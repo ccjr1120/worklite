@@ -1,0 +1,22 @@
+{
+  "name": "@worklite/db",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"No lint configured\""
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.44.4",
+    "postgres": "^3.4.7"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.4",
+    "typescript": "^5.9.2"
+  }
+}

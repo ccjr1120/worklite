@@ -1,0 +1,47 @@
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { HealthController } from './common/health.controller';
+import { DatabaseModule } from './infrastructure/database.module';
+import { RedisModule } from './infrastructure/redis.module';
+import { ObjectStorageModule } from './infrastructure/object-storage.module';
+import { QueueModule } from './infrastructure/queue.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { UsersModule } from './modules/users/users.module';
+import { TeamsModule } from './modules/teams/teams.module';
+import { MembersModule } from './modules/members/members.module';
+import { AgentsModule } from './modules/agents/agents.module';
+import { SkillsModule } from './modules/skills/skills.module';
+import { McpServersModule } from './modules/mcp-servers/mcp-servers.module';
+import { WorkflowsModule } from './modules/workflows/workflows.module';
+import { WorkflowRevisionsModule } from './modules/workflow-revisions/workflow-revisions.module';
+import { RunsModule } from './modules/runs/runs.module';
+import { ArtifactsModule } from './modules/artifacts/artifacts.module';
+import { ModelProvidersModule } from './modules/model-providers/model-providers.module';
+import { UsageModule } from './modules/usage/usage.module';
+import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    DatabaseModule,
+    RedisModule,
+    ObjectStorageModule,
+    QueueModule,
+    AuthModule,
+    UsersModule,
+    TeamsModule,
+    MembersModule,
+    AgentsModule,
+    SkillsModule,
+    McpServersModule,
+    WorkflowsModule,
+    WorkflowRevisionsModule,
+    RunsModule,
+    ArtifactsModule,
+    ModelProvidersModule,
+    UsageModule,
+    AuditLogsModule,
+  ],
+  controllers: [HealthController],
+})
+export class AppModule {}

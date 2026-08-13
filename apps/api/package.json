@@ -1,0 +1,33 @@
+{
+  "name": "@worklite/api",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "nest start --watch",
+    "start": "nest start",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"No lint configured\""
+  },
+  "dependencies": {
+    "@nestjs/bullmq": "^11.0.3",
+    "@nestjs/common": "^11.1.5",
+    "@nestjs/config": "^4.0.2",
+    "@nestjs/core": "^11.1.5",
+    "@nestjs/platform-express": "^11.1.5",
+    "@worklite/config": "workspace:*",
+    "@worklite/contracts": "workspace:*",
+    "@worklite/db": "workspace:*",
+    "@worklite/queue": "workspace:*",
+    "bullmq": "^5.56.8",
+    "ioredis": "^5.7.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.10",
+    "@nestjs/schematics": "^11.0.7",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.2"
+  }
+}

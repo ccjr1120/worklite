@@ -1,0 +1,7 @@
+{
+  "extends": "@worklite/config/typescript/react.json",
+  "compilerOptions": {
+    "rootDir": "./src"
+  },
+  "include": ["src"]
+}

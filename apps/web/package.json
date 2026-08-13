@@ -1,0 +1,42 @@
+{
+  "name": "@worklite/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"No lint configured\"",
+    "generate:routes": "tsr generate"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^5.2.1",
+    "@monaco-editor/react": "^4.7.0",
+    "@tanstack/react-query": "^5.85.5",
+    "@tanstack/react-router": "^1.131.27",
+    "@worklite/contracts": "workspace:*",
+    "@worklite/ui": "workspace:*",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.541.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-hook-form": "^7.62.0",
+    "tailwind-merge": "^3.3.1",
+    "zod": "^4.0.17",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.12",
+    "@tanstack/router-cli": "^1.131.27",
+    "@tanstack/router-plugin": "^1.131.27",
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "^5.0.2",
+    "@worklite/config": "workspace:*",
+    "tailwindcss": "^4.1.12",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.3"
+  }
+}

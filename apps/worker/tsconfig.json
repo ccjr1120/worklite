@@ -1,0 +1,10 @@
+{
+  "extends": "@worklite/config/typescript/node.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": "./"
+  },
+  "include": ["src"]
+}
