@@ -17,3 +17,7 @@ When editing an existing file, preserve or improve compliance with this policy i
 ## Required AI Workflow
 
 Before starting any task, read `AGENTS_WORKFLOW.md` and follow the applicable workflow defined there. Do not begin work directly without using that workflow.
+
+## Compatibility Policy
+
+When changing routes, APIs, configuration, or other public project behavior, the default implementation does not preserve legacy compatibility. Do not add redirects, aliases, adapters, migrations, or other compatibility layers unless the user explicitly requests them. When compatibility is intentionally omitted, call out the resulting impact in the handoff.

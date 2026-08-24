@@ -1,0 +1,34 @@
+{
+  "title": "Skills",
+  "description": "Versioned packages of instructions, scripts, and references.",
+  "upload": "Upload archive",
+  "create": "Create skill",
+  "search": "Search skills",
+  "empty": {
+    "title": "No skills yet",
+    "description": "Create a skill online or upload an archive, then publish an immutable version."
+  },
+  "noMatches": {
+    "title": "No matching skills",
+    "description": "No skills match “{{search}}”."
+  },
+  "columns": {
+    "skill": "Skill",
+    "source": "Source",
+    "version": "Version",
+    "validation": "Validation",
+    "updated": "Updated"
+  },
+  "source": {
+    "online": "Online",
+    "archive": "Archive"
+  },
+  "editor": {
+    "new": "New skill",
+    "fallback": "Skill",
+    "validate": "Validate",
+    "package": "Package",
+    "safetyHint": "Validation does not guarantee runtime safety. Executables never run in the API process.",
+    "published": "Skill version published"
+  }
+}

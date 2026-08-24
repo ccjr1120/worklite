@@ -1,0 +1,34 @@
+{
+  "title": "技能",
+  "description": "包含指令、脚本和参考资料的版本化包。",
+  "upload": "上传压缩包",
+  "create": "创建技能",
+  "search": "搜索技能",
+  "empty": {
+    "title": "还没有技能",
+    "description": "在线创建技能或上传压缩包，然后发布一个不可变版本。"
+  },
+  "noMatches": {
+    "title": "没有匹配的技能",
+    "description": "没有与“{{search}}”匹配的技能。"
+  },
+  "columns": {
+    "skill": "技能",
+    "source": "来源",
+    "version": "版本",
+    "validation": "校验",
+    "updated": "更新时间"
+  },
+  "source": {
+    "online": "在线",
+    "archive": "压缩包"
+  },
+  "editor": {
+    "new": "新建技能",
+    "fallback": "技能",
+    "validate": "校验",
+    "package": "包内容",
+    "safetyHint": "校验不能保证运行时安全。可执行内容绝不会在 API 进程中运行。",
+    "published": "技能版本已发布"
+  }
+}

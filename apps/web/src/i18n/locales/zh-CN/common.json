@@ -1,0 +1,66 @@
+{
+  "actions": {
+    "cancel": "取消",
+    "save": "保存",
+    "continue": "继续",
+    "tryAgain": "重试",
+    "close": "关闭",
+    "clearFilters": "清除筛选",
+    "publish": "发布",
+    "delete": "删除",
+    "open": "打开",
+    "download": "下载",
+    "preview": "预览",
+    "search": "搜索",
+    "skip": "暂时跳过",
+    "all": "全部"
+  },
+  "search": {
+    "placeholder": "搜索"
+  },
+  "password": {
+    "show": "显示密码",
+    "hide": "隐藏密码"
+  },
+  "copy": {
+    "copied": "已复制",
+    "identifier": "复制标识符",
+    "value": "复制 {{value}}"
+  },
+  "saveState": {
+    "saved": "已保存",
+    "saving": "保存中",
+    "unsaved": "有未保存的更改"
+  },
+  "status": {
+    "queued": "排队中",
+    "running": "运行中",
+    "waiting_for_input": "等待输入",
+    "completed": "已完成",
+    "failed": "失败",
+    "cancelled": "已取消",
+    "idle": "空闲",
+    "draft": "草稿",
+    "published": "已发布",
+    "connected": "已连接",
+    "unreachable": "无法连接",
+    "auth_failed": "认证失败",
+    "unconfigured": "未配置",
+    "valid": "有效",
+    "invalid": "无效",
+    "pending": "校验中"
+  },
+  "empty": {
+    "dash": "—"
+  },
+  "brand": {
+    "name": "WorkLite"
+  },
+  "roles": {
+    "admin": "管理员",
+    "member": "成员"
+  },
+  "duration": {
+    "compact": "{{minutes}}分{{seconds}}秒"
+  }
+}

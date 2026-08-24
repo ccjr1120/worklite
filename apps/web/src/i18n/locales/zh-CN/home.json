@@ -1,0 +1,113 @@
+{
+  "greeting": {
+    "morning": "早上好，{{name}}",
+    "afternoon": "下午好，{{name}}",
+    "evening": "晚上好，{{name}}",
+    "night": "晚上好，{{name}}",
+    "teamFallback": "团队"
+  },
+  "description": "查看需要关注的事项、正在运行的任务，以及接下来可以继续的工作。",
+  "createWorkflow": "创建工作流",
+  "attention": {
+    "title": "需要关注",
+    "empty": "目前没有需要关注的事项。"
+  },
+  "activeRuns": {
+    "title": "进行中的运行",
+    "empty": "当前没有正在进行的运行。"
+  },
+  "recentWorkflows": "最近的工作流",
+  "recentActivity": "最近动态",
+  "dashboard": {
+    "title": "看板",
+    "description": "将工作流视图整理成清晰、可复用的看板。",
+    "categories": {
+      "workflows": "工作流"
+    },
+    "actions": {
+      "addCategory": "添加分类",
+      "addBoard": "添加看板",
+      "createBoard": "创建看板",
+      "backToDashboards": "全部看板",
+      "editBoard": "编辑看板",
+      "addWidget": "添加组件",
+      "viewAll": "查看全部"
+    },
+    "emptyCategory": "添加第一个看板",
+    "summary": {
+      "workflows_one": "{{count}} 个工作流",
+      "workflows_other": "{{count}} 个工作流",
+      "attention_one": "{{count}} 项需要关注",
+      "attention_other": "{{count}} 项需要关注",
+      "activeRuns_one": "{{count}} 个进行中的运行",
+      "activeRuns_other": "{{count}} 个进行中的运行",
+      "artifacts_one": "{{count}} 个产物",
+      "artifacts_other": "{{count}} 个产物"
+    },
+    "category": {
+      "boardCount_one": "{{count}} 个看板",
+      "boardCount_other": "{{count}} 个看板",
+      "rename": "重命名分类",
+      "delete": "删除分类",
+      "createTitle": "添加分类",
+      "renameTitle": "重命名分类",
+      "description": "将看板分组，方便快速浏览工作区。",
+      "nameLabel": "分类名称",
+      "deleteTitle": "删除分类？",
+      "deleteDescription": "该分类下的看板将不再显示在看板目录中。"
+    },
+    "board": {
+      "createTitle": "添加看板",
+      "createDescription": "从默认布局开始，或创建一个空白看板。",
+      "nameLabel": "看板名称",
+      "templateLabel": "起始布局"
+    },
+    "templates": {
+      "blank": "空白看板",
+      "workflowOverview": "工作流概览",
+      "workflowHealth": "工作流健康度",
+      "recentActivity": "最近动态"
+    },
+    "boards": {
+      "workflowOverview": {
+        "title": "工作流概览",
+        "description": "查看需要关注的事项、运行中的任务、工作流和最近变更。"
+      },
+      "workflowHealth": {
+        "title": "工作流健康度",
+        "description": "查看工作流状态、运行中的任务和生成的产物。"
+      },
+      "recentActivity": {
+        "title": "最近动态",
+        "description": "跟踪最近的工作流变更及其生成的产物。"
+      },
+      "custom": {
+        "description": "属于此团队的可自定义看板。"
+      }
+    },
+    "widget": {
+      "addTitle": "添加组件",
+      "addDescription": "选择一个工作流视图添加到此看板。",
+      "emptyTitle": "此看板为空",
+      "emptyDescription": "添加组件以开始组织此视图。",
+      "moveUp": "上移",
+      "moveDown": "下移",
+      "remove": "移除组件"
+    },
+    "widgets": {
+      "attention": { "title": "需要关注", "empty": "目前没有需要关注的事项。" },
+      "active_runs": { "title": "进行中的运行", "empty": "当前没有正在进行的运行。" },
+      "workflow_health": { "title": "工作流健康度", "empty": "暂无工作流。" },
+      "recent_workflows": { "title": "最近的工作流", "empty": "暂无工作流。" },
+      "recent_activity": { "title": "最近动态", "empty": "暂无最近动态。" },
+      "recent_artifacts": { "title": "最近产物", "empty": "暂无产物。" }
+    }
+  },
+  "newTeam": {
+    "intro": "这个团队已准备好开始配置。请完成下面的步骤。",
+    "configureProvider": "配置模型提供商",
+    "createAgent": "创建 Agent",
+    "createWorkflow": "创建工作流",
+    "runAndInspect": "运行并检查结果"
+  }
+}

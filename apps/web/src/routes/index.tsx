@@ -1,16 +1,26 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, Navigate } from '@tanstack/react-router';
+import { useSessionStore } from '@/stores/session-store';
 
 export const Route = createFileRoute('/')({
-  component: HomePage,
+  component: IndexPage,
 });
 
-function HomePage() {
-  return (
-    <main className="flex min-h-screen items-center justify-center">
-      <div className="space-y-2 text-center">
-        <h1 className="text-3xl font-semibold tracking-tight">WorkLite</h1>
-        <p className="text-muted-foreground">Create and run team AI agents and workflows.</p>
-      </div>
-    </main>
-  );
+function IndexPage() {
+  const session = useSessionStore();
+  if (!session.signedIn) {
+    return <Navigate to="/sign-in" />;
+  }
+  if (!session.emailVerified) {
+    return <Navigate to="/verify-email" />;
+  }
+  if (session.onboardingStep === 'provider') {
+    return <Navigate to="/onboarding/provider" />;
+  }
+  if (session.onboardingStep === 'first-agent') {
+    return <Navigate to="/onboarding/first-agent" />;
+  }
+  if (session.onboardingStep !== 'complete') {
+    return <Navigate to="/onboarding/team" />;
+  }
+  return <Navigate to="/$teamSlug/home" params={{ teamSlug: session.currentTeamSlug }} />;
 }

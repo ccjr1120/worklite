@@ -2,6 +2,7 @@
   "extends": "@worklite/config/typescript/react.json",
   "compilerOptions": {
     "baseUrl": ".",
+    "resolveJsonModule": true,
     "paths": {
       "@/*": ["./src/*"]
     }

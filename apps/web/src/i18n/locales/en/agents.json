@@ -1,0 +1,38 @@
+{
+  "title": "Agents",
+  "description": "Configurable work units with a model, instructions, skills, and tools.",
+  "create": "Create agent",
+  "search": "Search agents",
+  "empty": {
+    "title": "No agents yet",
+    "description": "An agent is a named set of instructions, a model, and the skills or tools it may use."
+  },
+  "noMatches": {
+    "title": "No matching agents",
+    "description": "No agents match “{{search}}”."
+  },
+  "columns": {
+    "agent": "Agent",
+    "model": "Model",
+    "skills": "Skills",
+    "version": "Version",
+    "updated": "Updated"
+  },
+  "editor": {
+    "new": "New agent",
+    "fallback": "Agent",
+    "name": "Name",
+    "responsibility": "Responsibility",
+    "instructions": "System instructions",
+    "instructionsHint": "Dedicated editor for the prompt. Secrets must not be pasted here.",
+    "configuration": "Configuration",
+    "model": "Model",
+    "skills": "Skills",
+    "mcpServers": "MCP servers",
+    "publishHint": "Publishing creates an immutable version. Existing workflows keep the version they already reference.",
+    "selectedNode": "Selected node {{id}}.",
+    "publishTitle": "Publish agent version",
+    "publishDescription": "Published versions are immutable. Downstream workflows continue using the locked version until they are edited and republished.",
+    "published": "Agent version published"
+  }
+}

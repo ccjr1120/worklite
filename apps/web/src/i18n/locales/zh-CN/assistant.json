@@ -1,0 +1,121 @@
+{
+  "title": "Agent Chat",
+  "description": "Plan and review workspace setup in one conversation.",
+  "localSession": "Local prototype",
+  "localSessionDetail": "This conversation resets when the page reloads.",
+  "starters": {
+    "title": "Start a task",
+    "provider": {
+      "title": "Configure provider",
+      "description": "Prepare model access and connection checks.",
+      "prompt": "Configure an OpenAI model provider for this team."
+    },
+    "skill": {
+      "title": "Create skill",
+      "description": "Draft instructions and package structure.",
+      "prompt": "Create a skill for triaging customer support requests."
+    },
+    "mcp": {
+      "title": "Connect MCP server",
+      "description": "Discover tools and prepare an allowlist.",
+      "prompt": "Connect a remote MCP server for customer data tools."
+    },
+    "agent": {
+      "title": "Create agent",
+      "description": "Combine a model, instructions, skills, and tools.",
+      "prompt": "Create a support coordinator agent for this team."
+    }
+  },
+  "composer": {
+    "label": "Message Agent Chat",
+    "placeholder": "Describe the provider, skill, MCP server, or agent you want to set up...",
+    "send": "Send message",
+    "sending": "Preparing proposal",
+    "secure": "Enter credentials only in secure settings."
+  },
+  "minimized": {
+    "minimize": "Minimize conversation",
+    "preparing": "Preparing proposal",
+    "running": "{{completed}} of {{total}} tool calls completed",
+    "ready_one": "{{count}} tool call ready for review",
+    "ready_other": "{{count}} tool calls ready for review",
+    "needsInput": "Tool calls need secure input",
+    "completed_one": "{{count}} tool call completed",
+    "completed_other": "{{count}} tool calls completed",
+    "openConversation": "Open conversation"
+  },
+  "views": {
+    "chat": "Chat",
+    "proposal": "Proposed changes"
+  },
+  "speaker": {
+    "you": "You",
+    "assistant": "Agent Chat"
+  },
+  "messages": {
+    "welcome": "Choose a task or describe the workspace setup you need.",
+    "proposalReady": "I prepared a structured proposal. Review the fields and dependencies before applying it.",
+    "proposalNeedsInput": "I prepared the proposal, but a secure field must be completed before it can be applied.",
+    "completed": "The local prototype applied the approved operations. Review the resulting resources before publishing them."
+  },
+  "proposal": {
+    "title": "Proposed changes",
+    "description": "Review each operation before applying it.",
+    "emptyTitle": "No proposal yet",
+    "emptyDescription": "Send a request to generate structured workspace changes.",
+    "operationCount_one": "{{count}} operation",
+    "operationCount_other": "{{count}} operations",
+    "review": "Review changes",
+    "apply": "Apply changes",
+    "applying": "Applying changes",
+    "applied": "Changes applied",
+    "blocked": "Complete secure input first",
+    "openSecureSettings": "Open secure settings",
+    "openResource": "Open resource",
+    "close": "Close proposal",
+    "scope": "Scope",
+    "teamScope": "Current team",
+    "execution": "Execution",
+    "executionDetail": "Operations run in dependency order after confirmation."
+  },
+  "resources": {
+    "provider": "Model provider",
+    "skill": "Skill",
+    "mcp": "MCP server",
+    "agent": "Agent"
+  },
+  "operations": {
+    "provider": {
+      "title": "OpenAI",
+      "action": "Configure provider",
+      "summary": "Store a credential securely, test the connection, and discover available models."
+    },
+    "skill": {
+      "title": "support-triage",
+      "action": "Create draft",
+      "summary": "Create SKILL.md with triage steps, escalation rules, and response quality checks."
+    },
+    "mcp": {
+      "title": "Customer data tools",
+      "action": "Connect and discover",
+      "summary": "Prepare a Streamable HTTP connection and review discovered tools before allowlisting."
+    },
+    "agent": {
+      "title": "Support coordinator",
+      "action": "Create draft",
+      "summary": "Use the connected model with support-triage instructions and approved customer data tools."
+    }
+  },
+  "status": {
+    "needs_input": "Needs input",
+    "ready": "Ready",
+    "running": "Running",
+    "completed": "Completed",
+    "failed": "Failed"
+  },
+  "announcements": {
+    "proposalReady": "Proposal ready for review.",
+    "applying": "Applying approved operations.",
+    "completed": "All approved operations completed."
+  }
+}

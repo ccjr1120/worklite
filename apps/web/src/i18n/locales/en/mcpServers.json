@@ -1,0 +1,36 @@
+{
+  "title": "MCP servers",
+  "description": "Remote Streamable HTTP connections, discovered tools, and published versions.",
+  "create": "Connect MCP server",
+  "search": "Search MCP servers",
+  "empty": {
+    "title": "No MCP servers",
+    "description": "Connect a remote MCP server, test it, then choose the tools agents may use."
+  },
+  "noMatches": {
+    "title": "No matching servers",
+    "description": "No servers match “{{search}}”."
+  },
+  "columns": {
+    "server": "Server",
+    "connection": "Connection",
+    "transport": "Transport",
+    "allowedTools": "Allowed tools",
+    "version": "Version"
+  },
+  "config": {
+    "new": "Connect server",
+    "fallback": "Server",
+    "title": "Connect MCP server",
+    "description": "Remote Streamable HTTP only. Credentials are write-only and never shown in logs.",
+    "name": "Name",
+    "endpoint": "Endpoint",
+    "authentication": "Authentication",
+    "tokenPlaceholder": "Bearer token",
+    "testing": "Testing...",
+    "test": "Test connection",
+    "allowedTools": "Allowed tools",
+    "publishHint": "Publishing locks the allowed-tool set. Discovered descriptions are untrusted content.",
+    "published": "MCP version published"
+  }
+}

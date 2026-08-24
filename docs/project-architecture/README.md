@@ -8,9 +8,11 @@ This is the approved initial baseline. Target-state components may be introduced
 
 ## Product Overview
 
-WorkLite is a team-oriented platform for creating and running AI agents and workflows. Teams manage members and team-scoped agents, skills, MCP servers, workflows, runs, and artifacts.
+WorkLite is a team-oriented platform for creating and running AI agents and workflows. Teams manage members and team-scoped model providers, agents, skills, MCP servers, workflows, runs, and artifacts.
 
 Agents are configured manually with their own prompts, model settings, skills, and MCP access. Users compose existing agents into workflows. A workflow can be edited with explicit add-node controls or through a natural-language AI assistant. Every AI change is recorded and reversible, similar to an AI-assisted code editor.
+
+A team-scoped workspace assistant can also guide provider setup and propose new Skill, MCP server, and Agent configurations. Assistant proposals remain structured, reviewable, and subject to the same validation, authorization, secret-handling, publication, and audit rules as manual configuration.
 
 ## Architectural Principles
 
@@ -63,8 +65,11 @@ The web application is delivered as static assets. The API owns authentication, 
 - Tailwind CSS and shadcn/ui for the UI system.
 - Monaco Editor for prompts, skills, and structured configuration where appropriate.
 - Server-Sent Events for workflow-run progress.
+- i18next with react-i18next for application internationalization.
 
 TanStack Router owns URL and navigation state. TanStack Query owns remote server state. Zustand owns uncommitted editor state. Backend authorization remains authoritative.
+
+Authenticated workspace routes do not include a locale segment. The web application resolves and persists a personal locale preference, falls back to English, and translates product-owned presentation content at the UI boundary. API contracts, persisted domain values, identifiers, logs, and externally supplied content remain language-neutral. `docs/internationalization/README.md` is the source of truth for internationalization requirements.
 
 ### API and Execution
 
@@ -96,6 +101,7 @@ Core relationships use relational tables. Versioned workflow definitions and rev
 ```text
 Team
 |-- Member
+|-- ModelProvider
 |-- Skill
 |   `-- SkillVersion
 |-- MCPServer
@@ -117,11 +123,31 @@ All team-owned records include `team_id`. Server-side queries and authorization 
 
 ## Agent Architecture
 
-An agent is manually configured with a name, description, optional avatar, model, system prompt, skills, MCP access, and supported runtime settings. Agent versions are immutable.
+An agent is manually configured with a name, description, optional avatar, model selected from the team's configured model providers, system prompt, skills, MCP access, and supported runtime settings. Agent versions are immutable.
 
 Workflow nodes reference an existing agent version from the same team. A node may override only an approved subset of settings: a compatible model identifier, temperature, maximum output tokens, and output format. Nodes cannot override the system prompt, skills, MCP servers, or tool allowlist.
 
 A published workflow locks every referenced `AgentVersion`; later agent edits cannot alter published workflows or historical runs. Deleted referenced agents use soft deletion so historical versions remain executable and auditable.
+
+Model providers are team-scoped resources and are presented in the Agent resource surface for workspace navigation. Agents may reference models exposed by a provider belonging to the same team. Provider credentials remain write-only and provider changes do not mutate immutable published workflow versions.
+
+## Workspace Assistant Architecture
+
+The workspace assistant is a team-scoped, task-oriented interface for configuring model providers and creating Skills, MCP servers, and Agents. It supplements the existing resource editors rather than replacing them.
+
+The assistant follows a propose-review-apply model:
+
+1. Collect the user's goal and the minimum non-secret configuration needed to understand it.
+2. Produce a resource-specific structured proposal with explicit dependencies, missing fields, validation state, and intended operations.
+3. Require user confirmation before applying any operation.
+4. Apply confirmed operations through the same domain services used by manual resource forms.
+5. Return durable per-operation results and direct links to the affected resources.
+
+The assistant cannot write arbitrary resource state, bypass authorization, publish immutable versions without confirmation, or silently expand MCP tool access. Provider credentials and other secrets are entered through dedicated secure fields and are excluded from assistant turns, model context, proposal payloads, ordinary logs, and error details.
+
+Assistant operations use stable resource-specific contracts. Initial operation families cover provider configuration, Skill draft creation, remote Streamable HTTP MCP connection and discovery, and Agent draft creation. Every operation is validated server-side and audited under the initiating user. Partial failure must preserve completed resources, identify the failed operation, and offer a safe retry or manual-edit route.
+
+The initial web increment may use local mock conversations and proposal execution to validate the interaction model. Persistent assistant sessions, model-backed proposal generation, and server-side application are later increments of this approved architecture; the UI must clearly avoid implying that mock results are durable.
 
 ## Skill Architecture
 
@@ -319,7 +345,6 @@ The model gateway, MCP client, skill SDK, sandbox, and observability code may be
 
 - Drag-and-drop workflow canvases.
 - Branches, loops, parallel nodes, and arbitrary graph edges.
-- AI-assisted agent creation or configuration.
 - Arbitrary user-supplied MCP `stdio` processes.
 - Resume from an arbitrary failed node.
 - Temporal or another durable workflow platform.
@@ -328,6 +353,32 @@ The model gateway, MCP client, skill SDK, sandbox, and observability code may be
 Adding a deferred capability requires an approved architecture change.
 
 ## Changelog
+
+### 2026-08-24 - Agent Resource Provider Placement
+
+- Returned Model Providers to the Agent resource surface as the final page-level view after MCP Servers.
+- Kept Model Providers team-scoped in the domain model and retained the dedicated `/:teamSlug/model-providers` route.
+- Did not restore the previous Settings route or add a compatibility redirect.
+
+### 2026-08-24 - Team-level Model Providers
+
+- Made Model Providers a first-class team-scoped resource independent of Agents.
+- Removed the provider resource from the Agent navigation surface and defined a dedicated workspace route.
+- Intentionally did not preserve the previous settings-path route or add a compatibility redirect.
+
+### 2026-08-20 - Workspace Assistant
+
+- Approved a team-scoped workspace assistant for provider setup and structured Skill, MCP server, and Agent creation.
+- Required explicit review and confirmation before applying assistant operations through existing domain services.
+- Excluded secrets from assistant conversations and retained existing validation, authorization, publication, and audit boundaries.
+- Allowed an initial local UI prototype before persistent sessions and model-backed server execution are introduced.
+
+### 2026-08-14 - Internationalization Standard
+
+- Established English and Simplified Chinese as the initial application locales, with English as the fallback.
+- Kept authenticated workspace routes locale-neutral and defined locale as a personal preference.
+- Required machine-readable API values and presentation-boundary localization.
+- Added `docs/internationalization/README.md` as the internationalization source of truth.
 
 ### 2026-08-13 - Initial Architecture Baseline
 

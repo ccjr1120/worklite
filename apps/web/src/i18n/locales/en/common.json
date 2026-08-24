@@ -1,0 +1,66 @@
+{
+  "actions": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "continue": "Continue",
+    "tryAgain": "Try again",
+    "close": "Close",
+    "clearFilters": "Clear filters",
+    "publish": "Publish",
+    "delete": "Delete",
+    "open": "Open",
+    "download": "Download",
+    "preview": "Preview",
+    "search": "Search",
+    "skip": "Skip for now",
+    "all": "All"
+  },
+  "search": {
+    "placeholder": "Search"
+  },
+  "password": {
+    "show": "Show password",
+    "hide": "Hide password"
+  },
+  "copy": {
+    "copied": "Copied",
+    "identifier": "Copy identifier",
+    "value": "Copy {{value}}"
+  },
+  "saveState": {
+    "saved": "Saved",
+    "saving": "Saving",
+    "unsaved": "Unsaved changes"
+  },
+  "status": {
+    "queued": "Queued",
+    "running": "Running",
+    "waiting_for_input": "Waiting for input",
+    "completed": "Completed",
+    "failed": "Failed",
+    "cancelled": "Cancelled",
+    "idle": "Idle",
+    "draft": "Draft",
+    "published": "Published",
+    "connected": "Connected",
+    "unreachable": "Unreachable",
+    "auth_failed": "Authentication failed",
+    "unconfigured": "Unconfigured",
+    "valid": "Valid",
+    "invalid": "Invalid",
+    "pending": "Validating"
+  },
+  "empty": {
+    "dash": "—"
+  },
+  "brand": {
+    "name": "WorkLite"
+  },
+  "roles": {
+    "admin": "Admin",
+    "member": "Member"
+  },
+  "duration": {
+    "compact": "{{minutes}}m {{seconds}}s"
+  }
+}

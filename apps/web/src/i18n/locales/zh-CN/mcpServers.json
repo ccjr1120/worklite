@@ -1,0 +1,36 @@
+{
+  "title": "MCP 服务器",
+  "description": "远程 Streamable HTTP 连接、已发现的工具，以及已发布版本。",
+  "create": "连接 MCP 服务器",
+  "search": "搜索 MCP 服务器",
+  "empty": {
+    "title": "还没有 MCP 服务器",
+    "description": "连接远程 MCP 服务器并测试，然后选择 Agent 可以使用的工具。"
+  },
+  "noMatches": {
+    "title": "没有匹配的服务器",
+    "description": "没有与“{{search}}”匹配的服务器。"
+  },
+  "columns": {
+    "server": "服务器",
+    "connection": "连接",
+    "transport": "传输",
+    "allowedTools": "允许的工具",
+    "version": "版本"
+  },
+  "config": {
+    "new": "连接服务器",
+    "fallback": "服务器",
+    "title": "连接 MCP 服务器",
+    "description": "仅支持远程 Streamable HTTP。凭据仅可写入，且不会出现在日志中。",
+    "name": "名称",
+    "endpoint": "端点",
+    "authentication": "认证",
+    "tokenPlaceholder": "Bearer token",
+    "testing": "正在测试...",
+    "test": "测试连接",
+    "allowedTools": "允许的工具",
+    "publishHint": "发布会锁定允许的工具集。发现到的描述属于不可信内容。",
+    "published": "MCP 版本已发布"
+  }
+}

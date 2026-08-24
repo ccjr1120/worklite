@@ -1,0 +1,104 @@
+{
+  "nav": {
+    "title": "设置",
+    "general": "常规",
+    "members": "成员",
+    "usage": "用量",
+    "auditLog": "审计日志",
+    "appearance": "外观"
+  },
+  "general": {
+    "title": "常规",
+    "description": "这些设置应用于 {{team}} 团队。",
+    "teamName": "团队名称",
+    "teamIdentifier": "团队标识符",
+    "identifierHint": "更改标识符可能会导致现有链接失效。",
+    "saved": "团队设置已保存",
+    "deleteTitle": "删除团队",
+    "deleteDescription": "将永久删除此团队及其 Agent、工作流和运行历史。此操作无法撤销。",
+    "deleteAction": "删除团队",
+    "deleteConfirmTitle": "删除 {{team}}？",
+    "deleteConfirmDescription": "所有团队资源都将被移除。生产环境需要类型安全的确认步骤。",
+    "deleteGated": "此预览中删除操作受权限限制"
+  },
+  "members": {
+    "title": "成员",
+    "description": "管理此团队的访问权限。不能移除最后一名管理员。",
+    "invite": "邀请成员",
+    "columns": {
+      "member": "成员",
+      "role": "角色",
+      "status": "状态",
+      "lastActive": "最近活跃",
+      "actions": ""
+    },
+    "changeRole": "更改角色",
+    "roleChangeConfirm": "更改角色需要确认",
+    "resend": "重新发送",
+    "remove": "移除",
+    "invitationResent": "邀请已重新发送",
+    "memberRetained": "成员已保留",
+    "inviteTitle": "邀请成员",
+    "inviteDescription": "受邀者将加入此团队。重复邀请会被拒绝。",
+    "workEmail": "工作邮箱",
+    "role": "角色",
+    "sendInvite": "发送邀请",
+    "inviteSent": "邀请已发送"
+  },
+  "providers": {
+    "title": "模型提供商",
+    "description": "凭据仅可写入。更改提供商会影响之后的 Agent 运行，不会影响已发布的工作流版本。",
+    "replaceKey": "替换 API 密钥",
+    "secretPlaceholder": "新密钥",
+    "testing": "正在测试...",
+    "test": "测试连接",
+    "testSucceeded": "{{provider}} 连接成功",
+    "saved": "提供商已保存"
+  },
+  "usage": {
+    "title": "用量",
+    "description": "此团队的模型消耗。总量用于决策，而不是装饰性分析。",
+    "chartLabel": "按模型统计的 token 用量",
+    "tokens": "{{count}} tokens",
+    "columns": {
+      "model": "模型",
+      "tokens": "Tokens",
+      "runs": "运行次数",
+      "cost": "预估费用",
+      "empty": ""
+    }
+  },
+  "audit": {
+    "title": "审计日志",
+    "description": "按时间排列的团队操作。元数据中的密钥已被脱敏。",
+    "search": "按操作者、操作或资源筛选",
+    "noMatches": {
+      "title": "没有匹配的事件",
+      "description": "当前筛选条件下没有匹配的审计事件。"
+    },
+    "columns": {
+      "time": "时间",
+      "actor": "操作者",
+      "action": "操作",
+      "resource": "资源",
+      "metadata": "元数据"
+    }
+  },
+  "appearance": {
+    "title": "外观",
+    "description": "这些偏好是个人设置。当前解析后的主题是 {{theme}}。",
+    "theme": {
+      "title": "主题",
+      "system": "跟随系统",
+      "systemDescription": "跟随操作系统设置。",
+      "light": "浅色",
+      "lightDescription": "清晰、开阔的表面。",
+      "dark": "深色",
+      "darkDescription": "专注的蓝灰色表面。"
+    },
+    "language": {
+      "title": "语言",
+      "description": "选择产品界面使用的语言。"
+    }
+  }
+}

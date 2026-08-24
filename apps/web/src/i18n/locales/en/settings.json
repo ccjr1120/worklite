@@ -1,0 +1,104 @@
+{
+  "nav": {
+    "title": "Settings",
+    "general": "General",
+    "members": "Members",
+    "usage": "Usage",
+    "auditLog": "Audit log",
+    "appearance": "Appearance"
+  },
+  "general": {
+    "title": "General",
+    "description": "These settings apply to the {{team}} team.",
+    "teamName": "Team name",
+    "teamIdentifier": "Team identifier",
+    "identifierHint": "Changing the identifier may break existing links.",
+    "saved": "Team settings saved",
+    "deleteTitle": "Delete team",
+    "deleteDescription": "Permanently deletes this team, its agents, workflows, and run history. This cannot be undone.",
+    "deleteAction": "Delete team",
+    "deleteConfirmTitle": "Delete {{team}}?",
+    "deleteConfirmDescription": "All team resources will be removed. Type-safe confirmation is required in production.",
+    "deleteGated": "Deletion is permission-gated in this preview"
+  },
+  "members": {
+    "title": "Members",
+    "description": "Manage access for this team. The last administrator cannot be removed.",
+    "invite": "Invite member",
+    "columns": {
+      "member": "Member",
+      "role": "Role",
+      "status": "Status",
+      "lastActive": "Last active",
+      "actions": ""
+    },
+    "changeRole": "Change role",
+    "roleChangeConfirm": "Role change requires confirmation",
+    "resend": "Resend",
+    "remove": "Remove",
+    "invitationResent": "Invitation resent",
+    "memberRetained": "Member retained",
+    "inviteTitle": "Invite member",
+    "inviteDescription": "The invited person joins this team. Duplicate invitations are rejected.",
+    "workEmail": "Work email",
+    "role": "Role",
+    "sendInvite": "Send invite",
+    "inviteSent": "Invitation sent"
+  },
+  "providers": {
+    "title": "Model providers",
+    "description": "Credentials are write-only. Changing a provider can affect future agent runs, not published workflow versions.",
+    "replaceKey": "Replace API key",
+    "secretPlaceholder": "New secret",
+    "testing": "Testing...",
+    "test": "Test connection",
+    "testSucceeded": "{{provider}} connection succeeded",
+    "saved": "Provider saved"
+  },
+  "usage": {
+    "title": "Usage",
+    "description": "Model consumption for this team. Totals are decision-oriented, not decorative analytics.",
+    "chartLabel": "Token usage by model",
+    "tokens": "{{count}} tokens",
+    "columns": {
+      "model": "Model",
+      "tokens": "Tokens",
+      "runs": "Runs",
+      "cost": "Estimated cost",
+      "empty": ""
+    }
+  },
+  "audit": {
+    "title": "Audit log",
+    "description": "Chronological team actions. Secrets are redacted from metadata.",
+    "search": "Filter by actor, action, or resource",
+    "noMatches": {
+      "title": "No matching events",
+      "description": "No audit events match the current filters."
+    },
+    "columns": {
+      "time": "Time",
+      "actor": "Actor",
+      "action": "Action",
+      "resource": "Resource",
+      "metadata": "Metadata"
+    }
+  },
+  "appearance": {
+    "title": "Appearance",
+    "description": "These preferences are personal. The current resolved theme is {{theme}}.",
+    "theme": {
+      "title": "Theme",
+      "system": "System",
+      "systemDescription": "Follow the operating system setting.",
+      "light": "Light",
+      "lightDescription": "Crisp, open surfaces.",
+      "dark": "Dark",
+      "darkDescription": "Focused blue-gray surfaces."
+    },
+    "language": {
+      "title": "Language",
+      "description": "Choose the language used across the product interface."
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "title": "Runs",
+  "description": "Recent executions of immutable workflow versions.",
+  "search": "Search runs",
+  "empty": {
+    "title": "No runs yet",
+    "description": "Run a published workflow to see execution history here."
+  },
+  "noMatches": {
+    "title": "No matching runs",
+    "description": "No runs match the current filters."
+  },
+  "columns": {
+    "workflow": "Workflow",
+    "status": "Status",
+    "currentStep": "Current step",
+    "started": "Started",
+    "duration": "Duration"
+  },
+  "details": {
+    "unavailableTitle": "Run unavailable",
+    "unavailableDescription": "This run does not exist or is no longer accessible.",
+    "cancel": "Cancel run",
+    "version": "Version {{version}}",
+    "failed": "Failed on {{step}}. Earlier completed work is retained.",
+    "openWorkflow": "Open workflow",
+    "stepFallback": "Step",
+    "input": "Input",
+    "model": "Model",
+    "retries": "Retries",
+    "artifacts": "Artifacts",
+    "logs": "Logs",
+    "followEnd": "Follow end"
+  }
+}

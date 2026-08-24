@@ -1,0 +1,26 @@
+{
+  "title": "Artifacts",
+  "description": "Outputs produced by workflow runs.",
+  "search": "Search artifacts",
+  "empty": {
+    "title": "No artifacts yet",
+    "description": "Artifacts appear here after a run produces output that can be inspected or downloaded."
+  },
+  "noMatches": {
+    "title": "No matching artifacts",
+    "description": "No artifacts match “{{search}}”."
+  },
+  "columns": {
+    "artifact": "Artifact",
+    "type": "Type",
+    "workflow": "Workflow",
+    "size": "Size",
+    "created": "Created"
+  },
+  "details": {
+    "unavailableTitle": "Artifact unavailable",
+    "unavailableDescription": "This artifact is missing, expired, or you do not have access.",
+    "downloadStarted": "Download started",
+    "unsupported": "This content cannot be previewed inline. Download the file instead."
+  }
+}

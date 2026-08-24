@@ -1,0 +1,98 @@
+import { readdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const localesRoot = path.join(root, 'src/i18n/locales');
+const referenceLocale = 'en';
+
+function flatten(value, prefix = '') {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return Object.entries(value).flatMap(([key, nested]) => flatten(nested, prefix ? `${prefix}.${key}` : key));
+  }
+
+  return [prefix];
+}
+
+function compareKeys(left, right) {
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+  return {
+    missing: left.filter((key) => !rightSet.has(key)),
+    extra: right.filter((key) => !leftSet.has(key)),
+  };
+}
+
+const localeDirs = (await readdir(localesRoot, { withFileTypes: true }))
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => entry.name)
+  .sort();
+
+if (!localeDirs.includes(referenceLocale)) {
+  console.error(`Missing reference locale directory: ${referenceLocale}`);
+  process.exit(1);
+}
+
+const namespaces = (await readdir(path.join(localesRoot, referenceLocale)))
+  .filter((file) => file.endsWith('.json'))
+  .map((file) => file.replace(/\.json$/, ''))
+  .sort();
+
+let failed = false;
+
+for (const locale of localeDirs) {
+  const files = (await readdir(path.join(localesRoot, locale))).filter((file) => file.endsWith('.json'));
+  const localeNamespaces = files.map((file) => file.replace(/\.json$/, '')).sort();
+  const namespaceDiff = compareKeys(namespaces, localeNamespaces);
+
+  if (namespaceDiff.missing.length || namespaceDiff.extra.length) {
+    failed = true;
+    console.error(`Locale ${locale} namespace mismatch.`);
+    if (namespaceDiff.missing.length) {
+      console.error(`  Missing: ${namespaceDiff.missing.join(', ')}`);
+    }
+    if (namespaceDiff.extra.length) {
+      console.error(`  Extra: ${namespaceDiff.extra.join(', ')}`);
+    }
+  }
+}
+
+for (const namespace of namespaces) {
+  const reference = JSON.parse(await readFile(path.join(localesRoot, referenceLocale, `${namespace}.json`), 'utf8'));
+  const referenceKeys = flatten(reference);
+
+  for (const locale of localeDirs) {
+    if (locale === referenceLocale) {
+      continue;
+    }
+
+    const filePath = path.join(localesRoot, locale, `${namespace}.json`);
+    let catalog;
+
+    try {
+      catalog = JSON.parse(await readFile(filePath, 'utf8'));
+    } catch (error) {
+      failed = true;
+      console.error(`Unable to read ${filePath}: ${error instanceof Error ? error.message : error}`);
+      continue;
+    }
+
+    const { missing, extra } = compareKeys(referenceKeys, flatten(catalog));
+    if (missing.length || extra.length) {
+      failed = true;
+      console.error(`${locale}/${namespace}.json key mismatch.`);
+      if (missing.length) {
+        console.error(`  Missing: ${missing.join(', ')}`);
+      }
+      if (extra.length) {
+        console.error(`  Extra: ${extra.join(', ')}`);
+      }
+    }
+  }
+}
+
+if (failed) {
+  process.exit(1);
+}
+
+console.log(`Locale key structures match for ${localeDirs.join(', ')}.`);

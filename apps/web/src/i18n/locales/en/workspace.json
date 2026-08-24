@@ -1,0 +1,59 @@
+{
+  "nav": {
+    "home": "Home",
+    "assistant": "Agent Chat",
+    "build": "Build",
+    "operate": "Operate",
+    "manage": "Manage",
+    "agents": "Agents",
+    "workflows": "Workflows",
+    "skills": "Skills",
+    "mcpServers": "MCP Servers",
+    "modelProviders": "Providers",
+    "runs": "Runs",
+    "artifacts": "Artifacts",
+    "members": "Members",
+    "usage": "Usage",
+    "settings": "Settings",
+    "agentResources": "Agent resources",
+    "title": "Navigation"
+  },
+  "command": {
+    "title": "Command menu",
+    "placeholder": "Search agents, workflows, runs…",
+    "empty": "No matching destinations.",
+    "navigation": "Navigation",
+    "create": "Create",
+    "recent": "Recent",
+    "createAgent": "Create agent",
+    "createWorkflow": "Create workflow",
+    "openAssistant": "Open Agent Chat",
+    "open": "Open command menu",
+    "search": "Search"
+  },
+  "userMenu": {
+    "label": "User menu",
+    "account": "Account",
+    "accountFallback": "Account",
+    "profile": "Profile",
+    "appearance": "Appearance",
+    "shortcuts": "Keyboard shortcuts",
+    "shortcutsDescription": "Common workspace commands.",
+    "commandMenu": "Command menu",
+    "signOutHint": "Sign out is in the user menu",
+    "signOut": "Sign out"
+  },
+  "teamSwitcher": {
+    "label": "Switch team",
+    "teams": "Teams",
+    "createTeam": "Create team"
+  },
+  "offline": {
+    "message": "Reconnecting. Local edits stay on this device until the connection returns."
+  },
+  "errors": {
+    "teamNotFoundTitle": "Team not found",
+    "teamNotFoundDescription": "This team does not exist or is no longer available."
+  },
+  "openNavigation": "Open navigation"
+}

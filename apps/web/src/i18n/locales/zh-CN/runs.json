@@ -1,0 +1,35 @@
+{
+  "title": "运行记录",
+  "description": "不可变工作流版本的近期执行。",
+  "search": "搜索运行记录",
+  "empty": {
+    "title": "还没有运行记录",
+    "description": "运行已发布的工作流后，执行历史会显示在这里。"
+  },
+  "noMatches": {
+    "title": "没有匹配的运行记录",
+    "description": "当前筛选条件下没有匹配的运行记录。"
+  },
+  "columns": {
+    "workflow": "工作流",
+    "status": "状态",
+    "currentStep": "当前步骤",
+    "started": "开始时间",
+    "duration": "耗时"
+  },
+  "details": {
+    "unavailableTitle": "运行记录不可用",
+    "unavailableDescription": "此运行记录不存在，或已无法访问。",
+    "cancel": "取消运行",
+    "version": "版本 {{version}}",
+    "failed": "在 {{step}} 失败。此前已完成的工作会保留。",
+    "openWorkflow": "打开工作流",
+    "stepFallback": "步骤",
+    "input": "输入",
+    "model": "模型",
+    "retries": "重试次数",
+    "artifacts": "产物",
+    "logs": "日志",
+    "followEnd": "跟随末尾"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "title": "Agent",
+  "description": "可配置的工作单元，包含模型、指令、技能和工具。",
+  "create": "创建 Agent",
+  "search": "搜索 Agent",
+  "empty": {
+    "title": "还没有 Agent",
+    "description": "Agent 是一组具名指令、一个模型，以及它可以使用的技能或工具。"
+  },
+  "noMatches": {
+    "title": "没有匹配的 Agent",
+    "description": "没有与“{{search}}”匹配的 Agent。"
+  },
+  "columns": {
+    "agent": "Agent",
+    "model": "模型",
+    "skills": "技能",
+    "version": "版本",
+    "updated": "更新时间"
+  },
+  "editor": {
+    "new": "新建 Agent",
+    "fallback": "Agent",
+    "name": "名称",
+    "responsibility": "职责",
+    "instructions": "系统指令",
+    "instructionsHint": "用于编写提示词的专用编辑器。请勿在此粘贴密钥。",
+    "configuration": "配置",
+    "model": "模型",
+    "skills": "技能",
+    "mcpServers": "MCP 服务器",
+    "publishHint": "发布会创建不可变版本。现有工作流会继续使用它们已经引用的版本。",
+    "selectedNode": "已选择节点 {{id}}。",
+    "publishTitle": "发布 Agent 版本",
+    "publishDescription": "已发布的版本不可更改。下游工作流会继续使用锁定的版本，直到被编辑并重新发布。",
+    "published": "Agent 版本已发布"
+  }
+}

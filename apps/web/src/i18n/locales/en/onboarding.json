@@ -1,0 +1,40 @@
+{
+  "steps": {
+    "team": "Team",
+    "provider": "Provider",
+    "firstAgent": "First agent"
+  },
+  "team": {
+    "title": "Create your team",
+    "description": "A team is the access boundary for agents, skills, workflows, and runs.",
+    "name": "Team name",
+    "url": "Team URL",
+    "urlHint": "You can edit this identifier now. Changing it later may be restricted."
+  },
+  "provider": {
+    "title": "Configure a model provider",
+    "description": "Credentials are write-only. WorkLite never reads them back after save.",
+    "provider": "Provider",
+    "apiKey": "API key",
+    "testing": "Testing...",
+    "succeeded": "Connection succeeded",
+    "test": "Test credentials"
+  },
+  "firstAgent": {
+    "title": "Create your first agent",
+    "description": "An agent is instructions, a model, skills, and tools — not a character.",
+    "templates": {
+      "researcher": {
+        "name": "Researcher",
+        "responsibility": "Gather sources and summarize findings"
+      },
+      "writer": {
+        "name": "Writer",
+        "responsibility": "Turn notes into a concise brief"
+      }
+    },
+    "name": "Name",
+    "responsibility": "Responsibility",
+    "submit": "Create agent"
+  }
+}

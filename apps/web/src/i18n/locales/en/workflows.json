@@ -1,0 +1,72 @@
+{
+  "title": "Workflows",
+  "description": "Ordered sequences of published agent versions.",
+  "create": "Create workflow",
+  "search": "Search workflows",
+  "empty": {
+    "title": "No workflows yet",
+    "description": "Compose existing agents into a linear sequence, then publish an immutable version."
+  },
+  "noMatches": {
+    "title": "No matching workflows",
+    "description": "No workflows match “{{search}}”."
+  },
+  "columns": {
+    "workflow": "Workflow",
+    "state": "State",
+    "steps": "Steps",
+    "lastRun": "Last run",
+    "updated": "Updated"
+  },
+  "editor": {
+    "new": "New workflow",
+    "fallback": "Workflow",
+    "untitled": "Untitled workflow",
+    "name": "Workflow name",
+    "input": "Workflow input",
+    "versions": "Versions",
+    "aiEdit": "AI edit",
+    "run": "Run",
+    "previewStarted": "Preview run started",
+    "step": "Step {{position}}",
+    "agentVersion": "Agent version",
+    "errorPolicy": "Error policy",
+    "stop": "Stop",
+    "retry": "Retry",
+    "overridesHint": "Runtime overrides are limited to model, temperature, max tokens, and output format.",
+    "assistant": "AI assistant",
+    "assistantHint": "Proposed operations are reviewable and reversible.",
+    "assistantPlaceholder": "Add a reviewer after the writer",
+    "propose": "Propose edits",
+    "pendingOperation": "Pending operation",
+    "pendingDescription": "Insert agent step “Reviewer” at position 3.",
+    "apply": "Apply",
+    "undo": "Undo",
+    "applied": "Applied",
+    "runOutput": "Run output",
+    "publishTitle": "Publish workflow",
+    "publishDescription": "Publishing locks each referenced agent version. Later agent edits will not change this workflow or its historical runs.",
+    "published": "Workflow published",
+    "addStep": "Add step",
+    "addStepStart": "Add step at start",
+    "addStepAfter": "Add step after {{name}}",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "remove": "Remove"
+  },
+  "versions": {
+    "title": "Versions",
+    "description": "Immutable publications. Runs always bind to an exact version.",
+    "empty": {
+      "title": "No published versions",
+      "description": "Publish the workflow to lock agent versions and enable runs."
+    },
+    "columns": {
+      "version": "Version",
+      "published": "Published",
+      "publisher": "Publisher",
+      "steps": "Steps",
+      "recentRun": "Recent run"
+    }
+  }
+}
