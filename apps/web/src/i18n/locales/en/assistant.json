@@ -1,121 +1,100 @@
 {
-  "title": "Agent Chat",
-  "description": "Plan and review workspace setup in one conversation.",
-  "localSession": "Local prototype",
-  "localSessionDetail": "This conversation resets when the page reloads.",
+  "title": "System Helper Chat",
+  "description": "Configure WorkLite through persisted Agent executions.",
   "starters": {
     "title": "Start a task",
     "provider": {
       "title": "Configure provider",
-      "description": "Prepare model access and connection checks.",
-      "prompt": "Configure an OpenAI model provider for this team."
+      "description": "Create a non-secret provider draft.",
+      "prompt": "Create an OpenAI model provider draft for this workspace. Do not include credentials."
     },
     "skill": {
-      "title": "Create skill",
-      "description": "Draft instructions and package structure.",
-      "prompt": "Create a skill for triaging customer support requests."
+      "title": "Create Skill",
+      "description": "Create a Skill package with real files.",
+      "prompt": "Create a Skill for triaging customer support requests, including the required SKILL.md file."
     },
     "mcp": {
       "title": "Connect MCP server",
-      "description": "Discover tools and prepare an allowlist.",
-      "prompt": "Connect a remote MCP server for customer data tools."
+      "description": "Create a remote MCP server draft.",
+      "prompt": "Create a remote MCP server draft for customer data tools without authentication secrets."
     },
     "agent": {
-      "title": "Create agent",
-      "description": "Combine a model, instructions, skills, and tools.",
-      "prompt": "Create a support coordinator agent for this team."
+      "title": "Create Agent",
+      "description": "Assign a model, Skills, and MCP servers.",
+      "prompt": "Inspect the workspace, then create a support coordinator Agent using available resources."
     }
   },
   "composer": {
-    "label": "Message Agent Chat",
-    "placeholder": "Describe the provider, skill, MCP server, or agent you want to set up...",
+    "label": "Message System Helper Chat",
+    "placeholder": "Ask about WorkLite or request a platform operation...",
     "send": "Send message",
-    "sending": "Preparing proposal",
-    "secure": "Enter credentials only in secure settings."
+    "stop": "Stop current response",
+    "loading": "Loading System Helper Chat configuration",
+    "configure": "Bind a model provider and model to use System Helper Chat"
   },
   "minimized": {
-    "minimize": "Minimize conversation",
-    "preparing": "Preparing proposal",
-    "running": "{{completed}} of {{total}} tool calls completed",
-    "ready_one": "{{count}} tool call ready for review",
-    "ready_other": "{{count}} tool calls ready for review",
-    "needsInput": "Tool calls need secure input",
-    "completed_one": "{{count}} tool call completed",
-    "completed_other": "{{count}} tool calls completed",
-    "openConversation": "Open conversation"
+    "minimize": "Minimize conversation"
   },
-  "views": {
-    "chat": "Chat",
-    "proposal": "Proposed changes"
+  "commands": {
+    "menuLabel": "Conversation commands",
+    "logDescription": "Download the current server transcript as Markdown.",
+    "newDescription": "Archive this execution and start a new conversation.",
+    "resumeDescription": "Resume an archived server execution."
+  },
+  "messages": {
+    "welcome": "Choose a task or describe the workspace operation you need."
   },
   "speaker": {
     "you": "You",
-    "assistant": "Agent Chat"
-  },
-  "messages": {
-    "welcome": "Choose a task or describe the workspace setup you need.",
-    "proposalReady": "I prepared a structured proposal. Review the fields and dependencies before applying it.",
-    "proposalNeedsInput": "I prepared the proposal, but a secure field must be completed before it can be applied.",
-    "completed": "The local prototype applied the approved operations. Review the resulting resources before publishing them."
-  },
-  "proposal": {
-    "title": "Proposed changes",
-    "description": "Review each operation before applying it.",
-    "emptyTitle": "No proposal yet",
-    "emptyDescription": "Send a request to generate structured workspace changes.",
-    "operationCount_one": "{{count}} operation",
-    "operationCount_other": "{{count}} operations",
-    "review": "Review changes",
-    "apply": "Apply changes",
-    "applying": "Applying changes",
-    "applied": "Changes applied",
-    "blocked": "Complete secure input first",
-    "openSecureSettings": "Open secure settings",
-    "openResource": "Open resource",
-    "close": "Close proposal",
-    "scope": "Scope",
-    "teamScope": "Current team",
-    "execution": "Execution",
-    "executionDetail": "Operations run in dependency order after confirmation."
-  },
-  "resources": {
-    "provider": "Model provider",
-    "skill": "Skill",
-    "mcp": "MCP server",
-    "agent": "Agent"
-  },
-  "operations": {
-    "provider": {
-      "title": "OpenAI",
-      "action": "Configure provider",
-      "summary": "Store a credential securely, test the connection, and discover available models."
-    },
-    "skill": {
-      "title": "support-triage",
-      "action": "Create draft",
-      "summary": "Create SKILL.md with triage steps, escalation rules, and response quality checks."
-    },
-    "mcp": {
-      "title": "Customer data tools",
-      "action": "Connect and discover",
-      "summary": "Prepare a Streamable HTTP connection and review discovered tools before allowlisting."
-    },
-    "agent": {
-      "title": "Support coordinator",
-      "action": "Create draft",
-      "summary": "Use the connected model with support-triage instructions and approved customer data tools."
-    }
+    "assistant": "System Helper Chat"
   },
   "status": {
-    "needs_input": "Needs input",
-    "ready": "Ready",
     "running": "Running",
     "completed": "Completed",
+    "cancelled": "Cancelled",
     "failed": "Failed"
   },
-  "announcements": {
-    "proposalReady": "Proposal ready for review.",
-    "applying": "Applying approved operations.",
-    "completed": "All approved operations completed."
+  "execution": {
+    "loading": "Loading the server execution",
+    "working": "Working...",
+    "loadFailed": "The saved execution could not be loaded.",
+    "requestFailed": "System Helper Chat could not complete this request.",
+    "cancelFailed": "The current response could not be stopped."
+  },
+  "history": {
+    "title": "Execution history",
+    "description": "Resume a server execution saved by this browser.",
+    "empty": "No archived executions yet.",
+    "untitled": "Untitled conversation",
+    "remove": "Remove from local history"
+  },
+  "tool": {
+    "label": "Skill script",
+    "script": "Script",
+    "workingDirectory": "Working directory",
+    "arguments": "Arguments",
+    "warning": "This script runs with the API process host permissions, working directory, and complete environment.",
+    "output": "Output · exit code {{code}}",
+    "exitCode": "Exit code {{code}}",
+    "noExitCode": "none",
+    "noOutput": "No output",
+    "expand": "Show Skill call details",
+    "collapse": "Hide Skill call details",
+    "openSecureProvider": "Open secure Provider form",
+    "openResource": "Open resource",
+    "status": {
+      "running": "Running",
+      "completed": "Completed",
+      "cancelled": "Cancelled",
+      "failed": "Failed"
+    }
+  },
+  "log": {
+    "title": "System Helper Chat conversation",
+    "generated": "Generated",
+    "empty": "No server messages in this execution.",
+    "user": "You",
+    "assistant": "System Helper Chat",
+    "tool": "Skill script"
   }
 }

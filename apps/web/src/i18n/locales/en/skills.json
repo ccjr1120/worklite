@@ -1,12 +1,11 @@
 {
   "title": "Skills",
   "description": "Versioned packages of instructions, scripts, and references.",
-  "upload": "Upload archive",
   "create": "Create skill",
   "search": "Search skills",
   "empty": {
     "title": "No skills yet",
-    "description": "Create a skill online or upload an archive, then publish an immutable version."
+    "description": "Create a Skill package with instructions, scripts, and references."
   },
   "noMatches": {
     "title": "No matching skills",
@@ -16,19 +15,59 @@
     "skill": "Skill",
     "source": "Source",
     "version": "Version",
-    "validation": "Validation",
     "updated": "Updated"
   },
   "source": {
     "online": "Online",
-    "archive": "Archive"
+    "archive": "Archive",
+    "built-in": "Built-in"
+  },
+  "terminal": {
+    "warning": "The product-owned scripts/run.sh delegates its single command argument to /bin/sh -lc without a sandbox and has the WorkLite process user's host permissions, including access to available files and networks."
+  },
+  "platform": {
+    "systemOnly": "System Helper Chat only",
+    "boundary": "Platform actions use a fixed tool registry. Resource and preference changes require confirmation, and secrets remain in dedicated secure forms."
   },
   "editor": {
     "new": "New skill",
     "fallback": "Skill",
-    "validate": "Validate",
+    "name": "Skill name",
+    "create": "Create Skill",
     "package": "Package",
-    "safetyHint": "Validation does not guarantee runtime safety. Executables never run in the API process.",
-    "published": "Skill version published"
+    "addFile": "Add package file",
+    "deleteFile": "Delete selected file",
+    "filePath": "Relative file path",
+    "filePathHint": "Use scripts/... for executable files or references/... for supporting text.",
+    "pathInvalid": "Enter a relative path under scripts/ or references/.",
+    "pathDuplicate": "A package file already uses this path.",
+    "executable": "Executable script",
+    "missingShebang": "Shebang required",
+    "scriptWarning": "Saved scripts with a Unix shebang can run directly with the API process's host permissions, working directory, and complete environment. There is no sandbox, timeout, or output limit.",
+    "run": {
+      "action": "Run",
+      "arguments": "Arguments (JSON string array)",
+      "argumentsHint": "Each array item is passed as one exact script argument.",
+      "invalidArguments": "Enter a valid JSON array containing only strings.",
+      "saveFirst": "Save the Skill before running this script.",
+      "output": "Script output",
+      "emptyOutput": "Output will appear after the script starts.",
+      "stdout": "stdout",
+      "stderr": "stderr",
+      "lifecycle": "event",
+      "exitCode": "Exit code {{code}}",
+      "signal": "Signal {{signal}}",
+      "cancel": "Cancel",
+      "reconnecting": "Live output disconnected. Reconnecting without stopping the script.",
+      "startFailed": "The script could not be started.",
+      "loadFailed": "The script execution could not be refreshed.",
+      "cancelFailed": "The script execution could not be cancelled."
+    },
+    "readOnly": "Read-only",
+    "builtInReadOnly": "Product-owned package",
+    "nameRequired": "Enter a Skill name before saving.",
+    "saveFailed": "The Skill could not be saved. Review the package and try again.",
+    "loading": "Loading Skill...",
+    "loadFailed": "Unable to load this Skill."
   }
 }

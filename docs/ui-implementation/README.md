@@ -15,56 +15,74 @@ Before UI work, read the design system, this index, every applicable document un
 
 ## Page Specifications
 
-- Authentication: [Sign in](auth/sign-in.md), [Sign up](auth/sign-up.md), [Email verification](auth/email-verification.md), [Password recovery](auth/password-recovery.md), [Invitation](auth/invitation.md)
-- [Onboarding](onboarding/README.md)
+- First-use setup: [Onboarding](onboarding/README.md)
 - [Home](home/README.md)
-- [Workspace Agent Chat](assistant/README.md)
+- [Workspace System Helper Chat](assistant/README.md)
 - Agents: [List and resource views](agents/list.md), [Editor](agents/editor.md), [Model providers](model-providers.md)
 - Workflows: [List](workflows/list.md), [Editor](workflows/editor.md), [Versions](workflows/versions.md)
 - Runs: [List](runs/list.md), [Details](runs/details.md)
 - Skills: [List](skills/list.md), [Editor](skills/editor.md)
 - MCP servers: [List](mcp-servers/list.md), [Configuration](mcp-servers/configuration.md)
 - Artifacts: [List](artifacts/list.md), [Details](artifacts/details.md)
-- Settings: [General](settings/general.md), [Members](settings/members.md), [Usage](settings/usage.md), [Audit log](settings/audit-log.md), [Appearance](settings/appearance.md)
+- Settings: [Usage](settings/usage.md), [Audit log](settings/audit-log.md), [Appearance](settings/appearance.md)
 
 ## Route Map
 
 ```text
-/sign-in  /sign-up  /verify-email  /forgot-password  /reset-password
-/invite/:token
-/onboarding/{team,provider,first-agent}
-/:teamSlug/home
-/:teamSlug/assistant  -> redirects to /:teamSlug/home with Agent Chat expanded
-/:teamSlug/agents/{new,:agentId}
-/:teamSlug/model-providers
-/:teamSlug/workflows/{new,:workflowId,:workflowId/versions}
-/:teamSlug/runs/:runId
-/:teamSlug/skills/{new,:skillId}
-/:teamSlug/mcp-servers/{new,:serverId}
-/:teamSlug/artifacts/:artifactId
-/:teamSlug/settings/{general,members,usage,audit-log,appearance}
+/home
+/agents/{new,:agentId}
+/model-providers
+/workflows/{new,:workflowId,:workflowId/versions}
+/runs/:runId
+/skills/{new,:skillId}
+/mcp-servers/{new,:serverId}
+/artifacts/:artifactId
+/settings/{usage,audit-log,appearance}
 ```
 
-Authentication redirects preserve the intended destination. Team routes verify membership and show explicit missing-team or access states.
+The root route opens Home. First-use setup is an optional provider and first-agent checklist from Home; there is no account, invitation, or team setup flow.
 
 ## Shared Component Inventory
 
-Theme provider and appearance selector; application shell; sidebar; team switcher; context bar; user and command menus; shell-level team Agent Chat; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; ordered workflow steps; run timeline; viewers for logs, output and artifacts; skeletons, errors, permission states and offline banner.
+Theme provider and appearance selector; application shell; sidebar; context bar; personal preferences menu; command menu; shell-level System Helper Chat; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; ordered workflow steps; run timeline; viewers for logs, output and artifacts; skeletons, errors, offline banner.
 
 Domain-neutral reusable components belong in the shared UI package. Feature composition remains near its feature. Abstract only demonstrated repeated patterns.
 
 ## Implementation Sequence
 
 1. Foundations: semantic dual-theme tokens, initial theme resolution, typography, focus, motion, controls and feedback.
-2. Authentication: shell, account flows, recovery and invitations.
-3. Workspace shell: navigation, context bar, menus and responsive behavior.
-4. Home and collections: Home states and shared collection grammar.
-5. Editors and execution: Agent editor, ordered Workflow editor, Runs, logs and artifacts.
-6. Integrations and administration: Skills, MCP servers and Settings.
+2. Personal workspace shell: navigation, context bar, menus and responsive behavior.
+3. Home and collections: Home states and shared collection grammar.
+4. Editors and execution: Agent editor, ordered Workflow editor, Runs, logs and artifacts.
+5. Integrations and preferences: Skills, MCP servers and Settings.
 
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-08-27
+
+- Removed the standalone Terminal page; direct host execution is now an action on saved Skill scripts in the Skill editor.
+
+### 2026-08-26
+
+- Added the shared streaming Markdown response renderer to the component inventory.
+
+### 2026-08-25
+
+- Replaced the authenticated team route map with a single-user personal workspace route map.
+- Removed account, invitation, team setup, member administration, team switcher, and team access-state requirements.
+- Kept first-use provider and first-agent setup as an optional Home checklist.
+
+### 2026-08-25
+
+- Moved collection creation controls for Agents, Skills, MCP Servers, and Model Providers into the right side of the toolbar directly above each table or list.
+- Added explicit Model Provider creation and confirmed deletion flows while preserving write-only credentials.
+
+### 2026-08-25
+
+- Consolidated sign-in and account creation into `/login` and removed the separate authentication routes without aliases.
+- Defined authentication mode as URL state so links and refreshes preserve the selected form.
 
 ### 2026-08-24
 

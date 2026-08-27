@@ -17,10 +17,12 @@ type Crumb = { label: string; to?: string };
 
 function WorkspaceChrome({
   crumbs,
+  back,
   status,
   actions,
 }: {
   crumbs: Crumb[];
+  back?: ReactNode;
   status?: ReactNode;
   actions?: ReactNode;
 }) {
@@ -39,7 +41,9 @@ function WorkspaceChrome({
   }, []);
 
   const crumbNode = (
-    <nav className="flex min-w-0 items-center gap-1.5 text-[13px]">
+    <div className="flex min-w-0 items-center gap-2">
+      {back}
+      <nav className="flex min-w-0 items-center gap-1.5 text-[13px]">
       {crumbs.map((crumb, index) => (
         <span key={`${crumb.label}-${index}`} className="flex min-w-0 items-center gap-1.5">
           {index > 0 ? <span className="text-muted-foreground">/</span> : null}
@@ -52,7 +56,8 @@ function WorkspaceChrome({
           )}
         </span>
       ))}
-    </nav>
+      </nav>
+    </div>
   );
 
   return (

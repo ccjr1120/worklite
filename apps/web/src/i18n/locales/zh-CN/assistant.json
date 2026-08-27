@@ -1,121 +1,100 @@
 {
-  "title": "Agent Chat",
-  "description": "Plan and review workspace setup in one conversation.",
-  "localSession": "Local prototype",
-  "localSessionDetail": "This conversation resets when the page reloads.",
+  "title": "System Helper Chat",
+  "description": "通过持久化的 Agent 执行配置 WorkLite。",
   "starters": {
-    "title": "Start a task",
+    "title": "开始任务",
     "provider": {
-      "title": "Configure provider",
-      "description": "Prepare model access and connection checks.",
-      "prompt": "Configure an OpenAI model provider for this team."
+      "title": "配置提供商",
+      "description": "创建不包含敏感信息的提供商草稿。",
+      "prompt": "为此工作区创建一个 OpenAI 模型提供商草稿，不要包含任何凭据。"
     },
     "skill": {
-      "title": "Create skill",
-      "description": "Draft instructions and package structure.",
-      "prompt": "Create a skill for triaging customer support requests."
+      "title": "创建 Skill",
+      "description": "创建包含真实文件的 Skill 包。",
+      "prompt": "创建一个用于分流客户支持请求的 Skill，并包含必需的 SKILL.md 文件。"
     },
     "mcp": {
-      "title": "Connect MCP server",
-      "description": "Discover tools and prepare an allowlist.",
-      "prompt": "Connect a remote MCP server for customer data tools."
+      "title": "连接 MCP 服务器",
+      "description": "创建远程 MCP 服务器草稿。",
+      "prompt": "为客户数据工具创建一个远程 MCP 服务器草稿，不要包含认证密钥。"
     },
     "agent": {
-      "title": "Create agent",
-      "description": "Combine a model, instructions, skills, and tools.",
-      "prompt": "Create a support coordinator agent for this team."
+      "title": "创建 Agent",
+      "description": "指定模型、Skills 和 MCP 服务器。",
+      "prompt": "先检查工作区，再使用已有资源创建一个客户支持协调 Agent。"
     }
   },
   "composer": {
-    "label": "Message Agent Chat",
-    "placeholder": "Describe the provider, skill, MCP server, or agent you want to set up...",
-    "send": "Send message",
-    "sending": "Preparing proposal",
-    "secure": "Enter credentials only in secure settings."
+    "label": "向 System Helper Chat 发送消息",
+    "placeholder": "询问 WorkLite，或请求执行平台操作...",
+    "send": "发送消息",
+    "stop": "中断当前回复",
+    "loading": "正在加载 System Helper Chat 配置",
+    "configure": "绑定模型提供商和模型后使用 System Helper Chat"
   },
   "minimized": {
-    "minimize": "Minimize conversation",
-    "preparing": "Preparing proposal",
-    "running": "{{completed}} of {{total}} tool calls completed",
-    "ready_one": "{{count}} tool call ready for review",
-    "ready_other": "{{count}} tool calls ready for review",
-    "needsInput": "Tool calls need secure input",
-    "completed_one": "{{count}} tool call completed",
-    "completed_other": "{{count}} tool calls completed",
-    "openConversation": "Open conversation"
+    "minimize": "最小化对话"
   },
-  "views": {
-    "chat": "Chat",
-    "proposal": "Proposed changes"
-  },
-  "speaker": {
-    "you": "You",
-    "assistant": "Agent Chat"
+  "commands": {
+    "menuLabel": "对话命令",
+    "logDescription": "将当前服务端记录下载为 Markdown。",
+    "newDescription": "归档当前执行并开始新对话。",
+    "resumeDescription": "恢复已归档的服务端执行。"
   },
   "messages": {
-    "welcome": "Choose a task or describe the workspace setup you need.",
-    "proposalReady": "I prepared a structured proposal. Review the fields and dependencies before applying it.",
-    "proposalNeedsInput": "I prepared the proposal, but a secure field must be completed before it can be applied.",
-    "completed": "The local prototype applied the approved operations. Review the resulting resources before publishing them."
+    "welcome": "选择一个任务，或描述你需要执行的工作区操作。"
   },
-  "proposal": {
-    "title": "Proposed changes",
-    "description": "Review each operation before applying it.",
-    "emptyTitle": "No proposal yet",
-    "emptyDescription": "Send a request to generate structured workspace changes.",
-    "operationCount_one": "{{count}} operation",
-    "operationCount_other": "{{count}} operations",
-    "review": "Review changes",
-    "apply": "Apply changes",
-    "applying": "Applying changes",
-    "applied": "Changes applied",
-    "blocked": "Complete secure input first",
-    "openSecureSettings": "Open secure settings",
-    "openResource": "Open resource",
-    "close": "Close proposal",
-    "scope": "Scope",
-    "teamScope": "Current team",
-    "execution": "Execution",
-    "executionDetail": "Operations run in dependency order after confirmation."
-  },
-  "resources": {
-    "provider": "Model provider",
-    "skill": "Skill",
-    "mcp": "MCP server",
-    "agent": "Agent"
-  },
-  "operations": {
-    "provider": {
-      "title": "OpenAI",
-      "action": "Configure provider",
-      "summary": "Store a credential securely, test the connection, and discover available models."
-    },
-    "skill": {
-      "title": "support-triage",
-      "action": "Create draft",
-      "summary": "Create SKILL.md with triage steps, escalation rules, and response quality checks."
-    },
-    "mcp": {
-      "title": "Customer data tools",
-      "action": "Connect and discover",
-      "summary": "Prepare a Streamable HTTP connection and review discovered tools before allowlisting."
-    },
-    "agent": {
-      "title": "Support coordinator",
-      "action": "Create draft",
-      "summary": "Use the connected model with support-triage instructions and approved customer data tools."
-    }
+  "speaker": {
+    "you": "你",
+    "assistant": "System Helper Chat"
   },
   "status": {
-    "needs_input": "Needs input",
-    "ready": "Ready",
-    "running": "Running",
-    "completed": "Completed",
-    "failed": "Failed"
+    "running": "执行中",
+    "completed": "已完成",
+    "cancelled": "已中断",
+    "failed": "失败"
   },
-  "announcements": {
-    "proposalReady": "Proposal ready for review.",
-    "applying": "Applying approved operations.",
-    "completed": "All approved operations completed."
+  "execution": {
+    "loading": "正在加载服务端执行",
+    "working": "正在处理...",
+    "loadFailed": "无法加载已保存的执行。",
+    "requestFailed": "System Helper Chat 无法完成此请求。",
+    "cancelFailed": "无法中断当前回复。"
+  },
+  "history": {
+    "title": "执行历史",
+    "description": "恢复此浏览器保存的服务端执行。",
+    "empty": "暂无已归档的执行。",
+    "untitled": "未命名对话",
+    "remove": "从本地历史中移除"
+  },
+  "tool": {
+    "label": "Skill 脚本",
+    "script": "脚本",
+    "workingDirectory": "工作目录",
+    "arguments": "参数",
+    "warning": "此脚本使用 API 进程的宿主机权限、工作目录和完整环境变量运行。",
+    "output": "输出 · 退出码 {{code}}",
+    "exitCode": "退出码 {{code}}",
+    "noExitCode": "无",
+    "noOutput": "没有输出",
+    "expand": "展开 Skill 调用详情",
+    "collapse": "收起 Skill 调用详情",
+    "openSecureProvider": "打开安全的提供商表单",
+    "openResource": "打开资源",
+    "status": {
+      "running": "执行中",
+      "completed": "已完成",
+      "cancelled": "已中断",
+      "failed": "失败"
+    }
+  },
+  "log": {
+    "title": "System Helper Chat 对话",
+    "generated": "生成时间",
+    "empty": "此执行中没有服务端消息。",
+    "user": "你",
+    "assistant": "System Helper Chat",
+    "tool": "Skill 脚本"
   }
 }

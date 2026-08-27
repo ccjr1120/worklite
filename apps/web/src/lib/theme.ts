@@ -1,20 +1,5 @@
-export const APPEARANCE_STORAGE_KEY = 'worklite.appearance';
-
 export type Appearance = 'system' | 'light' | 'dark';
 export type ResolvedTheme = 'light' | 'dark';
-
-export function readStoredAppearance(): Appearance {
-  if (typeof window === 'undefined') {
-    return 'system';
-  }
-
-  const stored = window.localStorage.getItem(APPEARANCE_STORAGE_KEY);
-  if (stored === 'light' || stored === 'dark' || stored === 'system') {
-    return stored;
-  }
-
-  return 'system';
-}
 
 export function getPreferredTheme(): ResolvedTheme {
   if (typeof window === 'undefined') {

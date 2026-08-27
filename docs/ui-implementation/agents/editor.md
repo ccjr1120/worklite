@@ -2,13 +2,68 @@
 
 ## Layout
 
-The context bar contains breadcrumb, save state, Preview, history when available, and Publish. The main column contains name, responsibility and system instructions. A configuration region or inspector contains model, runtime defaults, skills, MCP servers, allowed tools and output settings.
+The initial draft editor context bar contains a breadcrumb with a leading back action, save state, and one `Save` action. Do not show Preview, Publish, version history, or execution controls until those behaviors have real end-to-end API and runtime support. The main column contains name, responsibility, and persisted system instructions.
+
+The configuration region contains a Model Provider selector, a dependent model selector, Skills, and MCP servers. Provider and model choices come only from configured workspace data. Skills and MCP servers come from their real workspace collections and use controlled checkboxes; every selection belongs only to the current Agent draft. Show each resource's meaningful validation, connection, or version metadata without preventing draft assignment. Loading, failure, and empty states remain local to each resource section, and an empty section links to the relevant creation page.
+
+Saved custom Agents have an unframed execution region below the draft fields. It contains the conversation transcript, a compact prompt composer, and durable request errors. Execution is unavailable until the Agent has a configured Provider and model. Text responses use the shared streaming Markdown presentation when streaming is available; the initial terminal-tool increment may return completed turns while preserving the same message hierarchy. A submitted turn immediately creates an Agent working placeholder in the transcript. While it is running, the prompt remains editable without queuing, and the Send action becomes Stop. Cancellation preserves the draft, marks the turn and active Skill call as cancelled, and leaves the session available for another message.
+
+When the model requests an assigned Skill's `skill_script`, append a compact inline disclosure row showing the Skill name, script name, automatic execution status, and exit code when available. The row remains collapsed by default, including for failures. Expanding it reveals the exact script path, argument list, working directory, host-execution warning, and preformatted output in a height-bounded internal scroller. The `terminal-command` Skill is represented as `scripts/run.sh` with its command string as the sole argument; it has no separate terminal tool presentation. Skill calls have no permission, `Run`, `Reject`, or approve-all control. The row exposes execution, exit, cancellation, and failure states with non-color labels, and raw output is never rendered as HTML. This automatic Agent execution path is separate from the direct Skill-editor run action.
+
+On desktop, configuration uses the existing `360px` inspector. Below the desktop breakpoint, render the same controls inline after the main fields so configuration never disappears. Both presentations use the same draft state and semantic tokens rather than duplicate state ownership.
+
+The protected System Helper Chat entry uses the same editor route in restricted system mode. Name, responsibility, prompt, Skills, and MCP settings are read-only product configuration; Preview, Publish, duplication, and deletion actions are absent. Show `worklite-platform` as a compact read-only built-in capability with no checkbox, remove action, or empty state. Its editable controls are a Model Provider selector populated from configured workspace providers, including an explicit `Not configured` option, followed by a model selector populated from the selected provider's configured model catalog. A model is disabled until a provider is selected and an explicit `Not configured` option is shown when the provider has no models. These binding controls exist only here. Deleting the selected provider returns both controls to an unconfigured state without moving configuration into the Chat or provider surfaces.
 
 ## States
 
-Support new unsaved, saving, saved, validation failure, publish confirmation, read-only historical version and soft-deleted historical reference. Distinguish drafts from immutable versions and explain downstream workflow impact during publication. Never expose secrets in fields or previews.
+Support new unsaved, loading, saving, saved, validation failure, resource loading failure, and empty-resource states. Save errors remain visible near the action or affected configuration instead of disappearing into save-state chrome. Never expose secrets in fields or resource summaries.
 
 ## Changelog
+
+### 2026-08-27
+
+- Made Agent Skill calls compact and collapsed by default while retaining status and exit context in the summary and complete bounded details on demand.
+- Added transcript-owned working and cancelled states, editable drafts during execution, and a server-backed Stop action for custom Agent turns.
+- Kept one active turn and intentionally did not add a message queue.
+
+### 2026-08-27
+
+- Replaced per-invocation Skill approval controls with automatic server execution and observer-only status, metadata, warning, and output presentation.
+- Removed approval, rejection, and duplicate-decision states from the Agent execution region.
+
+### 2026-08-27
+
+- Unified terminal command requests with assigned Skill-script approval by representing the built-in terminal command as `terminal-command/scripts/run.sh`.
+- Removed the separate `terminal_command` tool presentation and retained exact arguments, host warnings, and per-invocation approval.
+
+### 2026-08-27
+
+- Aligned Agent tool output with the shared uncapped Commands runtime and distinguished Agent approval from direct Skill-editor execution.
+
+### 2026-08-27
+
+- Generalized the Agent execution approval region for terminal commands and assigned Skill scripts.
+- Required Skill name, script path, arguments, package-root working directory, snapshot boundary, and non-sandbox warning before execution.
+
+### 2026-08-26
+
+- Added a read-only `worklite-platform` capability summary to restricted System Helper Chat configuration without exposing Skill assignment controls.
+
+### 2026-08-26
+
+- Added the custom Agent execution region and the explicit per-command host terminal approval state.
+- Required exact command and working-directory disclosure, non-sandbox warning, durable execution results, bounded output presentation, and no approve-all action.
+
+### 2026-08-26
+
+- Replaced placeholder model, Skill, and MCP choices with real workspace-backed draft configuration.
+- Made Skill and MCP assignments independent per Agent and responsive across desktop and mobile layouts.
+- Limited the initial surface to persisted Agent drafts and removed unsupported Preview, Publish, version, and execution controls.
+
+### 2026-08-26
+
+- Added restricted system mode for System Helper Chat with provider and model binding controls.
+- Added a leading back action before the Agent editor breadcrumb.
 
 ### 2026-08-13
 

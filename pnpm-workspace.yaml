@@ -1,7 +1,8 @@
 packages:
-  - "apps/*"
-  - "packages/*"
+  - apps/*
+  - packages/*
 
 onlyBuiltDependencies:
   - esbuild
+  - better-sqlite3
   - msgpackr-extract

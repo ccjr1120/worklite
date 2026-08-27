@@ -1,28 +1,21 @@
 import { useState } from 'react';
-import { Link, useNavigate } from '@tanstack/react-router';
-import { Keyboard, LogOut, Palette, UserRound } from 'lucide-react';
+import { Link } from '@tanstack/react-router';
+import { Keyboard, Palette } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Kbd } from '@/components/ui/kbd';
-import { useSessionStore } from '@/stores/session-store';
 import { cn } from '@/lib/utils';
 
 function UserMenu({ collapsed }: { collapsed: boolean }) {
   const { t } = useTranslation('workspace');
-  const navigate = useNavigate();
-  const name = useSessionStore((state) => state.name);
-  const email = useSessionStore((state) => state.email);
-  const teamSlug = useSessionStore((state) => state.currentTeamSlug);
-  const signOut = useSessionStore((state) => state.signOut);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   return (
@@ -31,26 +24,20 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className={cn('h-10 w-full justify-start gap-2 px-2', collapsed && 'justify-center px-0')} aria-label={t('userMenu.label')}>
             <span className="inline-flex size-6 items-center justify-center rounded-full bg-surface-subtle text-[11px] font-medium">
-              {name.slice(0, 1) || 'A'}
+              P
             </span>
             {collapsed ? null : (
               <span className="min-w-0 text-left">
-                <span className="block truncate text-[13px] font-medium">{name || t('userMenu.accountFallback')}</span>
-                <span className="block truncate text-xs text-muted-foreground">{email}</span>
+                <span className="block truncate text-[13px] font-medium">{t('userMenu.personalWorkspace')}</span>
+                <span className="block truncate text-xs text-muted-foreground">{t('userMenu.localOnly')}</span>
               </span>
             )}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" side="top" className="w-56">
-          <DropdownMenuLabel>{t('userMenu.account')}</DropdownMenuLabel>
+          <DropdownMenuLabel>{t('userMenu.personalWorkspace')}</DropdownMenuLabel>
           <DropdownMenuItem asChild>
-            <Link to="/$teamSlug/settings/appearance" params={{ teamSlug }}>
-              <UserRound className="size-4" />
-              {t('userMenu.profile')}
-            </Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link to="/$teamSlug/settings/appearance" params={{ teamSlug }}>
+            <Link to="/settings/appearance">
               <Palette className="size-4" />
               {t('userMenu.appearance')}
             </Link>
@@ -58,16 +45,6 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
           <DropdownMenuItem onSelect={() => setShortcutsOpen(true)}>
             <Keyboard className="size-4" />
             {t('userMenu.shortcuts')}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onSelect={() => {
-              signOut();
-              void navigate({ to: '/sign-in' });
-            }}
-          >
-            <LogOut className="size-4" />
-            {t('userMenu.signOut')}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -84,9 +61,6 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
                 <Kbd>⌘</Kbd>
                 <Kbd>K</Kbd>
               </span>
-            </li>
-            <li className="flex items-center justify-between">
-              <span>{t('userMenu.signOutHint')}</span>
             </li>
           </ul>
         </DialogContent>

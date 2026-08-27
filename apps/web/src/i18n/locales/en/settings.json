@@ -1,63 +1,83 @@
 {
   "nav": {
     "title": "Settings",
-    "general": "General",
-    "members": "Members",
     "usage": "Usage",
     "auditLog": "Audit log",
     "appearance": "Appearance"
   },
-  "general": {
-    "title": "General",
-    "description": "These settings apply to the {{team}} team.",
-    "teamName": "Team name",
-    "teamIdentifier": "Team identifier",
-    "identifierHint": "Changing the identifier may break existing links.",
-    "saved": "Team settings saved",
-    "deleteTitle": "Delete team",
-    "deleteDescription": "Permanently deletes this team, its agents, workflows, and run history. This cannot be undone.",
-    "deleteAction": "Delete team",
-    "deleteConfirmTitle": "Delete {{team}}?",
-    "deleteConfirmDescription": "All team resources will be removed. Type-safe confirmation is required in production.",
-    "deleteGated": "Deletion is permission-gated in this preview"
-  },
-  "members": {
-    "title": "Members",
-    "description": "Manage access for this team. The last administrator cannot be removed.",
-    "invite": "Invite member",
-    "columns": {
-      "member": "Member",
-      "role": "Role",
-      "status": "Status",
-      "lastActive": "Last active",
-      "actions": ""
-    },
-    "changeRole": "Change role",
-    "roleChangeConfirm": "Role change requires confirmation",
-    "resend": "Resend",
-    "remove": "Remove",
-    "invitationResent": "Invitation resent",
-    "memberRetained": "Member retained",
-    "inviteTitle": "Invite member",
-    "inviteDescription": "The invited person joins this team. Duplicate invitations are rejected.",
-    "workEmail": "Work email",
-    "role": "Role",
-    "sendInvite": "Send invite",
-    "inviteSent": "Invitation sent"
-  },
   "providers": {
     "title": "Model providers",
     "description": "Credentials are write-only. Changing a provider can affect future agent runs, not published workflow versions.",
+    "create": "Create provider",
+    "columns": {
+      "provider": "Provider",
+      "status": "Status",
+      "models": "Models",
+      "credential": "Credential",
+      "actions": "Actions"
+    },
+    "empty": {
+      "title": "No model providers",
+      "description": "Add a provider to make models available to agents."
+    },
+    "noMatches": {
+      "title": "No matching providers",
+      "description": "No providers match the current search."
+    },
+    "search": "Search providers",
+    "createTitle": "Create model provider",
+    "createDescription": "Configure an AI SDK provider and store its secrets securely. Key and header values are never shown again.",
+    "name": "Provider name",
+    "namePlaceholder": "OpenAI",
+    "kind": "Provider type",
+    "kinds": {
+      "deepseek": "DeepSeek",
+      "openai": "OpenAI",
+      "openaiCompatible": "OpenAI-compatible"
+    },
+    "apiKey": "API key",
+    "baseUrl": "Base URL",
+    "baseUrlHint": "Leave empty to use the SDK default.",
+    "baseUrlPlaceholder": "https://api.openai.com/v1",
+    "organization": "Organization",
+    "project": "Project",
+    "models": "Models",
+    "modelsHint": "Separate model identifiers with commas.",
+    "modelsPlaceholder": "gpt-4.1, gpt-4.1-mini",
+    "headers": "Custom headers",
+    "headersHint": "Optional JSON object. Values are write-only and never shown again.",
+    "headersPlaceholder": "{\n  \"X-Workspace\": \"personal\"\n}",
+    "headersError": "Enter a JSON object with string header names and values.",
+    "headerNames": "Headers: {{names}}",
+    "noHeaders": "No custom headers",
+    "createAction": "Create provider",
+    "created": "Provider created",
     "replaceKey": "Replace API key",
     "secretPlaceholder": "New secret",
+    "replaceTitle": "Replace provider key",
+    "replaceDescription": "The new key and optional header JSON replace the stored secrets and are never displayed in full.",
+    "replaceAction": "Save new key",
     "testing": "Testing...",
     "test": "Test connection",
-    "testSucceeded": "{{provider}} connection succeeded",
-    "saved": "Provider saved"
+    "testTitle": "Test {{provider}}",
+    "testDescription": "Sending a fixed read-only message through the first configured model.",
+    "testDescriptionWithModel": "Reply from {{model}}.",
+    "testPromptLabel": "Test message",
+    "testReplyLabel": "Model reply",
+    "waitingReply": "Waiting for the model reply · {{seconds}} s",
+    "waitingReplyAccessible": "Waiting for the model reply.",
+    "testDuration": "Duration: {{seconds}} s",
+    "testFailed": "The provider test failed.",
+    "saved": "Provider saved",
+    "delete": "Delete provider",
+    "deleteTitle": "Delete {{provider}}?",
+    "deleteDescription": "This removes the provider and its stored credential. Agents using its models may fail on their next run.",
+    "deleteAction": "Delete provider",
+    "deleted": "Provider deleted"
   },
   "usage": {
     "title": "Usage",
-    "description": "Model consumption for this team. Totals are decision-oriented, not decorative analytics.",
+    "description": "Model consumption for this workspace. Totals are decision-oriented, not decorative analytics.",
     "chartLabel": "Token usage by model",
     "tokens": "{{count}} tokens",
     "columns": {
@@ -70,7 +90,7 @@
   },
   "audit": {
     "title": "Audit log",
-    "description": "Chronological team actions. Secrets are redacted from metadata.",
+    "description": "Chronological workspace actions. Secrets are redacted from metadata.",
     "search": "Filter by actor, action, or resource",
     "noMatches": {
       "title": "No matching events",
@@ -87,6 +107,7 @@
   "appearance": {
     "title": "Appearance",
     "description": "These preferences are personal. The current resolved theme is {{theme}}.",
+    "saveFailed": "The preference could not be saved.",
     "theme": {
       "title": "Theme",
       "system": "System",

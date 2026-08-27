@@ -5,13 +5,13 @@ import { cn } from '@/lib/utils';
 
 type AgentResourceView = 'agents' | 'skills' | 'mcp-servers' | 'providers';
 
-function AgentResourceNav({ teamSlug, active }: { teamSlug: string; active: AgentResourceView }) {
+function AgentResourceNav({ active }: { workspaceSlug?: string; active: AgentResourceView }) {
   const { t } = useTranslation('workspace');
   const items = [
-    { id: 'agents', label: t('nav.agents'), to: '/$teamSlug/agents', icon: Bot },
-    { id: 'skills', label: t('nav.skills'), to: '/$teamSlug/skills', icon: Blocks },
-    { id: 'mcp-servers', label: t('nav.mcpServers'), to: '/$teamSlug/mcp-servers', icon: Server },
-    { id: 'providers', label: t('nav.modelProviders'), to: '/$teamSlug/model-providers', icon: KeyRound },
+    { id: 'agents', label: t('nav.agents'), to: '/agents', icon: Bot },
+    { id: 'skills', label: t('nav.skills'), to: '/skills', icon: Blocks },
+    { id: 'mcp-servers', label: t('nav.mcpServers'), to: '/mcp-servers', icon: Server },
+    { id: 'providers', label: t('nav.modelProviders'), to: '/model-providers', icon: KeyRound },
   ] as const;
 
   return (
@@ -20,7 +20,6 @@ function AgentResourceNav({ teamSlug, active }: { teamSlug: string; active: Agen
         <Link
           key={item.id}
           to={item.to}
-          params={{ teamSlug }}
           className={cn(
             'inline-flex h-7 items-center gap-1.5 rounded-sm px-3 text-[13px] font-medium text-muted-foreground transition-colors duration-[120ms] hover:text-foreground focus-visible:outline-none',
             active === item.id && 'bg-surface text-foreground shadow-sm',

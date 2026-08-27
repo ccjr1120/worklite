@@ -1,7 +1,7 @@
 {
   "nav": {
     "home": "首页",
-    "assistant": "Agent Chat",
+    "assistant": "System Helper Chat",
     "build": "构建",
     "operate": "运行",
     "manage": "管理",
@@ -12,7 +12,6 @@
     "modelProviders": "模型提供商",
     "runs": "运行记录",
     "artifacts": "产物",
-    "members": "成员",
     "usage": "用量",
     "settings": "设置",
     "agentResources": "Agent 资源",
@@ -27,33 +26,21 @@
     "recent": "最近",
     "createAgent": "创建 Agent",
     "createWorkflow": "创建工作流",
-    "openAssistant": "Open Agent Chat",
+    "openAssistant": "Open System Helper Chat",
     "open": "打开命令菜单",
     "search": "搜索"
   },
   "userMenu": {
     "label": "用户菜单",
-    "account": "账号",
-    "accountFallback": "账号",
-    "profile": "个人资料",
+    "personalWorkspace": "个人工作台",
+    "localOnly": "仅本地存储",
     "appearance": "外观",
     "shortcuts": "键盘快捷键",
     "shortcutsDescription": "常用工作区命令。",
-    "commandMenu": "命令菜单",
-    "signOutHint": "退出登录位于用户菜单中",
-    "signOut": "退出登录"
-  },
-  "teamSwitcher": {
-    "label": "切换团队",
-    "teams": "团队",
-    "createTeam": "创建团队"
+    "commandMenu": "命令菜单"
   },
   "offline": {
     "message": "正在重新连接。本地编辑会保留在此设备上，直到连接恢复。"
-  },
-  "errors": {
-    "teamNotFoundTitle": "找不到团队",
-    "teamNotFoundDescription": "该团队不存在，或已不可用。"
   },
   "openNavigation": "打开导航"
 }

@@ -4,7 +4,7 @@ This document is the source of truth for WorkLite user-interface principles and 
 
 ## Product Character
 
-WorkLite is a professional workspace for creating and running team AI agents and workflows. Its interface should feel calm, precise, focused, and warm.
+WorkLite is a professional personal workspace for creating and running AI agents and workflows. Its interface should feel calm, precise, focused, and warm.
 
 The visual direction is inspired by the clarity and efficiency of Linear without copying its brand. WorkLite establishes its own identity through persimmon orange, execution-oriented interaction patterns, and a consistent visual language for agents, workflows, and runs.
 
@@ -16,7 +16,7 @@ The interface must:
 - Feel lighter than a traditional enterprise dashboard and more dependable than a novelty AI interface.
 - Treat light and dark modes as equally important, deliberately designed experiences.
 
-The WorkLite brand mark is the orange robot outline in `apps/web/public/brand/worklite-logo.png`. Use the transparent asset through the shared `WorkLiteMark` component for product-owned branding, authentication, onboarding, and browser icons. Do not recreate the mark with a substitute icon or apply a background that reduces its legibility.
+The WorkLite brand mark is the orange robot outline in `apps/web/public/brand/worklite-logo.png`. Use the transparent asset through the shared `WorkLiteMark` component for product-owned branding, onboarding, and browser icons. Do not recreate the mark with a substitute icon or apply a background that reduces its legibility.
 
 ## Design Principles
 
@@ -158,6 +158,16 @@ Use Lucide icons consistently, normally at `16px` and at `18px` in primary navig
 
 Present agents as configurable work units, not cartoon characters. Identity comes from a restrained geometric symbol or letter mark, name, responsibility, model, available skills or tools, ownership, version, and recent run state.
 
+### AI Response Content
+
+Use one shared streaming Markdown renderer for model-generated text across System Helper Chat and future Agent response surfaces. It must handle incomplete Markdown during streaming, GitHub Flavored Markdown, long words, tables, links, lists, quotations, and fenced code without executing embedded HTML or scripts. Product styling wraps the renderer and uses semantic tokens in both themes; transport parsing and conversation state do not belong inside the renderer.
+
+In conversational layouts, user messages align to the right in compact neutral bubbles and remain plain text. Agent responses align to the left with a wider, unframed reading column so structured output remains scannable. Alignment, accessible labels, and optional identity marks distinguish speakers without relying on color. Streaming updates follow the end only when the reader was already at the end.
+
+Create an Agent response placeholder in the transcript as soon as a turn starts. Show restrained inline progress there instead of replacing or disabling the composer. While a turn is running, keep the draft input editable and replace the send control with a familiar square Stop icon; stopping is a neutral execution control rather than a destructive action. Preserve the draft after completion or cancellation, and use text plus icon cues for working and cancelled states.
+
+Present inline Skill calls as compact disclosure rows by default. The collapsed row keeps the Skill identity, script name, execution status, and exit code visible without allowing arguments, host details, or raw output to dominate the transcript. A keyboard-accessible disclosure control reveals the complete metadata, warning, and a height-bounded internally scrollable output region. Failed calls remain collapsed unless the user opens them.
+
 ### Workflow Editor
 
 - Represent the initial workflow model as a structured vertical sequence of ordered agent steps, not a free-form graph canvas.
@@ -225,10 +235,26 @@ Before confirming a UI proposal, verify that it:
 
 ## Changelog
 
+### 2026-08-27
+
+- Made inline Skill calls compact and collapsed by default, with status and exit context retained in the summary and bounded details available on demand.
+- Added transcript-owned Agent working placeholders, editable drafts during execution, and a neutral Stop control that replaces Send for active turns.
+
+### 2026-08-26
+
+- Added the shared streaming Markdown response pattern for current and future Agent output.
+- Defined right-aligned plain-text user messages, left-aligned unframed Agent responses, secure Markdown handling, and conditional stream following.
+
 ### 2026-08-24
 
 - Adopted the provided orange robot outline as the WorkLite brand mark.
 - Added transparent responsive PNG assets and browser icon variants.
+
+### 2026-08-25
+
+- Reframed the product UI as a single-user personal workspace.
+- Removed team switchers, member administration, account entry surfaces, and team-specific language from the shared visual model.
+- Kept the same dual-theme tokens, execution semantics, resource density, and accessible interaction requirements.
 
 ### 2026-08-14
 

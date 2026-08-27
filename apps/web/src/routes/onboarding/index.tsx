@@ -9,5 +9,5 @@ function OnboardingIndex() {
   const step = useSessionStore((state) => state.onboardingStep);
   if (step === 'provider') return <Navigate to="/onboarding/provider" />;
   if (step === 'first-agent') return <Navigate to="/onboarding/first-agent" />;
-  return <Navigate to="/onboarding/team" />;
+  return <Navigate to="/onboarding/provider" />;
 }

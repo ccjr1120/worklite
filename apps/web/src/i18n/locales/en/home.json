@@ -4,7 +4,7 @@
     "afternoon": "Good afternoon, {{name}}",
     "evening": "Good evening, {{name}}",
     "night": "Good evening, {{name}}",
-    "teamFallback": "team"
+    "teamFallback": "workspace"
   },
   "description": "What needs attention, what is running, and where to continue.",
   "createWorkflow": "Create workflow",
@@ -82,7 +82,7 @@
         "description": "Follow recent workflow changes and the artifacts they produced."
       },
       "custom": {
-        "description": "A customizable dashboard for this team."
+        "description": "A customizable dashboard for this workspace."
       }
     },
     "widget": {
@@ -103,8 +103,8 @@
       "recent_artifacts": { "title": "Recent artifacts", "empty": "No artifacts available." }
     }
   },
-  "newTeam": {
-    "intro": "This team is ready to set up. Complete the sequence below.",
+  "firstUse": {
+    "intro": "Your workspace is ready to set up. Complete the sequence below.",
     "configureProvider": "Configure a provider",
     "createAgent": "Create an agent",
     "createWorkflow": "Create a workflow",

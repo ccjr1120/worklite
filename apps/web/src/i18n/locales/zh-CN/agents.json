@@ -3,6 +3,10 @@
   "description": "可配置的工作单元，包含模型、指令、技能和工具。",
   "create": "创建 Agent",
   "search": "搜索 Agent",
+  "builtIn": "内置",
+  "notConfigured": "未配置",
+  "loading": "正在加载 Agent...",
+  "loadFailed": "无法加载 Agent。",
   "empty": {
     "title": "还没有 Agent",
     "description": "Agent 是一组具名指令、一个模型，以及它可以使用的技能或工具。"
@@ -13,9 +17,8 @@
   },
   "columns": {
     "agent": "Agent",
-    "model": "模型",
-    "skills": "技能",
-    "version": "版本",
+    "model": "模型 / 提供商",
+    "resources": "技能 / MCP",
     "updated": "更新时间"
   },
   "editor": {
@@ -27,12 +30,62 @@
     "instructionsHint": "用于编写提示词的专用编辑器。请勿在此粘贴密钥。",
     "configuration": "配置",
     "model": "模型",
+    "provider": "模型提供商",
+    "providerHint": "System Helper Chat 的提供商只能在这里选择。",
+    "providerHintCustom": "此提供商和模型仅应用于当前 Agent。",
+    "modelHint": "只能选择此提供商已配置的模型。",
+    "noModels": "此提供商尚未配置模型。",
+    "systemHint": "System Helper Chat 是内置 Agent，无法修改或删除它的身份、指令、技能和 MCP 设置。",
+    "builtInCapabilities": "内置能力",
     "skills": "技能",
+    "skillsHint": "选择当前 Agent 可以使用的技能。",
     "mcpServers": "MCP 服务器",
-    "publishHint": "发布会创建不可变版本。现有工作流会继续使用它们已经引用的版本。",
-    "selectedNode": "已选择节点 {{id}}。",
-    "publishTitle": "发布 Agent 版本",
-    "publishDescription": "已发布的版本不可更改。下游工作流会继续使用锁定的版本，直到被编辑并重新发布。",
-    "published": "Agent 版本已发布"
+    "mcpServersHint": "选择当前 Agent 可以使用的 MCP 服务器。",
+    "selectedCount": "已选择 {{count}} 项",
+    "resourcesLoading": "正在加载工作区资源...",
+    "skillsLoadFailed": "无法加载技能。",
+    "mcpLoadFailed": "无法加载 MCP 服务器。",
+    "noSkills": "当前工作区还没有可用技能。",
+    "noMcpServers": "当前工作区还没有可用的 MCP 服务器。",
+    "createSkill": "创建技能",
+    "connectMcpServer": "连接 MCP 服务器",
+    "nameRequired": "请先输入 Agent 名称再保存。",
+    "loadFailed": "无法加载此 Agent。",
+    "saveFailed": "无法保存 Agent 更改。请检查配置后重试。"
+  },
+  "execution": {
+    "title": "运行 Agent",
+    "newSession": "新会话",
+    "configureModel": "请先配置并保存模型提供商和模型，然后再运行此 Agent。",
+    "saveFirst": "开始或继续会话前，请先保存 Agent 更改。",
+    "placeholder": "向此 Agent 发送任务",
+    "messageLabel": "Agent 消息",
+    "send": "发送",
+    "stop": "中断",
+    "working": "正在处理...",
+    "requestFailed": "Agent 请求失败。请检查已保存的配置后重试。",
+    "cancelFailed": "无法中断当前 Agent 回复。",
+    "userMessage": "你的消息",
+    "agentMessage": "Agent 回复",
+    "tool": {
+      "skillTitle": "技能脚本",
+      "skill": "技能",
+      "script": "脚本路径",
+      "arguments": "参数",
+      "workingDirectory": "工作目录",
+      "warning": "此次调用没有沙箱隔离。它会以 WorkLite 进程用户的宿主权限运行，并可能访问宿主文件和网络。",
+      "output": "输出 · 退出码 {{code}}",
+      "exitCode": "退出码 {{code}}",
+      "noExitCode": "无",
+      "noOutput": "没有输出",
+      "expand": "展开 Skill 调用详情",
+      "collapse": "收起 Skill 调用详情",
+      "status": {
+        "running": "运行中",
+        "completed": "已完成",
+        "cancelled": "已中断",
+        "failed": "失败"
+      }
+    }
   }
 }

@@ -3,8 +3,8 @@ import { defineConfig } from 'drizzle-kit';
 export default defineConfig({
   schema: './src/schema/index.ts',
   out: './drizzle',
-  dialect: 'postgresql',
+  dialect: 'sqlite',
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? 'postgres://worklite:worklite@localhost:5432/worklite',
+    url: process.env.SQLITE_PATH ?? '.data/worklite.db',
   },
 });

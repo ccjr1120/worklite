@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from '@tanstack/react-router';
+import { useNavigate } from '@tanstack/react-router';
 import { Bot, FileStack, Home, MessageSquareText, Play, Plus, Server, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -10,13 +10,14 @@ import {
   CommandList,
   CommandSeparator,
 } from '@/components/ui/command';
-import { agents, artifacts, runs, workflows } from '@/mock/data';
+import { useAgentsQuery, useRunsQuery, useWorkflowsQuery } from '@/api/queries';
 
 function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { t } = useTranslation('workspace');
   const navigate = useNavigate();
-  const { teamSlug } = useParams({ strict: false });
-  const slug = teamSlug ?? 'acme';
+  const { data: workflows = [] } = useWorkflowsQuery();
+  const { data: agents = [] } = useAgentsQuery();
+  const { data: runs = [] } = useRunsQuery();
 
   function closeAndGo(run: () => void) {
     onOpenChange(false);
@@ -29,22 +30,22 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
       <CommandList>
         <CommandEmpty>{t('command.empty')}</CommandEmpty>
         <CommandGroup heading={t('command.navigation')}>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/$teamSlug/home', params: { teamSlug: slug } }))}>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/home' }))}>
             <Home className="size-4" /> {t('nav.home')}
           </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/$teamSlug/agents', params: { teamSlug: slug } }))}>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/agents' }))}>
             <Bot className="size-4" /> {t('nav.agents')}
           </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/$teamSlug/workflows', params: { teamSlug: slug } }))}>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/workflows' }))}>
             <Workflow className="size-4" /> {t('nav.workflows')}
           </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/$teamSlug/runs', params: { teamSlug: slug } }))}>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/runs' }))}>
             <Play className="size-4" /> {t('nav.runs')}
           </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/$teamSlug/artifacts', params: { teamSlug: slug } }))}>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/artifacts' }))}>
             <FileStack className="size-4" /> {t('nav.artifacts')}
           </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/$teamSlug/mcp-servers', params: { teamSlug: slug } }))}>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/mcp-servers' }))}>
             <Server className="size-4" /> {t('nav.mcpServers')}
           </CommandItem>
         </CommandGroup>
@@ -52,63 +53,48 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
         <CommandGroup heading={t('command.create')}>
           <CommandItem
             onSelect={() => closeAndGo(() => void navigate({
-              to: '/$teamSlug/home',
-              params: { teamSlug: slug },
+              to: '/home',
               search: { assistant: 'open' },
             }))}
           >
             <MessageSquareText className="size-4" /> {t('command.openAssistant')}
           </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/$teamSlug/agents/$agentId', params: { teamSlug: slug, agentId: 'new' } }))}>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/agents/$agentId', params: { agentId: 'new' } }))}>
             <Plus className="size-4" /> {t('command.createAgent')}
           </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/$teamSlug/workflows/$workflowId', params: { teamSlug: slug, workflowId: 'new' } }))}>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/workflows/$workflowId', params: { workflowId: 'new' } }))}>
             <Plus className="size-4" /> {t('command.createWorkflow')}
           </CommandItem>
         </CommandGroup>
         <CommandGroup heading={t('command.recent')}>
           {workflows
-            .filter((item) => item.teamSlug === slug)
             .slice(0, 3)
             .map((item) => (
               <CommandItem
                 key={item.id}
-                onSelect={() => closeAndGo(() => void navigate({ to: '/$teamSlug/workflows/$workflowId', params: { teamSlug: slug, workflowId: item.id } }))}
+                onSelect={() => closeAndGo(() => void navigate({ to: '/workflows/$workflowId', params: { workflowId: item.id } }))}
               >
                 <Workflow className="size-4" /> {item.name}
               </CommandItem>
             ))}
           {agents
-            .filter((item) => item.teamSlug === slug)
             .slice(0, 2)
             .map((item) => (
               <CommandItem
                 key={item.id}
-                onSelect={() => closeAndGo(() => void navigate({ to: '/$teamSlug/agents/$agentId', params: { teamSlug: slug, agentId: item.id } }))}
+                onSelect={() => closeAndGo(() => void navigate({ to: '/agents/$agentId', params: { agentId: item.id } }))}
               >
                 <Bot className="size-4" /> {item.name}
               </CommandItem>
             ))}
           {runs
-            .filter((item) => item.teamSlug === slug)
             .slice(0, 2)
             .map((item) => (
               <CommandItem
                 key={item.id}
-                onSelect={() => closeAndGo(() => void navigate({ to: '/$teamSlug/runs/$runId', params: { teamSlug: slug, runId: item.id } }))}
+                onSelect={() => closeAndGo(() => void navigate({ to: '/runs/$runId', params: { runId: item.id } }))}
               >
                 <Play className="size-4" /> {item.workflowName}
-              </CommandItem>
-            ))}
-          {artifacts
-            .filter((item) => item.teamSlug === slug)
-            .slice(0, 1)
-            .map((item) => (
-              <CommandItem
-                key={item.id}
-                onSelect={() => closeAndGo(() => void navigate({ to: '/$teamSlug/artifacts/$artifactId', params: { teamSlug: slug, artifactId: item.id } }))}
-              >
-                <FileStack className="size-4" /> {item.name}
               </CommandItem>
             ))}
         </CommandGroup>

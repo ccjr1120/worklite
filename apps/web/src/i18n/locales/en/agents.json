@@ -3,6 +3,10 @@
   "description": "Configurable work units with a model, instructions, skills, and tools.",
   "create": "Create agent",
   "search": "Search agents",
+  "builtIn": "Built-in",
+  "notConfigured": "Not configured",
+  "loading": "Loading agents...",
+  "loadFailed": "Unable to load agents.",
   "empty": {
     "title": "No agents yet",
     "description": "An agent is a named set of instructions, a model, and the skills or tools it may use."
@@ -13,9 +17,8 @@
   },
   "columns": {
     "agent": "Agent",
-    "model": "Model",
-    "skills": "Skills",
-    "version": "Version",
+    "model": "Model / provider",
+    "resources": "Skills / MCP",
     "updated": "Updated"
   },
   "editor": {
@@ -27,12 +30,62 @@
     "instructionsHint": "Dedicated editor for the prompt. Secrets must not be pasted here.",
     "configuration": "Configuration",
     "model": "Model",
+    "provider": "Model provider",
+    "providerHint": "System Helper Chat provider selection is managed only here.",
+    "providerHintCustom": "This provider and model apply only to this Agent.",
+    "modelHint": "Select one of the models configured for this provider.",
+    "noModels": "This provider has no configured models.",
+    "systemHint": "System Helper Chat is built in. Its identity, instructions, Skills, and MCP settings cannot be changed or deleted.",
+    "builtInCapabilities": "Built-in capabilities",
     "skills": "Skills",
+    "skillsHint": "Select the Skills available to this Agent.",
     "mcpServers": "MCP servers",
-    "publishHint": "Publishing creates an immutable version. Existing workflows keep the version they already reference.",
-    "selectedNode": "Selected node {{id}}.",
-    "publishTitle": "Publish agent version",
-    "publishDescription": "Published versions are immutable. Downstream workflows continue using the locked version until they are edited and republished.",
-    "published": "Agent version published"
+    "mcpServersHint": "Select the MCP servers available to this Agent.",
+    "selectedCount": "{{count}} selected",
+    "resourcesLoading": "Loading workspace resources...",
+    "skillsLoadFailed": "Unable to load Skills.",
+    "mcpLoadFailed": "Unable to load MCP servers.",
+    "noSkills": "No Skills are available in this workspace.",
+    "noMcpServers": "No MCP servers are available in this workspace.",
+    "createSkill": "Create Skill",
+    "connectMcpServer": "Connect MCP server",
+    "nameRequired": "Enter an Agent name before saving.",
+    "loadFailed": "Unable to load this Agent.",
+    "saveFailed": "Agent changes could not be saved. Review the configuration and try again."
+  },
+  "execution": {
+    "title": "Run Agent",
+    "newSession": "New session",
+    "configureModel": "Configure and save a model provider and model before running this Agent.",
+    "saveFirst": "Save Agent changes before starting or continuing a session.",
+    "placeholder": "Send a task to this Agent",
+    "messageLabel": "Agent message",
+    "send": "Send",
+    "stop": "Stop",
+    "working": "Working...",
+    "requestFailed": "The Agent request failed. Review the saved configuration and try again.",
+    "cancelFailed": "The current Agent response could not be stopped.",
+    "userMessage": "Your message",
+    "agentMessage": "Agent response",
+    "tool": {
+      "skillTitle": "Skill script",
+      "skill": "Skill",
+      "script": "Script path",
+      "arguments": "Arguments",
+      "workingDirectory": "Working directory",
+      "warning": "This invocation is not sandboxed. It runs with the WorkLite process user's host permissions and may access host files and networks.",
+      "output": "Output · exit code {{code}}",
+      "exitCode": "Exit code {{code}}",
+      "noExitCode": "none",
+      "noOutput": "No output",
+      "expand": "Show Skill call details",
+      "collapse": "Hide Skill call details",
+      "status": {
+        "running": "Running",
+        "completed": "Completed",
+        "cancelled": "Cancelled",
+        "failed": "Failed"
+      }
+    }
   }
 }

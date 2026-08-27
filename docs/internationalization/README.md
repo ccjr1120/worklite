@@ -24,13 +24,13 @@ Resolve the active locale in this order:
 
 Normalize compatible regional variants to a supported locale. For example, `zh`, `zh-CN`, and compatible Simplified Chinese browser preferences resolve to `zh-CN`. Unsupported locales must resolve to `en` without producing a broken or partially empty interface.
 
-The initial implementation may persist the preference in `localStorage`. When user profiles are persisted by the API, locale becomes a personal user preference so it follows the user across teams and devices. A local value may provide immediate pre-authentication and pre-hydration behavior, while the authenticated user preference becomes authoritative after session loading.
+The initial implementation may persist the preference in `localStorage`. When personal preferences are persisted by the API, locale remains a user preference across devices. A local value provides immediate pre-hydration behavior.
 
 ### Routing
 
-Application routes do not include a locale segment. WorkLite is an authenticated workspace rather than a locale-indexed public content site, so routes remain stable when the user changes language.
+Application routes do not include a locale segment. WorkLite is a local personal workspace rather than a locale-indexed public content site, so routes remain stable when the user changes language.
 
-If WorkLite later introduces public, search-indexed content with localized canonical URLs, that surface requires a separate routing decision. It must not change authenticated workspace routes implicitly.
+If WorkLite later introduces public, search-indexed content with localized canonical URLs, that surface requires a separate routing decision. It must not change workspace routes implicitly.
 
 ### Scope of Translation
 
@@ -44,7 +44,7 @@ Translate product-owned interface content, including:
 
 Do not automatically translate user-authored or externally supplied content, including:
 
-- Team, agent, workflow, skill, MCP server, artifact, and file names.
+- Workspace, agent, workflow, skill, MCP server, artifact, and file names.
 - Prompts, workflow input, model output, logs, and artifact contents.
 - Third-party provider, model, MCP tool, or skill content.
 - Technical identifiers, code, configuration keys, and protocol values.
@@ -66,7 +66,7 @@ apps/web/src/i18n/
     `-- zh-CN/
 ```
 
-Split resources by stable product domain rather than by individual component. Expected namespaces include `common`, `auth`, `workspace`, `agents`, `workflows`, `runs`, `skills`, `mcpServers`, `artifacts`, and `settings`. Add a namespace only when it represents a durable ownership boundary.
+Split resources by stable product domain rather than by individual component. Expected namespaces include `common`, `workspace`, `onboarding`, `agents`, `workflows`, `runs`, `skills`, `mcpServers`, `artifacts`, and `settings`. Add a namespace only when it represents a durable ownership boundary.
 
 English and Simplified Chinese resources must have matching key structures. English is the runtime fallback, but missing translations in a supported locale are defects and must be visible during development.
 
@@ -76,7 +76,7 @@ Use semantic, stable keys:
 
 ```text
 common.actions.cancel
-auth.signIn.title
+onboarding.provider.title
 runs.empty.description
 workflows.publish.confirmation.title
 ```

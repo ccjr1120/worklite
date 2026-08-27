@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Outlet, useParams } from '@tanstack/react-router';
-import { useTranslation } from 'react-i18next';
+import { Outlet } from '@tanstack/react-router';
 import { Sidebar } from '@/components/workspace/sidebar';
 import { ContextBar } from '@/components/workspace/context-bar';
 import { CommandMenu } from '@/components/workspace/command-menu';
@@ -8,19 +7,14 @@ import { OfflineBanner } from '@/components/workspace/offline-banner';
 import { workspaceSlots } from '@/components/workspace/workspace-chrome';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useMediaQuery } from '@/hooks/use-media-query';
-import { teamBySlug } from '@/mock/data';
-import { ErrorState } from '@/components/error-state';
 import { AgentChat } from '@/components/workspace/agent-chat';
 
 function WorkspaceShell() {
-  const { t } = useTranslation('workspace');
-  const { teamSlug } = useParams({ strict: false });
   const isWide = useMediaQuery('(min-width: 1280px)');
   const isMobile = useMediaQuery('(max-width: 767px)');
   const collapsed = !isWide && !isMobile;
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
-  const team = teamBySlug(teamSlug ?? '');
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -33,17 +27,6 @@ function WorkspaceShell() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  if (!team) {
-    return (
-      <div className="flex min-h-screen items-center justify-center p-6">
-        <ErrorState
-          title={t('errors.teamNotFoundTitle')}
-          description={t('errors.teamNotFoundDescription')}
-        />
-      </div>
-    );
-  }
-
   return (
     <div className="flex h-screen flex-col bg-background">
       <OfflineBanner />
@@ -52,7 +35,7 @@ function WorkspaceShell() {
           <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
             <SheetContent side="left" className="p-0 sm:max-w-[232px]">
               <SheetHeader className="sr-only">
-                <SheetTitle>{t('nav.title')}</SheetTitle>
+                <SheetTitle>Navigation</SheetTitle>
               </SheetHeader>
               <Sidebar collapsed={false} onNavigate={() => setMobileNavOpen(false)} />
             </SheetContent>
@@ -74,7 +57,7 @@ function WorkspaceShell() {
             <main className="h-full overflow-auto">
               <Outlet />
             </main>
-            <AgentChat teamSlug={teamSlug ?? ''} />
+            <AgentChat workspaceSlug="personal" />
           </div>
         </div>
       </div>

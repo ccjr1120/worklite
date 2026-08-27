@@ -1,12 +1,11 @@
 {
   "title": "技能",
   "description": "包含指令、脚本和参考资料的版本化包。",
-  "upload": "上传压缩包",
   "create": "创建技能",
   "search": "搜索技能",
   "empty": {
     "title": "还没有技能",
-    "description": "在线创建技能或上传压缩包，然后发布一个不可变版本。"
+    "description": "创建包含指令、脚本和参考资料的技能包。"
   },
   "noMatches": {
     "title": "没有匹配的技能",
@@ -16,19 +15,59 @@
     "skill": "技能",
     "source": "来源",
     "version": "版本",
-    "validation": "校验",
     "updated": "更新时间"
   },
   "source": {
     "online": "在线",
-    "archive": "压缩包"
+    "archive": "压缩包",
+    "built-in": "内置"
+  },
+  "terminal": {
+    "warning": "产品内置的 scripts/run.sh 会把唯一的命令参数交给 /bin/sh -lc 执行。它没有沙箱，并拥有 WorkLite 进程用户的宿主权限，包括访问可用文件和网络。"
+  },
+  "platform": {
+    "systemOnly": "仅供 System Helper Chat 使用",
+    "boundary": "平台操作使用固定工具注册表。资源和偏好变更需要确认，敏感凭据仍只能通过专用安全表单提交。"
   },
   "editor": {
     "new": "新建技能",
     "fallback": "技能",
-    "validate": "校验",
+    "name": "技能名称",
+    "create": "创建技能",
     "package": "包内容",
-    "safetyHint": "校验不能保证运行时安全。可执行内容绝不会在 API 进程中运行。",
-    "published": "技能版本已发布"
+    "addFile": "添加包文件",
+    "deleteFile": "删除所选文件",
+    "filePath": "相对文件路径",
+    "filePathHint": "可执行文件使用 scripts/...，辅助文本使用 references/...。",
+    "pathInvalid": "请输入 scripts/ 或 references/ 下的相对路径。",
+    "pathDuplicate": "已有包文件使用了这个路径。",
+    "executable": "可执行脚本",
+    "missingShebang": "需要 Shebang",
+    "scriptWarning": "已保存且包含 Unix shebang 的脚本可直接使用 API 进程的宿主权限、工作目录和完整环境变量运行；没有沙箱、超时或输出上限。",
+    "run": {
+      "action": "运行",
+      "arguments": "参数（JSON 字符串数组）",
+      "argumentsHint": "数组中的每一项都会作为一个完整脚本参数传入。",
+      "invalidArguments": "请输入仅包含字符串的有效 JSON 数组。",
+      "saveFirst": "请先保存技能，再运行此脚本。",
+      "output": "脚本输出",
+      "emptyOutput": "脚本启动后，输出会显示在这里。",
+      "stdout": "标准输出",
+      "stderr": "标准错误",
+      "lifecycle": "事件",
+      "exitCode": "退出码 {{code}}",
+      "signal": "信号 {{signal}}",
+      "cancel": "取消",
+      "reconnecting": "实时输出连接已断开，正在重连，脚本不会停止。",
+      "startFailed": "无法启动脚本。",
+      "loadFailed": "无法刷新脚本执行状态。",
+      "cancelFailed": "无法取消脚本执行。"
+    },
+    "readOnly": "只读",
+    "builtInReadOnly": "平台内置包",
+    "nameRequired": "请先输入技能名称再保存。",
+    "saveFailed": "无法保存技能。请检查包内容后重试。",
+    "loading": "正在加载技能...",
+    "loadFailed": "无法加载此技能。"
   }
 }

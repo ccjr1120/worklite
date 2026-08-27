@@ -1,47 +1,48 @@
-import { Link, useParams, useRouterState } from '@tanstack/react-router';
+import { Link, useRouterState } from '@tanstack/react-router';
 import { Bot, Home, Settings, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { TeamSwitcher } from '@/components/workspace/team-switcher';
 import { UserMenu } from '@/components/workspace/user-menu';
+import { WorkLiteMark } from '@/components/worklite-mark';
 import { cn } from '@/lib/utils';
 
-type TeamPath = '/$teamSlug/home' | '/$teamSlug/agents' | '/$teamSlug/workflows' | '/$teamSlug/settings/general';
+type PersonalPath = '/home' | '/agents' | '/workflows' | '/settings/appearance';
 
 type NavItem = {
   id: 'home' | 'agents' | 'workflows' | 'settings';
   label: string;
-  to: TeamPath;
+  to: PersonalPath;
   icon: typeof Home;
 };
 
 function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
   const { t } = useTranslation('workspace');
-  const { teamSlug } = useParams({ strict: false });
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const slug = teamSlug ?? 'acme';
   const items: NavItem[] = [
-    { id: 'home', label: t('nav.home'), to: '/$teamSlug/home', icon: Home },
-    { id: 'agents', label: t('nav.agents'), to: '/$teamSlug/agents', icon: Bot },
-    { id: 'workflows', label: t('nav.workflows'), to: '/$teamSlug/workflows', icon: Workflow },
-    { id: 'settings', label: t('nav.settings'), to: '/$teamSlug/settings/general', icon: Settings },
+    { id: 'home', label: t('nav.home'), to: '/home', icon: Home },
+    { id: 'agents', label: t('nav.agents'), to: '/agents', icon: Bot },
+    { id: 'workflows', label: t('nav.workflows'), to: '/workflows', icon: Workflow },
+    { id: 'settings', label: t('nav.settings'), to: '/settings/appearance', icon: Settings },
   ];
 
   function isActive(item: NavItem) {
     if (item.id === 'agents') {
-      return ['/agents', '/skills', '/mcp-servers', '/model-providers'].some((suffix) => pathname.startsWith(`/${slug}${suffix}`));
+      return ['/agents', '/skills', '/mcp-servers', '/model-providers'].some((suffix) => pathname.startsWith(suffix));
     }
     if (item.id === 'settings') {
-      return pathname.startsWith(`/${slug}/settings`);
+      return pathname.startsWith('/settings');
     }
-    const suffix = String(item.to).replace('/$teamSlug', '');
-    return pathname === `/${slug}${suffix}` || pathname.startsWith(`/${slug}${suffix}/`);
+    const suffix = String(item.to);
+    return pathname === suffix || pathname.startsWith(`${suffix}/`);
   }
 
   return (
     <aside className={cn('flex h-full flex-col border-r border-border bg-surface', collapsed ? 'w-14' : 'w-[232px]')}>
-      <div className="flex h-[52px] items-center border-b border-border px-2">
-        <TeamSwitcher collapsed={collapsed} />
+      <div className={cn('flex h-[52px] items-center border-b border-border px-2', collapsed && 'justify-center')}>
+        <Link to="/home" aria-label="WorkLite" className="flex items-center gap-2">
+          <WorkLiteMark className={collapsed ? 'size-5' : 'size-6'} />
+          {collapsed ? null : <span className="text-sm font-semibold">WorkLite</span>}
+        </Link>
       </div>
       <nav className="flex-1 overflow-y-auto px-2 py-3">
         <ul className="flex flex-col gap-0.5">
@@ -50,7 +51,6 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
             const content = (
               <Link
                 to={item.to}
-                params={{ teamSlug: slug }}
                 onClick={onNavigate}
                 className={cn(
                   'relative flex h-8 items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-[120ms]',

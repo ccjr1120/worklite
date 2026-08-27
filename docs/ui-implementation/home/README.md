@@ -2,11 +2,11 @@
 
 ## Purpose
 
-Home is the team's dashboard library. It organizes dashboards into user-manageable categories and opens a selected dashboard that answers what requires attention, what is running, where work can continue, and what changed. It also provides the team Agent Chat without requiring a separate destination.
+Home is the personal dashboard library. It organizes dashboards into user-manageable categories and opens a selected dashboard that answers what requires attention, what is running, where work can continue, and what changed. It also provides System Helper Chat without requiring a separate destination.
 
 ## Dashboard Library
 
-Show collapsible category sections rather than a flat collection of panels. Provide a default `Workflows` category with `Workflow overview`, `Workflow health`, and `Recent activity` dashboards. Users may add, rename, reorder, and remove categories and may add dashboards from a template or as a blank dashboard. Category and dashboard configuration is team-scoped local-prototype state until persistence is introduced.
+Show collapsible category sections rather than a flat collection of panels. Provide a default `Workflows` category with `Workflow overview`, `Workflow health`, and `Recent activity` dashboards. Users may add, rename, reorder, and remove categories and may add dashboards from a template or as a blank dashboard. Category and dashboard configuration is local-prototype state until persistence is introduced.
 
 The library shows a category title, dashboard count, category actions, and an `Add dashboard` action. Category headers expand or collapse their dashboard list and expose a non-color open-state cue. Dashboard rows or tiles show their name, short description, meaningful summary metrics from their configured widgets, and a clear open affordance. Category creation sits below the category list rather than in the page header. Home does not duplicate the Workflow creation action; creation remains on the Workflow list and editor. The page keeps the existing workspace shell and does not replace the Workflow list or editor.
 
@@ -16,27 +16,36 @@ Opening a dashboard navigates to its detail view. Dashboard widgets link to the 
 
 Dashboard detail supports editing the dashboard name, adding supported widgets, reordering widgets, and removing widgets. Supported initial widgets are `Needs attention`, `Active runs`, `Workflow health`, `Recent workflows`, `Recent activity`, and `Recent artifacts`.
 
-## Embedded Agent Chat
+## Embedded System Helper Chat
 
-Keep the dashboard library or selected dashboard mounted as the Home content. Place a persistent, labeled, single-line Agent Chat composer at the bottom center of the Home content region. The dashboard content reserves enough bottom space that the composer does not obscure its final content.
+Keep the dashboard library or selected dashboard mounted as the Home content. Place a persistent, labeled, single-line System Helper Chat composer at the bottom center of the Home content region. The dashboard content reserves enough bottom space that the composer does not obscure its final content.
 
-Focusing the composer expands a raised conversation panel above it without waiting for message submission. The panel occupies most, but not all, of the workspace content region, up to approximately `1040px` by `680px` with at least `24px` desktop outer space. Keep the Dashboard mounted beneath the panel and preserve its scroll position. The panel contains the conversation, tool and resource-operation progress, and structured proposal review defined in `../assistant/README.md`.
+Focusing the composer expands a raised conversation panel above it without waiting for message submission. The panel occupies most, but not all, of the workspace content region, up to `1200px` by approximately `680px` with at least `24px` desktop outer space. Keep the Dashboard mounted beneath the panel and preserve its scroll position. The panel contains the persisted Agent transcript and inline Skill-script approvals defined in `../assistant/README.md`.
 
-Clicking outside, pressing `Escape`, using the icon-only minimize control, navigating to another page, or switching teams closes the panel without cancelling work or clearing the conversation. The minimized dock retains the composer and, after the first request, a compact status summary such as preparing, tool calls in progress, needs review, completed, or failed. The summary includes a non-color cue and reopens the current conversation. Completion does not automatically minimize the conversation.
+Clicking outside, pressing `Escape`, using the icon-only minimize control, or navigating to another page closes the panel without cancelling work or clearing the conversation. The minimized dock retains the composer and, after the first request, a compact status summary such as preparing, tool calls in progress, needs review, completed, or failed. The summary includes a non-color cue and reopens the current conversation. Completion does not automatically minimize the conversation.
 
-The legacy `/:teamSlug/assistant` route redirects to Home and opens the conversation. Command search may open or focus Agent Chat through the same Home state, but Agent Chat is not a separate sidebar item.
+Command search may open or focus System Helper Chat through the same Home state, but System Helper Chat is not a separate sidebar item.
 
 ## Dashboard Content
 
 Use compact, workflow-oriented widgets rather than decorative totals or generic metric cards. The default Workflow dashboards may contain `Needs attention`, `Active runs`, `Workflow health`, `Recent workflows`, `Recent activity`, and `Recent artifacts`. Section failures remain local to the affected widget.
 
-## New Team
+## First Use
 
 Replace empty metrics with a guided sequence: configure provider, create agent, create workflow, then run and inspect it. The current step owns the primary action; completed steps remain visible but quiet.
 
-Teams with resources but no runs show recent resources and a `Run workflow` next step. Failed runs show a concise cause and recovery route.
+An installation with resources but no runs shows recent resources and a `Run workflow` next step. Failed runs show a concise cause and recovery route.
 
 ## Changelog
+
+### 2026-08-27
+
+- Replaced structured proposal review with the persisted System Helper Agent transcript and inline Skill-script approvals.
+
+### 2026-08-25
+
+- Reframed Home as the dashboard library for a single personal workspace.
+- Replaced the team setup sequence with an optional provider and first-agent checklist.
 
 ### 2026-08-24
 

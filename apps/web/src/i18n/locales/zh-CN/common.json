@@ -1,6 +1,7 @@
 {
   "actions": {
     "cancel": "取消",
+    "back": "返回",
     "save": "保存",
     "continue": "继续",
     "tryAgain": "重试",
@@ -55,10 +56,6 @@
   },
   "brand": {
     "name": "WorkLite"
-  },
-  "roles": {
-    "admin": "管理员",
-    "member": "成员"
   },
   "duration": {
     "compact": "{{minutes}}分{{seconds}}秒"

@@ -12,10 +12,11 @@
     "lint": "echo \"No lint configured\""
   },
   "dependencies": {
-    "drizzle-orm": "^0.44.4",
-    "postgres": "^3.4.7"
+    "better-sqlite3": "^12.4.1",
+    "drizzle-orm": "^0.44.4"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "drizzle-kit": "^0.31.4",
     "typescript": "^5.9.2"
   }

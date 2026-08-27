@@ -17,7 +17,6 @@ function OnboardingFirstAgentPage() {
   const { locale } = useLocale();
   const navigate = useNavigate();
   const completeOnboardingStep = useSessionStore((state) => state.completeOnboardingStep);
-  const teamSlug = useSessionStore((state) => state.currentTeamSlug);
   const templates = useMemo(
     () => [
       { id: 'researcher', name: t('firstAgent.templates.researcher.name'), responsibility: t('firstAgent.templates.researcher.responsibility') },
@@ -50,7 +49,7 @@ function OnboardingFirstAgentPage() {
       <Button
         onClick={() => {
           completeOnboardingStep('complete');
-          void navigate({ to: '/$teamSlug/agents/$agentId', params: { teamSlug, agentId: 'agt_researcher' } });
+          void navigate({ to: '/agents/$agentId', params: { agentId: 'agt_researcher' } });
         }}
       >
         {t('firstAgent.submit')}

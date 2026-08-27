@@ -1,7 +1,127 @@
-export async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(path);
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+import type {
+  AgentView,
+  AgentExecutionView,
+  CreateAgentRequest,
+  CreateRunRequest,
+  CreateWorkflowRequest,
+  UpdateAgentRequest,
+  ArtifactView,
+  AuditEventView,
+  CreateMcpServerRequest,
+  CreateModelProviderRequest,
+  CreateSkillRequest,
+  McpServerView,
+  ModelProviderTestResult,
+  ModelProviderView,
+  RunView,
+  SkillView,
+  UpdateSkillRequest,
+  UsageRow,
+  WorkflowView,
+  CommandExecutionEvent,
+  CommandExecutionView,
+  ExecuteSkillScriptRequest,
+  UpdateWorkspaceSettingsRequest,
+  WorkspaceSettingsView,
+} from '@worklite/contracts';
+
+export class ApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
   }
+}
+
+export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, {
+    ...init,
+    credentials: 'include',
+    headers: {
+      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...init?.headers,
+    },
+  });
+  if (!response.ok) {
+    let message = `Request failed: ${response.status}`;
+    try {
+      const body = (await response.json()) as { message?: string | string[] };
+      if (body.message) message = Array.isArray(body.message) ? body.message.join(', ') : body.message;
+    } catch {
+      // Keep the status-based error when the server does not return JSON.
+    }
+    throw new ApiError(response.status, message);
+  }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+export function apiGet<T>(path: string): Promise<T> {
+  return apiRequest<T>(path);
+}
+
+export function apiPost<T>(path: string, body?: unknown): Promise<T> {
+  return apiRequest<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
+}
+
+export function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  return apiRequest<T>(path, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+export function apiDelete<T = void>(path: string): Promise<T> {
+  return apiRequest<T>(path, { method: 'DELETE' });
+}
+
+export const api = {
+  command: (commandId: string) => apiGet<CommandExecutionView>(`/api/commands/${encodeURIComponent(commandId)}`),
+  cancelCommand: (commandId: string) => apiPost<CommandExecutionView>(`/api/commands/${encodeURIComponent(commandId)}/cancel`),
+  commandEventsUrl: (commandId: string) => `/api/commands/${encodeURIComponent(commandId)}/events`,
+  agents: (_workspace?: string) => apiGet<AgentView[]>('/api/agents'),
+  agent: (_workspace: string | undefined, agentId: string) => apiGet<AgentView>(`/api/agents/${encodeURIComponent(agentId)}`),
+  createAgent: (_workspace: string | undefined, input: CreateAgentRequest) => apiPost<AgentView>('/api/agents', input),
+  updateAgent: (_workspace: string | undefined, agentId: string, input: UpdateAgentRequest) => apiPatch<AgentView>(`/api/agents/${encodeURIComponent(agentId)}`, input),
+  deleteAgent: (_workspace: string | undefined, agentId: string) => apiDelete(`/api/agents/${encodeURIComponent(agentId)}`),
+  createAgentExecution: (_workspace: string | undefined, agentId: string, message: string) => apiPost<AgentExecutionView>(`/api/agents/${encodeURIComponent(agentId)}/executions`, { message }),
+  agentExecution: (_workspace: string | undefined, agentId: string, executionId: string) => apiGet<AgentExecutionView>(`/api/agents/${encodeURIComponent(agentId)}/executions/${encodeURIComponent(executionId)}`),
+  continueAgentExecution: (_workspace: string | undefined, agentId: string, executionId: string, message: string) => apiPost<AgentExecutionView>(`/api/agents/${encodeURIComponent(agentId)}/executions/${encodeURIComponent(executionId)}/messages`, { message }),
+  cancelAgentExecution: (_workspace: string | undefined, agentId: string, executionId: string) => apiPost<AgentExecutionView>(`/api/agents/${encodeURIComponent(agentId)}/executions/${encodeURIComponent(executionId)}/cancel`),
+  settings: () => apiGet<WorkspaceSettingsView>('/api/settings'),
+  updateSettings: (input: UpdateWorkspaceSettingsRequest) => apiPatch<WorkspaceSettingsView>('/api/settings', input),
+  workflows: (_workspace?: string) => apiGet<WorkflowView[]>('/api/workflows'),
+  workflow: (_workspace: string | undefined, workflowId: string) => apiGet<WorkflowView>(`/api/workflows/${encodeURIComponent(workflowId)}`),
+  createWorkflow: (_workspace: string | undefined, input: CreateWorkflowRequest) => apiPost<WorkflowView>('/api/workflows', input),
+  updateWorkflow: (_workspace: string | undefined, workflowId: string, input: Partial<CreateWorkflowRequest>) => apiPatch<WorkflowView>(`/api/workflows/${encodeURIComponent(workflowId)}`, input),
+  skills: (_workspace?: string) => apiGet<SkillView[]>('/api/skills'),
+  skill: (_workspace: string | undefined, skillId: string) => apiGet<SkillView>(`/api/skills/${encodeURIComponent(skillId)}`),
+  createSkill: (_workspace: string | undefined, input: CreateSkillRequest) => apiPost<SkillView>('/api/skills', input),
+  updateSkill: (_workspace: string | undefined, skillId: string, input: UpdateSkillRequest) => apiPatch<SkillView>(`/api/skills/${encodeURIComponent(skillId)}`, input),
+  executeSkillScript: (_workspace: string | undefined, skillId: string, input: ExecuteSkillScriptRequest) => apiPost<CommandExecutionView>(`/api/skills/${encodeURIComponent(skillId)}/executions`, input),
+  mcpServers: (_workspace?: string) => apiGet<McpServerView[]>('/api/mcp-servers'),
+  mcpServer: (_workspace: string | undefined, serverId: string) => apiGet<McpServerView>(`/api/mcp-servers/${encodeURIComponent(serverId)}`),
+  createMcpServer: (_workspace: string | undefined, input: CreateMcpServerRequest) => apiPost<McpServerView>('/api/mcp-servers', input),
+  modelProviders: (_workspace?: string) => apiGet<ModelProviderView[]>('/api/model-providers'),
+  saveModelProvider: (_workspace: string | undefined, input: CreateModelProviderRequest) => apiPost<ModelProviderView>('/api/model-providers', input),
+  testModelProvider: (_workspace: string | undefined, providerId: string) => apiPost<ModelProviderTestResult>(`/api/model-providers/${encodeURIComponent(providerId)}/test`),
+  deleteModelProvider: (_workspace: string | undefined, providerId: string) => apiDelete(`/api/model-providers/${encodeURIComponent(providerId)}`),
+  artifacts: (_workspace?: string) => apiGet<ArtifactView[]>('/api/artifacts'),
+  artifact: (_workspace: string | undefined, artifactId: string) => apiGet<ArtifactView>(`/api/artifacts/${encodeURIComponent(artifactId)}`),
+  usage: (_workspace?: string) => apiGet<UsageRow[]>('/api/usage'),
+  auditLogs: (_workspace?: string) => apiGet<AuditEventView[]>('/api/audit-logs'),
+  runs: (_workspace?: string) => apiGet<RunView[]>('/api/runs'),
+  run: (_workspace: string | undefined, runId: string) => apiGet<RunView>(`/api/runs/${encodeURIComponent(runId)}`),
+  createRun: (workflowVersionId: string, input: CreateRunRequest) => apiPost<{ runId: string }>(`/api/workflow-versions/${encodeURIComponent(workflowVersionId)}/runs`, input),
+  cancelRun: (_workspace: string | undefined, runId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/cancel`),
+};
+
+export function parseCommandEvent(value: string): CommandExecutionEvent {
+  const event = JSON.parse(value) as Partial<CommandExecutionEvent>;
+  if (
+    typeof event.sequence !== 'number'
+    || typeof event.commandId !== 'string'
+    || (event.type !== 'stdout' && event.type !== 'stderr' && event.type !== 'lifecycle')
+    || typeof event.data !== 'string'
+    || typeof event.createdAt !== 'string'
+  ) {
+    throw new Error('The command event stream returned an invalid event.');
+  }
+  return event as CommandExecutionEvent;
 }

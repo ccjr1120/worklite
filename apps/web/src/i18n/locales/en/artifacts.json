@@ -21,6 +21,7 @@
     "unavailableTitle": "Artifact unavailable",
     "unavailableDescription": "This artifact is missing, expired, or you do not have access.",
     "downloadStarted": "Download started",
+    "noRun": "Unlinked run",
     "unsupported": "This content cannot be previewed inline. Download the file instead."
   }
 }

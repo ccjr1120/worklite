@@ -1,6 +1,7 @@
 {
   "actions": {
     "cancel": "Cancel",
+    "back": "Back",
     "save": "Save",
     "continue": "Continue",
     "tryAgain": "Try again",
@@ -55,10 +56,6 @@
   },
   "brand": {
     "name": "WorkLite"
-  },
-  "roles": {
-    "admin": "Admin",
-    "member": "Member"
   },
   "duration": {
     "compact": "{{minutes}}m {{seconds}}s"

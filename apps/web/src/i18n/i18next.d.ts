@@ -2,7 +2,6 @@ import 'i18next';
 import type enAgents from './locales/en/agents.json';
 import type enAssistant from './locales/en/assistant.json';
 import type enArtifacts from './locales/en/artifacts.json';
-import type enAuth from './locales/en/auth.json';
 import type enCommon from './locales/en/common.json';
 import type enHome from './locales/en/home.json';
 import type enMcpServers from './locales/en/mcpServers.json';
@@ -18,7 +17,6 @@ declare module 'i18next' {
     defaultNS: 'common';
     resources: {
       common: typeof enCommon;
-      auth: typeof enAuth;
       workspace: typeof enWorkspace;
       home: typeof enHome;
       onboarding: typeof enOnboarding;

@@ -10,56 +10,44 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as TeamSlugRouteRouteImport } from './routes/$teamSlug/route'
-import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as HomeRouteImport } from './routes/home'
+import { Route as ModelProvidersRouteImport } from './routes/model-providers'
 import { Route as OnboardingRouteRouteImport } from './routes/onboarding/route'
-import { Route as ResetPasswordRouteImport } from './routes/reset-password'
-import { Route as SignInRouteImport } from './routes/sign-in'
-import { Route as SignUpRouteImport } from './routes/sign-up'
-import { Route as VerifyEmailRouteImport } from './routes/verify-email'
-import { Route as TeamSlugIndexRouteImport } from './routes/$teamSlug/index'
-import { Route as TeamSlugAssistantRouteImport } from './routes/$teamSlug/assistant'
-import { Route as TeamSlugHomeRouteImport } from './routes/$teamSlug/home'
-import { Route as TeamSlugModelProvidersRouteImport } from './routes/$teamSlug/model-providers'
-import { Route as TeamSlugSettingsRouteRouteImport } from './routes/$teamSlug/settings/route'
-import { Route as InviteTokenRouteImport } from './routes/invite.$token'
+import { Route as SettingsRouteRouteImport } from './routes/settings/route'
+import { Route as AgentsIndexRouteImport } from './routes/agents/index'
+import { Route as AgentsAgentIdRouteImport } from './routes/agents/$agentId'
+import { Route as ArtifactsIndexRouteImport } from './routes/artifacts/index'
+import { Route as ArtifactsArtifactIdRouteImport } from './routes/artifacts/$artifactId'
+import { Route as McpServersIndexRouteImport } from './routes/mcp-servers/index'
+import { Route as McpServersServerIdRouteImport } from './routes/mcp-servers/$serverId'
 import { Route as OnboardingIndexRouteImport } from './routes/onboarding/index'
 import { Route as OnboardingFirstAgentRouteImport } from './routes/onboarding/first-agent'
 import { Route as OnboardingProviderRouteImport } from './routes/onboarding/provider'
-import { Route as OnboardingTeamRouteImport } from './routes/onboarding/team'
-import { Route as TeamSlugAgentsIndexRouteImport } from './routes/$teamSlug/agents/index'
-import { Route as TeamSlugAgentsAgentIdRouteImport } from './routes/$teamSlug/agents/$agentId'
-import { Route as TeamSlugArtifactsIndexRouteImport } from './routes/$teamSlug/artifacts/index'
-import { Route as TeamSlugArtifactsArtifactIdRouteImport } from './routes/$teamSlug/artifacts/$artifactId'
-import { Route as TeamSlugMcpServersIndexRouteImport } from './routes/$teamSlug/mcp-servers/index'
-import { Route as TeamSlugMcpServersServerIdRouteImport } from './routes/$teamSlug/mcp-servers/$serverId'
-import { Route as TeamSlugRunsIndexRouteImport } from './routes/$teamSlug/runs/index'
-import { Route as TeamSlugRunsRunIdRouteImport } from './routes/$teamSlug/runs/$runId'
-import { Route as TeamSlugSettingsIndexRouteImport } from './routes/$teamSlug/settings/index'
-import { Route as TeamSlugSettingsAppearanceRouteImport } from './routes/$teamSlug/settings/appearance'
-import { Route as TeamSlugSettingsAuditLogRouteImport } from './routes/$teamSlug/settings/audit-log'
-import { Route as TeamSlugSettingsGeneralRouteImport } from './routes/$teamSlug/settings/general'
-import { Route as TeamSlugSettingsMembersRouteImport } from './routes/$teamSlug/settings/members'
-import { Route as TeamSlugSettingsUsageRouteImport } from './routes/$teamSlug/settings/usage'
-import { Route as TeamSlugSkillsIndexRouteImport } from './routes/$teamSlug/skills/index'
-import { Route as TeamSlugSkillsSkillIdRouteImport } from './routes/$teamSlug/skills/$skillId'
-import { Route as TeamSlugWorkflowsIndexRouteImport } from './routes/$teamSlug/workflows/index'
-import { Route as TeamSlugWorkflowsWorkflowIdRouteImport } from './routes/$teamSlug/workflows/$workflowId'
-import { Route as TeamSlugWorkflowsWorkflowIdVersionsRouteImport } from './routes/$teamSlug/workflows/$workflowId.versions'
+import { Route as RunsIndexRouteImport } from './routes/runs/index'
+import { Route as RunsRunIdRouteImport } from './routes/runs/$runId'
+import { Route as SettingsIndexRouteImport } from './routes/settings/index'
+import { Route as SettingsAppearanceRouteImport } from './routes/settings/appearance'
+import { Route as SettingsAuditLogRouteImport } from './routes/settings/audit-log'
+import { Route as SettingsUsageRouteImport } from './routes/settings/usage'
+import { Route as SkillsIndexRouteImport } from './routes/skills/index'
+import { Route as SkillsSkillIdRouteImport } from './routes/skills/$skillId'
+import { Route as WorkflowsIndexRouteImport } from './routes/workflows/index'
+import { Route as WorkflowsWorkflowIdRouteImport } from './routes/workflows/$workflowId'
+import { Route as WorkflowsWorkflowIdVersionsRouteImport } from './routes/workflows/$workflowId.versions'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const TeamSlugRouteRoute = TeamSlugRouteRouteImport.update({
-  id: '/$teamSlug',
-  path: '/$teamSlug',
+const HomeRoute = HomeRouteImport.update({
+  id: '/home',
+  path: '/home',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
-  id: '/forgot-password',
-  path: '/forgot-password',
+const ModelProvidersRoute = ModelProvidersRouteImport.update({
+  id: '/model-providers',
+  path: '/model-providers',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OnboardingRouteRoute = OnboardingRouteRouteImport.update({
@@ -67,54 +55,39 @@ const OnboardingRouteRoute = OnboardingRouteRouteImport.update({
   path: '/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ResetPasswordRoute = ResetPasswordRouteImport.update({
-  id: '/reset-password',
-  path: '/reset-password',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SignInRoute = SignInRouteImport.update({
-  id: '/sign-in',
-  path: '/sign-in',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SignUpRoute = SignUpRouteImport.update({
-  id: '/sign-up',
-  path: '/sign-up',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const VerifyEmailRoute = VerifyEmailRouteImport.update({
-  id: '/verify-email',
-  path: '/verify-email',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const TeamSlugIndexRoute = TeamSlugIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => TeamSlugRouteRoute,
-} as any)
-const TeamSlugAssistantRoute = TeamSlugAssistantRouteImport.update({
-  id: '/assistant',
-  path: '/assistant',
-  getParentRoute: () => TeamSlugRouteRoute,
-} as any)
-const TeamSlugHomeRoute = TeamSlugHomeRouteImport.update({
-  id: '/home',
-  path: '/home',
-  getParentRoute: () => TeamSlugRouteRoute,
-} as any)
-const TeamSlugModelProvidersRoute = TeamSlugModelProvidersRouteImport.update({
-  id: '/model-providers',
-  path: '/model-providers',
-  getParentRoute: () => TeamSlugRouteRoute,
-} as any)
-const TeamSlugSettingsRouteRoute = TeamSlugSettingsRouteRouteImport.update({
+const SettingsRouteRoute = SettingsRouteRouteImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => TeamSlugRouteRoute,
+  getParentRoute: () => rootRouteImport,
 } as any)
-const InviteTokenRoute = InviteTokenRouteImport.update({
-  id: '/invite/$token',
-  path: '/invite/$token',
+const AgentsIndexRoute = AgentsIndexRouteImport.update({
+  id: '/agents/',
+  path: '/agents/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsAgentIdRoute = AgentsAgentIdRouteImport.update({
+  id: '/agents/$agentId',
+  path: '/agents/$agentId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ArtifactsIndexRoute = ArtifactsIndexRouteImport.update({
+  id: '/artifacts/',
+  path: '/artifacts/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ArtifactsArtifactIdRoute = ArtifactsArtifactIdRouteImport.update({
+  id: '/artifacts/$artifactId',
+  path: '/artifacts/$artifactId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McpServersIndexRoute = McpServersIndexRouteImport.update({
+  id: '/mcp-servers/',
+  path: '/mcp-servers/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McpServersServerIdRoute = McpServersServerIdRouteImport.update({
+  id: '/mcp-servers/$serverId',
+  path: '/mcp-servers/$serverId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OnboardingIndexRoute = OnboardingIndexRouteImport.update({
@@ -132,355 +105,243 @@ const OnboardingProviderRoute = OnboardingProviderRouteImport.update({
   path: '/provider',
   getParentRoute: () => OnboardingRouteRoute,
 } as any)
-const OnboardingTeamRoute = OnboardingTeamRouteImport.update({
-  id: '/team',
-  path: '/team',
-  getParentRoute: () => OnboardingRouteRoute,
-} as any)
-const TeamSlugAgentsIndexRoute = TeamSlugAgentsIndexRouteImport.update({
-  id: '/agents/',
-  path: '/agents/',
-  getParentRoute: () => TeamSlugRouteRoute,
-} as any)
-const TeamSlugAgentsAgentIdRoute = TeamSlugAgentsAgentIdRouteImport.update({
-  id: '/agents/$agentId',
-  path: '/agents/$agentId',
-  getParentRoute: () => TeamSlugRouteRoute,
-} as any)
-const TeamSlugArtifactsIndexRoute = TeamSlugArtifactsIndexRouteImport.update({
-  id: '/artifacts/',
-  path: '/artifacts/',
-  getParentRoute: () => TeamSlugRouteRoute,
-} as any)
-const TeamSlugArtifactsArtifactIdRoute =
-  TeamSlugArtifactsArtifactIdRouteImport.update({
-    id: '/artifacts/$artifactId',
-    path: '/artifacts/$artifactId',
-    getParentRoute: () => TeamSlugRouteRoute,
-  } as any)
-const TeamSlugMcpServersIndexRoute = TeamSlugMcpServersIndexRouteImport.update({
-  id: '/mcp-servers/',
-  path: '/mcp-servers/',
-  getParentRoute: () => TeamSlugRouteRoute,
-} as any)
-const TeamSlugMcpServersServerIdRoute =
-  TeamSlugMcpServersServerIdRouteImport.update({
-    id: '/mcp-servers/$serverId',
-    path: '/mcp-servers/$serverId',
-    getParentRoute: () => TeamSlugRouteRoute,
-  } as any)
-const TeamSlugRunsIndexRoute = TeamSlugRunsIndexRouteImport.update({
+const RunsIndexRoute = RunsIndexRouteImport.update({
   id: '/runs/',
   path: '/runs/',
-  getParentRoute: () => TeamSlugRouteRoute,
+  getParentRoute: () => rootRouteImport,
 } as any)
-const TeamSlugRunsRunIdRoute = TeamSlugRunsRunIdRouteImport.update({
+const RunsRunIdRoute = RunsRunIdRouteImport.update({
   id: '/runs/$runId',
   path: '/runs/$runId',
-  getParentRoute: () => TeamSlugRouteRoute,
+  getParentRoute: () => rootRouteImport,
 } as any)
-const TeamSlugSettingsIndexRoute = TeamSlugSettingsIndexRouteImport.update({
+const SettingsIndexRoute = SettingsIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => TeamSlugSettingsRouteRoute,
+  getParentRoute: () => SettingsRouteRoute,
 } as any)
-const TeamSlugSettingsAppearanceRoute =
-  TeamSlugSettingsAppearanceRouteImport.update({
-    id: '/appearance',
-    path: '/appearance',
-    getParentRoute: () => TeamSlugSettingsRouteRoute,
-  } as any)
-const TeamSlugSettingsAuditLogRoute =
-  TeamSlugSettingsAuditLogRouteImport.update({
-    id: '/audit-log',
-    path: '/audit-log',
-    getParentRoute: () => TeamSlugSettingsRouteRoute,
-  } as any)
-const TeamSlugSettingsGeneralRoute = TeamSlugSettingsGeneralRouteImport.update({
-  id: '/general',
-  path: '/general',
-  getParentRoute: () => TeamSlugSettingsRouteRoute,
+const SettingsAppearanceRoute = SettingsAppearanceRouteImport.update({
+  id: '/appearance',
+  path: '/appearance',
+  getParentRoute: () => SettingsRouteRoute,
 } as any)
-const TeamSlugSettingsMembersRoute = TeamSlugSettingsMembersRouteImport.update({
-  id: '/members',
-  path: '/members',
-  getParentRoute: () => TeamSlugSettingsRouteRoute,
+const SettingsAuditLogRoute = SettingsAuditLogRouteImport.update({
+  id: '/audit-log',
+  path: '/audit-log',
+  getParentRoute: () => SettingsRouteRoute,
 } as any)
-const TeamSlugSettingsUsageRoute = TeamSlugSettingsUsageRouteImport.update({
+const SettingsUsageRoute = SettingsUsageRouteImport.update({
   id: '/usage',
   path: '/usage',
-  getParentRoute: () => TeamSlugSettingsRouteRoute,
+  getParentRoute: () => SettingsRouteRoute,
 } as any)
-const TeamSlugSkillsIndexRoute = TeamSlugSkillsIndexRouteImport.update({
+const SkillsIndexRoute = SkillsIndexRouteImport.update({
   id: '/skills/',
   path: '/skills/',
-  getParentRoute: () => TeamSlugRouteRoute,
+  getParentRoute: () => rootRouteImport,
 } as any)
-const TeamSlugSkillsSkillIdRoute = TeamSlugSkillsSkillIdRouteImport.update({
+const SkillsSkillIdRoute = SkillsSkillIdRouteImport.update({
   id: '/skills/$skillId',
   path: '/skills/$skillId',
-  getParentRoute: () => TeamSlugRouteRoute,
+  getParentRoute: () => rootRouteImport,
 } as any)
-const TeamSlugWorkflowsIndexRoute = TeamSlugWorkflowsIndexRouteImport.update({
+const WorkflowsIndexRoute = WorkflowsIndexRouteImport.update({
   id: '/workflows/',
   path: '/workflows/',
-  getParentRoute: () => TeamSlugRouteRoute,
+  getParentRoute: () => rootRouteImport,
 } as any)
-const TeamSlugWorkflowsWorkflowIdRoute =
-  TeamSlugWorkflowsWorkflowIdRouteImport.update({
-    id: '/workflows/$workflowId',
-    path: '/workflows/$workflowId',
-    getParentRoute: () => TeamSlugRouteRoute,
-  } as any)
-const TeamSlugWorkflowsWorkflowIdVersionsRoute =
-  TeamSlugWorkflowsWorkflowIdVersionsRouteImport.update({
+const WorkflowsWorkflowIdRoute = WorkflowsWorkflowIdRouteImport.update({
+  id: '/workflows/$workflowId',
+  path: '/workflows/$workflowId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WorkflowsWorkflowIdVersionsRoute =
+  WorkflowsWorkflowIdVersionsRouteImport.update({
     id: '/versions',
     path: '/versions',
-    getParentRoute: () => TeamSlugWorkflowsWorkflowIdRoute,
+    getParentRoute: () => WorkflowsWorkflowIdRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/$teamSlug': typeof TeamSlugRouteRouteWithChildren
   '/onboarding': typeof OnboardingRouteRouteWithChildren
-  '/forgot-password': typeof ForgotPasswordRoute
-  '/reset-password': typeof ResetPasswordRoute
-  '/sign-in': typeof SignInRoute
-  '/sign-up': typeof SignUpRoute
-  '/verify-email': typeof VerifyEmailRoute
-  '/$teamSlug/settings': typeof TeamSlugSettingsRouteRouteWithChildren
-  '/$teamSlug/assistant': typeof TeamSlugAssistantRoute
-  '/$teamSlug/home': typeof TeamSlugHomeRoute
-  '/$teamSlug/model-providers': typeof TeamSlugModelProvidersRoute
-  '/invite/$token': typeof InviteTokenRoute
+  '/settings': typeof SettingsRouteRouteWithChildren
+  '/home': typeof HomeRoute
+  '/model-providers': typeof ModelProvidersRoute
+  '/agents/$agentId': typeof AgentsAgentIdRoute
+  '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
+  '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/onboarding/first-agent': typeof OnboardingFirstAgentRoute
   '/onboarding/provider': typeof OnboardingProviderRoute
-  '/onboarding/team': typeof OnboardingTeamRoute
-  '/$teamSlug/': typeof TeamSlugIndexRoute
+  '/runs/$runId': typeof RunsRunIdRoute
+  '/settings/appearance': typeof SettingsAppearanceRoute
+  '/settings/audit-log': typeof SettingsAuditLogRoute
+  '/settings/usage': typeof SettingsUsageRoute
+  '/skills/$skillId': typeof SkillsSkillIdRoute
+  '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
+  '/agents/': typeof AgentsIndexRoute
+  '/artifacts/': typeof ArtifactsIndexRoute
+  '/mcp-servers/': typeof McpServersIndexRoute
   '/onboarding/': typeof OnboardingIndexRoute
-  '/$teamSlug/agents/$agentId': typeof TeamSlugAgentsAgentIdRoute
-  '/$teamSlug/artifacts/$artifactId': typeof TeamSlugArtifactsArtifactIdRoute
-  '/$teamSlug/mcp-servers/$serverId': typeof TeamSlugMcpServersServerIdRoute
-  '/$teamSlug/runs/$runId': typeof TeamSlugRunsRunIdRoute
-  '/$teamSlug/settings/appearance': typeof TeamSlugSettingsAppearanceRoute
-  '/$teamSlug/settings/audit-log': typeof TeamSlugSettingsAuditLogRoute
-  '/$teamSlug/settings/general': typeof TeamSlugSettingsGeneralRoute
-  '/$teamSlug/settings/members': typeof TeamSlugSettingsMembersRoute
-  '/$teamSlug/settings/usage': typeof TeamSlugSettingsUsageRoute
-  '/$teamSlug/skills/$skillId': typeof TeamSlugSkillsSkillIdRoute
-  '/$teamSlug/workflows/$workflowId': typeof TeamSlugWorkflowsWorkflowIdRouteWithChildren
-  '/$teamSlug/agents/': typeof TeamSlugAgentsIndexRoute
-  '/$teamSlug/artifacts/': typeof TeamSlugArtifactsIndexRoute
-  '/$teamSlug/mcp-servers/': typeof TeamSlugMcpServersIndexRoute
-  '/$teamSlug/runs/': typeof TeamSlugRunsIndexRoute
-  '/$teamSlug/settings/': typeof TeamSlugSettingsIndexRoute
-  '/$teamSlug/skills/': typeof TeamSlugSkillsIndexRoute
-  '/$teamSlug/workflows/': typeof TeamSlugWorkflowsIndexRoute
-  '/$teamSlug/workflows/$workflowId/versions': typeof TeamSlugWorkflowsWorkflowIdVersionsRoute
+  '/runs/': typeof RunsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
+  '/skills/': typeof SkillsIndexRoute
+  '/workflows/': typeof WorkflowsIndexRoute
+  '/workflows/$workflowId/versions': typeof WorkflowsWorkflowIdVersionsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/forgot-password': typeof ForgotPasswordRoute
-  '/reset-password': typeof ResetPasswordRoute
-  '/sign-in': typeof SignInRoute
-  '/sign-up': typeof SignUpRoute
-  '/verify-email': typeof VerifyEmailRoute
-  '/$teamSlug/assistant': typeof TeamSlugAssistantRoute
-  '/$teamSlug/home': typeof TeamSlugHomeRoute
-  '/$teamSlug/model-providers': typeof TeamSlugModelProvidersRoute
-  '/invite/$token': typeof InviteTokenRoute
+  '/home': typeof HomeRoute
+  '/model-providers': typeof ModelProvidersRoute
+  '/agents/$agentId': typeof AgentsAgentIdRoute
+  '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
+  '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/onboarding/first-agent': typeof OnboardingFirstAgentRoute
   '/onboarding/provider': typeof OnboardingProviderRoute
-  '/onboarding/team': typeof OnboardingTeamRoute
-  '/$teamSlug': typeof TeamSlugIndexRoute
+  '/runs/$runId': typeof RunsRunIdRoute
+  '/settings/appearance': typeof SettingsAppearanceRoute
+  '/settings/audit-log': typeof SettingsAuditLogRoute
+  '/settings/usage': typeof SettingsUsageRoute
+  '/skills/$skillId': typeof SkillsSkillIdRoute
+  '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
+  '/agents': typeof AgentsIndexRoute
+  '/artifacts': typeof ArtifactsIndexRoute
+  '/mcp-servers': typeof McpServersIndexRoute
   '/onboarding': typeof OnboardingIndexRoute
-  '/$teamSlug/agents/$agentId': typeof TeamSlugAgentsAgentIdRoute
-  '/$teamSlug/artifacts/$artifactId': typeof TeamSlugArtifactsArtifactIdRoute
-  '/$teamSlug/mcp-servers/$serverId': typeof TeamSlugMcpServersServerIdRoute
-  '/$teamSlug/runs/$runId': typeof TeamSlugRunsRunIdRoute
-  '/$teamSlug/settings/appearance': typeof TeamSlugSettingsAppearanceRoute
-  '/$teamSlug/settings/audit-log': typeof TeamSlugSettingsAuditLogRoute
-  '/$teamSlug/settings/general': typeof TeamSlugSettingsGeneralRoute
-  '/$teamSlug/settings/members': typeof TeamSlugSettingsMembersRoute
-  '/$teamSlug/settings/usage': typeof TeamSlugSettingsUsageRoute
-  '/$teamSlug/skills/$skillId': typeof TeamSlugSkillsSkillIdRoute
-  '/$teamSlug/workflows/$workflowId': typeof TeamSlugWorkflowsWorkflowIdRouteWithChildren
-  '/$teamSlug/agents': typeof TeamSlugAgentsIndexRoute
-  '/$teamSlug/artifacts': typeof TeamSlugArtifactsIndexRoute
-  '/$teamSlug/mcp-servers': typeof TeamSlugMcpServersIndexRoute
-  '/$teamSlug/runs': typeof TeamSlugRunsIndexRoute
-  '/$teamSlug/settings': typeof TeamSlugSettingsIndexRoute
-  '/$teamSlug/skills': typeof TeamSlugSkillsIndexRoute
-  '/$teamSlug/workflows': typeof TeamSlugWorkflowsIndexRoute
-  '/$teamSlug/workflows/$workflowId/versions': typeof TeamSlugWorkflowsWorkflowIdVersionsRoute
+  '/runs': typeof RunsIndexRoute
+  '/settings': typeof SettingsIndexRoute
+  '/skills': typeof SkillsIndexRoute
+  '/workflows': typeof WorkflowsIndexRoute
+  '/workflows/$workflowId/versions': typeof WorkflowsWorkflowIdVersionsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/$teamSlug': typeof TeamSlugRouteRouteWithChildren
   '/onboarding': typeof OnboardingRouteRouteWithChildren
-  '/forgot-password': typeof ForgotPasswordRoute
-  '/reset-password': typeof ResetPasswordRoute
-  '/sign-in': typeof SignInRoute
-  '/sign-up': typeof SignUpRoute
-  '/verify-email': typeof VerifyEmailRoute
-  '/$teamSlug/settings': typeof TeamSlugSettingsRouteRouteWithChildren
-  '/$teamSlug/assistant': typeof TeamSlugAssistantRoute
-  '/$teamSlug/home': typeof TeamSlugHomeRoute
-  '/$teamSlug/model-providers': typeof TeamSlugModelProvidersRoute
-  '/invite/$token': typeof InviteTokenRoute
+  '/settings': typeof SettingsRouteRouteWithChildren
+  '/home': typeof HomeRoute
+  '/model-providers': typeof ModelProvidersRoute
+  '/agents/$agentId': typeof AgentsAgentIdRoute
+  '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
+  '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/onboarding/first-agent': typeof OnboardingFirstAgentRoute
   '/onboarding/provider': typeof OnboardingProviderRoute
-  '/onboarding/team': typeof OnboardingTeamRoute
-  '/$teamSlug/': typeof TeamSlugIndexRoute
+  '/runs/$runId': typeof RunsRunIdRoute
+  '/settings/appearance': typeof SettingsAppearanceRoute
+  '/settings/audit-log': typeof SettingsAuditLogRoute
+  '/settings/usage': typeof SettingsUsageRoute
+  '/skills/$skillId': typeof SkillsSkillIdRoute
+  '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
+  '/agents/': typeof AgentsIndexRoute
+  '/artifacts/': typeof ArtifactsIndexRoute
+  '/mcp-servers/': typeof McpServersIndexRoute
   '/onboarding/': typeof OnboardingIndexRoute
-  '/$teamSlug/agents/$agentId': typeof TeamSlugAgentsAgentIdRoute
-  '/$teamSlug/artifacts/$artifactId': typeof TeamSlugArtifactsArtifactIdRoute
-  '/$teamSlug/mcp-servers/$serverId': typeof TeamSlugMcpServersServerIdRoute
-  '/$teamSlug/runs/$runId': typeof TeamSlugRunsRunIdRoute
-  '/$teamSlug/settings/appearance': typeof TeamSlugSettingsAppearanceRoute
-  '/$teamSlug/settings/audit-log': typeof TeamSlugSettingsAuditLogRoute
-  '/$teamSlug/settings/general': typeof TeamSlugSettingsGeneralRoute
-  '/$teamSlug/settings/members': typeof TeamSlugSettingsMembersRoute
-  '/$teamSlug/settings/usage': typeof TeamSlugSettingsUsageRoute
-  '/$teamSlug/skills/$skillId': typeof TeamSlugSkillsSkillIdRoute
-  '/$teamSlug/workflows/$workflowId': typeof TeamSlugWorkflowsWorkflowIdRouteWithChildren
-  '/$teamSlug/agents/': typeof TeamSlugAgentsIndexRoute
-  '/$teamSlug/artifacts/': typeof TeamSlugArtifactsIndexRoute
-  '/$teamSlug/mcp-servers/': typeof TeamSlugMcpServersIndexRoute
-  '/$teamSlug/runs/': typeof TeamSlugRunsIndexRoute
-  '/$teamSlug/settings/': typeof TeamSlugSettingsIndexRoute
-  '/$teamSlug/skills/': typeof TeamSlugSkillsIndexRoute
-  '/$teamSlug/workflows/': typeof TeamSlugWorkflowsIndexRoute
-  '/$teamSlug/workflows/$workflowId/versions': typeof TeamSlugWorkflowsWorkflowIdVersionsRoute
+  '/runs/': typeof RunsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
+  '/skills/': typeof SkillsIndexRoute
+  '/workflows/': typeof WorkflowsIndexRoute
+  '/workflows/$workflowId/versions': typeof WorkflowsWorkflowIdVersionsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/$teamSlug'
     | '/onboarding'
-    | '/forgot-password'
-    | '/reset-password'
-    | '/sign-in'
-    | '/sign-up'
-    | '/verify-email'
-    | '/$teamSlug/settings'
-    | '/$teamSlug/assistant'
-    | '/$teamSlug/home'
-    | '/$teamSlug/model-providers'
-    | '/invite/$token'
+    | '/settings'
+    | '/home'
+    | '/model-providers'
+    | '/agents/$agentId'
+    | '/artifacts/$artifactId'
+    | '/mcp-servers/$serverId'
     | '/onboarding/first-agent'
     | '/onboarding/provider'
-    | '/onboarding/team'
-    | '/$teamSlug/'
+    | '/runs/$runId'
+    | '/settings/appearance'
+    | '/settings/audit-log'
+    | '/settings/usage'
+    | '/skills/$skillId'
+    | '/workflows/$workflowId'
+    | '/agents/'
+    | '/artifacts/'
+    | '/mcp-servers/'
     | '/onboarding/'
-    | '/$teamSlug/agents/$agentId'
-    | '/$teamSlug/artifacts/$artifactId'
-    | '/$teamSlug/mcp-servers/$serverId'
-    | '/$teamSlug/runs/$runId'
-    | '/$teamSlug/settings/appearance'
-    | '/$teamSlug/settings/audit-log'
-    | '/$teamSlug/settings/general'
-    | '/$teamSlug/settings/members'
-    | '/$teamSlug/settings/usage'
-    | '/$teamSlug/skills/$skillId'
-    | '/$teamSlug/workflows/$workflowId'
-    | '/$teamSlug/agents/'
-    | '/$teamSlug/artifacts/'
-    | '/$teamSlug/mcp-servers/'
-    | '/$teamSlug/runs/'
-    | '/$teamSlug/settings/'
-    | '/$teamSlug/skills/'
-    | '/$teamSlug/workflows/'
-    | '/$teamSlug/workflows/$workflowId/versions'
+    | '/runs/'
+    | '/settings/'
+    | '/skills/'
+    | '/workflows/'
+    | '/workflows/$workflowId/versions'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/forgot-password'
-    | '/reset-password'
-    | '/sign-in'
-    | '/sign-up'
-    | '/verify-email'
-    | '/$teamSlug/assistant'
-    | '/$teamSlug/home'
-    | '/$teamSlug/model-providers'
-    | '/invite/$token'
+    | '/home'
+    | '/model-providers'
+    | '/agents/$agentId'
+    | '/artifacts/$artifactId'
+    | '/mcp-servers/$serverId'
     | '/onboarding/first-agent'
     | '/onboarding/provider'
-    | '/onboarding/team'
-    | '/$teamSlug'
+    | '/runs/$runId'
+    | '/settings/appearance'
+    | '/settings/audit-log'
+    | '/settings/usage'
+    | '/skills/$skillId'
+    | '/workflows/$workflowId'
+    | '/agents'
+    | '/artifacts'
+    | '/mcp-servers'
     | '/onboarding'
-    | '/$teamSlug/agents/$agentId'
-    | '/$teamSlug/artifacts/$artifactId'
-    | '/$teamSlug/mcp-servers/$serverId'
-    | '/$teamSlug/runs/$runId'
-    | '/$teamSlug/settings/appearance'
-    | '/$teamSlug/settings/audit-log'
-    | '/$teamSlug/settings/general'
-    | '/$teamSlug/settings/members'
-    | '/$teamSlug/settings/usage'
-    | '/$teamSlug/skills/$skillId'
-    | '/$teamSlug/workflows/$workflowId'
-    | '/$teamSlug/agents'
-    | '/$teamSlug/artifacts'
-    | '/$teamSlug/mcp-servers'
-    | '/$teamSlug/runs'
-    | '/$teamSlug/settings'
-    | '/$teamSlug/skills'
-    | '/$teamSlug/workflows'
-    | '/$teamSlug/workflows/$workflowId/versions'
+    | '/runs'
+    | '/settings'
+    | '/skills'
+    | '/workflows'
+    | '/workflows/$workflowId/versions'
   id:
     | '__root__'
     | '/'
-    | '/$teamSlug'
     | '/onboarding'
-    | '/forgot-password'
-    | '/reset-password'
-    | '/sign-in'
-    | '/sign-up'
-    | '/verify-email'
-    | '/$teamSlug/settings'
-    | '/$teamSlug/assistant'
-    | '/$teamSlug/home'
-    | '/$teamSlug/model-providers'
-    | '/invite/$token'
+    | '/settings'
+    | '/home'
+    | '/model-providers'
+    | '/agents/$agentId'
+    | '/artifacts/$artifactId'
+    | '/mcp-servers/$serverId'
     | '/onboarding/first-agent'
     | '/onboarding/provider'
-    | '/onboarding/team'
-    | '/$teamSlug/'
+    | '/runs/$runId'
+    | '/settings/appearance'
+    | '/settings/audit-log'
+    | '/settings/usage'
+    | '/skills/$skillId'
+    | '/workflows/$workflowId'
+    | '/agents/'
+    | '/artifacts/'
+    | '/mcp-servers/'
     | '/onboarding/'
-    | '/$teamSlug/agents/$agentId'
-    | '/$teamSlug/artifacts/$artifactId'
-    | '/$teamSlug/mcp-servers/$serverId'
-    | '/$teamSlug/runs/$runId'
-    | '/$teamSlug/settings/appearance'
-    | '/$teamSlug/settings/audit-log'
-    | '/$teamSlug/settings/general'
-    | '/$teamSlug/settings/members'
-    | '/$teamSlug/settings/usage'
-    | '/$teamSlug/skills/$skillId'
-    | '/$teamSlug/workflows/$workflowId'
-    | '/$teamSlug/agents/'
-    | '/$teamSlug/artifacts/'
-    | '/$teamSlug/mcp-servers/'
-    | '/$teamSlug/runs/'
-    | '/$teamSlug/settings/'
-    | '/$teamSlug/skills/'
-    | '/$teamSlug/workflows/'
-    | '/$teamSlug/workflows/$workflowId/versions'
+    | '/runs/'
+    | '/settings/'
+    | '/skills/'
+    | '/workflows/'
+    | '/workflows/$workflowId/versions'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  TeamSlugRouteRoute: typeof TeamSlugRouteRouteWithChildren
   OnboardingRouteRoute: typeof OnboardingRouteRouteWithChildren
-  ForgotPasswordRoute: typeof ForgotPasswordRoute
-  ResetPasswordRoute: typeof ResetPasswordRoute
-  SignInRoute: typeof SignInRoute
-  SignUpRoute: typeof SignUpRoute
-  VerifyEmailRoute: typeof VerifyEmailRoute
-  InviteTokenRoute: typeof InviteTokenRoute
+  SettingsRouteRoute: typeof SettingsRouteRouteWithChildren
+  HomeRoute: typeof HomeRoute
+  ModelProvidersRoute: typeof ModelProvidersRoute
+  AgentsAgentIdRoute: typeof AgentsAgentIdRoute
+  ArtifactsArtifactIdRoute: typeof ArtifactsArtifactIdRoute
+  McpServersServerIdRoute: typeof McpServersServerIdRoute
+  RunsRunIdRoute: typeof RunsRunIdRoute
+  SkillsSkillIdRoute: typeof SkillsSkillIdRoute
+  WorkflowsWorkflowIdRoute: typeof WorkflowsWorkflowIdRouteWithChildren
+  AgentsIndexRoute: typeof AgentsIndexRoute
+  ArtifactsIndexRoute: typeof ArtifactsIndexRoute
+  McpServersIndexRoute: typeof McpServersIndexRoute
+  RunsIndexRoute: typeof RunsIndexRoute
+  SkillsIndexRoute: typeof SkillsIndexRoute
+  WorkflowsIndexRoute: typeof WorkflowsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -492,18 +353,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/$teamSlug': {
-      id: '/$teamSlug'
-      path: '/$teamSlug'
-      fullPath: '/$teamSlug'
-      preLoaderRoute: typeof TeamSlugRouteRouteImport
+    '/home': {
+      id: '/home'
+      path: '/home'
+      fullPath: '/home'
+      preLoaderRoute: typeof HomeRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/forgot-password': {
-      id: '/forgot-password'
-      path: '/forgot-password'
-      fullPath: '/forgot-password'
-      preLoaderRoute: typeof ForgotPasswordRouteImport
+    '/model-providers': {
+      id: '/model-providers'
+      path: '/model-providers'
+      fullPath: '/model-providers'
+      preLoaderRoute: typeof ModelProvidersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/onboarding': {
@@ -513,74 +374,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OnboardingRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/reset-password': {
-      id: '/reset-password'
-      path: '/reset-password'
-      fullPath: '/reset-password'
-      preLoaderRoute: typeof ResetPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/sign-in': {
-      id: '/sign-in'
-      path: '/sign-in'
-      fullPath: '/sign-in'
-      preLoaderRoute: typeof SignInRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/sign-up': {
-      id: '/sign-up'
-      path: '/sign-up'
-      fullPath: '/sign-up'
-      preLoaderRoute: typeof SignUpRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/verify-email': {
-      id: '/verify-email'
-      path: '/verify-email'
-      fullPath: '/verify-email'
-      preLoaderRoute: typeof VerifyEmailRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/$teamSlug/': {
-      id: '/$teamSlug/'
-      path: '/'
-      fullPath: '/$teamSlug/'
-      preLoaderRoute: typeof TeamSlugIndexRouteImport
-      parentRoute: typeof TeamSlugRouteRoute
-    }
-    '/$teamSlug/assistant': {
-      id: '/$teamSlug/assistant'
-      path: '/assistant'
-      fullPath: '/$teamSlug/assistant'
-      preLoaderRoute: typeof TeamSlugAssistantRouteImport
-      parentRoute: typeof TeamSlugRouteRoute
-    }
-    '/$teamSlug/home': {
-      id: '/$teamSlug/home'
-      path: '/home'
-      fullPath: '/$teamSlug/home'
-      preLoaderRoute: typeof TeamSlugHomeRouteImport
-      parentRoute: typeof TeamSlugRouteRoute
-    }
-    '/$teamSlug/model-providers': {
-      id: '/$teamSlug/model-providers'
-      path: '/model-providers'
-      fullPath: '/$teamSlug/model-providers'
-      preLoaderRoute: typeof TeamSlugModelProvidersRouteImport
-      parentRoute: typeof TeamSlugRouteRoute
-    }
-    '/$teamSlug/settings': {
-      id: '/$teamSlug/settings'
+    '/settings': {
+      id: '/settings'
       path: '/settings'
-      fullPath: '/$teamSlug/settings'
-      preLoaderRoute: typeof TeamSlugSettingsRouteRouteImport
-      parentRoute: typeof TeamSlugRouteRoute
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/invite/$token': {
-      id: '/invite/$token'
-      path: '/invite/$token'
-      fullPath: '/invite/$token'
-      preLoaderRoute: typeof InviteTokenRouteImport
+    '/agents/': {
+      id: '/agents/'
+      path: '/agents'
+      fullPath: '/agents/'
+      preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/$agentId': {
+      id: '/agents/$agentId'
+      path: '/agents/$agentId'
+      fullPath: '/agents/$agentId'
+      preLoaderRoute: typeof AgentsAgentIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/artifacts/': {
+      id: '/artifacts/'
+      path: '/artifacts'
+      fullPath: '/artifacts/'
+      preLoaderRoute: typeof ArtifactsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/artifacts/$artifactId': {
+      id: '/artifacts/$artifactId'
+      path: '/artifacts/$artifactId'
+      fullPath: '/artifacts/$artifactId'
+      preLoaderRoute: typeof ArtifactsArtifactIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcp-servers/': {
+      id: '/mcp-servers/'
+      path: '/mcp-servers'
+      fullPath: '/mcp-servers/'
+      preLoaderRoute: typeof McpServersIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcp-servers/$serverId': {
+      id: '/mcp-servers/$serverId'
+      path: '/mcp-servers/$serverId'
+      fullPath: '/mcp-servers/$serverId'
+      preLoaderRoute: typeof McpServersServerIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/onboarding/': {
@@ -604,243 +444,95 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OnboardingProviderRouteImport
       parentRoute: typeof OnboardingRouteRoute
     }
-    '/onboarding/team': {
-      id: '/onboarding/team'
-      path: '/team'
-      fullPath: '/onboarding/team'
-      preLoaderRoute: typeof OnboardingTeamRouteImport
-      parentRoute: typeof OnboardingRouteRoute
-    }
-    '/$teamSlug/agents/': {
-      id: '/$teamSlug/agents/'
-      path: '/agents'
-      fullPath: '/$teamSlug/agents/'
-      preLoaderRoute: typeof TeamSlugAgentsIndexRouteImport
-      parentRoute: typeof TeamSlugRouteRoute
-    }
-    '/$teamSlug/agents/$agentId': {
-      id: '/$teamSlug/agents/$agentId'
-      path: '/agents/$agentId'
-      fullPath: '/$teamSlug/agents/$agentId'
-      preLoaderRoute: typeof TeamSlugAgentsAgentIdRouteImport
-      parentRoute: typeof TeamSlugRouteRoute
-    }
-    '/$teamSlug/artifacts/': {
-      id: '/$teamSlug/artifacts/'
-      path: '/artifacts'
-      fullPath: '/$teamSlug/artifacts/'
-      preLoaderRoute: typeof TeamSlugArtifactsIndexRouteImport
-      parentRoute: typeof TeamSlugRouteRoute
-    }
-    '/$teamSlug/artifacts/$artifactId': {
-      id: '/$teamSlug/artifacts/$artifactId'
-      path: '/artifacts/$artifactId'
-      fullPath: '/$teamSlug/artifacts/$artifactId'
-      preLoaderRoute: typeof TeamSlugArtifactsArtifactIdRouteImport
-      parentRoute: typeof TeamSlugRouteRoute
-    }
-    '/$teamSlug/mcp-servers/': {
-      id: '/$teamSlug/mcp-servers/'
-      path: '/mcp-servers'
-      fullPath: '/$teamSlug/mcp-servers/'
-      preLoaderRoute: typeof TeamSlugMcpServersIndexRouteImport
-      parentRoute: typeof TeamSlugRouteRoute
-    }
-    '/$teamSlug/mcp-servers/$serverId': {
-      id: '/$teamSlug/mcp-servers/$serverId'
-      path: '/mcp-servers/$serverId'
-      fullPath: '/$teamSlug/mcp-servers/$serverId'
-      preLoaderRoute: typeof TeamSlugMcpServersServerIdRouteImport
-      parentRoute: typeof TeamSlugRouteRoute
-    }
-    '/$teamSlug/runs/': {
-      id: '/$teamSlug/runs/'
+    '/runs/': {
+      id: '/runs/'
       path: '/runs'
-      fullPath: '/$teamSlug/runs/'
-      preLoaderRoute: typeof TeamSlugRunsIndexRouteImport
-      parentRoute: typeof TeamSlugRouteRoute
+      fullPath: '/runs/'
+      preLoaderRoute: typeof RunsIndexRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/$teamSlug/runs/$runId': {
-      id: '/$teamSlug/runs/$runId'
+    '/runs/$runId': {
+      id: '/runs/$runId'
       path: '/runs/$runId'
-      fullPath: '/$teamSlug/runs/$runId'
-      preLoaderRoute: typeof TeamSlugRunsRunIdRouteImport
-      parentRoute: typeof TeamSlugRouteRoute
+      fullPath: '/runs/$runId'
+      preLoaderRoute: typeof RunsRunIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/$teamSlug/settings/': {
-      id: '/$teamSlug/settings/'
+    '/settings/': {
+      id: '/settings/'
       path: '/'
-      fullPath: '/$teamSlug/settings/'
-      preLoaderRoute: typeof TeamSlugSettingsIndexRouteImport
-      parentRoute: typeof TeamSlugSettingsRouteRoute
+      fullPath: '/settings/'
+      preLoaderRoute: typeof SettingsIndexRouteImport
+      parentRoute: typeof SettingsRouteRoute
     }
-    '/$teamSlug/settings/appearance': {
-      id: '/$teamSlug/settings/appearance'
+    '/settings/appearance': {
+      id: '/settings/appearance'
       path: '/appearance'
-      fullPath: '/$teamSlug/settings/appearance'
-      preLoaderRoute: typeof TeamSlugSettingsAppearanceRouteImport
-      parentRoute: typeof TeamSlugSettingsRouteRoute
+      fullPath: '/settings/appearance'
+      preLoaderRoute: typeof SettingsAppearanceRouteImport
+      parentRoute: typeof SettingsRouteRoute
     }
-    '/$teamSlug/settings/audit-log': {
-      id: '/$teamSlug/settings/audit-log'
+    '/settings/audit-log': {
+      id: '/settings/audit-log'
       path: '/audit-log'
-      fullPath: '/$teamSlug/settings/audit-log'
-      preLoaderRoute: typeof TeamSlugSettingsAuditLogRouteImport
-      parentRoute: typeof TeamSlugSettingsRouteRoute
+      fullPath: '/settings/audit-log'
+      preLoaderRoute: typeof SettingsAuditLogRouteImport
+      parentRoute: typeof SettingsRouteRoute
     }
-    '/$teamSlug/settings/general': {
-      id: '/$teamSlug/settings/general'
-      path: '/general'
-      fullPath: '/$teamSlug/settings/general'
-      preLoaderRoute: typeof TeamSlugSettingsGeneralRouteImport
-      parentRoute: typeof TeamSlugSettingsRouteRoute
-    }
-    '/$teamSlug/settings/members': {
-      id: '/$teamSlug/settings/members'
-      path: '/members'
-      fullPath: '/$teamSlug/settings/members'
-      preLoaderRoute: typeof TeamSlugSettingsMembersRouteImport
-      parentRoute: typeof TeamSlugSettingsRouteRoute
-    }
-    '/$teamSlug/settings/usage': {
-      id: '/$teamSlug/settings/usage'
+    '/settings/usage': {
+      id: '/settings/usage'
       path: '/usage'
-      fullPath: '/$teamSlug/settings/usage'
-      preLoaderRoute: typeof TeamSlugSettingsUsageRouteImport
-      parentRoute: typeof TeamSlugSettingsRouteRoute
+      fullPath: '/settings/usage'
+      preLoaderRoute: typeof SettingsUsageRouteImport
+      parentRoute: typeof SettingsRouteRoute
     }
-    '/$teamSlug/skills/': {
-      id: '/$teamSlug/skills/'
+    '/skills/': {
+      id: '/skills/'
       path: '/skills'
-      fullPath: '/$teamSlug/skills/'
-      preLoaderRoute: typeof TeamSlugSkillsIndexRouteImport
-      parentRoute: typeof TeamSlugRouteRoute
+      fullPath: '/skills/'
+      preLoaderRoute: typeof SkillsIndexRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/$teamSlug/skills/$skillId': {
-      id: '/$teamSlug/skills/$skillId'
+    '/skills/$skillId': {
+      id: '/skills/$skillId'
       path: '/skills/$skillId'
-      fullPath: '/$teamSlug/skills/$skillId'
-      preLoaderRoute: typeof TeamSlugSkillsSkillIdRouteImport
-      parentRoute: typeof TeamSlugRouteRoute
+      fullPath: '/skills/$skillId'
+      preLoaderRoute: typeof SkillsSkillIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/$teamSlug/workflows/': {
-      id: '/$teamSlug/workflows/'
+    '/workflows/': {
+      id: '/workflows/'
       path: '/workflows'
-      fullPath: '/$teamSlug/workflows/'
-      preLoaderRoute: typeof TeamSlugWorkflowsIndexRouteImport
-      parentRoute: typeof TeamSlugRouteRoute
+      fullPath: '/workflows/'
+      preLoaderRoute: typeof WorkflowsIndexRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/$teamSlug/workflows/$workflowId': {
-      id: '/$teamSlug/workflows/$workflowId'
+    '/workflows/$workflowId': {
+      id: '/workflows/$workflowId'
       path: '/workflows/$workflowId'
-      fullPath: '/$teamSlug/workflows/$workflowId'
-      preLoaderRoute: typeof TeamSlugWorkflowsWorkflowIdRouteImport
-      parentRoute: typeof TeamSlugRouteRoute
+      fullPath: '/workflows/$workflowId'
+      preLoaderRoute: typeof WorkflowsWorkflowIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/$teamSlug/workflows/$workflowId/versions': {
-      id: '/$teamSlug/workflows/$workflowId/versions'
+    '/workflows/$workflowId/versions': {
+      id: '/workflows/$workflowId/versions'
       path: '/versions'
-      fullPath: '/$teamSlug/workflows/$workflowId/versions'
-      preLoaderRoute: typeof TeamSlugWorkflowsWorkflowIdVersionsRouteImport
-      parentRoute: typeof TeamSlugWorkflowsWorkflowIdRoute
+      fullPath: '/workflows/$workflowId/versions'
+      preLoaderRoute: typeof WorkflowsWorkflowIdVersionsRouteImport
+      parentRoute: typeof WorkflowsWorkflowIdRoute
     }
   }
 }
-
-interface TeamSlugSettingsRouteRouteChildren {
-  TeamSlugSettingsAppearanceRoute: typeof TeamSlugSettingsAppearanceRoute
-  TeamSlugSettingsAuditLogRoute: typeof TeamSlugSettingsAuditLogRoute
-  TeamSlugSettingsGeneralRoute: typeof TeamSlugSettingsGeneralRoute
-  TeamSlugSettingsMembersRoute: typeof TeamSlugSettingsMembersRoute
-  TeamSlugSettingsUsageRoute: typeof TeamSlugSettingsUsageRoute
-  TeamSlugSettingsIndexRoute: typeof TeamSlugSettingsIndexRoute
-}
-
-const TeamSlugSettingsRouteRouteChildren: TeamSlugSettingsRouteRouteChildren = {
-  TeamSlugSettingsAppearanceRoute: TeamSlugSettingsAppearanceRoute,
-  TeamSlugSettingsAuditLogRoute: TeamSlugSettingsAuditLogRoute,
-  TeamSlugSettingsGeneralRoute: TeamSlugSettingsGeneralRoute,
-  TeamSlugSettingsMembersRoute: TeamSlugSettingsMembersRoute,
-  TeamSlugSettingsUsageRoute: TeamSlugSettingsUsageRoute,
-  TeamSlugSettingsIndexRoute: TeamSlugSettingsIndexRoute,
-}
-
-const TeamSlugSettingsRouteRouteWithChildren =
-  TeamSlugSettingsRouteRoute._addFileChildren(
-    TeamSlugSettingsRouteRouteChildren,
-  )
-
-interface TeamSlugWorkflowsWorkflowIdRouteChildren {
-  TeamSlugWorkflowsWorkflowIdVersionsRoute: typeof TeamSlugWorkflowsWorkflowIdVersionsRoute
-}
-
-const TeamSlugWorkflowsWorkflowIdRouteChildren: TeamSlugWorkflowsWorkflowIdRouteChildren =
-  {
-    TeamSlugWorkflowsWorkflowIdVersionsRoute:
-      TeamSlugWorkflowsWorkflowIdVersionsRoute,
-  }
-
-const TeamSlugWorkflowsWorkflowIdRouteWithChildren =
-  TeamSlugWorkflowsWorkflowIdRoute._addFileChildren(
-    TeamSlugWorkflowsWorkflowIdRouteChildren,
-  )
-
-interface TeamSlugRouteRouteChildren {
-  TeamSlugSettingsRouteRoute: typeof TeamSlugSettingsRouteRouteWithChildren
-  TeamSlugAssistantRoute: typeof TeamSlugAssistantRoute
-  TeamSlugHomeRoute: typeof TeamSlugHomeRoute
-  TeamSlugModelProvidersRoute: typeof TeamSlugModelProvidersRoute
-  TeamSlugIndexRoute: typeof TeamSlugIndexRoute
-  TeamSlugAgentsAgentIdRoute: typeof TeamSlugAgentsAgentIdRoute
-  TeamSlugArtifactsArtifactIdRoute: typeof TeamSlugArtifactsArtifactIdRoute
-  TeamSlugMcpServersServerIdRoute: typeof TeamSlugMcpServersServerIdRoute
-  TeamSlugRunsRunIdRoute: typeof TeamSlugRunsRunIdRoute
-  TeamSlugSkillsSkillIdRoute: typeof TeamSlugSkillsSkillIdRoute
-  TeamSlugWorkflowsWorkflowIdRoute: typeof TeamSlugWorkflowsWorkflowIdRouteWithChildren
-  TeamSlugAgentsIndexRoute: typeof TeamSlugAgentsIndexRoute
-  TeamSlugArtifactsIndexRoute: typeof TeamSlugArtifactsIndexRoute
-  TeamSlugMcpServersIndexRoute: typeof TeamSlugMcpServersIndexRoute
-  TeamSlugRunsIndexRoute: typeof TeamSlugRunsIndexRoute
-  TeamSlugSkillsIndexRoute: typeof TeamSlugSkillsIndexRoute
-  TeamSlugWorkflowsIndexRoute: typeof TeamSlugWorkflowsIndexRoute
-}
-
-const TeamSlugRouteRouteChildren: TeamSlugRouteRouteChildren = {
-  TeamSlugSettingsRouteRoute: TeamSlugSettingsRouteRouteWithChildren,
-  TeamSlugAssistantRoute: TeamSlugAssistantRoute,
-  TeamSlugHomeRoute: TeamSlugHomeRoute,
-  TeamSlugModelProvidersRoute: TeamSlugModelProvidersRoute,
-  TeamSlugIndexRoute: TeamSlugIndexRoute,
-  TeamSlugAgentsAgentIdRoute: TeamSlugAgentsAgentIdRoute,
-  TeamSlugArtifactsArtifactIdRoute: TeamSlugArtifactsArtifactIdRoute,
-  TeamSlugMcpServersServerIdRoute: TeamSlugMcpServersServerIdRoute,
-  TeamSlugRunsRunIdRoute: TeamSlugRunsRunIdRoute,
-  TeamSlugSkillsSkillIdRoute: TeamSlugSkillsSkillIdRoute,
-  TeamSlugWorkflowsWorkflowIdRoute:
-    TeamSlugWorkflowsWorkflowIdRouteWithChildren,
-  TeamSlugAgentsIndexRoute: TeamSlugAgentsIndexRoute,
-  TeamSlugArtifactsIndexRoute: TeamSlugArtifactsIndexRoute,
-  TeamSlugMcpServersIndexRoute: TeamSlugMcpServersIndexRoute,
-  TeamSlugRunsIndexRoute: TeamSlugRunsIndexRoute,
-  TeamSlugSkillsIndexRoute: TeamSlugSkillsIndexRoute,
-  TeamSlugWorkflowsIndexRoute: TeamSlugWorkflowsIndexRoute,
-}
-
-const TeamSlugRouteRouteWithChildren = TeamSlugRouteRoute._addFileChildren(
-  TeamSlugRouteRouteChildren,
-)
 
 interface OnboardingRouteRouteChildren {
   OnboardingFirstAgentRoute: typeof OnboardingFirstAgentRoute
   OnboardingProviderRoute: typeof OnboardingProviderRoute
-  OnboardingTeamRoute: typeof OnboardingTeamRoute
   OnboardingIndexRoute: typeof OnboardingIndexRoute
 }
 
 const OnboardingRouteRouteChildren: OnboardingRouteRouteChildren = {
   OnboardingFirstAgentRoute: OnboardingFirstAgentRoute,
   OnboardingProviderRoute: OnboardingProviderRoute,
-  OnboardingTeamRoute: OnboardingTeamRoute,
   OnboardingIndexRoute: OnboardingIndexRoute,
 }
 
@@ -848,16 +540,53 @@ const OnboardingRouteRouteWithChildren = OnboardingRouteRoute._addFileChildren(
   OnboardingRouteRouteChildren,
 )
 
+interface SettingsRouteRouteChildren {
+  SettingsAppearanceRoute: typeof SettingsAppearanceRoute
+  SettingsAuditLogRoute: typeof SettingsAuditLogRoute
+  SettingsUsageRoute: typeof SettingsUsageRoute
+  SettingsIndexRoute: typeof SettingsIndexRoute
+}
+
+const SettingsRouteRouteChildren: SettingsRouteRouteChildren = {
+  SettingsAppearanceRoute: SettingsAppearanceRoute,
+  SettingsAuditLogRoute: SettingsAuditLogRoute,
+  SettingsUsageRoute: SettingsUsageRoute,
+  SettingsIndexRoute: SettingsIndexRoute,
+}
+
+const SettingsRouteRouteWithChildren = SettingsRouteRoute._addFileChildren(
+  SettingsRouteRouteChildren,
+)
+
+interface WorkflowsWorkflowIdRouteChildren {
+  WorkflowsWorkflowIdVersionsRoute: typeof WorkflowsWorkflowIdVersionsRoute
+}
+
+const WorkflowsWorkflowIdRouteChildren: WorkflowsWorkflowIdRouteChildren = {
+  WorkflowsWorkflowIdVersionsRoute: WorkflowsWorkflowIdVersionsRoute,
+}
+
+const WorkflowsWorkflowIdRouteWithChildren =
+  WorkflowsWorkflowIdRoute._addFileChildren(WorkflowsWorkflowIdRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  TeamSlugRouteRoute: TeamSlugRouteRouteWithChildren,
   OnboardingRouteRoute: OnboardingRouteRouteWithChildren,
-  ForgotPasswordRoute: ForgotPasswordRoute,
-  ResetPasswordRoute: ResetPasswordRoute,
-  SignInRoute: SignInRoute,
-  SignUpRoute: SignUpRoute,
-  VerifyEmailRoute: VerifyEmailRoute,
-  InviteTokenRoute: InviteTokenRoute,
+  SettingsRouteRoute: SettingsRouteRouteWithChildren,
+  HomeRoute: HomeRoute,
+  ModelProvidersRoute: ModelProvidersRoute,
+  AgentsAgentIdRoute: AgentsAgentIdRoute,
+  ArtifactsArtifactIdRoute: ArtifactsArtifactIdRoute,
+  McpServersServerIdRoute: McpServersServerIdRoute,
+  RunsRunIdRoute: RunsRunIdRoute,
+  SkillsSkillIdRoute: SkillsSkillIdRoute,
+  WorkflowsWorkflowIdRoute: WorkflowsWorkflowIdRouteWithChildren,
+  AgentsIndexRoute: AgentsIndexRoute,
+  ArtifactsIndexRoute: ArtifactsIndexRoute,
+  McpServersIndexRoute: McpServersIndexRoute,
+  RunsIndexRoute: RunsIndexRoute,
+  SkillsIndexRoute: SkillsIndexRoute,
+  WorkflowsIndexRoute: WorkflowsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

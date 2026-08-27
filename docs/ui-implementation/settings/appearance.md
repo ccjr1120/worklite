@@ -10,6 +10,10 @@ Verify application surfaces, Monaco, charts, diagrams, scrollbars, overlays and 
 
 ## Changelog
 
+### 2026-08-25
+
+- Defined Appearance as a personal preference surface in the single-user workspace.
+
 ### 2026-08-14
 
 - Added a personal language preference to Appearance Settings, alongside theme.

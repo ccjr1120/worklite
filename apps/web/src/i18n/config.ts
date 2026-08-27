@@ -1,10 +1,9 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
-import { DEFAULT_LOCALE, resolveLocale } from './locale';
+import { DEFAULT_LOCALE } from './locale';
 import enAgents from './locales/en/agents.json';
 import enAssistant from './locales/en/assistant.json';
 import enArtifacts from './locales/en/artifacts.json';
-import enAuth from './locales/en/auth.json';
 import enCommon from './locales/en/common.json';
 import enHome from './locales/en/home.json';
 import enMcpServers from './locales/en/mcpServers.json';
@@ -17,7 +16,6 @@ import enWorkspace from './locales/en/workspace.json';
 import zhAgents from './locales/zh-CN/agents.json';
 import zhAssistant from './locales/zh-CN/assistant.json';
 import zhArtifacts from './locales/zh-CN/artifacts.json';
-import zhAuth from './locales/zh-CN/auth.json';
 import zhCommon from './locales/zh-CN/common.json';
 import zhHome from './locales/zh-CN/home.json';
 import zhMcpServers from './locales/zh-CN/mcpServers.json';
@@ -30,7 +28,6 @@ import zhWorkspace from './locales/zh-CN/workspace.json';
 
 export const NAMESPACES = [
   'common',
-  'auth',
   'workspace',
   'home',
   'onboarding',
@@ -47,7 +44,6 @@ export const NAMESPACES = [
 const resources = {
   en: {
     common: enCommon,
-    auth: enAuth,
     workspace: enWorkspace,
     home: enHome,
     onboarding: enOnboarding,
@@ -62,7 +58,6 @@ const resources = {
   },
   'zh-CN': {
     common: zhCommon,
-    auth: zhAuth,
     workspace: zhWorkspace,
     home: zhHome,
     onboarding: zhOnboarding,
@@ -77,11 +72,9 @@ const resources = {
   },
 } as const;
 
-const initialLocale = resolveLocale();
-
 void i18n.use(initReactI18next).init({
   resources,
-  lng: initialLocale,
+  lng: DEFAULT_LOCALE,
   fallbackLng: DEFAULT_LOCALE,
   supportedLngs: ['en', 'zh-CN'],
   defaultNS: 'common',

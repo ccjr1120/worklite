@@ -12,6 +12,184 @@ export type HealthResponse = {
   status: 'ok';
 };
 
+export type CommandExecutionStatus = 'queued' | 'running' | 'cancelling' | 'succeeded' | 'failed' | 'cancelled';
+
+export type CreateCommandRequest = {
+  command: string;
+};
+
+export type CommandExecutionEvent = {
+  sequence: number;
+  commandId: string;
+  type: 'stdout' | 'stderr' | 'lifecycle';
+  data: string;
+  createdAt: string;
+};
+
+export type CommandExecutionView = {
+  id: string;
+  command: string;
+  cwd: string;
+  status: CommandExecutionStatus;
+  pid: number | null;
+  exitCode: number | null;
+  signal: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+};
+
+export type WorkspaceView = {
+  id: string;
+  slug: string;
+  name: string;
+};
+
+export type AgentView = {
+  id: string;
+  workspaceSlug: string;
+  kind: 'system' | 'custom';
+  name: string;
+  responsibility: string;
+  systemPrompt: string;
+  initials: string;
+  model: string;
+  providerId: string | null;
+  providerName: string | null;
+  skills: Array<{
+    id: string;
+    name: string;
+    version: string;
+    validation: 'valid' | 'invalid' | 'pending';
+  }>;
+  mcpServers: Array<{
+    id: string;
+    name: string;
+    version: string;
+    connection: 'connected' | 'unreachable' | 'auth_failed' | 'unconfigured';
+    allowedTools: number;
+  }>;
+  version: 'draft';
+  updatedAt: string;
+};
+
+export type AgentExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+
+export type AgentExecutionMessage = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+};
+
+export type AgentToolCallStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+
+export type AgentToolCallView = {
+  id: string;
+  workingDirectory: string;
+  skillId: string | null;
+  skillName: string | null;
+  scriptPath: string | null;
+  arguments: string[];
+  status: AgentToolCallStatus;
+  output: string;
+  exitCode: number | null;
+  commandExecutionId: string | null;
+  result: WorkliteScriptResult | null;
+  createdAt: string;
+  finishedAt: string | null;
+};
+
+export type AgentExecutionView = {
+  id: string;
+  agentId: string;
+  status: AgentExecutionStatus;
+  messages: AgentExecutionMessage[];
+  toolCalls: AgentToolCallView[];
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateAgentExecutionRequest = {
+  message: string;
+};
+
+export type ContinueAgentExecutionRequest = {
+  message: string;
+};
+
+export type CreateAgentRequest = {
+  name: string;
+  responsibility: string;
+  systemPrompt: string;
+  providerId: string | null;
+  model: string;
+  skillIds: string[];
+  mcpServerIds: string[];
+};
+
+export type UpdateAgentRequest = Partial<CreateAgentRequest> & {
+  providerId?: string | null;
+};
+
+export type WorkliteNavigationTarget =
+  | 'home'
+  | 'agents'
+  | 'system-helper-chat'
+  | 'skills'
+  | 'mcp-servers'
+  | 'model-providers'
+  | 'workflows'
+  | 'runs'
+  | 'artifacts'
+  | 'settings-appearance'
+  | 'settings-usage'
+  | 'settings-audit-log';
+
+export type WorkspaceSettingsView = {
+  appearance: 'system' | 'light' | 'dark';
+  locale: 'en' | 'zh-CN';
+  updatedAt: string;
+};
+
+export type UpdateWorkspaceSettingsRequest = Partial<Pick<WorkspaceSettingsView, 'appearance' | 'locale'>>;
+
+export type WorkliteScriptResult =
+  | { type: 'resource'; resourceType: 'provider' | 'agent' | 'skill' | 'mcp-server' | 'workflow'; id: string; route: string }
+  | { type: 'navigation'; target: WorkliteNavigationTarget; route: string }
+  | { type: 'settings'; appearance: WorkspaceSettingsView['appearance']; locale: WorkspaceSettingsView['locale'] }
+  | { type: 'snapshot' };
+
+export type WorkflowView = {
+  id: string;
+  workspaceSlug: string;
+  latestVersionId: string | null;
+  name: string;
+  state: 'draft' | 'published';
+  stepCount: number;
+  lastRunStatus: RunStatus | null;
+  lastRunAt: string | null;
+  updatedAt: string;
+};
+
+export type CreateWorkflowRequest = {
+  name: string;
+};
+
+export type RunView = {
+  id: string;
+  workspaceSlug: string;
+  workflowId: string;
+  workflowName: string;
+  version: string;
+  status: RunStatus;
+  currentStep: string | null;
+  startedAt: string;
+  durationSeconds: number | null;
+  initiator: string;
+};
+
 export type CreateRunRequest = {
   input: unknown;
 };
@@ -22,7 +200,7 @@ export type CreateRunResponse = {
 
 export type WorkflowRunView = {
   id: string;
-  teamId: string;
+  workspaceId: string;
   workflowVersionId: string;
   status: RunStatus;
   currentNodeId: string | null;
@@ -38,4 +216,115 @@ export type RunProgressEvent = {
   type: 'run.status' | 'node.started' | 'node.completed' | 'node.failed';
   payload: unknown;
   occurredAt: string;
+};
+
+export type SkillView = {
+  id: string;
+  workspaceSlug: string;
+  name: string;
+  source: 'online' | 'archive' | 'built-in';
+  version: string;
+  validation: 'valid' | 'invalid' | 'pending';
+  files: Array<{
+    path: string;
+    content: string;
+  }>;
+  updatedAt: string;
+};
+
+export type McpServerView = {
+  id: string;
+  workspaceSlug: string;
+  name: string;
+  connection: 'connected' | 'unreachable' | 'auth_failed' | 'unconfigured';
+  transport: 'Streamable HTTP';
+  allowedTools: number;
+  version: string;
+  updatedAt: string;
+};
+
+export type ModelProviderView = {
+  id: string;
+  name: string;
+  kind: 'deepseek' | 'openai' | 'openai-compatible';
+  baseUrl: string | null;
+  organization: string | null;
+  project: string | null;
+  status: 'connected' | 'unconfigured' | 'invalid';
+  maskedKey: string;
+  models: string[];
+  headerNames: string[];
+};
+
+export type ModelProviderTestResult = {
+  prompt: string;
+  model: string;
+  response: string;
+};
+
+export type ArtifactView = {
+  id: string;
+  workspaceSlug: string;
+  name: string;
+  type: 'json' | 'text' | 'markdown' | 'unsupported';
+  workflowName: string;
+  runId: string;
+  size: string;
+  createdAt: string;
+  content: string;
+};
+
+export type AuditEventView = {
+  id: string;
+  actor: string;
+  action: string;
+  resource: string;
+  timestamp: string;
+  metadata: string;
+};
+
+export type UsageRow = {
+  model: string;
+  tokens: number;
+  runs: number;
+  cost: number;
+};
+
+export type CreateModelProviderRequest = {
+  name: string;
+  kind?: 'deepseek' | 'openai' | 'openai-compatible';
+  apiKey?: string;
+  baseUrl?: string;
+  organization?: string;
+  project?: string;
+  models?: string[];
+  headers?: Record<string, string>;
+};
+
+export type CreateMcpServerRequest = {
+  name: string;
+  endpoint: string;
+  authToken?: string;
+};
+
+export type CreateSkillRequest = {
+  name: string;
+  source?: 'online';
+  files: Array<{
+    path: string;
+    content: string;
+  }>;
+};
+
+export type UpdateSkillRequest = {
+  name?: string;
+  files?: Array<{
+    path: string;
+    content: string;
+  }>;
+};
+
+export type ExecuteSkillScriptRequest = {
+  scriptPath: string;
+  arguments: string[];
 };

@@ -28,6 +28,8 @@
     "aiEdit": "AI 编辑",
     "run": "运行",
     "previewStarted": "预览运行已开始",
+    "saveBeforeRun": "请先保存工作流再运行。",
+    "running": "启动中...",
     "step": "步骤 {{position}}",
     "agentVersion": "Agent 版本",
     "errorPolicy": "错误策略",

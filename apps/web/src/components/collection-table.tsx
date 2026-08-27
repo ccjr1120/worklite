@@ -9,9 +9,9 @@ function CollectionTable({ children, className }: { children: ReactNode; classNa
   );
 }
 
-function CollectionHeader({ columns }: { columns: string[] }) {
+function CollectionHeader({ columns, className }: { columns: string[]; className?: string }) {
   return (
-    <div className="grid min-w-[720px] grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 border-b border-border bg-background px-4 py-2 text-xs font-medium text-muted-foreground">
+    <div className={cn('grid min-w-[720px] grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 border-b border-border bg-background px-4 py-2 text-xs font-medium text-muted-foreground', className)}>
       {columns.map((column) => (
         <span key={column}>{column}</span>
       ))}

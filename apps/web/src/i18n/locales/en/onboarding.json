@@ -1,15 +1,7 @@
 {
   "steps": {
-    "team": "Team",
     "provider": "Provider",
     "firstAgent": "First agent"
-  },
-  "team": {
-    "title": "Create your team",
-    "description": "A team is the access boundary for agents, skills, workflows, and runs.",
-    "name": "Team name",
-    "url": "Team URL",
-    "urlHint": "You can edit this identifier now. Changing it later may be restricted."
   },
   "provider": {
     "title": "Configure a model provider",

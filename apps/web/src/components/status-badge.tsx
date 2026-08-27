@@ -1,8 +1,9 @@
 import { Ban, CheckCircle2, CircleDashed, LoaderCircle, PauseCircle, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/badge';
-import type { RunUiStatus } from '@/mock/data';
 import { cn } from '@/lib/utils';
+
+type RunUiStatus = 'queued' | 'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled';
 
 type StatusKey =
   | RunUiStatus

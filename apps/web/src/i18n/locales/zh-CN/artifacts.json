@@ -21,6 +21,7 @@
     "unavailableTitle": "产物不可用",
     "unavailableDescription": "此产物缺失、已过期，或你没有访问权限。",
     "downloadStarted": "已开始下载",
+    "noRun": "未关联运行",
     "unsupported": "此内容无法在页面中预览。请改为下载文件。"
   }
 }

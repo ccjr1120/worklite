@@ -1,6 +1,5 @@
 import { createFileRoute, Link, Outlet, useRouterState } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
-import { RequireSession } from '@/components/require-session';
 import { WorkLiteMark } from '@/components/worklite-mark';
 import { cn } from '@/lib/utils';
 
@@ -12,14 +11,12 @@ function OnboardingLayout() {
   const { t } = useTranslation(['onboarding', 'common']);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const steps = [
-    { id: 'team', label: t('steps.team'), to: '/onboarding/team' },
     { id: 'provider', label: t('steps.provider'), to: '/onboarding/provider' },
     { id: 'first-agent', label: t('steps.firstAgent'), to: '/onboarding/first-agent' },
   ] as const;
 
   return (
-    <RequireSession>
-      <div className="min-h-screen bg-background px-5 py-10">
+    <div className="min-h-screen bg-background px-5 py-10">
         <div className="mx-auto w-full max-w-[560px]">
           <div className="mb-8 flex items-center gap-2">
             <WorkLiteMark />
@@ -48,6 +45,5 @@ function OnboardingLayout() {
           <Outlet />
         </div>
       </div>
-    </RequireSession>
   );
 }

@@ -1,7 +1,7 @@
 {
   "nav": {
     "home": "Home",
-    "assistant": "Agent Chat",
+    "assistant": "System Helper Chat",
     "build": "Build",
     "operate": "Operate",
     "manage": "Manage",
@@ -12,7 +12,6 @@
     "modelProviders": "Providers",
     "runs": "Runs",
     "artifacts": "Artifacts",
-    "members": "Members",
     "usage": "Usage",
     "settings": "Settings",
     "agentResources": "Agent resources",
@@ -27,33 +26,21 @@
     "recent": "Recent",
     "createAgent": "Create agent",
     "createWorkflow": "Create workflow",
-    "openAssistant": "Open Agent Chat",
+    "openAssistant": "Open System Helper Chat",
     "open": "Open command menu",
     "search": "Search"
   },
   "userMenu": {
     "label": "User menu",
-    "account": "Account",
-    "accountFallback": "Account",
-    "profile": "Profile",
+    "personalWorkspace": "Personal workspace",
+    "localOnly": "Stored locally",
     "appearance": "Appearance",
     "shortcuts": "Keyboard shortcuts",
     "shortcutsDescription": "Common workspace commands.",
-    "commandMenu": "Command menu",
-    "signOutHint": "Sign out is in the user menu",
-    "signOut": "Sign out"
-  },
-  "teamSwitcher": {
-    "label": "Switch team",
-    "teams": "Teams",
-    "createTeam": "Create team"
+    "commandMenu": "Command menu"
   },
   "offline": {
     "message": "Reconnecting. Local edits stay on this device until the connection returns."
-  },
-  "errors": {
-    "teamNotFoundTitle": "Team not found",
-    "teamNotFoundDescription": "This team does not exist or is no longer available."
   },
   "openNavigation": "Open navigation"
 }

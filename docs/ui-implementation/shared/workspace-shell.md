@@ -4,9 +4,9 @@
 
 Use a persistent `232px` sidebar, a `52px` context bar, fluid main content, an optional `360px` inspector, and an optional resizable bottom run panel. The sidebar collapses to `56px`.
 
-Primary navigation is a single level containing `Home`, `Agents`, `Workflows`, and `Settings`; it never reveals nested navigation. `Skills`, `MCP Servers`, and `Providers` are resource views within the Agents surface and use page-level view navigation, with Providers last. Members, usage, audit log, and appearance are reached from Settings. Runs and Artifacts remain available from dashboard widgets, detail links, and command search but are not primary navigation destinations. Agent Chat is available throughout the workspace shell, presented prominently on Home and as a floating control elsewhere. Counts indicate actionable state only. The team switcher is at the top and the personal menu at the bottom.
+Primary navigation is a single level containing `Home`, `Agents`, `Workflows`, and `Settings`; it never reveals nested navigation. `Skills`, `MCP Servers`, and `Providers` are resource views within the Agents surface and use page-level view navigation, with Providers last. Usage, audit log, and appearance are reached from Settings. Runs and Artifacts remain available from dashboard widgets, detail links, and command search but are not primary navigation destinations. System Helper Chat is available throughout the workspace shell, presented prominently on Home and as a floating control elsewhere. Counts indicate actionable state only. The WorkLite mark is at the top and the personal preferences menu is at the bottom.
 
-The selected navigation item uses `brand-subtle`, primary text, and a non-color indicator. Team administration stays outside the personal menu.
+The selected navigation item uses `brand-subtle`, primary text, and a non-color indicator. Personal preferences stay in the bottom menu.
 
 ## Context Bar
 
@@ -16,9 +16,9 @@ Place navigation and breadcrumb context on the left. Place command search, state
 
 The inspector opens only for selected contextual content, keeps its header and essential actions available, scrolls internally, and does not discard unsaved work when closed. It may expand to `440px` for structured configuration.
 
-The workspace shell owns Agent Chat session state. Store independent in-memory messages, draft, proposal, and execution state for each `teamSlug`. Page navigation and team switching close the visible conversation without cancelling work. Returning to a team restores its session in the minimized state; a browser reload clears all local-prototype sessions.
+The workspace shell owns the active System Helper Chat execution identifier and transient composer draft. Messages, script requests, automatic execution state, and results remain server-owned. Page navigation closes the visible conversation without cancelling work; a browser reload fetches the active execution identifier saved by the browser.
 
-Place a single-line Agent Chat composer at the bottom of the content region on every team page. Focusing it opens the same raised, full-width conversation panel above the current page, with stable outer space around it. Both Home and other team pages use the same team session, expanded dimensions, and compact execution summary.
+Place the System Helper Chat interaction surface at the bottom of the content region on every workspace page. Center the complete surface and cap it at `1200px`. With a bound provider it contains only the single-line input and one stable icon-button target without a repeated visible System Helper Chat title; the target shows Send while idle and Stop while the active turn is running. The input remains editable in both states. Focusing it opens the same raised conversation panel above the current page, with stable outer space around it. Without a bound provider it contains a single direct link to `/agents/agt_system_helper_chat` instead of an input or send control. Home and other pages use the same personal session, expanded dimensions, and compact execution summary.
 
 The bottom panel defaults to about `240px`, resizes, and collapses to a status strip. Closing hides but never cancels a run. Logs distinguish timestamp, severity, source and content, and auto-follow only while the user is at the stream end.
 
@@ -27,6 +27,39 @@ The bottom panel defaults to about `240px`, resizes, and collapses to a status s
 `Command+K` or `Control+K` opens grouped search, recent destinations, navigation and safe creation commands. Destructive actions are excluded. The user menu contains Profile, Appearance, Keyboard shortcuts and Sign out. Appearance includes the personal theme and language preferences.
 
 ## Changelog
+
+### 2026-08-27
+
+- Kept the System Helper composer editable during execution and made its stable Send target switch to Stop while the transcript owns loading feedback.
+
+### 2026-08-27
+
+- Removed browser-owned Skill permission decisions; the shell now observes server-owned automatic execution state and results.
+
+### 2026-08-27
+
+- Replaced browser-local System Helper conversation and proposal ownership with a persisted Agent execution identifier and server-owned messages, approvals, and results.
+
+### 2026-08-27
+
+- Removed Terminal from primary navigation because host execution belongs to saved Skill scripts rather than a generic command surface.
+
+### 2026-08-26
+
+- Centered the shell-level Agent Chat surface and capped its complete width at `1200px`.
+
+### 2026-08-26
+
+- Simplified the configured shell composer to the input and send action while retaining an accessible Agent Chat label.
+
+### 2026-08-26
+
+- Made the shell-level Agent Chat composer conditional on a provider binding and defined the unconfigured setup link.
+
+### 2026-08-25
+
+- Replaced the team switcher and team-scoped shell session with a fixed WorkLite mark and a single personal workspace session.
+- Removed team administration and team-specific access-state requirements from the shell.
 
 ### 2026-08-24
 

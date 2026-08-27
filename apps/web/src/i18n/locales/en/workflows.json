@@ -28,6 +28,8 @@
     "aiEdit": "AI edit",
     "run": "Run",
     "previewStarted": "Preview run started",
+    "saveBeforeRun": "Save the workflow before running it.",
+    "running": "Starting...",
     "step": "Step {{position}}",
     "agentVersion": "Agent version",
     "errorPolicy": "Error policy",
