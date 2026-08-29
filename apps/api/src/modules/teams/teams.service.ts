@@ -14,10 +14,9 @@ export class WorkspaceService {
     return rows;
   }
 
-  async getWorkspace(_request: unknown, _slug = PERSONAL_WORKSPACE_SLUG) {
-    const [row] = await this.db.select({ id: workspaces.id, slug: workspaces.slug, name: workspaces.name }).from(workspaces).where(eq(workspaces.slug, PERSONAL_WORKSPACE_SLUG)).limit(1);
-    const [fallback] = row ? [row] : await this.db.select({ id: workspaces.id, slug: workspaces.slug, name: workspaces.name }).from(workspaces).limit(1);
-    if (!fallback) throw new NotFoundException('Personal workspace not found');
-    return fallback;
+  async getWorkspace(_request: unknown, slug = PERSONAL_WORKSPACE_SLUG) {
+    const [workspace] = await this.db.select({ id: workspaces.id, slug: workspaces.slug, name: workspaces.name }).from(workspaces).where(eq(workspaces.slug, slug)).limit(1);
+    if (!workspace) throw new NotFoundException(`Workspace ${slug} not found`);
+    return workspace;
   }
 }

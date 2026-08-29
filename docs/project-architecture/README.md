@@ -147,7 +147,7 @@ Workspace (one per installation)
                 `-- NodeRun
 ```
 
-All workspace-owned records include `workspace_id`. The API resolves the singleton workspace from installation configuration and applies workspace filtering to every resource query. There are no accounts, memberships, invitations, roles, or authorization checks in this product shape.
+All workspace-owned records include `workspace_id`. The API resolves the singleton workspace by the requested canonical workspace slug and applies workspace filtering to every resource query. A missing slug is an error; the API never substitutes another workspace. There are no accounts, memberships, invitations, roles, or authorization checks in this product shape.
 
 ## Agent Architecture
 
@@ -452,6 +452,11 @@ Adding a deferred capability requires an approved architecture change.
 - Approved persisted, sequence-numbered Agent execution events delivered through Server-Sent Events for live model deltas, tool lifecycle, status, and terminal updates.
 - Reused the existing Commands SSE connection and replay pattern with `Last-Event-ID`; kept REST execution endpoints as the authoritative mutation and snapshot contract.
 - Kept browser disconnects non-cancelling and accepted snapshot-only recovery for pre-existing executions without historical event records.
+
+### 2026-08-29 - Remove Workspace Resolution Compatibility Fallback
+
+- Removed the workspace lookup fallback that silently selected the first database row when the canonical workspace was missing.
+- Workspace resolution now uses the requested slug directly and fails with a not-found response when that workspace does not exist.
 
 ### 2026-08-28 - Recoverable And Diagnosable Helper Executions
 
