@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core';
 
 const timestamp = (name: string) => integer(name, { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`);
 
@@ -23,19 +23,68 @@ export const workflows = sqliteTable('workflows', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), state: text('state').$type<'draft' | 'published'>().notNull().default('draft'), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
 });
 
+export type StoredWorkflowInputMapping =
+  | { source: 'workflow.input' }
+  | { source: 'previous.output' }
+  | { source: 'literal'; value: unknown };
+
 export type StoredWorkflowNode = {
   id: string;
   position: number;
   type: string;
   typeVersion: string;
   config: unknown;
-  input: { source: 'workflow.input' | 'previous.output' | 'literal'; value?: unknown };
+  input: StoredWorkflowInputMapping;
   errorPolicy: 'stop' | 'retry';
 };
 
+export type StoredWorkflowDefinition = {
+  schemaVersion: number;
+  input: { example?: unknown };
+  defaults: { errorPolicy: 'stop' | 'retry' };
+  nodes: StoredWorkflowNode[];
+};
+
+export type StoredWorkflowEditOperation =
+  | { type: 'addNode'; node: StoredWorkflowNode; index: number }
+  | { type: 'removeNode'; nodeId: string }
+  | { type: 'updateNode'; nodeId: string; patch: Partial<Omit<StoredWorkflowNode, 'id' | 'position'>> }
+  | { type: 'moveNode'; nodeId: string; index: number }
+  | { type: 'updateSettings'; input?: { example?: unknown }; defaults?: { errorPolicy: 'stop' | 'retry' } };
+
+export const emptyWorkflowDefinition: StoredWorkflowDefinition = {
+  schemaVersion: 1,
+  input: {},
+  defaults: { errorPolicy: 'stop' },
+  nodes: [],
+};
+
+export const workflowDrafts = sqliteTable('workflow_drafts', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  workflowId: text('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }),
+  currentRevisionId: text('current_revision_id'),
+  definition: text('definition', { mode: 'json' }).$type<StoredWorkflowDefinition>().notNull().default(emptyWorkflowDefinition),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (table) => [unique().on(table.workflowId)]);
+
+export const workflowEditRevisions = sqliteTable('workflow_edit_revisions', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  workflowId: text('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }),
+  draftId: text('draft_id').notNull().references(() => workflowDrafts.id, { onDelete: 'cascade' }),
+  parentRevisionId: text('parent_revision_id'),
+  source: text('source').$type<'manual' | 'assistant' | 'migration'>().notNull(),
+  sourceInstruction: text('source_instruction'),
+  operations: text('operations', { mode: 'json' }).$type<StoredWorkflowEditOperation[]>().notNull().default([]),
+  snapshot: text('snapshot', { mode: 'json' }).$type<StoredWorkflowDefinition>().notNull(),
+  createdAt: timestamp('created_at'),
+});
+
 export const workflowVersions = sqliteTable('workflow_versions', {
-  id: text('id').primaryKey(), workflowId: text('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }), version: integer('version').notNull().default(1), published: integer('published', { mode: 'boolean' }).notNull().default(false),
-  schemaVersion: integer('schema_version').notNull().default(1), nodes: text('nodes', { mode: 'json' }).$type<StoredWorkflowNode[]>().notNull().default([]), createdAt: timestamp('created_at'),
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'cascade' }), workflowId: text('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }), version: integer('version').notNull().default(1), published: integer('published', { mode: 'boolean' }).notNull().default(false),
+  schemaVersion: integer('schema_version').notNull().default(1), nodes: text('nodes', { mode: 'json' }).$type<StoredWorkflowNode[]>().notNull().default([]), definition: text('definition', { mode: 'json' }).$type<StoredWorkflowDefinition | null>(), sourceRevisionId: text('source_revision_id'), publishedAt: integer('published_at', { mode: 'timestamp_ms' }), publishedBy: text('published_by'), createdAt: timestamp('created_at'),
 });
 
 export const workflowRuns = sqliteTable('workflow_runs', {
@@ -157,6 +206,8 @@ export const auditLogs = sqliteTable('audit_logs', {
 export type Workspace = typeof workspaces.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
 export type Workflow = typeof workflows.$inferSelect;
+export type WorkflowDraft = typeof workflowDrafts.$inferSelect;
+export type WorkflowEditRevision = typeof workflowEditRevisions.$inferSelect;
 export type WorkflowVersion = typeof workflowVersions.$inferSelect;
 export type WorkflowRun = typeof workflowRuns.$inferSelect;
 export type CommandExecution = typeof commandExecutions.$inferSelect;

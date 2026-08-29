@@ -7,7 +7,7 @@ import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { CopyableId } from '@/components/copyable-id';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
-import { useWorkflowQuery } from '@/api/queries';
+import { useWorkflowQuery, useWorkflowVersionsQuery } from '@/api/queries';
 
 export const Route = createFileRoute('/workflows/$workflowId/versions')({
   component: WorkflowVersionsPage,
@@ -19,11 +19,7 @@ function WorkflowVersionsPage() {
   const { workflowId } = Route.useParams();
   const workspaceSlug = "personal";
   const { data: workflow } = useWorkflowQuery(workspaceSlug, workflowId);
-  const versions = workflow
-    ? [
-        { id: workflow.latestVersionId ?? 'draft', publishedAt: workflow.updatedAt, publisher: 'Current user', steps: workflow.stepCount, lastRun: workflow.lastRunStatus === 'succeeded' ? 'completed' as const : workflow.lastRunStatus === 'failed' ? 'failed' as const : 'queued' as const },
-      ]
-    : [];
+  const { data: versions = [] } = useWorkflowVersionsQuery(workspaceSlug, workflowId);
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
@@ -45,10 +41,10 @@ function WorkflowVersionsPage() {
               <CollectionRow key={item.id}>
                 <CopyableId value={item.id} />
                 <span className="tabular-nums text-[13px]">{formatDateTime(item.publishedAt, locale)}</span>
-                <span className="text-[13px]">{item.publisher}</span>
-                <span className="tabular-nums text-[13px]">{item.steps}</span>
-                <span className="flex items-center gap-3 text-[13px]">
-                  {t(`common:status.${item.lastRun}`)}
+                <span className="text-[13px]">{item.publishedBy}</span>
+                <span className="tabular-nums text-[13px]">{item.definition.nodes.length}</span>
+                <span className="flex items-center gap-3 text-[13px] text-muted-foreground">
+                  {t('common:empty.dash')}
                   <ButtonLink workspaceSlug={workspaceSlug} workflowId={workflowId} />
                 </span>
               </CollectionRow>

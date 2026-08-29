@@ -1,10 +1,11 @@
-import { Plus } from 'lucide-react';
+import { ArrowDown, ArrowUp, Copy, Plus, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/status-badge';
 import type { WorkflowStep } from '@/mock/data';
 import { cn } from '@/lib/utils';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 type WorkflowStepsProps = {
   steps: WorkflowStep[];
@@ -12,10 +13,11 @@ type WorkflowStepsProps = {
   onSelect: (id: string) => void;
   onAdd: (index: number) => void;
   onMove: (id: string, direction: -1 | 1) => void;
+  onDuplicate: (id: string) => void;
   onRemove: (id: string) => void;
 };
 
-function WorkflowSteps({ steps, selectedId, onSelect, onAdd, onMove, onRemove }: WorkflowStepsProps) {
+function WorkflowSteps({ steps, selectedId, onSelect, onAdd, onMove, onDuplicate, onRemove }: WorkflowStepsProps) {
   const { t } = useTranslation('workflows');
 
   return (
@@ -47,16 +49,39 @@ function WorkflowSteps({ steps, selectedId, onSelect, onAdd, onMove, onRemove }:
                   {step.status ? <StatusBadge status={step.status} /> : null}
                 </div>
               </button>
-              <div className="mt-3 flex flex-wrap gap-1">
-                <Button type="button" variant="ghost" size="sm" disabled={index === 0} onClick={() => onMove(step.id, -1)}>
-                  {t('editor.moveUp')}
-                </Button>
-                <Button type="button" variant="ghost" size="sm" disabled={index === steps.length - 1} onClick={() => onMove(step.id, 1)}>
-                  {t('editor.moveDown')}
-                </Button>
-                <Button type="button" variant="ghost" size="sm" onClick={() => onRemove(step.id)}>
-                  {t('editor.remove')}
-                </Button>
+              <div className="mt-3 flex items-center gap-1 border-t border-border pt-3">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button type="button" variant="ghost" size="icon-compact" disabled={index === 0} onClick={() => onMove(step.id, -1)} aria-label={t('editor.moveUp')}>
+                      <ArrowUp className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t('editor.moveUp')}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button type="button" variant="ghost" size="icon-compact" disabled={index === steps.length - 1} onClick={() => onMove(step.id, 1)} aria-label={t('editor.moveDown')}>
+                      <ArrowDown className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t('editor.moveDown')}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button type="button" variant="ghost" size="icon-compact" onClick={() => onDuplicate(step.id)} aria-label={t('editor.duplicate')}>
+                      <Copy className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t('editor.duplicate')}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button type="button" variant="ghost" size="icon-compact" onClick={() => onRemove(step.id)} aria-label={t('editor.remove')}>
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t('editor.remove')}</TooltipContent>
+                </Tooltip>
               </div>
             </article>
             <div className="flex justify-center py-2">

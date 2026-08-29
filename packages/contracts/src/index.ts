@@ -242,6 +242,55 @@ export type WorkliteScriptResult =
   | { type: 'settings'; appearance: WorkspaceSettingsView['appearance']; locale: WorkspaceSettingsView['locale'] }
   | { type: 'snapshot' };
 
+export type WorkflowInputMapping =
+  | { source: 'workflow.input' }
+  | { source: 'previous.output' }
+  | { source: 'literal'; value: unknown };
+
+export type WorkflowNodeDefinition = {
+  id: string;
+  position: number;
+  type: string;
+  typeVersion: string;
+  config: unknown;
+  input: WorkflowInputMapping;
+  errorPolicy: NodeErrorPolicy;
+};
+
+export type WorkflowDefinition = {
+  schemaVersion: number;
+  input: { example?: unknown };
+  defaults: { errorPolicy: NodeErrorPolicy };
+  nodes: WorkflowNodeDefinition[];
+};
+
+export type WorkflowEditOperation =
+  | { type: 'addNode'; node: WorkflowNodeDefinition; index: number }
+  | { type: 'removeNode'; nodeId: string }
+  | { type: 'updateNode'; nodeId: string; patch: Partial<Omit<WorkflowNodeDefinition, 'id' | 'position'>> }
+  | { type: 'moveNode'; nodeId: string; index: number }
+  | { type: 'updateSettings'; input?: { example?: unknown }; defaults?: { errorPolicy: NodeErrorPolicy } };
+
+export type WorkflowDraftView = {
+  id: string;
+  workflowId: string;
+  revisionId: string;
+  definition: WorkflowDefinition;
+  canUndo: boolean;
+  canRedo: boolean;
+  updatedAt: string;
+};
+
+export type WorkflowRevisionView = {
+  id: string;
+  workflowId: string;
+  parentRevisionId: string | null;
+  source: 'manual' | 'assistant' | 'migration';
+  sourceInstruction: string | null;
+  operations: WorkflowEditOperation[];
+  createdAt: string;
+};
+
 export type WorkflowView = {
   id: string;
   workspaceSlug: string;
@@ -254,8 +303,31 @@ export type WorkflowView = {
   updatedAt: string;
 };
 
+export type WorkflowDetailView = WorkflowView & {
+  draft: WorkflowDraftView;
+};
+
+export type ApplyWorkflowDraftOperationsRequest = {
+  baseRevisionId: string;
+  operations: WorkflowEditOperation[];
+  source?: 'manual' | 'assistant';
+  sourceInstruction?: string;
+};
+
 export type CreateWorkflowRequest = {
   name: string;
+  definition?: WorkflowDefinition;
+};
+
+export type WorkflowVersionView = {
+  id: string;
+  workflowId: string;
+  version: number;
+  schemaVersion: number;
+  definition: WorkflowDefinition;
+  sourceRevisionId: string | null;
+  publishedAt: string;
+  publishedBy: string;
 };
 
 export type RunView = {

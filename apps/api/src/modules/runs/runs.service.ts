@@ -36,18 +36,6 @@ export class RunsService {
     return this.toView(row.run, row.workflow, row.version, workspaceSlug, 'You');
   }
 
-  async create(request: Request, workspaceSlug: string, workflowId: string, input: CreateRunRequest): Promise<{ runId: string }> {
-    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [workflow] = await this.db.select().from(workflows).where(eq(workflows.id, workflowId)).limit(1);
-    if (!workflow || workflow.workspaceId !== team.id) throw new NotFoundException('Workflow not found');
-    const [version] = await this.db.select().from(workflowVersions).where(eq(workflowVersions.workflowId, workflowId)).orderBy(desc(workflowVersions.version)).limit(1);
-    if (!version) throw new NotFoundException('Workflow version not found');
-    const runId = `run_${randomUUID()}`;
-    await this.db.insert(workflowRuns).values({ id: runId, workspaceId: team.id, workflowId, workflowVersionId: version.id, input: input.input ?? null, status: 'queued' });
-    this.schedule(runId);
-    return { runId };
-  }
-
   async createForVersion(request: Request, workflowVersionId: string, input: CreateRunRequest): Promise<{ runId: string }> {
     const [version] = await this.db.select({ version: workflowVersions, workflow: workflows })
       .from(workflowVersions)

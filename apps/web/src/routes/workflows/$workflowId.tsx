@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import { ArrowLeft, Check, FilePlus2, PanelRight, Plus, Redo2, Search, Settings2, SlidersHorizontal, Undo2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -10,9 +11,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SaveIndicator } from '@/components/save-indicator';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { WorkflowSteps } from '@/components/workflow-steps';
+import { AgentMark } from '@/components/agent-mark';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { WorkflowStep } from '@/mock/data';
+import { workflowSteps as seededWorkflowSteps } from '@/mock/data';
+import type { WorkflowDefinition, WorkflowEditOperation } from '@worklite/contracts';
 import { api } from '@/api/client';
 import { useAgentsQuery, useWorkflowQuery, workflowsQueryKey } from '@/api/queries';
 import { queryClient } from '@/lib/query-client';
@@ -34,6 +40,17 @@ function WorkflowEditorPage() {
   const [steps, setSteps] = useState<WorkflowStep[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(steps[0]?.id ?? null);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'unsaved'>(isNew ? 'unsaved' : 'saved');
+  const [draftRevisionId, setDraftRevisionId] = useState('');
+  const [persistedDefinition, setPersistedDefinition] = useState<WorkflowDefinition>({ schemaVersion: 1, input: {}, defaults: { errorPolicy: 'stop' }, nodes: [] });
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState('');
+  const [insertIndex, setInsertIndex] = useState(0);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(isNew);
+  const [executionPolicy, setExecutionPolicy] = useState<'stop' | 'retry'>('stop');
   const [aiOpen, setAiOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [publishOpen, setPublishOpen] = useState(false);
@@ -52,6 +69,18 @@ function WorkflowEditorPage() {
   useEffect(() => {
     if (!existing) return;
     setName(existing.name);
+    if (existing.draft) {
+      const definition = existing.draft.definition;
+      setSteps(toEditorSteps(definition));
+      setSelectedId(definition.nodes[0]?.id ?? null);
+      setInsertIndex(definition.nodes.length);
+      setInput(typeof definition.input.example === 'string' ? definition.input.example : '');
+      setExecutionPolicy(definition.defaults.errorPolicy);
+      setDraftRevisionId(existing.draft.revisionId);
+      setPersistedDefinition(definition);
+      setCanUndo(existing.draft.canUndo);
+      setCanRedo(existing.draft.canRedo);
+    }
     setSaveState('saved');
   }, [existing]);
 
@@ -59,37 +88,135 @@ function WorkflowEditorPage() {
     return next.map((step, index) => ({ ...step, position: index + 1 }));
   }
 
-  function addStep(index: number) {
-    const agent = availableAgents[0];
+  function requestAdd(index: number) {
+    setInsertIndex(index);
+    setPaletteOpen(true);
+  }
+
+  function addStep(index: number, agentId: string) {
+    const agent = availableAgents.find((item) => item.id === agentId);
     const step: WorkflowStep = {
       id: `step_${Date.now()}`,
       position: index + 1,
-      agentId: agent?.id ?? 'agt_researcher',
-      agentName: agent?.name ?? 'Researcher',
-      agentVersion: agent?.version ?? 'v1',
+      agentId: agent?.id ?? agentId,
+      agentName: agent?.name ?? 'Agent',
+      agentVersion: agent?.version ?? 'draft',
       inputSummary: 'input → output',
-      errorPolicy: 'stop',
+      errorPolicy: executionPolicy,
     };
     const next = [...steps];
     next.splice(index, 0, step);
     setSteps(reindex(next));
     setSelectedId(step.id);
+    setInsertIndex(index + 1);
+    setPaletteOpen(false);
     setSaveState('unsaved');
   }
 
-  function save() {
+  function currentDefinition(): WorkflowDefinition {
+    return {
+      schemaVersion: 1,
+      input: input ? { example: input } : {},
+      defaults: { errorPolicy: executionPolicy },
+      nodes: steps.map((step, index) => ({
+        id: step.id,
+        position: index + 1,
+        type: 'worklite/agent',
+        typeVersion: '1',
+        config: { agentId: step.agentId, agentName: step.agentName, agentVersion: step.agentVersion },
+        input: index === 0 ? { source: 'workflow.input' as const } : { source: 'previous.output' as const },
+        errorPolicy: step.errorPolicy,
+      })),
+    };
+  }
+
+  function replaceOperations(previous: WorkflowDefinition, next: WorkflowDefinition): WorkflowEditOperation[] {
+    return [
+      ...previous.nodes.map((node) => ({ type: 'removeNode' as const, nodeId: node.id })),
+      ...next.nodes.map((node, index) => ({ type: 'addNode' as const, node, index })),
+      { type: 'updateSettings' as const, input: next.input, defaults: next.defaults },
+    ];
+  }
+
+  function syncDraft(detail: typeof existing) {
+    if (!detail?.draft) return;
+    const definition = detail.draft.definition;
+    setSteps(toEditorSteps(definition));
+    setSelectedId(definition.nodes[0]?.id ?? null);
+    setInsertIndex(definition.nodes.length);
+    setInput(typeof definition.input.example === 'string' ? definition.input.example : '');
+    setExecutionPolicy(definition.defaults.errorPolicy);
+    setDraftRevisionId(detail.draft.revisionId);
+    setPersistedDefinition(definition);
+    setCanUndo(detail.draft.canUndo);
+    setCanRedo(detail.draft.canRedo);
+  }
+
+  function duplicateStep(id: string) {
+    const source = steps.find((step) => step.id === id);
+    if (!source) return;
+    const index = steps.findIndex((step) => step.id === id);
+    const duplicate = { ...source, id: `step_${Date.now()}`, position: index + 2 };
+    setSteps(reindex([...steps.slice(0, index + 1), duplicate, ...steps.slice(index + 1)]));
+    setSelectedId(duplicate.id);
+    setInsertIndex(index + 2);
+    setSaveState('unsaved');
+  }
+
+  async function save() {
     if (saveState === 'saving') return;
     setSaveState('saving');
     setSaveError('');
-    const request = isNew ? api.createWorkflow(workspaceSlug, { name }) : api.updateWorkflow(workspaceSlug, workflowId, { name });
-    void request.then(async (saved) => {
+    try {
+      if (isNew) {
+        const saved = await api.createWorkflow(workspaceSlug, { name, definition: currentDefinition() });
+        syncDraft(saved);
+        setSaveState('saved');
+        void navigate({ to: '/workflows/$workflowId', params: { workflowId: saved.id }, replace: true });
+        return;
+      }
+      await api.updateWorkflow(workspaceSlug, workflowId, { name });
+      const saved = await api.applyWorkflowOperations(workspaceSlug, workflowId, { baseRevisionId: draftRevisionId, operations: replaceOperations(persistedDefinition, currentDefinition()) });
+      syncDraft(saved);
       setSaveState('saved');
-      if (isNew) void navigate({ to: '/workflows/$workflowId', params: { workflowId: saved.id }, replace: true });
       void queryClient.invalidateQueries({ queryKey: workflowsQueryKey() }).catch(() => undefined);
-    }).catch((error: unknown) => {
+    } catch (error: unknown) {
       setSaveState('unsaved');
       setSaveError(error instanceof Error ? error.message : t('editor.saveFailed'));
-    });
+    }
+  }
+
+  async function moveRevision(direction: 'undo' | 'redo') {
+    if (isNew || saveState === 'saving') return;
+    setSaveState('saving');
+    try {
+      const saved = direction === 'undo' ? await api.undoWorkflow(workspaceSlug, workflowId) : await api.redoWorkflow(workspaceSlug, workflowId);
+      syncDraft(saved);
+      setSaveState('saved');
+    } catch (error) {
+      setSaveState('unsaved');
+      setSaveError(error instanceof Error ? error.message : t('editor.saveFailed'));
+    }
+  }
+
+  async function publishWorkflow() {
+    if (isNew) {
+      toast.message(t('editor.saveBeforeRun'));
+      return;
+    }
+    if (saveState !== 'saved') {
+      toast.message(t('editor.saveBeforePublish'));
+      return;
+    }
+    setPublishOpen(false);
+    try {
+      await api.publishWorkflow(workspaceSlug, workflowId);
+      await queryClient.invalidateQueries({ queryKey: ['workflow', workflowId] });
+      await queryClient.invalidateQueries({ queryKey: workflowsQueryKey() });
+      toast.success(t('editor.published'));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('editor.publishFailed'));
+    }
   }
 
   async function runWorkflow() {
@@ -124,118 +251,197 @@ function WorkflowEditorPage() {
   }
 
   const logLines = useMemo(() => logs, [logs]);
+  const filteredAgents = useMemo(() => {
+    const query = paletteQuery.trim().toLowerCase();
+    if (!query) return availableAgents;
+    return availableAgents.filter((agent) => `${agent.name} ${agent.responsibility} ${agent.model}`.toLowerCase().includes(query));
+  }, [availableAgents, paletteQuery]);
+
+  const insertionLabel = steps.length === 0
+    ? t('editor.insertFirst')
+    : t('editor.insertAt', { position: insertIndex + 1 });
+
+  function applyTemplate(template: 'blank' | 'daily') {
+    if (template === 'blank') {
+      setName(t('editor.untitled'));
+      setInput('');
+      setSteps([]);
+      setSelectedId(null);
+      setInsertIndex(0);
+    } else {
+      const source = seededWorkflowSteps.wf_daily_brief ?? [];
+      const next = source.map((step, index) => ({ ...step, id: `step_${Date.now()}_${index}`, position: index + 1 }));
+      setName(t('editor.templateDailyName'));
+      setInput('topic: daily market brief');
+      setSteps(next);
+      setSelectedId(next[0]?.id ?? null);
+      setInsertIndex(next.length);
+    }
+    setSaveState('unsaved');
+    setTemplateOpen(false);
+  }
+
+  const palette = (
+    <div className="flex min-h-0 flex-col">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">{t('editor.agentPalette')}</h2>
+          <p className="mt-1 text-[12px] text-muted-foreground">{insertionLabel}</p>
+        </div>
+        <FilePlus2 className="size-4 text-muted-foreground" aria-hidden="true" />
+      </div>
+      <label className="relative mt-4 block">
+        <span className="sr-only">{t('editor.searchAgents')}</span>
+        <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" aria-hidden="true" />
+        <Input className="pl-8" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} placeholder={t('editor.searchAgents')} />
+      </label>
+      <div className="mt-3 min-h-0 flex-1 space-y-1 overflow-auto">
+        {filteredAgents.length === 0 ? <p className="px-2 py-6 text-center text-[13px] text-muted-foreground">{t('editor.noAgents')}</p> : null}
+        {filteredAgents.map((agent) => (
+          <button
+            key={agent.id}
+            type="button"
+            className="flex w-full items-center gap-3 rounded-md border border-transparent px-2 py-2 text-left transition-colors duration-[120ms] hover:border-border hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45"
+            onClick={() => addStep(insertIndex, agent.id)}
+          >
+            <AgentMark initials={agent.initials ?? agent.name.slice(0, 2).toUpperCase()} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] font-medium">{agent.name}</span>
+              <span className="block truncate text-[12px] text-muted-foreground">{agent.model}</span>
+            </span>
+            <Plus className="size-4 text-muted-foreground" aria-hidden="true" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const inspector = selected ? (
+    <div className="flex min-h-0 flex-col">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">{t('editor.step', { position: selected.position })}</p>
+          <h2 className="mt-1 text-sm font-semibold">{selected.agentName}</h2>
+        </div>
+        <PanelRight className="size-4 text-muted-foreground" aria-hidden="true" />
+      </div>
+      <div className="mt-5 flex flex-col gap-4">
+        <Field label={t('editor.agentVersion')} htmlFor="agent">
+          <Select
+            value={selected.agentId}
+            onValueChange={(value) => {
+              const agent = availableAgents.find((item) => item.id === value);
+              setSteps((current) => current.map((step) => step.id === selectedId ? { ...step, agentId: value, agentName: agent?.name ?? step.agentName, agentVersion: agent?.version ?? step.agentVersion } : step));
+              setSaveState('unsaved');
+            }}
+          >
+            <SelectTrigger id="agent"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {availableAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.name} {agent.version}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label={t('editor.errorPolicy')} htmlFor="policy">
+          <Select
+            value={selected.errorPolicy}
+            onValueChange={(value) => {
+              setSteps((current) => current.map((step) => step.id === selectedId ? { ...step, errorPolicy: value as 'stop' | 'retry' } : step));
+              setSaveState('unsaved');
+            }}
+          >
+            <SelectTrigger id="policy"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="stop">{t('editor.stop')}</SelectItem>
+              <SelectItem value="retry">{t('editor.retry')}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <div className="rounded-md border border-border bg-surface-subtle p-3">
+          <p className="text-[12px] font-medium">{t('editor.inputMapping')}</p>
+          <p className="mt-1 font-mono text-[12px] text-muted-foreground">{selected.inputSummary}</p>
+        </div>
+        <p className="text-[13px] text-muted-foreground">{t('editor.overridesHint')}</p>
+      </div>
+    </div>
+  ) : (
+    <div className="flex h-full min-h-32 items-center justify-center text-center text-[13px] text-muted-foreground">{t('editor.selectStep')}</div>
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <WorkspaceChrome
+        back={<Button variant="ghost" size="icon-compact" type="button" aria-label={t('common:actions.back')} onClick={() => void navigate({ to: '/workflows' })}><ArrowLeft className="size-4" /></Button>}
         crumbs={[
           { label: t('title'), to: '/workflows' },
           { label: isNew ? t('editor.new') : existing?.name ?? t('editor.fallback') },
         ]}
         status={<SaveIndicator state={saveState} />}
         actions={
-          <>
-            <Button asChild variant="ghost" size="compact">
+          <div className="flex items-center gap-1.5">
+            <Button variant="ghost" size="icon-compact" className="lg:hidden" type="button" aria-label={t('editor.agentPalette')} onClick={() => setPaletteOpen(true)}><Plus className="size-4" /></Button>
+            <Button variant="ghost" size="icon-compact" className="xl:hidden" type="button" aria-label={t('editor.configureStep')} onClick={() => setInspectorOpen(true)} disabled={!selected}><PanelRight className="size-4" /></Button>
+            <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" type="button" aria-label={t('editor.undo')} onClick={() => void moveRevision('undo')} disabled={!canUndo || saveState === 'saving'}><Undo2 className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('editor.undo')}</TooltipContent></Tooltip>
+            <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" type="button" aria-label={t('editor.redo')} onClick={() => void moveRevision('redo')} disabled={!canRedo || saveState === 'saving'}><Redo2 className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('editor.redo')}</TooltipContent></Tooltip>
+            <Button variant="ghost" size="compact" onClick={() => setSettingsOpen(true)}><SlidersHorizontal className="size-4" />{t('editor.workflowSettings')}</Button>
+            <Button asChild variant="ghost" size="compact" className="hidden sm:inline-flex">
               <Link to="/workflows/$workflowId/versions" params={{ workflowId }}>
                 {t('editor.versions')}
               </Link>
             </Button>
-            <Button variant="ghost" size="compact" onClick={() => setAiOpen((value) => !value)}>
+            <Button variant="ghost" size="compact" className="hidden md:inline-flex" onClick={() => setAiOpen((value) => !value)}>
               {t('editor.aiEdit')}
             </Button>
-            <Button variant="secondary" size="compact" onClick={save} disabled={saveState === 'saving'}>
+            <Button variant="secondary" size="compact" className="hidden sm:inline-flex" onClick={save} disabled={saveState === 'saving'}>
               {t('common:actions.save')}
             </Button>
-            <Button variant="secondary" size="compact" onClick={() => void runWorkflow()} disabled={runSubmitting}>
+            <Button variant="secondary" size="compact" className="hidden sm:inline-flex" onClick={() => void runWorkflow()} disabled={runSubmitting}>
               {runSubmitting ? t('editor.running') : t('editor.run')}
             </Button>
             <Button size="compact" onClick={() => setPublishOpen(true)}>
               {t('common:actions.publish')}
             </Button>
-          </>
+          </div>
         }
       />
       <div className="flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1 overflow-auto px-6 py-6">
-          <div className="mx-auto max-w-2xl">
-            <Field label={t('editor.name')} htmlFor="wf-name">
-              <Input id="wf-name" value={name} onChange={(event) => { setName(event.target.value); setSaveState('unsaved'); }} />
-            </Field>
-            {saveError ? <p className="mt-2 text-[13px] text-danger" role="alert">{saveError}</p> : null}
-            <Field className="mt-4" label={t('editor.input')} htmlFor="wf-input">
-              <Textarea id="wf-input" className="font-mono text-[13px]" value={input} onChange={(event) => { setInput(event.target.value); setSaveState('unsaved'); }} />
-            </Field>
-            <div className="mt-6">
-              <WorkflowSteps
-                steps={steps}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-                onAdd={addStep}
-                onMove={moveStep}
-                onRemove={(id) => {
-                  const next = steps.filter((step) => step.id !== id);
-                  setSteps(reindex(next));
-                  setSelectedId(next[0]?.id ?? null);
-                  setSaveState('unsaved');
-                }}
-              />
+        <aside className="hidden w-64 shrink-0 overflow-auto border-r border-border bg-surface p-4 lg:flex">{palette}</aside>
+        <main className="min-w-0 flex-1 overflow-auto">
+          <div className="border-b border-border bg-surface px-4 py-3 sm:px-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">{t('editor.sequence')}</p>
+                <p className="mt-1 text-[13px] text-muted-foreground">{t('editor.stepCount', { count: steps.length })}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" size="compact" className="sm:hidden" onClick={save} disabled={saveState === 'saving'}><Check className="size-4" />{t('common:actions.save')}</Button>
+                <Button variant="secondary" size="compact" className="sm:hidden" onClick={() => void runWorkflow()} disabled={runSubmitting}>{t('editor.run')}</Button>
+              </div>
             </div>
           </div>
-        </div>
-        {panelOpen ? (
-          <aside className="hidden w-[360px] shrink-0 overflow-auto border-l border-border bg-surface p-4 xl:block">
-            <h2 className="text-sm font-semibold">{t('editor.step', { position: selected?.position })}</h2>
-            <div className="mt-4 flex flex-col gap-4">
-              <Field label={t('editor.agentVersion')} htmlFor="agent">
-                <Select
-                  value={selected?.agentId}
-                  onValueChange={(value) => {
-                    const agent = availableAgents.find((item) => item.id === value);
-                    setSteps((current) =>
-                      current.map((step) =>
-                        step.id === selectedId
-                          ? { ...step, agentId: value, agentName: agent?.name ?? step.agentName, agentVersion: agent?.version ?? step.agentVersion }
-                          : step,
-                      ),
-                    );
-                    setSaveState('unsaved');
-                  }}
-                >
-                  <SelectTrigger id="agent">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableAgents.map((agent) => (
-                      <SelectItem key={agent.id} value={agent.id}>
-                        {agent.name} {agent.version}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label={t('editor.errorPolicy')} htmlFor="policy">
-                <Select
-                  value={selected?.errorPolicy}
-                  onValueChange={(value) => {
-                    setSteps((current) =>
-                      current.map((step) => (step.id === selectedId ? { ...step, errorPolicy: value as 'stop' | 'retry' } : step)),
-                    );
-                    setSaveState('unsaved');
-                  }}
-                >
-                  <SelectTrigger id="policy">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="stop">{t('editor.stop')}</SelectItem>
-                    <SelectItem value="retry">{t('editor.retry')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <p className="text-[13px] text-muted-foreground">{t('editor.overridesHint')}</p>
-            </div>
-          </aside>
-        ) : null}
+          <div className="px-4 py-6 sm:px-6">
+            {saveError ? <p className="mb-4 text-[13px] text-danger" role="alert">{saveError}</p> : null}
+            <WorkflowSteps
+              steps={steps}
+              selectedId={selectedId}
+              onSelect={(id) => {
+                const step = steps.find((item) => item.id === id);
+                setSelectedId(id);
+                setInsertIndex(step?.position ?? steps.length);
+              }}
+              onAdd={requestAdd}
+              onMove={moveStep}
+              onDuplicate={duplicateStep}
+              onRemove={(id) => {
+                const next = steps.filter((step) => step.id !== id);
+                setSteps(reindex(next));
+                setSelectedId(next[0]?.id ?? null);
+                setInsertIndex(Math.min(insertIndex, next.length));
+                setSaveState('unsaved');
+              }}
+            />
+          </div>
+        </main>
+        {panelOpen ? <aside className="hidden w-[360px] shrink-0 overflow-auto border-l border-border bg-surface p-4 xl:block">{inspector}</aside> : null}
         {aiOpen ? (
           <aside className="hidden w-[360px] shrink-0 overflow-auto border-l border-border bg-surface p-4 2xl:block">
             <h2 className="text-sm font-semibold">{t('editor.assistant')}</h2>
@@ -248,7 +454,7 @@ function WorkflowEditorPage() {
               <p className="font-medium">{t('editor.pendingOperation')}</p>
               <p className="mt-1 text-muted-foreground">{t('editor.pendingDescription')}</p>
               <div className="mt-2 flex gap-2">
-                <Button size="sm" onClick={() => { addStep(steps.length); toast.success(t('editor.applied')); }}>{t('editor.apply')}</Button>
+                <Button size="sm" onClick={() => { requestAdd(steps.length); toast.success(t('editor.applied')); }}>{t('editor.apply')}</Button>
                 <Button size="sm" variant="ghost">{t('editor.undo')}</Button>
               </div>
             </div>
@@ -274,6 +480,68 @@ function WorkflowEditorPage() {
           </div>
         </CollapsibleContent>
       </Collapsible>
+      <Dialog open={templateOpen} onOpenChange={setTemplateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('editor.chooseTemplate')}</DialogTitle>
+            <DialogDescription>{t('editor.chooseTemplateDescription')}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button type="button" className="rounded-lg border border-border bg-surface p-4 text-left transition-colors duration-[120ms] hover:border-brand hover:bg-brand-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45" onClick={() => applyTemplate('blank')}>
+              <p className="text-sm font-semibold">{t('editor.blankTemplate')}</p>
+              <p className="mt-1 text-[13px] text-muted-foreground">{t('editor.blankTemplateDescription')}</p>
+            </button>
+            <button type="button" className="rounded-lg border border-border bg-surface p-4 text-left transition-colors duration-[120ms] hover:border-brand hover:bg-brand-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45" onClick={() => applyTemplate('daily')}>
+              <p className="text-sm font-semibold">{t('editor.dailyTemplate')}</p>
+              <p className="mt-1 text-[13px] text-muted-foreground">{t('editor.dailyTemplateDescription')}</p>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className="max-h-[85vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle>{t('editor.workflowSettings')}</DialogTitle>
+            <DialogDescription>{t('editor.workflowSettingsDescription')}</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-5">
+            <section>
+              <h3 className="text-sm font-semibold">{t('editor.general')}</h3>
+              <Field className="mt-3" label={t('editor.name')} htmlFor="wf-name">
+                <Input id="wf-name" value={name} onChange={(event) => { setName(event.target.value); setSaveState('unsaved'); }} />
+              </Field>
+            </section>
+            <section>
+              <h3 className="text-sm font-semibold">{t('editor.inputs')}</h3>
+              <Field className="mt-3" label={t('editor.input')} htmlFor="wf-input">
+                <Textarea id="wf-input" className="font-mono text-[13px]" value={input} onChange={(event) => { setInput(event.target.value); setSaveState('unsaved'); }} />
+              </Field>
+            </section>
+            <section>
+              <h3 className="text-sm font-semibold">{t('editor.execution')}</h3>
+              <Field className="mt-3" label={t('editor.defaultErrorPolicy')} htmlFor="default-policy">
+                <Select value={executionPolicy} onValueChange={(value) => { setExecutionPolicy(value as 'stop' | 'retry'); setSaveState('unsaved'); }}>
+                  <SelectTrigger id="default-policy"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="stop">{t('editor.stop')}</SelectItem><SelectItem value="retry">{t('editor.retry')}</SelectItem></SelectContent>
+                </Select>
+              </Field>
+            </section>
+            <section className="rounded-md border border-border bg-surface-subtle p-3">
+              <h3 className="text-sm font-semibold">{t('editor.versioning')}</h3>
+              <p className="mt-1 text-[13px] text-muted-foreground">{t('editor.versioningHint')}</p>
+            </section>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setSettingsOpen(false)}>{t('common:actions.close')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Sheet open={paletteOpen} onOpenChange={setPaletteOpen}>
+        <SheetContent side="left" className="p-4 pt-5"><SheetHeader className="p-0 pr-10"><SheetTitle>{t('editor.agentPalette')}</SheetTitle><SheetDescription>{insertionLabel}</SheetDescription></SheetHeader><div className="mt-4 min-h-0 flex-1">{palette}</div></SheetContent>
+      </Sheet>
+      <Sheet open={inspectorOpen} onOpenChange={setInspectorOpen}>
+        <SheetContent side="right" className="overflow-auto p-4 pt-5"><SheetHeader className="sr-only"><SheetTitle>{t('editor.configureStep')}</SheetTitle><SheetDescription>{t('editor.selectStep')}</SheetDescription></SheetHeader>{inspector}</SheetContent>
+      </Sheet>
       <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
         <DialogContent>
           <DialogHeader>
@@ -285,11 +553,7 @@ function WorkflowEditorPage() {
           <DialogFooter>
             <Button variant="secondary" onClick={() => setPublishOpen(false)}>{t('common:actions.cancel')}</Button>
             <Button
-              onClick={() => {
-                setPublishOpen(false);
-                toast.success(t('editor.published'));
-                void navigate({ to: '/workflows' });
-              }}
+              onClick={() => void publishWorkflow()}
             >
               {t('common:actions.publish')}
             </Button>
@@ -298,4 +562,15 @@ function WorkflowEditorPage() {
       </Dialog>
     </div>
   );
+}
+
+function toEditorSteps(definition: WorkflowDefinition): WorkflowStep[] {
+  return definition.nodes.map((node) => {
+    const config = node.config && typeof node.config === 'object' && !Array.isArray(node.config) ? node.config as Record<string, unknown> : {};
+    const agentId = typeof config.agentId === 'string' ? config.agentId : node.id;
+    const agentName = typeof config.agentName === 'string' ? config.agentName : agentId;
+    const agentVersion = typeof config.agentVersion === 'string' ? config.agentVersion : 'draft';
+    const inputSummary = node.input.source === 'literal' ? 'literal → output' : node.input.source === 'workflow.input' ? 'input → output' : 'previous output → output';
+    return { id: node.id, position: node.position, agentId, agentName, agentVersion, inputSummary, errorPolicy: node.errorPolicy };
+  });
 }

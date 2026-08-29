@@ -17,11 +17,6 @@ export class RunsController {
     return this.runs.get(request, 'personal', runId);
   }
 
-  @Post('workflows/:workflowId/runs')
-  create(@Req() request: Request, @Param('workflowId') workflowId: string, @Body() body: CreateRunRequest) {
-    return this.runs.create(request, 'personal', workflowId, body);
-  }
-
   @Post('workflow-versions/:workflowVersionId/runs')
   createForVersion(@Req() request: Request, @Param('workflowVersionId') workflowVersionId: string, @Body() body: CreateRunRequest) {
     return this.runs.createForVersion(request, workflowVersionId, body);
