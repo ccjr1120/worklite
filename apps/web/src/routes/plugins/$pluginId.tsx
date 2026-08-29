@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { LoaderCircle, LogIn, Puzzle, RefreshCw, RotateCcw, Unplug } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import QRCode from 'qrcode';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { api } from '@/api/client';
@@ -31,6 +32,7 @@ function PluginConfigPage() {
   const [testState, setTestState] = useState<'idle' | 'pending' | 'available' | 'missing' | 'failed'>('idle');
   const [error, setError] = useState('');
   const [wechatPending, setWechatPending] = useState(false);
+  const [wechatQrImage, setWechatQrImage] = useState<string | null>(null);
   useEffect(() => {
     if (!plugin) return;
     setCommand(plugin.command);
@@ -38,6 +40,23 @@ function PluginConfigPage() {
     setSaveState('saved');
     setError('');
   }, [plugin]);
+
+  useEffect(() => {
+    const value = plugin?.wechat.qrCode;
+    if (!value) {
+      setWechatQrImage(null);
+      return;
+    }
+    if (value.startsWith('data:image/')) {
+      setWechatQrImage(value);
+      return;
+    }
+    let cancelled = false;
+    void QRCode.toDataURL(value, { width: 320, margin: 2, errorCorrectionLevel: 'M' })
+      .then((image) => { if (!cancelled) setWechatQrImage(image); })
+      .catch(() => { if (!cancelled) setWechatQrImage(null); });
+    return () => { cancelled = true; };
+  }, [plugin?.wechat.qrCode]);
 
   async function save() {
     if (!command.trim() || saving) return null;
@@ -129,7 +148,7 @@ function PluginConfigPage() {
               </div>
               <StatusBadge status={plugin.wechat.status} />
             </div>
-            {plugin.wechat.qrCode ? <div className="space-y-2"><img src={plugin.wechat.qrCode} alt={tPlugins('wechat.qrAlt')} className="size-48 rounded border border-border bg-white object-contain p-2" /><p className="text-[13px] text-muted-foreground">{tPlugins('wechat.scan')}</p></div> : null}
+            {plugin.wechat.qrCode ? <div className="space-y-2">{wechatQrImage ? <img src={wechatQrImage} alt={tPlugins('wechat.qrAlt')} className="size-48 rounded border border-border bg-white object-contain p-2" /> : <a href={plugin.wechat.qrCode} target="_blank" rel="noreferrer" className="text-sm text-brand underline underline-offset-4">{tPlugins('wechat.openQrLink')}</a>}<p className="text-[13px] text-muted-foreground">{tPlugins('wechat.scan')}</p></div> : null}
             <dl className="grid gap-3 text-[13px] sm:grid-cols-2"><div><dt className="text-muted-foreground">{tPlugins('wechat.botId')}</dt><dd className="font-mono">{plugin.wechat.botId || tPlugins('wechat.notConnected')}</dd></div><div><dt className="text-muted-foreground">{tPlugins('wechat.conversations')}</dt><dd className="tabular-nums">{plugin.wechat.conversationCount}</dd></div></dl>
             {plugin.wechat.lastError ? <p className="text-[13px] text-danger" role="alert">{plugin.wechat.lastError}</p> : null}
             <div className="flex flex-wrap gap-3"><Button type="button" variant="secondary" onClick={() => void startWechatLogin()} disabled={wechatPending || plugin.wechat.status === 'connected'}>{wechatPending ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : plugin.wechat.status === 'qr_pending' ? <RefreshCw aria-hidden="true" /> : <LogIn aria-hidden="true" />}{plugin.wechat.status === 'qr_pending' ? tPlugins('wechat.refresh') : tPlugins('wechat.login')}</Button>{plugin.wechat.status !== 'disconnected' ? <Button type="button" variant="ghost" onClick={() => void disconnectWechat()} disabled={wechatPending}><Unplug aria-hidden="true" />{tPlugins('wechat.disconnect')}</Button> : null}</div>

@@ -42,6 +42,7 @@
     "loginFailed": "WeChat login could not be started.",
     "disconnectFailed": "The WeChat connection could not be disconnected.",
     "qrAlt": "WeChat login QR code",
+    "openQrLink": "Open the QR link",
     "scan": "Scan this QR code with WeChat to connect.",
     "botId": "Bot ID",
     "conversations": "Mapped conversations",

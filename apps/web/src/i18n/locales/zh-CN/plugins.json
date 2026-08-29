@@ -42,6 +42,7 @@
     "loginFailed": "无法开始微信登录。",
     "disconnectFailed": "无法断开微信连接。",
     "qrAlt": "微信登录二维码",
+    "openQrLink": "打开二维码链接",
     "scan": "使用微信扫描此二维码以完成连接。",
     "botId": "Bot ID",
     "conversations": "已映射会话",
