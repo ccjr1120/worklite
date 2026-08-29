@@ -34,6 +34,11 @@
     "loading": "Loading System Helper Chat configuration",
     "configure": "Bind a model provider and model to use System Helper Chat"
   },
+  "plugin": {
+    "targetLabel": "Conversation target",
+    "systemHelper": "System Helper Chat",
+    "codexCli": "Codex CLI Chat"
+  },
   "minimized": {
     "minimize": "Minimize conversation"
   },

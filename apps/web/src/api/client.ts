@@ -35,6 +35,7 @@ import type {
   ExecuteSkillScriptRequest,
   UpdateWorkspaceSettingsRequest,
   WorkspaceSettingsView,
+  PluginView,
 } from '@worklite/contracts';
 
 export class ApiError extends Error {
@@ -84,6 +85,7 @@ export function apiDelete<T = void>(path: string): Promise<T> {
 }
 
 export const api = {
+  plugins: () => apiGet<PluginView[]>('/api/plugins'),
   command: (commandId: string) => apiGet<CommandExecutionView>(`/api/commands/${encodeURIComponent(commandId)}`),
   cancelCommand: (commandId: string) => apiPost<CommandExecutionView>(`/api/commands/${encodeURIComponent(commandId)}/cancel`),
   commandEventsUrl: (commandId: string) => `/api/commands/${encodeURIComponent(commandId)}/events`,

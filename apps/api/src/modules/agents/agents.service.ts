@@ -1,6 +1,6 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { AgentVersionView, AgentView, CreateAgentRequest, UpdateAgentRequest } from '@worklite/contracts';
 import { agentMcpServers, agentVersions, agents, agentSkills, mcpServers, modelProviders, skills, type Database } from '@worklite/db';
@@ -8,6 +8,7 @@ import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 
 const WORKLITE_PLATFORM_SKILL_ID = 'sk_worklite_platform';
+const CODEX_CLI_AGENT_ID = 'agt_codex_cli_chat';
 
 function initials(name: string): string {
   return name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
@@ -27,7 +28,7 @@ export class AgentsService {
 
   async list(request: Request, workspaceSlug: string): Promise<AgentView[]> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const rows = await this.db.select({ agent: agents, providerName: modelProviders.name }).from(agents).leftJoin(modelProviders, eq(agents.providerId, modelProviders.id)).where(eq(agents.workspaceId, team.id));
+    const rows = await this.db.select({ agent: agents, providerName: modelProviders.name }).from(agents).leftJoin(modelProviders, eq(agents.providerId, modelProviders.id)).where(and(eq(agents.workspaceId, team.id), ne(agents.id, CODEX_CLI_AGENT_ID)));
     const assignments = await this.loadAssignments(team.id, rows.map(({ agent }) => agent.id));
     const latestRows = rows.length === 0 ? [] : await this.db.select({ agentId: agentVersions.agentId, id: agentVersions.id, version: agentVersions.version }).from(agentVersions).where(and(eq(agentVersions.workspaceId, team.id), inArray(agentVersions.agentId, rows.map(({ agent }) => agent.id)))).orderBy(desc(agentVersions.version));
     const latestByAgent = new Map<string, { id: string; version: number }>();
@@ -38,6 +39,7 @@ export class AgentsService {
   }
 
   async get(request: Request, workspaceSlug: string, agentId: string): Promise<AgentView> {
+    if (agentId === CODEX_CLI_AGENT_ID) throw new NotFoundException('Agent not found');
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [row] = await this.db.select({ agent: agents, providerName: modelProviders.name }).from(agents).leftJoin(modelProviders, eq(agents.providerId, modelProviders.id)).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
     if (!row) throw new NotFoundException('Agent not found');

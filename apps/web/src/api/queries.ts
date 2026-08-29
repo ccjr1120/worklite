@@ -4,6 +4,7 @@ import { api } from './client';
 export const agentsQueryKey = () => ['agents'] as const;
 export const agentSubSessionsQueryKey = () => ['agent-sub-sessions'] as const;
 export const agentScheduledTasksQueryKey = () => ['agent-scheduled-tasks'] as const;
+export const pluginsQueryKey = () => ['plugins'] as const;
 export const workflowsQueryKey = () => ['workflows'] as const;
 export const runsQueryKey = () => ['runs'] as const;
 
@@ -25,6 +26,10 @@ export function useAgentSubSessionsQuery(workspace?: string) {
 
 export function useAgentScheduledTasksQuery(workspace?: string) {
   return useQuery({ queryKey: agentScheduledTasksQueryKey(), queryFn: () => api.agentScheduledTasks(workspace), refetchInterval: 5_000 });
+}
+
+export function usePluginsQuery() {
+  return useQuery({ queryKey: pluginsQueryKey(), queryFn: api.plugins, staleTime: 30_000 });
 }
 
 export function useWorkflowsQuery(workspace?: string) {

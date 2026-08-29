@@ -34,6 +34,11 @@
     "loading": "正在加载 System Helper Chat 配置",
     "configure": "绑定模型提供商和模型后使用 System Helper Chat"
   },
+  "plugin": {
+    "targetLabel": "对话目标",
+    "systemHelper": "System Helper Chat",
+    "codexCli": "Codex CLI Chat"
+  },
   "minimized": {
     "minimize": "最小化对话"
   },
