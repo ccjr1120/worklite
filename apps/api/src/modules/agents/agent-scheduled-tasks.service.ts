@@ -68,7 +68,8 @@ export class AgentScheduledTasksService implements OnModuleInit {
     for (;;) {
       await new Promise((resolve) => setTimeout(resolve, 2_000));
       const [execution] = await this.db.select({ status: agentExecutions.status }).from(agentExecutions).where(eq(agentExecutions.id, executionId)).limit(1);
-      if (!execution || execution.status === 'running' || execution.status === 'waiting_for_input') continue;
+      if (!execution) return;
+      if (execution.status === 'running' || execution.status === 'waiting_for_input') continue;
       await this.db.update(scheduledAgentTasks).set({ running: false, activeExecutionId: null, lastStatus: execution.status, unread: true, nextRunAt: new Date(Date.now() + intervalSeconds * 1_000), updatedAt: new Date() }).where(eq(scheduledAgentTasks.id, taskId));
       return;
     }

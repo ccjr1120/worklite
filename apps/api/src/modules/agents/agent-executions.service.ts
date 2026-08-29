@@ -203,22 +203,32 @@ export class AgentExecutionsService {
     const [execution] = await this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.workspaceId, workspace.id))).limit(1);
     if (!execution) throw new NotFoundException('Agent execution not found');
     if (execution.status !== 'running') return this.toView(execution);
-    const priorToolCalls = await this.db.select({ id: agentToolCalls.id }).from(agentToolCalls).where(eq(agentToolCalls.executionId, executionId));
+    const priorToolCalls = await this.db.select({ id: agentToolCalls.id, toolName: agentToolCalls.toolName, mcpToolName: agentToolCalls.mcpToolName }).from(agentToolCalls).where(eq(agentToolCalls.executionId, executionId));
     if (priorToolCalls.length >= MAX_HELPER_TOOL_ROUNDS) throw new Error('The Agent reached its maximum tool rounds for this execution.');
+    const clarificationAllowed = execution.plan.length > 0
+      && execution.plan.some((step) => step.status !== 'completed')
+      && priorToolCalls.length === 1
+      && priorToolCalls[0]?.toolName === 'builtin'
+      && priorToolCalls[0].mcpToolName === 'update_plan';
     const { agent, assignedSkills } = await this.requireExecutableAgent(workspace.id, execution.agentId);
+    const clarificationPass = agent.id === SYSTEM_HELPER_CHAT_ID && clarificationAllowed;
     const skillScripts = assignedSkills.flatMap((skill) => skill.files.filter((file) => file.path.startsWith('scripts/') && file.content.startsWith('#!')).map((file) => ({ skillId: skill.id, skillName: skill.name, path: file.path })));
-    const mcpRuntimes = await this.resources.agentMcpRuntimes(request, workspaceSlug, execution.agentId);
-    const mcpTools = await this.mcpRuntime.discover(mcpRuntimes);
-    const builtinToolDefinitions = agent.id === SYSTEM_HELPER_CHAT_ID ? [...this.builtinTools.toolDefinitions(), ...HELPER_BUILTIN_TOOLS] : [];
+    const mcpRuntimes = clarificationPass ? [] : await this.resources.agentMcpRuntimes(request, workspaceSlug, execution.agentId);
+    const mcpTools = clarificationPass ? [] : await this.mcpRuntime.discover(mcpRuntimes);
+    const availableSkillScripts = clarificationPass ? [] : skillScripts;
+    const availableMcpTools = clarificationPass ? [] : mcpTools;
+    const builtinToolDefinitions = agent.id === SYSTEM_HELPER_CHAT_ID
+      ? clarificationPass ? HELPER_BUILTIN_TOOLS : [...this.builtinTools.toolDefinitions(), HELPER_BUILTIN_TOOLS[0]]
+      : [];
     const skillInstructions = assignedSkills.map((skill) => `## ${skill.name}\n${skill.instructions.trim()}`).filter((value) => value.trim()).join('\n\n');
-    const scriptList = skillScripts.map((script) => `- Skill ${script.skillName} (${script.skillId}): ${script.path}`).join('\n');
+    const scriptList = availableSkillScripts.map((script) => `- Skill ${script.skillName} (${script.skillId}): ${script.path}`).join('\n');
     const systemPrompt = [
       agent.systemPrompt.trim(),
       skillInstructions ? `Assigned Skill instructions:\n\n${skillInstructions}` : '',
-      skillScripts.length > 0 ? 'Request at most one skill_script at a time. Every valid request executes immediately on the WorkLite host without user approval.' : '',
+      availableSkillScripts.length > 0 ? 'Request at most one skill_script at a time. Every valid request executes immediately on the WorkLite host without user approval.' : '',
       scriptList ? `Assigned executable Skill scripts:\n${scriptList}\nUse skill_script only with an exact listed Skill id and script path.` : '',
       builtinToolDefinitions.length > 0 ? 'Use update_plan for multi-step work. Use ask_user only once in the clarification pass before execution when a material user choice is required.' : '',
-      mcpTools.length > 0 ? `Assigned MCP tools:\n${mcpTools.map((tool) => `- ${tool.name}: ${tool.description}`).join('\n')}` : '',
+      availableMcpTools.length > 0 ? `Assigned MCP tools:\n${availableMcpTools.map((tool) => `- ${tool.name}: ${tool.description}`).join('\n')}` : '',
     ].filter(Boolean).join('\n\n');
     const abortController = new AbortController();
     this.activeModelRequests.set(executionId, abortController);
@@ -228,7 +238,7 @@ export class AgentExecutionsService {
       const readyExecution = await this.loadExecution(workspace.id, execution.agentId, executionId);
       if (readyExecution.status !== 'running') return this.toView(readyExecution);
       const runtime = await this.resources.providerRuntime(request, workspaceSlug, agent.providerId!, agent.model);
-      const result = await createModelGateway().generateAgentStep({ provider: runtime.provider, model: runtime.model, systemPrompt, messages: execution.modelMessages as GatewayAgentMessage[], skillScripts, builtinTools: builtinToolDefinitions, mcpTools, maxToolRounds: MAX_HELPER_TOOL_ROUNDS, abortSignal: abortController.signal });
+      const result = await createModelGateway().generateAgentStep({ provider: runtime.provider, model: runtime.model, systemPrompt, messages: execution.modelMessages as GatewayAgentMessage[], skillScripts: availableSkillScripts, builtinTools: builtinToolDefinitions, mcpTools: availableMcpTools, maxToolRounds: MAX_HELPER_TOOL_ROUNDS, abortSignal: abortController.signal });
       const responseText = normalizeAssistantMessage(result.text);
       if (!responseText && result.toolCalls.length === 0) throw new Error('Empty Agent response');
       if (result.toolCalls.length > 4) throw new Error('The Agent requested too many tools in one step.');
@@ -256,8 +266,10 @@ export class AgentExecutionsService {
           const mcpTool = mcpTools.find((tool) => tool.name === requestedCall.toolName);
           if (requestedCall.toolName === 'skill_script' && (!skill || !script)) throw new BadRequestException('The model requested a Skill script that is not assigned or executable.');
           if (requestedCall.toolName.startsWith('mcp_') && !mcpTool) throw new BadRequestException('The model requested an MCP tool that is not assigned or available.');
+          if (clarificationPass && requestedCall.toolName !== 'update_plan' && requestedCall.toolName !== 'ask_user') throw new BadRequestException('Only clarification tools are available during the planning clarification pass.');
           if (requestedCall.toolName === 'ask_user') {
-            if (execution.plan.length > 0) throw new BadRequestException('The clarification tool is available only before plan execution begins.');
+            if (!clarificationAllowed) throw new BadRequestException('The clarification tool is available only after a new multi-step plan and before execution begins.');
+            if (result.toolCalls.length !== 1) throw new BadRequestException('The clarification tool must be requested in its own model step.');
             if (pendingQuestion) throw new BadRequestException('Only one clarification question may be active.');
             pendingQuestion = createPendingQuestion(requestedCall.input);
             status = 'waiting_for_input';

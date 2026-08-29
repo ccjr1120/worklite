@@ -73,7 +73,7 @@ export class AgentSubSessionsService {
     const [session] = await this.db.select().from(agentSubSessions).where(and(eq(agentSubSessions.id, sessionId), eq(agentSubSessions.workspaceId, workspace.id))).limit(1);
     if (!session) throw new NotFoundException('Agent sub-session not found');
     const [execution] = await this.db.select({ status: agentExecutions.status }).from(agentExecutions).where(and(eq(agentExecutions.id, session.executionId), eq(agentExecutions.workspaceId, workspace.id))).limit(1);
-    if (execution?.status === 'running') await this.executions.cancel(request, workspaceSlug, session.agentId, session.executionId);
+    if (execution?.status === 'running' || execution?.status === 'waiting_for_input') await this.executions.cancel(request, workspaceSlug, session.agentId, session.executionId);
     this.db.transaction((transaction) => {
       transaction.delete(agentSubSessions).where(eq(agentSubSessions.id, session.id)).run();
       transaction.delete(agentExecutions).where(eq(agentExecutions.id, session.executionId)).run();
