@@ -22,8 +22,9 @@ export class WechatClawbotService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    const rows = await this.db.select({ id: plugins.id, token: plugins.wechatToken }).from(plugins).where(eq(plugins.id, CODEX_CLI_PLUGIN_ID));
+    const rows = await this.db.select({ id: plugins.id, token: plugins.wechatToken, status: plugins.wechatStatus }).from(plugins).where(eq(plugins.id, CODEX_CLI_PLUGIN_ID));
     if (rows[0]?.token) this.startPolling(rows[0].id);
+    else if (rows[0]?.status === 'qr_pending' || rows[0]?.status === 'error') await this.plugins.updateWechat(CODEX_CLI_PLUGIN_ID, { wechatStatus: 'disconnected', wechatQrCode: null, wechatQrKey: null, wechatLastError: null });
   }
 
   onModuleDestroy(): void {
@@ -32,10 +33,8 @@ export class WechatClawbotService implements OnModuleInit, OnModuleDestroy {
 
   async startLogin(): Promise<WechatConnectionView> {
     const { baseUrl } = await this.plugins.wechatSecret(CODEX_CLI_PLUGIN_ID);
-    const response = await this.getJson(`${baseUrl || DEFAULT_BASE_URL}/ilink/bot/get_bot_qrcode?bot_type=3`);
-    if (typeof response.qrcode !== 'string' || typeof response.qrcode_img_content !== 'string') throw new Error('WeChat did not return a login QR code.');
-    await this.plugins.updateWechat(CODEX_CLI_PLUGIN_ID, { wechatBaseUrl: response.baseurl || baseUrl || DEFAULT_BASE_URL, wechatStatus: 'qr_pending', wechatQrCode: response.qrcode_img_content || null, wechatQrKey: response.qrcode || null, wechatLastError: null });
-    void this.waitForLogin(response.qrcode, response.baseurl || baseUrl || DEFAULT_BASE_URL);
+    const qr = await this.issueLoginQr(baseUrl || DEFAULT_BASE_URL);
+    void this.waitForLogin(qr.qrKey, qr.baseUrl, 0);
     return (await this.plugins.get(CODEX_CLI_PLUGIN_ID)).wechat;
   }
 
@@ -44,18 +43,35 @@ export class WechatClawbotService implements OnModuleInit, OnModuleDestroy {
     return (await this.plugins.get(CODEX_CLI_PLUGIN_ID)).wechat;
   }
 
-  private async waitForLogin(qrKey: string, baseUrl: string): Promise<void> {
+  private async issueLoginQr(baseUrl: string): Promise<{ qrKey: string; baseUrl: string }> {
+    const response = await this.getJson(`${baseUrl}/ilink/bot/get_bot_qrcode?bot_type=3`);
+    if (typeof response.qrcode !== 'string' || typeof response.qrcode_img_content !== 'string') throw new Error('WeChat did not return a login QR code.');
+    const resolvedBaseUrl = typeof response.baseurl === 'string' && response.baseurl ? response.baseurl : baseUrl;
+    await this.plugins.updateWechat(CODEX_CLI_PLUGIN_ID, { wechatBaseUrl: resolvedBaseUrl, wechatStatus: 'qr_pending', wechatQrCode: response.qrcode_img_content, wechatQrKey: response.qrcode, wechatLastError: null });
+    return { qrKey: response.qrcode, baseUrl: resolvedBaseUrl };
+  }
+
+  private async waitForLogin(qrKey: string, baseUrl: string, refreshCount: number): Promise<void> {
     try {
-      for (let attempt = 0; attempt < 90 && !this.stopped; attempt += 1) {
+      for (let attempt = 0; attempt < 240 && !this.stopped; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 2_000));
         const result = await this.getJson(`${baseUrl}/ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrKey)}`);
         if (result.status === 'confirmed' || result.bot_token) {
-          await this.plugins.updateWechat(CODEX_CLI_PLUGIN_ID, { wechatBaseUrl: result.baseurl || baseUrl, wechatToken: result.bot_token ? encryptSecret(result.bot_token) : null, wechatBotId: result.bot_id || null, wechatStatus: 'connected', wechatQrCode: null, wechatQrKey: null, wechatCursor: '', wechatLastError: null });
+          await this.plugins.updateWechat(CODEX_CLI_PLUGIN_ID, { wechatBaseUrl: result.baseurl || baseUrl, wechatToken: result.bot_token ? encryptSecret(String(result.bot_token).replace(/^Bearer\s+/i, '')) : null, wechatBotId: result.ilink_bot_id || result.bot_id || null, wechatStatus: 'connected', wechatQrCode: null, wechatQrKey: null, wechatCursor: '', wechatLastError: null });
           this.startPolling(CODEX_CLI_PLUGIN_ID);
           return;
         }
-        if (result.status === 'expired') throw new Error('The WeChat login QR code expired.');
+        if (result.status === 'scaned_but_redirect' && typeof result.redirect_host === 'string' && result.redirect_host) {
+          baseUrl = `https://${result.redirect_host}`;
+          await this.plugins.updateWechat(CODEX_CLI_PLUGIN_ID, { wechatBaseUrl: baseUrl });
+        }
+        if (result.status === 'expired') {
+          if (refreshCount >= 3) throw new Error('The WeChat login QR code expired after three refreshes.');
+          const next = await this.issueLoginQr(baseUrl);
+          return this.waitForLogin(next.qrKey, next.baseUrl, refreshCount + 1);
+        }
       }
+      if (!this.stopped) throw new Error('The WeChat login QR code expired.');
     } catch (error) {
       await this.plugins.updateWechat(CODEX_CLI_PLUGIN_ID, { wechatStatus: 'error', wechatLastError: error instanceof Error ? error.message : 'WeChat login failed.' });
     }
