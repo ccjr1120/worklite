@@ -6,6 +6,7 @@ import type enCommon from './locales/en/common.json';
 import type enHome from './locales/en/home.json';
 import type enMcpServers from './locales/en/mcpServers.json';
 import type enOnboarding from './locales/en/onboarding.json';
+import type enPlugins from './locales/en/plugins.json';
 import type enRuns from './locales/en/runs.json';
 import type enSettings from './locales/en/settings.json';
 import type enSkills from './locales/en/skills.json';
@@ -26,6 +27,7 @@ declare module 'i18next' {
       runs: typeof enRuns;
       skills: typeof enSkills;
       mcpServers: typeof enMcpServers;
+      plugins: typeof enPlugins;
       artifacts: typeof enArtifacts;
       settings: typeof enSettings;
     };

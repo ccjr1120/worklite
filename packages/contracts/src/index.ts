@@ -49,7 +49,19 @@ export type PluginView = {
   id: 'codex-cli-chat';
   name: string;
   description: string;
+  command: string;
   enabled: boolean;
+  status: 'available' | 'missing' | 'failed';
+  updatedAt: string;
+};
+
+export type UpdatePluginRequest = {
+  command: string;
+};
+
+export type PluginTestResult = {
+  enabled: boolean;
+  status: 'available' | 'missing' | 'failed';
 };
 
 export type AgentView = {

@@ -49,7 +49,9 @@
     "unconfigured": "Unconfigured",
     "valid": "Valid",
     "invalid": "Invalid",
-    "pending": "Validating"
+    "pending": "Validating",
+    "available": "Available",
+    "missing": "Unavailable"
   },
   "empty": {
     "dash": "—"

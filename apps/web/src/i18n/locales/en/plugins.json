@@ -1,0 +1,36 @@
+{
+  "title": "Plugins",
+  "description": "Configure trusted workspace plugins and their execution commands.",
+  "search": "Search plugins",
+  "noMatches": {
+    "title": "No matching plugins",
+    "description": "No plugins match \"{{search}}\"."
+  },
+  "columns": {
+    "plugin": "Plugin",
+    "command": "Command",
+    "availability": "Availability",
+    "updated": "Updated"
+  },
+  "loading": "Loading plugins...",
+  "loadFailed": "Unable to load plugins.",
+  "empty": {
+    "title": "No plugins",
+    "description": "No workspace plugins are available to configure."
+  },
+  "config": {
+    "fallback": "Plugin",
+    "title": "Plugin configuration",
+    "description": "Configure the executable command used by this trusted plugin. The command runs through the API host command boundary.",
+    "command": "Executable command",
+    "commandPlaceholder": "codex",
+    "commandHint": "Enter the executable name or absolute path. Environment-variable overrides are not used.",
+    "test": "Test command",
+    "testing": "Testing...",
+    "testFailed": "The plugin command could not be started.",
+    "testMissing": "The configured command was not found.",
+    "testUnavailable": "The configured command exited unsuccessfully.",
+    "saved": "Plugin configuration saved",
+    "saveFailed": "The plugin configuration could not be saved."
+  }
+}

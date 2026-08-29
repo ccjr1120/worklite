@@ -23,6 +23,8 @@ import { Route as McpServersServerIdRouteImport } from './routes/mcp-servers/$se
 import { Route as OnboardingIndexRouteImport } from './routes/onboarding/index'
 import { Route as OnboardingFirstAgentRouteImport } from './routes/onboarding/first-agent'
 import { Route as OnboardingProviderRouteImport } from './routes/onboarding/provider'
+import { Route as PluginsIndexRouteImport } from './routes/plugins/index'
+import { Route as PluginsPluginIdRouteImport } from './routes/plugins/$pluginId'
 import { Route as RunsIndexRouteImport } from './routes/runs/index'
 import { Route as RunsRunIdRouteImport } from './routes/runs/$runId'
 import { Route as SettingsIndexRouteImport } from './routes/settings/index'
@@ -105,6 +107,16 @@ const OnboardingProviderRoute = OnboardingProviderRouteImport.update({
   path: '/provider',
   getParentRoute: () => OnboardingRouteRoute,
 } as any)
+const PluginsIndexRoute = PluginsIndexRouteImport.update({
+  id: '/plugins/',
+  path: '/plugins/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PluginsPluginIdRoute = PluginsPluginIdRouteImport.update({
+  id: '/plugins/$pluginId',
+  path: '/plugins/$pluginId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RunsIndexRoute = RunsIndexRouteImport.update({
   id: '/runs/',
   path: '/runs/',
@@ -173,6 +185,7 @@ export interface FileRoutesByFullPath {
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/onboarding/first-agent': typeof OnboardingFirstAgentRoute
   '/onboarding/provider': typeof OnboardingProviderRoute
+  '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/audit-log': typeof SettingsAuditLogRoute
@@ -183,6 +196,7 @@ export interface FileRoutesByFullPath {
   '/artifacts/': typeof ArtifactsIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/onboarding/': typeof OnboardingIndexRoute
+  '/plugins/': typeof PluginsIndexRoute
   '/runs/': typeof RunsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/skills/': typeof SkillsIndexRoute
@@ -198,6 +212,7 @@ export interface FileRoutesByTo {
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/onboarding/first-agent': typeof OnboardingFirstAgentRoute
   '/onboarding/provider': typeof OnboardingProviderRoute
+  '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/audit-log': typeof SettingsAuditLogRoute
@@ -208,6 +223,7 @@ export interface FileRoutesByTo {
   '/artifacts': typeof ArtifactsIndexRoute
   '/mcp-servers': typeof McpServersIndexRoute
   '/onboarding': typeof OnboardingIndexRoute
+  '/plugins': typeof PluginsIndexRoute
   '/runs': typeof RunsIndexRoute
   '/settings': typeof SettingsIndexRoute
   '/skills': typeof SkillsIndexRoute
@@ -226,6 +242,7 @@ export interface FileRoutesById {
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/onboarding/first-agent': typeof OnboardingFirstAgentRoute
   '/onboarding/provider': typeof OnboardingProviderRoute
+  '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/audit-log': typeof SettingsAuditLogRoute
@@ -236,6 +253,7 @@ export interface FileRoutesById {
   '/artifacts/': typeof ArtifactsIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/onboarding/': typeof OnboardingIndexRoute
+  '/plugins/': typeof PluginsIndexRoute
   '/runs/': typeof RunsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/skills/': typeof SkillsIndexRoute
@@ -255,6 +273,7 @@ export interface FileRouteTypes {
     | '/mcp-servers/$serverId'
     | '/onboarding/first-agent'
     | '/onboarding/provider'
+    | '/plugins/$pluginId'
     | '/runs/$runId'
     | '/settings/appearance'
     | '/settings/audit-log'
@@ -265,6 +284,7 @@ export interface FileRouteTypes {
     | '/artifacts/'
     | '/mcp-servers/'
     | '/onboarding/'
+    | '/plugins/'
     | '/runs/'
     | '/settings/'
     | '/skills/'
@@ -280,6 +300,7 @@ export interface FileRouteTypes {
     | '/mcp-servers/$serverId'
     | '/onboarding/first-agent'
     | '/onboarding/provider'
+    | '/plugins/$pluginId'
     | '/runs/$runId'
     | '/settings/appearance'
     | '/settings/audit-log'
@@ -290,6 +311,7 @@ export interface FileRouteTypes {
     | '/artifacts'
     | '/mcp-servers'
     | '/onboarding'
+    | '/plugins'
     | '/runs'
     | '/settings'
     | '/skills'
@@ -307,6 +329,7 @@ export interface FileRouteTypes {
     | '/mcp-servers/$serverId'
     | '/onboarding/first-agent'
     | '/onboarding/provider'
+    | '/plugins/$pluginId'
     | '/runs/$runId'
     | '/settings/appearance'
     | '/settings/audit-log'
@@ -317,6 +340,7 @@ export interface FileRouteTypes {
     | '/artifacts/'
     | '/mcp-servers/'
     | '/onboarding/'
+    | '/plugins/'
     | '/runs/'
     | '/settings/'
     | '/skills/'
@@ -333,12 +357,14 @@ export interface RootRouteChildren {
   AgentsAgentIdRoute: typeof AgentsAgentIdRoute
   ArtifactsArtifactIdRoute: typeof ArtifactsArtifactIdRoute
   McpServersServerIdRoute: typeof McpServersServerIdRoute
+  PluginsPluginIdRoute: typeof PluginsPluginIdRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
   SkillsSkillIdRoute: typeof SkillsSkillIdRoute
   WorkflowsWorkflowIdRoute: typeof WorkflowsWorkflowIdRouteWithChildren
   AgentsIndexRoute: typeof AgentsIndexRoute
   ArtifactsIndexRoute: typeof ArtifactsIndexRoute
   McpServersIndexRoute: typeof McpServersIndexRoute
+  PluginsIndexRoute: typeof PluginsIndexRoute
   RunsIndexRoute: typeof RunsIndexRoute
   SkillsIndexRoute: typeof SkillsIndexRoute
   WorkflowsIndexRoute: typeof WorkflowsIndexRoute
@@ -443,6 +469,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/onboarding/provider'
       preLoaderRoute: typeof OnboardingProviderRouteImport
       parentRoute: typeof OnboardingRouteRoute
+    }
+    '/plugins/': {
+      id: '/plugins/'
+      path: '/plugins'
+      fullPath: '/plugins/'
+      preLoaderRoute: typeof PluginsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/plugins/$pluginId': {
+      id: '/plugins/$pluginId'
+      path: '/plugins/$pluginId'
+      fullPath: '/plugins/$pluginId'
+      preLoaderRoute: typeof PluginsPluginIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/runs/': {
       id: '/runs/'
@@ -578,12 +618,14 @@ const rootRouteChildren: RootRouteChildren = {
   AgentsAgentIdRoute: AgentsAgentIdRoute,
   ArtifactsArtifactIdRoute: ArtifactsArtifactIdRoute,
   McpServersServerIdRoute: McpServersServerIdRoute,
+  PluginsPluginIdRoute: PluginsPluginIdRoute,
   RunsRunIdRoute: RunsRunIdRoute,
   SkillsSkillIdRoute: SkillsSkillIdRoute,
   WorkflowsWorkflowIdRoute: WorkflowsWorkflowIdRouteWithChildren,
   AgentsIndexRoute: AgentsIndexRoute,
   ArtifactsIndexRoute: ArtifactsIndexRoute,
   McpServersIndexRoute: McpServersIndexRoute,
+  PluginsIndexRoute: PluginsIndexRoute,
   RunsIndexRoute: RunsIndexRoute,
   SkillsIndexRoute: SkillsIndexRoute,
   WorkflowsIndexRoute: WorkflowsIndexRoute,

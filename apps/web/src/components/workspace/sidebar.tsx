@@ -27,7 +27,7 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
 
   function isActive(item: NavItem) {
     if (item.id === 'agents') {
-      return ['/agents', '/skills', '/mcp-servers', '/model-providers'].some((suffix) => pathname.startsWith(suffix));
+      return ['/agents', '/skills', '/mcp-servers', '/plugins', '/model-providers'].some((suffix) => pathname.startsWith(suffix));
     }
     if (item.id === 'settings') {
       return pathname.startsWith('/settings');

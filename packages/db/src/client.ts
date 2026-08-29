@@ -345,6 +345,10 @@ export async function initializeDatabase(db: Database): Promise<void> {
     DELETE FROM agents WHERE id = 'agt_agent_chat';
     INSERT INTO workspaces (id, slug, name) VALUES ('workspace_personal', 'personal', 'Personal Workspace') ON CONFLICT (slug) DO NOTHING;
     INSERT INTO workspace_settings (workspace_id) SELECT id FROM workspaces WHERE slug = 'personal' ON CONFLICT (workspace_id) DO NOTHING;
+    INSERT INTO plugins (id, workspace_id, name, description, command)
+      SELECT 'codex-cli-chat', workspaces.id, 'Codex CLI Chat', 'Chat with Codex CLI in the API workspace.', 'codex'
+      FROM workspaces WHERE workspaces.slug = 'personal'
+      ON CONFLICT (id) DO UPDATE SET name = excluded.name, description = excluded.description;
     INSERT INTO agents (id, workspace_id, kind, name, responsibility, system_prompt, model)
       SELECT 'agt_system_helper_chat', workspaces.id, 'system', 'System Helper Chat', 'Configure workspace AI resources through guided conversation', '${SYSTEM_HELPER_PROMPT.replaceAll("'", "''")}', ''
       FROM workspaces WHERE workspaces.slug = 'personal'

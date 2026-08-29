@@ -23,6 +23,7 @@ Before UI work, read the design system, this index, every applicable document un
 - Runs: [List](runs/list.md), [Details](runs/details.md)
 - Skills: [List](skills/list.md), [Editor](skills/editor.md)
 - MCP servers: [List](mcp-servers/list.md), [Configuration](mcp-servers/configuration.md)
+- Plugins: [List](plugins/list.md), [Configuration](plugins/configuration.md)
 - Artifacts: [List](artifacts/list.md), [Details](artifacts/details.md)
 - Settings: [Usage](settings/usage.md), [Audit log](settings/audit-log.md), [Appearance](settings/appearance.md)
 
@@ -36,6 +37,7 @@ Before UI work, read the design system, this index, every applicable document un
 /runs/:runId
 /skills/{new,:skillId}
 /mcp-servers/{new,:serverId}
+/plugins/:pluginId
 /artifacts/:artifactId
 /settings/{usage,audit-log,appearance}
 ```
@@ -44,7 +46,7 @@ The root route opens Home. First-use setup is an optional checklist for configur
 
 ## Shared Component Inventory
 
-Theme provider and appearance selector; application shell; sidebar; context bar; personal preferences menu; command menu; shell-level System Helper Chat with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; ordered workflow steps; run timeline; viewers for logs, output and artifacts; skeletons, errors, offline banner.
+Theme provider and appearance selector; application shell; sidebar; context bar; personal preferences menu; command menu; shell-level System Helper Chat with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; ordered workflow steps; run timeline; plugin configuration; viewers for logs, output and artifacts; skeletons, errors, offline banner.
 
 Domain-neutral reusable components belong in the shared UI package. Feature composition remains near its feature. Abstract only demonstrated repeated patterns.
 
@@ -68,6 +70,7 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 ### 2026-08-29
 
 - Added the shell-owned plugin picker for the built-in Codex CLI Chat plugin. Activation changes the execution target while preserving the existing transcript, streaming, cancellation, and error presentation patterns.
+- Added Plugins as an Agent-surface resource view with a dedicated Codex CLI configuration page, persisted command editing, server-side availability testing, and responsive save/error states.
 
 ### 2026-08-26
 

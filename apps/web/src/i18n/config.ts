@@ -8,6 +8,7 @@ import enCommon from './locales/en/common.json';
 import enHome from './locales/en/home.json';
 import enMcpServers from './locales/en/mcpServers.json';
 import enOnboarding from './locales/en/onboarding.json';
+import enPlugins from './locales/en/plugins.json';
 import enRuns from './locales/en/runs.json';
 import enSettings from './locales/en/settings.json';
 import enSkills from './locales/en/skills.json';
@@ -20,6 +21,7 @@ import zhCommon from './locales/zh-CN/common.json';
 import zhHome from './locales/zh-CN/home.json';
 import zhMcpServers from './locales/zh-CN/mcpServers.json';
 import zhOnboarding from './locales/zh-CN/onboarding.json';
+import zhPlugins from './locales/zh-CN/plugins.json';
 import zhRuns from './locales/zh-CN/runs.json';
 import zhSettings from './locales/zh-CN/settings.json';
 import zhSkills from './locales/zh-CN/skills.json';
@@ -37,6 +39,7 @@ export const NAMESPACES = [
   'runs',
   'skills',
   'mcpServers',
+  'plugins',
   'artifacts',
   'settings',
 ] as const;
@@ -53,6 +56,7 @@ const resources = {
     runs: enRuns,
     skills: enSkills,
     mcpServers: enMcpServers,
+    plugins: enPlugins,
     artifacts: enArtifacts,
     settings: enSettings,
   },
@@ -67,6 +71,7 @@ const resources = {
     runs: zhRuns,
     skills: zhSkills,
     mcpServers: zhMcpServers,
+    plugins: zhPlugins,
     artifacts: zhArtifacts,
     settings: zhSettings,
   },

@@ -37,6 +37,8 @@ import type {
   UpdateWorkspaceSettingsRequest,
   WorkspaceSettingsView,
   PluginView,
+  PluginTestResult,
+  UpdatePluginRequest,
 } from '@worklite/contracts';
 
 export class ApiError extends Error {
@@ -87,6 +89,9 @@ export function apiDelete<T = void>(path: string): Promise<T> {
 
 export const api = {
   plugins: () => apiGet<PluginView[]>('/api/plugins'),
+  plugin: (pluginId: string) => apiGet<PluginView>(`/api/plugins/${encodeURIComponent(pluginId)}`),
+  updatePlugin: (pluginId: string, input: UpdatePluginRequest) => apiPatch<PluginView>(`/api/plugins/${encodeURIComponent(pluginId)}`, input),
+  testPlugin: (pluginId: string) => apiPost<PluginTestResult>(`/api/plugins/${encodeURIComponent(pluginId)}/test`),
   command: (commandId: string) => apiGet<CommandExecutionView>(`/api/commands/${encodeURIComponent(commandId)}`),
   cancelCommand: (commandId: string) => apiPost<CommandExecutionView>(`/api/commands/${encodeURIComponent(commandId)}/cancel`),
   commandEventsUrl: (commandId: string) => `/api/commands/${encodeURIComponent(commandId)}/events`,

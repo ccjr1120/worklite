@@ -14,6 +14,15 @@ export const workspaceSettings = sqliteTable('workspace_settings', {
   updatedAt: timestamp('updated_at'),
 });
 
+export const plugins = sqliteTable('plugins', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description').notNull(),
+  command: text('command').notNull().default('codex'),
+  updatedAt: timestamp('updated_at'),
+});
+
 export const agents = sqliteTable('agents', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), kind: text('kind').$type<'system' | 'custom'>().notNull().default('custom'), name: text('name').notNull(), responsibility: text('responsibility').notNull(), model: text('model').notNull(), providerId: text('provider_id'),
   systemPrompt: text('system_prompt').notNull().default(''), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
@@ -223,6 +232,7 @@ export const auditLogs = sqliteTable('audit_logs', {
 });
 
 export type Workspace = typeof workspaces.$inferSelect;
+export type Plugin = typeof plugins.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
 export type AgentVersion = typeof agentVersions.$inferSelect;
 export type Workflow = typeof workflows.$inferSelect;

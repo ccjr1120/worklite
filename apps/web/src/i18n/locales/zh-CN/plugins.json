@@ -1,0 +1,36 @@
+{
+  "title": "插件",
+  "description": "配置受信任的工作区插件及其执行命令。",
+  "search": "搜索插件",
+  "noMatches": {
+    "title": "没有匹配的插件",
+    "description": "没有与“{{search}}”匹配的插件。"
+  },
+  "columns": {
+    "plugin": "插件",
+    "command": "命令",
+    "availability": "可用性",
+    "updated": "更新时间"
+  },
+  "loading": "正在加载插件...",
+  "loadFailed": "无法加载插件。",
+  "empty": {
+    "title": "没有插件",
+    "description": "当前没有可配置的工作区插件。"
+  },
+  "config": {
+    "fallback": "插件",
+    "title": "插件配置",
+    "description": "配置此受信任插件使用的可执行命令。命令会通过 API 主机命令边界运行。",
+    "command": "可执行命令",
+    "commandPlaceholder": "codex",
+    "commandHint": "输入可执行文件名或绝对路径。不会使用环境变量覆盖。",
+    "test": "测试命令",
+    "testing": "正在测试...",
+    "testFailed": "无法启动插件命令。",
+    "testMissing": "找不到配置的命令。",
+    "testUnavailable": "配置的命令执行失败。",
+    "saved": "插件配置已保存",
+    "saveFailed": "无法保存插件配置。"
+  }
+}

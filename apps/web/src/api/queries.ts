@@ -32,6 +32,10 @@ export function usePluginsQuery() {
   return useQuery({ queryKey: pluginsQueryKey(), queryFn: api.plugins, staleTime: 30_000 });
 }
 
+export function usePluginQuery(pluginId: string) {
+  return useQuery({ queryKey: ['plugin', pluginId] as const, queryFn: () => api.plugin(pluginId), enabled: Boolean(pluginId) });
+}
+
 export function useWorkflowsQuery(workspace?: string) {
   return useQuery({ queryKey: workflowsQueryKey(), queryFn: () => api.workflows(workspace) });
 }

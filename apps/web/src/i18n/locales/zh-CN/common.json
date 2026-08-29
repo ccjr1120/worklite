@@ -49,7 +49,9 @@
     "unconfigured": "未配置",
     "valid": "有效",
     "invalid": "无效",
-    "pending": "校验中"
+    "pending": "校验中",
+    "available": "可用",
+    "missing": "不可用"
   },
   "empty": {
     "dash": "—"

@@ -16,7 +16,9 @@ type StatusKey =
   | 'unconfigured'
   | 'valid'
   | 'invalid'
-  | 'pending';
+  | 'pending'
+  | 'available'
+  | 'missing';
 
 const STATUS_CONFIG: Record<
   StatusKey,
@@ -38,6 +40,8 @@ const STATUS_CONFIG: Record<
   valid: { variant: 'success', icon: CheckCircle2 },
   invalid: { variant: 'danger', icon: XCircle },
   pending: { variant: 'info', icon: LoaderCircle },
+  available: { variant: 'success', icon: CheckCircle2 },
+  missing: { variant: 'danger', icon: XCircle },
 };
 
 type StatusBadgeProps = {

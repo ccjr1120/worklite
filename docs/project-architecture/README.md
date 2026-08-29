@@ -130,6 +130,7 @@ Core relationships use relational tables. Versioned workflow definitions and rev
 ```text
 Workspace (one per installation)
 |-- ModelProvider
+|-- Plugin
 |-- Skill
 |   `-- SkillVersion
 |-- MCPServer
@@ -161,9 +162,9 @@ Workflow nodes are generic typed execution units. Each node references a registe
 
 Plugins are the extension and composition boundary. A trusted in-process plugin may register Node Types, runtime capabilities, typed lifecycle events, and optional browser metadata. The Workflow Engine does not import concrete plugin implementations; it resolves a Node Type from its registry and invokes its execution contract. Plugin registration is separate from node execution: a plugin may contribute capabilities without being a workflow node.
 
-The initial plugin runtime also includes one product-owned, trusted external-process plugin: `codex-cli-chat`. It is registered by the API, exposed through a read-only plugin catalog, and uses the existing Agent execution, message, SSE, cancellation, and audit contracts. A plugin execution is persisted against a protected system Agent identity so the browser can reuse the existing execution viewer without exposing the plugin as a configurable Agent. Each turn starts `codex exec --json` through the Commands process boundary, sends the prompt through stdin, parses the final Agent message from JSONL, and stores the response in the normal execution transcript. Conversation history is included in the next turn's prompt; the plugin does not depend on Codex session files or interactive TUI state.
+The initial plugin runtime also includes one product-owned, trusted external-process plugin: `codex-cli-chat`. It is registered by the API, stored as a workspace plugin resource, and uses the existing Agent execution, message, SSE, cancellation, and audit contracts. A plugin execution is persisted against a protected system Agent identity so the browser can reuse the existing execution viewer without exposing the plugin as a configurable Agent. Each turn starts the plugin's persisted executable command with `exec --json` through the Commands process boundary, sends the prompt through stdin, parses the final Agent message from JSONL, and stores the response in the normal execution transcript. Conversation history is included in the next turn's prompt; the plugin does not depend on Codex session files or interactive TUI state.
 
-The Codex CLI plugin is available only when the API host has an authenticated `codex` executable. Its working directory is the API process working directory and its environment is inherited from the API process, matching the existing Host Command Interface. The plugin catalog contains static metadata and an enabled state; there is no user-uploaded plugin code, arbitrary command configuration, marketplace installation, or network authorization layer in this increment. Existing Agent, Workflow, and execution records remain valid; startup bootstrap adds the protected plugin Agent row when absent and removes no user data.
+The Codex CLI plugin owns an editable executable command configuration, defaulting to `codex`, in the persisted Plugin row. The Plugins API exposes the command for configuration and computes availability by probing that persisted command; it never reads a command override from an environment variable. The command is executed through the existing shell command boundary with the API process working directory and inherited process environment, matching the existing Host Command Interface. The browser exposes a dedicated Plugins resource list and configuration page inside the Agents surface; saving and testing are server-owned operations. There is no user-uploaded plugin code, marketplace installation, or network authorization layer in this increment. Existing Agent, Workflow, and execution records remain valid; startup bootstrap adds or repairs the protected plugin row and Agent row without removing user data.
 
 Agent is one Node Type rather than the Workflow Engine's universal primitive. The Agent Node adapter references an immutable AgentVersion, maps workflow input into the Agent Runtime request, and returns text, structured data, and artifact references through the generic node result. The first-party `worklite/text` node passes a configured text value through the same contract. Agent Runtime remains independent from Workflow Engine.
 
@@ -476,8 +477,8 @@ Adding a deferred capability requires an approved architecture change.
 
 - Approved the product-owned `codex-cli-chat` plugin as a trusted external-process Agent execution backend.
 - Reused Agent execution persistence, SSE events, cancellation, and audit records; each turn invokes `codex exec --json` through the Commands process boundary and passes the conversation prompt through stdin.
-- Added a protected plugin Agent identity for persistence and a read-only plugin catalog; plugin code, arbitrary command configuration, and third-party marketplace behavior remain out of scope.
-- Accepted the API host's installed Codex CLI, authentication, working directory, and inherited environment as prerequisites; no compatibility route or session-file dependency is introduced.
+- Added a protected plugin Agent identity for persistence and a workspace-owned plugin configuration resource with a dedicated list and editor page; plugin code and third-party marketplace behavior remain out of scope.
+- Moved the Codex executable command from `CODEX_BIN` environment-variable lookup to the persisted plugin configuration, while retaining the API host's working directory and inherited environment as execution prerequisites; no compatibility route or session-file dependency is introduced.
 
 ### 2026-08-29 - WorkLite-Compatible G-Agent Helper Runtime
 

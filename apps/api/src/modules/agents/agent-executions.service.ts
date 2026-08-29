@@ -12,7 +12,7 @@ import { WorkspaceService } from '../teams/teams.service';
 import type { AgentMcpRuntime } from '../teams/team-resources.service';
 import { McpRuntimeService } from './mcp-runtime.service';
 import { BuiltinAgentToolsService } from './builtin-agent-tools.service';
-import { CODEX_CLI_AGENT_ID } from '../plugins/plugins.service';
+import { CODEX_CLI_AGENT_ID, CODEX_CLI_PLUGIN_ID, PluginsService } from '../plugins/plugins.service';
 import { CommandsService } from '../commands/commands.service';
 
 const SYSTEM_HELPER_CHAT_ID = 'agt_system_helper_chat';
@@ -53,6 +53,7 @@ export class AgentExecutionsService {
     private readonly mcpRuntime: McpRuntimeService,
     private readonly builtinTools: BuiltinAgentToolsService,
     private readonly commands: CommandsService,
+    private readonly plugins: PluginsService,
   ) {}
 
   async create(request: Request, workspaceSlug: string, agentId: string, input: CreateAgentExecutionRequest): Promise<AgentExecutionView> {
@@ -473,6 +474,7 @@ export class AgentExecutionsService {
     const [agent] = await this.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, workspaceId))).limit(1);
     if (!agent) throw new NotFoundException('Agent not found');
     if (agent.kind !== 'custom' && agent.id !== SYSTEM_HELPER_CHAT_ID && agent.id !== CODEX_CLI_AGENT_ID) throw new BadRequestException('This built-in Agent cannot be executed.');
+    if (agent.id === CODEX_CLI_AGENT_ID && !(await this.plugins.get(CODEX_CLI_PLUGIN_ID)).enabled) throw new ConflictException('Configure an available Codex CLI command before running this plugin.');
     if (agent.id !== CODEX_CLI_AGENT_ID && (!agent.providerId || !agent.model)) throw new ConflictException('Configure a model provider and model before running this Agent.');
     const rows = await this.db.select({ id: skills.id, name: skills.name, instructions: skills.instructions }).from(agentSkills).innerJoin(skills, eq(agentSkills.skillId, skills.id)).where(and(eq(agentSkills.agentId, agentId), eq(skills.workspaceId, workspaceId)));
     const files = rows.length === 0 ? [] : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, rows.map((skill) => skill.id)));
@@ -485,7 +487,7 @@ export class AgentExecutionsService {
       ...execution.displayMessages.map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}:\n${message.content}`),
     ].join('\n\n');
     await this.db.update(agentExecutions).set({ phase: 'model', updatedAt: new Date() }).where(and(eq(agentExecutions.id, execution.id), eq(agentExecutions.status, 'running')));
-    const command = `${shellQuote(process.env.CODEX_BIN || 'codex')} exec --json --ephemeral -`;
+    const command = `${shellQuote(await this.plugins.command(CODEX_CLI_PLUGIN_ID))} exec --json --ephemeral -`;
     const started = await this.commands.createWithInput(command, prompt);
     this.activePluginCommands.set(execution.id, started.id);
     try {

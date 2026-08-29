@@ -15,6 +15,13 @@
       "when": 1788011113702,
       "tag": "0001_mcp_allowed_tool_names",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788012789998,
+      "tag": "0002_striped_alex_power",
+      "breakpoints": true
     }
   ]
 }
