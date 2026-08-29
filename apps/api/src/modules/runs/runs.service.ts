@@ -1,6 +1,6 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, gt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { ArtifactView, CreateRunRequest, RunProgressEvent, RunView, WorkflowNodeRunView } from '@worklite/contracts';
 import {
@@ -106,10 +106,11 @@ export class RunsService {
   }
 
   async createForVersion(request: Request, workflowVersionId: string, input: CreateRunRequest): Promise<{ runId: string }> {
+    const workspace = await this.workspaces.getWorkspace(request, 'personal');
     const [version] = await this.db.select({ version: workflowVersions, workflow: workflows })
       .from(workflowVersions)
       .innerJoin(workflows, eq(workflowVersions.workflowId, workflows.id))
-      .where(and(eq(workflowVersions.id, workflowVersionId), eq(workflowVersions.published, true))).limit(1);
+      .where(and(eq(workflowVersions.id, workflowVersionId), eq(workflowVersions.workspaceId, workspace.id), eq(workflowVersions.published, true))).limit(1);
     if (!version) throw new NotFoundException('Published workflow version not found');
     const runId = `run_${randomUUID()}`;
     await this.db.insert(workflowRuns).values({ id: runId, workspaceId: version.workflow.workspaceId, workflowId: version.workflow.id, workflowVersionId, input: input?.input ?? null, status: 'queued' });
@@ -120,9 +121,11 @@ export class RunsService {
 
   async cancel(request: Request, workspaceSlug: string, runId: string): Promise<RunView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [run] = await this.db.update(workflowRuns).set({ status: 'cancelled', finishedAt: new Date(), updatedAt: new Date() }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id), sql`${workflowRuns.status} in ('queued', 'running')`)).returning();
+    const finishedAt = new Date();
+    const [run] = await this.db.update(workflowRuns).set({ status: 'cancelled', currentNodeId: null, finishedAt, updatedAt: finishedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id), sql`${workflowRuns.status} in ('queued', 'running')`)).returning();
     if (!run) return this.get(request, workspaceSlug, runId);
     this.activeRuns.get(runId)?.abort();
+    await this.db.update(workflowNodeRuns).set({ status: 'cancelled', error: 'Workflow run cancelled.', finishedAt }).where(and(eq(workflowNodeRuns.runId, runId), inArray(workflowNodeRuns.status, ['queued', 'running'])));
     await this.publish(runId, 'run.status', { status: 'cancelled' });
     const [workflow] = await this.db.select().from(workflows).where(eq(workflows.id, run.workflowId)).limit(1);
     const [version] = await this.db.select().from(workflowVersions).where(eq(workflowVersions.id, run.workflowVersionId)).limit(1);

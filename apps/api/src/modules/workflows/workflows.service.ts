@@ -256,12 +256,17 @@ function validateDefinition(definition: StoredWorkflowDefinition, requireAgentVe
   const ids = new Set<string>();
   definition.nodes.forEach((node, index) => {
     if (!node.id || ids.has(node.id) || node.position !== index + 1 || !node.type || !node.typeVersion) throw new BadRequestException('The workflow contains an invalid node sequence.');
+    if (node.type !== 'worklite/agent' && node.type !== 'worklite/text') throw new BadRequestException(`The node type ${node.type} is not supported.`);
     if (node.type === 'worklite/agent') {
       const config = isRecord(node.config) ? node.config : null;
       if (!config) throw new BadRequestException('Agent node configuration must be an object.');
       if (requireAgentVersions && (typeof config.agentVersionId !== 'string' || !config.agentVersionId.trim())) throw new BadRequestException('Every Agent node must reference an immutable AgentVersion before publication.');
     }
-    if (node.type === 'worklite/text' && node.input.source === 'literal' && node.input.value !== undefined && typeof node.input.value !== 'string') throw new BadRequestException('Text node literal input must be a string.');
+    if (node.type === 'worklite/text') {
+      const config = isRecord(node.config) ? node.config : null;
+      if (!config || (config.text !== undefined && typeof config.text !== 'string')) throw new BadRequestException('Text node configuration must contain a string text value.');
+      if (node.input.source === 'literal' && node.input.value !== undefined && typeof node.input.value !== 'string') throw new BadRequestException('Text node literal input must be a string.');
+    }
     ids.add(node.id);
   });
 }

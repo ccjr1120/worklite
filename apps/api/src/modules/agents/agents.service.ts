@@ -85,20 +85,23 @@ export class AgentsService {
       this.db.select({ id: agentSkills.skillId }).from(agentSkills).where(eq(agentSkills.agentId, agentId)),
       this.db.select({ id: agentMcpServers.mcpServerId }).from(agentMcpServers).where(eq(agentMcpServers.agentId, agentId)),
     ]);
-    const latest = await this.db.select({ version: agentVersions.version }).from(agentVersions).where(eq(agentVersions.agentId, agentId)).orderBy(desc(agentVersions.version)).limit(1);
-    const [row] = await this.db.insert(agentVersions).values({
-      id: `agv_${randomUUID()}`,
-      workspaceId: team.id,
-      agentId: agent.id,
-      version: (latest[0]?.version ?? 0) + 1,
-      name: agent.name,
-      responsibility: agent.responsibility,
-      systemPrompt: agent.systemPrompt,
-      providerId: agent.providerId,
-      model: agent.model,
-      skillIds: assignments[0].map(({ id }) => id),
-      mcpServerIds: assignments[1].map(({ id }) => id),
-    }).returning();
+    const row = this.db.transaction((transaction) => {
+      const [latest] = transaction.select({ version: agentVersions.version }).from(agentVersions).where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, team.id))).orderBy(desc(agentVersions.version)).limit(1).all();
+      const [created] = transaction.insert(agentVersions).values({
+        id: `agv_${randomUUID()}`,
+        workspaceId: team.id,
+        agentId: agent.id,
+        version: (latest?.version ?? 0) + 1,
+        name: agent.name,
+        responsibility: agent.responsibility,
+        systemPrompt: agent.systemPrompt,
+        providerId: agent.providerId,
+        model: agent.model,
+        skillIds: assignments[0].map(({ id }) => id),
+        mcpServerIds: assignments[1].map(({ id }) => id),
+      }).returning().all();
+      return created;
+    });
     if (!row) throw new NotFoundException('Agent version could not be created');
     return toAgentVersionView(row);
   }
