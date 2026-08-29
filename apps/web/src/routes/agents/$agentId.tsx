@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import type { AgentExecutionView, AgentToolCallView, McpServerView, ModelProviderView, SkillView } from '@worklite/contracts';
-import { api } from '@/api/client';
+import { api, parseAgentExecutionEvent } from '@/api/client';
 import {
   agentsQueryKey,
   useAgentQuery,
@@ -79,11 +79,28 @@ function AgentEditorPage() {
 
   useEffect(() => {
     const executionId = execution?.id;
-    if (!executionId || execution.status !== 'running' || isSystem) return;
-    const timer = window.setInterval(() => {
-      void api.agentExecution(workspaceSlug, agentId, executionId).then(setExecution).catch(() => undefined);
-    }, 1_500);
-    return () => window.clearInterval(timer);
+    if (!executionId || (execution.status !== 'running' && execution.status !== 'waiting_for_input') || isSystem) return;
+    const source = new EventSource(api.agentExecutionEventsUrl(agentId, executionId), { withCredentials: true });
+    source.onmessage = (message) => {
+      try {
+        const event = parseAgentExecutionEvent(message.data);
+        const data = event.data;
+        if (data.kind === 'snapshot') setExecution(data.execution);
+        if (data.kind === 'message_delta') {
+          setExecution((current) => {
+            if (!current) return current;
+            const existing = current.messages.find((item) => item.id === data.messageId);
+            const messages = existing
+              ? current.messages.map((item) => item.id === data.messageId ? { ...item, content: item.content + data.delta } : item)
+              : [...current.messages, { id: data.messageId, role: 'assistant' as const, content: data.delta, createdAt: event.createdAt }];
+            return { ...current, messages };
+          });
+        }
+      } catch {
+        // EventSource will reconnect automatically.
+      }
+    };
+    return () => source.close();
   }, [agentId, execution?.id, execution?.status, isSystem, workspaceSlug]);
 
   function markUnsaved() {

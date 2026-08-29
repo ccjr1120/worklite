@@ -1,9 +1,9 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, eq, inArray, or } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
-import type { AgentExecutionErrorCode, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, WorkliteNavigationTarget, WorkliteScriptResult } from '@worklite/contracts';
-import { agentExecutions, agents, agentSkills, agentSubSessions, agentToolCalls, auditLogs, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
+import type { AgentExecutionErrorCode, AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, WorkliteNavigationTarget, WorkliteScriptResult } from '@worklite/contracts';
+import { agentExecutionEvents, agentExecutions, agents, agentSkills, agentSubSessions, agentToolCalls, auditLogs, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
 import { createModelGateway, ModelGatewayError, type GatewayAgentMessage, type GatewayToolResultOutput } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
@@ -39,6 +39,8 @@ export class AgentExecutionsService {
   private readonly activeModelRequests = new Map<string, AbortController>();
   private readonly activeMcpRequests = new Map<string, AbortController>();
   private readonly scheduledExecutions = new Set<string>();
+  private readonly listeners = new Set<(event: AgentExecutionEvent) => void>();
+  private readonly eventQueues = new Map<string, Promise<void>>();
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
@@ -58,6 +60,7 @@ export class AgentExecutionsService {
     const modelMessages: StoredAgentModelMessage[] = [{ role: 'user', content }];
     const displayMessages: StoredAgentDisplayMessage[] = [{ id: `msg_${randomUUID()}`, role: 'user', content, createdAt: now }];
     await this.db.insert(agentExecutions).values({ id, workspaceId: workspace.id, agentId, status: 'running', phase: 'model', modelMessages, displayMessages });
+    await this.publishSnapshotForExecution(workspace.id, id);
     this.schedule(request, workspaceSlug, id);
     return this.toView(await this.loadExecution(workspace.id, agentId, id));
   }
@@ -69,6 +72,7 @@ export class AgentExecutionsService {
     const modelMessages: StoredAgentModelMessage[] = [{ role: 'user', content }];
     const displayMessages: StoredAgentDisplayMessage[] = [{ id: `msg_${randomUUID()}`, role: 'user', content, createdAt: now.toISOString() }];
     await this.db.insert(agentExecutions).values({ id, workspaceId, agentId, status: 'running', phase: 'model', modelMessages, displayMessages, createdAt: now, updatedAt: now });
+    await this.publishSnapshotForExecution(workspaceId, id);
     this.schedule({} as Request, 'personal', id);
     return id;
   }
@@ -76,6 +80,20 @@ export class AgentExecutionsService {
   async get(request: Request, workspaceSlug: string, agentId: string, executionId: string): Promise<AgentExecutionView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     return this.toView(await this.loadExecution(workspace.id, agentId, executionId));
+  }
+
+  async events(request: Request, workspaceSlug: string, agentId: string, executionId: string, afterSequence = 0): Promise<AgentExecutionEvent[]> {
+    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.loadExecution(workspace.id, agentId, executionId);
+    const rows = await this.db.select().from(agentExecutionEvents)
+      .where(and(eq(agentExecutionEvents.executionId, executionId), gt(agentExecutionEvents.sequence, afterSequence)))
+      .orderBy(asc(agentExecutionEvents.sequence));
+    return rows.map(toExecutionEvent);
+  }
+
+  subscribe(listener: (event: AgentExecutionEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   async continue(request: Request, workspaceSlug: string, agentId: string, executionId: string, input: ContinueAgentExecutionRequest): Promise<AgentExecutionView> {
@@ -98,6 +116,7 @@ export class AgentExecutionsService {
       accepted = updated.changes > 0;
     });
     if (!accepted) throw new ConflictException('This Agent execution is no longer ready for another message.');
+    await this.publishSnapshotForExecution(workspace.id, executionId);
     this.schedule(request, workspaceSlug, executionId);
     return this.toView(await this.loadExecution(workspace.id, agentId, executionId));
   }
@@ -121,6 +140,7 @@ export class AgentExecutionsService {
     });
     if (!accepted) throw new ConflictException('This Agent execution is no longer ready to retry.');
     await Promise.all(unresolvedCalls.flatMap((call) => call.commandExecutionId ? [this.skillScripts.cancel(call.commandExecutionId).catch(() => undefined)] : []));
+    await this.publishSnapshotForExecution(workspace.id, executionId);
     this.schedule(request, workspaceSlug, executionId);
     return this.toView(await this.loadExecution(workspace.id, agentId, executionId));
   }
@@ -142,6 +162,7 @@ export class AgentExecutionsService {
       transaction.insert(auditLogs).values({ id: `audit_${randomUUID()}`, workspaceId: workspace.id, action: 'agent_execution.question_answered', resource: executionId, metadata: { executionId, agentId, questionId: input.questionId } }).run();
     });
     if (!accepted) throw new ConflictException('This Agent question is no longer active.');
+    await this.publishSnapshotForExecution(workspace.id, executionId);
     void this.resumeAfterToolCalls(request, workspaceSlug, workspace.id, agentId, executionId).catch(async (error) => {
       await this.markExecutionFailed(workspace.id, executionId, executionFailure(error));
     });
@@ -183,6 +204,7 @@ export class AgentExecutionsService {
       await Promise.all(runningCalls.flatMap((call) => call.commandExecutionId
         ? [this.skillScripts.cancel(call.commandExecutionId).catch(() => undefined)]
         : []));
+      await this.publishSnapshotForExecution(workspace.id, executionId);
     }
     return this.toView(await this.loadExecution(workspace.id, agentId, executionId));
   }
@@ -238,14 +260,15 @@ export class AgentExecutionsService {
       const readyExecution = await this.loadExecution(workspace.id, execution.agentId, executionId);
       if (readyExecution.status !== 'running') return this.toView(readyExecution);
       const runtime = await this.resources.providerRuntime(request, workspaceSlug, agent.providerId!, agent.model);
-      const result = await createModelGateway().generateAgentStep({ provider: runtime.provider, model: runtime.model, systemPrompt, messages: execution.modelMessages as GatewayAgentMessage[], skillScripts: availableSkillScripts, builtinTools: builtinToolDefinitions, mcpTools: availableMcpTools, maxToolRounds: MAX_HELPER_TOOL_ROUNDS, abortSignal: abortController.signal });
+      const streamedMessageId = `msg_${randomUUID()}`;
+      const result = await createModelGateway().generateAgentStep({ provider: runtime.provider, model: runtime.model, systemPrompt, messages: execution.modelMessages as GatewayAgentMessage[], skillScripts: availableSkillScripts, builtinTools: builtinToolDefinitions, mcpTools: availableMcpTools, maxToolRounds: MAX_HELPER_TOOL_ROUNDS, abortSignal: abortController.signal, onTextDelta: (delta) => this.persistEvent(executionId, { kind: 'message_delta', messageId: streamedMessageId, delta }) });
       const responseText = normalizeAssistantMessage(result.text);
       if (!responseText && result.toolCalls.length === 0) throw new Error('Empty Agent response');
       if (result.toolCalls.length > 4) throw new Error('The Agent requested too many tools in one step.');
       const currentExecution = await this.loadExecution(workspace.id, execution.agentId, executionId);
       if (currentExecution.status !== 'running') return this.toView(currentExecution);
       const modelMessages = [...execution.modelMessages, ...result.responseMessages] as StoredAgentModelMessage[];
-      const displayMessages = responseText ? [...execution.displayMessages, { id: `msg_${randomUUID()}`, role: 'assistant' as const, content: responseText, createdAt: new Date().toISOString() }] : execution.displayMessages;
+      const displayMessages = responseText ? [...execution.displayMessages, { id: streamedMessageId, role: 'assistant' as const, content: responseText, createdAt: new Date().toISOString() }] : execution.displayMessages;
       let status: 'running' | 'waiting_for_input' | 'completed' = result.toolCalls.length > 0 ? 'running' : 'completed';
       let phase: AgentExecutionPhase = result.toolCalls.length > 0 ? 'skill' : 'model';
       let pendingQuestion: AgentPendingQuestion | null = null;
@@ -290,6 +313,13 @@ export class AgentExecutionsService {
           transaction.insert(auditLogs).values({ id: `audit_${randomUUID()}`, workspaceId: workspace.id, action: 'agent_execution.completed', resource: executionId, metadata: { agentId: execution.agentId, executionId, phase: 'model', errorCode: null } }).run();
         }
       });
+      if (turnUpdated) {
+        for (const callId of [...immediateCallIds, ...runningCallIds]) {
+          const [call] = await this.db.select().from(agentToolCalls).where(eq(agentToolCalls.id, callId)).limit(1);
+          if (call) await this.persistEvent(executionId, { kind: 'tool_call', call: toToolCallView(call) });
+        }
+        await this.publishSnapshotForExecution(workspace.id, executionId);
+      }
       if (turnUpdated && immediateCallIds.length > 0) {
         await this.resumeAfterToolCalls(request, workspaceSlug, workspace.id, execution.agentId, executionId);
       }
@@ -370,6 +400,11 @@ export class AgentExecutionsService {
       finalized = true;
       transaction.insert(auditLogs).values({ id: `audit_${randomUUID()}`, workspaceId, action: `${call.toolName}.${result.status}`, resource: callId, metadata: { ...toolAuditMetadata(call), commandExecutionId: result.commandExecutionId, exitCode: result.exitCode } }).run();
     });
+    if (finalized) {
+      const [updatedCall] = await this.db.select().from(agentToolCalls).where(eq(agentToolCalls.id, callId)).limit(1);
+      if (updatedCall) await this.persistEvent(executionId, { kind: 'tool_call', call: toToolCallView(updatedCall) });
+      await this.publishSnapshotForExecution(workspaceId, executionId);
+    }
     if (finalized && result.status !== 'cancelled') await this.resumeAfterToolCalls(request, workspaceSlug, workspaceId, agentId, executionId);
   }
 
@@ -379,6 +414,7 @@ export class AgentExecutionsService {
     const calls = await this.db.select().from(agentToolCalls).where(and(eq(agentToolCalls.executionId, executionId), eq(agentToolCalls.resultAppended, false)));
     if (calls.some((call) => call.status === 'running')) {
       await this.db.update(agentExecutions).set({ status: 'running', phase: 'skill', updatedAt: new Date() }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'running')));
+      await this.publishSnapshotForExecution(workspaceId, executionId);
       return this.toView(await this.loadExecution(workspaceId, agentId, executionId));
     }
     const execution = await this.loadExecution(workspaceId, agentId, executionId);
@@ -391,7 +427,9 @@ export class AgentExecutionsService {
       shouldAdvance = true;
       for (const call of calls) transaction.update(agentToolCalls).set({ resultAppended: true }).where(eq(agentToolCalls.id, call.id)).run();
     });
-    return shouldAdvance ? this.advance(request, workspaceSlug, executionId) : this.toView(await this.loadExecution(workspaceId, agentId, executionId));
+    if (!shouldAdvance) return this.toView(await this.loadExecution(workspaceId, agentId, executionId));
+    await this.publishSnapshotForExecution(workspaceId, executionId);
+    return this.advance(request, workspaceSlug, executionId);
   }
 
   private async requireExecutableAgent(workspaceId: string, agentId: string) {
@@ -429,6 +467,35 @@ export class AgentExecutionsService {
       transaction.update(agentSubSessions).set({ unread: true, updatedAt: now }).where(eq(agentSubSessions.executionId, executionId)).run();
       transaction.insert(auditLogs).values({ id: `audit_${randomUUID()}`, workspaceId, action: 'agent_execution.failed', resource: executionId, metadata: { executionId, phase: failure.phase, errorCode: failure.code } }).run();
     });
+    await this.publishSnapshotForExecution(workspaceId, executionId);
+  }
+
+  private async publishSnapshotForExecution(workspaceId: string, executionId: string): Promise<void> {
+    const [execution] = await this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.workspaceId, workspaceId))).limit(1);
+    if (!execution) return;
+    const view = await this.toView(execution);
+    await this.persistEvent(executionId, { kind: 'status', status: view.status, phase: view.phase, errorCode: view.errorCode, error: view.error });
+    await this.persistEvent(executionId, { kind: 'snapshot', execution: view });
+  }
+
+  private async persistEvent(executionId: string, data: AgentExecutionEventData): Promise<void> {
+    const previous = this.eventQueues.get(executionId) ?? Promise.resolve();
+    const next = previous.then(async () => {
+      const [row] = await this.db.insert(agentExecutionEvents).values({
+        executionId,
+        sequence: sql<number>`coalesce((select max(sequence) from agent_execution_events where execution_id = ${executionId}), 0) + 1`,
+        data,
+      }).returning();
+      if (!row) return;
+      const event = toExecutionEvent(row);
+      for (const listener of this.listeners) listener(event);
+    });
+    this.eventQueues.set(executionId, next);
+    try {
+      await next;
+    } finally {
+      if (this.eventQueues.get(executionId) === next) this.eventQueues.delete(executionId);
+    }
   }
 }
 
@@ -468,6 +535,15 @@ function modelToolName(call: typeof agentToolCalls.$inferSelect): string {
 
 function toToolCallView(call: typeof agentToolCalls.$inferSelect): AgentToolCallView {
   return { id: call.id, workingDirectory: call.workingDirectory, skillId: call.skillId, skillName: call.skillName, scriptPath: call.scriptPath, mcpServerId: call.mcpServerId, mcpToolName: call.mcpToolName, arguments: call.arguments, status: call.status, output: call.output, exitCode: call.exitCode, commandExecutionId: call.commandExecutionId, result: call.result, createdAt: call.createdAt.toISOString(), finishedAt: call.finishedAt?.toISOString() ?? null };
+}
+
+function toExecutionEvent(row: typeof agentExecutionEvents.$inferSelect): AgentExecutionEvent {
+  return {
+    sequence: row.sequence,
+    executionId: row.executionId,
+    data: row.data as AgentExecutionEventData,
+    createdAt: row.createdAt?.toISOString() ?? new Date().toISOString(),
+  };
 }
 
 function toolAuditMetadata(call: typeof agentToolCalls.$inferSelect): Record<string, unknown> {

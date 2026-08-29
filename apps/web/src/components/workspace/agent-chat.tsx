@@ -3,7 +3,7 @@ import { ArrowLeft, ArrowUp, Ban, Bot, CheckCircle2, ChevronDown, ChevronRight, 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentSubSessionView, AgentToolCallView, AgentView } from '@worklite/contracts';
-import { ApiError, api } from '@/api/client';
+import { ApiError, api, parseAgentExecutionEvent } from '@/api/client';
 import { agentSubSessionsQueryKey, useAgentQuery, useAgentsQuery, useAgentSubSessionsQuery } from '@/api/queries';
 import { Conversation, ConversationContent } from '@/components/ai-elements/conversation';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
@@ -93,7 +93,6 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [mainConnectionState, setMainConnectionState] = useState<'connected' | 'reconnecting'>('connected');
   const [subConnectionState, setSubConnectionState] = useState<'connected' | 'reconnecting'>('connected');
-  const [refreshSignal, setRefreshSignal] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const currentPathRef = useRef(pathname);
   const appliedResultIdsRef = useRef(new Set<string>());
@@ -133,17 +132,6 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   useEffect(() => {
     window.localStorage.setItem(storageKey(workspaceSlug), JSON.stringify({ activeId, activeSubSessionId, archived } satisfies StoredExecutionState));
   }, [activeId, activeSubSessionId, archived, workspaceSlug]);
-
-  useEffect(() => {
-    const refresh = () => setRefreshSignal((current) => current + 1);
-    const onVisibilityChange = () => { if (document.visibilityState === 'visible') refresh(); };
-    window.addEventListener('online', refresh);
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => {
-      window.removeEventListener('online', refresh);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-    };
-  }, []);
 
   useEffect(() => {
     if (currentPathRef.current !== pathname) {
@@ -193,30 +181,33 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   }, [activeId, t, workspaceSlug]);
 
   useEffect(() => {
-    if (!activeId || execution?.status !== 'running' || busy) return;
-    const generation = ++mainRequestGenerationRef.current;
-    let cancelled = false;
-    let timer: number | undefined;
-    let delay = 1_500;
-    const poll = async () => {
-      if (cancelled || generation !== mainRequestGenerationRef.current) return;
+    if (!activeId || (execution?.status !== 'running' && execution?.status !== 'waiting_for_input')) return;
+    const source = new EventSource(api.agentExecutionEventsUrl(SYSTEM_HELPER_CHAT_ID, activeId), { withCredentials: true });
+    source.onopen = () => setMainConnectionState('connected');
+    source.onerror = () => setMainConnectionState('reconnecting');
+    source.onmessage = (message) => {
       try {
-        const next = await api.agentExecution(workspaceSlug, SYSTEM_HELPER_CHAT_ID, activeId);
-        if (cancelled || generation !== mainRequestGenerationRef.current) return;
-        setMainConnectionState('connected');
-        setExecution(next);
-        void applyCompletedResults(next);
-        if (next.status === 'running') timer = window.setTimeout(poll, delay);
+        const event = parseAgentExecutionEvent(message.data);
+        const data = event.data;
+        if (data.kind === 'snapshot') {
+          setExecution(data.execution);
+          void applyCompletedResults(data.execution);
+        } else if (data.kind === 'message_delta') {
+          setExecution((current) => {
+            if (!current) return current;
+            const existing = current.messages.find((item) => item.id === data.messageId);
+            const messages = existing
+              ? current.messages.map((item) => item.id === data.messageId ? { ...item, content: item.content + data.delta } : item)
+              : [...current.messages, { id: data.messageId, role: 'assistant' as const, content: data.delta, createdAt: event.createdAt }];
+            return { ...current, messages };
+          });
+        }
       } catch {
-        if (cancelled || generation !== mainRequestGenerationRef.current) return;
         setMainConnectionState('reconnecting');
-        delay = Math.min(delay * 2, 12_000);
-        timer = window.setTimeout(poll, delay);
       }
     };
-    void poll();
-    return () => { cancelled = true; if (timer !== undefined) window.clearTimeout(timer); };
-  }, [activeId, busy, execution?.status, refreshSignal, workspaceSlug]);
+    return () => source.close();
+  }, [activeId, execution?.status]);
 
   useEffect(() => {
     let cancelled = false;
@@ -261,30 +252,33 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   }, [activeSubSession?.agentId, activeSubSession?.executionId, activeSubSessionId, subSessionsQuery.isLoading, t, workspaceSlug]);
 
   useEffect(() => {
-    if (!activeSubSession || subExecution?.status !== 'running' || busy) return;
-    const generation = ++subRequestGenerationRef.current;
-    let cancelled = false;
-    let timer: number | undefined;
-    let delay = 1_500;
-    const poll = async () => {
-      if (cancelled || generation !== subRequestGenerationRef.current) return;
+    if (!activeSubSession || (subExecution?.status !== 'running' && subExecution?.status !== 'waiting_for_input')) return;
+    const source = new EventSource(api.agentExecutionEventsUrl(activeSubSession.agentId, activeSubSession.executionId), { withCredentials: true });
+    source.onopen = () => setSubConnectionState('connected');
+    source.onerror = () => setSubConnectionState('reconnecting');
+    source.onmessage = (message) => {
       try {
-        const next = await api.agentExecution(workspaceSlug, activeSubSession.agentId, activeSubSession.executionId);
-        if (cancelled || generation !== subRequestGenerationRef.current) return;
-        setSubConnectionState('connected');
-        setSubExecution(next);
-        if (next.status !== 'running') void queryClient.invalidateQueries({ queryKey: agentSubSessionsQueryKey() });
-        else timer = window.setTimeout(poll, delay);
+        const event = parseAgentExecutionEvent(message.data);
+        const data = event.data;
+        if (data.kind === 'snapshot') {
+          setSubExecution(data.execution);
+          if (data.execution.status !== 'running') void queryClient.invalidateQueries({ queryKey: agentSubSessionsQueryKey() });
+        } else if (data.kind === 'message_delta') {
+          setSubExecution((current) => {
+            if (!current) return current;
+            const existing = current.messages.find((item) => item.id === data.messageId);
+            const messages = existing
+              ? current.messages.map((item) => item.id === data.messageId ? { ...item, content: item.content + data.delta } : item)
+              : [...current.messages, { id: data.messageId, role: 'assistant' as const, content: data.delta, createdAt: event.createdAt }];
+            return { ...current, messages };
+          });
+        }
       } catch {
-        if (cancelled || generation !== subRequestGenerationRef.current) return;
         setSubConnectionState('reconnecting');
-        delay = Math.min(delay * 2, 12_000);
-        timer = window.setTimeout(poll, delay);
       }
     };
-    void poll();
-    return () => { cancelled = true; if (timer !== undefined) window.clearTimeout(timer); };
-  }, [activeSubSession?.agentId, activeSubSession?.executionId, busy, refreshSignal, subExecution?.status, workspaceSlug]);
+    return () => source.close();
+  }, [activeSubSession?.agentId, activeSubSession?.executionId, subExecution?.status]);
 
   useEffect(() => {
     if (!activeSubSession || !activeSubSession.unread || subExecution?.status === 'running') return;

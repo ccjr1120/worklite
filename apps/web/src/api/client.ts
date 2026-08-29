@@ -25,6 +25,7 @@ import type {
   UsageRow,
   WorkflowView,
   CommandExecutionEvent,
+  AgentExecutionEvent,
   CommandExecutionView,
   ExecuteSkillScriptRequest,
   UpdateWorkspaceSettingsRequest,
@@ -95,6 +96,7 @@ export const api = {
   deleteAgentScheduledTask: (_workspace: string | undefined, taskId: string) => apiDelete(`/api/agent-scheduled-tasks/${encodeURIComponent(taskId)}`),
   createAgentExecution: (_workspace: string | undefined, agentId: string, message: string) => apiPost<AgentExecutionView>(`/api/agents/${encodeURIComponent(agentId)}/executions`, { message }),
   agentExecution: (_workspace: string | undefined, agentId: string, executionId: string) => apiGet<AgentExecutionView>(`/api/agents/${encodeURIComponent(agentId)}/executions/${encodeURIComponent(executionId)}`),
+  agentExecutionEventsUrl: (agentId: string, executionId: string) => `/api/agents/${encodeURIComponent(agentId)}/executions/${encodeURIComponent(executionId)}/events`,
   continueAgentExecution: (_workspace: string | undefined, agentId: string, executionId: string, message: string) => apiPost<AgentExecutionView>(`/api/agents/${encodeURIComponent(agentId)}/executions/${encodeURIComponent(executionId)}/messages`, { message }),
   retryAgentExecution: (_workspace: string | undefined, agentId: string, executionId: string) => apiPost<AgentExecutionView>(`/api/agents/${encodeURIComponent(agentId)}/executions/${encodeURIComponent(executionId)}/retry`),
   cancelAgentExecution: (_workspace: string | undefined, agentId: string, executionId: string) => apiPost<AgentExecutionView>(`/api/agents/${encodeURIComponent(agentId)}/executions/${encodeURIComponent(executionId)}/cancel`),
@@ -140,4 +142,12 @@ export function parseCommandEvent(value: string): CommandExecutionEvent {
     throw new Error('The command event stream returned an invalid event.');
   }
   return event as CommandExecutionEvent;
+}
+
+export function parseAgentExecutionEvent(value: string): AgentExecutionEvent {
+  const event = JSON.parse(value) as Partial<AgentExecutionEvent>;
+  if (typeof event.sequence !== 'number' || typeof event.executionId !== 'string' || !event.data || typeof event.data !== 'object' || typeof event.createdAt !== 'string') {
+    throw new Error('The Agent event stream returned an invalid event.');
+  }
+  return event as AgentExecutionEvent;
 }

@@ -142,6 +142,19 @@ export type AgentExecutionView = {
   updatedAt: string;
 };
 
+export type AgentExecutionEventData =
+  | { kind: 'snapshot'; execution: AgentExecutionView }
+  | { kind: 'message_delta'; messageId: string; delta: string }
+  | { kind: 'status'; status: AgentExecutionStatus; phase: AgentExecutionPhase; errorCode: AgentExecutionErrorCode | null; error: string | null }
+  | { kind: 'tool_call'; call: AgentToolCallView };
+
+export type AgentExecutionEvent = {
+  sequence: number;
+  executionId: string;
+  data: AgentExecutionEventData;
+  createdAt: string;
+};
+
 export type CreateAgentExecutionRequest = {
   message: string;
 };

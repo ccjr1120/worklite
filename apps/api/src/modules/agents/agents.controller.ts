@@ -1,6 +1,6 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from '@nestjs/common';
-import type { Request } from 'express';
-import type { AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, CreateAgentRequest, UpdateAgentRequest } from '@worklite/contracts';
+import { Body, Controller, Delete, Get, Header, Headers, Param, Patch, Post, Req, Res } from '@nestjs/common';
+import type { Request, Response } from 'express';
+import type { AgentExecutionEvent, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, CreateAgentRequest, UpdateAgentRequest } from '@worklite/contracts';
 import { AgentExecutionsService } from './agent-executions.service';
 import { AgentsService } from './agents.service';
 
@@ -33,6 +33,59 @@ export class AgentsController {
     return this.executions.get(request, 'personal', agentId, executionId);
   }
 
+  @Get(':agentId/executions/:executionId/events')
+  @Header('Cache-Control', 'no-cache, no-transform')
+  async executionEvents(
+    @Req() request: Request,
+    @Param('agentId') agentId: string,
+    @Param('executionId') executionId: string,
+    @Headers('last-event-id') lastEventId: string | undefined,
+    @Res() response: Response,
+  ): Promise<void> {
+    const afterSequence = parseLastEventId(lastEventId);
+    const execution = await this.executions.get(request, 'personal', agentId, executionId);
+    response.status(200);
+    response.setHeader('Content-Type', 'text/event-stream');
+    response.setHeader('Connection', 'keep-alive');
+    response.setHeader('X-Accel-Buffering', 'no');
+    response.flushHeaders();
+    let lastSequence = afterSequence;
+    let replaying = true;
+    let closed = false;
+    const pending: AgentExecutionEvent[] = [];
+    const send = (event: AgentExecutionEvent) => {
+      if (closed || event.executionId !== executionId || (event.sequence > 0 && event.sequence <= lastSequence)) return;
+      if (event.sequence > 0) lastSequence = event.sequence;
+      response.write(`id: ${event.sequence}\ndata: ${JSON.stringify(event)}\n\n`);
+    };
+    const unsubscribe = this.executions.subscribe((event) => {
+      if (event.executionId !== executionId) return;
+      if (replaying) pending.push(event);
+      else send(event);
+    });
+    const heartbeat = setInterval(() => response.write(': keep-alive\n\n'), 15_000);
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      clearInterval(heartbeat);
+      unsubscribe();
+    };
+    request.once('close', cleanup);
+    const replay = await this.executions.events(request, 'personal', agentId, executionId, afterSequence);
+    replay.forEach(send);
+    replaying = false;
+    pending.sort((left, right) => left.sequence - right.sequence).forEach(send);
+    const hasSnapshot = [...replay, ...pending].some((event) => event.data.kind === 'snapshot');
+    if (!hasSnapshot && afterSequence === 0) {
+      send({ sequence: 0, executionId, data: { kind: 'snapshot', execution }, createdAt: new Date().toISOString() });
+    }
+    const latest = await this.executions.get(request, 'personal', agentId, executionId);
+    if (latest.status === 'completed' || latest.status === 'failed' || latest.status === 'cancelled') {
+      cleanup();
+      response.end();
+    }
+  }
+
   @Post(':agentId/executions/:executionId/messages')
   continueExecution(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string, @Body() body: ContinueAgentExecutionRequest) {
     return this.executions.continue(request, 'personal', agentId, executionId, body);
@@ -62,4 +115,9 @@ export class AgentsController {
   delete(@Req() request: Request, @Param('agentId') agentId: string) {
     return this.agents.delete(request, 'personal', agentId);
   }
+}
+
+function parseLastEventId(value: string | undefined): number {
+  const parsed = Number(value ?? 0);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
 }

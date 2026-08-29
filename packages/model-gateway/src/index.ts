@@ -44,6 +44,7 @@ export type GenerateAgentStepRequest = {
   maxContextTokens?: number;
   maxOutputTokens?: number;
   abortSignal?: AbortSignal;
+  onTextDelta?: (delta: string) => void | Promise<void>;
 };
 
 export type GatewayToolDefinition = {
@@ -152,14 +153,14 @@ export class AiSdkModelGateway implements ModelGateway {
       });
     }
     const context = trimAgentMessages(request.systemPrompt, request.messages, request.maxContextTokens ?? 12_000);
-    const result = await generateWithRetry({
+    const result = await generateAgentWithRetry({
       model,
       instructions: request.systemPrompt,
       messages: context.messages as ModelMessage[],
       tools: Object.keys(tools).length > 0 ? tools as never : undefined,
       maxOutputTokens: request.maxOutputTokens,
       abortSignal: request.abortSignal,
-    }, request.abortSignal);
+    }, request.abortSignal, request.onTextDelta);
 
     const invalidToolRequest = classifyInvalidToolRequest(result.toolCalls);
     if (invalidToolRequest) throw invalidToolRequest;
@@ -171,6 +172,31 @@ export class AiSdkModelGateway implements ModelGateway {
       finishReason: result.finishReason,
       contextDropped: context.dropped,
     };
+  }
+}
+
+async function generateAgentWithRetry(
+  request: Parameters<typeof streamText>[0],
+  signal: AbortSignal | undefined,
+  onTextDelta?: (delta: string) => void | Promise<void>,
+  maxAttempts = 3,
+): Promise<Awaited<ReturnType<typeof generateText>>> {
+  const attempts = Math.max(1, Math.min(4, Math.floor(maxAttempts)));
+  for (let attempt = 0; ; attempt += 1) {
+    signal?.throwIfAborted();
+    let emitted = false;
+    try {
+      const result = streamText(request);
+      for await (const delta of result.textStream) {
+        emitted = true;
+        await onTextDelta?.(delta);
+      }
+      const [text, toolCalls, responseMessages, finishReason] = await Promise.all([result.text, result.toolCalls, result.responseMessages, result.finishReason]);
+      return { text, toolCalls, responseMessages, finishReason } as Awaited<ReturnType<typeof generateText>>;
+    } catch (error) {
+      if (attempt + 1 >= attempts || emitted || signal?.aborted || !isRetryableGatewayError(error)) throw error;
+      await abortableDelay(Math.min(250 * 2 ** attempt, 2_000), signal);
+    }
   }
 }
 
