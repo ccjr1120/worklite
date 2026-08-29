@@ -49,6 +49,7 @@
     "publishTitle": "发布工作流",
     "publishDescription": "发布会锁定每个引用的 Agent 版本。之后对 Agent 的编辑不会改变此工作流或其历史运行。",
     "published": "工作流已发布",
+    "saveFailed": "无法保存工作流。",
     "addStep": "添加步骤",
     "addStepStart": "在开头添加步骤",
     "addStepAfter": "在 {{name}} 之后添加步骤",

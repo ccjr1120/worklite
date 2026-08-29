@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Root as VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { surfaceInteraction } from '@/components/ui/interaction';
 
 function Command({ className, ...props }: ComponentProps<typeof CommandPrimitive>) {
   return (
@@ -27,7 +28,7 @@ function CommandDialog({
           <DialogTitle>{t('command.title')}</DialogTitle>
         </VisuallyHidden>
         <Command className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-4 [&_[cmdk-input-wrapper]_svg]:w-4">
-          {children}
+          {children as unknown as ComponentProps<typeof CommandPrimitive>['children']}
         </Command>
       </DialogContent>
     </Dialog>
@@ -36,7 +37,7 @@ function CommandDialog({
 
 function CommandInput({ className, ...props }: ComponentProps<typeof CommandPrimitive.Input>) {
   return (
-    <div className="flex items-center border-b border-border px-3" cmdk-input-wrapper="">
+    <div className="flex items-center border-b border-border px-3 transition-colors duration-[120ms] focus-within:border-ring" cmdk-input-wrapper="">
       <Search className="mr-2 size-4 shrink-0 text-muted-foreground" />
       <CommandPrimitive.Input
         className={cn(
@@ -73,7 +74,8 @@ function CommandItem({ className, ...props }: ComponentProps<typeof CommandPrimi
   return (
     <CommandPrimitive.Item
       className={cn(
-        'relative flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[selected=true]:bg-brand-subtle data-[selected=true]:text-foreground data-[disabled=true]:opacity-50',
+        'relative flex cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:pointer-events-none data-[selected=true]:bg-brand-subtle data-[selected=true]:text-foreground data-[disabled=true]:opacity-50',
+        surfaceInteraction,
         className,
       )}
       {...props}

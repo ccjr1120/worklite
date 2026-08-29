@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/status-badge';
 import type { WorkflowStep } from '@/mock/data';
 import { cn } from '@/lib/utils';
+import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 
 type WorkflowStepsProps = {
   steps: WorkflowStep[];
@@ -36,7 +37,7 @@ function WorkflowSteps({ steps, selectedId, onSelect, onAdd, onMove, onRemove }:
                 selected ? 'border-brand' : 'border-border',
               )}
             >
-              <button type="button" className="w-full text-left" onClick={() => onSelect(step.id)}>
+              <button type="button" className={cn('w-full rounded-md text-left', surfaceInteraction, focusRingInset)} onClick={() => onSelect(step.id)} aria-pressed={selected}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-xs font-medium text-muted-foreground">{t('editor.step', { position: step.position })}</p>

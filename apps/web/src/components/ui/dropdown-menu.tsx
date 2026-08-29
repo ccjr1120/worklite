@@ -2,6 +2,7 @@ import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
 import { Check, ChevronRight } from 'lucide-react';
 import type { ComponentProps } from 'react';
 import { cn } from '@/lib/utils';
+import { surfaceInteraction } from '@/components/ui/interaction';
 
 function DropdownMenu({ ...props }: ComponentProps<typeof DropdownMenuPrimitive.Root>) {
   return <DropdownMenuPrimitive.Root {...props} />;
@@ -33,7 +34,7 @@ function DropdownMenuContent({
       <DropdownMenuPrimitive.Content
         sideOffset={sideOffset}
         className={cn(
-          'z-50 min-w-44 overflow-hidden rounded-lg border border-border bg-surface-raised p-1 text-sm shadow-md duration-[150ms]',
+          'z-50 min-w-44 overflow-hidden rounded-lg border border-border bg-surface-raised p-1 text-sm shadow-md outline-none duration-[150ms]',
           className,
         )}
         {...props}
@@ -50,7 +51,8 @@ function DropdownMenuItem({
   return (
     <DropdownMenuPrimitive.Item
       className={cn(
-        'relative flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none transition-colors duration-[120ms] focus:bg-surface-subtle data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        'relative flex cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none focus:bg-brand-subtle data-[disabled]:cursor-not-allowed data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        surfaceInteraction,
         inset && 'pl-8',
         className,
       )}
@@ -68,7 +70,8 @@ function DropdownMenuCheckboxItem({
   return (
     <DropdownMenuPrimitive.CheckboxItem
       className={cn(
-        'relative flex cursor-default select-none items-center rounded-md py-1.5 pl-8 pr-2 text-sm outline-none transition-colors duration-[120ms] focus:bg-surface-subtle data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        'relative flex cursor-pointer select-none items-center rounded-md py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-brand-subtle data-[disabled]:cursor-not-allowed data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        surfaceInteraction,
         className,
       )}
       checked={checked}
@@ -114,7 +117,8 @@ function DropdownMenuSubTrigger({
   return (
     <DropdownMenuPrimitive.SubTrigger
       className={cn(
-        'flex cursor-default select-none items-center rounded-md px-2 py-1.5 text-sm outline-none focus:bg-surface-subtle',
+        'flex cursor-pointer select-none items-center rounded-md px-2 py-1.5 text-sm outline-none focus:bg-brand-subtle',
+        surfaceInteraction,
         inset && 'pl-8',
         className,
       )}
@@ -129,7 +133,7 @@ function DropdownMenuSubTrigger({
 function DropdownMenuSubContent({ className, ...props }: ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
   return (
     <DropdownMenuPrimitive.SubContent
-      className={cn('z-50 min-w-32 overflow-hidden rounded-lg border border-border bg-surface-raised p-1 shadow-md', className)}
+      className={cn('z-50 min-w-32 overflow-hidden rounded-lg border border-border bg-surface-raised p-1 shadow-md outline-none', className)}
       {...props}
     />
   );

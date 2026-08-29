@@ -10,7 +10,7 @@ function PasswordInput({ className, ...props }: InputHTMLAttributes<HTMLInputEle
   const [visible, setVisible] = useState(false);
 
   return (
-    <div className="relative">
+    <div className="relative w-full min-w-0">
       <Input type={visible ? 'text' : 'password'} className={cn('pr-10', className)} {...props} />
       <Button
         type="button"

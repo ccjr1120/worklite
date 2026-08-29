@@ -49,6 +49,7 @@
     "publishTitle": "Publish workflow",
     "publishDescription": "Publishing locks each referenced agent version. Later agent edits will not change this workflow or its historical runs.",
     "published": "Workflow published",
+    "saveFailed": "The workflow could not be saved.",
     "addStep": "Add step",
     "addStepStart": "Add step at start",
     "addStepAfter": "Add step after {{name}}",

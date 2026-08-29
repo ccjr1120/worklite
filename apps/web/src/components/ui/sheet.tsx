@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import type { ComponentProps } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
+import { focusRing, surfaceInteraction } from '@/components/ui/interaction';
 
 function Sheet({ ...props }: ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root {...props} />;
@@ -40,7 +41,7 @@ function SheetContent({
       <SheetOverlay />
       <DialogPrimitive.Content
         className={cn(
-          'fixed z-50 flex flex-col bg-surface-raised shadow-lg duration-[200ms]',
+          'fixed z-50 flex flex-col bg-surface-raised shadow-lg outline-none duration-[200ms]',
           side === 'right' && 'inset-y-0 right-0 h-full w-full border-l border-border sm:max-w-md',
           side === 'left' && 'inset-y-0 left-0 h-full w-full border-r border-border sm:max-w-[232px]',
           side === 'bottom' && 'inset-x-0 bottom-0 h-[70vh] rounded-t-xl border-t border-border',
@@ -49,7 +50,7 @@ function SheetContent({
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm text-muted-foreground hover:text-foreground">
+        <DialogPrimitive.Close className={cn('absolute right-3 top-3 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-subtle hover:text-foreground active:bg-border', surfaceInteraction, focusRing)}>
           <X className="size-4" />
           <span className="sr-only">{t('actions.close')}</span>
         </DialogPrimitive.Close>

@@ -106,8 +106,6 @@
   "firstUse": {
     "intro": "Your workspace is ready to set up. Complete the sequence below.",
     "configureProvider": "Configure a provider",
-    "createAgent": "Create an agent",
-    "createWorkflow": "Create a workflow",
-    "runAndInspect": "Run and inspect it"
+    "configureSystemHelper": "Choose a provider and model for System Helper Chat"
   }
 }

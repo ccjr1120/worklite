@@ -10,7 +10,7 @@ An empty collection explains the object and provides one authorized next action.
 
 ## Error and Permission
 
-Explain failures in user terms, preserve unaffected content, and provide recovery. Durable errors remain in the page rather than only in a toast. Resource errors identify the unavailable item or action without leaking protected details.
+Explain failures in user terms, preserve unaffected content, and provide recovery. Durable errors remain in the page rather than only in a toast. Resource errors identify the unavailable item or action without leaking protected details. Agent turns render credential-safe failure reasons and explicit cancellation cues inline; raw provider or SDK errors and malformed tool input are never presentation content.
 
 ## Offline and Streaming
 
@@ -24,6 +24,7 @@ Truncate only summaries and provide expand, copy, download or details access. In
 
 ### 2026-08-27
 
+- Required inline credential-safe Agent failure reasons and explicit cancellation cues without exposing malformed tool input or raw provider and SDK errors.
 - Defined collapsed-by-default Agent Skill-call summaries and bounded on-demand output for long transcript content.
 - Replaced obsolete local Agent message queue guidance with editable, unqueued drafts, transcript-owned working feedback, and active-turn Stop behavior.
 

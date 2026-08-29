@@ -40,7 +40,7 @@ Before UI work, read the design system, this index, every applicable document un
 /settings/{usage,audit-log,appearance}
 ```
 
-The root route opens Home. First-use setup is an optional provider and first-agent checklist from Home; there is no account, invitation, or team setup flow.
+The root route opens Home. First-use setup is an optional checklist for configuring a Model Provider and binding that Provider and a model to System Helper Chat; there is no account, invitation, team, first custom Agent, Workflow, or Run setup step.
 
 ## Shared Component Inventory
 
@@ -62,6 +62,7 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ### 2026-08-27
 
+- Reduced the Home first-use checklist to Model Provider configuration and System Helper Chat model binding, with completion derived from persisted resource state.
 - Removed the standalone Terminal page; direct host execution is now an action on saved Skill scripts in the Skill editor.
 
 ### 2026-08-26

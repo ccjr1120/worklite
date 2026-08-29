@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { Blocks, Bot, KeyRound, Server } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
+import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 
 type AgentResourceView = 'agents' | 'skills' | 'mcp-servers' | 'providers';
 
@@ -21,7 +22,9 @@ function AgentResourceNav({ active }: { workspaceSlug?: string; active: AgentRes
           key={item.id}
           to={item.to}
           className={cn(
-            'inline-flex h-7 items-center gap-1.5 rounded-sm px-3 text-[13px] font-medium text-muted-foreground transition-colors duration-[120ms] hover:text-foreground focus-visible:outline-none',
+            'inline-flex h-7 items-center gap-1.5 rounded-sm px-3 text-[13px] font-medium text-muted-foreground hover:bg-surface/70 hover:text-foreground',
+            surfaceInteraction,
+            focusRingInset,
             active === item.id && 'bg-surface text-foreground shadow-sm',
           )}
           aria-current={active === item.id ? 'page' : undefined}

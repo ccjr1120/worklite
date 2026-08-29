@@ -1,7 +1,10 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { focusRing, surfaceInteraction } from '@/components/ui/interaction';
 import { CopyableId } from '@/components/copyable-id';
 import { PageHeading } from '@/components/page-heading';
 import { StatusBadge } from '@/components/status-badge';
@@ -34,9 +37,24 @@ function RunDetailsPage() {
   const steps: WorkflowStep[] = [];
   const [selectedId, setSelectedId] = useState(steps.find((step) => step.status === 'running')?.id ?? steps[0]?.id ?? null);
   const [following, setFollowing] = useState(true);
+  const [cancelling, setCancelling] = useState(false);
   const selected = steps.find((step) => step.id === selectedId);
   const runArtifacts: Artifact[] = [];
   const cancellable = run?.status === 'running' || run?.status === 'queued';
+
+  async function cancelRun() {
+    if (cancelling) return;
+    setCancelling(true);
+    try {
+      await api.cancelRun(workspaceSlug, runId);
+      await queryClient.invalidateQueries({ queryKey: ['run', runId] });
+      await queryClient.invalidateQueries({ queryKey: ['runs'] });
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : t('details.cancelFailed'));
+    } finally {
+      setCancelling(false);
+    }
+  }
 
   const duration = useMemo(() => {
     if (run?.durationSeconds == null) {
@@ -62,8 +80,8 @@ function RunDetailsPage() {
         ]}
         actions={
           cancellable ? (
-            <Button variant="destructive" size="compact" onClick={() => void api.cancelRun(workspaceSlug, runId).then(() => queryClient.invalidateQueries({ queryKey: ['run', workspaceSlug, runId] }))}>
-              {t('details.cancel')}
+            <Button variant="destructive" size="compact" onClick={() => void cancelRun()} disabled={cancelling}>
+              {cancelling ? t('details.cancelling') : t('details.cancel')}
             </Button>
           ) : undefined
         }
@@ -109,7 +127,17 @@ function RunDetailsPage() {
                   />
                   {index < steps.length - 1 ? <span className="w-px flex-1 bg-border" /> : null}
                 </div>
-                <button type="button" className="mb-4 w-full rounded-lg border border-border bg-surface p-3 text-left hover:bg-surface-subtle" onClick={() => setSelectedId(step.id)}>
+                <button
+                  type="button"
+                  className={cn(
+                    'mb-4 w-full rounded-lg border bg-surface p-3 text-left hover:bg-surface-subtle',
+                    surfaceInteraction,
+                    focusRing,
+                    selectedId === step.id ? 'border-brand bg-brand-subtle' : 'border-border hover:border-foreground/20',
+                  )}
+                  aria-pressed={selectedId === step.id}
+                  onClick={() => setSelectedId(step.id)}
+                >
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">{step.agentName}</span>
                     {step.status ? <StatusBadge status={step.status} /> : null}
@@ -155,8 +183,8 @@ function RunDetailsPage() {
       <div className="hidden h-56 border-t border-border md:block">
         <div className="flex h-9 items-center justify-between px-4 text-[13px]">
           <span className="font-medium">{t('details.logs')}</span>
-          <label className="flex items-center gap-2 text-muted-foreground">
-            <input type="checkbox" checked={following} onChange={(event) => setFollowing(event.target.checked)} />
+          <label className="flex cursor-pointer items-center gap-2 text-muted-foreground">
+            <Checkbox checked={following} onCheckedChange={(checked) => setFollowing(checked === true)} />
             {t('details.followEnd')}
           </label>
         </div>

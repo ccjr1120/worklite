@@ -21,6 +21,8 @@
     "unavailableTitle": "运行记录不可用",
     "unavailableDescription": "此运行记录不存在，或已无法访问。",
     "cancel": "取消运行",
+    "cancelling": "正在取消...",
+    "cancelFailed": "无法取消运行。",
     "version": "版本 {{version}}",
     "failed": "在 {{step}} 失败。此前已完成的工作会保留。",
     "openWorkflow": "打开工作流",

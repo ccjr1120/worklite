@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   ArrowUpRight,
   BarChart3,
+  Check,
   ChevronDown,
   ChevronRight,
   FileStack,
@@ -20,6 +21,7 @@ import { create } from 'zustand';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { focusRing, focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -28,9 +30,8 @@ import { StatusBadge } from '@/components/status-badge';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { greetingPeriod } from '@/i18n/format';
 import type { Artifact, Run, Workflow } from '@/mock/data';
-import { useArtifactsQuery, useAuditLogsQuery, useWorkflowsQuery, useRunsQuery } from '@/api/queries';
+import { useAgentQuery, useArtifactsQuery, useAuditLogsQuery, useModelProvidersQuery, useRunsQuery, useWorkflowsQuery } from '@/api/queries';
 import { cn } from '@/lib/utils';
-import { useSessionStore } from '@/stores/session-store';
 
 type DashboardWidgetType = 'attention' | 'active_runs' | 'workflow_health' | 'recent_workflows' | 'recent_activity' | 'recent_artifacts';
 type DashboardTemplate = 'workflow-overview' | 'workflow-health' | 'recent-activity' | 'blank';
@@ -66,6 +67,7 @@ type HomeSearch = {
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 const ALL_WIDGETS: DashboardWidgetType[] = ['attention', 'active_runs', 'workflow_health', 'recent_workflows', 'recent_activity', 'recent_artifacts'];
+const SYSTEM_HELPER_CHAT_ID = 'agt_system_helper_chat';
 
 function createDefaultCategories(): DashboardCategory[] {
   return [
@@ -127,9 +129,10 @@ function HomePage() {
   const { t: translate } = useTranslation(['home', 'workspace', 'common']);
   const t = translate as unknown as Translate;
   const workspaceKey = 'personal';
-  const onboardingStep = useSessionStore((state) => state.onboardingStep);
   const search = Route.useSearch();
   const navigate = useNavigate();
+  const modelProvidersQuery = useModelProvidersQuery(workspaceKey);
+  const systemHelperQuery = useAgentQuery(workspaceKey, SYSTEM_HELPER_CHAT_ID);
   const { data: apiWorkflows = [] } = useWorkflowsQuery(workspaceKey);
   const { data: apiRuns = [] } = useRunsQuery(workspaceKey);
   const { data: apiArtifacts = [] } = useArtifactsQuery(workspaceKey);
@@ -169,6 +172,9 @@ function HomePage() {
   }));
   const workspaceArtifacts: Artifact[] = apiArtifacts.map((item) => ({ ...item, teamSlug: workspaceKey }));
   const workspaceActivity = apiAuditLogs.map((item) => ({ id: item.id, text: `${item.actor} ${item.action}`, time: item.timestamp }));
+  const firstUseStateReady = modelProvidersQuery.isSuccess && systemHelperQuery.isSuccess;
+  const providerConfigured = (modelProvidersQuery.data?.length ?? 0) > 0;
+  const systemHelperConfigured = providerConfigured && Boolean(systemHelperQuery.data?.providerId && systemHelperQuery.data.model);
   const selectedBoardEntry = categories
     .flatMap((category) => category.boards.map((board) => ({ category, board })))
     .find(({ board }) => board.id === search.board);
@@ -263,7 +269,7 @@ function HomePage() {
       <WorkspaceChrome crumbs={[{ label: t('workspace:nav.home') }]} actions={pageActions} />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1200px] px-6 pb-36 pt-6">
-          {onboardingStep !== 'complete' ? <FirstUseGuide /> : null}
+          {firstUseStateReady && !systemHelperConfigured ? <FirstUseGuide providerConfigured={providerConfigured} /> : null}
           {selectedBoard && selectedBoardEntry ? (
             <DashboardDetail board={selectedBoard} category={selectedBoardEntry.category} workflows={workspaceWorkflows} runs={workspaceRuns} artifacts={workspaceArtifacts} activity={workspaceActivity} t={t} onAddWidget={() => setWidgetDialogOpen(true)} onMoveWidget={moveWidget} onRemoveWidget={removeWidget} onRename={(name) => updateBoard(selectedBoard.id, (board) => ({ ...board, name, nameKey: undefined }))} />
           ) : (
@@ -311,7 +317,7 @@ function DashboardLibrary({ categories, workflows, runs, artifacts, activity, t,
               <Button variant="secondary" size="compact" onClick={() => onAddBoard(category.id)}><Plus className="size-4" />{t('dashboard.actions.addBoard')}</Button>
             </div>
             <CollapsibleContent>
-              {category.boards.length === 0 ? <button type="button" className="mt-3 flex min-h-20 w-full cursor-pointer items-center justify-center rounded-lg border border-dashed border-border text-[13px] text-muted-foreground transition-colors duration-[120ms] hover:border-brand hover:bg-brand-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background" onClick={() => onAddBoard(category.id)}><Plus className="mr-2 size-4" />{t('dashboard.emptyCategory')}</button> : <div className="mt-3 grid gap-3 md:grid-cols-2">{category.boards.map((board) => <button key={board.id} type="button" className="group flex min-h-28 cursor-pointer items-start gap-3 rounded-lg border border-border bg-surface p-4 text-left transition-[border-color,background-color,box-shadow] duration-[120ms] hover:border-brand/50 hover:bg-surface-subtle hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background" onClick={() => onOpenBoard(board.id)}><span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand-subtle text-brand" aria-hidden="true"><LayoutDashboard className="size-[18px]" /></span><span className="min-w-0 flex-1"><span className="flex items-center gap-2 text-sm font-semibold"><span className="truncate">{resolveBoardName(board, t)}</span><ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100" aria-hidden="true" /></span><span className="mt-1 block text-[13px] leading-5 text-muted-foreground">{resolveBoardDescription(board, t)}</span><BoardSummary board={board} workflows={workflows} runs={runs} artifacts={artifacts} t={t} /></span><ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground" aria-hidden="true" /></button>)}</div>}
+              {category.boards.length === 0 ? <button type="button" className={cn('mt-3 flex min-h-20 w-full items-center justify-center rounded-lg border border-dashed border-border text-[13px] text-muted-foreground hover:border-brand hover:bg-brand-subtle hover:text-foreground', surfaceInteraction, focusRing)} onClick={() => onAddBoard(category.id)}><Plus className="mr-2 size-4" />{t('dashboard.emptyCategory')}</button> : <div className="mt-3 grid gap-3 md:grid-cols-2">{category.boards.map((board) => <button key={board.id} type="button" className={cn('group flex min-h-28 items-start gap-3 rounded-lg border border-border bg-surface p-4 text-left hover:border-brand/50 hover:bg-surface-subtle hover:shadow-sm', surfaceInteraction, focusRing)} onClick={() => onOpenBoard(board.id)}><span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand-subtle text-brand" aria-hidden="true"><LayoutDashboard className="size-[18px]" /></span><span className="min-w-0 flex-1"><span className="flex items-center gap-2 text-sm font-semibold"><span className="truncate">{resolveBoardName(board, t)}</span><ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100" aria-hidden="true" /></span><span className="mt-1 block text-[13px] leading-5 text-muted-foreground">{resolveBoardDescription(board, t)}</span><BoardSummary board={board} workflows={workflows} runs={runs} artifacts={artifacts} t={t} /></span><ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground" aria-hidden="true" /></button>)}</div>}
             </CollapsibleContent>
           </Collapsible>
         ))}
@@ -377,20 +383,20 @@ function renderWidgetContent(type: DashboardWidgetType, data: { workflows: Workf
 }
 
 function WorkflowRow({ workflow, attention = false }: { workflow: Workflow; attention?: boolean }) {
-  return <Link to="/workflows/$workflowId" params={{ workflowId: workflow.id }} className="group flex items-center gap-3 px-4 py-3 transition-colors duration-[120ms] hover:bg-surface-subtle focus-visible:outline-none">{attention ? <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden="true" /> : <WorkflowIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}<span className="min-w-0 flex-1 truncate text-[13px] font-medium">{workflow.name}</span><StatusBadge status={workflow.lastRunStatus ?? workflow.state} /><ChevronRight className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100" aria-hidden="true" /></Link>;
+  return <Link to="/workflows/$workflowId" params={{ workflowId: workflow.id }} className={cn('group flex items-center gap-3 px-4 py-3 hover:bg-surface-subtle', surfaceInteraction, focusRingInset)}>{attention ? <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden="true" /> : <WorkflowIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}<span className="min-w-0 flex-1 truncate text-[13px] font-medium">{workflow.name}</span><StatusBadge status={workflow.lastRunStatus ?? workflow.state} /><ChevronRight className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100" aria-hidden="true" /></Link>;
 }
 
 function RunRow({ run }: { run: Run }) {
-  return <Link to="/runs/$runId" params={{ runId: run.id }} className="group flex items-center gap-3 px-4 py-3 transition-colors duration-[120ms] hover:bg-surface-subtle focus-visible:outline-none"><Play className="size-4 shrink-0 text-brand" aria-hidden="true" /><span className="min-w-0 flex-1 truncate text-[13px] font-medium">{run.workflowName}</span><StatusBadge status={run.status} /><ChevronRight className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100" aria-hidden="true" /></Link>;
+  return <Link to="/runs/$runId" params={{ runId: run.id }} className={cn('group flex items-center gap-3 px-4 py-3 hover:bg-surface-subtle', surfaceInteraction, focusRingInset)}><Play className="size-4 shrink-0 text-brand" aria-hidden="true" /><span className="min-w-0 flex-1 truncate text-[13px] font-medium">{run.workflowName}</span><StatusBadge status={run.status} /><ChevronRight className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100" aria-hidden="true" /></Link>;
 }
 
 function ArtifactRow({ artifact }: { artifact: Artifact }) {
-  return <Link to="/artifacts/$artifactId" params={{ artifactId: artifact.id }} className="group flex items-center gap-3 px-4 py-3 transition-colors duration-[120ms] hover:bg-surface-subtle focus-visible:outline-none"><FileStack className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" /><span className="min-w-0 flex-1 truncate text-[13px] font-medium">{artifact.name}</span><span className="shrink-0 text-xs text-muted-foreground">{artifact.size}</span><ChevronRight className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100" aria-hidden="true" /></Link>;
+  return <Link to="/artifacts/$artifactId" params={{ artifactId: artifact.id }} className={cn('group flex items-center gap-3 px-4 py-3 hover:bg-surface-subtle', surfaceInteraction, focusRingInset)}><FileStack className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" /><span className="min-w-0 flex-1 truncate text-[13px] font-medium">{artifact.name}</span><span className="shrink-0 text-xs text-muted-foreground">{artifact.size}</span><ChevronRight className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100" aria-hidden="true" /></Link>;
 }
 
 function WidgetEmpty({ text }: { text: string }) { return <p className="px-4 py-8 text-center text-[13px] text-muted-foreground">{text}</p>; }
 
-function WidgetLink({ to, children }: { to: '/runs' | '/artifacts' | '/workflows'; children: string }) { return <Link to={to} className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">{children}<ArrowUpRight className="size-3.5" /></Link>; }
+function WidgetLink({ to, children }: { to: '/runs' | '/artifacts' | '/workflows'; children: string }) { return <Link to={to} className={cn('flex items-center gap-1 rounded-sm text-xs font-medium text-muted-foreground hover:text-foreground', surfaceInteraction, focusRing)}>{children}<ArrowUpRight className="size-3.5" /></Link>; }
 
 function getWidgetIcon(type: DashboardWidgetType, className: string) {
   if (type === 'attention') return <AlertTriangle className={className} aria-hidden="true" />;
@@ -411,7 +417,34 @@ function resolveCategoryName(category: DashboardCategory, t: Translate) { return
 function resolveBoardName(board: DashboardBoard, t: Translate) { return board.name ?? (board.nameKey ? t(board.nameKey) : 'Dashboard'); }
 function resolveBoardDescription(board: DashboardBoard, t: Translate) { return board.description ?? (board.descriptionKey ? t(board.descriptionKey) : t('dashboard.boards.custom.description')); }
 
-function FirstUseGuide() {
+function FirstUseGuide({ providerConfigured }: { providerConfigured: boolean }) {
   const { t } = useTranslation(['home', 'common']);
-  return <div className="mt-8 space-y-3"><p className="text-[13px] text-muted-foreground">{t('firstUse.intro')}</p><Link to="/model-providers" className="flex items-center justify-between rounded-lg border border-border bg-surface px-4 py-3 hover:bg-surface-subtle"><span className="text-sm font-medium">{t('firstUse.configureProvider')}</span><Button size="compact" asChild><span>{t('common:actions.continue')}</span></Button></Link><Link to="/agents/$agentId" params={{ agentId: 'new' }} className="flex items-center justify-between rounded-lg border border-border bg-surface px-4 py-3 hover:bg-surface-subtle"><span className="text-sm text-muted-foreground">{t('firstUse.createAgent')}</span></Link><Link to="/runs" className="flex items-center justify-between rounded-lg border border-border bg-surface px-4 py-3 hover:bg-surface-subtle"><span className="text-sm text-muted-foreground">{t('firstUse.runAndInspect')}</span></Link></div>;
+  const rowClassName = 'flex min-h-14 items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3';
+  const markerClassName = 'flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold';
+
+  return (
+    <section className="mt-8" aria-labelledby="first-use-title">
+      <p id="first-use-title" className="text-[13px] text-muted-foreground">{t('firstUse.intro')}</p>
+      <ol className="mt-3 space-y-2">
+        <li className={cn(rowClassName, providerConfigured && 'bg-surface-subtle/50')}>
+          <span className={cn(markerClassName, providerConfigured ? 'bg-success-subtle text-success' : 'bg-brand text-brand-foreground')} aria-hidden="true">
+            {providerConfigured ? <Check className="size-3.5" /> : '1'}
+          </span>
+          <span className={cn('min-w-0 flex-1 text-sm font-medium', providerConfigured && 'text-muted-foreground')}>{t('firstUse.configureProvider')}</span>
+          {providerConfigured ? (
+            <span className="text-xs font-medium text-success">{t('common:status.completed')}</span>
+          ) : (
+            <Button size="compact" asChild><Link to="/model-providers">{t('common:actions.continue')}<ChevronRight /></Link></Button>
+          )}
+        </li>
+        <li className={cn(rowClassName, !providerConfigured && 'bg-surface-subtle/50 text-muted-foreground')}>
+          <span className={cn(markerClassName, providerConfigured ? 'bg-brand text-brand-foreground' : 'bg-surface-subtle text-muted-foreground')} aria-hidden="true">2</span>
+          <span className="min-w-0 flex-1 text-sm font-medium">{t('firstUse.configureSystemHelper')}</span>
+          {providerConfigured ? (
+            <Button size="compact" asChild><Link to="/agents/$agentId" params={{ agentId: SYSTEM_HELPER_CHAT_ID }}>{t('common:actions.continue')}<ChevronRight /></Link></Button>
+          ) : null}
+        </li>
+      </ol>
+    </section>
+  );
 }

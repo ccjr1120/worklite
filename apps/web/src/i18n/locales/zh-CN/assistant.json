@@ -26,9 +26,11 @@
   },
   "composer": {
     "label": "向 System Helper Chat 发送消息",
-    "placeholder": "询问 WorkLite，或请求执行平台操作...",
+    "placeholder": "询问 WorkLite，或输入 @ 将任务交给 Agent...",
+    "followUpPlaceholder": "向 {{agent}} 发送消息...",
     "send": "发送消息",
     "stop": "中断当前回复",
+    "answerPlaceholder": "回答澄清问题...",
     "loading": "正在加载 System Helper Chat 配置",
     "configure": "绑定模型提供商和模型后使用 System Helper Chat"
   },
@@ -37,8 +39,8 @@
   },
   "commands": {
     "menuLabel": "对话命令",
-    "logDescription": "将当前服务端记录下载为 Markdown。",
-    "newDescription": "归档当前执行并开始新对话。",
+    "logDescription": "仅将当前对话下载为 Markdown。",
+    "newDescription": "结束当前对话并开始一个新对话。",
     "resumeDescription": "恢复已归档的服务端执行。"
   },
   "messages": {
@@ -50,16 +52,46 @@
   },
   "status": {
     "running": "执行中",
+    "waiting_for_input": "等待你的回答",
     "completed": "已完成",
     "cancelled": "已中断",
-    "failed": "失败"
+    "failed": "失败",
+    "reconnecting": "正在重新连接"
   },
   "execution": {
     "loading": "正在加载服务端执行",
     "working": "正在处理...",
+    "cancelled": "当前回复已中断。",
     "loadFailed": "无法加载已保存的执行。",
     "requestFailed": "System Helper Chat 无法完成此请求。",
-    "cancelFailed": "无法中断当前回复。"
+    "providerRequestFailed": "System Helper Chat 无法完成当前轮次，请检查模型提供商配置后重试。",
+    "skillFailed": "Agent Skill 脚本未能完成执行。",
+    "incompleteSkillRequest": "模型返回了不完整的 Skill 请求，JSON 在请求完成前提前结束。",
+    "invalidSkillRequest": "模型返回了无效的 Skill 请求，参数无法解析或不符合所需结构。",
+    "cancelFailed": "无法中断当前回复。",
+    "answerFailed": "无法提交澄清回答。",
+    "restarted": "API 在当前 Agent 任务完成前重启了。你可以发送后续消息继续。",
+    "retry": "重试上一条请求",
+    "diagnostics": "诊断信息",
+    "id": "执行 ID",
+    "phase": "阶段",
+    "errorCode": "错误代码",
+    "updated": "更新时间",
+    "none": "无"
+  },
+  "mentions": {
+    "menuLabel": "可用 Agent",
+    "empty": "没有匹配且已配置的 Agent。",
+    "remove": "移除已选择的 Agent"
+  },
+  "subAgents": {
+    "label": "子 Agent",
+    "unread": "新消息",
+    "return": "返回 System Helper Chat",
+    "close": "关闭并删除此子 Agent 会话",
+    "createFailed": "无法创建子 Agent 会话。",
+    "requestFailed": "子 Agent 无法完成此请求。",
+    "closeFailed": "无法关闭子 Agent 会话。"
   },
   "history": {
     "title": "执行历史",
@@ -73,6 +105,9 @@
     "script": "脚本",
     "workingDirectory": "工作目录",
     "arguments": "参数",
+    "toolCallId": "工具调用 ID",
+    "commandExecutionId": "命令执行 ID",
+    "none": "无",
     "warning": "此脚本使用 API 进程的宿主机权限、工作目录和完整环境变量运行。",
     "output": "输出 · 退出码 {{code}}",
     "exitCode": "退出码 {{code}}",
@@ -84,6 +119,7 @@
     "openResource": "打开资源",
     "status": {
       "running": "执行中",
+      "waiting_for_input": "等待你的回答",
       "completed": "已完成",
       "cancelled": "已中断",
       "failed": "失败"
@@ -92,9 +128,31 @@
   "log": {
     "title": "System Helper Chat 对话",
     "generated": "生成时间",
-    "empty": "此执行中没有服务端消息。",
+    "executionId": "执行 ID",
+    "phase": "阶段",
+    "errorCode": "错误代码",
+    "status": "状态",
+    "incomplete": "当前对话仍在进行中，导出的内容可能不完整。",
+    "reason": "原因",
+    "cancelledReason": "当前回复已由用户中断。",
+    "noActive": "当前没有可下载的对话。",
+    "transcript": "对话记录",
+    "noMessages": "当前对话中没有可用消息。",
     "user": "你",
     "assistant": "System Helper Chat",
-    "tool": "Skill 脚本"
+    "activity": "Skill 活动",
+    "noActivity": "当前对话中没有 Skill 活动。",
+    "skill": "Skill",
+    "script": "脚本",
+    "toolCallId": "工具调用 ID",
+    "commandExecutionId": "命令执行 ID",
+    "exitCode": "退出码",
+    "statuses": {
+      "running": "执行中",
+      "waiting_for_input": "等待你的回答",
+      "completed": "已完成",
+      "cancelled": "已中断",
+      "failed": "失败"
+    }
   }
 }

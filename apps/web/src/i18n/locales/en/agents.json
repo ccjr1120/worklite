@@ -49,6 +49,12 @@
     "noMcpServers": "No MCP servers are available in this workspace.",
     "createSkill": "Create Skill",
     "connectMcpServer": "Connect MCP server",
+    "delete": "Delete agent",
+    "deleteTitle": "Delete {{name}}?",
+    "deleteDescription": "This permanently removes the Agent, its assignments, and its execution history.",
+    "deleteAction": "Delete agent",
+    "deleteFailed": "The Agent could not be deleted. Try again.",
+    "deleted": "Agent deleted",
     "nameRequired": "Enter an Agent name before saving.",
     "loadFailed": "Unable to load this Agent.",
     "saveFailed": "Agent changes could not be saved. Review the configuration and try again."

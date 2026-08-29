@@ -31,6 +31,7 @@
     "test": "Test connection",
     "allowedTools": "Allowed tools",
     "publishHint": "Publishing locks the allowed-tool set. Discovered descriptions are untrusted content.",
-    "published": "MCP version published"
+    "published": "MCP version published",
+    "publishFailed": "The MCP server could not be saved."
   }
 }

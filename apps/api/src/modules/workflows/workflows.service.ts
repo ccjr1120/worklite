@@ -30,7 +30,7 @@ export class WorkflowsService {
     const versionId = `wfv_${randomUUID()}`;
     const [row] = await this.db.insert(workflows).values({ id: workflowId, workspaceId: team.id, name: input.name.trim(), state: 'draft' }).returning();
     if (!row) throw new NotFoundException('Workflow could not be created');
-    await this.db.insert(workflowVersions).values({ id: versionId, workflowId, version: 1, published: false, steps: [] });
+    await this.db.insert(workflowVersions).values({ id: versionId, workflowId, version: 1, schemaVersion: 1, published: false, nodes: [] });
     return this.toView(row, workspaceSlug);
   }
 
@@ -53,7 +53,7 @@ export class WorkflowsService {
       latestVersionId: version?.id ?? null,
       name: row.name,
       state: row.state,
-      stepCount: version?.steps.length ?? 0,
+      stepCount: version?.nodes.length ?? 0,
       lastRunStatus: lastRun?.status ?? null,
       lastRunAt: lastRun?.createdAt.toISOString() ?? null,
       updatedAt: row.updatedAt.toISOString(),

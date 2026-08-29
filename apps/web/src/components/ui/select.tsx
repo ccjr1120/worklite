@@ -2,6 +2,7 @@ import * as SelectPrimitive from '@radix-ui/react-select';
 import { Check, ChevronDown } from 'lucide-react';
 import type { ComponentProps } from 'react';
 import { cn } from '@/lib/utils';
+import { controlInteraction, focusRing, surfaceInteraction } from '@/components/ui/interaction';
 
 function Select({ ...props }: ComponentProps<typeof SelectPrimitive.Root>) {
   return <SelectPrimitive.Root {...props} />;
@@ -19,7 +20,9 @@ function SelectTrigger({ className, children, ...props }: ComponentProps<typeof 
   return (
     <SelectPrimitive.Trigger
       className={cn(
-        'flex h-9 w-full items-center justify-between rounded-md border border-input bg-surface px-3 text-sm transition-[border-color,box-shadow] duration-[120ms] placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1',
+        'flex h-9 w-full items-center justify-between rounded-md border border-input bg-surface px-3 text-sm placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted-foreground disabled:opacity-70 [&>span]:line-clamp-1',
+        controlInteraction,
+        focusRing,
         className,
       )}
       {...props}
@@ -37,7 +40,7 @@ function SelectContent({ className, children, position = 'popper', ...props }: C
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
         className={cn(
-          'relative z-50 max-h-72 min-w-32 overflow-hidden rounded-lg border border-border bg-surface-raised shadow-md duration-[150ms]',
+          'relative z-50 max-h-72 min-w-32 overflow-hidden rounded-lg border border-border bg-surface-raised shadow-md outline-none duration-[150ms]',
           position === 'popper' && 'data-[side=bottom]:translate-y-1',
           className,
         )}
@@ -54,7 +57,8 @@ function SelectItem({ className, children, ...props }: ComponentProps<typeof Sel
   return (
     <SelectPrimitive.Item
       className={cn(
-        'relative flex w-full cursor-default select-none items-center rounded-md py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-surface-subtle data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        'relative flex w-full cursor-pointer select-none items-center rounded-md py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-brand-subtle data-[disabled]:cursor-not-allowed data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        surfaceInteraction,
         className,
       )}
       {...props}

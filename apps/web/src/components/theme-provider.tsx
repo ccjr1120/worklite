@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { api } from '@/api/client';
 import { useWorkspaceSettingsQuery } from '@/api/queries';
 import { queryClient } from '@/lib/query-client';
-import { applyTheme, resolveTheme, type Appearance, type ResolvedTheme } from '@/lib/theme';
+import { applyTheme, getStoredAppearance, resolveTheme, storeAppearance, type Appearance, type ResolvedTheme } from '@/lib/theme';
 
 type ThemeContextValue = {
   appearance: Appearance;
@@ -15,10 +15,11 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const settingsQuery = useWorkspaceSettingsQuery();
-  const [appearance, setAppearanceState] = useState<Appearance>('system');
+  const [appearance, setAppearanceState] = useState<Appearance>(getStoredAppearance);
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => resolveTheme(appearance));
 
   const applyAppearancePreference = useCallback((next: Appearance) => {
+    storeAppearance(next);
     setAppearanceState(next);
     setResolvedTheme(applyTheme(next));
   }, []);

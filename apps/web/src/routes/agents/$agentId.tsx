@@ -1,7 +1,8 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import { AlertCircle, ArrowLeft, ChevronDown, ChevronRight, FileCode2, LoaderCircle, RotateCcw, Send, ShieldAlert, Square } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ChevronDown, ChevronRight, FileCode2, LoaderCircle, RotateCcw, Send, ShieldAlert, Square, Trash2 } from 'lucide-react';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import type { AgentExecutionView, AgentToolCallView, McpServerView, ModelProviderView, SkillView } from '@worklite/contracts';
 import { api } from '@/api/client';
 import {
@@ -17,12 +18,16 @@ import { StreamingMarkdown } from '@/components/ai/streaming-markdown';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { queryClient } from '@/lib/query-client';
+import { cn } from '@/lib/utils';
 
 export const Route = createFileRoute('/agents/$agentId')({
   component: AgentEditorPage,
@@ -53,6 +58,9 @@ function AgentEditorPage() {
   const [executionMessage, setExecutionMessage] = useState('');
   const [executionBusy, setExecutionBusy] = useState(false);
   const [executionError, setExecutionError] = useState('');
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -171,6 +179,23 @@ function AgentEditorPage() {
     }
   }
 
+  async function deleteAgent() {
+    if (isNew || isSystem || deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError('');
+    try {
+      await api.deleteAgent(workspaceSlug, agentId);
+      setDeleteOpen(false);
+      toast.success(t('editor.deleted'));
+      void navigate({ to: '/home' });
+      void queryClient.invalidateQueries({ queryKey: agentsQueryKey() }).catch(() => undefined);
+    } catch {
+      setDeleteError(t('editor.deleteFailed'));
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
   const editorLoading = !isNew && agentQuery.isLoading;
   const editorFailed = !isNew && agentQuery.isError;
   const configurationProps = {
@@ -211,9 +236,21 @@ function AgentEditorPage() {
         ]}
         status={<SaveIndicator state={saveState} />}
         actions={
-          <Button size="compact" type="button" onClick={() => void save()} disabled={saveState === 'saving' || editorLoading || editorFailed}>
-            {t('common:actions.save')}
-          </Button>
+          <div className="flex items-center gap-2">
+            {!isNew && !isSystem ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon-compact" type="button" aria-label={t('editor.delete')} onClick={() => { setDeleteError(''); setDeleteOpen(true); }} disabled={editorLoading || editorFailed || deleteBusy}>
+                    <Trash2 className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t('editor.delete')}</TooltipContent>
+              </Tooltip>
+            ) : null}
+            <Button size="compact" type="button" onClick={() => void save()} disabled={saveState === 'saving' || editorLoading || editorFailed}>
+              {t('common:actions.save')}
+            </Button>
+          </div>
         }
       />
       <div className="min-w-0 flex-1 overflow-auto px-6 py-6">
@@ -221,7 +258,7 @@ function AgentEditorPage() {
           {editorLoading ? <ResourceMessage loading>{t('loading')}</ResourceMessage> : null}
           {editorFailed ? <ResourceMessage error>{t('editor.loadFailed')}</ResourceMessage> : null}
           <Field label={t('editor.name')} htmlFor="name" error={nameError}>
-            <Input id="name" value={name} readOnly={isSystem} disabled={editorLoading || editorFailed} onChange={(event) => { setName(event.target.value); setNameError(''); markUnsaved(); }} />
+            <Input id="name" value={name} readOnly={isSystem} disabled={editorLoading || editorFailed} aria-invalid={Boolean(nameError)} onChange={(event) => { setName(event.target.value); setNameError(''); markUnsaved(); }} />
           </Field>
           <Field label={t('editor.responsibility')} htmlFor="responsibility">
             <Input id="responsibility" value={responsibility} readOnly={isSystem} disabled={editorLoading || editorFailed} onChange={(event) => { setResponsibility(event.target.value); markUnsaved(); }} />
@@ -261,6 +298,22 @@ function AgentEditorPage() {
         <h2 id="agent-configuration-title" className="text-sm font-semibold">{t('editor.configuration')}</h2>
         <div className="mt-4"><AgentConfigurationFields {...configurationProps} idPrefix="desktop" /></div>
       </aside>
+      <Dialog open={deleteOpen} onOpenChange={(open) => { if (!open && !deleteBusy) { setDeleteOpen(false); setDeleteError(''); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('editor.deleteTitle', { name: existing?.name ?? name })}</DialogTitle>
+            <DialogDescription>{t('editor.deleteDescription')}</DialogDescription>
+          </DialogHeader>
+          {deleteError ? <ResourceMessage error>{deleteError}</ResourceMessage> : null}
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setDeleteOpen(false)} disabled={deleteBusy}>{t('common:actions.cancel')}</Button>
+            <Button variant="destructive" onClick={() => void deleteAgent()} disabled={deleteBusy}>
+              {deleteBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}
+              {t('editor.deleteAction')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -364,7 +417,7 @@ function AgentToolCallPanel({ call }: { call: AgentToolCallView }) {
 
   return (
     <div className="border-l-2 border-warning bg-surface-subtle">
-      <button type="button" className="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left outline-none hover:bg-background/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" aria-expanded={expanded} aria-label={expanded ? t('execution.tool.collapse') : t('execution.tool.expand')} onClick={() => setExpanded((value) => !value)}>
+      <button type="button" className={cn('flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left hover:bg-background/50', surfaceInteraction, focusRingInset)} aria-expanded={expanded} aria-label={expanded ? t('execution.tool.collapse') : t('execution.tool.expand')} onClick={() => setExpanded((value) => !value)}>
         <FileCode2 className="size-4 shrink-0" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-sm font-semibold">{call.skillName || t('execution.tool.skillTitle')} <span className="font-mono text-xs font-normal text-muted-foreground">/ {scriptName}</span></span>
         {finished && call.exitCode !== null ? <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">{t('execution.tool.exitCode', { code: call.exitCode })}</span> : null}
@@ -484,14 +537,15 @@ function AgentConfigurationFields({
             emptyAction={<Button asChild type="button" variant="secondary" size="compact"><Link to="/skills/$skillId" params={{ skillId: 'new' }}>{t('editor.createSkill')}</Link></Button>}
           >
             {skills.map((skill) => (
-              <label key={skill.id} className="flex min-h-10 items-start gap-2 py-1 text-[13px]">
+              <label key={skill.id} className="flex min-w-0 items-center gap-2 py-1.5 text-[13px]">
                 <Checkbox checked={selectedSkillIds.includes(skill.id)} onCheckedChange={(checked) => onSkillChange(skill.id, checked === true)} aria-label={skill.name} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{skill.name}</span>
-                    <span className="mt-1 flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-xs text-muted-foreground">{skill.version}</span>
-                  </span>
-                </span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span tabIndex={0} className="min-w-0 flex-1 truncate font-medium" aria-label={skill.name}>{skill.name}</span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs break-words">{skill.name}</TooltipContent>
+                </Tooltip>
+                <span className="shrink-0 font-mono text-xs text-muted-foreground">{skill.version}</span>
               </label>
             ))}
           </AssignmentSection>
@@ -507,15 +561,16 @@ function AgentConfigurationFields({
             emptyAction={<Button asChild type="button" variant="secondary" size="compact"><Link to="/mcp-servers/$serverId" params={{ serverId: 'new' }}>{t('editor.connectMcpServer')}</Link></Button>}
           >
             {mcpServers.map((server) => (
-              <label key={server.id} className="flex min-h-10 items-start gap-2 py-1 text-[13px]">
+              <label key={server.id} className="flex min-w-0 items-center gap-2 py-1.5 text-[13px]">
                 <Checkbox checked={selectedMcpServerIds.includes(server.id)} onCheckedChange={(checked) => onMcpServerChange(server.id, checked === true)} aria-label={server.name} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{server.name}</span>
-                  <span className="mt-1 flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-xs text-muted-foreground">{server.version} · {server.allowedTools}</span>
-                    <StatusBadge status={server.connection} />
-                  </span>
-                </span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span tabIndex={0} className="min-w-0 flex-1 truncate font-medium" aria-label={server.name}>{server.name}</span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs break-words">{server.name}</TooltipContent>
+                </Tooltip>
+                <span className="shrink-0 font-mono text-xs text-muted-foreground">{server.version} · {server.allowedTools}</span>
+                <StatusBadge status={server.connection} />
               </label>
             ))}
           </AssignmentSection>
@@ -565,7 +620,7 @@ function AssignmentSection({
           {emptyAction}
         </div>
       ) : null}
-      {!loading && !failed && !empty ? <div className="divide-y divide-border">{children}</div> : null}
+      {!loading && !failed && !empty ? <div className="grid grid-cols-2 gap-x-3 gap-y-1">{children}</div> : null}
     </fieldset>
   );
 }

@@ -61,6 +61,10 @@ function ModelProvidersPage() {
   const [models, setModels] = useState('');
   const [headersText, setHeadersText] = useState('');
   const [headersError, setHeadersError] = useState('');
+  const [providerBusy, setProviderBusy] = useState(false);
+  const [providerError, setProviderError] = useState('');
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const { data: modelProviders = [], isLoading, isError } = useModelProvidersQuery(workspaceSlug);
   const items = useMemo(
     () => modelProviders.filter((provider) => `${provider.name} ${provider.models.join(' ')}`.toLowerCase().includes(search.toLowerCase())),
@@ -85,6 +89,7 @@ function ModelProvidersPage() {
     setModels('');
     setHeadersText('');
     setHeadersError('');
+    setProviderError('');
     setDialog({ mode: 'create' });
   }
 
@@ -97,6 +102,7 @@ function ModelProvidersPage() {
     setModels(provider.models.join(', '));
     setHeadersText('');
     setHeadersError('');
+    setProviderError('');
     setDialog({ mode: 'replace', provider });
   }
 
@@ -104,9 +110,10 @@ function ModelProvidersPage() {
     setDialog(null);
     setApiKey('');
     setHeadersError('');
+    setProviderError('');
   }
 
-  function saveProvider() {
+  async function saveProvider() {
     if (!dialog || !apiKey.trim() || (dialog.mode === 'create' && !name.trim())) return;
     let headers: Record<string, string> | undefined;
     if (headersText.trim()) {
@@ -121,24 +128,39 @@ function ModelProvidersPage() {
       }
     }
     const providerName = dialog.mode === 'create' ? name.trim() : dialog.provider.name;
-    void api.saveModelProvider(workspaceSlug, { name: providerName, kind, apiKey: apiKey.trim(), baseUrl: baseUrl.trim() || undefined, organization: organization.trim() || undefined, project: project.trim() || undefined, models: parseModels(models), ...(headers !== undefined ? { headers } : {}) }).then(async () => {
-      await queryClient.invalidateQueries({ queryKey: ['model-providers'] });
-      toast.success(t(dialog.mode === 'create' ? 'providers.created' : 'providers.saved'));
+    const mode = dialog.mode;
+    setProviderBusy(true);
+    setProviderError('');
+    try {
+      await api.saveModelProvider(workspaceSlug, { name: providerName, kind, apiKey: apiKey.trim(), baseUrl: baseUrl.trim() || undefined, organization: organization.trim() || undefined, project: project.trim() || undefined, models: parseModels(models), ...(headers !== undefined ? { headers } : {}) });
       closeProviderDialog();
-    });
+      toast.success(t(mode === 'create' ? 'providers.created' : 'providers.saved'));
+      void queryClient.invalidateQueries({ queryKey: ['model-providers'] }).catch(() => undefined);
+    } catch (error: unknown) {
+      setProviderError(error instanceof Error ? error.message : t('providers.testFailed'));
+    } finally {
+      setProviderBusy(false);
+    }
   }
 
-  function removeProvider() {
+  async function removeProvider() {
     if (!deleteProvider) return;
-    void api.deleteModelProvider(workspaceSlug, deleteProvider.id).then(async () => {
-      await Promise.all([
+    setDeleteBusy(true);
+    setDeleteError('');
+    try {
+      await api.deleteModelProvider(workspaceSlug, deleteProvider.id);
+      setDeleteProvider(null);
+      toast.success(t('providers.deleted'));
+      void Promise.all([
         queryClient.invalidateQueries({ queryKey: ['model-providers'] }),
         queryClient.invalidateQueries({ queryKey: ['agents'] }),
         queryClient.invalidateQueries({ queryKey: ['agent', 'agt_system_helper_chat'] }),
-      ]);
-      toast.success(t('providers.deleted'));
-      setDeleteProvider(null);
-    });
+      ]).catch(() => undefined);
+    } catch (error: unknown) {
+      setDeleteError(error instanceof Error ? error.message : t('providers.testFailed'));
+    } finally {
+      setDeleteBusy(false);
+    }
   }
 
   function testProvider(provider: ModelProviderView) {
@@ -195,7 +217,7 @@ function ModelProvidersPage() {
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon-compact" aria-label={t('providers.delete')} onClick={() => setDeleteProvider(provider)}><Trash2 /></Button>
+                      <Button variant="ghost" size="icon-compact" aria-label={t('providers.delete')} onClick={() => { setDeleteError(''); setDeleteProvider(provider); }}><Trash2 /></Button>
                     </TooltipTrigger>
                     <TooltipContent>{t('providers.delete')}</TooltipContent>
                   </Tooltip>
@@ -212,7 +234,8 @@ function ModelProvidersPage() {
             <DialogTitle>{t(dialog?.mode === 'replace' ? 'providers.replaceTitle' : 'providers.createTitle')}</DialogTitle>
             <DialogDescription>{t(dialog?.mode === 'replace' ? 'providers.replaceDescription' : 'providers.createDescription')}</DialogDescription>
           </DialogHeader>
-          {dialog?.mode === 'create' ? <Field label={t('providers.name')} htmlFor="provider-name"><Input id="provider-name" placeholder={t('providers.namePlaceholder')} value={name} onChange={(event) => setName(event.target.value)} /></Field> : null}
+          {providerError ? <p className="text-[13px] text-danger" role="alert">{providerError}</p> : null}
+          {dialog?.mode === 'create' ? <Field label={t('providers.name')} htmlFor="provider-name"><Input id="provider-name" placeholder={t('providers.namePlaceholder')} value={name} onChange={(event) => setName(event.target.value)} disabled={providerBusy} /></Field> : null}
           <Field label={t('providers.kind')} htmlFor="provider-kind">
             <Select value={kind} onValueChange={(value) => setKind(value as typeof kind)}>
               <SelectTrigger id="provider-kind"><SelectValue /></SelectTrigger>
@@ -229,10 +252,10 @@ function ModelProvidersPage() {
           <Field label={t('providers.baseUrl')} htmlFor="provider-base-url" hint={t('providers.baseUrlHint')}><Input id="provider-base-url" placeholder={t('providers.baseUrlPlaceholder')} value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} /></Field>
           {kind === 'openai' ? <div className="grid gap-4 sm:grid-cols-2"><Field label={t('providers.organization')} htmlFor="provider-organization"><Input id="provider-organization" value={organization} onChange={(event) => setOrganization(event.target.value)} /></Field><Field label={t('providers.project')} htmlFor="provider-project"><Input id="provider-project" value={project} onChange={(event) => setProject(event.target.value)} /></Field></div> : null}
           <Field label={t('providers.models')} htmlFor="provider-models" hint={t('providers.modelsHint')}><Input id="provider-models" placeholder={t('providers.modelsPlaceholder')} value={models} onChange={(event) => setModels(event.target.value)} /></Field>
-          <Field label={t('providers.headers')} htmlFor="provider-headers" hint={t('providers.headersHint')} error={headersError}><Textarea id="provider-headers" className="min-h-28 font-mono text-[13px]" placeholder={t('providers.headersPlaceholder')} value={headersText} onChange={(event) => { setHeadersText(event.target.value); setHeadersError(''); }} /></Field>
+          <Field label={t('providers.headers')} htmlFor="provider-headers" hint={t('providers.headersHint')} error={headersError}><Textarea id="provider-headers" className="min-h-28 font-mono text-[13px]" placeholder={t('providers.headersPlaceholder')} value={headersText} aria-invalid={Boolean(headersError)} onChange={(event) => { setHeadersText(event.target.value); setHeadersError(''); }} /></Field>
           <DialogFooter>
-            <Button variant="secondary" onClick={closeProviderDialog}>{t('common:actions.cancel')}</Button>
-            <Button onClick={saveProvider} disabled={!apiKey.trim() || (dialog?.mode === 'create' && !name.trim())}>{t(dialog?.mode === 'replace' ? 'providers.replaceAction' : 'providers.createAction')}</Button>
+            <Button variant="secondary" onClick={closeProviderDialog} disabled={providerBusy}>{t('common:actions.cancel')}</Button>
+            <Button onClick={() => void saveProvider()} disabled={providerBusy || !apiKey.trim() || (dialog?.mode === 'create' && !name.trim())}>{providerBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}{t(dialog?.mode === 'replace' ? 'providers.replaceAction' : 'providers.createAction')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -276,9 +299,10 @@ function ModelProvidersPage() {
             <DialogTitle>{t('providers.deleteTitle', { provider: deleteProvider?.name })}</DialogTitle>
             <DialogDescription>{t('providers.deleteDescription')}</DialogDescription>
           </DialogHeader>
+          {deleteError ? <p className="text-[13px] text-danger" role="alert">{deleteError}</p> : null}
           <DialogFooter>
-            <Button variant="secondary" onClick={() => setDeleteProvider(null)}>{t('common:actions.cancel')}</Button>
-            <Button variant="destructive" onClick={removeProvider}>{t('providers.deleteAction')}</Button>
+            <Button variant="secondary" onClick={() => setDeleteProvider(null)} disabled={deleteBusy}>{t('common:actions.cancel')}</Button>
+            <Button variant="destructive" onClick={() => void removeProvider()} disabled={deleteBusy}>{deleteBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}{t('providers.deleteAction')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

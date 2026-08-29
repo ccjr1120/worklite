@@ -55,11 +55,11 @@ export class AgentsService {
     const skillIds = validatedAssignments.skillIds ?? [];
     const mcpServerIds = validatedAssignments.mcpServerIds ?? [];
     const id = `agt_${randomUUID()}`;
-    await this.db.transaction(async (transaction) => {
-      const [row] = await transaction.insert(agents).values({ id, workspaceId: team.id, kind: 'custom', name, responsibility, systemPrompt, providerId, model }).returning({ id: agents.id });
+    await this.db.transaction((transaction) => {
+      const [row] = transaction.insert(agents).values({ id, workspaceId: team.id, kind: 'custom', name, responsibility, systemPrompt, providerId, model }).returning({ id: agents.id }).all();
       if (!row) throw new NotFoundException('Agent could not be created');
-      if (skillIds.length > 0) await transaction.insert(agentSkills).values(skillIds.map((skillId) => ({ agentId: id, skillId })));
-      if (mcpServerIds.length > 0) await transaction.insert(agentMcpServers).values(mcpServerIds.map((mcpServerId) => ({ agentId: id, mcpServerId })));
+      if (skillIds.length > 0) transaction.insert(agentSkills).values(skillIds.map((skillId) => ({ agentId: id, skillId }))).run();
+      if (mcpServerIds.length > 0) transaction.insert(agentMcpServers).values(mcpServerIds.map((mcpServerId) => ({ agentId: id, mcpServerId }))).run();
     });
     return this.get(request, workspaceSlug, id);
   }
@@ -92,23 +92,23 @@ export class AgentsService {
     const provider = await this.validateDraftModel(team.id, nextProviderId, model);
     const assignments = await this.validateAssignments(team.id, input.skillIds, input.mcpServerIds, true);
 
-    await this.db.transaction(async (transaction) => {
-      const [row] = await transaction.update(agents).set({
+    await this.db.transaction((transaction) => {
+      const [row] = transaction.update(agents).set({
         name,
         ...(input.responsibility === undefined ? {} : { responsibility: input.responsibility.trim() }),
         ...(input.systemPrompt === undefined ? {} : { systemPrompt: input.systemPrompt.trim() }),
         providerId: nextProviderId ?? null,
         model,
         updatedAt: new Date(),
-      }).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).returning({ id: agents.id });
+      }).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).returning({ id: agents.id }).all();
       if (!row) throw new NotFoundException('Agent not found');
       if (assignments.skillIds !== undefined) {
-        await transaction.delete(agentSkills).where(eq(agentSkills.agentId, agentId));
-        if (assignments.skillIds.length > 0) await transaction.insert(agentSkills).values(assignments.skillIds.map((skillId) => ({ agentId, skillId })));
+        transaction.delete(agentSkills).where(eq(agentSkills.agentId, agentId)).run();
+        if (assignments.skillIds.length > 0) transaction.insert(agentSkills).values(assignments.skillIds.map((skillId) => ({ agentId, skillId }))).run();
       }
       if (assignments.mcpServerIds !== undefined) {
-        await transaction.delete(agentMcpServers).where(eq(agentMcpServers.agentId, agentId));
-        if (assignments.mcpServerIds.length > 0) await transaction.insert(agentMcpServers).values(assignments.mcpServerIds.map((mcpServerId) => ({ agentId, mcpServerId })));
+        transaction.delete(agentMcpServers).where(eq(agentMcpServers.agentId, agentId)).run();
+        if (assignments.mcpServerIds.length > 0) transaction.insert(agentMcpServers).values(assignments.mcpServerIds.map((mcpServerId) => ({ agentId, mcpServerId }))).run();
       }
     });
     return this.get(request, workspaceSlug, agentId);

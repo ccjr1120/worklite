@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
-import type { ContinueAgentExecutionRequest, CreateAgentExecutionRequest, CreateAgentRequest, UpdateAgentRequest } from '@worklite/contracts';
+import type { AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, CreateAgentRequest, UpdateAgentRequest } from '@worklite/contracts';
 import { AgentExecutionsService } from './agent-executions.service';
 import { AgentsService } from './agents.service';
 
@@ -36,6 +36,16 @@ export class AgentsController {
   @Post(':agentId/executions/:executionId/messages')
   continueExecution(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string, @Body() body: ContinueAgentExecutionRequest) {
     return this.executions.continue(request, 'personal', agentId, executionId, body);
+  }
+
+  @Post(':agentId/executions/:executionId/answers')
+  answerQuestion(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string, @Body() body: AnswerAgentQuestionRequest) {
+    return this.executions.answer(request, 'personal', agentId, executionId, body);
+  }
+
+  @Post(':agentId/executions/:executionId/retry')
+  retryExecution(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string) {
+    return this.executions.retry(request, 'personal', agentId, executionId);
   }
 
   @Post(':agentId/executions/:executionId/cancel')

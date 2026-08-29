@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
-import type { CreateMcpServerRequest, CreateModelProviderRequest, CreateSkillRequest, ExecuteSkillScriptRequest, UpdateSkillRequest, UpdateWorkspaceSettingsRequest } from '@worklite/contracts';
+import type { CreateMcpServerRequest, CreateModelProviderRequest, CreateSkillRequest, ExecuteSkillScriptRequest, UpdateMcpServerRequest, UpdateSkillRequest, UpdateWorkspaceSettingsRequest } from '@worklite/contracts';
 import { WorkspaceResourcesService } from './team-resources.service';
 
 @Controller()
@@ -30,6 +30,9 @@ export class WorkspaceResourcesController {
 
   @Post('mcp-servers')
   createMcpServer(@Req() request: Request, @Body() body: CreateMcpServerRequest) { return this.resources.createMcpServer(request, 'personal', body); }
+
+  @Patch('mcp-servers/:serverId')
+  updateMcpServer(@Req() request: Request, @Param('serverId') serverId: string, @Body() body: UpdateMcpServerRequest) { return this.resources.updateMcpServer(request, 'personal', serverId, body); }
 
   @Get('model-providers')
   providers(@Req() request: Request) { return this.resources.providers(request, 'personal'); }

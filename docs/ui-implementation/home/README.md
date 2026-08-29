@@ -32,14 +32,15 @@ Use compact, workflow-oriented widgets rather than decorative totals or generic 
 
 ## First Use
 
-Replace empty metrics with a guided sequence: configure provider, create agent, create workflow, then run and inspect it. The current step owns the primary action; completed steps remain visible but quiet.
+Show a two-step guided sequence: configure at least one Model Provider, then bind a Provider and model to the protected System Helper Chat Agent. The current step owns the primary action; completed steps remain visible but quiet while the sequence is incomplete.
 
-An installation with resources but no runs shows recent resources and a `Run workflow` next step. Failed runs show a concise cause and recovery route.
+Derive completion from persisted server resources rather than browser preferences. Do not show the guide until both Provider and System Helper Chat queries have resolved successfully. Remove the complete guide as soon as both steps are complete. Creating a custom Agent, creating a Workflow, and running or inspecting a Workflow are not first-use steps.
 
 ## Changelog
 
 ### 2026-08-27
 
+- Reduced first use to Provider configuration and System Helper Chat Provider-and-model binding, made completion server-derived, and removed the guide after both steps complete.
 - Replaced structured proposal review with the persisted System Helper Agent transcript and inline Skill-script approvals.
 
 ### 2026-08-25

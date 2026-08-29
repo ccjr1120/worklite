@@ -2,6 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from './client';
 
 export const agentsQueryKey = () => ['agents'] as const;
+export const agentSubSessionsQueryKey = () => ['agent-sub-sessions'] as const;
+export const agentScheduledTasksQueryKey = () => ['agent-scheduled-tasks'] as const;
 export const workflowsQueryKey = () => ['workflows'] as const;
 export const runsQueryKey = () => ['runs'] as const;
 
@@ -11,6 +13,14 @@ export function useAgentsQuery(workspace?: string) {
 
 export function useAgentQuery(workspace: string | undefined, agentId: string) {
   return useQuery({ queryKey: ['agent', agentId] as const, queryFn: () => api.agent(workspace, agentId), enabled: Boolean(agentId && agentId !== 'new') });
+}
+
+export function useAgentSubSessionsQuery(workspace?: string) {
+  return useQuery({ queryKey: agentSubSessionsQueryKey(), queryFn: () => api.agentSubSessions(workspace), refetchInterval: 1_500 });
+}
+
+export function useAgentScheduledTasksQuery(workspace?: string) {
+  return useQuery({ queryKey: agentScheduledTasksQueryKey(), queryFn: () => api.agentScheduledTasks(workspace), refetchInterval: 5_000 });
 }
 
 export function useWorkflowsQuery(workspace?: string) {

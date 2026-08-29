@@ -73,12 +73,36 @@ export type AgentView = {
   updatedAt: string;
 };
 
-export type AgentExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+export type AgentExecutionStatus = 'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled';
+
+export type AgentExecutionPhase = 'model' | 'skill' | 'recovery';
+
+export type AgentExecutionErrorCode =
+  | 'provider'
+  | 'invalid_request'
+  | 'invalid_tool_request'
+  | 'incomplete_tool_request'
+  | 'skill'
+  | 'mcp'
+  | 'restarted'
+  | 'internal';
 
 export type AgentExecutionMessage = {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  createdAt: string;
+};
+
+export type AgentPlanStep = {
+  step: string;
+  status: 'pending' | 'in_progress' | 'completed';
+};
+
+export type AgentPendingQuestion = {
+  id: string;
+  question: string;
+  options: string[];
   createdAt: string;
 };
 
@@ -90,6 +114,8 @@ export type AgentToolCallView = {
   skillId: string | null;
   skillName: string | null;
   scriptPath: string | null;
+  mcpServerId: string | null;
+  mcpToolName: string | null;
   arguments: string[];
   status: AgentToolCallStatus;
   output: string;
@@ -104,9 +130,14 @@ export type AgentExecutionView = {
   id: string;
   agentId: string;
   status: AgentExecutionStatus;
+  phase: AgentExecutionPhase;
+  errorCode: AgentExecutionErrorCode | null;
   messages: AgentExecutionMessage[];
   toolCalls: AgentToolCallView[];
   error: string | null;
+  plan: AgentPlanStep[];
+  pendingQuestion: AgentPendingQuestion | null;
+  contextDropped: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -117,6 +148,56 @@ export type CreateAgentExecutionRequest = {
 
 export type ContinueAgentExecutionRequest = {
   message: string;
+};
+
+export type AnswerAgentQuestionRequest = {
+  questionId: string;
+  answer: string;
+};
+
+export type CreateScheduledAgentTaskRequest = {
+  agentId: string;
+  prompt: string;
+  intervalSeconds: number;
+  label?: string;
+};
+
+export type ScheduledAgentTaskView = {
+  id: string;
+  agentId: string;
+  agentName: string;
+  label: string;
+  prompt: string;
+  intervalSeconds: number;
+  nextRunAt: string;
+  lastRunAt: string | null;
+  lastStatus: AgentExecutionStatus | null;
+  unread: boolean;
+  running: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateAgentSubSessionRequest = {
+  agentId: string;
+  message: string;
+};
+
+export type UpdateAgentSubSessionRequest = {
+  unread: boolean;
+};
+
+export type AgentSubSessionView = {
+  id: string;
+  agentId: string;
+  agentName: string;
+  agentInitials: string;
+  executionId: string;
+  title: string;
+  unread: boolean;
+  status: AgentExecutionStatus;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type CreateAgentRequest = {
@@ -306,6 +387,8 @@ export type CreateMcpServerRequest = {
   endpoint: string;
   authToken?: string;
 };
+
+export type UpdateMcpServerRequest = Partial<CreateMcpServerRequest>;
 
 export type CreateSkillRequest = {
   name: string;

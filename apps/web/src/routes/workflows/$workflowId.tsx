@@ -38,6 +38,7 @@ function WorkflowEditorPage() {
   const [aiPrompt, setAiPrompt] = useState('');
   const [publishOpen, setPublishOpen] = useState(false);
   const [runSubmitting, setRunSubmitting] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [logs] = useState([
     { time: '08:12:01', severity: 'info', source: 'run', content: 'Run queued' },
     { time: '08:12:04', severity: 'info', source: 'Researcher', content: 'Step started' },
@@ -77,13 +78,18 @@ function WorkflowEditorPage() {
   }
 
   function save() {
+    if (saveState === 'saving') return;
     setSaveState('saving');
+    setSaveError('');
     const request = isNew ? api.createWorkflow(workspaceSlug, { name }) : api.updateWorkflow(workspaceSlug, workflowId, { name });
     void request.then(async (saved) => {
-      await queryClient.invalidateQueries({ queryKey: workflowsQueryKey() });
       setSaveState('saved');
       if (isNew) void navigate({ to: '/workflows/$workflowId', params: { workflowId: saved.id }, replace: true });
-    }).catch(() => setSaveState('unsaved'));
+      void queryClient.invalidateQueries({ queryKey: workflowsQueryKey() }).catch(() => undefined);
+    }).catch((error: unknown) => {
+      setSaveState('unsaved');
+      setSaveError(error instanceof Error ? error.message : t('editor.saveFailed'));
+    });
   }
 
   async function runWorkflow() {
@@ -155,6 +161,7 @@ function WorkflowEditorPage() {
             <Field label={t('editor.name')} htmlFor="wf-name">
               <Input id="wf-name" value={name} onChange={(event) => { setName(event.target.value); setSaveState('unsaved'); }} />
             </Field>
+            {saveError ? <p className="mt-2 text-[13px] text-danger" role="alert">{saveError}</p> : null}
             <Field className="mt-4" label={t('editor.input')} htmlFor="wf-input">
               <Textarea id="wf-input" className="font-mono text-[13px]" value={input} onChange={(event) => { setInput(event.target.value); setSaveState('unsaved'); }} />
             </Field>

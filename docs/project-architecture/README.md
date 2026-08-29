@@ -142,7 +142,7 @@ Workspace (one per installation)
     |-- WorkflowDraft
     |   `-- EditRevision
     `-- WorkflowVersion
-        `-- ordered AgentNode references AgentVersion
+        `-- ordered WorkflowNode references NodeTypeVersion
             `-- WorkflowRun
                 `-- NodeRun
 ```
@@ -155,9 +155,13 @@ An agent is manually configured with a name, description, optional avatar, model
 
 The initial Agent configuration increment persists mutable Agent drafts. `agent_skills` and `agent_mcp_servers` relational tables own the many-to-many draft assignments; the Agent row owns its provider, model, and system prompt. The draft editor exposes only real persisted behavior. Preview, publication, version labels, and execution status are not exposed until immutable AgentVersion creation and Agent execution are implemented end to end. Agent versions remain the target immutable publication boundary.
 
-The singleton workspace owns one protected system Agent with the stable identifier `agt_system_helper_chat`. It represents the product's System Helper Chat and is created during startup bootstrap. It always appears before custom Agents, cannot be deleted, and exposes a nullable Model Provider binding plus a model selection for user configuration. Its name, responsibility, prompt, Skills, and MCP configuration are product-owned and read-only. Startup permanently assigns the protected `worklite-platform` Skill and repairs that assignment if local data is changed; the Skill cannot be assigned to a custom Agent. The binding and model can be changed only from the System Helper Chat entry in the Agent editor; provider pages and the Chat surface do not own configuration selectors. The selected model must belong to the selected provider's configured model catalog. Changing or deleting a provider clears the binding when necessary and resets an invalid model selection to an unconfigured state. When configured, System Helper Chat resolves the bound provider and selected model through the WorkLite model gateway. When unconfigured, the Chat composer is unavailable and links directly to the protected Agent's configuration form.
+The singleton workspace owns one protected system Agent with the stable identifier `agt_system_helper_chat`. It represents the product's System Helper Chat and is created during startup bootstrap. It always appears before custom Agents, cannot be deleted, and exposes a nullable Model Provider binding plus a model selection for user configuration. Its name, responsibility, prompt, Skills, and MCP configuration are product-owned and read-only. Startup permanently assigns the protected `worklite-platform` Skill and repairs that assignment if local data is changed; the Skill cannot be assigned to a custom Agent. The binding and model can be changed only from the System Helper Chat entry in the Agent editor; provider pages and the Chat surface do not own configuration selectors. The selected model must belong to the selected provider's configured model catalog. Changing or deleting a provider clears the binding when necessary and resets an invalid model selection to an unconfigured state. When configured, System Helper Chat resolves the bound provider and selected model through the WorkLite model gateway. When unconfigured, ordinary System Helper submission is unavailable; the surface links to the protected Agent's configuration form unless a configured custom Agent keeps the composer available for structured `@` dispatch.
 
-Workflow nodes reference an existing agent version from the same workspace. A node may override only an approved subset of settings: a compatible model identifier, temperature, maximum output tokens, and output format. Nodes cannot override the system prompt, skills, MCP servers, or tool allowlist.
+Workflow nodes are generic typed execution units. Each node references a registered Node Type and contains versioned configuration plus explicit input and output mappings. The initial editor exposes one default `input` and `output` port per node, while the contract reserves named ports for later graph capabilities. A Node Type declares configuration, input, and output schemas and executes behind the Workflow Engine contract.
+
+Plugins are the extension and composition boundary. A trusted in-process plugin may register Node Types, runtime capabilities, typed lifecycle events, and optional browser metadata. The Workflow Engine does not import concrete plugin implementations; it resolves a Node Type from its registry and invokes its execution contract. Plugin registration is separate from node execution: a plugin may contribute capabilities without being a workflow node.
+
+Agent is one Node Type rather than the Workflow Engine's universal primitive. The Agent Node adapter references an immutable AgentVersion, maps workflow input into the Agent Runtime request, and returns text, structured data, and artifact references through the generic node result. Agent Runtime remains independent from Workflow Engine.
 
 A published workflow locks every referenced `AgentVersion`; later agent edits cannot alter published workflows or historical runs. Deleted referenced agents use soft deletion so historical versions remain executable and auditable.
 
@@ -167,19 +171,31 @@ Provider connection tests are synchronous, bounded smoke tests through the same 
 
 ## Workspace Assistant Architecture
 
-The workspace assistant is the normal server-owned Agent execution surface for the protected `agt_system_helper_chat` Agent. It supplements the resource editors rather than replacing them and uses the same model step, persisted messages, Skill discovery, automatic `skill_script` execution, execution result, and continuation contracts as other Agents.
+The workspace assistant is the normal server-owned Agent execution surface for the protected `agt_system_helper_chat` Agent. It supplements the resource editors rather than replacing them and uses the same model step, persisted messages, Skill discovery, automatic tool execution, execution result, and continuation contracts as other Agents. Its runtime follows the g-agent interaction model while keeping WorkLite ownership of persistence, Commands, Skills, MCP authorization, and audit records.
 
 System Helper Chat permanently owns the protected `worklite-platform` Skill. That Skill is a standard immutable package containing `SKILL.md`, executable Node scripts under `scripts/`, and a contract reference. It receives no capability flag and does not enable a fixed model-tool registry. The model can request only exact scripts discovered from the persisted package; every requested script is snapshotted into the Agent tool-call record and starts automatically after server validation.
 
-Platform scripts run as child processes through the shared Skill and Commands runtime. They never import Nest services or access SQLite directly. The API process exposes its loopback base URL and workspace slug to every Skill invocation as server-owned context. `worklite-platform` scripts use the built-in Node `fetch` API to call the same typed resource and settings endpoints used by manual forms. This preserves server validation, domain ownership, audit behavior, and independence from the Web client. The scripts accept one JSON argument, validate their operation-specific input, and print one JSON result containing the affected resource and route.
+Platform scripts run as child processes through the shared Skill and Commands runtime. They never import Nest services or access SQLite directly. The API process exposes its loopback base URL and workspace slug to every Skill invocation as server-owned context. `worklite-platform` scripts use the built-in Node `fetch` API to call the same typed resource and settings endpoints used by manual forms. This preserves server validation, domain ownership, audit behavior, and independence from the Web client. The scripts accept one JSON argument, validate their operation-specific structure, and print one JSON result containing the affected resource and route. The Agent creation script forwards complete responsibility and system-prompt strings without application-level character limits.
 
 Initial scripts inspect the credential-safe workspace snapshot; create non-secret Provider, Agent, Skill, MCP server, and Workflow drafts; update persisted appearance or language settings; and validate a requested navigation target. Provider credentials and custom-header values are never accepted by the scripts, model context, Agent tool-call arguments, ordinary logs, or errors. A created Provider result directs the user to the secure Provider form for credentials.
 
 Navigation is the only client-actuated result because a server process cannot move a browser. The navigation script calls a server allowlist endpoint and returns a typed client action containing the resolved route. Agent execution stores this parsed action with the completed tool call. Web may apply only that server-returned action and must not infer navigation or operations from model text or raw stdout. Appearance and language are persisted server settings; Web reads and applies the resulting state instead of owning the mutation.
 
-System Helper conversations are persisted as ordinary mutable Agent executions, not Runs or Artifacts. The browser stores only the current execution identifier and optional local archive labels needed by `/new`, `/resume`, and `/log`; it does not own messages, operation ordering, cancellation state, or mutation state. Creating or continuing an Agent execution persists the user message, schedules the turn in the API process, and returns the `running` execution immediately. A new message may be submitted after the current turn reaches `completed` or `cancelled`. A `skill_script` request keeps the execution `running`, starts the validated script immediately, and returns its result to the same model turn before another tool request or final response.
+System Helper conversations are persisted as ordinary mutable Agent executions, not Runs or Artifacts. The browser stores only the current execution identifier and optional local archive labels needed by `/new`, `/resume`, and `/log`; it does not own messages, operation ordering, cancellation state, or mutation state. Creating or continuing an Agent execution persists the complete non-empty user message without application-level character or per-execution message-count limits, schedules the turn in the API process, and returns the `running` execution immediately. Agent model steps do not impose a WorkLite output-token cap or forced timeout and remain cancellable through the normal turn-cancellation route. Transport request-size limits and the selected Model Provider's context and generation boundaries remain authoritative external constraints, so accepted long messages may still fail during provider execution. A new message may be submitted after the current turn reaches `completed`, `cancelled`, or `failed`; a failed execution clears its error when a follow-up starts. A `skill_script` request keeps the execution `running`, starts the validated script immediately, and returns its result to the same model turn before another tool request or final response.
 
-The public turn-cancellation route is `POST /agents/:agentId/executions/:executionId/cancel`. Cancellation is scoped to the active turn, not the reusable conversation. During a model step, the API aborts the active provider request. During a Skill step, the Agent tool call stores its Command execution identifier immediately and cancellation delegates to Commands so the process group is terminated. The execution and active tool call become `cancelled`, no later callback may overwrite that terminal state, and a cancelled Skill result is persisted without resuming the model. The conversation history and browser draft remain available for the next message. Browser disconnection alone still does not cancel execution.
+System Helper Chat also supports explicit custom-Agent dispatch through a structured `@` selection and helper-created background sessions. Web sends the selected Agent identifier and the remaining non-empty task as separate request fields; ordinary message text is never parsed as a dispatch command, and the task is never submitted to the System Helper model. Only one custom Agent may be selected for a task. The target Agent must belong to the current workspace, must not be protected, and must have a configured Provider and model. It executes with its own prompt, Provider, model, Skill assignments, MCP assignments, and conversation history. A helper-created session uses the same persisted sub-session contract and never enters the main conversation context.
+
+Each dispatch creates an `agent_sub_sessions` row linked to one ordinary mutable Agent execution. The sub-session stores workspace and Agent ownership, a display title, unread state, and timestamps; messages and execution lifecycle remain owned by the linked execution. `GET /agent-sub-sessions`, `POST /agent-sub-sessions`, `PATCH /agent-sub-sessions/:sessionId`, and `DELETE /agent-sub-sessions/:sessionId` list, create, update unread state, and delete these records within the active workspace. Deleting a sub-session cancels an active turn before deleting the linked execution and its dependent tool calls. Sub-session turns run independently of the main System Helper execution, remain available after browser reload, accept follow-up through the existing execution continuation route, and never enter the main conversation or model context. `/new` changes only the main System Helper conversation.
+
+The API process owns in-memory scheduling and cancellation handles, so an interrupted process cannot resume a previously running turn. Database initialization changes every persisted `running` execution to `failed` with a stable restart-safe error while preserving its messages. Running Skill calls, MCP calls, and built-in host calls are also marked failed, and linked sub-sessions become unread so the restart is visible after reload. Execution views persist a safe diagnostic phase and error code alongside the safe localized error message; terminal transitions write audit metadata containing the execution, tool-call, command-execution, and background-task identifiers without provider responses, stack traces, credentials, or raw SDK errors. This normalization is a forward runtime rule for existing records; no compatibility route, text command, or migration adapter is provided.
+
+The model gateway exposes a typed built-in tool set (`bash`, `read`, `write`, `glob`, `grep`, `update_plan`, and `ask_user`) only to System Helper Chat, plus the exact executable Skill and authorized MCP tool allowlists for every Agent. Built-in host operations still delegate to Commands and are persisted as tool calls; they do not bypass workspace or audit ownership. `update_plan` is persisted execution state. `ask_user` is available only in the dedicated clarification pass for a newly created multi-step plan, pauses the execution, and resumes it through a typed answer route. The gateway rejects invalid or incomplete tool calls before their response messages enter Agent history, classifies malformed JSON separately from other schema-invalid requests, and exposes only stable credential-safe errors. The Agent runtime immediately marks the active turn `failed` or `waiting_for_input` and persists an actionable safe error message with a phase and error code; it never persists malformed tool input, SDK exceptions, provider response bodies, stack traces, credentials, or meaningless residual model text as a display message. A failure already committed for the turn is terminal and cannot later be replaced by cancellation. A single execution may have only one scheduled advance at a time, and every asynchronous continuation rechecks the persisted state before writing.
+
+The public turn-cancellation route is `POST /agents/:agentId/executions/:executionId/cancel`. A failed execution can be restarted in place through `POST /agents/:agentId/executions/:executionId/retry` without appending a duplicate user message. Cancellation is scoped to the active turn, not the reusable conversation. During a model step, the API aborts the active provider request. During a Skill or built-in host step, the Agent tool call stores its Command execution identifier immediately and cancellation delegates to Commands so the process group is terminated. During an MCP step, cancellation aborts the request through the MCP client. The execution and active tool call become `cancelled`, no later callback may overwrite that terminal state, and a cancelled tool result is persisted without resuming the model. The conversation history and browser draft remain available for the next message. Browser disconnection alone still does not cancel execution.
+
+Helper turns use a bounded, abort-aware exponential retry for transient provider and MCP transport failures. Retries happen before a tool call is committed and never replay a committed host side effect. The runtime maintains a maximum tool-round budget per turn and emits a stable failure when the model does not converge. Full display history remains persisted; context accounting may trim the oldest low-priority messages from the provider request only, preserving the first user task and the most recent message. The trim decision is recorded as execution metadata so the browser can explain reduced context without deleting the conversation.
+
+The protected helper may create recurring background tasks through `schedule_task`, `unschedule_task`, and `list_scheduled_tasks`. Tasks are workspace-scoped, persisted, isolated from the main conversation, and run through the same Agent Runtime with their own execution history. A task never moves the browser or writes credentials; updates are surfaced through the task list and unread state. Overdue tasks are resumed once after restart and then continue on their configured interval.
 
 ## Skill Architecture
 
@@ -196,7 +212,7 @@ The product supports creating a Skill online and editing a real textual package.
 
 `skill_files` is the canonical mutable package-file store. The Skill row retains an instructions projection of `SKILL.md` for Agent prompt assembly. Package writes validate normalized relative POSIX paths, reject traversal, duplicate paths, unsupported roots, oversized files, and packages without `SKILL.md`, then update the file set and instructions projection atomically. Startup backfills the current `instructions` value into `SKILL.md` for existing Skills and repairs built-in package files.
 
-An assigned Skill contributes its `SKILL.md` to the Agent system prompt. Files directly below or nested under `scripts/` are executable only when they begin with a Unix shebang. The model receives a server-generated allowlist of script identifiers, selects one exact Skill id and script path, and supplies an argument array. It cannot submit an interpreter, working directory, environment, or unlisted script through the Skill-script tool. The API revalidates the Agent assignment and selected file before persisting and immediately starting the invocation.
+An assigned Skill contributes its `SKILL.md` to the Agent system prompt. Files directly below or nested under `scripts/` are executable only when they begin with a Unix shebang. The model receives a server-generated allowlist of script identifiers, selects one exact Skill id and script path, and supplies a structurally validated string argument array without WorkLite item-count or per-item character limits. It cannot submit an interpreter, working directory, environment, or unlisted script through the Skill-script tool. The API revalidates the Agent assignment and selected file before persisting and immediately starting the invocation. Transport, provider, operating-system argument, and process-memory boundaries still apply.
 
 A saved Skill script, including a script in a protected built-in package, may also be started directly from the Skill editor through `POST /skills/:skillId/executions`. This direct path validates the persisted Skill and exact shebang-bearing `scripts/` file, accepts only a string argument array, snapshots and materializes the persisted package, and delegates execution to Commands. Clicking `Run` is the execution decision; it does not require an Agent assignment, Model Provider, model selection, or a second approval step. Unsaved browser edits are never executed, so the editor disables direct execution until the package is saved. The page observes the resulting persisted command events, exit state, and cancellation through the server API without owning the process lifecycle.
 
@@ -228,15 +244,21 @@ The configuration flow is:
 4. Select the tools agents may use.
 5. Publish an immutable MCP version.
 
+The initial web configuration also exposes a workspace-scoped update operation for an existing draft. It replaces name, endpoint, and optionally the write-only authentication token before the next connection test or publication.
+
 Secrets use a secret-storage abstraction and must never be returned in full or written to ordinary logs. MCP output is untrusted input. Tool calls must be authorized and auditable.
+
+Assigned MCP tools are resolved lazily when an Agent turn starts and are exposed to the model alongside built-in and executable Skill tools. The runtime records the server, tool name, sanitized arguments, result status, and cancellation state in the same Agent tool-call table. Connection failures are classified without persisting upstream response bodies. A disconnected MCP client is re-created for the next turn; an in-flight request is aborted on turn cancellation and never resumes a model step after the execution has become terminal.
 
 ## Workflow Architecture
 
 ### Initial Workflow Model
 
-The initial workflow is a fixed, ordered list of agent nodes. It does not support arbitrary edges, branching, loops, parallel execution, or backward jumps.
+The initial workflow is a fixed, ordered list of generic nodes. It does not support arbitrary edges, branching, loops, parallel execution, or backward jumps. The linear scheduler is intentionally retained while the node contract is generalized.
 
-Each node has a stable identifier, integer position, agent-version reference, optional input template, restricted runtime overrides, and an error policy initially limited to `stop` or `retry`. A node receives the original workflow input, previous-node output, and workflow variables. Its successful output becomes the next node's input.
+Each node has a stable identifier, integer position, Node Type identifier and version, JSON configuration, explicit input mapping, and an error policy initially limited to `stop` or `retry`. A node receives the mapped workflow data and execution context. Its committed output becomes the next node's mapped input. Large values are represented by Artifact references rather than copied into every node record.
+
+The first-party `worklite/agent` Node Type adapts an AgentVersion. Other first-party Node Types may later adapt Skills, Commands, HTTP/MCP calls, transforms, approvals, and subworkflows without changing the Workflow Engine contract. Control-flow nodes remain engine-owned until branching and parallel semantics are approved.
 
 Every workflow definition includes a `schemaVersion` for future migrations.
 
@@ -254,7 +276,7 @@ Every manual or AI edit creates an `EditRevision` with its actor, optional sourc
 WorkflowDraft --publish--> immutable WorkflowVersion --run--> WorkflowRun
 ```
 
-Drafts can change. Published versions cannot. Publication resolves and locks agent-version references. Every execution is tied to one immutable workflow version.
+Drafts can change. Published versions cannot. Publication resolves and locks Node Type versions and all referenced resource versions, including AgentVersion, SkillVersion, and MCPVersion where applicable. Every execution is tied to one immutable workflow version.
 
 ## Runtime Architecture
 
@@ -264,7 +286,7 @@ Runs are asynchronous because they may take minutes or longer. The initial local
 Create run
   -> persist WorkflowRun
   -> schedule in-process job
-  -> execute nodes in order
+  -> resolve and execute nodes in order through the Node Type registry
   -> persist NodeRun and events
   -> publish progress
   -> persist final output or failure
@@ -279,7 +301,7 @@ queued -> running -> succeeded
                   -> timed_out
 ```
 
-A `WorkflowRun` stores its workspace, workflow version, input, current node, timestamps, final result, and status. A `NodeRun` stores its agent version, input, output, status, duration, retry count, and relevant model, skill, MCP, and tool-call activity.
+A `WorkflowRun` stores its workspace, workflow version, input, current node, timestamps, final result, and status. A `NodeRun` stores its Node Type identity, configuration snapshot, mapped input, committed output or Artifact references, status, duration, retry count, and plugin-specific execution references. Run progress uses generic node lifecycle events; plugin-specific events are namespaced and carry immutable data snapshots.
 
 Runtime requirements include node and workflow timeouts, cooperative cancellation, worker heartbeats or leases, persisted intermediate results, classified transient retries, idempotency for retryable external side effects, and per-workspace concurrency, duration, and model-usage quotas.
 
@@ -404,6 +426,8 @@ The MCP client, skill SDK, and observability code may begin inside applications 
 
 - Drag-and-drop workflow canvases.
 - Branches, loops, parallel nodes, and arbitrary graph edges.
+- Dynamic script-authored workflow orchestration as the primary Workflow model.
+- A third-party plugin marketplace or untrusted in-process plugin execution.
 - Arbitrary user-supplied MCP `stdio` processes.
 - Resume from an arbitrary failed node.
 - Temporal or another durable workflow platform.
@@ -413,6 +437,52 @@ The MCP client, skill SDK, and observability code may begin inside applications 
 Adding a deferred capability requires an approved architecture change.
 
 ## Changelog
+
+### 2026-08-29 - WorkLite-Compatible G-Agent Helper Runtime
+
+- Approved a g-agent-style System Helper runtime while retaining WorkLite ownership of Commands, Skills, MCP authorization, persistence, workspace isolation, and audit records.
+- Added the target contract for built-in helper tools, multi-round execution, typed clarification, streamed execution events, MCP tool calls, background Agent sessions, and recurring background tasks.
+- Defined abort-aware provider/MCP retries, bounded tool rounds, idempotent terminal transitions, restart recovery for all helper side effects, and provider-only context trimming that never deletes display history.
+- Kept direct filesystem tools and source-project disk state out of the runtime; built-in host operations continue through the persisted Commands boundary.
+
+### 2026-08-28 - Recoverable And Diagnosable Helper Executions
+
+- Extended restart normalization from child sessions to every persisted Agent execution, including the main System Helper conversation.
+- Added safe execution phase and error-code metadata, terminal audit records, and server-owned unread updates for completed or recovered sub-sessions.
+- Allowed follow-up messages after failed executions while retaining single-turn execution and terminal-state guards.
+- Defined browser reconnect behavior and request-generation protection as the presentation layer for the same persisted execution contract.
+
+### 2026-08-28 - Generic Workflow Node Contract
+
+- Generalized Workflow definitions from Agent-only steps to versioned Node Types with explicit configuration, input, and output contracts.
+- Kept the first execution strategy linear while separating the Workflow Engine, Node Type registry, plugin composition, and Agent Node adapter.
+- Locked Node Type versions alongside referenced Agent, Skill, and MCP versions at publication time.
+- Deferred graph control flow, script-authored primary workflows, plugin marketplace behavior, and untrusted in-process plugins.
+
+### 2026-08-28 - Explicit Mentioned Sub-Agent Sessions
+
+- Added persistent custom-Agent sub-sessions launched by a structured `@` selection in System Helper Chat.
+- Kept child Agent configuration, execution history, continuation, cancellation, and model context independent from the main System Helper conversation.
+- Defined workspace-scoped sub-session lifecycle APIs and restart normalization for in-memory work that cannot be resumed.
+
+### 2026-08-28 - Mutation Completion And AI Elements UI
+
+- Added durable success and failure handling for provider, MCP, workflow, Agent, and Run mutations, including duplicate-submission protection, query refreshes, and post-delete navigation.
+- Added the typed MCP draft update operation used by the configuration editor.
+- Adopted compositional AI Elements-compatible Conversation, Message, and Prompt Input primitives for the shell-owned System Helper Chat without changing server execution boundaries.
+
+### 2026-08-27 - Credential-Safe Agent Tool Failures
+
+- Required the model gateway to reject malformed and schema-invalid Skill requests before they enter Agent history.
+- Required active Agent turns to fail promptly with an actionable credential-safe error while excluding raw tool input, provider responses, stack traces, and credentials.
+- Made committed failures terminal so a later cancellation cannot hide the original cause.
+
+### 2026-08-27 - Uncapped Agent Execution Content
+
+- Removed WorkLite character and count limits from Agent messages and Skill-script string arguments while retaining non-empty and structural validation.
+- Removed the Agent model-step output-token cap and forced timeout while preserving explicit cancellation.
+- Removed content-length validation for responsibility and system prompt in the platform Agent-creation script.
+- Left transport, Model Provider, operating-system, Skill package storage, identifier, path, and structural validation boundaries unchanged.
 
 ### 2026-08-27 - Cancellable Background Agent Turns
 

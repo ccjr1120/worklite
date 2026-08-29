@@ -26,9 +26,11 @@
   },
   "composer": {
     "label": "Message System Helper Chat",
-    "placeholder": "Ask about WorkLite or request a platform operation...",
+    "placeholder": "Ask WorkLite or type @ to delegate to an Agent...",
+    "followUpPlaceholder": "Message {{agent}}...",
     "send": "Send message",
     "stop": "Stop current response",
+    "answerPlaceholder": "Answer the clarification question...",
     "loading": "Loading System Helper Chat configuration",
     "configure": "Bind a model provider and model to use System Helper Chat"
   },
@@ -37,8 +39,8 @@
   },
   "commands": {
     "menuLabel": "Conversation commands",
-    "logDescription": "Download the current server transcript as Markdown.",
-    "newDescription": "Archive this execution and start a new conversation.",
+    "logDescription": "Download only the active conversation as Markdown.",
+    "newDescription": "End this conversation and start a new one.",
     "resumeDescription": "Resume an archived server execution."
   },
   "messages": {
@@ -50,16 +52,46 @@
   },
   "status": {
     "running": "Running",
+    "waiting_for_input": "Waiting for your answer",
     "completed": "Completed",
     "cancelled": "Cancelled",
-    "failed": "Failed"
+    "failed": "Failed",
+    "reconnecting": "Reconnecting"
   },
   "execution": {
     "loading": "Loading the server execution",
     "working": "Working...",
+    "cancelled": "This response was stopped.",
     "loadFailed": "The saved execution could not be loaded.",
     "requestFailed": "System Helper Chat could not complete this request.",
-    "cancelFailed": "The current response could not be stopped."
+    "providerRequestFailed": "System Helper Chat could not complete this turn. Check the model provider configuration and try again.",
+    "skillFailed": "The Agent Skill script could not be completed.",
+    "incompleteSkillRequest": "The model returned an incomplete Skill request. Its JSON ended before the request was complete.",
+    "invalidSkillRequest": "The model returned an invalid Skill request. Its arguments could not be parsed or did not match the required structure.",
+    "cancelFailed": "The current response could not be stopped.",
+    "answerFailed": "The clarification answer could not be submitted.",
+    "restarted": "The API restarted before this Agent turn completed. Send a follow-up to continue.",
+    "retry": "Retry last request",
+    "diagnostics": "Diagnostics",
+    "id": "Execution ID",
+    "phase": "Phase",
+    "errorCode": "Error code",
+    "updated": "Updated",
+    "none": "none"
+  },
+  "mentions": {
+    "menuLabel": "Available Agents",
+    "empty": "No matching configured Agents.",
+    "remove": "Remove selected Agent"
+  },
+  "subAgents": {
+    "label": "Sub Agents",
+    "unread": "New",
+    "return": "Return to System Helper Chat",
+    "close": "Close and delete this sub-Agent session",
+    "createFailed": "The sub-Agent session could not be created.",
+    "requestFailed": "The sub-Agent could not complete this request.",
+    "closeFailed": "The sub-Agent session could not be closed."
   },
   "history": {
     "title": "Execution history",
@@ -73,6 +105,9 @@
     "script": "Script",
     "workingDirectory": "Working directory",
     "arguments": "Arguments",
+    "toolCallId": "Tool call ID",
+    "commandExecutionId": "Command execution ID",
+    "none": "none",
     "warning": "This script runs with the API process host permissions, working directory, and complete environment.",
     "output": "Output · exit code {{code}}",
     "exitCode": "Exit code {{code}}",
@@ -84,6 +119,7 @@
     "openResource": "Open resource",
     "status": {
       "running": "Running",
+      "waiting_for_input": "Waiting for your answer",
       "completed": "Completed",
       "cancelled": "Cancelled",
       "failed": "Failed"
@@ -92,9 +128,31 @@
   "log": {
     "title": "System Helper Chat conversation",
     "generated": "Generated",
-    "empty": "No server messages in this execution.",
+    "executionId": "Execution ID",
+    "phase": "Phase",
+    "errorCode": "Error code",
+    "status": "Status",
+    "incomplete": "This conversation is still running. The export may be incomplete.",
+    "reason": "Reason",
+    "cancelledReason": "The current response was stopped by the user.",
+    "noActive": "There is no active conversation to download.",
+    "transcript": "Conversation",
+    "noMessages": "No messages are available in this conversation.",
     "user": "You",
     "assistant": "System Helper Chat",
-    "tool": "Skill script"
+    "activity": "Skill activity",
+    "noActivity": "No Skill activity in this conversation.",
+    "skill": "Skill",
+    "script": "Script",
+    "toolCallId": "Tool call ID",
+    "commandExecutionId": "Command execution ID",
+    "exitCode": "Exit code",
+    "statuses": {
+      "running": "Running",
+      "waiting_for_input": "Waiting for your answer",
+      "completed": "Completed",
+      "cancelled": "Cancelled",
+      "failed": "Failed"
+    }
   }
 }

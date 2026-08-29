@@ -10,6 +10,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { queryClient } from '@/lib/query-client';
 import { cn } from '@/lib/utils';
@@ -313,7 +314,7 @@ function SkillEditorPage() {
           </div>
         ) : null}
         <textarea
-          className="min-h-80 flex-1 resize-none border-0 bg-background p-4 font-mono text-[13px] leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default disabled:opacity-100"
+          className={cn('min-h-80 flex-1 resize-none border-0 bg-background p-4 font-mono text-[13px] leading-6 text-foreground disabled:cursor-default disabled:opacity-100', surfaceInteraction, focusRingInset)}
           value={selectedFile?.content ?? ''}
           onChange={(event) => { if (!selectedFile || !editable) return; setFiles((current) => current.map((file) => file.path === selectedFile.path ? { ...file, content: event.target.value } : file)); markUnsaved(); }}
           readOnly={!editable}
@@ -378,7 +379,7 @@ function PackageTree({ groups, selectedPath, onSelect }: { groups: ReturnType<ty
 
 function PackageFileButton({ file, label = file.path, selected, onSelect }: { file: PackageFile; label?: string; selected: boolean; onSelect: (path: string) => void }) {
   const Icon = file.path.startsWith('scripts/') ? FileCode2 : FileText;
-  return <li><button type="button" onClick={() => onSelect(file.path)} className={cn('flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring', selected ? 'bg-brand-subtle text-foreground' : 'text-muted-foreground hover:bg-surface-subtle')}><Icon className="size-3.5 shrink-0" aria-hidden="true" /><span className="truncate">{label}</span></button></li>;
+  return <li><button type="button" onClick={() => onSelect(file.path)} aria-pressed={selected} className={cn('flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono text-xs', surfaceInteraction, focusRingInset, selected ? 'bg-brand-subtle text-foreground' : 'text-muted-foreground hover:bg-surface-subtle hover:text-foreground')}><Icon className="size-3.5 shrink-0" aria-hidden="true" /><span className="truncate">{label}</span></button></li>;
 }
 
 function groupPackageFiles(files: PackageFile[]) {

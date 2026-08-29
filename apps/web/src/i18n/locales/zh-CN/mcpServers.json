@@ -31,6 +31,7 @@
     "test": "测试连接",
     "allowedTools": "允许的工具",
     "publishHint": "发布会锁定允许的工具集。发现到的描述属于不可信内容。",
-    "published": "MCP 版本已发布"
+    "published": "MCP 版本已发布",
+    "publishFailed": "无法保存 MCP 服务器。"
   }
 }

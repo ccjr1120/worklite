@@ -140,6 +140,10 @@ Prefer one primary action per visible region. Loading actions must respond immed
 
 Keep labels visible above fields. Placeholder text provides examples only. Place help and validation messages next to the relevant field. Clearly communicate `Saving`, `Saved`, and `Unsaved changes` states. Group advanced configuration and disclose it progressively. Use dedicated editors for prompts, code, and structured data.
 
+Form controls use one crisp boundary at rest. Hover may strengthen that boundary with neutral contrast, while keyboard focus replaces it with the brand-colored boundary and one soft, translucent halo without a gap. Do not stack an outline, border, and offset ring into multiple hard focus borders. Invalid controls use the same treatment with the error color. Disabled controls keep their boundary and surface legible without hover or active feedback.
+
+Apply the same focus language to buttons, selection controls, tabs, menu items, and custom interactive rows. Borderless or inset interactions use one contained focus indicator that follows the component shape. Pointer, hover, active, focus, disabled, and invalid states must remain consistent across local and shared controls.
+
 ### Tables and Lists
 
 Prefer compact lists or tables for agents, workflows, and runs when scanability matters. Use row heights around `44px` to `48px`, subdued headers, predictable sorting, visible filter chips, and on-hover secondary actions. Keep status near the object name. Truncated identifiers must be copyable. Distinguish an empty collection from a filtered result with no matches.
@@ -167,6 +171,10 @@ In conversational layouts, user messages align to the right in compact neutral b
 Create an Agent response placeholder in the transcript as soon as a turn starts. Show restrained inline progress there instead of replacing or disabling the composer. While a turn is running, keep the draft input editable and replace the send control with a familiar square Stop icon; stopping is a neutral execution control rather than a destructive action. Preserve the draft after completion or cancellation, and use text plus icon cues for working and cancelled states.
 
 Present inline Skill calls as compact disclosure rows by default. The collapsed row keeps the Skill identity, script name, execution status, and exit code visible without allowing arguments, host details, or raw output to dominate the transcript. A keyboard-accessible disclosure control reveals the complete metadata, warning, and a height-bounded internally scrollable output region. Failed calls remain collapsed unless the user opens them.
+
+Treat `@` selection in a conversation composer as structured dispatch, not decorated message text. Opening `@` presents a searchable keyboard-accessible custom-Agent menu with pointer selection, arrow navigation, `Enter`, and `Escape`. A selection becomes one removable mention token before the task text inside the same bordered input surface; it must not appear as a separate adjacent field or region. Only one Agent may be selected for a task, and its identity remains visible until dispatch or removal. The token and task text may wrap together within that shared surface on narrow screens.
+
+Present persistent child Agent sessions in a compact unframed status band between the transcript and composer. Each item shows Agent identity and a text or icon status cue, with unread state communicated by more than color. Selecting an item switches the transcript and composer to that child conversation. Provide explicit return-to-System-Helper and close actions, use familiar Lucide icons with accessible names and tooltips, and keep the band compact and horizontally scrollable on narrow screens.
 
 ### Workflow Editor
 
@@ -235,8 +243,15 @@ Before confirming a UI proposal, verify that it:
 
 ## Changelog
 
+### 2026-08-28
+
+- Kept selected Agent mentions inline with task text inside one composer input surface.
+- Added structured `@` Agent selection, removable mention tokens, and a compact persistent child-session band for System Helper Chat.
+- Adopted Vercel AI Elements' compositional Conversation, Message, and Prompt Input pattern for System Helper Chat while retaining WorkLite's semantic tokens, persisted execution state, and shared safe Markdown renderer.
+
 ### 2026-08-27
 
+- Unified interactive component states around a single crisp boundary, a soft gapless focus halo, restrained hover contrast, and consistent invalid and disabled behavior.
 - Made inline Skill calls compact and collapsed by default, with status and exit context retained in the summary and bounded details available on demand.
 - Added transcript-owned Agent working placeholders, editable drafts during execution, and a neutral Stop control that replaces Send for active turns.
 

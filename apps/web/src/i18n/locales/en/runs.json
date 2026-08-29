@@ -21,6 +21,8 @@
     "unavailableTitle": "Run unavailable",
     "unavailableDescription": "This run does not exist or is no longer accessible.",
     "cancel": "Cancel run",
+    "cancelling": "Cancelling...",
+    "cancelFailed": "The run could not be cancelled.",
     "version": "Version {{version}}",
     "failed": "Failed on {{step}}. Earlier completed work is retained.",
     "openWorkflow": "Open workflow",

@@ -14,7 +14,7 @@ function Field({ label, htmlFor, hint, error, children, className }: FieldProps)
   const describedBy = error ? `${htmlFor}-error` : hint ? `${htmlFor}-hint` : undefined;
 
   return (
-    <div className={cn('flex flex-col gap-2', className)}>
+    <div className={cn('flex w-full min-w-0 flex-col gap-2', className)}>
       <label htmlFor={htmlFor} className="text-xs font-medium text-foreground">
         {label}
       </label>

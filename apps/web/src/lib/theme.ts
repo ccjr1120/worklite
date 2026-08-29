@@ -1,6 +1,26 @@
 export type Appearance = 'system' | 'light' | 'dark';
 export type ResolvedTheme = 'light' | 'dark';
 
+const APPEARANCE_STORAGE_KEY = 'worklite.appearance';
+
+export function getStoredAppearance(): Appearance {
+  if (typeof window === 'undefined') return 'system';
+  try {
+    const stored = window.localStorage.getItem(APPEARANCE_STORAGE_KEY);
+    return stored === 'light' || stored === 'dark' ? stored : 'system';
+  } catch {
+    return 'system';
+  }
+}
+
+export function storeAppearance(appearance: Appearance) {
+  try {
+    window.localStorage.setItem(APPEARANCE_STORAGE_KEY, appearance);
+  } catch {
+    // The applied theme still works when storage is unavailable.
+  }
+}
+
 export function getPreferredTheme(): ResolvedTheme {
   if (typeof window === 'undefined') {
     return 'light';

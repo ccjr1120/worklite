@@ -2,9 +2,9 @@
 
 ## Layout
 
-The initial draft editor context bar contains a breadcrumb with a leading back action, save state, and one `Save` action. Do not show Preview, Publish, version history, or execution controls until those behaviors have real end-to-end API and runtime support. The main column contains name, responsibility, and persisted system instructions.
+The initial draft editor context bar contains a breadcrumb with a leading back action, save state, and one `Save` action. Saved custom Agents also expose a destructive delete icon with a tooltip and confirmation dialog; the action is absent for new and protected system Agents. Do not show Preview, Publish, version history, or execution controls until those behaviors have real end-to-end API and runtime support. The main column contains name, responsibility, and persisted system instructions.
 
-The configuration region contains a Model Provider selector, a dependent model selector, Skills, and MCP servers. Provider and model choices come only from configured workspace data. Skills and MCP servers come from their real workspace collections and use controlled checkboxes; every selection belongs only to the current Agent draft. Show each resource's meaningful validation, connection, or version metadata without preventing draft assignment. Loading, failure, and empty states remain local to each resource section, and an empty section links to the relevant creation page.
+The configuration region contains a Model Provider selector, a dependent model selector, Skills, and MCP servers. Provider and model choices come only from configured workspace data. Skills and MCP servers come from their real workspace collections and use controlled checkboxes; every selection belongs only to the current Agent draft. Render each assignment section as a responsive two-column list of single-line rows. Resource names truncate within their row and expose the complete name on hover or keyboard focus; keep meaningful version, connection, or validation metadata visible inline without preventing draft assignment. Loading, failure, and empty states remain local to each resource section, and an empty section links to the relevant creation page.
 
 Saved custom Agents have an unframed execution region below the draft fields. It contains the conversation transcript, a compact prompt composer, and durable request errors. Execution is unavailable until the Agent has a configured Provider and model. Text responses use the shared streaming Markdown presentation when streaming is available; the initial terminal-tool increment may return completed turns while preserving the same message hierarchy. A submitted turn immediately creates an Agent working placeholder in the transcript. While it is running, the prompt remains editable without queuing, and the Send action becomes Stop. Cancellation preserves the draft, marks the turn and active Skill call as cancelled, and leaves the session available for another message.
 
@@ -25,6 +25,11 @@ Support new unsaved, loading, saving, saved, validation failure, resource loadin
 - Made Agent Skill calls compact and collapsed by default while retaining status and exit context in the summary and complete bounded details on demand.
 - Added transcript-owned working and cancelled states, editable drafts during execution, and a server-backed Stop action for custom Agent turns.
 - Kept one active turn and intentionally did not add a message queue.
+
+### 2026-08-28
+
+- Added confirmed deletion for saved custom Agents while keeping protected system Agents non-destructive.
+- Changed Agent Skill and MCP assignment sections to responsive two-column, single-line rows with complete-name disclosure for truncated resources.
 
 ### 2026-08-27
 

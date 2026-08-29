@@ -6,6 +6,7 @@ import type {
   ArtifactView,
   AuditEventView,
   CreateMcpServerRequest,
+  UpdateMcpServerRequest,
   CreateModelProviderRequest,
   CreateSkillRequest,
   CommandExecutionView,
@@ -89,6 +90,14 @@ function providerView(row: typeof modelProviders.$inferSelect): ModelProviderVie
 }
 
 type PackageFile = { path: string; content: string };
+
+export type AgentMcpRuntime = {
+  id: string;
+  name: string;
+  endpoint: string;
+  authToken?: string;
+  allowedTools: number;
+};
 
 const MAX_SKILL_FILES = 100;
 const MAX_SKILL_FILE_BYTES = 256 * 1_024;
@@ -200,9 +209,9 @@ export class WorkspaceResourcesService {
     if (input.source !== undefined && input.source !== 'online') throw new BadRequestException('Archive Skill creation is not available yet.');
     const files = validatePackageFiles(input.files);
     const id = `sk_${randomUUID()}`;
-    const [row] = await this.db.transaction(async (transaction) => {
-      const inserted = await transaction.insert(skills).values({ id, workspaceId: team.id, name, source: 'online', version: 'draft', validation: 'pending', instructions: files.find((file) => file.path === 'SKILL.md')?.content ?? '' }).returning();
-      await transaction.insert(skillFiles).values(files.map((file) => ({ skillId: id, ...file })));
+    const [row] = await this.db.transaction((transaction) => {
+      const inserted = transaction.insert(skills).values({ id, workspaceId: team.id, name, source: 'online', version: 'draft', validation: 'pending', instructions: files.find((file) => file.path === 'SKILL.md')?.content ?? '' }).returning().all();
+      transaction.insert(skillFiles).values(files.map((file) => ({ skillId: id, ...file }))).run();
       return inserted;
     });
     if (!row) throw new NotFoundException('Skill could not be created');
@@ -220,11 +229,11 @@ export class WorkspaceResourcesService {
     const files = input.files === undefined
       ? await this.db.select({ path: skillFiles.path, content: skillFiles.content }).from(skillFiles).where(eq(skillFiles.skillId, skillId)).orderBy(asc(skillFiles.path))
       : validatePackageFiles(input.files);
-    const [row] = await this.db.transaction(async (transaction) => {
-      const updated = await transaction.update(skills).set({ name, instructions: files.find((file) => file.path === 'SKILL.md')?.content ?? '', updatedAt: new Date() }).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).returning();
+    const [row] = await this.db.transaction((transaction) => {
+      const updated = transaction.update(skills).set({ name, instructions: files.find((file) => file.path === 'SKILL.md')?.content ?? '', updatedAt: new Date() }).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).returning().all();
       if (input.files !== undefined) {
-        await transaction.delete(skillFiles).where(eq(skillFiles.skillId, skillId));
-        await transaction.insert(skillFiles).values(files.map((file) => ({ skillId, ...file })));
+        transaction.delete(skillFiles).where(eq(skillFiles.skillId, skillId)).run();
+        transaction.insert(skillFiles).values(files.map((file) => ({ skillId, ...file }))).run();
       }
       return updated;
     });
@@ -256,10 +265,56 @@ export class WorkspaceResourcesService {
     return { id: row.id, workspaceSlug, name: row.name, connection: row.connection, transport: 'Streamable HTTP', allowedTools: row.allowedTools, version: row.version, updatedAt: row.updatedAt.toISOString() };
   }
 
+  async agentMcpRuntimes(request: Request, workspaceSlug: string, agentId: string): Promise<AgentMcpRuntime[]> {
+    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const rows = await this.db.select({ server: mcpServers }).from(agentMcpServers)
+      .innerJoin(agents, eq(agentMcpServers.agentId, agents.id))
+      .innerJoin(mcpServers, eq(agentMcpServers.mcpServerId, mcpServers.id))
+      .where(and(eq(agentMcpServers.agentId, agentId), eq(agents.workspaceId, workspace.id)));
+    return rows.flatMap(({ server }) => {
+      if (!server.endpoint.trim()) return [];
+      let authToken: string | undefined;
+      try {
+        authToken = server.authSecret ? decryptSecret(server.authSecret) : undefined;
+      } catch {
+        authToken = undefined;
+      }
+      return [{ id: server.id, name: server.name, endpoint: server.endpoint, ...(authToken ? { authToken } : {}), allowedTools: server.allowedTools }];
+    });
+  }
+
   async createMcpServer(request: Request, workspaceSlug: string, input: CreateMcpServerRequest): Promise<McpServerView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [row] = await this.db.insert(mcpServers).values({ id: `mcp_${randomUUID()}`, workspaceId: team.id, name: input.name.trim(), endpoint: input.endpoint.trim(), authSecret: input.authToken ? encryptSecret(input.authToken) : null, connection: 'unconfigured', transport: 'Streamable HTTP', allowedTools: 0, version: 'v1' }).returning();
     if (!row) throw new NotFoundException('MCP server could not be created');
+    return { id: row.id, workspaceSlug, name: row.name, connection: row.connection, transport: 'Streamable HTTP', allowedTools: row.allowedTools, version: row.version, updatedAt: row.updatedAt.toISOString() };
+  }
+
+  async updateMcpServer(request: Request, workspaceSlug: string, serverId: string, input: UpdateMcpServerRequest): Promise<McpServerView> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    if (
+      !input
+      || typeof input !== 'object'
+      || Array.isArray(input)
+      || Object.keys(input).some((key) => !['name', 'endpoint', 'authToken'].includes(key))
+      || (input.name !== undefined && typeof input.name !== 'string')
+      || (input.endpoint !== undefined && typeof input.endpoint !== 'string')
+      || (input.authToken !== undefined && typeof input.authToken !== 'string')
+    ) {
+      throw new BadRequestException('Only MCP server name, endpoint, and authentication can be changed.');
+    }
+    const [existing] = await this.db.select().from(mcpServers).where(and(eq(mcpServers.id, serverId), eq(mcpServers.workspaceId, team.id))).limit(1);
+    if (!existing) throw new NotFoundException('MCP server not found');
+    const name = input.name === undefined ? existing.name : input.name.trim();
+    const endpoint = input.endpoint === undefined ? existing.endpoint : input.endpoint.trim();
+    if (!name || !endpoint) throw new BadRequestException('MCP server name and endpoint are required.');
+    const [row] = await this.db.update(mcpServers).set({
+      name,
+      endpoint,
+      ...(input.authToken === undefined ? {} : { authSecret: input.authToken ? encryptSecret(input.authToken) : null }),
+      updatedAt: new Date(),
+    }).where(and(eq(mcpServers.id, serverId), eq(mcpServers.workspaceId, team.id))).returning();
+    if (!row) throw new NotFoundException('MCP server not found');
     return { id: row.id, workspaceSlug, name: row.name, connection: row.connection, transport: 'Streamable HTTP', allowedTools: row.allowedTools, version: row.version, updatedAt: row.updatedAt.toISOString() };
   }
 

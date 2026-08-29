@@ -21,3 +21,9 @@ Before starting any task, read `AGENTS_WORKFLOW.md` and follow the applicable wo
 ## Compatibility Policy
 
 When changing routes, APIs, configuration, or other public project behavior, the default implementation does not preserve legacy compatibility. Do not add redirects, aliases, adapters, migrations, or other compatibility layers unless the user explicitly requests them. When compatibility is intentionally omitted, call out the resulting impact in the handoff.
+
+## Minimal Implementation Policy
+
+Implement only the smallest direct change required by the confirmed request. Do not proactively add validation, limits, compatibility layers, abstractions, fallback behavior, security hardening, or adjacent UX changes unless they are explicitly requested or required by an existing project rule.
+
+When an out-of-scope concern is discovered, mention it briefly instead of expanding the implementation.

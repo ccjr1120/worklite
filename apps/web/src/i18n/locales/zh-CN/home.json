@@ -106,8 +106,6 @@
   "firstUse": {
     "intro": "个人工作台已准备好开始配置。请完成下面的步骤。",
     "configureProvider": "配置模型提供商",
-    "createAgent": "创建 Agent",
-    "createWorkflow": "创建工作流",
-    "runAndInspect": "运行并检查结果"
+    "configureSystemHelper": "为 System Helper Chat 选择模型提供商和模型"
   }
 }

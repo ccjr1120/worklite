@@ -7,12 +7,23 @@ export type AgentRuntimeSettings = {
   outputFormat?: string;
 };
 
-export type AgentExecutionInput = {
-  workflowInput: unknown;
-  previousNodeOutput: unknown;
-  workflowVariables: Record<string, unknown>;
+export type AgentExecutionContext = {
+  workflowRunId?: string;
+  workflowVersionId?: string;
+  nodeId?: string;
+  variables: Readonly<Record<string, unknown>>;
+};
+
+export type AgentExecutionRequest = {
+  input: unknown;
+  settings: AgentRuntimeSettings;
+  context: AgentExecutionContext;
+  signal: AbortSignal;
 };
 
 export type AgentExecutionResult = {
   output: unknown;
+  artifacts?: Array<{ id: string; type: string; name?: string }>;
 };
+
+export type AgentExecutor = (request: AgentExecutionRequest) => Promise<AgentExecutionResult>;

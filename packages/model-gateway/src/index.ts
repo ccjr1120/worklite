@@ -1,6 +1,6 @@
 import { createDeepSeek } from '@ai-sdk/deepseek';
 import { createOpenAI } from '@ai-sdk/openai';
-import { generateText, jsonSchema, streamText, tool, type LanguageModel, type LanguageModelUsage, type ModelMessage } from 'ai';
+import { generateText, InvalidToolInputError, JSONParseError, jsonSchema, streamText, tool, type LanguageModel, type LanguageModelUsage, type ModelMessage } from 'ai';
 
 export type ModelProviderConfig =
   | {
@@ -38,15 +38,26 @@ export type GenerateAgentStepRequest = {
   systemPrompt: string;
   messages: readonly GatewayAgentMessage[];
   skillScripts: Array<{ skillId: string; skillName: string; path: string }>;
+  builtinTools?: readonly GatewayToolDefinition[];
+  mcpTools?: readonly GatewayToolDefinition[];
+  maxToolRounds?: number;
+  maxContextTokens?: number;
   maxOutputTokens?: number;
   abortSignal?: AbortSignal;
+};
+
+export type GatewayToolDefinition = {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
 };
 
 export type AgentStepResult = {
   text: string;
   responseMessages: GatewayAgentMessage[];
-  toolCalls: Array<{ toolCallId: string; toolName: 'skill_script'; skillId: string; scriptPath: string; arguments: string[] }>;
+  toolCalls: Array<{ toolCallId: string; toolName: string; input: unknown; skillId?: string; scriptPath?: string; arguments?: string[] }>;
   finishReason: string | null;
+  contextDropped: number;
 };
 
 export type StreamTextRequest = {
@@ -83,7 +94,7 @@ export interface ModelGateway {
 }
 
 export class ModelGatewayError extends Error {
-  readonly code: 'INVALID_PROVIDER' | 'INVALID_REQUEST';
+  readonly code: 'INVALID_PROVIDER' | 'INVALID_REQUEST' | 'INVALID_TOOL_REQUEST' | 'INCOMPLETE_TOOL_REQUEST';
 
   constructor(code: ModelGatewayError['code'], message: string) {
     super(message);
@@ -126,28 +137,39 @@ export class AiSdkModelGateway implements ModelGateway {
         properties: {
           skillId: { type: 'string', enum: [...new Set(request.skillScripts.map((script) => script.skillId))] },
           scriptPath: { type: 'string', enum: request.skillScripts.map((script) => script.path) },
-          arguments: { type: 'array', maxItems: 100, items: { type: 'string', maxLength: 2_000 } },
+          arguments: { type: 'array', items: { type: 'string' } },
         },
       }),
     });
-    const tools = {
+    const tools: Record<string, unknown> = {
       ...(request.skillScripts.length > 0 ? { skill_script: skillScript } : {}),
     };
-    const result = await generateText({
+    for (const definition of [...(request.builtinTools ?? []), ...(request.mcpTools ?? [])]) {
+      if (!definition.name || tools[definition.name]) continue;
+      tools[definition.name] = tool({
+        description: definition.description,
+        inputSchema: jsonSchema<Record<string, unknown>>(definition.inputSchema as never),
+      });
+    }
+    const context = trimAgentMessages(request.systemPrompt, request.messages, request.maxContextTokens ?? 12_000);
+    const result = await generateWithRetry({
       model,
       instructions: request.systemPrompt,
-      messages: request.messages as ModelMessage[],
-      tools: Object.keys(tools).length > 0 ? tools : undefined,
+      messages: context.messages as ModelMessage[],
+      tools: Object.keys(tools).length > 0 ? tools as never : undefined,
       maxOutputTokens: request.maxOutputTokens,
       abortSignal: request.abortSignal,
-    });
+    }, request.abortSignal);
 
-    const toolCalls = result.toolCalls.flatMap((call) => call ? normalizeAgentToolCall(call as { toolCallId: string; toolName: string; input: unknown }) : []);
+    const invalidToolRequest = classifyInvalidToolRequest(result.toolCalls);
+    if (invalidToolRequest) throw invalidToolRequest;
+    const toolCalls = result.toolCalls.flatMap((call) => call ? normalizeAgentToolCall(call as { toolCallId: string; toolName: string; input: unknown }, tools) : []);
     return {
       text: result.text,
       responseMessages: normalizeResponseMessages(result.responseMessages, new Set(toolCalls.map((call) => call.toolCallId))),
       toolCalls,
       finishReason: result.finishReason,
+      contextDropped: context.dropped,
     };
   }
 }
@@ -169,8 +191,8 @@ function requiredString(value: unknown, maxLength: number): string | null {
   return normalized ? normalized : null;
 }
 
-function argumentArray(value: unknown, maxItems: number, maxLength: number): string[] | null {
-  if (!Array.isArray(value) || value.length > maxItems || value.some((item) => typeof item !== 'string' || item.length > maxLength)) return null;
+function argumentArray(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) return null;
   return [...value] as string[];
 }
 
@@ -206,13 +228,91 @@ function toModelMessages(messages: readonly GatewayMessage[]): ModelMessage[] {
   return messages.map(({ role, content }) => ({ role, content }));
 }
 
-function normalizeAgentToolCall(call: { toolCallId: string; toolName: string; input: unknown }): AgentStepResult['toolCalls'] {
-  if (call.toolName !== 'skill_script') return [];
+function normalizeAgentToolCall(call: { toolCallId: string; toolName: string; input: unknown }, tools: Record<string, unknown>): AgentStepResult['toolCalls'] {
+  if (!tools[call.toolName]) return [];
+  if (call.toolName !== 'skill_script') return [{ toolCallId: call.toolCallId, toolName: call.toolName, input: call.input }];
   const input = asRecord(call.input);
   const skillId = requiredString(input?.skillId, 200);
   const scriptPath = requiredString(input?.scriptPath, 240);
-  const argumentsValue = argumentArray(input?.arguments, 100, 2_000);
-  return skillId && scriptPath && argumentsValue ? [{ toolCallId: call.toolCallId, toolName: 'skill_script', skillId, scriptPath, arguments: argumentsValue }] : [];
+  const argumentsValue = argumentArray(input?.arguments);
+  return skillId && scriptPath && argumentsValue ? [{ toolCallId: call.toolCallId, toolName: 'skill_script', input: call.input, skillId, scriptPath, arguments: argumentsValue }] : [];
+}
+
+function trimAgentMessages(systemPrompt: string, messages: readonly GatewayAgentMessage[], maxTokens: number): { messages: GatewayAgentMessage[]; dropped: number } {
+  const result = [...messages];
+  const estimate = (value: unknown) => Math.ceil(JSON.stringify(value).length / 4);
+  const total = () => Math.ceil(systemPrompt.length / 4) + result.reduce((sum, message) => sum + estimate(message) + 4, 0);
+  let dropped = 0;
+  while (result.length > 3 && total() > maxTokens) {
+    const candidate = result[1];
+    if (!candidate || candidate.role === 'tool') {
+      result.splice(1, 1);
+    } else {
+      result.splice(1, 1);
+      if (result[1]?.role === 'tool') result.splice(1, 1);
+    }
+    dropped += 1;
+  }
+  while (result[0]?.role === 'tool') {
+    result.shift();
+    dropped += 1;
+  }
+  return { messages: result, dropped };
+}
+
+async function generateWithRetry(
+  request: Parameters<typeof generateText>[0],
+  signal: AbortSignal | undefined,
+  maxAttempts = 3,
+): Promise<Awaited<ReturnType<typeof generateText>>> {
+  const attempts = Math.max(1, Math.min(4, Math.floor(maxAttempts)));
+  for (let attempt = 0; ; attempt += 1) {
+    signal?.throwIfAborted();
+    try {
+      return await generateText(request);
+    } catch (error) {
+      if (attempt + 1 >= attempts || signal?.aborted || !isRetryableGatewayError(error)) throw error;
+      await abortableDelay(Math.min(250 * 2 ** attempt, 2_000), signal);
+    }
+  }
+}
+
+function isRetryableGatewayError(error: unknown): boolean {
+  if (error instanceof TypeError) return true;
+  if (error instanceof DOMException && error.name === 'TimeoutError') return true;
+  if (!error || typeof error !== 'object') return false;
+  const record = error as Record<string, unknown>;
+  const status = record.statusCode ?? record.status ?? (record.response && typeof record.response === 'object' ? (record.response as Record<string, unknown>).status : undefined);
+  return typeof status === 'number' && [408, 409, 429, 500, 502, 503, 504].includes(status);
+}
+
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    }, { once: true });
+  });
+}
+
+function classifyInvalidToolRequest(calls: readonly unknown[]): ModelGatewayError | null {
+  for (const value of calls) {
+    const call = asRecord(value);
+    if (call?.invalid !== true) continue;
+    const error = call.error;
+    const cause = InvalidToolInputError.isInstance(error) ? error.cause : null;
+    if (JSONParseError.isInstance(cause) && isUnexpectedJsonEnd(cause.cause)) {
+      return new ModelGatewayError('INCOMPLETE_TOOL_REQUEST', 'The model returned an incomplete Skill request. Its JSON ended before the request was complete.');
+    }
+    return new ModelGatewayError('INVALID_TOOL_REQUEST', 'The model returned an invalid Skill request. Its arguments could not be parsed or did not match the required structure.');
+  }
+  return null;
+}
+
+function isUnexpectedJsonEnd(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /unterminated|string in json at position|unexpected end|end of json/i.test(error.message);
 }
 
 function normalizeResponseMessages(messages: readonly ModelMessage[], acceptedToolCallIds: ReadonlySet<string>): GatewayAgentMessage[] {
@@ -234,7 +334,11 @@ function normalizeResponseMessages(messages: readonly ModelMessage[], acceptedTo
     if (message.role === 'tool') {
       const parts: Array<{ type: 'tool-result'; toolCallId: string; toolName: string; output: GatewayToolResultOutput }> = [];
       for (const part of message.content) {
-        if (part.type === 'tool-result') parts.push({ type: 'tool-result', toolCallId: part.toolCallId, toolName: part.toolName, output: normalizeToolResultOutput(part.output) });
+        if (part.type !== 'tool-result') continue;
+        if (!acceptedToolCallIds.has(part.toolCallId)) {
+          throw new ModelGatewayError('INVALID_TOOL_REQUEST', 'The model returned an invalid Skill request. Its arguments could not be parsed or did not match the required structure.');
+        }
+        parts.push({ type: 'tool-result', toolCallId: part.toolCallId, toolName: part.toolName, output: normalizeToolResultOutput(part.output) });
       }
       if (parts.length > 0) normalized.push({ role: 'tool', content: parts });
     }
