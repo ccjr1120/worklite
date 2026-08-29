@@ -11,7 +11,7 @@ function CollectionTable({ children, className }: { children: ReactNode; classNa
 
 function CollectionHeader({ columns, className }: { columns: string[]; className?: string }) {
   return (
-    <div className={cn('grid min-w-[720px] grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 border-b border-border bg-background px-4 py-2 text-xs font-medium text-muted-foreground', className)}>
+    <div className={cn('hidden grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 border-b border-border bg-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid', className)}>
       {columns.map((column) => (
         <span key={column}>{column}</span>
       ))}
@@ -29,7 +29,7 @@ function CollectionRow({
   return (
     <div
       className={cn(
-        'grid min-w-[720px] grid-cols-[2fr_1fr_1fr_1fr_1fr] items-center gap-3 border-b border-border px-4 py-[10px] last:border-b-0 hover:bg-surface-subtle',
+        'grid grid-cols-1 items-center gap-2 border-b border-border px-4 py-3 last:border-b-0 hover:bg-surface-subtle md:grid-cols-[2fr_1fr_1fr_1fr_1fr] md:gap-3 md:py-[10px]',
         className,
       )}
     >

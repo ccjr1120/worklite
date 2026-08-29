@@ -1,0 +1,1 @@
+ALTER TABLE `mcp_servers` ADD `allowed_tool_names` text DEFAULT '[]' NOT NULL;

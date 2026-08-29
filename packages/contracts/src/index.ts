@@ -333,6 +333,7 @@ export type WorkflowView = {
   id: string;
   workspaceSlug: string;
   latestVersionId: string | null;
+  latestVersion: number | null;
   name: string;
   state: 'draft' | 'published';
   stepCount: number;
@@ -451,9 +452,11 @@ export type McpServerView = {
   id: string;
   workspaceSlug: string;
   name: string;
+  endpoint: string;
   connection: 'connected' | 'unreachable' | 'auth_failed' | 'unconfigured';
   transport: 'Streamable HTTP';
   allowedTools: number;
+  allowedToolNames: string[];
   version: string;
   updatedAt: string;
 };
@@ -520,9 +523,16 @@ export type CreateMcpServerRequest = {
   name: string;
   endpoint: string;
   authToken?: string;
+  allowedTools?: string[];
 };
 
 export type UpdateMcpServerRequest = Partial<CreateMcpServerRequest>;
+
+export type McpServerTestResult = {
+  connection: 'connected' | 'unreachable' | 'auth_failed';
+  tools: Array<{ name: string; description?: string }>;
+  error?: 'authentication' | 'unreachable' | 'unsupported_protocol' | 'malformed_response';
+};
 
 export type CreateSkillRequest = {
   name: string;

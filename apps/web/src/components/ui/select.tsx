@@ -3,6 +3,7 @@ import { Check, ChevronDown } from 'lucide-react';
 import type { ComponentProps } from 'react';
 import { cn } from '@/lib/utils';
 import { controlInteraction, focusRing, surfaceInteraction } from '@/components/ui/interaction';
+import { useFieldDescription } from '@/components/ui/field';
 
 function Select({ ...props }: ComponentProps<typeof SelectPrimitive.Root>) {
   return <SelectPrimitive.Root {...props} />;
@@ -16,9 +17,11 @@ function SelectValue({ ...props }: ComponentProps<typeof SelectPrimitive.Value>)
   return <SelectPrimitive.Value {...props} />;
 }
 
-function SelectTrigger({ className, children, ...props }: ComponentProps<typeof SelectPrimitive.Trigger>) {
+function SelectTrigger({ className, children, 'aria-describedby': describedBy, ...props }: ComponentProps<typeof SelectPrimitive.Trigger>) {
+  const fieldDescription = useFieldDescription(describedBy);
   return (
     <SelectPrimitive.Trigger
+      aria-describedby={fieldDescription}
       className={cn(
         'flex h-9 w-full items-center justify-between rounded-md border border-input bg-surface px-3 text-sm placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted-foreground disabled:opacity-70 [&>span]:line-clamp-1',
         controlInteraction,

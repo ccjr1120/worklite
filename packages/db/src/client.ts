@@ -1,8 +1,9 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import BetterSqlite3 from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import * as schema from './schema';
 
 const TERMINAL_COMMAND_SKILL_MD = `# terminal-command
@@ -222,59 +223,12 @@ export function createDb(filePath: string) {
 export type Database = ReturnType<typeof createDb>;
 
 export async function initializeDatabase(db: Database): Promise<void> {
-  db.$client.exec(`
-    CREATE TABLE IF NOT EXISTS workspaces (id text PRIMARY KEY, slug text NOT NULL UNIQUE, name text NOT NULL, created_at integer NOT NULL DEFAULT (unixepoch() * 1000), updated_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-    CREATE TABLE IF NOT EXISTS workspace_settings (workspace_id text PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE, appearance text NOT NULL DEFAULT 'system', locale text NOT NULL DEFAULT 'en', updated_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-    CREATE TABLE IF NOT EXISTS model_providers (id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, name text NOT NULL, kind text NOT NULL DEFAULT 'openai-compatible', base_url text, organization text, project text, status text NOT NULL DEFAULT 'unconfigured', masked_key text NOT NULL DEFAULT '', models text NOT NULL DEFAULT '[]', api_key text, headers text, updated_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-    CREATE TABLE IF NOT EXISTS agents (id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, kind text NOT NULL DEFAULT 'custom', name text NOT NULL, responsibility text NOT NULL, system_prompt text NOT NULL DEFAULT '', model text NOT NULL DEFAULT '', provider_id text REFERENCES model_providers(id) ON DELETE SET NULL, created_at integer NOT NULL DEFAULT (unixepoch() * 1000), updated_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-    CREATE TABLE IF NOT EXISTS agent_versions (id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, agent_id text NOT NULL REFERENCES agents(id) ON DELETE RESTRICT, version integer NOT NULL, name text NOT NULL, responsibility text NOT NULL, system_prompt text NOT NULL, provider_id text, model text NOT NULL, skill_ids text NOT NULL DEFAULT '[]', mcp_server_ids text NOT NULL DEFAULT '[]', created_at integer NOT NULL DEFAULT (unixepoch() * 1000), UNIQUE(agent_id, version));
-    CREATE TABLE IF NOT EXISTS workflows (id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, name text NOT NULL, state text NOT NULL DEFAULT 'draft', created_at integer NOT NULL DEFAULT (unixepoch() * 1000), updated_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-    CREATE TABLE IF NOT EXISTS workflow_drafts (id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, workflow_id text NOT NULL UNIQUE REFERENCES workflows(id) ON DELETE CASCADE, current_revision_id text, definition text NOT NULL DEFAULT '{"schemaVersion":1,"input":{},"defaults":{"errorPolicy":"stop"},"nodes":[]}', created_at integer NOT NULL DEFAULT (unixepoch() * 1000), updated_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-    CREATE TABLE IF NOT EXISTS workflow_edit_revisions (id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, workflow_id text NOT NULL REFERENCES workflows(id) ON DELETE CASCADE, draft_id text NOT NULL REFERENCES workflow_drafts(id) ON DELETE CASCADE, parent_revision_id text, source text NOT NULL, source_instruction text, operations text NOT NULL DEFAULT '[]', snapshot text NOT NULL, created_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-    CREATE TABLE IF NOT EXISTS workflow_versions (id text PRIMARY KEY, workspace_id text REFERENCES workspaces(id) ON DELETE CASCADE, workflow_id text NOT NULL REFERENCES workflows(id) ON DELETE CASCADE, version integer NOT NULL DEFAULT 1, published integer NOT NULL DEFAULT 0, schema_version integer NOT NULL DEFAULT 1, nodes text NOT NULL DEFAULT '[]', definition text, source_revision_id text, published_at integer, published_by text, created_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-    CREATE TABLE IF NOT EXISTS workflow_runs (id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, workflow_id text NOT NULL REFERENCES workflows(id) ON DELETE CASCADE, workflow_version_id text NOT NULL REFERENCES workflow_versions(id) ON DELETE RESTRICT, status text NOT NULL DEFAULT 'queued', input text NOT NULL, result text, current_node_id text, created_at integer NOT NULL DEFAULT (unixepoch() * 1000), updated_at integer NOT NULL DEFAULT (unixepoch() * 1000), finished_at integer);
-    CREATE TABLE IF NOT EXISTS workflow_node_runs (id text PRIMARY KEY, run_id text NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, node_id text NOT NULL, position integer NOT NULL, type text NOT NULL, type_version text NOT NULL, status text NOT NULL DEFAULT 'queued', input text, output text, artifact_ids text NOT NULL DEFAULT '[]', error text, retry_count integer NOT NULL DEFAULT 0, started_at integer, finished_at integer, created_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-    CREATE TABLE IF NOT EXISTS workflow_run_events (run_id text NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE, sequence integer NOT NULL, type text NOT NULL, payload text NOT NULL, created_at integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (run_id, sequence));
-    CREATE TABLE IF NOT EXISTS command_executions (id text PRIMARY KEY, command text NOT NULL, cwd text NOT NULL, status text NOT NULL DEFAULT 'queued', pid integer, exit_code integer, signal text, created_at integer NOT NULL DEFAULT (unixepoch() * 1000), started_at integer, finished_at integer);
-    CREATE TABLE IF NOT EXISTS command_execution_events (sequence integer PRIMARY KEY AUTOINCREMENT, command_id text NOT NULL REFERENCES command_executions(id) ON DELETE CASCADE, type text NOT NULL, data text NOT NULL, created_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-    CREATE INDEX IF NOT EXISTS command_execution_events_command_sequence_idx ON command_execution_events(command_id, sequence);
-    CREATE TABLE IF NOT EXISTS skills (id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, name text NOT NULL, source text NOT NULL, version text NOT NULL DEFAULT 'draft', validation text NOT NULL DEFAULT 'pending', instructions text NOT NULL DEFAULT '', updated_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-    CREATE TABLE IF NOT EXISTS skill_files (skill_id text NOT NULL REFERENCES skills(id) ON DELETE CASCADE, path text NOT NULL, content text NOT NULL DEFAULT '', PRIMARY KEY (skill_id, path));
-    CREATE TABLE IF NOT EXISTS mcp_servers (id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, name text NOT NULL, endpoint text NOT NULL DEFAULT '', connection text NOT NULL DEFAULT 'unconfigured', transport text NOT NULL DEFAULT 'Streamable HTTP', allowed_tools integer NOT NULL DEFAULT 0, version text NOT NULL DEFAULT 'v1', auth_secret text, updated_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-    CREATE TABLE IF NOT EXISTS agent_skills (agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE, skill_id text NOT NULL REFERENCES skills(id) ON DELETE CASCADE, PRIMARY KEY (agent_id, skill_id));
-    CREATE TABLE IF NOT EXISTS agent_mcp_servers (agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE, mcp_server_id text NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE, PRIMARY KEY (agent_id, mcp_server_id));
-    CREATE TABLE IF NOT EXISTS agent_executions (id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE, status text NOT NULL DEFAULT 'running', phase text NOT NULL DEFAULT 'model', error_code text, model_messages text NOT NULL DEFAULT '[]', display_messages text NOT NULL DEFAULT '[]', plan text NOT NULL DEFAULT '[]', pending_question text, context_dropped integer NOT NULL DEFAULT 0, error text, created_at integer NOT NULL DEFAULT (unixepoch() * 1000), updated_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-    CREATE TABLE IF NOT EXISTS agent_execution_events (execution_id text NOT NULL REFERENCES agent_executions(id) ON DELETE CASCADE, sequence integer NOT NULL, data text NOT NULL, created_at integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (execution_id, sequence));
-    CREATE TABLE IF NOT EXISTS agent_sub_sessions (id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE, execution_id text NOT NULL UNIQUE REFERENCES agent_executions(id) ON DELETE CASCADE, title text NOT NULL, unread integer NOT NULL DEFAULT 0, created_at integer NOT NULL DEFAULT (unixepoch() * 1000), updated_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-    CREATE INDEX IF NOT EXISTS agent_sub_sessions_workspace_updated_idx ON agent_sub_sessions(workspace_id, updated_at);
-    CREATE TABLE IF NOT EXISTS agent_tool_calls (id text PRIMARY KEY, execution_id text NOT NULL REFERENCES agent_executions(id) ON DELETE CASCADE, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE, tool_call_id text NOT NULL, tool_name text NOT NULL, working_directory text NOT NULL, skill_id text, skill_name text, script_path text, mcp_server_id text, mcp_tool_name text, arguments text NOT NULL DEFAULT '[]', input text, package_files text NOT NULL DEFAULT '[]', command_execution_id text REFERENCES command_executions(id) ON DELETE SET NULL, status text NOT NULL DEFAULT 'running', output text NOT NULL DEFAULT '', result text, exit_code integer, result_appended integer NOT NULL DEFAULT 0, created_at integer NOT NULL DEFAULT (unixepoch() * 1000), finished_at integer);
-    CREATE TABLE IF NOT EXISTS scheduled_agent_tasks (id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE, label text NOT NULL, prompt text NOT NULL, interval_seconds integer NOT NULL, next_run_at integer NOT NULL, active_execution_id text, last_run_at integer, last_status text, unread integer NOT NULL DEFAULT 0, running integer NOT NULL DEFAULT 0, created_at integer NOT NULL DEFAULT (unixepoch() * 1000), updated_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-    CREATE INDEX IF NOT EXISTS scheduled_agent_tasks_workspace_next_run_idx ON scheduled_agent_tasks(workspace_id, next_run_at);
-    CREATE TABLE IF NOT EXISTS artifacts (id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, workflow_id text REFERENCES workflows(id) ON DELETE SET NULL, run_id text REFERENCES workflow_runs(id) ON DELETE SET NULL, name text NOT NULL, type text NOT NULL, size text NOT NULL DEFAULT '0 B', content text NOT NULL DEFAULT '', object_key text, created_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-    CREATE TABLE IF NOT EXISTS audit_logs (id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, actor_id text, action text NOT NULL, resource text NOT NULL, metadata text NOT NULL DEFAULT '{}', created_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-  `);
-
-  const workflowVersionColumns = new Set((db.$client.prepare('PRAGMA table_info(workflow_versions)').all() as Array<{ name: string }>).map((column) => column.name));
-  const missingWorkflowVersionColumns: Array<[string, string]> = [
-    ['workspace_id', 'text REFERENCES workspaces(id) ON DELETE CASCADE'],
-    ['schema_version', "integer NOT NULL DEFAULT 1"],
-    ['nodes', "text NOT NULL DEFAULT '[]'"],
-    ['definition', 'text'],
-    ['source_revision_id', 'text'],
-    ['published_at', 'integer'],
-    ['published_by', 'text'],
-  ];
-  for (const [column, definition] of missingWorkflowVersionColumns) {
-    if (!workflowVersionColumns.has(column)) db.$client.exec(`ALTER TABLE workflow_versions ADD COLUMN ${column} ${definition}`);
-  }
-  if (workflowVersionColumns.has('steps')) {
-    db.$client.exec("UPDATE workflow_versions SET nodes = steps WHERE nodes = '[]' OR nodes IS NULL");
-  }
-  db.$client.exec(`
-    UPDATE workflow_versions
-      SET workspace_id = (SELECT workspace_id FROM workflows WHERE workflows.id = workflow_versions.workflow_id)
-      WHERE workspace_id IS NULL;
-  `);
+  const migrationsFolder = [
+    resolve(process.cwd(), 'packages/db/drizzle'),
+    resolve(process.cwd(), '../../packages/db/drizzle'),
+  ].find((candidate) => existsSync(candidate));
+  if (!migrationsFolder) throw new Error('Drizzle migrations folder could not be located.');
+  migrate(db, { migrationsFolder });
 
   const workflowRows = db.$client.prepare('SELECT id, workspace_id FROM workflows').all() as Array<{ id: string; workspace_id: string }>;
   const workflowVersionQuery = db.$client.prepare(`
@@ -318,18 +272,6 @@ export async function initializeDatabase(db: Database): Promise<void> {
     revisionInsert.run(revisionId, workflow.workspace_id, workflow.id, draftId, JSON.stringify(definition));
   }
 
-  const executionColumns = new Set((db.$client.prepare('PRAGMA table_info(agent_executions)').all() as Array<{ name: string }>).map((column) => column.name));
-  const missingExecutionColumns: Array<[string, string]> = [
-    ['phase', "text NOT NULL DEFAULT 'model'"],
-    ['error_code', 'text'],
-    ['plan', "text NOT NULL DEFAULT '[]'"],
-    ['pending_question', 'text'],
-    ['context_dropped', 'integer NOT NULL DEFAULT 0'],
-  ];
-  for (const [column, definition] of missingExecutionColumns) {
-    if (!executionColumns.has(column)) db.$client.exec(`ALTER TABLE agent_executions ADD COLUMN ${column} ${definition}`);
-  }
-
   const staleExecutions = db.$client.prepare(`
     SELECT id, workspace_id, agent_id,
       EXISTS (SELECT 1 FROM agent_sub_sessions WHERE agent_sub_sessions.execution_id = agent_executions.id) AS has_sub_session
@@ -363,42 +305,41 @@ export async function initializeDatabase(db: Database): Promise<void> {
     }
   }
 
-  const providerColumns = new Set((db.$client.prepare('PRAGMA table_info(model_providers)').all() as Array<{ name: string }>).map((column) => column.name));
-  const missingProviderColumns: Array<[string, string]> = [
-    ['kind', "text NOT NULL DEFAULT 'openai-compatible'"],
-    ['base_url', 'text'],
-    ['organization', 'text'],
-    ['project', 'text'],
-    ['headers', 'text'],
-  ];
-  for (const [column, definition] of missingProviderColumns) {
-    if (!providerColumns.has(column)) db.$client.exec(`ALTER TABLE model_providers ADD COLUMN ${column} ${definition}`);
+  const staleWorkflowRuns = db.$client.prepare(`
+    SELECT id, workspace_id, workflow_id
+    FROM workflow_runs
+    WHERE status IN ('queued', 'running')
+  `).all() as Array<{ id: string; workspace_id: string; workflow_id: string }>;
+  if (staleWorkflowRuns.length > 0) {
+    db.$client.exec(`
+      UPDATE workflow_node_runs
+        SET status = 'failed', error = 'The API restarted before this Workflow node completed.', finished_at = unixepoch() * 1000
+        WHERE status IN ('queued', 'running')
+          AND run_id IN (SELECT id FROM workflow_runs WHERE status IN ('queued', 'running'));
+      INSERT INTO workflow_run_events (run_id, sequence, type, payload)
+        SELECT workflow_runs.id,
+          COALESCE((SELECT MAX(sequence) + 1 FROM workflow_run_events WHERE workflow_run_events.run_id = workflow_runs.id), 1),
+          'run.status',
+          '{"status":"failed","error":"The API restarted before this Workflow run completed."}'
+        FROM workflow_runs
+        WHERE status IN ('queued', 'running');
+      UPDATE workflow_runs
+        SET status = 'failed', current_node_id = NULL,
+          result = '{"error":"The API restarted before this Workflow run completed."}',
+          finished_at = unixepoch() * 1000, updated_at = unixepoch() * 1000
+        WHERE status IN ('queued', 'running');
+    `);
+    for (const run of staleWorkflowRuns) {
+      db.insert(schema.auditLogs).values({
+        id: `audit_${randomUUID()}`,
+        workspaceId: run.workspace_id,
+        action: 'workflow_run.restarted',
+        resource: run.id,
+        metadata: { workflowId: run.workflow_id, runId: run.id, errorCode: 'restarted' },
+      }).run();
+    }
   }
 
-  const agentColumns = new Set((db.$client.prepare('PRAGMA table_info(agents)').all() as Array<{ name: string }>).map((column) => column.name));
-  const missingAgentColumns: Array<[string, string]> = [
-    ['kind', "text NOT NULL DEFAULT 'custom'"],
-    ['provider_id', 'text'],
-    ['system_prompt', "text NOT NULL DEFAULT ''"],
-  ];
-  for (const [column, definition] of missingAgentColumns) {
-    if (!agentColumns.has(column)) db.$client.exec(`ALTER TABLE agents ADD COLUMN ${column} ${definition}`);
-  }
-
-  const agentToolCallColumns = new Set((db.$client.prepare('PRAGMA table_info(agent_tool_calls)').all() as Array<{ name: string }>).map((column) => column.name));
-  if (!agentToolCallColumns.has('command_execution_id')) db.$client.exec('ALTER TABLE agent_tool_calls ADD COLUMN command_execution_id text REFERENCES command_executions(id) ON DELETE SET NULL');
-  if (!agentToolCallColumns.has('result')) db.$client.exec('ALTER TABLE agent_tool_calls ADD COLUMN result text');
-  if (!agentToolCallColumns.has('mcp_server_id')) db.$client.exec('ALTER TABLE agent_tool_calls ADD COLUMN mcp_server_id text');
-  if (!agentToolCallColumns.has('mcp_tool_name')) db.$client.exec('ALTER TABLE agent_tool_calls ADD COLUMN mcp_tool_name text');
-  if (!agentToolCallColumns.has('input')) db.$client.exec('ALTER TABLE agent_tool_calls ADD COLUMN input text');
-  db.$client.exec('CREATE TABLE IF NOT EXISTS agent_execution_events (execution_id text NOT NULL REFERENCES agent_executions(id) ON DELETE CASCADE, sequence integer NOT NULL, data text NOT NULL, created_at integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (execution_id, sequence))');
-
-  db.$client.exec(`
-    CREATE TABLE IF NOT EXISTS scheduled_agent_tasks (id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE, label text NOT NULL, prompt text NOT NULL, interval_seconds integer NOT NULL, next_run_at integer NOT NULL, active_execution_id text, last_run_at integer, last_status text, unread integer NOT NULL DEFAULT 0, running integer NOT NULL DEFAULT 0, created_at integer NOT NULL DEFAULT (unixepoch() * 1000), updated_at integer NOT NULL DEFAULT (unixepoch() * 1000));
-    CREATE INDEX IF NOT EXISTS scheduled_agent_tasks_workspace_next_run_idx ON scheduled_agent_tasks(workspace_id, next_run_at);
-  `);
-  const scheduledTaskColumns = new Set((db.$client.prepare('PRAGMA table_info(scheduled_agent_tasks)').all() as Array<{ name: string }>).map((column) => column.name));
-  if (!scheduledTaskColumns.has('active_execution_id')) db.$client.exec('ALTER TABLE scheduled_agent_tasks ADD COLUMN active_execution_id text');
 
   db.$client.exec(`
     DELETE FROM agents WHERE id = 'agt_agent_chat';

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { McpClientService } from './mcp-client.service';
 
-@Module({})
+@Module({ providers: [McpClientService], exports: [McpClientService] })
 export class McpServersModule {}

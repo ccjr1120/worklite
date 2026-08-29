@@ -24,9 +24,13 @@ The bottom panel defaults to about `240px`, resizes, and collapses to a status s
 
 ## Command and User Menus
 
-`Command+K` or `Control+K` opens grouped search, recent destinations, navigation and safe creation commands. Destructive actions are excluded. The user menu contains Profile, Appearance, Keyboard shortcuts and Sign out. Appearance includes the personal theme and language preferences.
+`Command+K` or `Control+K` opens grouped search, recent destinations, navigation and safe creation commands. Destructive actions are excluded. Opening System Helper through the command menu changes the shell-owned conversation state through typed route search and must not rely on an ignored URL flag. The user menu contains Profile, Appearance, Keyboard shortcuts and Sign out. Appearance includes the personal theme and language preferences.
 
 ## Changelog
+
+### 2026-08-29
+
+- Required command-menu System Helper actions to open the shell-owned conversation through typed route state.
 
 ### 2026-08-27
 

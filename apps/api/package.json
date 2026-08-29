@@ -6,7 +6,7 @@
     "dev": "nest start --watch --builder webpack --webpackPath webpack.config.js",
     "start": "nest start",
     "typecheck": "tsc --noEmit",
-    "lint": "echo \"No lint configured\""
+    "lint": "eslint src --max-warnings=0"
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1",
@@ -14,12 +14,13 @@
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.1.5",
     "@nestjs/platform-express": "^11.1.5",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@worklite/config": "workspace:*",
     "@worklite/contracts": "workspace:*",
     "@worklite/db": "workspace:*",
     "@worklite/model-gateway": "workspace:*",
     "@worklite/workflow-engine": "workspace:*",
-    "drizzle-orm": "^0.44.4",
+    "drizzle-orm": "^0.45.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
   },

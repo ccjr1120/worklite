@@ -16,7 +16,7 @@ function AgentResourceNav({ active }: { workspaceSlug?: string; active: AgentRes
   ] as const;
 
   return (
-    <nav className="mt-6 flex h-9 w-fit items-center gap-1 rounded-md bg-surface-subtle p-1" aria-label={t('nav.agentResources')}>
+    <nav className="mt-6 flex max-w-full items-center gap-1 overflow-x-auto rounded-md bg-surface-subtle p-1" aria-label={t('nav.agentResources')}>
       {items.map((item) => (
         <Link
           key={item.id}

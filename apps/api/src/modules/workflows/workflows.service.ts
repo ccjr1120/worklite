@@ -201,7 +201,7 @@ export class WorkflowsService {
   private async toView(row: typeof workflows.$inferSelect, workspaceSlug: string): Promise<WorkflowView> {
     const [version] = await this.db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, row.id), eq(workflowVersions.published, true))).orderBy(desc(workflowVersions.version)).limit(1);
     const [lastRun] = await this.db.select().from(workflowRuns).where(eq(workflowRuns.workflowId, row.id)).orderBy(desc(workflowRuns.createdAt)).limit(1);
-    return { id: row.id, workspaceSlug, latestVersionId: version?.id ?? null, name: row.name, state: row.state, stepCount: (version?.definition as StoredWorkflowDefinition | null)?.nodes.length ?? version?.nodes.length ?? 0, lastRunStatus: lastRun?.status ?? null, lastRunAt: lastRun?.createdAt.toISOString() ?? null, updatedAt: row.updatedAt.toISOString() };
+    return { id: row.id, workspaceSlug, latestVersionId: version?.id ?? null, latestVersion: version?.version ?? null, name: row.name, state: row.state, stepCount: (version?.definition as StoredWorkflowDefinition | null)?.nodes.length ?? version?.nodes.length ?? 0, lastRunStatus: lastRun?.status ?? null, lastRunAt: lastRun?.createdAt.toISOString() ?? null, updatedAt: row.updatedAt.toISOString() };
   }
 }
 

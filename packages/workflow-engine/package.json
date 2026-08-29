@@ -9,7 +9,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "echo \"No lint configured\""
+    "lint": "eslint src --max-warnings=0"
   },
   "dependencies": {
     "@worklite/contracts": "workspace:*"

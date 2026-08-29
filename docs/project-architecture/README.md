@@ -41,7 +41,7 @@ Static Web Hosting / Reverse Proxy
                   |     |-- Model providers
                   |     |-- MCP servers
                   |     `-- Skill and Agent execution
-                  `-- S3-compatible object storage
+                  `-- SQLite textual artifacts and skill content
 
 Browser <---- Server-Sent Events ---- API
 ```
@@ -54,7 +54,7 @@ The web application is delivered as static assets and is only an HTTP and Server
 
 - pnpm workspaces for dependency and workspace management.
 - Turborepo for task orchestration and caching.
-- TypeScript across the web, API, worker, and shared packages.
+- TypeScript across the web, API, and shared packages.
 
 ### Web Application
 
@@ -62,9 +62,8 @@ The web application is delivered as static assets and is only an HTTP and Server
 - TanStack Router with file-based, type-safe routing.
 - TanStack Query for server state and caching.
 - Zustand for transient editor state and local undo/redo.
-- React Hook Form and Zod for forms and runtime validation.
 - Tailwind CSS and shadcn/ui for the UI system.
-- Monaco Editor for prompts, skills, and structured configuration where appropriate.
+- Existing typed form controls for current forms. A dedicated editor dependency is added only when a concrete editing surface requires it; CodeMirror 6 is the preferred lightweight option for future Markdown, JSON, or shell editing.
 - Server-Sent Events for workflow-run progress.
 - i18next with react-i18next for application internationalization.
 
@@ -77,7 +76,6 @@ Authenticated workspace routes do not include a locale segment. The web applicat
 ### API and Execution
 
 - NestJS for the HTTP API.
-- An optional separately deployed NestJS worker reserved for a later production scale-out increment.
 - REST for configuration and command APIs.
 - Server-Sent Events for one-way progress delivery.
 - An in-process asynchronous executor for the initial local runtime. A durable queue is a later production scale-out boundary.
@@ -113,14 +111,16 @@ The Commands module owns all process spawning. It is an API runtime primitive ra
 - SQLite as the initial local system of record, stored in a project data directory.
 - Drizzle ORM for schemas, migrations, and type-safe queries.
 - PostgreSQL, Redis, and BullMQ are deferred until multi-instance execution and durable queue requirements justify them.
-- S3-compatible object storage for skill archives, attachments, large outputs, and artifacts.
+- Textual skill and artifact content remains in SQLite for the local runtime. Binary archives and large payload storage are deferred until an implemented storage boundary requires them.
 
-Core relationships use relational tables. Versioned workflow definitions and revision operations may use SQLite JSON columns. Binary files and large payloads belong in object storage; SQLite stores metadata and object keys.
+Core relationships use relational tables. Versioned workflow definitions and revision operations may use SQLite JSON columns. A later binary-storage increment may introduce an S3-compatible service without changing current textual artifact contracts.
 
 ### Operations
 
 - OpenTelemetry for traces and metrics.
 - Sentry for error reporting.
+- ESLint with TypeScript, React Hooks, and JSX accessibility rules for static quality checks.
+- Knip for unused dependency and source analysis.
 - Vitest for unit and integration tests.
 - Playwright for browser end-to-end tests.
 - Docker Compose for the initial local and self-hosted environment.
@@ -240,7 +240,7 @@ Agent execution uses a server-owned session for custom and protected system Agen
 
 ## MCP Architecture
 
-MCP servers are workspace-scoped and versioned. The initial implementation prioritizes remote Streamable HTTP connections. Arbitrary user-supplied `stdio` processes are deferred because they require stronger isolation and operational controls.
+MCP servers are workspace-scoped and versioned. Remote Streamable HTTP transport, protocol negotiation, tool discovery, and tool calls use the official `@modelcontextprotocol/sdk` client rather than a WorkLite-specific protocol implementation. Arbitrary user-supplied `stdio` processes are deferred because they require stronger isolation and operational controls.
 
 The configuration flow is:
 
@@ -250,7 +250,7 @@ The configuration flow is:
 4. Select the tools agents may use.
 5. Publish an immutable MCP version.
 
-The initial web configuration also exposes a workspace-scoped update operation for an existing draft. It replaces name, endpoint, and optionally the write-only authentication token before the next connection test or publication.
+The web configuration exposes workspace-scoped create and update operations for a draft. They persist name, endpoint, allowed tool names, and optionally the write-only authentication token. Credential-safe reads return the endpoint and allowed tool names so an existing draft can be edited accurately. A server-owned connection-test operation uses the saved or submitted configuration, performs real protocol negotiation and tool discovery, and returns classified connection state plus discovered tool metadata. Saving a draft is not described as publication.
 
 Secrets use a secret-storage abstraction and must never be returned in full or written to ordinary logs. MCP output is untrusted input. Tool calls must be authorized and auditable.
 
@@ -290,7 +290,7 @@ Workflow draft operations are exposed through `POST /workflows/:workflowId/draft
 WorkflowDraft --publish--> immutable WorkflowVersion --run--> WorkflowRun
 ```
 
-Drafts can change. Published versions cannot. A publication copies the current draft definition into a new immutable WorkflowVersion with its source revision and locked Node Type/resource references. Every execution is tied to one immutable workflow version; draft workflows cannot be run directly. Until immutable AgentVersion records exist end to end, publication rejects nodes that cannot be locked to an AgentVersion.
+Drafts can change. Published versions cannot. A publication copies the current draft definition into a new immutable WorkflowVersion with its source revision and locked Node Type/resource references. Every execution is tied to one immutable workflow version; draft workflows cannot be run directly. Publication rejects nodes that cannot be locked to an AgentVersion. The editor offers only Agents with immutable versions for Agent nodes, disables Run while the draft has unsaved changes, and identifies that Run targets the latest published version.
 
 The initial local persistence migration creates a draft and migration revision for every existing workflow, wraps legacy `workflow_versions.nodes` in the full definition shape, and preserves already published versions. Browser-only edits that were never written to the database cannot be recovered.
 
@@ -308,7 +308,7 @@ Create run
   -> persist final output or failure
 ```
 
-The API returns a `runId` immediately. The browser loads run state through the API and subscribes to Server-Sent Events. Reconnecting with the same `runId` restores current state and continues event delivery.
+The API returns a `runId` immediately. The browser loads run state through the API and subscribes to Server-Sent Events. Reconnecting with the same `runId` restores current state and continues event delivery. Because the local executor has no durable lease or resume mechanism, database startup changes persisted `queued` and `running` Workflow Runs and Node Runs to `failed` with a stable restart explanation.
 
 ```text
 queued -> running -> succeeded
@@ -347,7 +347,7 @@ The initial vertical slice includes:
 - asynchronous Workflow Run creation and status reads through the API-local executor;
 - shared request and response contracts in `packages/contracts`.
 
-Drizzle owns the SQLite schema. The initial increment uses an idempotent startup bootstrap for local development; a versioned migration runner remains the next database-operations step. API controllers remain thin and delegate persistence to module services. The API schedules run execution in-process and persists run state transitions. Startup creates the singleton personal workspace, the protected System Helper Chat system Agent, and protected built-in Skills; all other resource records are user-created.
+Drizzle owns the SQLite schema. Checked-in, ordered Drizzle SQL migrations are applied by the Drizzle migrator during database initialization before runtime bootstrap and restart normalization. API controllers remain thin and delegate persistence to module services. The API schedules run execution in-process and persists run state transitions. Startup creates the singleton personal workspace, the protected System Helper Chat system Agent, and protected built-in Skills; all other resource records are user-created.
 
 This increment intentionally does not add compatibility routes for the previous mock-only behavior, arbitrary graph workflows, or account-based identity integration.
 
@@ -355,7 +355,7 @@ This increment intentionally does not add compatibility routes for the previous 
 
 The second API increment extends the same typed, same-origin boundary to the remaining workspace resources: Skills, MCP Servers, Model Providers, Artifacts, Usage, and Audit Logs. These resources remain workspace-owned and are queried through TanStack Query; browser pages no longer import mock records at runtime. The local persistence target is SQLite.
 
-Provider and MCP credentials are write-only inputs. API responses expose connection state, masked metadata, provider kind, endpoint metadata, model catalogs, and custom-header names, but never secret values. Provider custom headers must be a JSON object with string keys and values; omitted headers preserve the stored value during an update, while an explicit empty object clears them. Skill and artifact content is treated as untrusted data. The first local implementation stores textual artifact content and skill metadata in SQLite while preserving the object-storage boundary for binary archives and large payloads. Audit events are append-only records written by resource services. Usage is a read model derived from persisted runs for the initial increment.
+Provider and MCP credentials are write-only inputs. API responses expose connection state, masked metadata, provider kind, endpoint metadata, allowed tool names, model catalogs, and custom-header names, but never secret values. Provider custom headers must be a JSON object with string keys and values; omitted headers preserve the stored value during an update, while an explicit empty object clears them. Skill and artifact content is treated as untrusted data. The local implementation stores textual artifact content and skill metadata in SQLite; binary archive processing and large-payload storage remain deferred. Audit events are append-only records written by resource services. Usage is a read model derived from persisted runs for the initial increment.
 
 This increment does not add third-party identity-provider integration, arbitrary MCP `stdio` execution, binary archive processing, or compatibility aliases for mock routes.
 
@@ -455,6 +455,14 @@ The MCP client, skill SDK, and observability code may begin inside applications 
 Adding a deferred capability requires an approved architecture change.
 
 ## Changelog
+
+### 2026-08-29 - Runtime Reliability and Dependency Alignment
+
+- Adopted the official MCP TypeScript SDK for remote Streamable HTTP negotiation, discovery, and tool calls, and made endpoint and allowed-tool draft metadata readable without exposing credentials.
+- Replaced ad hoc startup schema mutation with checked-in Drizzle migrations and startup migration execution.
+- Added restart failure normalization for queued or running Workflow Runs and Node Runs in the API-local executor.
+- Removed inactive worker and object-storage deployment claims from the current runtime while retaining them as future scale boundaries.
+- Removed unused form and Monaco dependencies from the web baseline, selected CodeMirror 6 only for future concrete editor needs, and added ESLint and Knip to the operations baseline.
 
 ### 2026-08-29 - End-to-end Agent and Workflow Runtime
 

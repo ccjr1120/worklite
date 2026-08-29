@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
 import type { GatewayToolDefinition } from '@worklite/model-gateway';
 import type { AgentMcpRuntime } from '../teams/team-resources.service';
+import { McpClientService } from '../mcp-servers/mcp-client.service';
 
 export type McpRuntimeTool = GatewayToolDefinition & {
   serverId: string;
@@ -11,27 +11,22 @@ export type McpRuntimeTool = GatewayToolDefinition & {
 
 @Injectable()
 export class McpRuntimeService {
+  constructor(private readonly client: McpClientService) {}
+
   async discover(runtimes: readonly AgentMcpRuntime[], signal?: AbortSignal): Promise<McpRuntimeTool[]> {
     const tools: McpRuntimeTool[] = [];
     for (const runtime of runtimes) {
       try {
-        await this.request(runtime, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'worklite', version: '0.0.0' } }, signal);
-        await this.request(runtime, 'notifications/initialized', {}, signal).catch(() => undefined);
-        const result = await this.request(runtime, 'tools/list', {}, signal);
-        const values = result?.tools;
-        if (!Array.isArray(values)) continue;
-        for (const value of values.slice(0, runtime.allowedTools > 0 ? runtime.allowedTools : 0)) {
-          if (!value || typeof value !== 'object') continue;
-          const record = value as Record<string, unknown>;
-          if (typeof record.name !== 'string' || !record.name.trim()) continue;
-          const modelName = `mcp_${runtime.id}_${record.name}`;
+        const toolsForServer = await this.client.discover(runtime, signal);
+        for (const tool of toolsForServer.filter((candidate) => runtime.allowedTools.includes(candidate.name))) {
+          const modelName = `mcp_${runtime.id}_${tool.name}`;
           tools.push({
             name: modelName,
-            remoteName: record.name,
+            remoteName: tool.name,
             serverId: runtime.id,
             serverName: runtime.name,
-            description: typeof record.description === 'string' ? record.description : `Call ${record.name} on ${runtime.name}.`,
-            inputSchema: isRecord(record.inputSchema) ? record.inputSchema : { type: 'object', additionalProperties: true },
+            description: tool.description ?? `Call ${tool.name} on ${runtime.name}.`,
+            inputSchema: tool.inputSchema,
           });
         }
       } catch {
@@ -42,53 +37,18 @@ export class McpRuntimeService {
   }
 
   async call(runtime: AgentMcpRuntime, remoteName: string, input: unknown, signal?: AbortSignal): Promise<string> {
-    await this.request(runtime, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'worklite', version: '0.0.0' } }, signal);
-    await this.request(runtime, 'notifications/initialized', {}, signal).catch(() => undefined);
-    const result = await this.request(runtime, 'tools/call', { name: remoteName, arguments: isRecord(input) ? input : {} }, signal);
+    if (!runtime.allowedTools.includes(remoteName)) throw new Error('MCP tool is not allowed.');
+    const result = await this.client.call(runtime, remoteName, input, signal);
     return stringifyMcpResult(result);
   }
-
-  private async request(runtime: AgentMcpRuntime, method: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    signal?.throwIfAborted();
-    const headers: Record<string, string> = { Accept: 'application/json, text/event-stream', 'Content-Type': 'application/json' };
-    if (runtime.authToken) headers.Authorization = `Bearer ${runtime.authToken}`;
-    const notification = method.startsWith('notifications/');
-    const response = await fetch(runtime.endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ jsonrpc: '2.0', ...(notification ? {} : { id: randomUUID() }), method, params }),
-      signal,
-    });
-    if (!response.ok) throw new Error(`MCP request failed with status ${response.status}.`);
-    if (notification) return {};
-    const payload = await response.text();
-    const parsed = parseJsonOrSse(payload);
-    if (parsed.error) throw new Error('MCP server returned an error.');
-    const result = parsed.result;
-    return isRecord(result) ? result : {};
-  }
-}
-
-function parseJsonOrSse(payload: string): Record<string, unknown> {
-  const candidates = payload.trim().startsWith('data:')
-    ? payload.split(/\r?\n/).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim()).filter(Boolean)
-    : [payload.trim()];
-  for (let index = candidates.length - 1; index >= 0; index -= 1) {
-    try {
-      const parsed = JSON.parse(candidates[index] ?? '') as unknown;
-      if (isRecord(parsed)) return parsed;
-    } catch {
-      continue;
-    }
-  }
-  throw new Error('MCP server returned invalid JSON.');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function stringifyMcpResult(value: Record<string, unknown>): string {
+function stringifyMcpResult(value: unknown): string {
+  if (!isRecord(value)) return JSON.stringify(value);
   const content = value.content;
   if (Array.isArray(content)) {
     const text = content.flatMap((part) => {

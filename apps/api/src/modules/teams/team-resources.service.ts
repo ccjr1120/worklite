@@ -11,6 +11,7 @@ import type {
   CreateSkillRequest,
   CommandExecutionView,
   ExecuteSkillScriptRequest,
+  McpServerTestResult,
   McpServerView,
   ModelProviderView,
   ModelProviderTestResult,
@@ -40,6 +41,7 @@ import { createModelGateway, type ModelProviderConfig } from '@worklite/model-ga
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from './teams.service';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
+import { McpClientService } from '../mcp-servers/mcp-client.service';
 
 function maskSecret(value: string): string {
   return value.length > 4 ? `****${value.slice(-4)}` : '****';
@@ -89,6 +91,27 @@ function providerView(row: typeof modelProviders.$inferSelect): ModelProviderVie
   return { id: row.id, name: row.name, kind: row.kind, baseUrl: row.baseUrl, organization: row.organization, project: row.project, status: row.status, maskedKey: row.maskedKey, models: row.models ?? [], headerNames: headerNames(row.headers) };
 }
 
+function mcpServerView(row: typeof mcpServers.$inferSelect, workspaceSlug: string): McpServerView {
+  return { id: row.id, workspaceSlug, name: row.name, endpoint: row.endpoint, connection: row.connection, transport: 'Streamable HTTP', allowedTools: row.allowedTools, allowedToolNames: row.allowedToolNames ?? [], version: row.version, updatedAt: row.updatedAt.toISOString() };
+}
+
+function normalizeToolNames(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new BadRequestException('Allowed MCP tools must be an array of tool names.');
+  return [...new Set(value.map((item) => item.trim()).filter(Boolean))];
+}
+
+function classifyMcpFailure(error: unknown): Pick<McpServerTestResult, 'connection' | 'error'> {
+  const candidate = error as { name?: unknown; code?: unknown; message?: unknown };
+  const name = typeof candidate?.name === 'string' ? candidate.name : '';
+  const code = typeof candidate?.code === 'number' ? candidate.code : undefined;
+  const message = typeof candidate?.message === 'string' ? candidate.message.toLowerCase() : '';
+  if (name === 'UnauthorizedError' || code === 401 || code === 403) return { connection: 'auth_failed', error: 'authentication' };
+  if (message.includes('protocol version') || message.includes('method not found')) return { connection: 'unreachable', error: 'unsupported_protocol' };
+  if (message.includes('invalid') || message.includes('parse')) return { connection: 'unreachable', error: 'malformed_response' };
+  return { connection: 'unreachable', error: 'unreachable' };
+}
+
 type PackageFile = { path: string; content: string };
 
 export type AgentMcpRuntime = {
@@ -96,7 +119,7 @@ export type AgentMcpRuntime = {
   name: string;
   endpoint: string;
   authToken?: string;
-  allowedTools: number;
+  allowedTools: string[];
 };
 
 const MAX_SKILL_FILES = 100;
@@ -183,6 +206,7 @@ export class WorkspaceResourcesService {
     @Inject(DATABASE) private readonly db: Database,
     private readonly workspaces: WorkspaceService,
     private readonly skillScripts: SkillScriptRunnerService,
+    private readonly mcpClient: McpClientService,
   ) {}
 
   async skills(request: Request, workspaceSlug: string): Promise<SkillView[]> {
@@ -255,14 +279,14 @@ export class WorkspaceResourcesService {
   async mcpServers(request: Request, workspaceSlug: string): Promise<McpServerView[]> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const rows = await this.db.select().from(mcpServers).where(eq(mcpServers.workspaceId, team.id)).orderBy(desc(mcpServers.updatedAt));
-    return rows.map((row) => ({ id: row.id, workspaceSlug, name: row.name, connection: row.connection, transport: 'Streamable HTTP', allowedTools: row.allowedTools, version: row.version, updatedAt: row.updatedAt.toISOString() }));
+    return rows.map((row) => mcpServerView(row, workspaceSlug));
   }
 
   async mcpServer(request: Request, workspaceSlug: string, serverId: string): Promise<McpServerView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [row] = await this.db.select().from(mcpServers).where(and(eq(mcpServers.id, serverId), eq(mcpServers.workspaceId, team.id))).limit(1);
     if (!row) throw new NotFoundException('MCP server not found');
-    return { id: row.id, workspaceSlug, name: row.name, connection: row.connection, transport: 'Streamable HTTP', allowedTools: row.allowedTools, version: row.version, updatedAt: row.updatedAt.toISOString() };
+    return mcpServerView(row, workspaceSlug);
   }
 
   async agentMcpRuntimes(request: Request, workspaceSlug: string, agentId: string): Promise<AgentMcpRuntime[]> {
@@ -279,15 +303,16 @@ export class WorkspaceResourcesService {
       } catch {
         authToken = undefined;
       }
-      return [{ id: server.id, name: server.name, endpoint: server.endpoint, ...(authToken ? { authToken } : {}), allowedTools: server.allowedTools }];
+      return [{ id: server.id, name: server.name, endpoint: server.endpoint, ...(authToken ? { authToken } : {}), allowedTools: server.allowedToolNames ?? [] }];
     });
   }
 
   async createMcpServer(request: Request, workspaceSlug: string, input: CreateMcpServerRequest): Promise<McpServerView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [row] = await this.db.insert(mcpServers).values({ id: `mcp_${randomUUID()}`, workspaceId: team.id, name: input.name.trim(), endpoint: input.endpoint.trim(), authSecret: input.authToken ? encryptSecret(input.authToken) : null, connection: 'unconfigured', transport: 'Streamable HTTP', allowedTools: 0, version: 'v1' }).returning();
+    const allowedToolNames = normalizeToolNames(input.allowedTools);
+    const [row] = await this.db.insert(mcpServers).values({ id: `mcp_${randomUUID()}`, workspaceId: team.id, name: input.name.trim(), endpoint: input.endpoint.trim(), authSecret: input.authToken ? encryptSecret(input.authToken) : null, connection: 'unconfigured', transport: 'Streamable HTTP', allowedTools: allowedToolNames.length, allowedToolNames, version: 'v1' }).returning();
     if (!row) throw new NotFoundException('MCP server could not be created');
-    return { id: row.id, workspaceSlug, name: row.name, connection: row.connection, transport: 'Streamable HTTP', allowedTools: row.allowedTools, version: row.version, updatedAt: row.updatedAt.toISOString() };
+    return mcpServerView(row, workspaceSlug);
   }
 
   async updateMcpServer(request: Request, workspaceSlug: string, serverId: string, input: UpdateMcpServerRequest): Promise<McpServerView> {
@@ -296,26 +321,51 @@ export class WorkspaceResourcesService {
       !input
       || typeof input !== 'object'
       || Array.isArray(input)
-      || Object.keys(input).some((key) => !['name', 'endpoint', 'authToken'].includes(key))
+      || Object.keys(input).some((key) => !['name', 'endpoint', 'authToken', 'allowedTools'].includes(key))
       || (input.name !== undefined && typeof input.name !== 'string')
       || (input.endpoint !== undefined && typeof input.endpoint !== 'string')
       || (input.authToken !== undefined && typeof input.authToken !== 'string')
+      || (input.allowedTools !== undefined && !Array.isArray(input.allowedTools))
     ) {
-      throw new BadRequestException('Only MCP server name, endpoint, and authentication can be changed.');
+      throw new BadRequestException('Only MCP server name, endpoint, authentication, and allowed tools can be changed.');
     }
     const [existing] = await this.db.select().from(mcpServers).where(and(eq(mcpServers.id, serverId), eq(mcpServers.workspaceId, team.id))).limit(1);
     if (!existing) throw new NotFoundException('MCP server not found');
     const name = input.name === undefined ? existing.name : input.name.trim();
     const endpoint = input.endpoint === undefined ? existing.endpoint : input.endpoint.trim();
+    const allowedToolNames = input.allowedTools === undefined ? existing.allowedToolNames : normalizeToolNames(input.allowedTools);
     if (!name || !endpoint) throw new BadRequestException('MCP server name and endpoint are required.');
     const [row] = await this.db.update(mcpServers).set({
       name,
       endpoint,
+      allowedTools: allowedToolNames.length,
+      allowedToolNames,
       ...(input.authToken === undefined ? {} : { authSecret: input.authToken ? encryptSecret(input.authToken) : null }),
       updatedAt: new Date(),
     }).where(and(eq(mcpServers.id, serverId), eq(mcpServers.workspaceId, team.id))).returning();
     if (!row) throw new NotFoundException('MCP server not found');
-    return { id: row.id, workspaceSlug, name: row.name, connection: row.connection, transport: 'Streamable HTTP', allowedTools: row.allowedTools, version: row.version, updatedAt: row.updatedAt.toISOString() };
+    return mcpServerView(row, workspaceSlug);
+  }
+
+  async testMcpServer(request: Request, workspaceSlug: string, serverId: string): Promise<McpServerTestResult> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const [server] = await this.db.select().from(mcpServers).where(and(eq(mcpServers.id, serverId), eq(mcpServers.workspaceId, team.id))).limit(1);
+    if (!server) throw new NotFoundException('MCP server not found');
+    let authToken: string | undefined;
+    try {
+      authToken = server.authSecret ? decryptSecret(server.authSecret) : undefined;
+    } catch {
+      authToken = undefined;
+    }
+    try {
+      const tools = await this.mcpClient.discover({ endpoint: server.endpoint, ...(authToken ? { authToken } : {}) }, AbortSignal.timeout(30_000));
+      await this.db.update(mcpServers).set({ connection: 'connected', updatedAt: new Date() }).where(eq(mcpServers.id, server.id));
+      return { connection: 'connected', tools: tools.map(({ name, description }) => ({ name, ...(description ? { description } : {}) })) };
+    } catch (error) {
+      const failure = classifyMcpFailure(error);
+      await this.db.update(mcpServers).set({ connection: failure.connection, updatedAt: new Date() }).where(eq(mcpServers.id, server.id));
+      return { connection: failure.connection, tools: [], error: failure.error };
+    }
   }
 
   async providers(request: Request, workspaceSlug: string): Promise<ModelProviderView[]> {

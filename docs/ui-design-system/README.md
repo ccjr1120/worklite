@@ -68,7 +68,7 @@ WorkLite supports `System`, `Light`, and `Dark` appearance settings. The default
 
 - Resolve the theme before initial paint to prevent a light-theme flash.
 - Set the browser `color-scheme` to match the active theme.
-- Theme Monaco, charts, scrollbars, diagrams, illustrations, and floating surfaces with the application.
+- Theme shared editors, charts, scrollbars, diagrams, illustrations, and floating surfaces with the application.
 - Preserve the same hierarchy and semantic meanings across themes.
 - Do not create dark mode through automatic color inversion.
 - Use subtle transition timing and respect `prefers-reduced-motion`.
@@ -245,6 +245,11 @@ Before confirming a UI proposal, verify that it:
 - Introduces a documented design-system decision before implementation when no existing rule applies.
 
 ## Changelog
+
+### 2026-08-29
+
+- Reaffirmed mobile object-row collections, reachable compact view navigation, validation-message associations, and conditional stream following for the reliability pass.
+- Required integration and workflow editor surfaces to represent only server-backed tests, tools, edits, versions, and logs.
 
 ### 2026-08-29
 

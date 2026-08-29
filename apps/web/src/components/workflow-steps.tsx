@@ -2,7 +2,7 @@ import { ArrowDown, ArrowUp, Copy, Plus, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/status-badge';
-import type { WorkflowStep } from '@/mock/data';
+import type { WorkflowStep } from '@/types/workflow';
 import { cn } from '@/lib/utils';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -30,6 +30,7 @@ function WorkflowSteps({ steps, selectedId, onSelect, onAdd, onMove, onDuplicate
       </li>
       {steps.map((step, index) => {
         const selected = step.id === selectedId;
+        const inputSummary = step.nodeType === 'text' ? t('editor.mappingLiteralOutput') : index === 0 ? t('editor.mappingInputOutput') : t('editor.mappingPreviousOutput');
         return (
           <li key={step.id} className="flex flex-col items-stretch">
             {index > 0 ? <div className="mx-auto h-6 w-px bg-border" aria-hidden="true" /> : null}
@@ -43,8 +44,8 @@ function WorkflowSteps({ steps, selectedId, onSelect, onAdd, onMove, onDuplicate
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-xs font-medium text-muted-foreground">{t('editor.step', { position: step.position })}</p>
-                    <h3 className="mt-1 text-sm font-semibold">{step.nodeType === 'text' ? 'Text' : step.agentName}</h3>
-                    <p className="mt-1 font-mono text-[12px] text-muted-foreground">{step.nodeType === 'text' ? 'text' : step.agentVersion} · {step.inputSummary}</p>
+                    <h3 className="mt-1 text-sm font-semibold">{step.nodeType === 'text' ? t('editor.textNode') : step.agentName}</h3>
+                    <p className="mt-1 font-mono text-[12px] text-muted-foreground">{step.nodeType === 'text' ? t('editor.textType') : step.agentVersion} · {inputSummary}</p>
                   </div>
                   {step.status ? <StatusBadge status={step.status} /> : null}
                 </div>

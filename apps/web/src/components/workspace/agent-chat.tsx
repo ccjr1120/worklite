@@ -1,4 +1,4 @@
-import { Link, useRouterState } from '@tanstack/react-router';
+import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { ArrowLeft, ArrowUp, Ban, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleX, Download, FileCode2, History, LoaderCircle, MessageSquareText, Plus, RefreshCw, ShieldAlert, Square, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -72,6 +72,8 @@ function readStoredState(workspaceSlug: string): StoredExecutionState {
 function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const { t } = useTranslation(['assistant', 'common']);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const locationSearch = useRouterState({ select: (state) => state.location.search as Record<string, unknown> });
+  const navigate = useNavigate();
   const agentQuery = useAgentQuery(workspaceSlug, SYSTEM_HELPER_CHAT_ID);
   const agentsQuery = useAgentsQuery(workspaceSlug);
   const subSessionsQuery = useAgentSubSessionsQuery(workspaceSlug);
@@ -100,6 +102,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const [mainConnectionState, setMainConnectionState] = useState<'connected' | 'reconnecting'>('connected');
   const [subConnectionState, setSubConnectionState] = useState<'connected' | 'reconnecting'>('connected');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const shouldFollowEndRef = useRef(true);
   const currentPathRef = useRef(pathname);
   const appliedResultIdsRef = useRef(new Set<string>());
   const mainRequestGenerationRef = useRef(0);
@@ -299,7 +302,12 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   }, [activeSubSession, subExecution?.status, workspaceSlug]);
 
   useEffect(() => {
+    if (locationSearch.assistant === 'open') setOpen(true);
+  }, [locationSearch.assistant]);
+
+  useEffect(() => {
     if (!open) return;
+    if (!shouldFollowEndRef.current) return;
     const frame = window.requestAnimationFrame(() => {
       if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     });
@@ -478,7 +486,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
       applyLocalePreference(saved.locale);
       return;
     }
-    if (result.type === 'navigation') window.location.assign(result.route);
+    if (result.type === 'navigation') void navigate({ to: result.route as never });
   }
 
   function archiveCurrent() {
@@ -631,7 +639,14 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
             {historyOpen ? (
               <HistoryPane archived={archived} loading={loadingExecution} onResume={resume} onRemove={(id) => setArchived((current) => current.filter((item) => item.id !== id))} />
             ) : (
-              <Conversation ref={scrollRef} className="px-4">
+              <Conversation
+                ref={scrollRef}
+                className="px-4"
+                onScroll={(event) => {
+                  const element = event.currentTarget;
+                  shouldFollowEndRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 64;
+                }}
+              >
                 <ConversationContent>
                   {events.length === 0 && !loadingExecution && !loadingSubExecution && !activeSubSession ? <StarterPane onSelect={(prompt) => { setDraft(prompt); setOpen(true); }} /> : null}
                   {(activeSubSession ? loadingSubExecution : loadingExecution) ? <p className="m-auto flex items-center gap-2 text-sm text-muted-foreground" role="status"><LoaderCircle className="size-4 motion-safe:animate-spin" />{t('assistant:execution.loading')}</p> : null}

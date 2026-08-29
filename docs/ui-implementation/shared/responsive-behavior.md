@@ -10,11 +10,15 @@ From `768px` to `1279px`, allow the icon rail, hide low-priority columns, and le
 
 ## Mobile
 
-Below `768px`, use a navigation drawer, retain page identity, state and primary action in the context bar, convert inspectors to full-screen or bottom sheets, replace wide tables with object rows, preserve vertical workflow steps, and show detailed logs full-screen or in a resizable sheet. Agent Chat keeps `12px` outer space and uses at most about `70vh`; it does not become full-screen. Its single-line composer remains reachable above browser controls, and Chat and Proposed changes use internal views. Essential touch controls may grow to `40px` to `44px`.
+Below `768px`, use a navigation drawer, retain page identity, state and primary action in the context bar, convert inspectors to full-screen or bottom sheets, replace wide tables with object rows, preserve vertical workflow steps, and show detailed logs full-screen or in a resizable sheet. Settings and Agent resource view navigation remain reachable through horizontally scrollable tabs or an equivalent compact control. Agent Chat keeps `12px` outer space and uses at most about `70vh`; it does not become full-screen. Its single-line composer remains reachable above browser controls, and Chat and Proposed changes use internal views. Essential touch controls may grow to `40px` to `44px`.
 
 Responsive layouts must not remove status, recovery, or cancellation controls. The Agent composer retains a stable Send-or-Stop target and editable input at every breakpoint; working feedback remains in the scrollable transcript rather than consuming composer space. Onboarding uses a centered column with `20px` horizontal padding and no decorative side panel.
 
 ## Changelog
+
+### 2026-08-29
+
+- Required mobile object rows for collections and retained compact access to Settings and Agent resource navigation.
 
 ### 2026-08-27
 

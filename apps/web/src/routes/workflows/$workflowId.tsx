@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import { ArrowLeft, Check, FilePlus2, PanelRight, Plus, Redo2, Search, Settings2, SlidersHorizontal, Undo2 } from 'lucide-react';
+import { ArrowLeft, Check, FilePlus2, PanelRight, Plus, Redo2, Search, SlidersHorizontal, Undo2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -14,15 +14,12 @@ import { WorkflowSteps } from '@/components/workflow-steps';
 import { AgentMark } from '@/components/agent-mark';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import type { WorkflowStep } from '@/mock/data';
-import { workflowSteps as seededWorkflowSteps } from '@/mock/data';
+import type { WorkflowStep } from '@/types/workflow';
 import type { WorkflowDefinition, WorkflowEditOperation } from '@worklite/contracts';
 import { api } from '@/api/client';
 import { useAgentVersionsQuery, useAgentsQuery, useWorkflowQuery, workflowsQueryKey } from '@/api/queries';
 import { queryClient } from '@/lib/query-client';
-import { cn } from '@/lib/utils';
 
 export const Route = createFileRoute('/workflows/$workflowId')({
   component: WorkflowEditorPage,
@@ -31,12 +28,12 @@ export const Route = createFileRoute('/workflows/$workflowId')({
 function WorkflowEditorPage() {
   const { t } = useTranslation(['workflows', 'common']);
   const { workflowId } = Route.useParams();
-  const workspaceSlug = "personal";
+  const workspaceSlug = 'personal';
   const isNew = workflowId === 'new';
   const { data: existing } = useWorkflowQuery(workspaceSlug, workflowId);
   const { data: availableAgents = [] } = useAgentsQuery(workspaceSlug);
   const [name, setName] = useState(existing?.name ?? t('editor.untitled'));
-  const [input, setInput] = useState('topic: daily market brief');
+  const [input, setInput] = useState(() => t('editor.templateDailyInput'));
   const [steps, setSteps] = useState<WorkflowStep[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(steps[0]?.id ?? null);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'unsaved'>(isNew ? 'unsaved' : 'saved');
@@ -51,16 +48,9 @@ function WorkflowEditorPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(isNew);
   const [executionPolicy, setExecutionPolicy] = useState<'stop' | 'retry'>('stop');
-  const [aiOpen, setAiOpen] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState('');
   const [publishOpen, setPublishOpen] = useState(false);
   const [runSubmitting, setRunSubmitting] = useState(false);
   const [saveError, setSaveError] = useState('');
-  const [logs] = useState([
-    { time: '08:12:01', severity: 'info', source: 'run', content: 'Run queued' },
-    { time: '08:12:04', severity: 'info', source: 'Researcher', content: 'Step started' },
-    { time: '08:14:11', severity: 'info', source: 'Brief writer', content: 'Generating brief' },
-  ]);
   const selected = steps.find((step) => step.id === selectedId);
   const selectedAgentVersionsQuery = useAgentVersionsQuery(workspaceSlug, selected?.nodeType === 'agent' ? selected.agentId : '');
   const navigate = useNavigate();
@@ -100,7 +90,7 @@ function WorkflowEditorPage() {
       id: `step_${Date.now()}`,
       position: index + 1,
       agentId: agent?.id ?? agentId,
-      agentName: agent?.name ?? 'Agent',
+      agentName: agent?.name ?? t('editor.agentFallback'),
       agentVersion: agent?.latestVersion ? `v${agent.latestVersion}` : agent?.version ?? 'draft',
       nodeType: 'agent',
       agentVersionId: agent?.latestVersionId ?? undefined,
@@ -121,7 +111,7 @@ function WorkflowEditorPage() {
       id: `text_${Date.now()}`,
       position: index + 1,
       agentId: '',
-      agentName: 'Text',
+      agentName: t('editor.textNode'),
       agentVersion: '1',
       nodeType: 'text',
       text: '',
@@ -247,20 +237,20 @@ function WorkflowEditorPage() {
   }
 
   async function runWorkflow() {
-    if (isNew) {
+    if (isNew || saveState !== 'saved') {
       toast.message(t('editor.saveBeforeRun'));
       return;
     }
     setRunSubmitting(true);
     try {
       if (!existing?.latestVersionId) {
-        toast.error('Save a workflow version before running it.');
+        toast.error(t('editor.publishBeforeRun'));
         return;
       }
       const result = await api.createRun(existing.latestVersionId, { input });
       void navigate({ to: '/runs/$runId', params: { runId: result.runId } });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unable to start workflow.');
+      toast.error(error instanceof Error ? error.message : t('editor.runFailed'));
     } finally {
       setRunSubmitting(false);
     }
@@ -277,12 +267,12 @@ function WorkflowEditorPage() {
     setSaveState('unsaved');
   }
 
-  const logLines = useMemo(() => logs, [logs]);
+  const publishedAgents = useMemo(() => availableAgents.filter((agent) => Boolean(agent.latestVersionId)), [availableAgents]);
   const filteredAgents = useMemo(() => {
     const query = paletteQuery.trim().toLowerCase();
-    if (!query) return availableAgents;
-    return availableAgents.filter((agent) => `${agent.name} ${agent.responsibility} ${agent.model}`.toLowerCase().includes(query));
-  }, [availableAgents, paletteQuery]);
+    if (!query) return publishedAgents;
+    return publishedAgents.filter((agent) => `${agent.name} ${agent.responsibility} ${agent.model}`.toLowerCase().includes(query));
+  }, [paletteQuery, publishedAgents]);
 
   const insertionLabel = steps.length === 0
     ? t('editor.insertFirst')
@@ -296,10 +286,19 @@ function WorkflowEditorPage() {
       setSelectedId(null);
       setInsertIndex(0);
     } else {
-      const source = seededWorkflowSteps.wf_daily_brief ?? [];
-      const next = source.map((step, index) => ({ ...step, id: `step_${Date.now()}_${index}`, position: index + 1 }));
+      const next = publishedAgents.slice(0, 3).map((agent, index): WorkflowStep => ({
+        id: `step_${Date.now()}_${index}`,
+        position: index + 1,
+        agentId: agent.id,
+        agentName: agent.name,
+        agentVersion: `v${agent.latestVersion}`,
+        agentVersionId: agent.latestVersionId ?? undefined,
+        nodeType: 'agent',
+        inputSummary: index === 0 ? 'workflow.input' : 'previous.output',
+        errorPolicy: executionPolicy,
+      }));
       setName(t('editor.templateDailyName'));
-      setInput('topic: daily market brief');
+      setInput(t('editor.templateDailyInput'));
       setSteps(next);
       setSelectedId(next[0]?.id ?? null);
       setInsertIndex(next.length);
@@ -325,10 +324,10 @@ function WorkflowEditorPage() {
       <div className="mt-3 min-h-0 flex-1 space-y-1 overflow-auto">
         <button type="button" className="flex w-full items-center gap-3 rounded-md border border-transparent px-2 py-2 text-left transition-colors duration-[120ms] hover:border-border hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45" onClick={() => addTextStep(insertIndex)}>
           <FilePlus2 className="size-5 shrink-0 text-brand" />
-          <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium">Text</span><span className="block truncate text-[12px] text-muted-foreground">Literal text input</span></span>
+          <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium">{t('editor.textNode')}</span><span className="block truncate text-[12px] text-muted-foreground">{t('editor.literalTextInput')}</span></span>
           <Plus className="size-4 text-muted-foreground" aria-hidden="true" />
         </button>
-        {filteredAgents.length === 0 ? <p className="px-2 py-6 text-center text-[13px] text-muted-foreground">{t('editor.noAgents')}</p> : null}
+        {publishedAgents.length === 0 ? <p className="px-2 py-6 text-center text-[13px] text-muted-foreground">{t('editor.noPublishedAgents')}</p> : filteredAgents.length === 0 ? <p className="px-2 py-6 text-center text-[13px] text-muted-foreground">{t('editor.noAgents')}</p> : null}
         {filteredAgents.map((agent) => (
           <button
             key={agent.id}
@@ -358,7 +357,7 @@ function WorkflowEditorPage() {
         <PanelRight className="size-4 text-muted-foreground" aria-hidden="true" />
       </div>
       <div className="mt-5 flex flex-col gap-4">
-        {selected.nodeType === 'text' ? <Field label="Text" htmlFor="node-text"><Textarea id="node-text" value={selected.text ?? ''} onChange={(event) => { setSteps((current) => current.map((step) => step.id === selectedId ? { ...step, text: event.target.value, inputSummary: event.target.value ? 'literal → output' : 'empty literal → output' } : step)); setSaveState('unsaved'); }} placeholder="Enter text" /></Field> : (
+        {selected.nodeType === 'text' ? <Field label={t('editor.textNode')} htmlFor="node-text"><Textarea id="node-text" value={selected.text ?? ''} onChange={(event) => { setSteps((current) => current.map((step) => step.id === selectedId ? { ...step, text: event.target.value } : step)); setSaveState('unsaved'); }} placeholder={t('editor.textPlaceholder')} /></Field> : (
           <>
             <Field label="Agent" htmlFor="agent">
               <Select
@@ -377,7 +376,7 @@ function WorkflowEditorPage() {
               >
                 <SelectTrigger id="agent"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {availableAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>)}
+                  {publishedAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </Field>
@@ -391,12 +390,12 @@ function WorkflowEditorPage() {
                 }}
                 disabled={selectedAgentVersionsQuery.isLoading || selectedAgentVersionsQuery.isError || !(selectedAgentVersionsQuery.data?.length)}
               >
-                <SelectTrigger id="agent-version"><SelectValue placeholder={selectedAgentVersionsQuery.isLoading ? 'Loading versions...' : 'Select an immutable version'} /></SelectTrigger>
+                <SelectTrigger id="agent-version"><SelectValue placeholder={selectedAgentVersionsQuery.isLoading ? t('editor.loadingVersions') : t('editor.selectImmutableVersion')} /></SelectTrigger>
                 <SelectContent>
                   {(selectedAgentVersionsQuery.data ?? []).map((version) => <SelectItem key={version.id} value={version.id}>v{version.version} · {version.model}</SelectItem>)}
                 </SelectContent>
               </Select>
-              {!selected.agentVersionId ? <p className="mt-1 text-[12px] text-danger">Select an immutable AgentVersion before publishing.</p> : null}
+              {!selected.agentVersionId ? <p className="mt-1 text-[12px] text-danger">{t('editor.selectVersionBeforePublish')}</p> : null}
             </Field>
           </>
         )}
@@ -417,7 +416,7 @@ function WorkflowEditorPage() {
         </Field>
         <div className="rounded-md border border-border bg-surface-subtle p-3">
           <p className="text-[12px] font-medium">{t('editor.inputMapping')}</p>
-          <p className="mt-1 font-mono text-[12px] text-muted-foreground">{selected.inputSummary}</p>
+          <p className="mt-1 font-mono text-[12px] text-muted-foreground">{selected.nodeType === 'text' ? t('editor.mappingLiteralOutput') : selected.position === 1 ? t('editor.mappingInputOutput') : t('editor.mappingPreviousOutput')}</p>
         </div>
         <p className="text-[13px] text-muted-foreground">{t('editor.overridesHint')}</p>
       </div>
@@ -447,14 +446,11 @@ function WorkflowEditorPage() {
                 {t('editor.versions')}
               </Link>
             </Button>
-            <Button variant="ghost" size="compact" className="hidden md:inline-flex" onClick={() => setAiOpen((value) => !value)}>
-              {t('editor.aiEdit')}
-            </Button>
             <Button variant="secondary" size="compact" className="hidden sm:inline-flex" onClick={save} disabled={saveState === 'saving'}>
               {t('common:actions.save')}
             </Button>
-            <Button variant="secondary" size="compact" className="hidden sm:inline-flex" onClick={() => void runWorkflow()} disabled={runSubmitting}>
-              {runSubmitting ? t('editor.running') : t('editor.run')}
+            <Button variant="secondary" size="compact" className="hidden sm:inline-flex" onClick={() => void runWorkflow()} disabled={runSubmitting || isNew || saveState !== 'saved' || !existing?.latestVersionId}>
+              {runSubmitting ? t('editor.running') : existing?.latestVersion ? t('editor.runVersion', { version: existing.latestVersion }) : t('editor.run')}
             </Button>
             <Button size="compact" onClick={() => setPublishOpen(true)}>
               {t('common:actions.publish')}
@@ -473,7 +469,7 @@ function WorkflowEditorPage() {
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="secondary" size="compact" className="sm:hidden" onClick={save} disabled={saveState === 'saving'}><Check className="size-4" />{t('common:actions.save')}</Button>
-                <Button variant="secondary" size="compact" className="sm:hidden" onClick={() => void runWorkflow()} disabled={runSubmitting}>{t('editor.run')}</Button>
+                <Button variant="secondary" size="compact" className="sm:hidden" onClick={() => void runWorkflow()} disabled={runSubmitting || isNew || saveState !== 'saved' || !existing?.latestVersionId}>{existing?.latestVersion ? t('editor.runVersion', { version: existing.latestVersion }) : t('editor.run')}</Button>
               </div>
             </div>
           </div>
@@ -501,44 +497,7 @@ function WorkflowEditorPage() {
           </div>
         </main>
         {panelOpen ? <aside className="hidden w-[360px] shrink-0 overflow-auto border-l border-border bg-surface p-4 xl:block">{inspector}</aside> : null}
-        {aiOpen ? (
-          <aside className="hidden w-[360px] shrink-0 overflow-auto border-l border-border bg-surface p-4 2xl:block">
-            <h2 className="text-sm font-semibold">{t('editor.assistant')}</h2>
-            <p className="mt-2 text-[13px] text-muted-foreground">{t('editor.assistantHint')}</p>
-            <Textarea className="mt-3" value={aiPrompt} onChange={(event) => setAiPrompt(event.target.value)} placeholder={t('editor.assistantPlaceholder')} />
-            <Button className="mt-3" size="compact" onClick={() => toast.message(t('editor.pendingDescription'))}>
-              {t('editor.propose')}
-            </Button>
-            <div className="mt-4 rounded-lg border border-border p-3 text-[13px]">
-              <p className="font-medium">{t('editor.pendingOperation')}</p>
-              <p className="mt-1 text-muted-foreground">{t('editor.pendingDescription')}</p>
-              <div className="mt-2 flex gap-2">
-                <Button size="sm" onClick={() => { requestAdd(steps.length); toast.success(t('editor.applied')); }}>{t('editor.apply')}</Button>
-                <Button size="sm" variant="ghost">{t('editor.undo')}</Button>
-              </div>
-            </div>
-          </aside>
-        ) : null}
       </div>
-      <Collapsible defaultOpen className="hidden border-t border-border md:block">
-        <div className="flex h-9 items-center justify-between px-4">
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm">{t('editor.runOutput')}</Button>
-          </CollapsibleTrigger>
-        </div>
-        <CollapsibleContent>
-          <div className="h-48 overflow-auto bg-background px-4 py-3 font-mono text-[12px]">
-            {logLines.map((line, index) => (
-              <p key={index} className={cn('grid grid-cols-[72px_64px_110px_1fr] gap-3', line.severity === 'error' && 'text-danger')}>
-                <span className="text-muted-foreground">{line.time}</span>
-                <span>{line.severity}</span>
-                <span className="text-muted-foreground">{line.source}</span>
-                <span>{line.content}</span>
-              </p>
-            ))}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
       <Dialog open={templateOpen} onOpenChange={setTemplateOpen}>
         <DialogContent>
           <DialogHeader>
@@ -550,9 +509,9 @@ function WorkflowEditorPage() {
               <p className="text-sm font-semibold">{t('editor.blankTemplate')}</p>
               <p className="mt-1 text-[13px] text-muted-foreground">{t('editor.blankTemplateDescription')}</p>
             </button>
-            <button type="button" className="rounded-lg border border-border bg-surface p-4 text-left transition-colors duration-[120ms] hover:border-brand hover:bg-brand-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45" onClick={() => applyTemplate('daily')}>
+            <button type="button" className="rounded-lg border border-border bg-surface p-4 text-left transition-colors duration-[120ms] hover:border-brand hover:bg-brand-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:opacity-50" onClick={() => applyTemplate('daily')} disabled={publishedAgents.length === 0}>
               <p className="text-sm font-semibold">{t('editor.dailyTemplate')}</p>
-              <p className="mt-1 text-[13px] text-muted-foreground">{t('editor.dailyTemplateDescription')}</p>
+              <p className="mt-1 text-[13px] text-muted-foreground">{publishedAgents.length === 0 ? t('editor.dailyTemplateUnavailable') : t('editor.dailyTemplateDescription')}</p>
             </button>
           </div>
         </DialogContent>

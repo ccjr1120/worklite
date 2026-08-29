@@ -2,7 +2,7 @@
 
 ## Layout
 
-Every Skill detail uses the same editor workspace: a compact package tree on the left and the selected file viewer or editor in the remaining space. The tree renders only files returned by the API, derives folder nodes from their paths, and never hard-codes example entries. Empty directories are not shown. Use Monaco where appropriate, or the shared monospace editor until Monaco is integrated.
+Every Skill detail uses the same editor workspace: a compact package tree on the left and the selected file viewer or editor in the remaining space. The tree renders only files returned by the API, derives folder nodes from their paths, and never hard-codes example entries. Empty directories are not shown. Use the shared monospace editor for current text files; introduce CodeMirror 6 only when a concrete editing requirement needs structured editing behavior.
 
 Online user Skills support a required root `SKILL.md`, executable text files under `scripts/`, and text files under `references/`. New Skills begin with `SKILL.md`. A compact add-file icon exposes an inline relative-path field; deleting a selected non-root file requires an explicit action, while `SKILL.md` cannot be deleted. File paths and content use the typed package API and retain visible unsaved, saving, saved, path-validation, and durable error states. Archive upload, binary assets, validation, and publication remain absent until those operations are implemented end to end.
 
@@ -15,6 +15,10 @@ Protected built-ins use the same package tree and file surface, with read-only c
 For `terminal-command`, show its product-owned `scripts/run.sh`, built-in status, explicit per-Agent assignment, automatic Agent execution, API process working directory, `/bin/sh -lc`, and the non-sandbox host-permission warning. Do not present it as a special runtime capability. For `worklite-platform`, show its product-owned scripts and contract reference, built-in status, permanent System Helper Chat assignment, loopback API boundary, automatic script execution, secure credential rules, constrained client navigation, and the exclusion of external APIs, direct database access, deletion, terminal execution, editing, publication, and manual assignment.
 
 ## Changelog
+
+### 2026-08-29
+
+- Set the current Skill editor baseline to the shared monospace editor and deferred CodeMirror 6 until a concrete structured-editing requirement exists.
 
 ### 2026-08-27
 

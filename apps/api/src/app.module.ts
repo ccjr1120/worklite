@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { HealthController } from './common/health.controller';
 import { DatabaseModule } from './infrastructure/database.module';
-import { ObjectStorageModule } from './infrastructure/object-storage.module';
 import { WorkspaceModule } from './modules/teams/teams.module';
 import { AgentsModule } from './modules/agents/agents.module';
 import { SkillsModule } from './modules/skills/skills.module';
@@ -23,7 +22,6 @@ import { PluginsModule } from './modules/plugins/plugins.module';
     DatabaseModule,
     CommandsModule,
     PluginsModule,
-    ObjectStorageModule,
     WorkspaceModule,
     AgentsModule,
     SkillsModule,

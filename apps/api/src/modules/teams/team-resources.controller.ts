@@ -34,6 +34,9 @@ export class WorkspaceResourcesController {
   @Patch('mcp-servers/:serverId')
   updateMcpServer(@Req() request: Request, @Param('serverId') serverId: string, @Body() body: UpdateMcpServerRequest) { return this.resources.updateMcpServer(request, 'personal', serverId, body); }
 
+  @Post('mcp-servers/:serverId/test')
+  testMcpServer(@Req() request: Request, @Param('serverId') serverId: string) { return this.resources.testMcpServer(request, 'personal', serverId); }
+
   @Get('model-providers')
   providers(@Req() request: Request) { return this.resources.providers(request, 'personal'); }
 

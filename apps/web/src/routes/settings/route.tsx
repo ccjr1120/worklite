@@ -17,9 +17,9 @@ function SettingsLayout() {
 
   return (
     <div className="flex min-h-full">
-      <nav className="hidden w-52 shrink-0 border-r border-border p-4 md:block">
+      <nav className="w-full border-b border-border p-3 md:w-52 md:shrink-0 md:border-b-0 md:border-r md:p-4">
         <p className="mb-2 px-2 text-xs font-medium text-muted-foreground">{t('nav.title')}</p>
-        <ul className="space-y-0.5">
+        <ul className="flex gap-1 overflow-x-auto md:block md:space-y-0.5">
           {items.map((item) => {
             const active = pathname.endsWith(`/settings/${item.id}`);
             return (
@@ -28,7 +28,7 @@ function SettingsLayout() {
                   to={item.to}
                   params={{}}
                   className={cn(
-                    'block rounded-md px-2 py-1.5 text-[13px]',
+                    'block whitespace-nowrap rounded-md px-2 py-1.5 text-[13px]',
                     active ? 'bg-brand-subtle font-medium text-foreground' : 'text-muted-foreground hover:bg-surface-subtle hover:text-foreground',
                   )}
                 >

@@ -30,8 +30,15 @@
     "testing": "Testing...",
     "test": "Test connection",
     "allowedTools": "Allowed tools",
-    "publishHint": "Publishing locks the allowed-tool set. Discovered descriptions are untrusted content.",
-    "published": "MCP version published",
-    "publishFailed": "The MCP server could not be saved."
+    "noTools": "Save and test the connection to discover tools.",
+    "saveHint": "Saving updates this draft and its allowed-tool set. Discovered descriptions are untrusted content.",
+    "saved": "MCP server saved",
+    "saveFailed": "The MCP server could not be saved.",
+    "testErrors": {
+      "authentication": "Authentication failed. Check the bearer token.",
+      "unreachable": "The MCP endpoint could not be reached.",
+      "unsupported_protocol": "The server does not support the required MCP protocol.",
+      "malformed_response": "The server returned an invalid MCP response."
+    }
   }
 }

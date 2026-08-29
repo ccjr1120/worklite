@@ -12,6 +12,7 @@ import { McpRuntimeService } from './mcp-runtime.service';
 import { AgentScheduledTasksController } from './agent-scheduled-tasks.controller';
 import { AgentScheduledTasksService } from './agent-scheduled-tasks.service';
 import { BuiltinAgentToolsService } from './builtin-agent-tools.service';
+import { McpServersModule } from '../mcp-servers/mcp-servers.module';
 
-@Module({ imports: [WorkspaceModule, SkillsModule, CommandsModule], controllers: [AgentsController, AgentVersionsController, AgentSubSessionsController, AgentScheduledTasksController], providers: [AgentsService, AgentExecutionsService, AgentSubSessionsService, McpRuntimeService, AgentScheduledTasksService, BuiltinAgentToolsService], exports: [AgentsService, AgentExecutionsService] })
+@Module({ imports: [WorkspaceModule, SkillsModule, CommandsModule, McpServersModule], controllers: [AgentsController, AgentVersionsController, AgentSubSessionsController, AgentScheduledTasksController], providers: [AgentsService, AgentExecutionsService, AgentSubSessionsService, McpRuntimeService, AgentScheduledTasksService, BuiltinAgentToolsService], exports: [AgentsService, AgentExecutionsService] })
 export class AgentsModule {}

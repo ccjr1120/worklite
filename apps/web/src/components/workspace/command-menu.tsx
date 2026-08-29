@@ -52,10 +52,7 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
         <CommandSeparator />
         <CommandGroup heading={t('command.create')}>
           <CommandItem
-            onSelect={() => closeAndGo(() => void navigate({
-              to: '/home',
-              search: { assistant: 'open' },
-            }))}
+            onSelect={() => closeAndGo(() => void navigate({ to: '/home', search: { assistant: 'open' } }))}
           >
             <MessageSquareText className="size-4" /> {t('command.openAssistant')}
           </CommandItem>

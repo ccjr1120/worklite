@@ -197,7 +197,7 @@ export const scheduledAgentTasks = sqliteTable('scheduled_agent_tasks', {
 }, (table) => [index('scheduled_agent_tasks_workspace_next_run_idx').on(table.workspaceId, table.nextRunAt)]);
 
 export const mcpServers = sqliteTable('mcp_servers', {
-  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), endpoint: text('endpoint').notNull().default(''), connection: text('connection').$type<'connected' | 'unreachable' | 'auth_failed' | 'unconfigured'>().notNull().default('unconfigured'), transport: text('transport').notNull().default('Streamable HTTP'), allowedTools: integer('allowed_tools').notNull().default(0), version: text('version').notNull().default('v1'), authSecret: text('auth_secret'), updatedAt: timestamp('updated_at'),
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), endpoint: text('endpoint').notNull().default(''), connection: text('connection').$type<'connected' | 'unreachable' | 'auth_failed' | 'unconfigured'>().notNull().default('unconfigured'), transport: text('transport').notNull().default('Streamable HTTP'), allowedTools: integer('allowed_tools').notNull().default(0), allowedToolNames: text('allowed_tool_names', { mode: 'json' }).$type<string[]>().notNull().default([]), version: text('version').notNull().default('v1'), authSecret: text('auth_secret'), updatedAt: timestamp('updated_at'),
 });
 
 export const agentSkills = sqliteTable('agent_skills', {
