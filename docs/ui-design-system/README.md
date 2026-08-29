@@ -179,13 +179,16 @@ Present persistent child Agent sessions in a compact unframed status band betwee
 ### Workflow Editor
 
 - Represent the initial workflow model as a structured vertical sequence of ordered agent steps, not a free-form graph canvas.
+- Use a three-region editor workspace: an agent palette for adding steps, a central ordered sequence, and a contextual inspector for the selected step.
 - Keep step cards visually consistent and expose only essential parameters in their collapsed state.
-- Add steps through explicit controls placed between or after existing steps.
+- Add steps through an agent search/palette with an explicit insertion position between or after existing steps.
 - Support reordering through accessible controls; do not depend on drag-and-drop.
+- Keep the inspector available at every breakpoint; collapse it to a drawer or bottom sheet when the layout cannot support a side panel.
 - Use persimmon borders or indicators for the selected and currently executing step.
 - Represent successful and failed states through compact green or red markers rather than filling the whole step.
 - Show the linear flow with a restrained connector or timeline treatment between steps.
 - Present AI-assisted edits in a side panel and make proposed structured operations understandable and reviewable.
+- Group workflow-level settings into General, Inputs, Execution, and Versioning sections, with advanced fields disclosed progressively.
 
 Persimmon progression through the ordered steps is a distinctive WorkLite motif. It communicates active execution and must remain subtle enough for sustained use. Free-form edges, branching, loops, parallel lanes, zoom controls, and minimaps are outside the initial product scope.
 
@@ -242,6 +245,11 @@ Before confirming a UI proposal, verify that it:
 - Introduces a documented design-system decision before implementation when no existing rule applies.
 
 ## Changelog
+
+### 2026-08-29
+
+- Adopted a ComfyUI-inspired three-region workflow workspace while retaining the ordered linear execution model.
+- Added an agent palette, persistent responsive inspector, explicit insertion positions, and grouped workflow-level settings.
 
 ### 2026-08-28
 

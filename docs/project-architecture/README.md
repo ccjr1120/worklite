@@ -272,13 +272,23 @@ AI edits are validated structured operations: add, delete, update, or reorder a 
 
 Every manual or AI edit creates an `EditRevision` with its actor, optional source instruction, operations, resulting snapshot or snapshot reference, and timestamp. The initial strategy uses immutable snapshots and a current-revision pointer. This favors reliable undo, redo, refresh recovery, and cross-device recovery. Zustand may provide immediate local history, but server revisions are authoritative.
 
+### Workflow Draft Persistence
+
+Every Workflow owns one mutable `WorkflowDraft` and an immutable revision history. The draft stores the current revision pointer and the current linear `WorkflowDefinition`; each meaningful manual or AI edit is submitted as typed operations against a `baseRevisionId`. The API validates and applies the operations in one transaction, writes an immutable `EditRevision` snapshot, and advances the draft pointer. Textual form edits may be batched until blur or explicit save so a keystroke does not create a revision.
+
+The persisted definition includes the schema version, an optional workflow-input example, workflow-level execution defaults, and ordered generic nodes. Existing linear input mappings remain limited to `workflow.input`, `previous.output`, and literal values. The draft is the only mutable source for editor recovery; the browser may optimistically render it but does not own durable workflow state.
+
+Workflow draft operations are exposed through `POST /workflows/:workflowId/draft/operations` with a required `baseRevisionId`. The response returns the authoritative draft, revision identifier, and undo/redo availability. `POST /workflows/:workflowId/draft/undo` and `POST /workflows/:workflowId/draft/redo` move the server-owned draft pointer without mutating immutable revision snapshots. A stale base revision is rejected so concurrent browser tabs or assistant edits cannot silently overwrite one another.
+
 ### Drafts and Published Versions
 
 ```text
 WorkflowDraft --publish--> immutable WorkflowVersion --run--> WorkflowRun
 ```
 
-Drafts can change. Published versions cannot. Publication resolves and locks Node Type versions and all referenced resource versions, including AgentVersion, SkillVersion, and MCPVersion where applicable. Every execution is tied to one immutable workflow version.
+Drafts can change. Published versions cannot. A publication copies the current draft definition into a new immutable WorkflowVersion with its source revision and locked Node Type/resource references. Every execution is tied to one immutable workflow version; draft workflows cannot be run directly. Until immutable AgentVersion records exist end to end, publication rejects nodes that cannot be locked to an AgentVersion.
+
+The initial local persistence migration creates a draft and migration revision for every existing workflow, wraps legacy `workflow_versions.nodes` in the full definition shape, and preserves already published versions. Browser-only edits that were never written to the database cannot be recovered.
 
 ## Runtime Architecture
 
@@ -317,6 +327,8 @@ GET  /runs/:runId
 GET  /runs/:runId/events
 POST /runs/:runId/cancel
 ```
+
+The workflow-level run endpoint is intentionally not part of the persisted-version contract; callers must select an explicit immutable workflow version.
 
 Production uses a same-origin `/api` route through the reverse proxy to simplify CORS and Server-Sent Events delivery.
 
@@ -471,6 +483,13 @@ Adding a deferred capability requires an approved architecture change.
 - Kept the first execution strategy linear while separating the Workflow Engine, Node Type registry, plugin composition, and Agent Node adapter.
 - Locked Node Type versions alongside referenced Agent, Skill, and MCP versions at publication time.
 - Deferred graph control flow, script-authored primary workflows, plugin marketplace behavior, and untrusted in-process plugins.
+
+### 2026-08-29 - Persisted Workflow Drafts And Revisions
+
+- Added a mutable WorkflowDraft with an authoritative current-revision pointer and immutable EditRevision snapshots.
+- Defined typed, base-revision-checked draft operations, server-owned undo/redo, and atomic revision application for manual and AI edits.
+- Made publication copy the current draft into an immutable WorkflowVersion and restricted runs to explicit published versions.
+- Defined the one-time migration from legacy workflow-version node arrays and accepted that browser-only edits cannot be recovered.
 
 ### 2026-08-28 - Explicit Mentioned Sub-Agent Sessions
 

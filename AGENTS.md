@@ -27,3 +27,7 @@ When changing routes, APIs, configuration, or other public project behavior, the
 Implement only the smallest direct change required by the confirmed request. Do not proactively add validation, limits, compatibility layers, abstractions, fallback behavior, security hardening, or adjacent UX changes unless they are explicitly requested or required by an existing project rule.
 
 When an out-of-scope concern is discovered, mention it briefly instead of expanding the implementation.
+
+## Git Worktree Directory Rule
+
+Place additional worktrees in the parent directory of the primary checkout. Name each worktree as `../<repository-name>-<purpose>`, such as `../work-lite-workflow-optimization`.

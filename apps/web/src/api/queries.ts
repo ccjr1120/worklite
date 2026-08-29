@@ -31,6 +31,10 @@ export function useWorkflowQuery(workspace: string | undefined, workflowId: stri
   return useQuery({ queryKey: ['workflow', workflowId] as const, queryFn: () => api.workflow(workspace, workflowId), enabled: Boolean(workflowId && workflowId !== 'new') });
 }
 
+export function useWorkflowVersionsQuery(workspace: string | undefined, workflowId: string) {
+  return useQuery({ queryKey: ['workflow-versions', workflowId] as const, queryFn: () => api.workflowVersions(workspace, workflowId), enabled: Boolean(workflowId && workflowId !== 'new') });
+}
+
 export function useRunsQuery(workspace?: string) {
   return useQuery({ queryKey: runsQueryKey(), queryFn: () => api.runs(workspace), refetchInterval: 5_000 });
 }
