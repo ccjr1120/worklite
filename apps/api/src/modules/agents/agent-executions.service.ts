@@ -12,6 +12,8 @@ import { WorkspaceService } from '../teams/teams.service';
 import type { AgentMcpRuntime } from '../teams/team-resources.service';
 import { McpRuntimeService } from './mcp-runtime.service';
 import { BuiltinAgentToolsService } from './builtin-agent-tools.service';
+import { CODEX_CLI_AGENT_ID } from '../plugins/plugins.service';
+import { CommandsService } from '../commands/commands.service';
 
 const SYSTEM_HELPER_CHAT_ID = 'agt_system_helper_chat';
 const WORKLITE_PLATFORM_SKILL_ID = 'sk_worklite_platform';
@@ -38,6 +40,7 @@ const WORKLITE_NAVIGATION_ROUTES = {
 export class AgentExecutionsService {
   private readonly activeModelRequests = new Map<string, AbortController>();
   private readonly activeMcpRequests = new Map<string, AbortController>();
+  private readonly activePluginCommands = new Map<string, string>();
   private readonly scheduledExecutions = new Set<string>();
   private readonly listeners = new Set<(event: AgentExecutionEvent) => void>();
   private readonly eventQueues = new Map<string, Promise<void>>();
@@ -49,6 +52,7 @@ export class AgentExecutionsService {
     private readonly skillScripts: SkillScriptRunnerService,
     private readonly mcpRuntime: McpRuntimeService,
     private readonly builtinTools: BuiltinAgentToolsService,
+    private readonly commands: CommandsService,
   ) {}
 
   async create(request: Request, workspaceSlug: string, agentId: string, input: CreateAgentExecutionRequest): Promise<AgentExecutionView> {
@@ -230,6 +234,8 @@ export class AgentExecutionsService {
 
     if (cancelled) {
       this.activeModelRequests.get(executionId)?.abort();
+      const pluginCommandId = this.activePluginCommands.get(executionId);
+      if (pluginCommandId) await this.commands.cancel(pluginCommandId).catch(() => undefined);
       for (const call of runningCalls) this.activeMcpRequests.get(call.id)?.abort();
       await Promise.all(runningCalls.flatMap((call) => call.commandExecutionId
         ? [this.skillScripts.cancel(call.commandExecutionId).catch(() => undefined)]
@@ -263,6 +269,7 @@ export class AgentExecutionsService {
       && priorToolCalls[0]?.toolName === 'builtin'
       && priorToolCalls[0].mcpToolName === 'update_plan';
     const { agent, assignedSkills } = await this.requireExecutableAgent(workspace.id, execution.agentId);
+    if (agent.id === CODEX_CLI_AGENT_ID) return this.advanceCodexCli(workspace.id, execution, request);
     const clarificationPass = agent.id === SYSTEM_HELPER_CHAT_ID && clarificationAllowed;
     const skillScripts = assignedSkills.flatMap((skill) => skill.files.filter((file) => file.path.startsWith('scripts/') && file.content.startsWith('#!')).map((file) => ({ skillId: skill.id, skillName: skill.name, path: file.path })));
     const mcpRuntimes = clarificationPass ? [] : await this.resources.agentMcpRuntimes(request, workspaceSlug, execution.agentId);
@@ -465,11 +472,49 @@ export class AgentExecutionsService {
   private async requireExecutableAgent(workspaceId: string, agentId: string) {
     const [agent] = await this.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, workspaceId))).limit(1);
     if (!agent) throw new NotFoundException('Agent not found');
-    if (agent.kind !== 'custom' && agent.id !== SYSTEM_HELPER_CHAT_ID) throw new BadRequestException('This built-in Agent cannot be executed.');
-    if (!agent.providerId || !agent.model) throw new ConflictException('Configure a model provider and model before running this Agent.');
+    if (agent.kind !== 'custom' && agent.id !== SYSTEM_HELPER_CHAT_ID && agent.id !== CODEX_CLI_AGENT_ID) throw new BadRequestException('This built-in Agent cannot be executed.');
+    if (agent.id !== CODEX_CLI_AGENT_ID && (!agent.providerId || !agent.model)) throw new ConflictException('Configure a model provider and model before running this Agent.');
     const rows = await this.db.select({ id: skills.id, name: skills.name, instructions: skills.instructions }).from(agentSkills).innerJoin(skills, eq(agentSkills.skillId, skills.id)).where(and(eq(agentSkills.agentId, agentId), eq(skills.workspaceId, workspaceId)));
     const files = rows.length === 0 ? [] : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, rows.map((skill) => skill.id)));
-    return { agent, assignedSkills: rows.map((skill) => ({ ...skill, files: files.filter((file) => file.skillId === skill.id).map(({ path, content }) => ({ path, content })) })) };
+    return { agent, assignedSkills: agent.id === CODEX_CLI_AGENT_ID ? [] : rows.map((skill) => ({ ...skill, files: files.filter((file) => file.skillId === skill.id).map(({ path, content }) => ({ path, content })) })) };
+  }
+
+  private async advanceCodexCli(workspaceId: string, execution: typeof agentExecutions.$inferSelect, request: Request): Promise<AgentExecutionView> {
+    const prompt = [
+      'You are Codex CLI Chat. Respond directly to the user.',
+      ...execution.displayMessages.map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}:\n${message.content}`),
+    ].join('\n\n');
+    await this.db.update(agentExecutions).set({ phase: 'model', updatedAt: new Date() }).where(and(eq(agentExecutions.id, execution.id), eq(agentExecutions.status, 'running')));
+    const command = `${shellQuote(process.env.CODEX_BIN || 'codex')} exec --json --ephemeral -`;
+    const started = await this.commands.createWithInput(command, prompt);
+    this.activePluginCommands.set(execution.id, started.id);
+    try {
+      const completed = await this.commands.waitForCompletion(started.id);
+      const current = await this.loadExecution(workspaceId, execution.agentId, execution.id);
+      if (current.status !== 'running') return this.toView(current);
+      if (completed.status !== 'succeeded') throw new Error('Codex CLI execution failed');
+      const reply = parseCodexReply(await this.commands.output(started.id));
+      if (!reply) throw new Error('Codex CLI returned an empty response');
+      const now = new Date().toISOString();
+      const messageId = `msg_${randomUUID()}`;
+      const updated = this.db.update(agentExecutions).set({
+        status: 'completed',
+        phase: 'model',
+        errorCode: null,
+        modelMessages: [...execution.modelMessages, { role: 'assistant', content: [{ type: 'text' as const, text: reply }] }],
+        displayMessages: [...execution.displayMessages, { id: messageId, role: 'assistant' as const, content: reply, createdAt: now }],
+        error: null,
+        updatedAt: new Date(),
+      }).where(and(eq(agentExecutions.id, execution.id), eq(agentExecutions.status, 'running'))).run();
+      if (updated.changes > 0) {
+        await this.persistEvent(execution.id, { kind: 'message_delta', messageId, delta: reply });
+        await this.db.insert(auditLogs).values({ id: `audit_${randomUUID()}`, workspaceId, action: 'plugin.codex_cli.completed', resource: execution.id, metadata: { pluginId: 'codex-cli-chat', executionId: execution.id } });
+        await this.publishSnapshotForExecution(workspaceId, execution.id);
+      }
+    } finally {
+      if (this.activePluginCommands.get(execution.id) === started.id) this.activePluginCommands.delete(execution.id);
+    }
+    return this.toView(await this.loadExecution(workspaceId, execution.agentId, execution.id));
   }
 
   private async requireSkillAssignment(workspaceId: string, agentId: string, skillId: string | null): Promise<void> {
@@ -537,6 +582,35 @@ function normalizeUserMessage(input: unknown): string {
 function normalizeAssistantMessage(input: string): string {
   const trimmed = input.trim();
   return /^\\+$/.test(trimmed) ? '' : input;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function parseCodexReply(output: string): string {
+  const messages: string[] = [];
+  for (const line of output.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const value = JSON.parse(line) as unknown;
+      collectCodexText(value, messages);
+    } catch {
+      // Ignore non-JSON process noise and rely on the structured final message.
+    }
+  }
+  return messages.join('\n').trim();
+}
+
+function collectCodexText(value: unknown, messages: string[]): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  const record = value as Record<string, unknown>;
+  const item = record.item;
+  if (record.type === 'agent_message' && typeof record.text === 'string') messages.push(record.text);
+  if (item && typeof item === 'object' && !Array.isArray(item)) {
+    const itemRecord = item as Record<string, unknown>;
+    if ((itemRecord.type === 'agent_message' || itemRecord.type === 'message') && typeof itemRecord.text === 'string') messages.push(itemRecord.text);
+  }
 }
 
 type ExecutionFailure = { message: string; code: AgentExecutionErrorCode; phase: AgentExecutionPhase };

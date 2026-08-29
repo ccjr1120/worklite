@@ -16,7 +16,7 @@ Place navigation and breadcrumb context on the left. Place command search, state
 
 The inspector opens only for selected contextual content, keeps its header and essential actions available, scrolls internally, and does not discard unsaved work when closed. It may expand to `440px` for structured configuration.
 
-The workspace shell owns the active System Helper Chat execution identifier and transient composer draft. Messages, script requests, automatic execution state, and results remain server-owned. Page navigation closes the visible conversation without cancelling work; a browser reload fetches the active execution identifier saved by the browser.
+The workspace shell owns the active conversation execution identifier, selected execution target, and transient composer draft. Messages, plugin process state, script requests, automatic execution state, and results remain server-owned. Page navigation closes the visible conversation without cancelling work; a browser reload fetches the active execution identifier and selected target saved by the browser.
 
 Place the System Helper Chat interaction surface at the bottom of the content region on every workspace page. Center the complete surface and cap it at `1200px`. With a bound provider it contains only the single-line input and one stable icon-button target without a repeated visible System Helper Chat title; the target shows Send while idle and Stop while the active turn is running. The input remains editable in both states. Focusing it opens the same raised conversation panel above the current page, with stable outer space around it. Without a bound provider it contains a single direct link to `/agents/agt_system_helper_chat` instead of an input or send control. Home and other pages use the same personal session, expanded dimensions, and compact execution summary.
 
@@ -31,6 +31,10 @@ The bottom panel defaults to about `240px`, resizes, and collapses to a status s
 ### 2026-08-27
 
 - Kept the System Helper composer editable during execution and made its stable Send target switch to Stop while the transcript owns loading feedback.
+
+### 2026-08-29
+
+- Added a compact shell-level target picker for the built-in Codex CLI Chat plugin. The picker is available when the plugin is enabled and does not add a new primary navigation surface.
 
 ### 2026-08-27
 

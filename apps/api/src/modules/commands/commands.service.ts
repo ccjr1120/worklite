@@ -13,6 +13,7 @@ type CommandEventListener = (event: CommandEventView) => void;
 export class CommandsService {
   private readonly activeProcesses = new Map<string, ChildProcess>();
   private readonly completionPromises = new Map<string, Promise<CommandExecutionView>>();
+  private readonly pendingStdin = new Map<string, string>();
   private readonly cancellationRequested = new Set<string>();
   private readonly listeners = new Set<CommandEventListener>();
 
@@ -23,15 +24,26 @@ export class CommandsService {
       throw new BadRequestException('A command is required.');
     }
 
+    return this.createInternal(input.command);
+  }
+
+  async createWithInput(command: string, input: string): Promise<CommandExecutionView> {
+    if (!command.trim()) throw new BadRequestException('A command is required.');
+    return this.createInternal(command, input);
+  }
+
+  private async createInternal(command: string, stdinInput?: string): Promise<CommandExecutionView> {
+
     const id = `cmd_${randomUUID()}`;
     const cwd = process.cwd();
-    await this.db.insert(commandExecutions).values({ id, command: input.command, cwd, status: 'queued' });
+    await this.db.insert(commandExecutions).values({ id, command, cwd, status: 'queued' });
     await this.persistEvent(id, 'lifecycle', 'Command queued.');
 
     const completion = Promise.resolve()
       .then(() => this.execute(id))
       .finally(() => this.completionPromises.delete(id));
     this.completionPromises.set(id, completion);
+    if (stdinInput !== undefined) this.pendingStdin.set(id, stdinInput);
     return this.get(id);
   }
 
@@ -89,6 +101,7 @@ export class CommandsService {
         .where(and(eq(commandExecutions.id, commandId), eq(commandExecutions.status, 'queued')))
         .returning();
       if (cancelled) {
+        this.pendingStdin.delete(commandId);
         await this.persistEvent(commandId, 'lifecycle', 'Command cancelled before startup.');
         return toView(cancelled);
       }
@@ -124,14 +137,19 @@ export class CommandsService {
     if (!claimed) return this.get(commandId);
 
     await this.persistEvent(commandId, 'lifecycle', 'Command started.');
+    const stdinInput = this.pendingStdin.get(commandId);
+    this.pendingStdin.delete(commandId);
     const child = spawn('/bin/sh', ['-lc', claimed.command], {
       cwd: process.cwd(),
       env: process.env,
       detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [stdinInput === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });
     this.activeProcesses.set(commandId, child);
     if (child.pid) await this.db.update(commandExecutions).set({ pid: child.pid }).where(eq(commandExecutions.id, commandId));
+    if (stdinInput !== undefined && child.stdin) {
+      child.stdin.end(stdinInput);
+    }
 
     const stdoutDecoder = new StringDecoder('utf8');
     const stderrDecoder = new StringDecoder('utf8');

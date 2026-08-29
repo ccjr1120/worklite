@@ -44,7 +44,7 @@ The root route opens Home. First-use setup is an optional checklist for configur
 
 ## Shared Component Inventory
 
-Theme provider and appearance selector; application shell; sidebar; context bar; personal preferences menu; command menu; shell-level System Helper Chat; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; ordered workflow steps; run timeline; viewers for logs, output and artifacts; skeletons, errors, offline banner.
+Theme provider and appearance selector; application shell; sidebar; context bar; personal preferences menu; command menu; shell-level System Helper Chat with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; ordered workflow steps; run timeline; viewers for logs, output and artifacts; skeletons, errors, offline banner.
 
 Domain-neutral reusable components belong in the shared UI package. Feature composition remains near its feature. Abstract only demonstrated repeated patterns.
 
@@ -64,6 +64,10 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 - Reduced the Home first-use checklist to Model Provider configuration and System Helper Chat model binding, with completion derived from persisted resource state.
 - Removed the standalone Terminal page; direct host execution is now an action on saved Skill scripts in the Skill editor.
+
+### 2026-08-29
+
+- Added the shell-owned plugin picker for the built-in Codex CLI Chat plugin. Activation changes the execution target while preserving the existing transcript, streaming, cancellation, and error presentation patterns.
 
 ### 2026-08-26
 

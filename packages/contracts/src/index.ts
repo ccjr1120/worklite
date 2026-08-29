@@ -45,6 +45,13 @@ export type WorkspaceView = {
   name: string;
 };
 
+export type PluginView = {
+  id: 'codex-cli-chat';
+  name: string;
+  description: string;
+  enabled: boolean;
+};
+
 export type AgentView = {
   id: string;
   workspaceSlug: string;

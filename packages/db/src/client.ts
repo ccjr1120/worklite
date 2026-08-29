@@ -408,6 +408,10 @@ export async function initializeDatabase(db: Database): Promise<void> {
       SELECT 'agt_system_helper_chat', workspaces.id, 'system', 'System Helper Chat', 'Configure workspace AI resources through guided conversation', '${SYSTEM_HELPER_PROMPT.replaceAll("'", "''")}', ''
       FROM workspaces WHERE workspaces.slug = 'personal'
       ON CONFLICT (id) DO UPDATE SET kind = 'system', name = 'System Helper Chat', responsibility = 'Configure workspace AI resources through guided conversation', system_prompt = excluded.system_prompt;
+    INSERT INTO agents (id, workspace_id, kind, name, responsibility, system_prompt, model)
+      SELECT 'agt_codex_cli_chat', workspaces.id, 'system', 'Codex CLI Chat', 'Run conversations through the local Codex CLI', 'You are Codex CLI Chat. Answer the user request directly and concisely.', ''
+      FROM workspaces WHERE workspaces.slug = 'personal'
+      ON CONFLICT (id) DO UPDATE SET kind = 'system', name = 'Codex CLI Chat', responsibility = 'Run conversations through the local Codex CLI', system_prompt = 'You are Codex CLI Chat. Answer the user request directly and concisely.';
   `);
 
   const upsertBuiltInSkill = db.$client.prepare(`

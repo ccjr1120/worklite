@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentSubSessionView, AgentToolCallView, AgentView } from '@worklite/contracts';
 import { ApiError, api, parseAgentExecutionEvent } from '@/api/client';
-import { agentSubSessionsQueryKey, useAgentQuery, useAgentsQuery, useAgentSubSessionsQuery } from '@/api/queries';
+import { agentSubSessionsQueryKey, useAgentQuery, useAgentsQuery, useAgentSubSessionsQuery, usePluginsQuery } from '@/api/queries';
 import { Conversation, ConversationContent } from '@/components/ai-elements/conversation';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import { PromptInput, PromptInputSubmit, PromptInputTextarea } from '@/components/ai-elements/prompt-input';
@@ -21,6 +21,8 @@ import { queryClient } from '@/lib/query-client';
 import { cn } from '@/lib/utils';
 
 const SYSTEM_HELPER_CHAT_ID = 'agt_system_helper_chat';
+const CODEX_CLI_AGENT_ID = 'agt_codex_cli_chat';
+const CODEX_CLI_PLUGIN_ID = 'codex-cli-chat';
 const HISTORY_LIMIT = 20;
 const INCOMPLETE_SKILL_REQUEST = 'The model returned an incomplete Skill request. Its JSON ended before the request was complete.';
 const INVALID_SKILL_REQUEST = 'The model returned an invalid Skill request. Its arguments could not be parsed or did not match the required structure.';
@@ -30,7 +32,8 @@ const SKILL_EXECUTION_ERROR = 'The Agent Skill script could not be completed.';
 const RESTARTED_AGENT_ERROR = 'The API restarted before this Agent turn completed.';
 
 type ArchivedExecution = { id: string; label: string; archivedAt: string };
-type StoredExecutionState = { activeId: string | null; activeSubSessionId: string | null; archived: ArchivedExecution[] };
+type ChatTarget = 'system-helper' | 'codex-cli-chat';
+type StoredExecutionState = { activeId: string | null; activeTarget?: ChatTarget; targetIds?: Partial<Record<ChatTarget, string | null>>; activeSubSessionId: string | null; archived: ArchivedExecution[] };
 type SlashCommand = '/log' | '/new' | '/resume';
 
 const SLASH_COMMANDS: Array<{ value: SlashCommand; icon: typeof Download; descriptionKey: 'commands.logDescription' | 'commands.newDescription' | 'commands.resumeDescription' }> = [
@@ -59,7 +62,8 @@ function readStoredState(workspaceSlug: string): StoredExecutionState {
             : [];
         }).slice(0, HISTORY_LIMIT)
       : [];
-    return { activeId, activeSubSessionId, archived };
+    const targetIds = record.targetIds && typeof record.targetIds === 'object' && !Array.isArray(record.targetIds) ? record.targetIds as Partial<Record<ChatTarget, string | null>> : { 'system-helper': activeId };
+    return { activeId, activeTarget: record.activeTarget === CODEX_CLI_PLUGIN_ID ? 'codex-cli-chat' : 'system-helper', targetIds, activeSubSessionId, archived };
   } catch {
     return { activeId: null, activeSubSessionId: null, archived: [] };
   }
@@ -71,10 +75,12 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const agentQuery = useAgentQuery(workspaceSlug, SYSTEM_HELPER_CHAT_ID);
   const agentsQuery = useAgentsQuery(workspaceSlug);
   const subSessionsQuery = useAgentSubSessionsQuery(workspaceSlug);
+  const pluginsQuery = usePluginsQuery();
   const { applyAppearancePreference } = useTheme();
   const { applyLocalePreference, locale } = useLocale();
   const initialState = useMemo(() => readStoredState(workspaceSlug), [workspaceSlug]);
-  const [activeId, setActiveId] = useState<string | null>(initialState.activeId);
+  const [target, setTarget] = useState<ChatTarget>(initialState.activeTarget ?? 'system-helper');
+  const [targetIds, setTargetIds] = useState<Partial<Record<ChatTarget, string | null>>>(initialState.targetIds ?? { 'system-helper': initialState.activeId });
   const [archived, setArchived] = useState<ArchivedExecution[]>(initialState.archived);
   const [execution, setExecution] = useState<AgentExecutionView | null>(null);
   const [activeSubSessionId, setActiveSubSessionId] = useState<string | null>(initialState.activeSubSessionId);
@@ -99,6 +105,11 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const mainRequestGenerationRef = useRef(0);
   const subRequestGenerationRef = useRef(0);
   const isConfigured = Boolean(agentQuery.data?.providerId && agentQuery.data?.model);
+  const activeId = targetIds[target] ?? null;
+  const selectedPlugin = (pluginsQuery.data ?? []).find((plugin) => plugin.id === CODEX_CLI_PLUGIN_ID) ?? null;
+  const pluginEnabled = Boolean(selectedPlugin?.enabled);
+  const executionAgentId = target === 'codex-cli-chat' ? CODEX_CLI_AGENT_ID : SYSTEM_HELPER_CHAT_ID;
+  const setActiveId = (id: string | null) => setTargetIds((current) => ({ ...current, [target]: id }));
   const subSessions = subSessionsQuery.data ?? [];
   const activeSubSession = subSessions.find((session) => session.id === activeSubSessionId) ?? null;
   const visibleExecution = activeSubSession ? subExecution : execution;
@@ -130,8 +141,8 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
               : visibleExecution?.error ?? '';
 
   useEffect(() => {
-    window.localStorage.setItem(storageKey(workspaceSlug), JSON.stringify({ activeId, activeSubSessionId, archived } satisfies StoredExecutionState));
-  }, [activeId, activeSubSessionId, archived, workspaceSlug]);
+    window.localStorage.setItem(storageKey(workspaceSlug), JSON.stringify({ activeId, activeTarget: target, targetIds, activeSubSessionId, archived } satisfies StoredExecutionState));
+  }, [activeId, activeSubSessionId, archived, target, targetIds, workspaceSlug]);
 
   useEffect(() => {
     if (currentPathRef.current !== pathname) {
@@ -156,7 +167,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
     const load = async () => {
       if (cancelled || generation !== mainRequestGenerationRef.current) return;
       try {
-        const next = await api.agentExecution(workspaceSlug, SYSTEM_HELPER_CHAT_ID, activeId);
+        const next = await api.agentExecution(workspaceSlug, executionAgentId, activeId);
         if (cancelled || generation !== mainRequestGenerationRef.current) return;
         for (const call of next.toolCalls) if (call.status === 'completed') appliedResultIdsRef.current.add(call.id);
         setMainConnectionState('connected');
@@ -178,11 +189,11 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
     };
     void load();
     return () => { cancelled = true; if (retryTimer !== undefined) window.clearTimeout(retryTimer); };
-  }, [activeId, t, workspaceSlug]);
+  }, [activeId, executionAgentId, t, workspaceSlug]);
 
   useEffect(() => {
     if (!activeId || (execution?.status !== 'running' && execution?.status !== 'waiting_for_input')) return;
-    const source = new EventSource(api.agentExecutionEventsUrl(SYSTEM_HELPER_CHAT_ID, activeId), { withCredentials: true });
+    const source = new EventSource(api.agentExecutionEventsUrl(executionAgentId, activeId), { withCredentials: true });
     source.onopen = () => setMainConnectionState('connected');
     source.onerror = () => setMainConnectionState('reconnecting');
     source.onmessage = (message) => {
@@ -207,7 +218,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
       }
     };
     return () => source.close();
-  }, [activeId, execution?.status]);
+  }, [activeId, execution?.status, executionAgentId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -338,7 +349,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
       }
       return;
     }
-    if (running || (!activeSubSession && !isConfigured)) return;
+    if (running || (!activeSubSession && target === 'system-helper' && !isConfigured) || (!activeSubSession && target === 'codex-cli-chat' && !pluginEnabled)) return;
     setBusy(true);
     setError('');
     try {
@@ -348,8 +359,8 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
         void queryClient.invalidateQueries({ queryKey: agentSubSessionsQueryKey() });
       } else {
         const next = activeId
-          ? await api.continueAgentExecution(workspaceSlug, SYSTEM_HELPER_CHAT_ID, activeId, trimmedMessage)
-          : await api.createAgentExecution(workspaceSlug, SYSTEM_HELPER_CHAT_ID, trimmedMessage);
+          ? await api.continueAgentExecution(workspaceSlug, executionAgentId, activeId, trimmedMessage)
+          : await api.createAgentExecution(workspaceSlug, executionAgentId, trimmedMessage);
         setActiveId(next.id);
         setExecution(next);
         void applyCompletedResults(next);
@@ -373,7 +384,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
         setSubExecution(await api.cancelAgentExecution(workspaceSlug, activeSubSession.agentId, activeSubSession.executionId));
         void queryClient.invalidateQueries({ queryKey: agentSubSessionsQueryKey() });
       } else {
-        setExecution(await api.cancelAgentExecution(workspaceSlug, SYSTEM_HELPER_CHAT_ID, visibleExecution.id));
+        setExecution(await api.cancelAgentExecution(workspaceSlug, executionAgentId, visibleExecution.id));
       }
     } catch (cancelError) {
       setError(apiErrorMessage(cancelError, t('assistant:execution.cancelFailed')));
@@ -391,7 +402,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
         setSubExecution(await api.retryAgentExecution(workspaceSlug, activeSubSession.agentId, activeSubSession.executionId));
         void queryClient.invalidateQueries({ queryKey: agentSubSessionsQueryKey() });
       } else {
-        setExecution(await api.retryAgentExecution(workspaceSlug, SYSTEM_HELPER_CHAT_ID, visibleExecution.id));
+        setExecution(await api.retryAgentExecution(workspaceSlug, executionAgentId, visibleExecution.id));
       }
       if (activeSubSession) setSubConnectionState('connected');
       else setMainConnectionState('connected');
@@ -594,8 +605,8 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
         : visibleExecution?.status === 'completed' ? t('assistant:status.completed')
     : visibleExecution?.status === 'waiting_for_input' ? t('assistant:status.waiting_for_input')
       : visibleExecution?.status === 'running' ? t('assistant:status.running') : '';
-  const composerAvailable = Boolean(activeSubSession || isConfigured || eligibleAgents.length > 0);
-  const composerLoading = agentQuery.isLoading || agentsQuery.isLoading || subSessionsQuery.isLoading;
+  const composerAvailable = Boolean(activeSubSession || (target === 'codex-cli-chat' ? pluginEnabled : isConfigured) || eligibleAgents.length > 0);
+  const composerLoading = agentQuery.isLoading || agentsQuery.isLoading || subSessionsQuery.isLoading || pluginsQuery.isLoading;
 
   return (
     <div className="pointer-events-none absolute inset-x-3 bottom-3 z-30 sm:inset-x-6 sm:bottom-6">
@@ -605,7 +616,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
             <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-surface px-4 py-3">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h2 id="assistant-panel-title" className="text-base font-semibold">{activeSubSession?.agentName ?? t('assistant:title')}</h2>
+                  <h2 id="assistant-panel-title" className="text-base font-semibold">{activeSubSession?.agentName ?? (target === 'codex-cli-chat' ? selectedPlugin?.name ?? t('assistant:plugin.codexCli') : t('assistant:title'))}</h2>
                   {status ? <Badge variant={visibleExecution?.status === 'failed' ? 'danger' : 'neutral'}>{status}</Badge> : null}
                 </div>
                 <p className="mt-0.5 truncate text-[13px] text-muted-foreground">{activeSubSession?.title ?? t('assistant:description')}</p>
@@ -644,6 +655,11 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
         ) : composerAvailable ? (
           <PromptInput onSubmit={submit}>
             <label htmlFor="assistant-message" className="sr-only">{t('assistant:composer.label')}</label>
+            {target !== 'system-helper' || pluginEnabled ? <label className="sr-only" htmlFor="assistant-target">{t('assistant:plugin.targetLabel')}</label> : null}
+            {target !== 'system-helper' || pluginEnabled ? <select id="assistant-target" value={target} disabled={running || busy} onChange={(event) => { const next = event.target.value as ChatTarget; setTarget(next); setActiveSubSessionId(null); setSubExecution(null); setHistoryOpen(false); setError(''); setOpen(true); }} className="h-8 shrink-0 rounded-md border border-border bg-surface px-2 text-xs font-medium text-foreground focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20">
+              <option value="system-helper">{t('assistant:plugin.systemHelper')}</option>
+              {selectedPlugin?.enabled ? <option value="codex-cli-chat">{selectedPlugin.name}</option> : null}
+            </select> : null}
             <Popover open={commandMatches.length > 0 || mentionMenuOpen} onOpenChange={(next) => { if (next) return; setSlashDismissed(true); setMentionDismissed(true); }}>
               <PopoverAnchor asChild><div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 rounded-md border border-border bg-surface px-2 focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
                 {selectedAgent ? <span className="inline-flex h-7 max-w-[min(12rem,45%)] shrink-0 items-center gap-1.5 rounded-md border border-brand/30 bg-brand-subtle px-2 text-[13px] font-medium text-foreground"><Bot className="size-3.5 shrink-0 text-brand" /><span className="truncate">{selectedAgent.name}</span><Tooltip><TooltipTrigger asChild><button type="button" className={cn('rounded-sm text-muted-foreground hover:text-foreground', focusRingInset)} aria-label={t('assistant:mentions.remove')} onClick={() => setSelectedAgent(null)}><X className="size-3.5" /></button></TooltipTrigger><TooltipContent>{t('assistant:mentions.remove')}</TooltipContent></Tooltip></span> : null}
@@ -653,7 +669,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
                 {mentionMenuOpen ? <AgentMentionMenu agents={mentionMatches} activeIndex={activeMentionIndex} onActiveIndex={setActiveMentionIndex} onSelect={selectMention} /> : <div role="listbox" aria-label={t('assistant:commands.menuLabel')}>{commandMatches.map((command, index) => { const Icon = command.icon; return <button key={command.value} type="button" role="option" aria-selected={index === activeCommandIndex} className={cn('flex w-full items-start gap-3 rounded-md px-3 py-2 text-left', surfaceInteraction, focusRingInset, index === activeCommandIndex ? 'bg-brand-subtle' : 'hover:bg-surface-subtle')} onPointerDown={(event) => event.preventDefault()} onPointerMove={() => setActiveCommandIndex(index)} onClick={() => runCommand(command.value)}><Icon className="mt-0.5 size-4 shrink-0 text-brand" /><span><span className="block font-mono text-[13px] font-medium">{command.value}</span><span className="mt-0.5 block text-xs text-muted-foreground">{t(`assistant:${command.descriptionKey}`)}</span></span></button>; })}</div>}
               </PopoverContent>
             </Popover>
-            <Tooltip><TooltipTrigger asChild><PromptInputSubmit className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md bg-brand text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50" status={running && !selectedAgent ? 'streaming' : busy ? 'submitted' : 'idle'} aria-label={running && !selectedAgent ? t('assistant:composer.stop') : t('assistant:composer.send')} disabled={running && !selectedAgent ? busy : !draft.trim() || busy || (!activeSubSession && !selectedAgent && !isConfigured)} onStop={() => void cancelExecution()}>{running && !selectedAgent ? <Square className="size-3.5 fill-current" /> : busy ? <LoaderCircle className="size-4 motion-safe:animate-spin" /> : <ArrowUp className="size-4" />}</PromptInputSubmit></TooltipTrigger><TooltipContent>{running && !selectedAgent ? t('assistant:composer.stop') : t('assistant:composer.send')}</TooltipContent></Tooltip>
+            <Tooltip><TooltipTrigger asChild><PromptInputSubmit className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md bg-brand text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50" status={running && !selectedAgent ? 'streaming' : busy ? 'submitted' : 'idle'} aria-label={running && !selectedAgent ? t('assistant:composer.stop') : t('assistant:composer.send')} disabled={running && !selectedAgent ? busy : !draft.trim() || busy || (!activeSubSession && !selectedAgent && ((target === 'system-helper' && !isConfigured) || (target === 'codex-cli-chat' && !pluginEnabled)))} onStop={() => void cancelExecution()}>{running && !selectedAgent ? <Square className="size-3.5 fill-current" /> : busy ? <LoaderCircle className="size-4 motion-safe:animate-spin" /> : <ArrowUp className="size-4" />}</PromptInputSubmit></TooltipTrigger><TooltipContent>{running && !selectedAgent ? t('assistant:composer.stop') : t('assistant:composer.send')}</TooltipContent></Tooltip>
           </PromptInput>
         ) : (
           <Link to="/agents/$agentId" params={{ agentId: SYSTEM_HELPER_CHAT_ID }} className={cn('flex min-h-12 items-center gap-2 px-3 text-[13px] font-medium hover:bg-surface-subtle', surfaceInteraction, focusRingInset)}><ShieldAlert className="size-4 shrink-0 text-brand" /><span className="min-w-0 flex-1">{t('assistant:composer.configure')}</span><ChevronRight className="size-4 text-muted-foreground" /></Link>

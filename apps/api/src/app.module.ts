@@ -15,12 +15,14 @@ import { ModelProvidersModule } from './modules/model-providers/model-providers.
 import { UsageModule } from './modules/usage/usage.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { CommandsModule } from './modules/commands/commands.module';
+import { PluginsModule } from './modules/plugins/plugins.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     DatabaseModule,
     CommandsModule,
+    PluginsModule,
     ObjectStorageModule,
     WorkspaceModule,
     AgentsModule,
