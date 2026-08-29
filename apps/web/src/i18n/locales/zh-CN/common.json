@@ -44,6 +44,7 @@
     "draft": "草稿",
     "published": "已发布",
     "connected": "已连接",
+    "disconnected": "未连接",
     "unreachable": "无法连接",
     "auth_failed": "认证失败",
     "unconfigured": "未配置",
@@ -51,7 +52,9 @@
     "invalid": "无效",
     "pending": "校验中",
     "available": "可用",
-    "missing": "不可用"
+    "missing": "不可用",
+    "qr_pending": "等待扫码",
+    "error": "错误"
   },
   "empty": {
     "dash": "—"

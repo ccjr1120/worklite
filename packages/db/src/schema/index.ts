@@ -20,8 +20,26 @@ export const plugins = sqliteTable('plugins', {
   name: text('name').notNull(),
   description: text('description').notNull(),
   command: text('command').notNull().default('codex'),
+  wechatBaseUrl: text('wechat_base_url').notNull().default('https://ilinkai.weixin.qq.com'),
+  wechatToken: text('wechat_token'),
+  wechatBotId: text('wechat_bot_id'),
+  wechatStatus: text('wechat_status').$type<'disconnected' | 'qr_pending' | 'connected' | 'error'>().notNull().default('disconnected'),
+  wechatQrCode: text('wechat_qr_code'),
+  wechatQrKey: text('wechat_qr_key'),
+  wechatCursor: text('wechat_cursor').notNull().default(''),
+  wechatLastError: text('wechat_last_error'),
   updatedAt: timestamp('updated_at'),
 });
+
+export const pluginWechatConversations = sqliteTable('plugin_wechat_conversations', {
+  id: text('id').primaryKey(),
+  pluginId: text('plugin_id').notNull().references(() => plugins.id, { onDelete: 'cascade' }),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull(),
+  contextToken: text('context_token'),
+  executionId: text('execution_id'),
+  updatedAt: timestamp('updated_at'),
+}, (table) => [unique().on(table.pluginId, table.userId)]);
 
 export const agents = sqliteTable('agents', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), kind: text('kind').$type<'system' | 'custom'>().notNull().default('custom'), name: text('name').notNull(), responsibility: text('responsibility').notNull(), model: text('model').notNull(), providerId: text('provider_id'),

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { WorkspaceModule } from '../teams/teams.module';
 import { SkillsModule } from '../skills/skills.module';
 import { CommandsModule } from '../commands/commands.module';
@@ -15,5 +15,5 @@ import { BuiltinAgentToolsService } from './builtin-agent-tools.service';
 import { McpServersModule } from '../mcp-servers/mcp-servers.module';
 import { PluginsModule } from '../plugins/plugins.module';
 
-@Module({ imports: [WorkspaceModule, SkillsModule, CommandsModule, McpServersModule, PluginsModule], controllers: [AgentsController, AgentVersionsController, AgentSubSessionsController, AgentScheduledTasksController], providers: [AgentsService, AgentExecutionsService, AgentSubSessionsService, McpRuntimeService, AgentScheduledTasksService, BuiltinAgentToolsService], exports: [AgentsService, AgentExecutionsService] })
+@Module({ imports: [WorkspaceModule, SkillsModule, CommandsModule, McpServersModule, forwardRef(() => PluginsModule)], controllers: [AgentsController, AgentVersionsController, AgentSubSessionsController, AgentScheduledTasksController], providers: [AgentsService, AgentExecutionsService, AgentSubSessionsService, McpRuntimeService, AgentScheduledTasksService, BuiltinAgentToolsService], exports: [AgentsService, AgentExecutionsService] })
 export class AgentsModule {}

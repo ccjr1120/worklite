@@ -53,6 +53,19 @@ export type PluginView = {
   enabled: boolean;
   status: 'available' | 'missing' | 'failed';
   updatedAt: string;
+  wechat: WechatConnectionView;
+};
+
+export type WechatConnectionStatus = 'disconnected' | 'qr_pending' | 'connected' | 'error';
+
+export type WechatConnectionView = {
+  status: WechatConnectionStatus;
+  baseUrl: string;
+  botId: string | null;
+  qrCode: string | null;
+  lastError: string | null;
+  conversationCount: number;
+  updatedAt: string;
 };
 
 export type UpdatePluginRequest = {

@@ -82,6 +82,35 @@ export class AgentExecutionsService {
     return id;
   }
 
+  async createOrContinueBackgroundExecution(workspaceId: string, agentId: string, executionId: string | null, message: string): Promise<string> {
+    const content = normalizeUserMessage(message);
+    if (!executionId) return this.createBackgroundExecution(workspaceId, agentId, content);
+    const [execution] = await this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.workspaceId, workspaceId), eq(agentExecutions.agentId, agentId))).limit(1);
+    if (!execution || execution.status === 'running' || execution.status === 'waiting_for_input') return this.createBackgroundExecution(workspaceId, agentId, content);
+    const now = new Date();
+    const accepted = this.db.update(agentExecutions).set({ status: 'running', phase: 'model', errorCode: null, error: null, modelMessages: [...execution.modelMessages, { role: 'user', content }], displayMessages: [...execution.displayMessages, { id: `msg_${randomUUID()}`, role: 'user', content, createdAt: now.toISOString() }], updatedAt: now }).where(and(eq(agentExecutions.id, executionId), or(eq(agentExecutions.status, 'completed'), eq(agentExecutions.status, 'cancelled'), eq(agentExecutions.status, 'failed')))).run().changes > 0;
+    if (!accepted) return this.createBackgroundExecution(workspaceId, agentId, content);
+    await this.publishSnapshotForExecution(workspaceId, executionId);
+    this.schedule({} as Request, 'personal', executionId);
+    return executionId;
+  }
+
+  async waitForCompletion(workspaceId: string, executionId: string, timeoutMs = 120_000): Promise<string> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const [execution] = await this.db.select({ status: agentExecutions.status, displayMessages: agentExecutions.displayMessages, error: agentExecutions.error }).from(agentExecutions).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.workspaceId, workspaceId))).limit(1);
+      if (!execution) throw new NotFoundException('Agent execution not found');
+      if (execution.status !== 'running' && execution.status !== 'waiting_for_input') {
+        const message = [...execution.displayMessages].reverse().find((item) => item.role === 'assistant');
+        if (message?.content) return message.content;
+        if (execution.error) throw new Error(execution.error);
+        throw new Error('The Codex execution returned no text.');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new Error('The Codex execution timed out.');
+  }
+
   async executeWorkflowAgent(
     workspaceId: string,
     agentVersionId: string,

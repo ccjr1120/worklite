@@ -11,6 +11,7 @@ type StatusKey =
   | 'draft'
   | 'published'
   | 'connected'
+  | 'disconnected'
   | 'unreachable'
   | 'auth_failed'
   | 'unconfigured'
@@ -18,7 +19,9 @@ type StatusKey =
   | 'invalid'
   | 'pending'
   | 'available'
-  | 'missing';
+  | 'missing'
+  | 'qr_pending'
+  | 'error';
 
 const STATUS_CONFIG: Record<
   StatusKey,
@@ -34,6 +37,7 @@ const STATUS_CONFIG: Record<
   draft: { variant: 'warning', icon: CircleDashed },
   published: { variant: 'success', icon: CheckCircle2 },
   connected: { variant: 'success', icon: CheckCircle2 },
+  disconnected: { variant: 'neutral', icon: CircleDashed },
   unreachable: { variant: 'danger', icon: XCircle },
   auth_failed: { variant: 'danger', icon: XCircle },
   unconfigured: { variant: 'neutral', icon: CircleDashed },
@@ -42,6 +46,8 @@ const STATUS_CONFIG: Record<
   pending: { variant: 'info', icon: LoaderCircle },
   available: { variant: 'success', icon: CheckCircle2 },
   missing: { variant: 'danger', icon: XCircle },
+  qr_pending: { variant: 'warning', icon: LoaderCircle },
+  error: { variant: 'danger', icon: XCircle },
 };
 
 type StatusBadgeProps = {
@@ -53,7 +59,7 @@ function StatusBadge({ status, className }: StatusBadgeProps) {
   const { t } = useTranslation('common');
   const config = STATUS_CONFIG[status];
   const Icon = config.icon;
-  const spinning = status === 'running' || status === 'pending';
+  const spinning = status === 'running' || status === 'pending' || status === 'qr_pending';
 
   return (
     <Badge variant={config.variant} className={cn('tabular-nums', className)}>

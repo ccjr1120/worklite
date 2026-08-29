@@ -32,5 +32,19 @@
     "testUnavailable": "The configured command exited unsuccessfully.",
     "saved": "Plugin configuration saved",
     "saveFailed": "The plugin configuration could not be saved."
+  },
+  "wechat": {
+    "title": "WeChat ClawBot",
+    "description": "Connect this Codex plugin to WeChat through the iLink bot transport.",
+    "login": "Start login",
+    "refresh": "Refresh QR",
+    "disconnect": "Disconnect",
+    "loginFailed": "WeChat login could not be started.",
+    "disconnectFailed": "The WeChat connection could not be disconnected.",
+    "qrAlt": "WeChat login QR code",
+    "scan": "Scan this QR code with WeChat to connect.",
+    "botId": "Bot ID",
+    "conversations": "Mapped conversations",
+    "notConnected": "Not connected"
   }
 }

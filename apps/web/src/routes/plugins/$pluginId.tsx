@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { LoaderCircle, Puzzle, RotateCcw } from 'lucide-react';
+import { LoaderCircle, LogIn, Puzzle, RefreshCw, RotateCcw, Unplug } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -30,6 +30,7 @@ function PluginConfigPage() {
   const [saving, setSaving] = useState(false);
   const [testState, setTestState] = useState<'idle' | 'pending' | 'available' | 'missing' | 'failed'>('idle');
   const [error, setError] = useState('');
+  const [wechatPending, setWechatPending] = useState(false);
   useEffect(() => {
     if (!plugin) return;
     setCommand(plugin.command);
@@ -78,6 +79,28 @@ function PluginConfigPage() {
     }
   }
 
+  async function startWechatLogin() {
+    setWechatPending(true);
+    setError('');
+    try {
+      const wechat = await api.startWechatLogin(pluginId);
+      queryClient.setQueryData(['plugin', pluginId], { ...plugin, wechat });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : tPlugins('wechat.loginFailed'));
+    } finally { setWechatPending(false); }
+  }
+
+  async function disconnectWechat() {
+    setWechatPending(true);
+    setError('');
+    try {
+      const wechat = await api.disconnectWechat(pluginId);
+      queryClient.setQueryData(['plugin', pluginId], { ...plugin, wechat });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : tPlugins('wechat.disconnectFailed'));
+    } finally { setWechatPending(false); }
+  }
+
   if (pluginQuery.isLoading) return <div className="mx-auto w-full max-w-[840px] px-6 py-6"><p className="text-sm text-muted-foreground">{tPlugins('loading')}</p></div>;
   if (pluginQuery.isError || !plugin) return <div className="mx-auto w-full max-w-[840px] px-6 py-6"><p className="text-sm text-danger" role="alert">{tPlugins('loadFailed')}</p><Button asChild className="mt-4" variant="secondary"><Link to="/plugins">{tCommon('actions.back')}</Link></Button></div>;
 
@@ -97,6 +120,21 @@ function PluginConfigPage() {
           <Button type="button" variant="secondary" onClick={() => void test()} disabled={saving || testState === 'pending' || !command.trim()}>{testState === 'pending' ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <RotateCcw aria-hidden="true" />}{testState === 'pending' ? tPlugins('config.testing') : tPlugins('config.test')}</Button>
           {testState !== 'idle' && testState !== 'pending' ? <StatusBadge status={testState} /> : null}
         </div>
+        {pluginId === 'codex-cli-chat' ? (
+          <section className="space-y-4 border-t border-border pt-5" aria-labelledby="wechat-heading">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 id="wechat-heading" className="flex items-center gap-2 text-sm font-medium"><Puzzle className="size-4 text-muted-foreground" aria-hidden="true" />{tPlugins('wechat.title')}</h2>
+                <p className="mt-1 text-[13px] text-muted-foreground">{tPlugins('wechat.description')}</p>
+              </div>
+              <StatusBadge status={plugin.wechat.status} />
+            </div>
+            {plugin.wechat.qrCode ? <div className="space-y-2"><img src={plugin.wechat.qrCode} alt={tPlugins('wechat.qrAlt')} className="size-48 rounded border border-border bg-white object-contain p-2" /><p className="text-[13px] text-muted-foreground">{tPlugins('wechat.scan')}</p></div> : null}
+            <dl className="grid gap-3 text-[13px] sm:grid-cols-2"><div><dt className="text-muted-foreground">{tPlugins('wechat.botId')}</dt><dd className="font-mono">{plugin.wechat.botId || tPlugins('wechat.notConnected')}</dd></div><div><dt className="text-muted-foreground">{tPlugins('wechat.conversations')}</dt><dd className="tabular-nums">{plugin.wechat.conversationCount}</dd></div></dl>
+            {plugin.wechat.lastError ? <p className="text-[13px] text-danger" role="alert">{plugin.wechat.lastError}</p> : null}
+            <div className="flex flex-wrap gap-3"><Button type="button" variant="secondary" onClick={() => void startWechatLogin()} disabled={wechatPending || plugin.wechat.status === 'connected'}>{wechatPending ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : plugin.wechat.status === 'qr_pending' ? <RefreshCw aria-hidden="true" /> : <LogIn aria-hidden="true" />}{plugin.wechat.status === 'qr_pending' ? tPlugins('wechat.refresh') : tPlugins('wechat.login')}</Button>{plugin.wechat.status !== 'disconnected' ? <Button type="button" variant="ghost" onClick={() => void disconnectWechat()} disabled={wechatPending}><Unplug aria-hidden="true" />{tPlugins('wechat.disconnect')}</Button> : null}</div>
+          </section>
+        ) : null}
       </div>
     </div>
   );

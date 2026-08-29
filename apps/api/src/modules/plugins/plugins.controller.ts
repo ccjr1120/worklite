@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import type { UpdatePluginRequest } from '@worklite/contracts';
 import { PluginsService } from './plugins.service';
+import { WechatClawbotService } from './wechat-clawbot.service';
 
 @Controller('plugins')
 export class PluginsController {
-  constructor(private readonly plugins: PluginsService) {}
+  constructor(private readonly plugins: PluginsService, private readonly wechat: WechatClawbotService) {}
 
   @Get()
   list() {
@@ -24,5 +25,17 @@ export class PluginsController {
   @Post(':pluginId/test')
   test(@Param('pluginId') pluginId: string) {
     return this.plugins.test(pluginId);
+  }
+
+  @Post(':pluginId/wechat/login')
+  startWechatLogin(@Param('pluginId') pluginId: string) {
+    if (pluginId !== 'codex-cli-chat') throw new BadRequestException('WeChat transport is only available for the Codex plugin.');
+    return this.wechat.startLogin();
+  }
+
+  @Post(':pluginId/wechat/disconnect')
+  disconnectWechat(@Param('pluginId') pluginId: string) {
+    if (pluginId !== 'codex-cli-chat') throw new BadRequestException('WeChat transport is only available for the Codex plugin.');
+    return this.wechat.disconnect();
   }
 }

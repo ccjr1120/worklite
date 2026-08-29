@@ -22,6 +22,13 @@
       "when": 1788012789998,
       "tag": "0002_striped_alex_power",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1788096000000,
+      "tag": "0003_wechat_clawbot",
+      "breakpoints": true
     }
   ]
 }

@@ -32,5 +32,19 @@
     "testUnavailable": "配置的命令执行失败。",
     "saved": "插件配置已保存",
     "saveFailed": "无法保存插件配置。"
+  },
+  "wechat": {
+    "title": "微信 ClawBot",
+    "description": "通过 iLink Bot 传输将此 Codex 插件连接到微信。",
+    "login": "开始登录",
+    "refresh": "刷新二维码",
+    "disconnect": "断开连接",
+    "loginFailed": "无法开始微信登录。",
+    "disconnectFailed": "无法断开微信连接。",
+    "qrAlt": "微信登录二维码",
+    "scan": "使用微信扫描此二维码以完成连接。",
+    "botId": "Bot ID",
+    "conversations": "已映射会话",
+    "notConnected": "未连接"
   }
 }

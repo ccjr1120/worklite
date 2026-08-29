@@ -1,9 +1,10 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { spawnSync } from 'node:child_process';
-import { eq } from 'drizzle-orm';
+import { count, eq } from 'drizzle-orm';
 import type { PluginTestResult, PluginView, UpdatePluginRequest } from '@worklite/contracts';
-import { plugins, type Database } from '@worklite/db';
+import { pluginWechatConversations, plugins, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 
 export const CODEX_CLI_PLUGIN_ID = 'codex-cli-chat' as const;
 export const CODEX_CLI_AGENT_ID = 'agt_codex_cli_chat' as const;
@@ -14,7 +15,7 @@ export class PluginsService {
 
   async list(): Promise<PluginView[]> {
     const rows = await this.db.select().from(plugins).orderBy(plugins.name);
-    return rows.map((row) => this.toView(row));
+    return Promise.all(rows.map((row) => this.toView(row)));
   }
 
   async get(pluginId: string): Promise<PluginView> {
@@ -41,8 +42,21 @@ export class PluginsService {
     return this.probe(command);
   }
 
-  private toView(row: typeof plugins.$inferSelect): PluginView {
+  async updateWechat(pluginId: string, patch: Partial<typeof plugins.$inferInsert>): Promise<PluginView> {
+    const [updated] = await this.db.update(plugins).set({ ...patch, updatedAt: new Date() }).where(eq(plugins.id, pluginId)).returning();
+    if (!updated) throw new NotFoundException('Plugin not found.');
+    return this.toView(updated);
+  }
+
+  async wechatSecret(pluginId: string): Promise<{ token: string | null; baseUrl: string }> {
+    const [row] = await this.db.select({ token: plugins.wechatToken, baseUrl: plugins.wechatBaseUrl }).from(plugins).where(eq(plugins.id, pluginId)).limit(1);
+    if (!row) throw new NotFoundException('Plugin not found.');
+    return { token: row.token ? decryptSecret(row.token) : null, baseUrl: row.baseUrl };
+  }
+
+  private async toView(row: typeof plugins.$inferSelect): Promise<PluginView> {
     const availability = this.probe(row.command);
+    const [{ value: conversationCount }] = await this.db.select({ value: count() }).from(pluginWechatConversations).where(eq(pluginWechatConversations.pluginId, row.id));
     return {
       id: row.id as PluginView['id'],
       name: row.name,
@@ -51,6 +65,15 @@ export class PluginsService {
       enabled: availability.enabled,
       status: availability.status,
       updatedAt: row.updatedAt.toISOString(),
+      wechat: {
+        status: row.wechatStatus,
+        baseUrl: row.wechatBaseUrl,
+        botId: row.wechatBotId,
+        qrCode: row.wechatQrCode,
+        lastError: row.wechatLastError,
+        conversationCount,
+        updatedAt: row.updatedAt.toISOString(),
+      },
     };
   }
 
@@ -67,3 +90,22 @@ export class PluginsService {
     return result.status === 0 ? { enabled: true, status: 'available' } : { enabled: false, status: 'failed' };
   }
 }
+
+function encryptSecret(value: string): string {
+  const key = createHash('sha256').update(process.env.SECRET_ENCRYPTION_KEY ?? 'worklite-development-secret').digest();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  return `${iv.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${encrypted.toString('base64url')}`;
+}
+
+function decryptSecret(value: string): string {
+  const [ivValue, tagValue, encryptedValue] = value.split('.');
+  if (!ivValue || !tagValue || !encryptedValue) throw new Error('Invalid encrypted secret');
+  const key = createHash('sha256').update(process.env.SECRET_ENCRYPTION_KEY ?? 'worklite-development-secret').digest();
+  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(ivValue, 'base64url'));
+  decipher.setAuthTag(Buffer.from(tagValue, 'base64url'));
+  return Buffer.concat([decipher.update(Buffer.from(encryptedValue, 'base64url')), decipher.final()]).toString('utf8');
+}
+
+export { encryptSecret };

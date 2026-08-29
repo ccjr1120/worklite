@@ -33,7 +33,7 @@ export function usePluginsQuery() {
 }
 
 export function usePluginQuery(pluginId: string) {
-  return useQuery({ queryKey: ['plugin', pluginId] as const, queryFn: () => api.plugin(pluginId), enabled: Boolean(pluginId) });
+  return useQuery({ queryKey: ['plugin', pluginId] as const, queryFn: () => api.plugin(pluginId), enabled: Boolean(pluginId), refetchInterval: pluginId === 'codex-cli-chat' ? 2_000 : false });
 }
 
 export function useWorkflowsQuery(workspace?: string) {
