@@ -20,7 +20,7 @@ import type { WorkflowStep } from '@/mock/data';
 import { workflowSteps as seededWorkflowSteps } from '@/mock/data';
 import type { WorkflowDefinition, WorkflowEditOperation } from '@worklite/contracts';
 import { api } from '@/api/client';
-import { useAgentsQuery, useWorkflowQuery, workflowsQueryKey } from '@/api/queries';
+import { useAgentVersionsQuery, useAgentsQuery, useWorkflowQuery, workflowsQueryKey } from '@/api/queries';
 import { queryClient } from '@/lib/query-client';
 import { cn } from '@/lib/utils';
 
@@ -62,6 +62,7 @@ function WorkflowEditorPage() {
     { time: '08:14:11', severity: 'info', source: 'Brief writer', content: 'Generating brief' },
   ]);
   const selected = steps.find((step) => step.id === selectedId);
+  const selectedAgentVersionsQuery = useAgentVersionsQuery(workspaceSlug, selected?.nodeType === 'agent' ? selected.agentId : '');
   const navigate = useNavigate();
 
   const panelOpen = Boolean(selected);
@@ -100,8 +101,32 @@ function WorkflowEditorPage() {
       position: index + 1,
       agentId: agent?.id ?? agentId,
       agentName: agent?.name ?? 'Agent',
-      agentVersion: agent?.version ?? 'draft',
+      agentVersion: agent?.latestVersion ? `v${agent.latestVersion}` : agent?.version ?? 'draft',
+      nodeType: 'agent',
+      agentVersionId: agent?.latestVersionId ?? undefined,
       inputSummary: 'input → output',
+      errorPolicy: executionPolicy,
+    };
+    const next = [...steps];
+    next.splice(index, 0, step);
+    setSteps(reindex(next));
+    setSelectedId(step.id);
+    setInsertIndex(index + 1);
+    setPaletteOpen(false);
+    setSaveState('unsaved');
+  }
+
+  function addTextStep(index: number) {
+    const step: WorkflowStep = {
+      id: `text_${Date.now()}`,
+      position: index + 1,
+      agentId: '',
+      agentName: 'Text',
+      agentVersion: '1',
+      nodeType: 'text',
+      text: '',
+      outputType: 'text',
+      inputSummary: 'literal → output',
       errorPolicy: executionPolicy,
     };
     const next = [...steps];
@@ -121,10 +146,12 @@ function WorkflowEditorPage() {
       nodes: steps.map((step, index) => ({
         id: step.id,
         position: index + 1,
-        type: 'worklite/agent',
+        type: step.nodeType === 'text' ? 'worklite/text' : 'worklite/agent',
         typeVersion: '1',
-        config: { agentId: step.agentId, agentName: step.agentName, agentVersion: step.agentVersion },
-        input: index === 0 ? { source: 'workflow.input' as const } : { source: 'previous.output' as const },
+        config: step.nodeType === 'text'
+          ? { text: step.text ?? '' }
+          : { agentId: step.agentId, agentName: step.agentName, agentVersion: step.agentVersion, ...(step.agentVersionId ? { agentVersionId: step.agentVersionId } : {}), ...(step.promptTemplate ? { promptTemplate: step.promptTemplate } : {}), ...(step.outputType === 'file' ? { outputType: 'file', fileName: step.fileName ?? 'workflow-output.txt', fileType: step.fileType ?? 'markdown' } : {}) },
+        input: step.nodeType === 'text' ? { source: 'literal' as const, value: step.text ?? '' } : index === 0 ? { source: 'workflow.input' as const } : { source: 'previous.output' as const },
         errorPolicy: step.errorPolicy,
       })),
     };
@@ -296,6 +323,11 @@ function WorkflowEditorPage() {
         <Input className="pl-8" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} placeholder={t('editor.searchAgents')} />
       </label>
       <div className="mt-3 min-h-0 flex-1 space-y-1 overflow-auto">
+        <button type="button" className="flex w-full items-center gap-3 rounded-md border border-transparent px-2 py-2 text-left transition-colors duration-[120ms] hover:border-border hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45" onClick={() => addTextStep(insertIndex)}>
+          <FilePlus2 className="size-5 shrink-0 text-brand" />
+          <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium">Text</span><span className="block truncate text-[12px] text-muted-foreground">Literal text input</span></span>
+          <Plus className="size-4 text-muted-foreground" aria-hidden="true" />
+        </button>
         {filteredAgents.length === 0 ? <p className="px-2 py-6 text-center text-[13px] text-muted-foreground">{t('editor.noAgents')}</p> : null}
         {filteredAgents.map((agent) => (
           <button
@@ -326,21 +358,48 @@ function WorkflowEditorPage() {
         <PanelRight className="size-4 text-muted-foreground" aria-hidden="true" />
       </div>
       <div className="mt-5 flex flex-col gap-4">
-        <Field label={t('editor.agentVersion')} htmlFor="agent">
-          <Select
-            value={selected.agentId}
-            onValueChange={(value) => {
-              const agent = availableAgents.find((item) => item.id === value);
-              setSteps((current) => current.map((step) => step.id === selectedId ? { ...step, agentId: value, agentName: agent?.name ?? step.agentName, agentVersion: agent?.version ?? step.agentVersion } : step));
-              setSaveState('unsaved');
-            }}
-          >
-            <SelectTrigger id="agent"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {availableAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.name} {agent.version}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </Field>
+        {selected.nodeType === 'text' ? <Field label="Text" htmlFor="node-text"><Textarea id="node-text" value={selected.text ?? ''} onChange={(event) => { setSteps((current) => current.map((step) => step.id === selectedId ? { ...step, text: event.target.value, inputSummary: event.target.value ? 'literal → output' : 'empty literal → output' } : step)); setSaveState('unsaved'); }} placeholder="Enter text" /></Field> : (
+          <>
+            <Field label="Agent" htmlFor="agent">
+              <Select
+                value={selected.agentId}
+                onValueChange={(value) => {
+                  const agent = availableAgents.find((item) => item.id === value);
+                  setSteps((current) => current.map((step) => step.id === selectedId ? {
+                    ...step,
+                    agentId: value,
+                    agentName: agent?.name ?? step.agentName,
+                    agentVersion: agent?.latestVersion ? `v${agent.latestVersion}` : agent?.version ?? step.agentVersion,
+                    agentVersionId: agent?.latestVersionId ?? undefined,
+                  } : step));
+                  setSaveState('unsaved');
+                }}
+              >
+                <SelectTrigger id="agent"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {availableAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label={t('editor.agentVersion')} htmlFor="agent-version">
+              <Select
+                value={selected.agentVersionId}
+                onValueChange={(value) => {
+                  const version = selectedAgentVersionsQuery.data?.find((item) => item.id === value);
+                  setSteps((current) => current.map((step) => step.id === selectedId ? { ...step, agentVersionId: value, agentVersion: version ? `v${version.version}` : step.agentVersion } : step));
+                  setSaveState('unsaved');
+                }}
+                disabled={selectedAgentVersionsQuery.isLoading || selectedAgentVersionsQuery.isError || !(selectedAgentVersionsQuery.data?.length)}
+              >
+                <SelectTrigger id="agent-version"><SelectValue placeholder={selectedAgentVersionsQuery.isLoading ? 'Loading versions...' : 'Select an immutable version'} /></SelectTrigger>
+                <SelectContent>
+                  {(selectedAgentVersionsQuery.data ?? []).map((version) => <SelectItem key={version.id} value={version.id}>v{version.version} · {version.model}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {!selected.agentVersionId ? <p className="mt-1 text-[12px] text-danger">Select an immutable AgentVersion before publishing.</p> : null}
+            </Field>
+          </>
+        )}
         <Field label={t('editor.errorPolicy')} htmlFor="policy">
           <Select
             value={selected.errorPolicy}
@@ -571,6 +630,8 @@ function toEditorSteps(definition: WorkflowDefinition): WorkflowStep[] {
     const agentName = typeof config.agentName === 'string' ? config.agentName : agentId;
     const agentVersion = typeof config.agentVersion === 'string' ? config.agentVersion : 'draft';
     const inputSummary = node.input.source === 'literal' ? 'literal → output' : node.input.source === 'workflow.input' ? 'input → output' : 'previous output → output';
-    return { id: node.id, position: node.position, agentId, agentName, agentVersion, inputSummary, errorPolicy: node.errorPolicy };
+    const nodeType = node.type === 'worklite/text' ? 'text' : 'agent';
+    const text = typeof config.text === 'string' ? config.text : node.input.source === 'literal' && typeof node.input.value === 'string' ? node.input.value : '';
+    return { id: node.id, position: node.position, agentId, agentName: nodeType === 'text' ? 'Text' : agentName, agentVersion, agentVersionId: typeof config.agentVersionId === 'string' ? config.agentVersionId : undefined, nodeType, text, outputType: config.outputType === 'file' ? 'file' : nodeType === 'text' ? 'text' : undefined, fileName: typeof config.fileName === 'string' ? config.fileName : undefined, fileType: config.fileType === 'json' || config.fileType === 'text' || config.fileType === 'markdown' ? config.fileType : undefined, promptTemplate: typeof config.promptTemplate === 'string' ? config.promptTemplate : undefined, inputSummary, errorPolicy: node.errorPolicy };
   });
 }

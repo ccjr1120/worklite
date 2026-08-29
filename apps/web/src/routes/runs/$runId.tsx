@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useMemo, useState } from 'react';
+import { useEffect } from 'react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
@@ -11,22 +12,15 @@ import { StatusBadge } from '@/components/status-badge';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
 import { durationParts, formatDateTime } from '@/i18n/format';
-import { api } from '@/api/client';
+import { api, parseRunProgressEvent } from '@/api/client';
 import { useRunQuery } from '@/api/queries';
 import { queryClient } from '@/lib/query-client';
-import type { Artifact, WorkflowStep } from '@/mock/data';
+import type { RunProgressEvent, WorkflowNodeRunView } from '@worklite/contracts';
 import { cn } from '@/lib/utils';
 
 export const Route = createFileRoute('/runs/$runId')({
   component: RunDetailsPage,
 });
-
-const LOGS = [
-  { time: '08:12:01.120', severity: 'info', source: 'run', content: 'Run queued' },
-  { time: '08:12:04.448', severity: 'info', source: 'Researcher', content: 'Step started with topic input' },
-  { time: '08:13:22.019', severity: 'info', source: 'Researcher', content: 'Retrieved 8 sources' },
-  { time: '08:14:11.330', severity: 'info', source: 'Brief writer', content: 'Generating brief' },
-];
 
 function RunDetailsPage() {
   const { t } = useTranslation(['runs', 'common']);
@@ -34,13 +28,41 @@ function RunDetailsPage() {
   const { runId } = Route.useParams();
   const workspaceSlug = "personal";
   const { data: run } = useRunQuery(workspaceSlug, runId);
-  const steps: WorkflowStep[] = [];
-  const [selectedId, setSelectedId] = useState(steps.find((step) => step.status === 'running')?.id ?? steps[0]?.id ?? null);
+  const steps = run?.nodeRuns ?? [];
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [nodeDeltas, setNodeDeltas] = useState<Record<string, string>>({});
+  const [events, setEvents] = useState<RunProgressEvent[]>([]);
   const [following, setFollowing] = useState(true);
   const [cancelling, setCancelling] = useState(false);
   const selected = steps.find((step) => step.id === selectedId);
-  const runArtifacts: Artifact[] = [];
+  const runArtifacts = run?.artifacts ?? [];
   const cancellable = run?.status === 'running' || run?.status === 'queued';
+
+  useEffect(() => {
+    setSelectedId((current) => current && steps.some((step) => step.id === current)
+      ? current
+      : steps.find((step) => step.status === 'running')?.id ?? steps[0]?.id ?? null);
+  }, [run?.id, steps]);
+
+  useEffect(() => {
+    if (!run || ['succeeded', 'failed', 'cancelled', 'timed_out'].includes(run.status)) return;
+    const source = new EventSource(api.runEventsUrl(runId), { withCredentials: true });
+    source.onmessage = (message) => {
+      try {
+        const event = parseRunProgressEvent(message.data);
+        setEvents((current) => [...current, event].slice(-200));
+        if (event.type === 'node.delta') {
+          const payload = event.payload as { nodeId?: string; delta?: string };
+          if (payload.nodeId && typeof payload.delta === 'string') setNodeDeltas((current) => ({ ...current, [payload.nodeId!]: `${current[payload.nodeId!] ?? ''}${payload.delta}` }));
+        }
+        void queryClient.invalidateQueries({ queryKey: ['run', runId] });
+        void queryClient.invalidateQueries({ queryKey: ['runs'] });
+      } catch {
+        // Ignore malformed events and let EventSource reconnect.
+      }
+    };
+    return () => source.close();
+  }, [run?.id, run?.status, runId]);
 
   async function cancelRun() {
     if (cancelling) return;
@@ -118,10 +140,10 @@ function RunDetailsPage() {
                   <span
                     className={cn(
                       'mt-1 size-2.5 rounded-full',
-                      step.status === 'completed' && 'bg-success',
+                      step.status === 'succeeded' && 'bg-success',
                       step.status === 'failed' && 'bg-danger',
                       step.status === 'running' && 'bg-brand',
-                      (!step.status || step.status === 'queued') && 'bg-border',
+                      step.status === 'queued' && 'bg-border',
                     )}
                     aria-hidden="true"
                   />
@@ -139,29 +161,33 @@ function RunDetailsPage() {
                   onClick={() => setSelectedId(step.id)}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">{step.agentName}</span>
-                    {step.status ? <StatusBadge status={step.status} /> : null}
+                    <span className="text-sm font-medium">{nodeLabel(step)}</span>
+                    <StatusBadge status={toUiStatus(step.status)} />
                   </div>
-                  <p className="mt-1 font-mono text-xs text-muted-foreground">{step.agentVersion}</p>
+                  <p className="mt-1 font-mono text-xs text-muted-foreground">{step.type} · {formatValue(step.output ?? nodeDeltas[step.nodeId])}</p>
                 </button>
               </li>
             ))}
           </ol>
         </div>
         <aside className="hidden w-[360px] shrink-0 overflow-auto border-l border-border bg-surface p-4 lg:block">
-          <h2 className="text-sm font-semibold">{selected?.agentName ?? t('details.stepFallback')}</h2>
+          <h2 className="text-sm font-semibold">{selected ? nodeLabel(selected) : t('details.stepFallback')}</h2>
           <dl className="mt-4 space-y-3 text-[13px]">
             <div>
               <dt className="text-xs font-medium text-muted-foreground">{t('details.input')}</dt>
-              <dd className="mt-1 font-mono text-xs">{selected?.inputSummary ?? t('common:empty.dash')}</dd>
+              <dd className="mt-1 max-h-24 overflow-auto font-mono text-xs">{selected ? formatValue(selected.input) : t('common:empty.dash')}</dd>
             </div>
             <div>
               <dt className="text-xs font-medium text-muted-foreground">{t('details.model')}</dt>
-              <dd className="mt-1">claude-sonnet-4</dd>
+              <dd className="mt-1">{selected?.type === 'worklite/agent' ? 'Agent model' : 'Text processor'}</dd>
             </div>
             <div>
               <dt className="text-xs font-medium text-muted-foreground">{t('details.retries')}</dt>
-              <dd className="mt-1 tabular-nums">0</dd>
+              <dd className="mt-1 tabular-nums">{selected?.retryCount ?? 0}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Output</dt>
+              <dd className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap font-mono text-xs">{selected ? formatValue(selected.output ?? nodeDeltas[selected.nodeId]) : t('common:empty.dash')}</dd>
             </div>
           </dl>
           {runArtifacts.length ? (
@@ -189,16 +215,29 @@ function RunDetailsPage() {
           </label>
         </div>
         <div className="h-[184px] overflow-auto bg-background px-4 py-2 font-mono text-[12px]">
-          {LOGS.map((line) => (
-            <p key={line.time} className="grid grid-cols-[110px_64px_110px_1fr] gap-3">
-              <span className="text-muted-foreground">{line.time}</span>
-              <span>{line.severity}</span>
-              <span className="text-muted-foreground">{line.source}</span>
-              <span>{line.content}</span>
+          {events.map((event) => (
+            <p key={`${event.sequence}-${event.occurredAt}`} className="grid grid-cols-[110px_100px_1fr] gap-3">
+              <span className="text-muted-foreground">{formatDateTime(event.occurredAt, locale)}</span>
+              <span>{event.type}</span>
+              <span>{formatValue(event.payload)}</span>
             </p>
           ))}
         </div>
       </div>
     </div>
   );
+}
+
+function nodeLabel(node: WorkflowNodeRunView): string {
+  return node.type === 'worklite/agent' ? `Agent step ${node.position}` : node.type === 'worklite/text' ? `Text step ${node.position}` : `Step ${node.position}`;
+}
+
+function toUiStatus(status: WorkflowNodeRunView['status']): 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' {
+  return status === 'succeeded' ? 'completed' : status;
+}
+
+function formatValue(value: unknown): string {
+  if (value == null) return '—';
+  if (typeof value === 'string') return value;
+  try { return JSON.stringify(value); } catch { return String(value); }
 }

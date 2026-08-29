@@ -23,6 +23,16 @@ export class AgentsController {
     return this.agents.create(request, 'personal', body);
   }
 
+  @Get(':agentId/versions')
+  versions(@Req() request: Request, @Param('agentId') agentId: string) {
+    return this.agents.versions(request, 'personal', agentId);
+  }
+
+  @Post(':agentId/versions')
+  createVersion(@Req() request: Request, @Param('agentId') agentId: string) {
+    return this.agents.createVersion(request, 'personal', agentId);
+  }
+
   @Post(':agentId/executions')
   createExecution(@Req() request: Request, @Param('agentId') agentId: string, @Body() body: CreateAgentExecutionRequest) {
     return this.executions.create(request, 'personal', agentId, body);

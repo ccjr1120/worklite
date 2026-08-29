@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { Request } from 'express';
 import type {
   ApplyWorkflowDraftOperationsRequest,
@@ -17,6 +17,7 @@ import {
   workflowEditRevisions,
   workflowVersions,
   workflowRuns,
+  agentVersions,
   workflows,
   type Database,
   type StoredWorkflowDefinition,
@@ -51,10 +52,11 @@ export class WorkflowsService {
     const draftId = `wfd_${randomUUID()}`;
     const revisionId = `wfr_${randomUUID()}`;
     const definition = normalizeDefinition(input.definition ?? emptyWorkflowDefinition);
+    validateDefinition(definition, false);
     await this.db.transaction((transaction) => {
       transaction.insert(workflows).values({ id: workflowId, workspaceId: workspace.id, name, state: 'draft' }).run();
-      transaction.insert(workflowEditRevisions).values({ id: revisionId, workspaceId: workspace.id, workflowId, draftId, parentRevisionId: null, source: 'manual', operations: [], snapshot: definition }).run();
       transaction.insert(workflowDrafts).values({ id: draftId, workspaceId: workspace.id, workflowId, currentRevisionId: revisionId, definition }).run();
+      transaction.insert(workflowEditRevisions).values({ id: revisionId, workspaceId: workspace.id, workflowId, draftId, parentRevisionId: null, source: 'manual', operations: [], snapshot: definition }).run();
     });
     return this.get(request, workspaceSlug, workflowId);
   }
@@ -80,6 +82,7 @@ export class WorkflowsService {
     const currentRevision = await this.loadRevision(workspace.id, input.baseRevisionId);
     if (!currentRevision) throw new ConflictException('The workflow base revision is unavailable.');
     const nextDefinition = applyOperations(currentRevision.snapshot, input.operations);
+    validateDefinition(nextDefinition, false);
     const revisionId = `wfr_${randomUUID()}`;
     await this.db.transaction((transaction) => {
       const current = transaction.select({ currentRevisionId: workflowDrafts.currentRevisionId }).from(workflowDrafts).where(and(eq(workflowDrafts.id, draft.id), eq(workflowDrafts.workspaceId, workspace.id))).limit(1).all()[0];
@@ -106,12 +109,13 @@ export class WorkflowsService {
     await this.ensureDraft(workflow);
     const draft = await this.loadDraft(workspace.id, workflowId);
     if (!draft || !draft.currentRevisionId) throw new BadRequestException('The workflow has no draft revision.');
-    validateDefinition(draft.definition);
-    const hasUnversionedAgent = draft.definition.nodes.some((node) => {
+    validateDefinition(draft.definition, true);
+    const agentVersionIds = draft.definition.nodes.flatMap((node) => {
       const config = isRecord(node.config) ? node.config : {};
-      return node.type === 'worklite/agent' && typeof config.agentVersionId !== 'string';
+      return node.type === 'worklite/agent' && typeof config.agentVersionId === 'string' ? [config.agentVersionId] : [];
     });
-    if (hasUnversionedAgent) throw new BadRequestException('Every Agent node must reference an immutable AgentVersion before publication.');
+    const availableAgentVersions = agentVersionIds.length === 0 ? [] : await this.db.select({ id: agentVersions.id }).from(agentVersions).where(and(eq(agentVersions.workspaceId, workspace.id), inArray(agentVersions.id, agentVersionIds)));
+    if (availableAgentVersions.length !== new Set(agentVersionIds).size) throw new BadRequestException('Every Agent node must reference an AgentVersion from this workspace.');
     const latest = await this.db.select({ version: workflowVersions.version }).from(workflowVersions).where(eq(workflowVersions.workflowId, workflowId)).orderBy(desc(workflowVersions.version)).limit(1);
     const versionNumber = (latest[0]?.version ?? 0) + 1;
     const versionId = `wfv_${randomUUID()}`;
@@ -247,11 +251,17 @@ function reindex(nodes: StoredWorkflowDefinition['nodes']): StoredWorkflowDefini
   return nodes.map((node, index) => ({ ...node, position: index + 1 }));
 }
 
-function validateDefinition(definition: StoredWorkflowDefinition): void {
+function validateDefinition(definition: StoredWorkflowDefinition, requireAgentVersions: boolean): void {
   if (!Number.isInteger(definition.schemaVersion) || !definition.input || !definition.defaults || !Array.isArray(definition.nodes)) throw new BadRequestException('The workflow definition is invalid.');
   const ids = new Set<string>();
   definition.nodes.forEach((node, index) => {
     if (!node.id || ids.has(node.id) || node.position !== index + 1 || !node.type || !node.typeVersion) throw new BadRequestException('The workflow contains an invalid node sequence.');
+    if (node.type === 'worklite/agent') {
+      const config = isRecord(node.config) ? node.config : null;
+      if (!config) throw new BadRequestException('Agent node configuration must be an object.');
+      if (requireAgentVersions && (typeof config.agentVersionId !== 'string' || !config.agentVersionId.trim())) throw new BadRequestException('Every Agent node must reference an immutable AgentVersion before publication.');
+    }
+    if (node.type === 'worklite/text' && node.input.source === 'literal' && node.input.value !== undefined && typeof node.input.value !== 'string') throw new BadRequestException('Text node literal input must be a string.');
     ids.add(node.id);
   });
 }

@@ -8,6 +8,7 @@ import { api, parseAgentExecutionEvent } from '@/api/client';
 import {
   agentsQueryKey,
   useAgentQuery,
+  useAgentVersionsQuery,
   useMcpServersQuery,
   useModelProvidersQuery,
   useSkillsQuery,
@@ -43,6 +44,7 @@ function AgentEditorPage() {
   const skillsQuery = useSkillsQuery(workspaceSlug);
   const mcpServersQuery = useMcpServersQuery(workspaceSlug);
   const existing = agentQuery.data;
+  const versionsQuery = useAgentVersionsQuery(workspaceSlug, isNew ? '' : agentId);
   const isSystem = agentId === 'agt_system_helper_chat' || existing?.kind === 'system';
   const [name, setName] = useState('');
   const [responsibility, setResponsibility] = useState('');
@@ -61,6 +63,7 @@ function AgentEditorPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const [versionBusy, setVersionBusy] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -161,6 +164,22 @@ function AgentEditorPage() {
     } catch {
       setSaveState('unsaved');
       setSaveError(t('editor.saveFailed'));
+    }
+  }
+
+  async function createVersion() {
+    if (isNew || isSystem || saveState !== 'saved' || versionBusy) return;
+    setVersionBusy(true);
+    try {
+      await api.createAgentVersion(workspaceSlug, agentId);
+      await queryClient.invalidateQueries({ queryKey: ['agent-versions', agentId] });
+      await queryClient.invalidateQueries({ queryKey: ['agent', agentId] });
+      await queryClient.invalidateQueries({ queryKey: agentsQueryKey() });
+      toast.success('Agent version created.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to create AgentVersion.');
+    } finally {
+      setVersionBusy(false);
     }
   }
 
@@ -267,6 +286,7 @@ function AgentEditorPage() {
             <Button size="compact" type="button" onClick={() => void save()} disabled={saveState === 'saving' || editorLoading || editorFailed}>
               {t('common:actions.save')}
             </Button>
+            {!isNew && !isSystem ? <Button variant="secondary" size="compact" type="button" onClick={() => void createVersion()} disabled={saveState !== 'saved' || versionBusy || editorLoading || editorFailed}>{versionBusy ? 'Creating...' : 'Create version'}</Button> : null}
           </div>
         }
       />
@@ -291,6 +311,27 @@ function AgentEditorPage() {
             />
           </Field>
           {saveError ? <ResourceMessage error>{saveError}</ResourceMessage> : null}
+          {!isNew && !isSystem ? (
+            <section className="border-t border-border pt-5" aria-labelledby="agent-versions-title">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 id="agent-versions-title" className="text-sm font-semibold">Agent versions</h2>
+                  <p className="mt-1 text-[13px] text-muted-foreground">Immutable snapshots used by published workflows.</p>
+                </div>
+                {existing?.latestVersion ? <span className="text-xs text-muted-foreground">Latest v{existing.latestVersion}</span> : null}
+              </div>
+              <div className="mt-3 space-y-2">
+                {versionsQuery.isLoading ? <p className="text-[13px] text-muted-foreground">Loading versions...</p> : null}
+                {!versionsQuery.isLoading && (versionsQuery.data ?? []).length === 0 ? <p className="text-[13px] text-muted-foreground">No immutable versions yet.</p> : null}
+                {(versionsQuery.data ?? []).map((version) => (
+                  <div key={version.id} className="flex items-center justify-between rounded-md border border-border bg-surface-subtle px-3 py-2 text-[13px]">
+                    <span className="font-medium">v{version.version}</span>
+                    <span className="text-muted-foreground">{version.model}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
           {!isNew && !isSystem && existing ? (
             <AgentExecutionPanel
               configured={Boolean(existing.providerId && existing.model)}

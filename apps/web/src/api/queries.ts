@@ -15,6 +15,10 @@ export function useAgentQuery(workspace: string | undefined, agentId: string) {
   return useQuery({ queryKey: ['agent', agentId] as const, queryFn: () => api.agent(workspace, agentId), enabled: Boolean(agentId && agentId !== 'new') });
 }
 
+export function useAgentVersionsQuery(workspace: string | undefined, agentId: string) {
+  return useQuery({ queryKey: ['agent-versions', agentId] as const, queryFn: () => api.agentVersions(workspace, agentId), enabled: Boolean(agentId), staleTime: 10_000 });
+}
+
 export function useAgentSubSessionsQuery(workspace?: string) {
   return useQuery({ queryKey: agentSubSessionsQueryKey(), queryFn: () => api.agentSubSessions(workspace), refetchInterval: 1_500 });
 }

@@ -59,6 +59,13 @@ export type WorkflowStep = {
   agentId: string;
   agentName: string;
   agentVersion: string;
+  nodeType?: 'text' | 'agent';
+  agentVersionId?: string;
+  text?: string;
+  outputType?: 'text' | 'file';
+  fileName?: string;
+  fileType?: 'json' | 'text' | 'markdown';
+  promptTemplate?: string;
   inputSummary: string;
   errorPolicy: 'stop' | 'retry';
   status?: RunUiStatus | 'idle';

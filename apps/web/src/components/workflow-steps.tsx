@@ -43,8 +43,8 @@ function WorkflowSteps({ steps, selectedId, onSelect, onAdd, onMove, onDuplicate
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-xs font-medium text-muted-foreground">{t('editor.step', { position: step.position })}</p>
-                    <h3 className="mt-1 text-sm font-semibold">{step.agentName}</h3>
-                    <p className="mt-1 font-mono text-[12px] text-muted-foreground">{step.agentVersion} · {step.inputSummary}</p>
+                    <h3 className="mt-1 text-sm font-semibold">{step.nodeType === 'text' ? 'Text' : step.agentName}</h3>
+                    <p className="mt-1 font-mono text-[12px] text-muted-foreground">{step.nodeType === 'text' ? 'text' : step.agentVersion} · {step.inputSummary}</p>
                   </div>
                   {step.status ? <StatusBadge status={step.status} /> : null}
                 </div>

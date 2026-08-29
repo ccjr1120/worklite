@@ -1,5 +1,6 @@
 import type {
   AgentView,
+  AgentVersionView,
   AgentExecutionView,
   AnswerAgentQuestionRequest,
   AgentSubSessionView,
@@ -23,6 +24,7 @@ import type {
   ModelProviderTestResult,
   ModelProviderView,
   RunView,
+  RunProgressEvent,
   SkillView,
   UpdateSkillRequest,
   UsageRow,
@@ -87,6 +89,9 @@ export const api = {
   commandEventsUrl: (commandId: string) => `/api/commands/${encodeURIComponent(commandId)}/events`,
   agents: (_workspace?: string) => apiGet<AgentView[]>('/api/agents'),
   agent: (_workspace: string | undefined, agentId: string) => apiGet<AgentView>(`/api/agents/${encodeURIComponent(agentId)}`),
+  agentVersions: (_workspace: string | undefined, agentId: string) => apiGet<AgentVersionView[]>(`/api/agents/${encodeURIComponent(agentId)}/versions`),
+  agentVersion: (_workspace: string | undefined, versionId: string) => apiGet<AgentVersionView>(`/api/agent-versions/${encodeURIComponent(versionId)}`),
+  createAgentVersion: (_workspace: string | undefined, agentId: string) => apiPost<AgentVersionView>(`/api/agents/${encodeURIComponent(agentId)}/versions`),
   createAgent: (_workspace: string | undefined, input: CreateAgentRequest) => apiPost<AgentView>('/api/agents', input),
   updateAgent: (_workspace: string | undefined, agentId: string, input: UpdateAgentRequest) => apiPatch<AgentView>(`/api/agents/${encodeURIComponent(agentId)}`, input),
   deleteAgent: (_workspace: string | undefined, agentId: string) => apiDelete(`/api/agents/${encodeURIComponent(agentId)}`),
@@ -135,6 +140,7 @@ export const api = {
   auditLogs: (_workspace?: string) => apiGet<AuditEventView[]>('/api/audit-logs'),
   runs: (_workspace?: string) => apiGet<RunView[]>('/api/runs'),
   run: (_workspace: string | undefined, runId: string) => apiGet<RunView>(`/api/runs/${encodeURIComponent(runId)}`),
+  runEventsUrl: (runId: string) => `/api/runs/${encodeURIComponent(runId)}/events`,
   createRun: (workflowVersionId: string, input: CreateRunRequest) => apiPost<{ runId: string }>(`/api/workflow-versions/${encodeURIComponent(workflowVersionId)}/runs`, input),
   cancelRun: (_workspace: string | undefined, runId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/cancel`),
 };
@@ -159,4 +165,17 @@ export function parseAgentExecutionEvent(value: string): AgentExecutionEvent {
     throw new Error('The Agent event stream returned an invalid event.');
   }
   return event as AgentExecutionEvent;
+}
+
+export function parseRunProgressEvent(value: string): RunProgressEvent {
+  const event = JSON.parse(value) as Partial<RunProgressEvent>;
+  if (
+    typeof event.runId !== 'string'
+    || typeof event.sequence !== 'number'
+    || typeof event.type !== 'string'
+    || typeof event.occurredAt !== 'string'
+  ) {
+    throw new Error('The workflow run event stream returned an invalid event.');
+  }
+  return event as RunProgressEvent;
 }

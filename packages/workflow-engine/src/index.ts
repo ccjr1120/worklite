@@ -29,6 +29,7 @@ export type WorkflowDefinition = {
 };
 
 export type NodeExecutionContext = {
+  workspaceId: string;
   workflowRunId: string;
   workflowVersionId: string;
   nodeId: string;

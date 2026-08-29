@@ -19,6 +19,10 @@ export const agents = sqliteTable('agents', {
   systemPrompt: text('system_prompt').notNull().default(''), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
 });
 
+export const agentVersions = sqliteTable('agent_versions', {
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'restrict' }), version: integer('version').notNull(), name: text('name').notNull(), responsibility: text('responsibility').notNull(), systemPrompt: text('system_prompt').notNull(), providerId: text('provider_id'), model: text('model').notNull(), skillIds: text('skill_ids', { mode: 'json' }).$type<string[]>().notNull().default([]), mcpServerIds: text('mcp_server_ids', { mode: 'json' }).$type<string[]>().notNull().default([]), createdAt: timestamp('created_at'),
+}, (table) => [unique().on(table.agentId, table.version)]);
+
 export const workflows = sqliteTable('workflows', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), state: text('state').$type<'draft' | 'published'>().notNull().default('draft'), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
 });
@@ -92,6 +96,14 @@ export const workflowRuns = sqliteTable('workflow_runs', {
   status: text('status').$type<'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out'>().notNull().default('queued'), input: text('input', { mode: 'json' }).$type<unknown>().notNull(), result: text('result', { mode: 'json' }).$type<unknown>(), currentNodeId: text('current_node_id'),
   createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'), finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
 });
+
+export const workflowNodeRuns = sqliteTable('workflow_node_runs', {
+  id: text('id').primaryKey(), runId: text('run_id').notNull().references(() => workflowRuns.id, { onDelete: 'cascade' }), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), nodeId: text('node_id').notNull(), position: integer('position').notNull(), type: text('type').notNull(), typeVersion: text('type_version').notNull(), status: text('status').$type<'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'>().notNull().default('queued'), input: text('input', { mode: 'json' }).$type<unknown>(), output: text('output', { mode: 'json' }).$type<unknown>(), artifactIds: text('artifact_ids', { mode: 'json' }).$type<string[]>().notNull().default([]), error: text('error'), retryCount: integer('retry_count').notNull().default(0), startedAt: integer('started_at', { mode: 'timestamp_ms' }), finishedAt: integer('finished_at', { mode: 'timestamp_ms' }), createdAt: timestamp('created_at'),
+});
+
+export const workflowRunEvents = sqliteTable('workflow_run_events', {
+  runId: text('run_id').notNull().references(() => workflowRuns.id, { onDelete: 'cascade' }), sequence: integer('sequence').notNull(), type: text('type').$type<'run.status' | 'node.started' | 'node.delta' | 'node.completed' | 'node.failed' | 'artifact.created'>().notNull(), payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(), createdAt: timestamp('created_at'),
+}, (table) => [primaryKey({ columns: [table.runId, table.sequence] })]);
 
 export const commandExecutions = sqliteTable('command_executions', {
   id: text('id').primaryKey(),
@@ -212,11 +224,14 @@ export const auditLogs = sqliteTable('audit_logs', {
 
 export type Workspace = typeof workspaces.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
+export type AgentVersion = typeof agentVersions.$inferSelect;
 export type Workflow = typeof workflows.$inferSelect;
 export type WorkflowDraft = typeof workflowDrafts.$inferSelect;
 export type WorkflowEditRevision = typeof workflowEditRevisions.$inferSelect;
 export type WorkflowVersion = typeof workflowVersions.$inferSelect;
 export type WorkflowRun = typeof workflowRuns.$inferSelect;
+export type WorkflowNodeRun = typeof workflowNodeRuns.$inferSelect;
+export type WorkflowRunEvent = typeof workflowRunEvents.$inferSelect;
 export type CommandExecution = typeof commandExecutions.$inferSelect;
 export type CommandExecutionEvent = typeof commandExecutionEvents.$inferSelect;
 export type Skill = typeof skills.$inferSelect;

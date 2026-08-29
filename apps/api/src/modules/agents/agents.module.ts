@@ -3,6 +3,7 @@ import { WorkspaceModule } from '../teams/teams.module';
 import { SkillsModule } from '../skills/skills.module';
 import { CommandsModule } from '../commands/commands.module';
 import { AgentsController } from './agents.controller';
+import { AgentVersionsController } from './agent-versions.controller';
 import { AgentsService } from './agents.service';
 import { AgentExecutionsService } from './agent-executions.service';
 import { AgentSubSessionsController } from './agent-sub-sessions.controller';
@@ -12,5 +13,5 @@ import { AgentScheduledTasksController } from './agent-scheduled-tasks.controlle
 import { AgentScheduledTasksService } from './agent-scheduled-tasks.service';
 import { BuiltinAgentToolsService } from './builtin-agent-tools.service';
 
-@Module({ imports: [WorkspaceModule, SkillsModule, CommandsModule], controllers: [AgentsController, AgentSubSessionsController, AgentScheduledTasksController], providers: [AgentsService, AgentExecutionsService, AgentSubSessionsService, McpRuntimeService, AgentScheduledTasksService, BuiltinAgentToolsService] })
+@Module({ imports: [WorkspaceModule, SkillsModule, CommandsModule], controllers: [AgentsController, AgentVersionsController, AgentSubSessionsController, AgentScheduledTasksController], providers: [AgentsService, AgentExecutionsService, AgentSubSessionsService, McpRuntimeService, AgentScheduledTasksService, BuiltinAgentToolsService], exports: [AgentsService, AgentExecutionsService] })
 export class AgentsModule {}

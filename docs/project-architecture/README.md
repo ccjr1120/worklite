@@ -153,7 +153,7 @@ All workspace-owned records include `workspace_id`. The API resolves the singlet
 
 An agent is manually configured with a name, description, optional avatar, model selected from the workspace's configured model providers, system prompt, skills, MCP access, and supported runtime settings. Skill and MCP definitions remain reusable workspace resources, but their assignment is explicit and independent for every Agent. Creating or editing one Agent never grants those resources to another Agent. The API validates that every selected provider, Skill, and MCP server belongs to the same workspace.
 
-The initial Agent configuration increment persists mutable Agent drafts. `agent_skills` and `agent_mcp_servers` relational tables own the many-to-many draft assignments; the Agent row owns its provider, model, and system prompt. The draft editor exposes only real persisted behavior. Preview, publication, version labels, and execution status are not exposed until immutable AgentVersion creation and Agent execution are implemented end to end. Agent versions remain the target immutable publication boundary.
+The Agent row is the mutable configuration draft. `agent_skills` and `agent_mcp_servers` relational tables own the many-to-many draft assignments; the Agent row owns its provider, model, and system prompt. Publishing creates an immutable `AgentVersion` snapshot containing the resolved model configuration and assigned Skill/MCP version references. AgentVersion records are the only Agent references allowed in published workflows and remain executable after the mutable Agent draft changes.
 
 The singleton workspace owns one protected system Agent with the stable identifier `agt_system_helper_chat`. It represents the product's System Helper Chat and is created during startup bootstrap. It always appears before custom Agents, cannot be deleted, and exposes a nullable Model Provider binding plus a model selection for user configuration. Its name, responsibility, prompt, Skills, and MCP configuration are product-owned and read-only. Startup permanently assigns the protected `worklite-platform` Skill and repairs that assignment if local data is changed; the Skill cannot be assigned to a custom Agent. The binding and model can be changed only from the System Helper Chat entry in the Agent editor; provider pages and the Chat surface do not own configuration selectors. The selected model must belong to the selected provider's configured model catalog. Changing or deleting a provider clears the binding when necessary and resets an invalid model selection to an unconfigured state. When configured, System Helper Chat resolves the bound provider and selected model through the WorkLite model gateway. When unconfigured, ordinary System Helper submission is unavailable; the surface links to the protected Agent's configuration form unless a configured custom Agent keeps the composer available for structured `@` dispatch.
 
@@ -161,7 +161,7 @@ Workflow nodes are generic typed execution units. Each node references a registe
 
 Plugins are the extension and composition boundary. A trusted in-process plugin may register Node Types, runtime capabilities, typed lifecycle events, and optional browser metadata. The Workflow Engine does not import concrete plugin implementations; it resolves a Node Type from its registry and invokes its execution contract. Plugin registration is separate from node execution: a plugin may contribute capabilities without being a workflow node.
 
-Agent is one Node Type rather than the Workflow Engine's universal primitive. The Agent Node adapter references an immutable AgentVersion, maps workflow input into the Agent Runtime request, and returns text, structured data, and artifact references through the generic node result. Agent Runtime remains independent from Workflow Engine.
+Agent is one Node Type rather than the Workflow Engine's universal primitive. The Agent Node adapter references an immutable AgentVersion, maps workflow input into the Agent Runtime request, and returns text, structured data, and artifact references through the generic node result. The first-party `worklite/text` node passes a configured text value through the same contract. Agent Runtime remains independent from Workflow Engine.
 
 A published workflow locks every referenced `AgentVersion`; later agent edits cannot alter published workflows or historical runs. Deleted referenced agents use soft deletion so historical versions remain executable and auditable.
 
@@ -317,7 +317,7 @@ A `WorkflowRun` stores its workspace, workflow version, input, current node, tim
 
 Runtime requirements include node and workflow timeouts, cooperative cancellation, worker heartbeats or leases, persisted intermediate results, classified transient retries, idempotency for retryable external side effects, and per-workspace concurrency, duration, and model-usage quotas.
 
-Resume from a failed node is deferred, but completed node runs must be retained. The API-local executor is the initial execution engine. A durable queue such as BullMQ should only be introduced after requirements include multi-instance execution, long waits, human approval, complex branching, or stronger durable-execution semantics.
+Completed node runs are retained. The API-local executor resolves registered node types, persists each node transition, creates Artifact metadata for file outputs, and publishes replayable run events. Resume from a failed node remains deferred. A durable queue such as BullMQ should only be introduced after requirements include multi-instance execution, long waits, human approval, complex branching, or stronger durable-execution semantics.
 
 Initial run endpoints are:
 
@@ -451,6 +451,14 @@ The MCP client, skill SDK, and observability code may begin inside applications 
 Adding a deferred capability requires an approved architecture change.
 
 ## Changelog
+
+### 2026-08-29 - End-to-end Agent and Workflow Runtime
+
+- Approved immutable AgentVersion snapshots as the binding boundary for published workflows.
+- Added first-party `worklite/text` and `worklite/agent` execution through the Workflow Engine registry.
+- Added persisted NodeRun records, replayable workflow run events, and Artifact references for file outputs.
+- Extended the workflow editor contract from Agent-only steps to generic linear nodes while retaining the no-branching model.
+- Kept the API-local asynchronous executor and SQLite persistence; durable queues and workflow resume remain deferred.
 
 ### 2026-08-29 - WorkLite-Compatible G-Agent Helper Runtime
 

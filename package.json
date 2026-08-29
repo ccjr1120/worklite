@@ -6,7 +6,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "turbo dev",
+    "dev": "node ./scripts/kill-dev-ports.mjs && turbo dev",
     "dev:web": "pnpm --filter @worklite/web dev",
     "dev:api": "pnpm --filter @worklite/api dev",
     "dev:worker": "pnpm --filter @worklite/worker dev",

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { AgentExecutionErrorCode, AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, WorkliteNavigationTarget, WorkliteScriptResult } from '@worklite/contracts';
-import { agentExecutionEvents, agentExecutions, agents, agentSkills, agentSubSessions, agentToolCalls, auditLogs, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
+import { agentExecutionEvents, agentExecutions, agentVersions, agents, agentSkills, agentSubSessions, agentToolCalls, auditLogs, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
 import { createModelGateway, ModelGatewayError, type GatewayAgentMessage, type GatewayToolResultOutput } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
@@ -75,6 +75,36 @@ export class AgentExecutionsService {
     await this.publishSnapshotForExecution(workspaceId, id);
     this.schedule({} as Request, 'personal', id);
     return id;
+  }
+
+  async executeWorkflowAgent(
+    workspaceId: string,
+    agentVersionId: string,
+    input: unknown,
+    promptTemplate: string | undefined,
+    signal: AbortSignal,
+    onTextDelta?: (delta: string) => void | Promise<void>,
+  ): Promise<string> {
+    const [version] = await this.db.select().from(agentVersions).where(and(eq(agentVersions.id, agentVersionId), eq(agentVersions.workspaceId, workspaceId))).limit(1);
+    if (!version) throw new NotFoundException('Agent version not found');
+    if (!version.providerId || !version.model) throw new ConflictException('The Agent version has no configured model provider.');
+    const runtime = await this.resources.providerRuntime({} as Request, 'personal', version.providerId, version.model);
+    const inputText = typeof input === 'string' ? input : JSON.stringify(input);
+    const prompt = (promptTemplate?.trim() || '{{input}}').replaceAll('{{input}}', inputText);
+    const result = await createModelGateway().generateAgentStep({
+      provider: runtime.provider,
+      model: runtime.model,
+      systemPrompt: version.systemPrompt,
+      messages: [{ role: 'user', content: prompt }],
+      skillScripts: [],
+      maxToolRounds: 1,
+      abortSignal: signal,
+      onTextDelta,
+    });
+    if (result.toolCalls.length > 0) throw new BadRequestException('Workflow Agent nodes cannot request tools.');
+    const output = result.text.trim();
+    if (!output) throw new Error('The workflow Agent returned an empty response.');
+    return output;
   }
 
   async get(request: Request, workspaceSlug: string, agentId: string, executionId: string): Promise<AgentExecutionView> {

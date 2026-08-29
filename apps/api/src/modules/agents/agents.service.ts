@@ -1,9 +1,9 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { Request } from 'express';
-import type { AgentView, CreateAgentRequest, UpdateAgentRequest } from '@worklite/contracts';
-import { agentMcpServers, agents, agentSkills, mcpServers, modelProviders, skills, type Database } from '@worklite/db';
+import type { AgentVersionView, AgentView, CreateAgentRequest, UpdateAgentRequest } from '@worklite/contracts';
+import { agentMcpServers, agentVersions, agents, agentSkills, mcpServers, modelProviders, skills, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 
@@ -29,9 +29,12 @@ export class AgentsService {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const rows = await this.db.select({ agent: agents, providerName: modelProviders.name }).from(agents).leftJoin(modelProviders, eq(agents.providerId, modelProviders.id)).where(eq(agents.workspaceId, team.id));
     const assignments = await this.loadAssignments(team.id, rows.map(({ agent }) => agent.id));
+    const latestRows = rows.length === 0 ? [] : await this.db.select({ agentId: agentVersions.agentId, id: agentVersions.id, version: agentVersions.version }).from(agentVersions).where(and(eq(agentVersions.workspaceId, team.id), inArray(agentVersions.agentId, rows.map(({ agent }) => agent.id)))).orderBy(desc(agentVersions.version));
+    const latestByAgent = new Map<string, { id: string; version: number }>();
+    for (const row of latestRows) if (!latestByAgent.has(row.agentId)) latestByAgent.set(row.agentId, { id: row.id, version: row.version });
     return rows
       .sort((left, right) => Number(left.agent.kind !== 'system') - Number(right.agent.kind !== 'system') || left.agent.name.localeCompare(right.agent.name))
-      .map(({ agent, providerName }) => this.toView(agent, workspaceSlug, providerName, assignments));
+      .map(({ agent, providerName }) => this.toView(agent, workspaceSlug, providerName, assignments, latestByAgent.get(agent.id)));
   }
 
   async get(request: Request, workspaceSlug: string, agentId: string): Promise<AgentView> {
@@ -39,7 +42,8 @@ export class AgentsService {
     const [row] = await this.db.select({ agent: agents, providerName: modelProviders.name }).from(agents).leftJoin(modelProviders, eq(agents.providerId, modelProviders.id)).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
     if (!row) throw new NotFoundException('Agent not found');
     const assignments = await this.loadAssignments(team.id, [row.agent.id]);
-    return this.toView(row.agent, workspaceSlug, row.providerName, assignments);
+    const [latest] = await this.db.select({ id: agentVersions.id, version: agentVersions.version }).from(agentVersions).where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, team.id))).orderBy(desc(agentVersions.version)).limit(1);
+    return this.toView(row.agent, workspaceSlug, row.providerName, assignments, latest);
   }
 
   async create(request: Request, workspaceSlug: string, input: CreateAgentRequest): Promise<AgentView> {
@@ -64,6 +68,48 @@ export class AgentsService {
     return this.get(request, workspaceSlug, id);
   }
 
+  async versions(request: Request, workspaceSlug: string, agentId: string): Promise<AgentVersionView[]> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const [agent] = await this.db.select({ id: agents.id }).from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
+    if (!agent) throw new NotFoundException('Agent not found');
+    const rows = await this.db.select().from(agentVersions).where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, team.id))).orderBy(desc(agentVersions.version));
+    return rows.map(toAgentVersionView);
+  }
+
+  async createVersion(request: Request, workspaceSlug: string, agentId: string): Promise<AgentVersionView> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const [agent] = await this.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
+    if (!agent) throw new NotFoundException('Agent not found');
+    if (!agent.providerId || !agent.model) throw new BadRequestException('Configure a model provider and model before publishing an Agent version.');
+    const assignments = await Promise.all([
+      this.db.select({ id: agentSkills.skillId }).from(agentSkills).where(eq(agentSkills.agentId, agentId)),
+      this.db.select({ id: agentMcpServers.mcpServerId }).from(agentMcpServers).where(eq(agentMcpServers.agentId, agentId)),
+    ]);
+    const latest = await this.db.select({ version: agentVersions.version }).from(agentVersions).where(eq(agentVersions.agentId, agentId)).orderBy(desc(agentVersions.version)).limit(1);
+    const [row] = await this.db.insert(agentVersions).values({
+      id: `agv_${randomUUID()}`,
+      workspaceId: team.id,
+      agentId: agent.id,
+      version: (latest[0]?.version ?? 0) + 1,
+      name: agent.name,
+      responsibility: agent.responsibility,
+      systemPrompt: agent.systemPrompt,
+      providerId: agent.providerId,
+      model: agent.model,
+      skillIds: assignments[0].map(({ id }) => id),
+      mcpServerIds: assignments[1].map(({ id }) => id),
+    }).returning();
+    if (!row) throw new NotFoundException('Agent version could not be created');
+    return toAgentVersionView(row);
+  }
+
+  async version(request: Request, workspaceSlug: string, versionId: string): Promise<AgentVersionView> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const [row] = await this.db.select().from(agentVersions).where(and(eq(agentVersions.id, versionId), eq(agentVersions.workspaceId, team.id))).limit(1);
+    if (!row) throw new NotFoundException('Agent version not found');
+    return toAgentVersionView(row);
+  }
+
   async update(request: Request, workspaceSlug: string, agentId: string, input: UpdateAgentRequest): Promise<AgentView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [existing] = await this.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
@@ -82,7 +128,8 @@ export class AgentsService {
       const [row] = await this.db.update(agents).set({ providerId: nextProviderId ?? null, model, updatedAt: new Date() }).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).returning();
       if (!row) throw new NotFoundException('Agent not found');
       const assignments = await this.loadAssignments(team.id, [row.id]);
-      return this.toView(row, workspaceSlug, provider?.name ?? null, assignments);
+      const [latest] = await this.db.select({ id: agentVersions.id, version: agentVersions.version }).from(agentVersions).where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, team.id))).orderBy(desc(agentVersions.version)).limit(1);
+      return this.toView(row, workspaceSlug, provider?.name ?? null, assignments, latest);
     }
 
     const name = input.name === undefined ? existing.name : input.name.trim();
@@ -180,7 +227,7 @@ export class AgentsService {
     return { skillsByAgent, mcpServersByAgent };
   }
 
-  private toView(row: typeof agents.$inferSelect, workspaceSlug: string, providerName: string | null, assignments: AgentAssignments): AgentView {
+  private toView(row: typeof agents.$inferSelect, workspaceSlug: string, providerName: string | null, assignments: AgentAssignments, latestVersion?: { id: string; version: number }): AgentView {
     return {
       id: row.id,
       workspaceSlug,
@@ -195,6 +242,8 @@ export class AgentsService {
       skills: assignments.skillsByAgent.get(row.id) ?? [],
       mcpServers: assignments.mcpServersByAgent.get(row.id) ?? [],
       version: 'draft',
+      latestVersionId: latestVersion?.id ?? null,
+      latestVersion: latestVersion?.version ?? null,
       updatedAt: row.updatedAt.toISOString(),
     };
   }
@@ -204,4 +253,20 @@ function normalizeResourceIds(input: unknown, resourceName: string): string[] {
   if (input === undefined) return [];
   if (!Array.isArray(input) || input.some((value) => typeof value !== 'string')) throw new BadRequestException(`${resourceName} selections must be an array of identifiers.`);
   return [...new Set(input.map((value) => value.trim()).filter(Boolean))];
+}
+
+function toAgentVersionView(row: typeof agentVersions.$inferSelect): AgentVersionView {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    version: row.version,
+    name: row.name,
+    responsibility: row.responsibility,
+    systemPrompt: row.systemPrompt,
+    providerId: row.providerId,
+    model: row.model,
+    skillIds: row.skillIds ?? [],
+    mcpServerIds: row.mcpServerIds ?? [],
+    createdAt: row.createdAt.toISOString(),
+  };
 }

@@ -70,7 +70,23 @@ export type AgentView = {
     allowedTools: number;
   }>;
   version: 'draft';
+  latestVersionId?: string | null;
+  latestVersion?: number | null;
   updatedAt: string;
+};
+
+export type AgentVersionView = {
+  id: string;
+  agentId: string;
+  version: number;
+  name: string;
+  responsibility: string;
+  systemPrompt: string;
+  providerId: string | null;
+  model: string;
+  skillIds: string[];
+  mcpServerIds: string[];
+  createdAt: string;
 };
 
 export type AgentExecutionStatus = 'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled';
@@ -223,6 +239,8 @@ export type CreateAgentRequest = {
   mcpServerIds: string[];
 };
 
+export type CreateAgentVersionRequest = Record<string, never>;
+
 export type UpdateAgentRequest = Partial<CreateAgentRequest> & {
   providerId?: string | null;
 };
@@ -354,6 +372,10 @@ export type RunView = {
   startedAt: string;
   durationSeconds: number | null;
   initiator: string;
+  input?: unknown;
+  result?: unknown;
+  nodeRuns?: WorkflowNodeRunView[];
+  artifacts?: ArtifactView[];
 };
 
 export type CreateRunRequest = {
@@ -377,9 +399,29 @@ export type WorkflowRunView = {
   finishedAt: string | null;
 };
 
+export type WorkflowNodeRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+export type WorkflowNodeRunView = {
+  id: string;
+  runId: string;
+  nodeId: string;
+  position: number;
+  type: string;
+  typeVersion: string;
+  status: WorkflowNodeRunStatus;
+  input: unknown;
+  output: unknown;
+  artifactIds: string[];
+  error: string | null;
+  retryCount: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+};
+
 export type RunProgressEvent = {
   runId: string;
-  type: 'run.status' | 'node.started' | 'node.completed' | 'node.failed';
+  sequence: number;
+  type: 'run.status' | 'node.started' | 'node.delta' | 'node.completed' | 'node.failed' | 'artifact.created';
   payload: unknown;
   occurredAt: string;
 };

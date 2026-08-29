@@ -250,6 +250,7 @@ Before confirming a UI proposal, verify that it:
 
 - Adopted a ComfyUI-inspired three-region workflow workspace while retaining the ordered linear execution model.
 - Added an agent palette, persistent responsive inspector, explicit insertion positions, and grouped workflow-level settings.
+- Extended workflow surfaces to generic Text and Agent nodes, immutable AgentVersion context, and file Artifact output states.
 
 ### 2026-08-28
 
