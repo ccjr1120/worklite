@@ -2,7 +2,7 @@
 
 ## Structure
 
-Use the collection pattern with the online-create entry point in the right side of the toolbar directly above the table. Skills is reached beneath Agents in the unified sidebar and does not repeat resource navigation in the page. Archive upload remains absent until package upload and extraction are implemented end to end. Rows show name, source type, current version, and update time. Do not show validation or publication state until those operations are real.
+Use the collection pattern with the online-create entry point in the right side of the toolbar directly above the table. Skills is the second view in the shared page-level Agent resource tabs. Archive upload remains absent until package upload and extraction are implemented end to end. Rows show name, source type, current version, and update time. Do not show validation or publication state until those operations are real.
 
 Protected built-in Skills appear in the same collection with a non-color `Built-in` source label. Executable built-ins expose Unix availability or unsupported-platform state without presenting runtime availability as package validation. The `worklite-platform` row carries a `System Helper Chat only` label and remains visible for transparency even though it is excluded from custom Agent assignment controls.
 
@@ -13,6 +13,7 @@ Define empty, uploading, validating, invalid package, filtered no-results, permi
 ### 2026-08-30
 
 - Placed Skills beneath Agents in the unified sidebar and removed page-level resource navigation.
+- Restored Skills as the second page-level Agent resource tab.
 
 ### 2026-08-27
 

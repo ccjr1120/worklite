@@ -64,6 +64,7 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ### 2026-08-30
 
+- Moved Skills, MCP Servers, and Providers from the sidebar subgroup into shared tabs on the four Agent resource collection pages; Plugins remains first-level navigation.
 - Unified workspace and Agent resource navigation into one hierarchical sidebar, with Plugins beside Agents and Skills, MCP Servers, and Providers beneath Agents.
 
 ### 2026-08-27

@@ -2,7 +2,7 @@
 
 ## Structure
 
-Use the collection pattern with `Create agent` in the right side of the toolbar directly above the table. Agents is the parent destination for the sidebar subgroup containing Skills, MCP Servers, and Providers. The page does not repeat that hierarchy as tabs. Each row emphasizes agent name and responsibility, provider and model, assigned Skills and MCP servers, and update time. Do not display version or execution status until Agent publication and execution are backed by real domain behavior. Identity uses a restrained geometric mark or initials, not character artwork.
+Use the collection pattern with `Create agent` in the right side of the toolbar directly above the table. The Agents collection shares page-level tabs with `Skills`, `MCP Servers`, and `Providers`, in that order; Plugins remains outside this resource group. Each row emphasizes agent name and responsibility, provider and model, assigned Skills and MCP servers, and update time. Do not display version or execution status until Agent publication and execution are backed by real domain behavior. Identity uses a restrained geometric mark or initials, not character artwork.
 
 System Helper Chat is a protected system Agent. It always appears first, carries a visible `Built-in` label, shows its selected provider and model or an unconfigured state in the model column, and never exposes duplication or deletion actions.
 
@@ -13,6 +13,7 @@ Define first-use empty, filtered no-results, loading, partial failure, permissio
 ### 2026-08-30
 
 - Replaced the page-level Agent resource tabs with the unified sidebar hierarchy and moved Plugins out of the Agents surface.
+- Restored page-level tabs for Agents, Skills, MCP Servers, and Providers while keeping Plugins in first-level navigation.
 
 ### 2026-08-29
 

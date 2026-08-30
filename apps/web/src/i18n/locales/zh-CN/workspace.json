@@ -16,8 +16,6 @@
     "usage": "用量",
     "settings": "设置",
     "agentResources": "Agent 资源",
-    "expandAgentResources": "展开 Agent 资源",
-    "collapseAgentResources": "折叠 Agent 资源",
     "title": "导航"
   },
   "command": {

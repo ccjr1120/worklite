@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { Blocks, Plus, Server } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { AgentMark } from '@/components/agent-mark';
+import { AgentResourceNav } from '@/components/agent-resource-nav';
 import { CollectionToolbar } from '@/components/collection-toolbar';
 import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/collection-table';
 import { EmptyState } from '@/components/empty-state';
@@ -37,6 +38,7 @@ function AgentListPage() {
         crumbs={[{ label: t('title') }]}
       />
       <PageHeading title={t('title')} description={t('description')} />
+      <AgentResourceNav active="agents" />
       <CollectionToolbar
         className="mt-6"
         search={search}

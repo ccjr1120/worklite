@@ -1,6 +1,6 @@
 # Model Providers
 
-Model Providers is a workspace resource beneath Agents in the unified sidebar. It follows Skills and MCP Servers and is always the final item in that subgroup. It does not use page-level resource tabs or the Settings local navigation. Create and delete controls sit on the right side of the collection toolbar directly above the provider table.
+Model Providers is the final view in the shared page-level Agent resource tabs, after Agents, Skills, and MCP Servers. It does not use the Settings local navigation. Create and delete controls sit on the right side of the collection toolbar directly above the provider table.
 
 ## Scope
 
@@ -17,6 +17,7 @@ Define unconfigured, testing, connected, invalid credentials, unavailable provid
 ### 2026-08-30
 
 - Moved Model Providers from page-level Agent resource tabs into the unified Agents sidebar subgroup.
+- Restored Model Providers as the final page-level Agent resource tab.
 
 ### 2026-08-26
 

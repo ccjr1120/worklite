@@ -6,11 +6,11 @@ At `1280px` and above, expand the sidebar, allow side-by-side inspectors, and re
 
 ## Compact Desktop and Tablet
 
-From `768px` to `1279px`, use the `56px` icon rail, hide low-priority columns, and let inspectors overlay or reduce content according to task importance. Agents and its nested Skills, MCP Servers, and Providers entries remain visible as individual direct icon links instead of opening a resource chooser. Constrain the Agent Chat panel within `16px` to `24px` outer space on every page, and keep expanded Skill arguments, execution states, and bounded results inside the transcript column.
+From `768px` to `1279px`, use the `56px` single-level icon rail, hide low-priority columns, and let inspectors overlay or reduce content according to task importance. Agent resource tabs remain horizontally scrollable within their collection pages. Constrain the Agent Chat panel within `16px` to `24px` outer space on every page, and keep expanded Skill arguments, execution states, and bounded results inside the transcript column.
 
 ## Mobile
 
-Below `768px`, use a navigation drawer, retain page identity, state and primary action in the context bar, convert inspectors to full-screen or bottom sheets, replace wide tables with object rows, preserve vertical workflow steps, and show detailed logs full-screen or in a resizable sheet. The drawer preserves the desktop hierarchy, including the Agents subgroup and first-level Plugins destination; resource pages do not add horizontally scrollable navigation tabs. Agent Chat keeps `12px` outer space and uses at most about `70vh`; it does not become full-screen. Its single-line composer remains reachable above browser controls, and Chat and Proposed changes use internal views. Essential touch controls may grow to `40px` to `44px`.
+Below `768px`, use a navigation drawer, retain page identity, state and primary action in the context bar, convert inspectors to full-screen or bottom sheets, replace wide tables with object rows, preserve vertical workflow steps, and show detailed logs full-screen or in a resizable sheet. The drawer preserves the desktop first-level destinations, including Agents and Plugins; Agent resource collection tabs remain reachable through horizontal scrolling. Agent Chat keeps `12px` outer space and uses at most about `70vh`; it does not become full-screen. Its single-line composer remains reachable above browser controls, and Chat and Proposed changes use internal views. Essential touch controls may grow to `40px` to `44px`.
 
 Responsive layouts must not remove status, recovery, or cancellation controls. The Agent composer retains a stable Send-or-Stop target and editable input at every breakpoint; working feedback remains in the scrollable transcript rather than consuming composer space. Onboarding uses a centered column with `20px` horizontal padding and no decorative side panel.
 
@@ -21,6 +21,7 @@ Responsive layouts must not remove status, recovery, or cancellation controls. T
 - Replaced responsive Agent resource tabs with the shared hierarchical navigation drawer and icon-rail menu.
 - Removed the compact icon-rail menu so Agents remains a direct navigation target at every non-mobile width.
 - Restored the compact icon rail with direct Agents and nested resource links instead of a resource chooser.
+- Returned Agent resource navigation to horizontally scrollable page tabs and kept the sidebar and mobile drawer single-level.
 
 ### 2026-08-29
 
