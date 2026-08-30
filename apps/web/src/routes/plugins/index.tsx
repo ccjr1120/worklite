@@ -3,7 +3,6 @@ import { Puzzle } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePluginsQuery } from '@/api/queries';
-import { AgentResourceNav } from '@/components/agent-resource-nav';
 import { CollectionToolbar } from '@/components/collection-toolbar';
 import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/collection-table';
 import { EmptyState } from '@/components/empty-state';
@@ -29,7 +28,6 @@ function PluginListPage() {
     <div className="mx-auto w-full max-w-[1440px] px-6 py-6">
       <WorkspaceChrome crumbs={[{ label: tPlugins('title') }]} />
       <PageHeading title={tPlugins('title')} description={tPlugins('description')} />
-      <AgentResourceNav active="plugins" />
       <CollectionToolbar className="mt-6" search={search} onSearchChange={setSearch} placeholder={tPlugins('search')} />
       <div className="mt-4">
         {isLoading ? <p className="text-sm text-muted-foreground">{tPlugins('loading')}</p> : isError ? <p className="text-sm text-danger" role="alert">{tPlugins('loadFailed')}</p> : plugins.length === 0 ? (

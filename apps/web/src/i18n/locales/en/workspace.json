@@ -16,6 +16,8 @@
     "usage": "Usage",
     "settings": "Settings",
     "agentResources": "Agent resources",
+    "expandAgentResources": "Expand Agent resources",
+    "collapseAgentResources": "Collapse Agent resources",
     "title": "Navigation"
   },
   "command": {

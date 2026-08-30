@@ -3,7 +3,6 @@ import { useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { CollectionToolbar } from '@/components/collection-toolbar';
-import { AgentResourceNav } from '@/components/agent-resource-nav';
 import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/collection-table';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeading } from '@/components/page-heading';
@@ -32,7 +31,6 @@ function SkillListPage() {
         crumbs={[{ label: t('title') }]}
       />
       <PageHeading title={t('title')} description={t('description')} />
-      <AgentResourceNav workspaceSlug={workspaceSlug} active="skills" />
       <CollectionToolbar
         className="mt-6"
         search={search}

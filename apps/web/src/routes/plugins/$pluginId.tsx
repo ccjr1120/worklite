@@ -6,7 +6,6 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { api } from '@/api/client';
 import { pluginsQueryKey, usePluginQuery } from '@/api/queries';
-import { AgentResourceNav } from '@/components/agent-resource-nav';
 import { PageHeading } from '@/components/page-heading';
 import { SaveIndicator } from '@/components/save-indicator';
 import { StatusBadge } from '@/components/status-badge';
@@ -127,7 +126,6 @@ function PluginConfigPage() {
     <div className="mx-auto w-full max-w-[840px] px-6 py-6">
       <WorkspaceChrome crumbs={[{ label: tPlugins('title'), to: '/plugins' }, { label: plugin.name }]} status={<SaveIndicator state={saveState} />} actions={<Button size="compact" onClick={() => void save()} disabled={saving || !command.trim()}>{tCommon('actions.save')}</Button>} />
       <PageHeading title={plugin.name} description={plugin.description} />
-      <AgentResourceNav active="plugins" />
       <div className="mt-6 space-y-5">
         <div className="flex items-center gap-2 text-sm font-medium"><Puzzle className="size-4 text-muted-foreground" aria-hidden="true" />{tPlugins('config.title')}</div>
         <p className="text-[13px] text-muted-foreground">{tPlugins('config.description')}</p>

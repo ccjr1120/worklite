@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import type { ModelProviderTestResult, ModelProviderView } from '@worklite/contracts';
-import { AgentResourceNav } from '@/components/agent-resource-nav';
 import { CollectionTable, CollectionHeader, CollectionRow } from '@/components/collection-table';
 import { CollectionToolbar } from '@/components/collection-toolbar';
 import { EmptyState } from '@/components/empty-state';
@@ -178,7 +177,6 @@ function ModelProvidersPage() {
     <div className="mx-auto w-full max-w-[1440px] px-6 py-6">
       <WorkspaceChrome crumbs={[{ label: t('providers.title') }]} />
       <PageHeading title={t('providers.title')} description={t('providers.description')} />
-      <AgentResourceNav workspaceSlug={workspaceSlug} active="providers" />
       <CollectionToolbar
         className="mt-6"
         search={search}
