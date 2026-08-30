@@ -2,7 +2,6 @@ import { Link, useRouterState } from '@tanstack/react-router';
 import { Blocks, Bot, ChevronDown, Home, KeyRound, Puzzle, Server, Settings, Workflow } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { focusRingInset } from '@/components/ui/interaction';
 import { UserMenu } from '@/components/workspace/user-menu';
@@ -74,19 +73,37 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
           <li>{primaryLink(primaryItems[0])}</li>
           <li>
             {collapsed ? (
-              <DropdownMenu modal={false}>
-                <DropdownMenuTrigger asChild>
-                  <button type="button" className={cn('relative flex h-8 w-full items-center justify-center rounded-md text-muted-foreground transition-colors duration-[120ms] hover:bg-surface-subtle hover:text-foreground', agentGroupActive && 'bg-brand-subtle font-medium text-foreground', focusRingInset)} aria-label={t('nav.agents')}>
-                    {agentGroupActive ? <span className="absolute left-0 top-1.5 h-5 w-0.5 rounded-full bg-brand" aria-hidden="true" /> : null}
-                    <Bot className="size-[18px]" aria-hidden="true" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent side="right" align="start">
-                  <DropdownMenuLabel>{t('nav.agentResources')}</DropdownMenuLabel>
-                  <DropdownMenuItem asChild><Link to="/agents" onClick={onNavigate}><Bot className="size-4" />{t('nav.agents')}</Link></DropdownMenuItem>
-                  {agentResources.map((item) => <DropdownMenuItem key={item.id} asChild><Link to={item.to} onClick={onNavigate}><item.icon className="size-4" />{t(item.labelKey)}</Link></DropdownMenuItem>)}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Link to="/agents" onClick={onNavigate} className={cn('relative flex h-8 w-full items-center justify-center rounded-md text-muted-foreground transition-colors duration-[120ms] hover:bg-surface-subtle hover:text-foreground', agentPageActive && 'bg-brand-subtle font-medium text-foreground', focusRingInset)} aria-current={agentPageActive ? 'page' : undefined}>
+                      {agentPageActive ? <span className="absolute left-0 top-1.5 h-5 w-0.5 rounded-full bg-brand" aria-hidden="true" /> : null}
+                      <Bot className="size-[18px]" aria-hidden="true" />
+                      <span className="sr-only">{t('nav.agents')}</span>
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{t('nav.agents')}</TooltipContent>
+                </Tooltip>
+                <ul className="ml-1 mt-0.5 space-y-0.5 border-l border-border pl-1">
+                  {agentResources.map((item) => {
+                    const active = pathname.startsWith(item.to);
+                    return (
+                      <li key={item.id}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Link to={item.to} onClick={onNavigate} className={cn('relative flex h-7 items-center justify-center rounded-md text-muted-foreground transition-colors duration-[120ms] hover:bg-surface-subtle hover:text-foreground', active && 'bg-brand-subtle font-medium text-foreground', focusRingInset)} aria-current={active ? 'page' : undefined}>
+                              {active ? <span className="absolute left-0 top-1 h-5 w-0.5 rounded-full bg-brand" aria-hidden="true" /> : null}
+                              <item.icon className="size-4" aria-hidden="true" />
+                              <span className="sr-only">{t(item.labelKey)}</span>
+                            </Link>
+                          </TooltipTrigger>
+                          <TooltipContent side="right">{t(item.labelKey)}</TooltipContent>
+                        </Tooltip>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
             ) : (
               <div>
                 <div className="relative flex items-center">

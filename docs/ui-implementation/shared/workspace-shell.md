@@ -6,7 +6,7 @@ Use a persistent `232px` sidebar, a `52px` context bar, fluid main content, an o
 
 Primary navigation uses one hierarchical sidebar containing `Home`, `Agents`, `Plugins`, `Workflows`, and `Settings`. `Agents` opens the Agent collection and owns an expandable subgroup containing `Skills`, `MCP Servers`, and `Providers`, in that order. The subgroup expands automatically whenever one of its routes is active and may otherwise be collapsed. Plugins remains at the same indentation and hierarchy as Agents. Resource pages do not repeat this navigation as page-level tabs.
 
-The non-mobile sidebar remains expanded so clicking Agents always navigates directly to the Agent collection and its child resources remain visible beneath it. The mobile navigation drawer uses the same expanded hierarchy. Usage, audit log, and appearance are reached from Settings. Runs and Artifacts remain available from dashboard widgets, detail links, and command search but are not primary navigation destinations. System Helper Chat is available throughout the workspace shell, presented prominently on Home and as a floating control elsewhere. Counts indicate actionable state only. The WorkLite mark is at the top and the personal preferences menu is at the bottom.
+The non-mobile sidebar may use its compact `56px` icon rail at constrained widths. In that mode, Agents remains a direct link to the Agent collection, while Skills, MCP Servers, and Providers remain visible as nested direct icon links beneath it; no resource chooser intercepts the Agents link. The mobile navigation drawer uses the same expanded hierarchy. Usage, audit log, and appearance are reached from Settings. Runs and Artifacts remain available from dashboard widgets, detail links, and command search but are not primary navigation destinations. System Helper Chat is available throughout the workspace shell, presented prominently on Home and as a floating control elsewhere. Counts indicate actionable state only. The WorkLite mark is at the top and the personal preferences menu is at the bottom.
 
 The selected navigation item uses `brand-subtle`, primary text, and a non-color indicator. Personal preferences stay in the bottom menu.
 
@@ -34,6 +34,7 @@ The bottom panel defaults to about `240px`, resizes, and collapses to a status s
 
 - Unified the workspace and Agent resource menus into one hierarchical sidebar, promoted Plugins beside Agents, and nested Skills, MCP Servers, and Providers beneath Agents.
 - Kept the non-mobile sidebar expanded so Agents remains a direct single-click destination instead of opening a resource menu.
+- Restored the compact icon rail at constrained non-mobile widths with direct links for Agents and each nested Agent resource.
 
 ### 2026-08-29
 

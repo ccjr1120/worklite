@@ -10,7 +10,9 @@ import { useMediaQuery } from '@/hooks/use-media-query';
 import { AgentChat } from '@/components/workspace/agent-chat';
 
 function WorkspaceShell() {
+  const isWide = useMediaQuery('(min-width: 1280px)');
   const isMobile = useMediaQuery('(max-width: 767px)');
+  const collapsed = !isWide && !isMobile;
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
 
@@ -39,7 +41,7 @@ function WorkspaceShell() {
             </SheetContent>
           </Sheet>
         ) : (
-          <Sidebar collapsed={false} />
+          <Sidebar collapsed={collapsed} />
         )}
         <div className="flex min-w-0 flex-1 flex-col">
           <ContextBar

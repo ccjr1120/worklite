@@ -24,7 +24,7 @@
     "description": "Configure the executable command used by this trusted plugin. The command runs through the API host command boundary.",
     "command": "Executable command",
     "commandPlaceholder": "codex",
-    "commandHint": "Enter the executable name or absolute path. Environment-variable overrides are not used.",
+    "commandHint": "Enter the executable name or path followed by optional arguments. Shell syntax and environment-variable overrides are not used.",
     "test": "Test command",
     "testing": "Testing...",
     "testFailed": "The plugin command could not be started.",

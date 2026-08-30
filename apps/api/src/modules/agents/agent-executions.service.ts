@@ -516,7 +516,7 @@ export class AgentExecutionsService {
       ...execution.displayMessages.map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}:\n${message.content}`),
     ].join('\n\n');
     await this.db.update(agentExecutions).set({ phase: 'model', updatedAt: new Date() }).where(and(eq(agentExecutions.id, execution.id), eq(agentExecutions.status, 'running')));
-    const command = `${shellQuote(await this.plugins.command(CODEX_CLI_PLUGIN_ID))} exec --json --ephemeral -`;
+    const command = [...await this.plugins.commandArguments(CODEX_CLI_PLUGIN_ID), 'exec', '--json', '--ephemeral', '-'].map(shellQuote).join(' ');
     const started = await this.commands.createWithInput(command, prompt);
     this.activePluginCommands.set(execution.id, started.id);
     try {

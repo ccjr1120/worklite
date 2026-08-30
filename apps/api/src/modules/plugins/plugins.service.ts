@@ -30,6 +30,10 @@ export class PluginsService {
     return row.command;
   }
 
+  async commandArguments(pluginId: string): Promise<string[]> {
+    return parsePluginCommand(await this.command(pluginId));
+  }
+
   async update(pluginId: string, input: UpdatePluginRequest): Promise<PluginView> {
     const command = this.normalizeCommand(input?.command);
     const [updated] = await this.db.update(plugins).set({ command, updatedAt: new Date() }).where(eq(plugins.id, pluginId)).returning();
@@ -80,15 +84,69 @@ export class PluginsService {
   private normalizeCommand(value: unknown): string {
     if (typeof value !== 'string' || !value.trim()) throw new BadRequestException('A plugin command is required.');
     if (value.includes('\0') || value.includes('\n') || value.includes('\r')) throw new BadRequestException('A plugin command must be a single line.');
-    return value.trim();
+    const command = value.trim();
+    parsePluginCommand(command);
+    return command;
   }
 
   private probe(command: string): PluginTestResult {
-    const result = spawnSync(command, ['--version'], { stdio: 'ignore' });
+    const [executable, ...argumentsValue] = parsePluginCommand(command);
+    const result = spawnSync(executable, [...argumentsValue, '--version'], { stdio: 'ignore' });
     const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
     if (errorCode === 'ENOENT') return { enabled: false, status: 'missing' };
     return result.status === 0 ? { enabled: true, status: 'available' } : { enabled: false, status: 'failed' };
   }
+}
+
+function parsePluginCommand(command: string): string[] {
+  const values: string[] = [];
+  let value = '';
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  let started = false;
+
+  for (const character of command) {
+    if (escaped) {
+      value += character;
+      escaped = false;
+      started = true;
+      continue;
+    }
+    if (quote === "'") {
+      if (character === "'") quote = null;
+      else value += character;
+      continue;
+    }
+    if (quote === '"') {
+      if (character === '"') quote = null;
+      else if (character === '\\') escaped = true;
+      else value += character;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      started = true;
+      continue;
+    }
+    if (character === '\\') {
+      escaped = true;
+      started = true;
+      continue;
+    }
+    if (/\s/.test(character)) {
+      if (started) values.push(value);
+      value = '';
+      started = false;
+      continue;
+    }
+    value += character;
+    started = true;
+  }
+
+  if (escaped || quote) throw new BadRequestException('The plugin command contains incomplete quoting.');
+  if (started) values.push(value);
+  if (!values[0]) throw new BadRequestException('A plugin executable is required.');
+  return values;
 }
 
 function encryptSecret(value: string): string {

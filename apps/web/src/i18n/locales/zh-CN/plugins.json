@@ -24,7 +24,7 @@
     "description": "配置此受信任插件使用的可执行命令。命令会通过 API 主机命令边界运行。",
     "command": "可执行命令",
     "commandPlaceholder": "codex",
-    "commandHint": "输入可执行文件名或绝对路径。不会使用环境变量覆盖。",
+    "commandHint": "输入可执行文件名或路径，后面可以附加参数。不会使用 Shell 语法或环境变量覆盖。",
     "test": "测试命令",
     "testing": "正在测试...",
     "testFailed": "无法启动插件命令。",
