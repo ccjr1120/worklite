@@ -6,7 +6,7 @@ At `1280px` and above, expand the sidebar, allow side-by-side inspectors, and re
 
 ## Compact Desktop and Tablet
 
-From `768px` to `1279px`, allow the icon rail, hide low-priority columns, and let inspectors overlay or reduce content according to task importance. Constrain the Agent Chat panel within `16px` to `24px` outer space on every page, and keep expanded Skill arguments, execution states, and bounded results inside the transcript column.
+From `768px` to `1279px`, retain the expanded hierarchical sidebar, hide low-priority columns, and let inspectors overlay or reduce content according to task importance. Constrain the Agent Chat panel within `16px` to `24px` outer space on every page, and keep expanded Skill arguments, execution states, and bounded results inside the transcript column.
 
 ## Mobile
 
@@ -19,6 +19,7 @@ Responsive layouts must not remove status, recovery, or cancellation controls. T
 ### 2026-08-30
 
 - Replaced responsive Agent resource tabs with the shared hierarchical navigation drawer and icon-rail menu.
+- Removed the compact icon-rail menu so Agents remains a direct navigation target at every non-mobile width.
 
 ### 2026-08-29
 
