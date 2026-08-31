@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 
-const ports = [Number(process.env.API_PORT ?? 3000), 5173];
+const ports = [Number(process.env.API_PORT ?? 4546), 4536];
 const processIds = new Set();
 
 for (const port of ports) {

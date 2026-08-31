@@ -1,4 +1,4 @@
-import type { NodeErrorPolicy } from '@worklite/contracts';
+import type { WorkflowDefinition, WorkflowEdgeDefinition, WorkflowNodeDefinition } from '@worklite/contracts';
 
 export type JsonSchema = Readonly<Record<string, unknown>>;
 
@@ -6,26 +6,6 @@ export type ArtifactRef = {
   id: string;
   type: string;
   name?: string;
-};
-
-export type NodeInputMapping =
-  | { source: 'workflow.input' }
-  | { source: 'previous.output' }
-  | { source: 'literal'; value: unknown };
-
-export type WorkflowNodeDefinition = {
-  id: string;
-  position: number;
-  type: string;
-  typeVersion: string;
-  config: unknown;
-  input: NodeInputMapping;
-  errorPolicy: NodeErrorPolicy;
-};
-
-export type WorkflowDefinition = {
-  schemaVersion: number;
-  nodes: WorkflowNodeDefinition[];
 };
 
 export type NodeExecutionContext = {
@@ -94,45 +74,82 @@ export class NodeTypeRegistry {
   }
 }
 
-export function sortNodes(nodes: WorkflowNodeDefinition[]): WorkflowNodeDefinition[] {
-  return [...nodes].sort((left, right) => left.position - right.position);
-}
+export function topologicallySortWorkflow(definition: WorkflowDefinition): WorkflowNodeDefinition[] {
+  const order = new Map(definition.nodes.map((node, index) => [node.id, index]));
+  const nodesById = new Map(definition.nodes.map((node) => [node.id, node]));
+  const incoming = new Map(definition.nodes.map((node) => [node.id, 0]));
+  const outgoing = new Map(definition.nodes.map((node) => [node.id, [] as string[]]));
 
-export function resolveLinearInput(node: WorkflowNodeDefinition, workflowInput: unknown, previousOutput: unknown): unknown {
-  switch (node.input.source) {
-    case 'workflow.input':
-      return workflowInput;
-    case 'previous.output':
-      return previousOutput;
-    case 'literal':
-      return node.input.value;
+  for (const edge of definition.edges) {
+    if (!nodesById.has(edge.sourceNodeId) || !nodesById.has(edge.targetNodeId)) throw new Error('Workflow edge references an unavailable node.');
+    incoming.set(edge.targetNodeId, (incoming.get(edge.targetNodeId) ?? 0) + 1);
+    outgoing.get(edge.sourceNodeId)?.push(edge.targetNodeId);
   }
+
+  const ready = definition.nodes.filter((node) => incoming.get(node.id) === 0);
+  const result: WorkflowNodeDefinition[] = [];
+  while (ready.length > 0) {
+    ready.sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0));
+    const node = ready.shift();
+    if (!node) break;
+    result.push(node);
+    for (const targetId of outgoing.get(node.id) ?? []) {
+      const remaining = (incoming.get(targetId) ?? 0) - 1;
+      incoming.set(targetId, remaining);
+      if (remaining === 0) {
+        const target = nodesById.get(targetId);
+        if (target) ready.push(target);
+      }
+    }
+  }
+
+  if (result.length !== definition.nodes.length) throw new Error('Workflow graph must not contain a cycle.');
+  return result;
 }
 
-export type AgentNodeConfig = {
+export function collectNodeInputs(edges: WorkflowEdgeDefinition[], nodeId: string, outputs: ReadonlyMap<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    edges
+      .filter((edge) => edge.targetNodeId === nodeId)
+      .map((edge) => [edge.targetPort, outputs.get(edge.sourceNodeId)]),
+  );
+}
+
+export function getLeafNodeIds(definition: WorkflowDefinition): string[] {
+  const sourceIds = new Set(definition.edges.map((edge) => edge.sourceNodeId));
+  return definition.nodes.filter((node) => !sourceIds.has(node.id)).map((node) => node.id);
+}
+
+export type GenericAgentNodeConfig = {
   agentVersionId: string;
-  promptTemplate?: string;
   outputSchema?: JsonSchema;
 };
 
-export type AgentNodeExecutionRequest = NodeExecutionRequest & {
-  config: AgentNodeConfig;
+export type GenericAgentNodeExecutionRequest = NodeExecutionRequest & {
+  config: GenericAgentNodeConfig;
 };
 
-export type AgentNodeExecutor = (request: AgentNodeExecutionRequest) => Promise<NodeExecutionResult>;
+export type GenericAgentNodeExecutor = (request: GenericAgentNodeExecutionRequest) => Promise<NodeExecutionResult>;
 
-export function createAgentNodeType(execute: AgentNodeExecutor): NodeTypeDefinition {
+export function createGenericAgentNodeType(execute: GenericAgentNodeExecutor): NodeTypeDefinition {
   return {
-    id: 'worklite/agent',
+    id: 'worklite/generic-agent',
     version: '1',
-    inputSchema: {},
+    inputSchema: {
+      type: 'object',
+      required: ['context', 'systemPrompt'],
+      properties: {
+        context: {},
+        systemPrompt: { type: 'string' },
+        skills: { type: 'object' },
+      },
+    },
     outputSchema: {},
     configSchema: {
       type: 'object',
       required: ['agentVersionId'],
       properties: {
         agentVersionId: { type: 'string' },
-        promptTemplate: { type: 'string' },
         outputSchema: { type: 'object' },
       },
     },

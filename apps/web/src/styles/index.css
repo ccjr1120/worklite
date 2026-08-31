@@ -168,3 +168,38 @@
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
+
+.workflow-react-flow {
+  background: var(--background);
+}
+
+.workflow-react-flow:focus-within {
+  outline: 2px solid color-mix(in srgb, var(--ring) 72%, transparent);
+  outline-offset: -2px;
+}
+
+.workflow-react-flow .react-flow__controls {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: none;
+}
+
+.workflow-react-flow .react-flow__controls-button {
+  width: 32px;
+  height: 32px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-raised);
+  fill: var(--foreground);
+}
+
+.workflow-react-flow .react-flow__controls-button:hover {
+  background: var(--surface-subtle);
+}
+
+@media (max-width: 767px) {
+  .workflow-react-flow .react-flow__controls-button {
+    width: 40px;
+    height: 40px;
+  }
+}

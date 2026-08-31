@@ -54,19 +54,26 @@ export const workflows = sqliteTable('workflows', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), state: text('state').$type<'draft' | 'published'>().notNull().default('draft'), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
 });
 
-export type StoredWorkflowInputMapping =
-  | { source: 'workflow.input' }
-  | { source: 'previous.output' }
-  | { source: 'literal'; value: unknown };
+export type StoredWorkflowNodePosition = {
+  x: number;
+  y: number;
+};
 
 export type StoredWorkflowNode = {
   id: string;
-  position: number;
+  position: StoredWorkflowNodePosition;
   type: string;
   typeVersion: string;
   config: unknown;
-  input: StoredWorkflowInputMapping;
   errorPolicy: 'stop' | 'retry';
+};
+
+export type StoredWorkflowEdge = {
+  id: string;
+  sourceNodeId: string;
+  sourcePort: string;
+  targetNodeId: string;
+  targetPort: string;
 };
 
 export type StoredWorkflowDefinition = {
@@ -74,20 +81,24 @@ export type StoredWorkflowDefinition = {
   input: { example?: unknown };
   defaults: { errorPolicy: 'stop' | 'retry' };
   nodes: StoredWorkflowNode[];
+  edges: StoredWorkflowEdge[];
 };
 
 export type StoredWorkflowEditOperation =
   | { type: 'addNode'; node: StoredWorkflowNode; index: number }
   | { type: 'removeNode'; nodeId: string }
-  | { type: 'updateNode'; nodeId: string; patch: Partial<Omit<StoredWorkflowNode, 'id' | 'position'>> }
-  | { type: 'moveNode'; nodeId: string; index: number }
+  | { type: 'updateNode'; nodeId: string; patch: Partial<Omit<StoredWorkflowNode, 'id'>> }
+  | { type: 'moveNode'; nodeId: string; position: StoredWorkflowNodePosition }
+  | { type: 'addEdge'; edge: StoredWorkflowEdge }
+  | { type: 'removeEdge'; edgeId: string }
   | { type: 'updateSettings'; input?: { example?: unknown }; defaults?: { errorPolicy: 'stop' | 'retry' } };
 
 export const emptyWorkflowDefinition: StoredWorkflowDefinition = {
-  schemaVersion: 1,
+  schemaVersion: 3,
   input: {},
   defaults: { errorPolicy: 'stop' },
   nodes: [],
+  edges: [],
 };
 
 export const workflowDrafts = sqliteTable('workflow_drafts', {

@@ -178,19 +178,21 @@ Present persistent child Agent sessions in a compact unframed status band betwee
 
 ### Workflow Editor
 
-- Represent the initial workflow model as a structured vertical sequence of ordered agent steps, not a free-form graph canvas.
-- Use a three-region editor workspace: an agent palette for adding steps, a central ordered sequence, and a contextual inspector for the selected step.
-- Keep step cards visually consistent and expose only essential parameters in their collapsed state.
-- Add steps through an agent search/palette with an explicit insertion position between or after existing steps.
-- Support reordering through accessible controls; do not depend on drag-and-drop.
+- Represent workflows on a focused React Flow node canvas with explicit input and output handles, directional edges, and persisted spatial layout.
+- Use a three-region editor workspace: a node palette, a central pan-and-zoom canvas, and a contextual inspector for the selected node or edge.
+- Keep nodes visually consistent and expose essential node-owned parameters, including editable Text content, without requiring the inspector for common work.
+- Add nodes through the searchable palette at a predictable viewport position and allow direct node dragging for spatial organization.
+- Provide familiar icon controls for zoom in, zoom out, fit view, and deletion.
+- Keep edge direction and handle compatibility visible through shape, labels, and interaction state rather than color alone.
+- Preserve a keyboard-accessible inspector path for reviewing configuration and removing selected nodes or edges.
 - Keep the inspector available at every breakpoint; collapse it to a drawer or bottom sheet when the layout cannot support a side panel.
-- Use persimmon borders or indicators for the selected and currently executing step.
-- Represent successful and failed states through compact green or red markers rather than filling the whole step.
-- Show the linear flow with a restrained connector or timeline treatment between steps.
+- Use persimmon borders or indicators for the selected and currently executing node or edge.
+- Represent successful and failed states through compact green or red markers rather than filling the whole node.
+- Render edges with restrained neutral strokes and reserve stronger treatment for selection and execution.
 - Present AI-assisted edits in a side panel and make proposed structured operations understandable and reviewable.
 - Group workflow-level settings into General, Inputs, Execution, and Versioning sections, with advanced fields disclosed progressively.
 
-Persimmon progression through the ordered steps is a distinctive WorkLite motif. It communicates active execution and must remain subtle enough for sustained use. Free-form edges, branching, loops, parallel lanes, zoom controls, and minimaps are outside the initial product scope.
+Persimmon progression through the graph is a distinctive WorkLite motif. It communicates selection and active execution while neutral surfaces and edges keep dense workflows readable. The initial graph supports acyclic data fan-out; conditional branches, joins, loops, and parallel execution remain outside the current product scope.
 
 ### Runs and Logs
 
@@ -246,6 +248,12 @@ Before confirming a UI proposal, verify that it:
 
 ## Changelog
 
+### 2026-08-31
+
+- Replaced the ordered workflow sequence with a node canvas supporting explicit edges, persisted layout, panning, zooming, and fit-to-view.
+- Required inline Text editing, restrained handle and edge semantics, and an accessible inspector path for graph review and deletion.
+- Selected `@xyflow/react` for the workflow editor; React-rendered nodes handle direct Text editing while the inspector remains the full keyboard-accessible path.
+
 ### 2026-08-29
 
 - Reaffirmed mobile object-row collections, reachable compact view navigation, validation-message associations, and conditional stream following for the reliability pass.
@@ -255,7 +263,7 @@ Before confirming a UI proposal, verify that it:
 
 - Adopted a ComfyUI-inspired three-region workflow workspace while retaining the ordered linear execution model.
 - Added an agent palette, persistent responsive inspector, explicit insertion positions, and grouped workflow-level settings.
-- Extended workflow surfaces to generic Text and Agent nodes, immutable AgentVersion context, and file Artifact output states.
+- Extended workflow surfaces to Workflow Input, Text, Skill Set, and named-port Generic Agent nodes with immutable AgentVersion context and file Artifact output states.
 
 ### 2026-08-28
 

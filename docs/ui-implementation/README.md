@@ -46,7 +46,7 @@ The root route opens Home. First-use setup is an optional checklist for configur
 
 ## Shared Component Inventory
 
-Theme provider and appearance selector; application shell; sidebar; context bar; personal preferences menu; command menu; shell-level System Helper Chat with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; ordered workflow steps; run timeline; plugin configuration; viewers for logs, output and artifacts; skeletons, errors, offline banner.
+Theme provider and appearance selector; application shell; sidebar; context bar; personal preferences menu; command menu; shell-level System Helper Chat with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; React Flow workflow graph canvas; run timeline; plugin configuration; viewers for logs, output and artifacts; skeletons, errors, offline banner.
 
 Domain-neutral reusable components belong in the shared UI package. Feature composition remains near its feature. Abstract only demonstrated repeated patterns.
 
@@ -55,12 +55,18 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 1. Foundations: semantic dual-theme tokens, initial theme resolution, typography, focus, motion, controls and feedback.
 2. Personal workspace shell: navigation, context bar, menus and responsive behavior.
 3. Home and collections: Home states and shared collection grammar.
-4. Editors and execution: Agent editor, ordered Workflow editor, Runs, logs and artifacts.
+4. Editors and execution: Agent editor, Workflow graph editor, Runs, logs and artifacts.
 5. Integrations and preferences: Skills, MCP servers and Settings.
 
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-08-31
+
+- Expanded the workflow graph component inventory with Workflow Input, Skill Set, and named-port Generic Agent nodes.
+- Replaced the ordered Workflow editor component inventory with the persisted workflow graph canvas.
+- Restored the `@xyflow/react` canvas implementation and removed the minimap from the workflow editor.
 
 ### 2026-08-30
 

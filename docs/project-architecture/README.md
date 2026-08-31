@@ -20,7 +20,7 @@ The workspace assistant can also inspect the workspace and create Provider, Skil
 2. Keep applications and shared packages in a TypeScript monorepo.
 3. Use one installation-owned workspace as the resource-isolation boundary.
 4. Keep published versions immutable and bind runs to explicit versions.
-5. Start with linear workflows instead of a general graph engine.
+5. Model workflows as versioned directed acyclic dataflow graphs with explicit nodes, ports, edges, and persisted canvas layout.
 6. Execute workflow runs asynchronously without blocking HTTP requests; the initial local runtime may execute them inside the API process.
 7. Treat uploaded skills and MCP responses as untrusted.
 8. Keep domain logic independent from controllers and queue processors.
@@ -63,6 +63,7 @@ The web application is delivered as static assets and is only an HTTP and Server
 - TanStack Query for server state and caching.
 - Zustand for transient editor state and local undo/redo.
 - Tailwind CSS and shadcn/ui for the UI system.
+- `@xyflow/react` for the workflow graph canvas and React-rendered node components.
 - Existing typed form controls for current forms. A dedicated editor dependency is added only when a concrete editing surface requires it; CodeMirror 6 is the preferred lightweight option for future Markdown, JSON, or shell editing.
 - Server-Sent Events for workflow-run progress.
 - i18next with react-i18next for application internationalization.
@@ -70,6 +71,8 @@ The web application is delivered as static assets and is only an HTTP and Server
 TanStack Router owns URL and navigation state. TanStack Query owns remote server state. Zustand owns uncommitted editor state. Backend authorization remains authoritative.
 
 The personal installation has no public sign-in, account creation, email verification, invitation, or password recovery flow. The root route opens Home directly and the API accepts requests without a session cookie. This is intentional for local use. Because the API includes unrestricted host command execution, it binds to `127.0.0.1` by default; listening on another interface requires an explicit `API_HOST` value and transfers responsibility for network access control to the operator.
+
+Local development serves the Vite web application on port `4536` and the NestJS API on port `4546`. The Vite development proxy forwards same-origin `/api` requests to the API port.
 
 Authenticated workspace routes do not include a locale segment. The web application resolves and persists a personal locale preference, falls back to English, and translates product-owned presentation content at the UI boundary. API contracts, persisted domain values, identifiers, logs, and externally supplied content remain language-neutral. `docs/internationalization/README.md` is the source of truth for internationalization requirements.
 
@@ -143,7 +146,9 @@ Workspace (one per installation)
     |-- WorkflowDraft
     |   `-- EditRevision
     `-- WorkflowVersion
-        `-- ordered WorkflowNode references NodeTypeVersion
+        `-- WorkflowGraph
+            |-- WorkflowNode references NodeTypeVersion
+            `-- WorkflowEdge connects typed ports
             `-- WorkflowRun
                 `-- NodeRun
 ```
@@ -158,7 +163,7 @@ The Agent row is the mutable configuration draft. `agent_skills` and `agent_mcp_
 
 The singleton workspace owns one protected system Agent with the stable identifier `agt_system_helper_chat`. It represents the product's System Helper Chat and is created during startup bootstrap. It always appears before custom Agents, cannot be deleted, and exposes a nullable Model Provider binding plus a model selection for user configuration. Its name, responsibility, prompt, Skills, and MCP configuration are product-owned and read-only. Startup permanently assigns the protected `worklite-platform` Skill and repairs that assignment if local data is changed; the Skill cannot be assigned to a custom Agent. The binding and model can be changed only from the System Helper Chat entry in the Agent editor; provider pages and the Chat surface do not own configuration selectors. The selected model must belong to the selected provider's configured model catalog. Changing or deleting a provider clears the binding when necessary and resets an invalid model selection to an unconfigured state. When configured, System Helper Chat resolves the bound provider and selected model through the WorkLite model gateway. When unconfigured, ordinary System Helper submission is unavailable; the surface links to the protected Agent's configuration form unless a configured custom Agent keeps the composer available for structured `@` dispatch.
 
-Workflow nodes are generic typed execution units. Each node references a registered Node Type and contains versioned configuration plus explicit input and output mappings. The initial editor exposes one default `input` and `output` port per node, while the contract reserves named ports for later graph capabilities. A Node Type declares configuration, input, and output schemas and executes behind the Workflow Engine contract.
+Workflow nodes are generic typed execution units. Each node references a registered Node Type and contains versioned configuration, a persisted canvas position, and declared input and output ports. Workflow edges connect one output port to one named input port. The workflow runtime assembles each node request as an object keyed by its declared input ports after every upstream dependency has completed. A Node Type declares configuration, input, and output schemas and executes behind the Workflow Engine contract.
 
 Plugins are the extension and composition boundary. A trusted in-process plugin may register Node Types, runtime capabilities, typed lifecycle events, and optional browser metadata. The Workflow Engine does not import concrete plugin implementations; it resolves a Node Type from its registry and invokes its execution contract. Plugin registration is separate from node execution: a plugin may contribute capabilities without being a workflow node.
 
@@ -168,7 +173,7 @@ The `wechat-clawbot` capability is a server-owned iLink text transport. It keeps
 
 The Codex CLI plugin owns an editable executable command configuration, defaulting to `codex`, in the persisted Plugin row. The value contains one executable name or path followed by optional fixed leading arguments. The API parses that value into an argument vector without shell operators, expansion, or environment-variable substitution, uses the same vector for availability probing and execution, and appends its product-owned `exec --json` arguments afterward. It never reads a command override from an environment variable. The command is executed through the existing shell command boundary with each parsed value quoted independently, using the API process working directory and inherited process environment to match the existing Host Command Interface. The browser exposes Plugins as a first-level workspace resource alongside Agents, with a dedicated list and configuration page; saving and testing are server-owned operations. The same page owns WeChat QR login and connection controls for the transport capability. Skills, MCP servers, and Model Providers remain workspace resources presented with Agents through shared page-level resource tabs because Agents consume their versions and runtime settings. There is no user-uploaded plugin code, marketplace installation, or network authorization layer in this increment. Existing `codex` values remain valid without migration. Existing routes, Agent, Workflow, and execution records remain valid without migration; startup bootstrap adds or repairs the protected plugin rows and Agent row without removing user data.
 
-Agent is one Node Type rather than the Workflow Engine's universal primitive. The Agent Node adapter references an immutable AgentVersion, maps workflow input into the Agent Runtime request, and returns text, structured data, and artifact references through the generic node result. The first-party `worklite/text` node passes a configured text value through the same contract. Agent Runtime remains independent from Workflow Engine.
+Agent is one Node Type rather than the Workflow Engine's universal primitive. The first-party `worklite/generic-agent` adapter references an immutable AgentVersion for its Provider, model, and maximum Skill authorization. Its `context`, `systemPrompt`, and `skills` inputs define one isolated invocation. The supplied Skill set must be a subset of the Skill identifiers locked by the AgentVersion. The adapter returns text, structured data, and artifact references through the generic node result. Agent Runtime remains independent from Workflow Engine.
 
 A published workflow locks every referenced `AgentVersion`; later agent edits cannot alter published workflows or historical runs. Deleted referenced agents use soft deletion so historical versions remain executable and auditable.
 
@@ -239,7 +244,9 @@ Assigning `terminal-command` to a custom Agent grants no special capability flag
 
 The Commands module uses the API process's current working directory and complete environment, persists uncapped stdout and stderr events, and provides process-group cancellation. Agent tool-call records link each validated invocation to the resulting command execution. A command can access and return any host data available to the WorkLite process user, including inherited environment values.
 
-Agent execution uses a server-owned session for custom and protected system Agents. The browser sends user messages, the API resolves the saved Agent, its assigned Skill instructions and executable Skill scripts, and the model gateway returns normalized text and tool-call steps. A valid `skill_script` tool call is persisted as `running`, delegated once to Commands immediately, and linked to the created Command before waiting for completion. If the turn remains active, the matching result resumes the same Agent turn and another tool request may then execute through the same sequence. Agent executions and tool calls use `running`, `completed`, `failed`, and `cancelled` runtime states and are mutable runtime records rather than immutable AgentVersions or WorkflowRuns. In-memory abort controllers coordinate active model cancellation in the initial single-process runtime; persisted state remains authoritative and every asynchronous continuation rechecks it before writing. There is no public Agent tool-call decision route. The former approval route, `pending_approval` and `rejected` states, `terminal_command` model tool, System Helper proposal stream, and pending-call behavior are removed without aliases or adapters; existing pending approval sessions are not migrated and must be replaced with new executions. Existing command execution history remains ordinary Commands data. Preview, Agent publication, and Workflow integration remain deferred.
+Agent execution uses a server-owned session for custom and protected system Agents. The browser sends user messages, the API resolves the saved Agent, its assigned Skill instructions and executable Skill scripts, and the model gateway returns normalized text and tool-call steps. A valid `skill_script` tool call is persisted as `running`, delegated once to Commands immediately, and linked to the created Command before waiting for completion. If the turn remains active, the matching result resumes the same Agent turn and another tool request may then execute through the same sequence. Agent executions and tool calls use `running`, `completed`, `failed`, and `cancelled` runtime states and are mutable runtime records rather than immutable AgentVersions or WorkflowRuns. In-memory abort controllers coordinate active model cancellation in the initial single-process runtime; persisted state remains authoritative and every asynchronous continuation rechecks it before writing. There is no public Agent tool-call decision route. The former approval route, `pending_approval` and `rejected` states, `terminal_command` model tool, System Helper proposal stream, and pending-call behavior are removed without aliases or adapters; existing pending approval sessions are not migrated and must be replaced with new executions. Existing command execution history remains ordinary Commands data.
+
+A Generic Agent workflow node uses the same model gateway and Skill-script runner without creating a conversational AgentExecution. The node resolves only the Skill packages named by its `skills` input and authorized by its locked AgentVersion, adds their instructions and exact executable script allowlist to the supplied system prompt, and executes one requested script at a time. Script results are appended to the isolated node model context until the model returns final text or reaches the bounded workflow tool-round budget. Commands persist each host invocation, while the Workflow NodeRun persists the assembled port input, final output, failure, and cancellation state. Workflow cancellation aborts the active model request and terminates an active Skill command before it can resume the node.
 
 ## MCP Architecture
 
@@ -261,29 +268,38 @@ Assigned MCP tools are resolved lazily when an Agent turn starts and are exposed
 
 ## Workflow Architecture
 
-### Initial Workflow Model
+### Workflow Graph Model
 
-The initial workflow is a fixed, ordered list of generic nodes. It does not support arbitrary edges, branching, loops, parallel execution, or backward jumps. The linear scheduler is intentionally retained while the node contract is generalized.
+A workflow is a directed acyclic dataflow graph of generic nodes and explicit port-to-port edges. Each node has a stable identifier, Node Type identifier and version, JSON configuration, persisted canvas coordinates, and an error policy limited to `stop` or `retry`. Each edge has a stable identifier, source node and port, and target node and port.
 
-Each node has a stable identifier, integer position, Node Type identifier and version, JSON configuration, explicit input mapping, and an error policy initially limited to `stop` or `retry`. A node receives the mapped workflow data and execution context. Its committed output becomes the next node's mapped input. Large values are represented by Artifact references rather than copied into every node record.
+The graph permits at most one incoming edge for each named input port and any number of outgoing edges from an output port. This supports fixed multi-input dependency assembly and data fan-out without defining conditions, loops, dynamic joins, or parallel execution. Cycles, self-connections, duplicate connections, and connections to unavailable or type-incompatible ports are invalid. A connected input receives its source node's committed output.
 
-The first-party `worklite/agent` Node Type adapts an AgentVersion. Other first-party Node Types may later adapt Skills, Commands, HTTP/MCP calls, transforms, approvals, and subworkflows without changing the Workflow Engine contract. Control-flow nodes remain engine-owned until branching and parallel semantics are approved.
+The API validates the complete graph and the Workflow Engine derives a deterministic topological order, using definition order as the stable tie breaker. Before a node executes, the runtime gathers every connected predecessor output into an object keyed by target port. Ready nodes execute one at a time in that order. Every node executes at most once. The final workflow result is an object keyed by leaf node identifier so fan-out results remain explicit. Large values are represented by Artifact references rather than copied into every node record.
 
-Every workflow definition includes a `schemaVersion` for future migrations.
+The first-party Node Types are:
+
+- `worklite/input` exposes the WorkflowRun input through `output`.
+- `worklite/text` exposes configured text through `output` and is used for visible system prompts and other constants.
+- `worklite/skill-set` locks a configured list of workspace Skill identifiers and exposes typed Skill references through `output`.
+- `worklite/generic-agent` locks one AgentVersion, accepts `context`, `systemPrompt`, and `skills`, and exposes the isolated invocation result through `output`.
+
+Publication requires every Generic Agent to reference an AgentVersion from the workspace and every Skill Set identifier to be authorized by each connected Generic Agent's AgentVersion. Context accepts arbitrary JSON-compatible values, system prompt accepts text, and skills accepts only the output of a Skill Set node. Conditions, loops, dynamic joins, and concurrent branch scheduling require separate architecture decisions.
+
+Graph definitions use `schemaVersion: 3`. The multi-port increment intentionally provides no schema-version adapter or migration for version 1 or version 2 definitions. Earlier drafts and published versions are not editable, publishable, or executable after the change. The personal workspace contains no Workflow records when this increment is introduced, so no persisted workflow data is rewritten.
 
 ### Editing and AI Assistance
 
-The editor is structured and does not use drag-and-drop. Users add nodes with explicit controls. A side-panel AI assistant can modify the workflow from natural-language instructions.
+The editor uses `@xyflow/react` with node dragging, edge creation and reconnection, panning, zooming, and fit-to-view. Users add nodes from a palette and configure node-owned fields directly through React-rendered nodes or the contextual inspector. The inspector remains the complete keyboard-accessible path for reviewing configuration and removing graph state. A side-panel AI assistant may modify the workflow from natural-language instructions.
 
-AI edits are validated structured operations: add, delete, update, or reorder a node. The AI cannot write arbitrary workflow state directly. The server validates and atomically applies operations.
+AI edits are validated structured operations: add, delete, update, or move a node; add or delete an edge; or update workflow settings. The AI cannot write arbitrary workflow state directly. The server validates and atomically applies operations.
 
 Every manual or AI edit creates an `EditRevision` with its actor, optional source instruction, operations, resulting snapshot or snapshot reference, and timestamp. The initial strategy uses immutable snapshots and a current-revision pointer. This favors reliable undo, redo, refresh recovery, and cross-device recovery. Zustand may provide immediate local history, but server revisions are authoritative.
 
 ### Workflow Draft Persistence
 
-Every Workflow owns one mutable `WorkflowDraft` and an immutable revision history. The draft stores the current revision pointer and the current linear `WorkflowDefinition`; each meaningful manual or AI edit is submitted as typed operations against a `baseRevisionId`. The API validates and applies the operations in one transaction, writes an immutable `EditRevision` snapshot, and advances the draft pointer. Textual form edits may be batched until blur or explicit save so a keystroke does not create a revision.
+Every Workflow owns one mutable `WorkflowDraft` and an immutable revision history. The draft stores the current revision pointer and the current graph `WorkflowDefinition`; each meaningful manual or AI edit is submitted as typed operations against a `baseRevisionId`. The API validates and applies the operations in one transaction, writes an immutable `EditRevision` snapshot, and advances the draft pointer. Textual form and canvas-position edits may be batched until blur, drag completion, or explicit save so a keystroke or pointer frame does not create a revision.
 
-The persisted definition includes the schema version, an optional workflow-input example, workflow-level execution defaults, and ordered generic nodes. Existing linear input mappings remain limited to `workflow.input`, `previous.output`, and literal values. The draft is the only mutable source for editor recovery; the browser may optimistically render it but does not own durable workflow state.
+The persisted definition includes the schema version, an optional workflow-input example, workflow-level execution defaults, generic nodes with canvas layout, and explicit graph edges. The draft is the only mutable source for editor recovery; the browser may optimistically render it but does not own durable workflow state.
 
 Workflow draft operations are exposed through `POST /workflows/:workflowId/draft/operations` with a required `baseRevisionId`. The response returns the authoritative draft, revision identifier, and undo/redo availability. `POST /workflows/:workflowId/draft/undo` and `POST /workflows/:workflowId/draft/redo` move the server-owned draft pointer without mutating immutable revision snapshots. A stale base revision is rejected so concurrent browser tabs or assistant edits cannot silently overwrite one another.
 
@@ -293,9 +309,9 @@ Workflow draft operations are exposed through `POST /workflows/:workflowId/draft
 WorkflowDraft --publish--> immutable WorkflowVersion --run--> WorkflowRun
 ```
 
-Drafts can change. Published versions cannot. A publication copies the current draft definition into a new immutable WorkflowVersion with its source revision and locked Node Type/resource references. Every execution is tied to one immutable workflow version; draft workflows cannot be run directly. Publication rejects nodes that cannot be locked to an AgentVersion. The editor offers only Agents with immutable versions for Agent nodes, disables Run while the draft has unsaved changes, and identifies that Run targets the latest published version.
+Drafts can change. Published versions cannot. A publication copies the current draft definition into a new immutable WorkflowVersion with its source revision and locked Node Type/resource references. Every execution is tied to one immutable workflow version; draft workflows cannot be run directly. Publication rejects Generic Agent nodes that cannot be locked to an AgentVersion or whose connected Skill Set exceeds that version's authorization. The editor offers only Agents with immutable versions for Generic Agent nodes, disables Run while the draft has unsaved changes, and identifies that Run targets the latest published version.
 
-The initial local persistence migration creates a draft and migration revision for every existing workflow, wraps legacy `workflow_versions.nodes` in the full definition shape, and preserves already published versions. Browser-only edits that were never written to the database cannot be recovered.
+The graph increment does not rewrite existing drafts or published versions. Version 1 definitions remain stored but are rejected by graph reads, publication, and execution. New drafts and publications use version 2 without a compatibility adapter.
 
 ## Runtime Architecture
 
@@ -305,7 +321,8 @@ Runs are asynchronous because they may take minutes or longer. The initial local
 Create run
   -> persist WorkflowRun
   -> schedule in-process job
-  -> resolve and execute nodes in order through the Node Type registry
+  -> validate the DAG and derive a deterministic topological order
+  -> resolve and execute nodes through the Node Type registry
   -> persist NodeRun and events
   -> publish progress
   -> persist final output or failure
@@ -324,7 +341,7 @@ A `WorkflowRun` stores its workspace, workflow version, input, current node, tim
 
 Runtime requirements include node and workflow timeouts, cooperative cancellation, worker heartbeats or leases, persisted intermediate results, classified transient retries, idempotency for retryable external side effects, and per-workspace concurrency, duration, and model-usage quotas.
 
-Completed node runs are retained. The API-local executor resolves registered node types, persists each node transition, creates Artifact metadata for file outputs, and publishes replayable run events. Resume from a failed node remains deferred. A durable queue such as BullMQ should only be introduced after requirements include multi-instance execution, long waits, human approval, complex branching, or stronger durable-execution semantics.
+Completed node runs are retained. The API-local executor resolves registered node types, persists each node transition, creates Artifact metadata for file outputs, and publishes replayable run events. Graph branches execute sequentially in the first increment. Resume from a failed node remains deferred. A durable queue such as BullMQ should only be introduced after requirements include multi-instance execution, long waits, human approval, concurrent branches, or stronger durable-execution semantics.
 
 Initial run endpoints are:
 
@@ -352,7 +369,7 @@ The initial vertical slice includes:
 
 Drizzle owns the SQLite schema. Checked-in, ordered Drizzle SQL migrations are applied by the Drizzle migrator during database initialization before runtime bootstrap and restart normalization. API controllers remain thin and delegate persistence to module services. The API schedules run execution in-process and persists run state transitions. Startup creates the singleton personal workspace, the protected System Helper Chat system Agent, and protected built-in Skills; all other resource records are user-created.
 
-This increment intentionally does not add compatibility routes for the previous mock-only behavior, arbitrary graph workflows, or account-based identity integration.
+This increment intentionally does not add compatibility routes for the previous mock-only behavior or account-based identity integration.
 
 ## Real API Resource Completion Increment
 
@@ -445,8 +462,8 @@ The MCP client, skill SDK, and observability code may begin inside applications 
 
 ## Deferred Capabilities
 
-- Drag-and-drop workflow canvases.
-- Branches, loops, parallel nodes, and arbitrary graph edges.
+- Conditional branches, joins, and loops.
+- Concurrent branch execution.
 - Dynamic script-authored workflow orchestration as the primary Workflow model.
 - A third-party plugin marketplace or untrusted plugin execution.
 - Arbitrary user-supplied MCP `stdio` processes.
@@ -458,6 +475,32 @@ The MCP client, skill SDK, and observability code may begin inside applications 
 Adding a deferred capability requires an approved architecture change.
 
 ## Changelog
+
+### 2026-08-31 - React Flow Workflow Canvas
+
+- Restored `@xyflow/react` as the workflow canvas implementation after evaluating the LiteGraph adapter.
+- Kept the schema version 3 graph contract, persisted node positions, typed ports, DAG validation, and sequential Workflow Engine unchanged.
+- Kept Text editing in React-rendered nodes with the contextual inspector as the keyboard-accessible configuration path.
+- Removed the minimap from the workflow editor while retaining palette, inspector, toolbar actions, and responsive drawers.
+
+### 2026-08-31 - Local Development Ports
+
+- Changed the local Vite development port from `5173` to `4536` and the default NestJS API port from `3000` to `4546`.
+- Kept same-origin `/api` routing aligned across the Vite development proxy and Nginx upstream configuration without preserving the previous port defaults.
+
+### 2026-08-31 - Composable Generic Agent Workflows
+
+- Upgraded workflow definitions to schema version 3 with named multi-port input assembly and no adapters for earlier schemas.
+- Added Workflow Input, Text, Skill Set, and Generic Agent node roles so prompts and authorized Skills are visible graph dependencies.
+- Allowed isolated Generic Agent workflow invocations to execute an AgentVersion-authorized subset of Skill scripts through the existing Commands boundary with bounded rounds and cancellation.
+- Kept execution sequential and deferred conditions, loops, dynamic joins, parallel scheduling, MCP workflow tools, and immutable SkillVersion persistence.
+
+### 2026-08-31 - Directed Acyclic Workflow Graphs
+
+- Replaced the fixed linear workflow model with schema version 2 directed acyclic dataflow graphs containing persisted node layout and explicit port-to-port edges.
+- Selected `@xyflow/react` for the workflow canvas and approved node dragging, edge editing, panning, zooming, fit-to-view, and a minimap.
+- Approved single-input data fan-out with deterministic sequential topological execution while deferring conditions, joins, loops, and concurrent branches.
+- Intentionally omitted adapters and migrations for schema version 1 workflow definitions.
 
 ### 2026-08-30 - Agent resource page tabs
 

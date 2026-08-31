@@ -179,7 +179,7 @@ function RunDetailsPage() {
             </div>
             <div>
               <dt className="text-xs font-medium text-muted-foreground">{t('details.model')}</dt>
-              <dd className="mt-1">{selected?.type === 'worklite/agent' ? 'Agent model' : 'Text processor'}</dd>
+              <dd className="mt-1">{nodeProcessor(selected?.type)}</dd>
             </div>
             <div>
               <dt className="text-xs font-medium text-muted-foreground">{t('details.retries')}</dt>
@@ -229,7 +229,18 @@ function RunDetailsPage() {
 }
 
 function nodeLabel(node: WorkflowNodeRunView): string {
-  return node.type === 'worklite/agent' ? `Agent step ${node.position}` : node.type === 'worklite/text' ? `Text step ${node.position}` : `Step ${node.position}`;
+  if (node.type === 'worklite/input') return `Workflow input ${node.position}`;
+  if (node.type === 'worklite/text') return `Text source ${node.position}`;
+  if (node.type === 'worklite/skill-set') return `Skill Set ${node.position}`;
+  if (node.type === 'worklite/generic-agent') return `Generic Agent ${node.position}`;
+  return `Step ${node.position}`;
+}
+
+function nodeProcessor(type: string | undefined): string {
+  if (type === 'worklite/generic-agent') return 'Agent model and authorized Skills';
+  if (type === 'worklite/input') return 'Workflow input source';
+  if (type === 'worklite/skill-set') return 'Skill reference source';
+  return type === 'worklite/text' ? 'Text source' : 'Node processor';
 }
 
 function toUiStatus(status: WorkflowNodeRunView['status']): 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' {

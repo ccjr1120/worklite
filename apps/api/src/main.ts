@@ -4,7 +4,7 @@ import { Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const port = Number(process.env.API_PORT ?? 3000);
+  const port = Number(process.env.API_PORT ?? 4546);
   const host = process.env.API_HOST?.trim() || '127.0.0.1';
   process.env.WORKLITE_API_URL = `http://127.0.0.1:${port}/api`;
   process.env.WORKLITE_WORKSPACE_SLUG = 'personal';

@@ -10,11 +10,15 @@ From `768px` to `1279px`, use the `56px` single-level icon rail, hide low-priori
 
 ## Mobile
 
-Below `768px`, use a navigation drawer, retain page identity, state and primary action in the context bar, convert inspectors to full-screen or bottom sheets, replace wide tables with object rows, preserve vertical workflow steps, and show detailed logs full-screen or in a resizable sheet. The drawer preserves the desktop first-level destinations, including Agents and Plugins; Agent resource collection tabs remain reachable through horizontal scrolling. Agent Chat keeps `12px` outer space and uses at most about `70vh`; it does not become full-screen. Its single-line composer remains reachable above browser controls, and Chat and Proposed changes use internal views. Essential touch controls may grow to `40px` to `44px`.
+Below `768px`, use a navigation drawer, retain page identity, state and primary action in the context bar, convert workflow palettes and inspectors to full-screen or bottom sheets, keep the workflow canvas full-bleed within its editor region, replace wide tables with object rows, and show detailed logs full-screen or in a resizable sheet. Canvas zoom, fit-to-view, selection, and deletion controls remain reachable with `40px` to `44px` touch targets. The drawer preserves the desktop first-level destinations, including Agents and Plugins; Agent resource collection tabs remain reachable through horizontal scrolling. Agent Chat keeps `12px` outer space and uses at most about `70vh`; it does not become full-screen. Its single-line composer remains reachable above browser controls, and Chat and Proposed changes use internal views.
 
 Responsive layouts must not remove status, recovery, or cancellation controls. The Agent composer retains a stable Send-or-Stop target and editable input at every breakpoint; working feedback remains in the scrollable transcript rather than consuming composer space. Onboarding uses a centered column with `20px` horizontal padding and no decorative side panel.
 
 ## Changelog
+
+### 2026-08-31
+
+- Replaced mobile ordered workflow steps with a full editor-region canvas and drawer-based palette and inspector controls.
 
 ### 2026-08-30
 

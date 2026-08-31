@@ -2,7 +2,7 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import type { Request } from 'express';
-import type { ArtifactView, CreateRunRequest, RunProgressEvent, RunView, WorkflowNodeRunView } from '@worklite/contracts';
+import type { ArtifactView, CreateRunRequest, RunProgressEvent, RunView, WorkflowNodeRunView, WorkflowSkillSetValue } from '@worklite/contracts';
 import {
   artifacts,
   workflowNodeRuns,
@@ -14,7 +14,7 @@ import {
   type StoredWorkflowDefinition,
   type StoredWorkflowNode,
 } from '@worklite/db';
-import { NodeTypeRegistry, resolveLinearInput, type NodeExecutionRequest } from '@worklite/workflow-engine';
+import { collectNodeInputs, getLeafNodeIds, NodeTypeRegistry, topologicallySortWorkflow, type NodeExecutionRequest } from '@worklite/workflow-engine';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from '../agents/agent-executions.service';
@@ -41,27 +41,57 @@ export class RunsService {
     private readonly agentExecutions: AgentExecutionsService,
   ) {
     this.registry.register({
+      id: 'worklite/input',
+      version: '1',
+      inputSchema: { type: 'object' },
+      outputSchema: {},
+      configSchema: { type: 'object' },
+      execute: async ({ context }) => ({ output: context.variables.workflowInput }),
+    });
+    this.registry.register({
       id: 'worklite/text',
       version: '1',
       inputSchema: { type: 'string' },
       outputSchema: { type: 'string' },
       configSchema: { type: 'object' },
-      execute: async ({ input }) => ({ output: typeof input === 'string' ? input : input == null ? '' : JSON.stringify(input) }),
+      execute: async ({ config }) => {
+        const value = asRecord(config)?.text;
+        return { output: typeof value === 'string' ? value : '' };
+      },
     });
     this.registry.register({
-      id: 'worklite/agent',
+      id: 'worklite/skill-set',
       version: '1',
-      inputSchema: {},
+      inputSchema: { type: 'object' },
+      outputSchema: { type: 'object', required: ['type', 'skillIds'] },
+      configSchema: { type: 'object', required: ['skillIds'] },
+      execute: async ({ config }) => {
+        const skillIds = asRecord(config)?.skillIds;
+        if (!Array.isArray(skillIds) || skillIds.some((skillId) => typeof skillId !== 'string')) throw new Error('Skill Set node requires Skill identifiers.');
+        return { output: { type: 'skill-set', skillIds: [...new Set(skillIds)] } satisfies WorkflowSkillSetValue };
+      },
+    });
+    this.registry.register({
+      id: 'worklite/generic-agent',
+      version: '1',
+      inputSchema: { type: 'object', required: ['context', 'systemPrompt'] },
       outputSchema: {},
       configSchema: { type: 'object', required: ['agentVersionId'] },
       execute: async (request) => {
         const config = asRecord(request.config);
-        if (!config || typeof config.agentVersionId !== 'string' || !config.agentVersionId.trim()) throw new Error('Agent node requires an AgentVersion.');
-        const output = await this.agentExecutions.executeWorkflowAgent(
+        const inputs = asRecord(request.input);
+        if (!config || typeof config.agentVersionId !== 'string' || !config.agentVersionId.trim()) throw new Error('Generic Agent node requires an AgentVersion.');
+        if (!inputs || typeof inputs.systemPrompt !== 'string') throw new Error('Generic Agent node requires a systemPrompt input.');
+        const skillSet = inputs.skills === undefined ? null : asRecord(inputs.skills);
+        if (skillSet && (skillSet.type !== 'skill-set' || !Array.isArray(skillSet.skillIds) || skillSet.skillIds.some((skillId) => typeof skillId !== 'string'))) {
+          throw new Error('Generic Agent skills input must come from a Skill Set node.');
+        }
+        const output = await this.agentExecutions.executeGenericWorkflowAgent(
           request.context.workspaceId,
           config.agentVersionId,
-          request.input,
-          typeof config.promptTemplate === 'string' ? config.promptTemplate : undefined,
+          inputs.context,
+          inputs.systemPrompt,
+          skillSet ? skillSet.skillIds as string[] : [],
           request.signal,
           (delta) => { void this.publish(request.context.workflowRunId, 'node.delta', { nodeId: request.context.nodeId, delta }); },
         );
@@ -145,19 +175,22 @@ export class RunsService {
       if (!run || run.status === 'cancelled') return;
       const [version] = await this.db.select().from(workflowVersions).where(eq(workflowVersions.id, run.workflowVersionId)).limit(1);
       if (!version) throw new Error('Workflow version not found');
-      const definition = (version.definition as StoredWorkflowDefinition | null) ?? { schemaVersion: version.schemaVersion, input: {}, defaults: { errorPolicy: 'stop' as const }, nodes: version.nodes };
+      const definition = version.definition as StoredWorkflowDefinition | null;
+      if (!definition || definition.schemaVersion !== 3 || !Array.isArray(definition.edges)) throw new Error('Workflow schema version 3 is required.');
+      const executionPlan = topologicallySortWorkflow(definition);
       await this.db.update(workflowRuns).set({ status: 'running', updatedAt: new Date() }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.status, 'queued')));
       await this.publish(runId, 'run.status', { status: 'running' });
-      let previousOutput: unknown = undefined;
-      for (const node of [...definition.nodes].sort((left, right) => left.position - right.position)) {
+      const outputs = new Map<string, unknown>();
+      for (const [executionIndex, node] of executionPlan.entries()) {
         await this.assertActive(runId, abortController.signal);
-        const input = resolveLinearInput(node, run.input, previousOutput);
+        const input = collectNodeInputs(definition.edges, node.id, outputs);
+        const position = executionIndex + 1;
         const nodeRunId = `nrun_${randomUUID()}`;
-        await this.db.insert(workflowNodeRuns).values({ id: nodeRunId, runId, workspaceId: run.workspaceId, nodeId: node.id, position: node.position, type: node.type, typeVersion: node.typeVersion, status: 'queued', input });
+        await this.db.insert(workflowNodeRuns).values({ id: nodeRunId, runId, workspaceId: run.workspaceId, nodeId: node.id, position, type: node.type, typeVersion: node.typeVersion, status: 'queued', input });
         const startedAt = new Date();
         await this.db.update(workflowNodeRuns).set({ status: 'running', startedAt }).where(eq(workflowNodeRuns.id, nodeRunId));
         await this.db.update(workflowRuns).set({ currentNodeId: node.id, updatedAt: startedAt }).where(eq(workflowRuns.id, runId));
-        await this.publish(runId, 'node.started', { nodeId: node.id, nodeRunId, position: node.position, type: node.type });
+        await this.publish(runId, 'node.started', { nodeId: node.id, nodeRunId, position, type: node.type });
         const attempts = node.errorPolicy === 'retry' ? 2 : 1;
         let output: unknown;
         let artifactIds: string[] = [];
@@ -166,7 +199,7 @@ export class RunsService {
           try {
             if (attempt > 0) await this.db.update(workflowNodeRuns).set({ retryCount: attempt }).where(eq(workflowNodeRuns.id, nodeRunId));
             const definition = this.registry.resolve(node.type, node.typeVersion);
-            const request: NodeExecutionRequest = { input, config: node.config, context: { workflowRunId: runId, workflowVersionId: run.workflowVersionId, nodeId: node.id, workspaceId: run.workspaceId, variables: {} }, signal: abortController.signal };
+            const request: NodeExecutionRequest = { input, config: node.config, context: { workflowRunId: runId, workflowVersionId: run.workflowVersionId, nodeId: node.id, workspaceId: run.workspaceId, variables: { workflowInput: run.input } }, signal: abortController.signal };
             const result = await definition.execute(request);
             const artifact = await this.createFileArtifact(run, node, result.output);
             output = artifact ? artifact.output : result.output;
@@ -186,10 +219,11 @@ export class RunsService {
         }
         await this.db.update(workflowNodeRuns).set({ status: 'succeeded', output, artifactIds, finishedAt: new Date() }).where(eq(workflowNodeRuns.id, nodeRunId));
         await this.publish(runId, 'node.completed', { nodeId: node.id, nodeRunId, output, artifactIds });
-        previousOutput = output;
+        outputs.set(node.id, output);
       }
-      await this.db.update(workflowRuns).set({ status: 'succeeded', result: previousOutput ?? null, currentNodeId: null, updatedAt: new Date(), finishedAt: new Date() }).where(eq(workflowRuns.id, runId));
-      await this.publish(runId, 'run.status', { status: 'succeeded', result: previousOutput ?? null });
+      const result = Object.fromEntries(getLeafNodeIds(definition).map((nodeId) => [nodeId, outputs.get(nodeId)]));
+      await this.db.update(workflowRuns).set({ status: 'succeeded', result, currentNodeId: null, updatedAt: new Date(), finishedAt: new Date() }).where(eq(workflowRuns.id, runId));
+      await this.publish(runId, 'run.status', { status: 'succeeded', result });
     } catch (error) {
       if (error instanceof RunCancelledError) return;
       const [current] = await this.db.select({ status: workflowRuns.status }).from(workflowRuns).where(eq(workflowRuns.id, runId)).limit(1);

@@ -18,6 +18,7 @@ import { CommandsService } from '../commands/commands.service';
 const SYSTEM_HELPER_CHAT_ID = 'agt_system_helper_chat';
 const WORKLITE_PLATFORM_SKILL_ID = 'sk_worklite_platform';
 const MAX_HELPER_TOOL_ROUNDS = 24;
+const MAX_WORKFLOW_TOOL_ROUNDS = 8;
 
 const HELPER_BUILTIN_TOOLS = [
   {
@@ -111,34 +112,97 @@ export class AgentExecutionsService {
     throw new Error('The Codex execution timed out.');
   }
 
-  async executeWorkflowAgent(
+  async executeGenericWorkflowAgent(
     workspaceId: string,
     agentVersionId: string,
-    input: unknown,
-    promptTemplate: string | undefined,
+    context: unknown,
+    systemPrompt: string,
+    requestedSkillIds: string[],
     signal: AbortSignal,
     onTextDelta?: (delta: string) => void | Promise<void>,
   ): Promise<string> {
     const [version] = await this.db.select().from(agentVersions).where(and(eq(agentVersions.id, agentVersionId), eq(agentVersions.workspaceId, workspaceId))).limit(1);
     if (!version) throw new NotFoundException('Agent version not found');
     if (!version.providerId || !version.model) throw new ConflictException('The Agent version has no configured model provider.');
+    const selectedSkillIds = [...new Set(requestedSkillIds)];
+    if (selectedSkillIds.some((skillId) => !(version.skillIds ?? []).includes(skillId))) {
+      throw new BadRequestException('The workflow requested a Skill that is not authorized by the AgentVersion.');
+    }
+    const skillRows = selectedSkillIds.length === 0
+      ? []
+      : await this.db.select({ id: skills.id, name: skills.name, instructions: skills.instructions })
+        .from(skills)
+        .where(and(eq(skills.workspaceId, workspaceId), inArray(skills.id, selectedSkillIds)));
+    if (skillRows.length !== selectedSkillIds.length) throw new NotFoundException('A workflow Skill is no longer available.');
+    const files = selectedSkillIds.length === 0
+      ? []
+      : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, selectedSkillIds));
+    const assignedSkills = skillRows.map((skill) => ({
+      ...skill,
+      files: files.filter((file) => file.skillId === skill.id).map(({ path, content }) => ({ path, content })),
+    }));
+    const availableSkillScripts = assignedSkills.flatMap((skill) => skill.files
+      .filter((file) => file.path.startsWith('scripts/') && file.content.startsWith('#!'))
+      .map((file) => ({ skillId: skill.id, skillName: skill.name, path: file.path })));
+    const skillInstructions = assignedSkills.map((skill) => `## ${skill.name}\n${skill.instructions.trim()}`).filter((value) => value.trim()).join('\n\n');
+    const scriptList = availableSkillScripts.map((script) => `- Skill ${script.skillName} (${script.skillId}): ${script.path}`).join('\n');
+    const effectiveSystemPrompt = [
+      version.systemPrompt.trim(),
+      systemPrompt.trim(),
+      skillInstructions ? `Assigned Skill instructions:\n\n${skillInstructions}` : '',
+      availableSkillScripts.length > 0 ? 'Request at most one skill_script at a time. Every valid request executes immediately on the WorkLite host without user approval.' : '',
+      scriptList ? `Assigned executable Skill scripts:\n${scriptList}\nUse skill_script only with an exact listed Skill id and script path.` : '',
+    ].filter(Boolean).join('\n\n');
     const runtime = await this.resources.providerRuntime({} as Request, 'personal', version.providerId, version.model);
-    const inputText = typeof input === 'string' ? input : JSON.stringify(input);
-    const prompt = (promptTemplate?.trim() || '{{input}}').replaceAll('{{input}}', inputText);
-    const result = await createModelGateway().generateAgentStep({
-      provider: runtime.provider,
-      model: runtime.model,
-      systemPrompt: version.systemPrompt,
-      messages: [{ role: 'user', content: prompt }],
-      skillScripts: [],
-      maxToolRounds: 1,
-      abortSignal: signal,
-      onTextDelta,
-    });
-    if (result.toolCalls.length > 0) throw new BadRequestException('Workflow Agent nodes cannot request tools.');
-    const output = result.text.trim();
-    if (!output) throw new Error('The workflow Agent returned an empty response.');
-    return output;
+    const contextText = typeof context === 'string' ? context : JSON.stringify(context);
+    const messages: GatewayAgentMessage[] = [{ role: 'user', content: contextText ?? '' }];
+
+    for (let round = 0; round <= MAX_WORKFLOW_TOOL_ROUNDS; round += 1) {
+      signal.throwIfAborted();
+      const result = await createModelGateway().generateAgentStep({
+        provider: runtime.provider,
+        model: runtime.model,
+        systemPrompt: effectiveSystemPrompt,
+        messages,
+        skillScripts: availableSkillScripts,
+        maxToolRounds: MAX_WORKFLOW_TOOL_ROUNDS,
+        abortSignal: signal,
+        onTextDelta,
+      });
+      messages.push(...result.responseMessages);
+      if (result.toolCalls.length === 0) {
+        const output = result.text.trim();
+        if (!output) throw new Error('The Generic Agent workflow node returned an empty response.');
+        return output;
+      }
+      if (round === MAX_WORKFLOW_TOOL_ROUNDS) throw new Error('The Generic Agent workflow node reached its Skill tool-round limit.');
+      if (result.toolCalls.length !== 1) throw new BadRequestException('Generic Agent workflow nodes may request only one Skill script at a time.');
+      const call = result.toolCalls[0];
+      const skill = assignedSkills.find((item) => item.id === call.skillId);
+      const script = skill?.files.find((file) => file.path === call.scriptPath && file.path.startsWith('scripts/') && file.content.startsWith('#!'));
+      if (call.toolName !== 'skill_script' || !skill || !script) throw new BadRequestException('The Generic Agent requested an unavailable Skill script.');
+      const started = await this.skillScripts.start(skill.files, script.path, call.arguments ?? []);
+      const cancel = () => { void this.skillScripts.cancel(started.id).catch(() => undefined); };
+      signal.addEventListener('abort', cancel, { once: true });
+      try {
+        const completed = await this.skillScripts.wait(started.id);
+        signal.throwIfAborted();
+        const succeeded = completed.execution.status === 'succeeded';
+        const value = completed.output || (succeeded ? 'Skill script completed without output.' : `Skill script failed with exit code ${completed.execution.exitCode ?? 'unknown'}.`);
+        messages.push({
+          role: 'tool',
+          content: [{
+            type: 'tool-result',
+            toolCallId: call.toolCallId,
+            toolName: call.toolName,
+            output: { type: succeeded ? 'text' : 'error-text', value },
+          }],
+        });
+      } finally {
+        signal.removeEventListener('abort', cancel);
+      }
+    }
+    throw new Error('The Generic Agent workflow node did not complete.');
   }
 
   async get(request: Request, workspaceSlug: string, agentId: string, executionId: string): Promise<AgentExecutionView> {

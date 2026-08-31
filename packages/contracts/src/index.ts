@@ -305,19 +305,26 @@ export type WorkliteScriptResult =
   | { type: 'settings'; appearance: WorkspaceSettingsView['appearance']; locale: WorkspaceSettingsView['locale'] }
   | { type: 'snapshot' };
 
-export type WorkflowInputMapping =
-  | { source: 'workflow.input' }
-  | { source: 'previous.output' }
-  | { source: 'literal'; value: unknown };
+export type WorkflowNodePosition = {
+  x: number;
+  y: number;
+};
 
 export type WorkflowNodeDefinition = {
   id: string;
-  position: number;
+  position: WorkflowNodePosition;
   type: string;
   typeVersion: string;
   config: unknown;
-  input: WorkflowInputMapping;
   errorPolicy: NodeErrorPolicy;
+};
+
+export type WorkflowEdgeDefinition = {
+  id: string;
+  sourceNodeId: string;
+  sourcePort: string;
+  targetNodeId: string;
+  targetPort: string;
 };
 
 export type WorkflowDefinition = {
@@ -325,13 +332,21 @@ export type WorkflowDefinition = {
   input: { example?: unknown };
   defaults: { errorPolicy: NodeErrorPolicy };
   nodes: WorkflowNodeDefinition[];
+  edges: WorkflowEdgeDefinition[];
+};
+
+export type WorkflowSkillSetValue = {
+  type: 'skill-set';
+  skillIds: string[];
 };
 
 export type WorkflowEditOperation =
   | { type: 'addNode'; node: WorkflowNodeDefinition; index: number }
   | { type: 'removeNode'; nodeId: string }
-  | { type: 'updateNode'; nodeId: string; patch: Partial<Omit<WorkflowNodeDefinition, 'id' | 'position'>> }
-  | { type: 'moveNode'; nodeId: string; index: number }
+  | { type: 'updateNode'; nodeId: string; patch: Partial<Omit<WorkflowNodeDefinition, 'id'>> }
+  | { type: 'moveNode'; nodeId: string; position: WorkflowNodePosition }
+  | { type: 'addEdge'; edge: WorkflowEdgeDefinition }
+  | { type: 'removeEdge'; edgeId: string }
   | { type: 'updateSettings'; input?: { example?: unknown }; defaults?: { errorPolicy: NodeErrorPolicy } };
 
 export type WorkflowDraftView = {
