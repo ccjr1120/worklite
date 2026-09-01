@@ -141,7 +141,7 @@ export class AgentsService {
     if (!name) throw new BadRequestException('Agent name is required.');
     const nextProviderId = input.providerId === undefined ? existing.providerId : input.providerId;
     const model = input.model === undefined ? existing.model : input.model.trim();
-    const provider = await this.validateDraftModel(team.id, nextProviderId, model);
+    await this.validateDraftModel(team.id, nextProviderId, model);
     const assignments = await this.validateAssignments(team.id, input.skillIds, input.mcpServerIds, true);
 
     await this.db.transaction((transaction) => {

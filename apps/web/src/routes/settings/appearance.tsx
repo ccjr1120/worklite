@@ -42,12 +42,13 @@ function AppearanceSettingsPage() {
           return (
             <label
               key={option.value}
+              htmlFor={`appearance-${option.value}`}
               className={cn(
                 'flex cursor-pointer items-start gap-3 rounded-lg border p-4',
                 selected ? 'border-brand bg-brand-subtle' : 'border-border bg-surface',
               )}
             >
-              <RadioGroupItem value={option.value} className="mt-0.5" />
+              <RadioGroupItem id={`appearance-${option.value}`} value={option.value} className="mt-0.5" />
               <Icon className="mt-0.5 size-4" aria-hidden="true" />
               <span>
                 <span className="block text-sm font-medium">{option.label}</span>

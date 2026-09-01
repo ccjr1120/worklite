@@ -21,7 +21,7 @@ function AuditLogPage() {
   const { data: auditEvents = [], isLoading, isError } = useAuditLogsQuery(workspaceSlug);
   const items = useMemo(
     () => auditEvents.filter((item) => `${item.actor} ${item.action} ${item.resource}`.toLowerCase().includes(search.toLowerCase())),
-    [search],
+    [auditEvents, search],
   );
 
   return (

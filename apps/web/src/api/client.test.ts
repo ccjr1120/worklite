@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ApiError, api, apiRequest, parseCommandEvent } from './client';
+import { api, apiRequest, parseCommandEvent } from './client';
 
 describe('apiRequest', () => {
   it('returns undefined for a successful 204 response', async () => {

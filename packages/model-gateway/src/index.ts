@@ -5,19 +5,19 @@ import { generateText, InvalidToolInputError, JSONParseError, jsonSchema, stream
 export type ModelProviderConfig =
   | {
       id: string;
-      kind: 'deepseek';
+      adapter: 'deepseek';
       apiKey: string;
-      baseUrl?: string;
+      baseURL?: string;
       headers?: Readonly<Record<string, string>>;
+      operation?: 'chat/completions';
     }
   | {
       id: string;
-      kind: 'openai' | 'openai-compatible';
+      adapter: 'openai';
       apiKey: string;
-      baseUrl?: string;
-      organization?: string;
-      project?: string;
+      baseURL?: string;
       headers?: Readonly<Record<string, string>>;
+      operation?: 'chat/completions' | 'responses';
     };
 
 export type GatewayMessage = {
@@ -231,23 +231,43 @@ function resolveModel(provider: ModelProviderConfig, modelId: string): LanguageM
     throw new ModelGatewayError('INVALID_PROVIDER', `Provider ${provider.id} has no usable API key.`);
   }
 
-  const headers = provider.headers == null ? undefined : { ...provider.headers };
+  const portkeyConfig = JSON.stringify({
+    provider: provider.adapter,
+    api_key: provider.apiKey,
+    ...(provider.baseURL ? { custom_host: provider.baseURL } : {}),
+    ...(provider.headers && Object.keys(provider.headers).length > 0 ? { forward_headers: Object.keys(provider.headers) } : {}),
+  });
+  const headers = {
+    ...(provider.headers ?? {}),
+    'x-portkey-config': portkeyConfig,
+  };
+  const baseURL = gatewayBaseURL();
 
-  if (provider.kind === 'deepseek') {
+  if (provider.adapter === 'deepseek') {
     return createDeepSeek({
-      apiKey: provider.apiKey,
-      baseURL: provider.baseUrl,
+      apiKey: 'worklite-gateway',
+      baseURL,
       headers,
     })(modelId);
   }
 
-  return createOpenAI({
-    apiKey: provider.apiKey,
-    baseURL: provider.baseUrl,
-    organization: provider.organization,
-    project: provider.project,
+  const openai = createOpenAI({
+    apiKey: 'worklite-gateway',
+    baseURL,
     headers,
-  }).chat(modelId);
+  });
+  return provider.operation === 'responses' ? openai.responses(modelId) as unknown as LanguageModel : openai.chat(modelId);
+}
+
+function gatewayBaseURL(): string {
+  const configured = process.env.PORTKEY_GATEWAY_URL?.trim();
+  if (configured) {
+    const root = configured.replace(/\/+$/, '');
+    return root.endsWith('/v1') ? root : `${root}/v1`;
+  }
+  const portValue = Number.parseInt(process.env.PORTKEY_GATEWAY_PORT ?? '4547', 10);
+  const port = Number.isInteger(portValue) && portValue > 0 && portValue <= 65_535 ? portValue : 4547;
+  return `http://127.0.0.1:${port}/v1`;
 }
 
 function toModelMessages(messages: readonly GatewayMessage[]): ModelMessage[] {
@@ -284,23 +304,6 @@ function trimAgentMessages(systemPrompt: string, messages: readonly GatewayAgent
     dropped += 1;
   }
   return { messages: result, dropped };
-}
-
-async function generateWithRetry(
-  request: Parameters<typeof generateText>[0],
-  signal: AbortSignal | undefined,
-  maxAttempts = 3,
-): Promise<Awaited<ReturnType<typeof generateText>>> {
-  const attempts = Math.max(1, Math.min(4, Math.floor(maxAttempts)));
-  for (let attempt = 0; ; attempt += 1) {
-    signal?.throwIfAborted();
-    try {
-      return await generateText(request);
-    } catch (error) {
-      if (attempt + 1 >= attempts || signal?.aborted || !isRetryableGatewayError(error)) throw error;
-      await abortableDelay(Math.min(250 * 2 ** attempt, 2_000), signal);
-    }
-  }
 }
 
 function isRetryableGatewayError(error: unknown): boolean {

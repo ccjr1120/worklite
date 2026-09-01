@@ -29,6 +29,20 @@
       "when": 1788096000000,
       "tag": "0003_wechat_clawbot",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788247662416,
+      "tag": "0004_portkey_gateway",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1788250945108,
+      "tag": "0006_misty_apocalypse",
+      "breakpoints": true
     }
   ]
 }

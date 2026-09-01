@@ -54,7 +54,10 @@
     "available": "可用",
     "missing": "不可用",
     "qr_pending": "等待扫码",
-    "error": "错误"
+    "error": "错误",
+    "stopped": "已停止",
+    "starting": "启动中",
+    "stopping": "停止中"
   },
   "empty": {
     "dash": "—"

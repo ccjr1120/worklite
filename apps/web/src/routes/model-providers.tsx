@@ -1,10 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { Bot, KeyRound, LoaderCircle, Plus, Trash2 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { Bot, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, RotateCcw, Square, Trash2, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import type { ModelProviderTestResult, ModelProviderView } from '@worklite/contracts';
-import { AgentResourceNav } from '@/components/agent-resource-nav';
+import type { DiscoverModelProviderRequest, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayStatus } from '@worklite/contracts';
 import { CollectionTable, CollectionHeader, CollectionRow } from '@/components/collection-table';
 import { CollectionToolbar } from '@/components/collection-toolbar';
 import { EmptyState } from '@/components/empty-state';
@@ -19,7 +18,7 @@ import { PasswordInput } from '@/components/password-input';
 import { StatusBadge } from '@/components/status-badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
-import { useModelProvidersQuery } from '@/api/queries';
+import { useModelProvidersQuery, usePortkeyGatewayQuery } from '@/api/queries';
 import { api } from '@/api/client';
 import { queryClient } from '@/lib/query-client';
 import { formatList } from '@/i18n/format';
@@ -31,7 +30,7 @@ export const Route = createFileRoute('/model-providers')({
 
 type ProviderDialog =
   | { mode: 'create' }
-  | { mode: 'replace'; provider: ModelProviderView };
+  | { mode: 'edit'; provider: ModelProviderView };
 
 type ProviderTestDialog =
   | { provider: ModelProviderView; status: 'loading'; startedAt: number; elapsedSeconds: number }
@@ -40,25 +39,133 @@ type ProviderTestDialog =
 
 const PROVIDER_TEST_PROMPT = '\u4f60\u597d';
 
-function parseModels(value: string): string[] {
-  return value.split(',').map((model) => model.trim()).filter(Boolean);
+function parseHeaders(value: string): Record<string, string> | undefined {
+  if (!value.trim()) return undefined;
+  const parsed: unknown = JSON.parse(value);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Object.values(parsed).some((item) => typeof item !== 'string')) throw new Error('invalid');
+  const headers = Object.fromEntries(Object.entries(parsed).map(([headerName, headerValue]) => [headerName.trim(), headerValue])) as Record<string, string>;
+  if (Object.keys(headers).some((headerName) => !headerName)) throw new Error('invalid');
+  return headers;
+}
+
+type ModelTokenInputProps = {
+  id: string;
+  value: string[];
+  onChange: (value: string[]) => void;
+  placeholder: string;
+  removeLabel: (model: string) => string;
+  disabled?: boolean;
+};
+
+function ModelTokenInput({ id, value, onChange, placeholder, removeLabel, disabled = false }: ModelTokenInputProps) {
+  const [draft, setDraft] = useState('');
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function focusInput(position?: number) {
+    inputRef.current?.focus();
+    if (position !== undefined) window.requestAnimationFrame(() => inputRef.current?.setSelectionRange(position, position));
+  }
+
+  function removeAt(index: number) {
+    onChange(value.filter((_, itemIndex) => itemIndex !== index));
+    setActiveIndex(null);
+    focusInput();
+  }
+
+  function commit() {
+    const model = draft.trim();
+    if (!model) return;
+    if (!value.includes(model)) onChange([...value, model]);
+    setDraft('');
+    setActiveIndex(null);
+    focusInput();
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commit();
+      return;
+    }
+    if ((event.key === 'Backspace' || event.key === 'Delete') && activeIndex !== null) {
+      event.preventDefault();
+      removeAt(activeIndex);
+      return;
+    }
+    if (event.key === 'ArrowLeft' && activeIndex === null && !draft && event.currentTarget.selectionStart === 0 && value.length > 0) {
+      event.preventDefault();
+      setActiveIndex(value.length - 1);
+      return;
+    }
+    if (event.key === 'ArrowLeft' && activeIndex !== null) {
+      event.preventDefault();
+      if (activeIndex === 0) {
+        setActiveIndex(null);
+        focusInput(0);
+      } else setActiveIndex(activeIndex - 1);
+      return;
+    }
+    if (event.key === 'ArrowRight' && activeIndex !== null) {
+      event.preventDefault();
+      if (activeIndex === value.length - 1) {
+        setActiveIndex(null);
+        focusInput();
+      } else setActiveIndex(activeIndex + 1);
+      return;
+    }
+    if (event.key === 'Backspace' && !draft && activeIndex === null && value.length > 0) {
+      event.preventDefault();
+      removeAt(value.length - 1);
+      return;
+    }
+    if (event.key === 'Delete' && !draft && activeIndex === null && value.length > 0 && event.currentTarget.selectionStart === 0) {
+      event.preventDefault();
+      removeAt(0);
+    }
+  }
+
+  return (
+    <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1.5 focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
+      {value.map((model, index) => (
+        <span key={model} className={`inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium ${activeIndex === index ? 'border-brand bg-brand-subtle text-brand' : 'border-border bg-surface-subtle text-foreground'}`}>
+          <span className="max-w-[min(22rem,70vw)] truncate font-mono">{model}</span>
+          <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40" aria-label={removeLabel(model)} onClick={() => removeAt(index)} disabled={disabled}>
+            <X className="size-3" aria-hidden="true" />
+          </button>
+        </span>
+      ))}
+      <input
+        ref={inputRef}
+        id={id}
+        className="min-w-[12rem] flex-1 bg-transparent px-1 py-1 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
+        value={draft}
+        placeholder={value.length === 0 ? placeholder : ''}
+        disabled={disabled}
+        onChange={(event) => { setDraft(event.target.value); setActiveIndex(null); }}
+        onKeyDown={handleKeyDown}
+        onFocus={() => setActiveIndex(null)}
+      />
+    </div>
+  );
 }
 
 function ModelProvidersPage() {
   const { t } = useTranslation(['settings', 'common']);
   const { locale } = useLocale();
   const workspaceSlug = 'personal';
+  const [view, setView] = useState<'providers' | 'gateway'>('providers');
   const [search, setSearch] = useState('');
   const [testDialog, setTestDialog] = useState<ProviderTestDialog | null>(null);
   const [dialog, setDialog] = useState<ProviderDialog | null>(null);
   const [deleteProvider, setDeleteProvider] = useState<ModelProviderView | null>(null);
   const [name, setName] = useState('');
   const [apiKey, setApiKey] = useState('');
-  const [kind, setKind] = useState<'deepseek' | 'openai' | 'openai-compatible'>('openai-compatible');
-  const [baseUrl, setBaseUrl] = useState('');
-  const [organization, setOrganization] = useState('');
-  const [project, setProject] = useState('');
-  const [models, setModels] = useState('');
+  const [protocol, setProtocol] = useState<ModelProviderProtocol>('openai/chat');
+  const [baseURL, setBaseURL] = useState('');
+  const [modelIds, setModelIds] = useState<string[]>([]);
+  const [modelsBusy, setModelsBusy] = useState(false);
+  const [modelsError, setModelsError] = useState('');
   const [headersText, setHeadersText] = useState('');
   const [headersError, setHeadersError] = useState('');
   const [providerBusy, setProviderBusy] = useState(false);
@@ -66,6 +173,13 @@ function ModelProvidersPage() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const { data: modelProviders = [], isLoading, isError } = useModelProvidersQuery(workspaceSlug);
+  const gatewayQuery = usePortkeyGatewayQuery();
+  const [gatewayPort, setGatewayPort] = useState('4547');
+  const [gatewayBusy, setGatewayBusy] = useState(false);
+  const [gatewayError, setGatewayError] = useState('');
+  useEffect(() => {
+    if (gatewayQuery.data) setGatewayPort(String(gatewayQuery.data.port));
+  }, [gatewayQuery.data]);
   const items = useMemo(
     () => modelProviders.filter((provider) => `${provider.name} ${provider.models.join(' ')}`.toLowerCase().includes(search.toLowerCase())),
     [modelProviders, search],
@@ -82,57 +196,59 @@ function ModelProvidersPage() {
   function openCreate() {
     setName('');
     setApiKey('');
-    setKind('openai-compatible');
-    setBaseUrl('');
-    setOrganization('');
-    setProject('');
-    setModels('');
+    setProtocol('openai/chat');
+    setBaseURL('');
+    setModelIds([]);
+    setModelsError('');
     setHeadersText('');
     setHeadersError('');
     setProviderError('');
     setDialog({ mode: 'create' });
   }
 
-  function openReplace(provider: ModelProviderView) {
+  function openEdit(provider: ModelProviderView) {
+    setName(provider.name);
     setApiKey('');
-    setKind(provider.kind);
-    setBaseUrl(provider.baseUrl ?? '');
-    setOrganization(provider.organization ?? '');
-    setProject(provider.project ?? '');
-    setModels(provider.models.join(', '));
+    setProtocol(provider.protocol);
+    setBaseURL(provider.baseURL ?? '');
+    setModelIds(provider.models);
+    setModelsError('');
     setHeadersText('');
     setHeadersError('');
     setProviderError('');
-    setDialog({ mode: 'replace', provider });
+    setDialog({ mode: 'edit', provider });
   }
 
   function closeProviderDialog() {
     setDialog(null);
     setApiKey('');
+    setModelsError('');
     setHeadersError('');
     setProviderError('');
   }
 
   async function saveProvider() {
-    if (!dialog || !apiKey.trim() || (dialog.mode === 'create' && !name.trim())) return;
-    let headers: Record<string, string> | undefined;
-    if (headersText.trim()) {
-      try {
-        const parsed: unknown = JSON.parse(headersText);
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Object.values(parsed).some((value) => typeof value !== 'string')) throw new Error('invalid');
-        headers = Object.fromEntries(Object.entries(parsed).map(([headerName, value]) => [headerName.trim(), value])) as Record<string, string>;
-        if (Object.keys(headers).some((headerName) => !headerName)) throw new Error('invalid');
-      } catch {
-        setHeadersError(t('providers.headersError'));
-        return;
-      }
+    if (!dialog || (dialog.mode === 'create' && !name.trim())) return;
+    if (!baseURL.trim()) {
+      setProviderError(t('providers.baseURLRequired'));
+      return;
     }
-    const providerName = dialog.mode === 'create' ? name.trim() : dialog.provider.name;
+    let headers: Record<string, string> | undefined;
+    try {
+      headers = parseHeaders(headersText);
+    } catch {
+      setHeadersError(t('providers.headersError'));
+      return;
+    }
     const mode = dialog.mode;
     setProviderBusy(true);
     setProviderError('');
     try {
-      await api.saveModelProvider(workspaceSlug, { name: providerName, kind, apiKey: apiKey.trim(), baseUrl: baseUrl.trim() || undefined, organization: organization.trim() || undefined, project: project.trim() || undefined, models: parseModels(models), ...(headers !== undefined ? { headers } : {}) });
+      if (dialog.mode === 'create') {
+        await api.saveModelProvider(workspaceSlug, { name: name.trim(), protocol, apiKey: apiKey.trim() || undefined, baseURL: baseURL.trim() || undefined, models: modelIds, ...(headers !== undefined ? { headers } : {}) });
+      } else {
+        await api.updateModelProvider(workspaceSlug, dialog.provider.id, { name: name.trim(), protocol, apiKey: apiKey.trim() || undefined, baseURL: baseURL.trim() || undefined, models: modelIds, ...(headers !== undefined ? { headers } : {}) });
+      }
       closeProviderDialog();
       toast.success(t(mode === 'create' ? 'providers.created' : 'providers.saved'));
       void queryClient.invalidateQueries({ queryKey: ['model-providers'] }).catch(() => undefined);
@@ -140,6 +256,36 @@ function ModelProvidersPage() {
       setProviderError(error instanceof Error ? error.message : t('providers.testFailed'));
     } finally {
       setProviderBusy(false);
+    }
+  }
+
+  async function discoverModels() {
+    if (!apiKey.trim()) {
+      setModelsError(t('providers.modelsApiKeyRequired'));
+      return;
+    }
+    if (!baseURL.trim()) {
+      setProviderError(t('providers.baseURLRequired'));
+      return;
+    }
+    let headers: Record<string, string> | undefined;
+    try {
+      headers = parseHeaders(headersText);
+    } catch {
+      setHeadersError(t('providers.headersError'));
+      return;
+    }
+    setModelsBusy(true);
+    setModelsError('');
+    try {
+      const input: DiscoverModelProviderRequest = { protocol, apiKey: apiKey.trim(), baseURL: baseURL.trim() || undefined, ...(headers !== undefined ? { headers } : {}) };
+      const result = await api.discoverModelProviderModels(input);
+      setModelIds((current) => [...new Set([...current, ...result.models])]);
+      toast.success(t('providers.modelsFetched', { count: result.models.length }));
+    } catch (error: unknown) {
+      setModelsError(error instanceof Error ? error.message : t('providers.modelsFetchFailed'));
+    } finally {
+      setModelsBusy(false);
     }
   }
 
@@ -164,7 +310,7 @@ function ModelProvidersPage() {
   }
 
   function testProvider(provider: ModelProviderView) {
-    const startedAt = Date.now();
+    const startedAt = currentTime();
     setTestDialog({ provider, status: 'loading', startedAt, elapsedSeconds: 0 });
     void api.testModelProvider(workspaceSlug, provider.id).then((result) => {
       setTestDialog((current) => current?.provider.id === provider.id ? { provider, status: 'success', result, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1_000) } : current);
@@ -178,8 +324,31 @@ function ModelProvidersPage() {
     <div className="mx-auto w-full max-w-[1440px] px-6 py-6">
       <WorkspaceChrome crumbs={[{ label: t('providers.title') }]} />
       <PageHeading title={t('providers.title')} description={t('providers.description')} />
-      <AgentResourceNav active="providers" />
-      <CollectionToolbar
+      <nav className="mt-6 flex max-w-full items-center gap-1 overflow-x-auto rounded-md bg-surface-subtle p-1" aria-label={t('providers.views.label')}>
+        <button type="button" className={`rounded-sm px-3 py-1.5 text-[13px] font-medium ${view === 'providers' ? 'bg-surface text-foreground shadow-sm' : 'text-muted-foreground hover:bg-surface/70 hover:text-foreground'}`} onClick={() => setView('providers')}>{t('providers.views.providers')}</button>
+        <button type="button" className={`rounded-sm px-3 py-1.5 text-[13px] font-medium ${view === 'gateway' ? 'bg-surface text-foreground shadow-sm' : 'text-muted-foreground hover:bg-surface/70 hover:text-foreground'}`} onClick={() => setView('gateway')}>{t('providers.views.gateway')}</button>
+      </nav>
+      {view === 'gateway' ? (
+        <GatewayPanel
+          gateway={gatewayQuery.data}
+          port={gatewayPort}
+          busy={gatewayBusy}
+          error={gatewayError}
+          onPortChange={setGatewayPort}
+          onSave={async () => {
+            const parsed = Number(gatewayPort);
+            if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) { setGatewayError(t('providers.gateway.invalidPort')); return; }
+            setGatewayBusy(true); setGatewayError('');
+            try { const saved = await api.updatePortkeyGateway({ port: parsed }); queryClient.setQueryData(['portkey-gateway'], saved); toast.success(t('providers.gateway.saved')); } catch (error: unknown) { setGatewayError(error instanceof Error ? error.message : t('providers.gateway.actionFailed')); } finally { setGatewayBusy(false); }
+          }}
+          onAction={async (action) => {
+            setGatewayBusy(true); setGatewayError('');
+            try { const result = action === 'start' ? await api.startPortkeyGateway() : action === 'stop' ? await api.stopPortkeyGateway() : await api.restartPortkeyGateway(); queryClient.setQueryData(['portkey-gateway'], result); } catch (error: unknown) { setGatewayError(error instanceof Error ? error.message : t('providers.gateway.actionFailed')); } finally { setGatewayBusy(false); }
+          }}
+          t={(key) => t(key as never)}
+        />
+      ) : null}
+      {view === 'providers' ? <CollectionToolbar
         className="mt-6"
         search={search}
         onSearchChange={setSearch}
@@ -190,8 +359,8 @@ function ModelProvidersPage() {
             {t('providers.create')}
           </Button>
         }
-      />
-      <div className="mt-4">
+      /> : null}
+      {view === 'providers' ? <div className="mt-4">
         {isLoading ? <p className="text-sm text-muted-foreground">Loading providers...</p> : isError ? <p className="text-sm text-danger">Unable to load providers.</p> : modelProviders.length === 0 ? (
           <EmptyState title={t('providers.empty.title')} description={t('providers.empty.description')} actionLabel={t('providers.create')} onAction={openCreate} />
         ) : items.length === 0 ? (
@@ -201,19 +370,19 @@ function ModelProvidersPage() {
             <CollectionHeader columns={[t('providers.columns.provider'), t('providers.columns.status'), t('providers.columns.models'), t('providers.columns.credential'), t('providers.columns.actions')]} />
             {items.map((provider) => (
               <CollectionRow key={provider.id} className="min-w-[900px]">
-                <span className="flex min-w-0 items-center gap-2 font-medium"><KeyRound className="size-4 shrink-0 text-brand" aria-hidden="true" /><span className="min-w-0 truncate"><span className="block truncate">{provider.name}</span><span className="block text-xs font-normal text-muted-foreground">{t(`providers.kinds.${provider.kind === 'openai-compatible' ? 'openaiCompatible' : provider.kind}`)}</span></span></span>
+                <span className="flex min-w-0 items-center gap-2 font-medium"><KeyRound className="size-4 shrink-0 text-brand" aria-hidden="true" /><span className="min-w-0 truncate"><span className="block truncate">{provider.name}</span><span className="block text-xs font-normal text-muted-foreground">{provider.protocol}</span></span></span>
                 <StatusBadge status={provider.status} />
                 <span className="truncate text-[13px] text-muted-foreground">{formatList(provider.models, locale) || t('common:empty.dash')}</span>
-                <span className="min-w-0 text-[13px] text-muted-foreground"><span className="block font-mono">{provider.maskedKey || t('common:empty.dash')}</span><span className="block truncate">{provider.headerNames.length ? t('providers.headerNames', { names: provider.headerNames.join(', ') }) : t('providers.noHeaders')}</span></span>
+                <span className="min-w-0 text-[13px] text-muted-foreground"><span className="block font-mono">{provider.maskedKey || t('common:empty.dash')}</span>{provider.headerNames.length ? <span className="block truncate">{t('providers.headerNames', { names: provider.headerNames.join(', ') })}</span> : null}</span>
                 <div className="flex items-center justify-end gap-1">
                   <Button variant="secondary" size="compact" onClick={() => testProvider(provider)} disabled={testDialog?.status === 'loading' && testDialog.provider.id === provider.id}>
                     {testDialog?.status === 'loading' && testDialog.provider.id === provider.id ? t('providers.testing') : t('providers.test')}
                   </Button>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon-compact" aria-label={t('providers.replaceKey')} onClick={() => openReplace(provider)}><KeyRound /></Button>
+                      <Button variant="ghost" size="icon-compact" aria-label={t('providers.edit')} onClick={() => openEdit(provider)}><Pencil /></Button>
                     </TooltipTrigger>
-                    <TooltipContent>{t('providers.replaceKey')}</TooltipContent>
+                    <TooltipContent>{t('providers.edit')}</TooltipContent>
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -226,36 +395,46 @@ function ModelProvidersPage() {
             ))}
           </CollectionTable>
         )}
-      </div>
+      </div> : null}
 
       <Dialog open={Boolean(dialog)} onOpenChange={(open) => !open && closeProviderDialog()}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{t(dialog?.mode === 'replace' ? 'providers.replaceTitle' : 'providers.createTitle')}</DialogTitle>
-            <DialogDescription>{t(dialog?.mode === 'replace' ? 'providers.replaceDescription' : 'providers.createDescription')}</DialogDescription>
+            <DialogTitle>{t(dialog?.mode === 'edit' ? 'providers.editTitle' : 'providers.createTitle')}</DialogTitle>
+            <DialogDescription>{t(dialog?.mode === 'edit' ? 'providers.editDescription' : 'providers.createDescription')}</DialogDescription>
           </DialogHeader>
           {providerError ? <p className="text-[13px] text-danger" role="alert">{providerError}</p> : null}
-          {dialog?.mode === 'create' ? <Field label={t('providers.name')} htmlFor="provider-name"><Input id="provider-name" placeholder={t('providers.namePlaceholder')} value={name} onChange={(event) => setName(event.target.value)} disabled={providerBusy} /></Field> : null}
-          <Field label={t('providers.kind')} htmlFor="provider-kind">
-            <Select value={kind} onValueChange={(value) => setKind(value as typeof kind)}>
-              <SelectTrigger id="provider-kind"><SelectValue /></SelectTrigger>
+          <Field label={t('providers.name')} htmlFor="provider-name"><Input id="provider-name" placeholder={t('providers.namePlaceholder')} value={name} onChange={(event) => setName(event.target.value)} disabled={providerBusy} /></Field>
+          <Field label={t('providers.baseURL')} htmlFor="provider-base-url" hint={t('providers.baseURLHint')}><Input id="provider-base-url" placeholder={t('providers.baseURLPlaceholder')} value={baseURL} onChange={(event) => setBaseURL(event.target.value)} /></Field>
+          <Field label={t('providers.protocol')} htmlFor="provider-protocol">
+            <Select value={protocol} onValueChange={(value) => setProtocol(value as ModelProviderProtocol)}>
+              <SelectTrigger id="provider-protocol"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="deepseek">{t('providers.kinds.deepseek')}</SelectItem>
-                <SelectItem value="openai">{t('providers.kinds.openai')}</SelectItem>
-                <SelectItem value="openai-compatible">{t('providers.kinds.openaiCompatible')}</SelectItem>
+                <SelectItem value="openai/chat">openai/chat</SelectItem>
+                <SelectItem value="openai/responses">openai/responses</SelectItem>
+                <SelectItem value="deepseek/chat">deepseek/chat</SelectItem>
               </SelectContent>
             </Select>
           </Field>
           <Field label={t('providers.apiKey')} htmlFor="provider-api-key">
-            <PasswordInput id="provider-api-key" autoComplete="off" placeholder={t('providers.secretPlaceholder')} value={apiKey} onChange={(event) => setApiKey(event.target.value)} />
+            <PasswordInput id="provider-api-key" autoComplete="off" placeholder={t(dialog?.mode === 'edit' ? 'providers.keepSecretPlaceholder' : 'providers.secretPlaceholder')} value={apiKey} onChange={(event) => setApiKey(event.target.value)} />
           </Field>
-          <Field label={t('providers.baseUrl')} htmlFor="provider-base-url" hint={t('providers.baseUrlHint')}><Input id="provider-base-url" placeholder={t('providers.baseUrlPlaceholder')} value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} /></Field>
-          {kind === 'openai' ? <div className="grid gap-4 sm:grid-cols-2"><Field label={t('providers.organization')} htmlFor="provider-organization"><Input id="provider-organization" value={organization} onChange={(event) => setOrganization(event.target.value)} /></Field><Field label={t('providers.project')} htmlFor="provider-project"><Input id="provider-project" value={project} onChange={(event) => setProject(event.target.value)} /></Field></div> : null}
-          <Field label={t('providers.models')} htmlFor="provider-models" hint={t('providers.modelsHint')}><Input id="provider-models" placeholder={t('providers.modelsPlaceholder')} value={models} onChange={(event) => setModels(event.target.value)} /></Field>
+          <Field label={t('providers.models')} htmlFor="provider-models" hint={t('providers.modelsHint')} error={modelsError}>
+            <div className="flex flex-col gap-2">
+              <ModelTokenInput id="provider-models" value={modelIds} onChange={(value) => { setModelIds(value); setModelsError(''); }} placeholder={t('providers.modelsPlaceholder')} removeLabel={(model) => t('providers.removeModel', { model })} disabled={providerBusy || modelsBusy} />
+              <div className="flex items-center justify-between gap-3">
+                <Button variant="secondary" size="compact" onClick={() => void discoverModels()} disabled={providerBusy || modelsBusy || !apiKey.trim()}>
+                  {modelsBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <RefreshCw className="size-4" aria-hidden="true" />}
+                  {modelsBusy ? t('providers.fetchingModels') : t('providers.fetchModels')}
+                </Button>
+                <span className="text-xs tabular-nums text-muted-foreground">{t('providers.modelCount', { count: modelIds.length })}</span>
+              </div>
+            </div>
+          </Field>
           <Field label={t('providers.headers')} htmlFor="provider-headers" hint={t('providers.headersHint')} error={headersError}><Textarea id="provider-headers" className="min-h-28 font-mono text-[13px]" placeholder={t('providers.headersPlaceholder')} value={headersText} aria-invalid={Boolean(headersError)} onChange={(event) => { setHeadersText(event.target.value); setHeadersError(''); }} /></Field>
           <DialogFooter>
             <Button variant="secondary" onClick={closeProviderDialog} disabled={providerBusy}>{t('common:actions.cancel')}</Button>
-            <Button onClick={() => void saveProvider()} disabled={providerBusy || !apiKey.trim() || (dialog?.mode === 'create' && !name.trim())}>{providerBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}{t(dialog?.mode === 'replace' ? 'providers.replaceAction' : 'providers.createAction')}</Button>
+            <Button onClick={() => void saveProvider()} disabled={providerBusy || !name.trim()}>{providerBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}{t(dialog?.mode === 'edit' ? 'providers.editAction' : 'providers.createAction')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -308,4 +487,23 @@ function ModelProvidersPage() {
       </Dialog>
     </div>
   );
+}
+
+function GatewayPanel({ gateway, port, busy, error, onPortChange, onSave, onAction, t }: { gateway?: { port: number; host: string; status: PortkeyGatewayStatus; error: string | null }; port: string; busy: boolean; error: string; onPortChange: (value: string) => void; onSave: () => Promise<void>; onAction: (action: 'start' | 'stop' | 'restart') => Promise<void>; t: (key: string) => string }) {
+  const status = gateway?.status ?? 'stopped';
+  const running = status === 'running';
+  return <section className="mt-6 max-w-2xl space-y-6 rounded-lg border border-border bg-surface p-5">
+    <div><h2 className="text-base font-semibold">{t('providers.gateway.title')}</h2><p className="mt-1 text-[13px] text-muted-foreground">{t('providers.gateway.description')}</p></div>
+    <div className="grid gap-4 sm:grid-cols-2">
+      <Field label={t('providers.gateway.port')} htmlFor="portkey-gateway-port"><Input id="portkey-gateway-port" value={port} onChange={(event) => onPortChange(event.target.value)} disabled={busy || running} inputMode="numeric" /></Field>
+      <div><p className="text-xs font-medium text-muted-foreground">{t('providers.gateway.status')}</p><div className="mt-2"><StatusBadge status={status} /></div></div>
+    </div>
+    <p className="font-mono text-xs text-muted-foreground">{gateway ? `http://${gateway.host}:${gateway.port}` : t('providers.gateway.loading')}</p>
+    {gateway?.error || error ? <p className="text-[13px] text-danger" role="alert">{error || gateway?.error}</p> : null}
+    <div className="flex flex-wrap gap-2"><Button variant="secondary" size="compact" onClick={() => void onSave()} disabled={busy || running}>{t('common:actions.save')}</Button><Button size="compact" onClick={() => void onAction('start')} disabled={busy || running}><Plus className="size-4" />{t('providers.gateway.start')}</Button><Button variant="secondary" size="compact" onClick={() => void onAction('restart')} disabled={busy || !running}><RotateCcw className="size-4" />{t('providers.gateway.restart')}</Button><Button variant="ghost" size="compact" onClick={() => void onAction('stop')} disabled={busy || !running}><Square className="size-4" />{t('providers.gateway.stop')}</Button></div>
+  </section>;
+}
+
+function currentTime(): number {
+  return Date.now();
 }

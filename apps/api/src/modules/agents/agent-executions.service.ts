@@ -9,7 +9,6 @@ import { DATABASE } from '../../infrastructure/database.module';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { WorkspaceService } from '../teams/teams.service';
-import type { AgentMcpRuntime } from '../teams/team-resources.service';
 import { McpRuntimeService } from './mcp-runtime.service';
 import { BuiltinAgentToolsService } from './builtin-agent-tools.service';
 import { CODEX_CLI_AGENT_ID, CODEX_CLI_PLUGIN_ID, PluginsService } from '../plugins/plugins.service';
@@ -363,7 +362,7 @@ export class AgentExecutionsService {
       && priorToolCalls[0]?.toolName === 'builtin'
       && priorToolCalls[0].mcpToolName === 'update_plan';
     const { agent, assignedSkills } = await this.requireExecutableAgent(workspace.id, execution.agentId);
-    if (agent.id === CODEX_CLI_AGENT_ID) return this.advanceCodexCli(workspace.id, execution, request);
+    if (agent.id === CODEX_CLI_AGENT_ID) return this.advanceCodexCli(workspace.id, execution);
     const clarificationPass = agent.id === SYSTEM_HELPER_CHAT_ID && clarificationAllowed;
     const skillScripts = assignedSkills.flatMap((skill) => skill.files.filter((file) => file.path.startsWith('scripts/') && file.content.startsWith('#!')).map((file) => ({ skillId: skill.id, skillName: skill.name, path: file.path })));
     const mcpRuntimes = clarificationPass ? [] : await this.resources.agentMcpRuntimes(request, workspaceSlug, execution.agentId);
@@ -574,7 +573,7 @@ export class AgentExecutionsService {
     return { agent, assignedSkills: agent.id === CODEX_CLI_AGENT_ID ? [] : rows.map((skill) => ({ ...skill, files: files.filter((file) => file.skillId === skill.id).map(({ path, content }) => ({ path, content })) })) };
   }
 
-  private async advanceCodexCli(workspaceId: string, execution: typeof agentExecutions.$inferSelect, request: Request): Promise<AgentExecutionView> {
+  private async advanceCodexCli(workspaceId: string, execution: typeof agentExecutions.$inferSelect): Promise<AgentExecutionView> {
     const prompt = [
       'You are Codex CLI Chat. Respond directly to the user.',
       ...execution.displayMessages.map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}:\n${message.content}`),

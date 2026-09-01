@@ -54,7 +54,10 @@
     "available": "Available",
     "missing": "Unavailable",
     "qr_pending": "Waiting for QR scan",
-    "error": "Error"
+    "error": "Error",
+    "stopped": "Stopped",
+    "starting": "Starting",
+    "stopping": "Stopping"
   },
   "empty": {
     "dash": "—"

@@ -3,23 +3,26 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
+    "predev": "pnpm --filter @portkey-ai/gateway build",
     "dev": "nest start --watch --builder webpack --webpackPath webpack.config.js",
+    "prestart": "pnpm --filter @portkey-ai/gateway build",
     "start": "nest start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --max-warnings=0"
   },
   "dependencies": {
-    "better-sqlite3": "^12.4.1",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@nestjs/common": "^11.1.5",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.1.5",
     "@nestjs/platform-express": "^11.1.5",
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@portkey-ai/gateway": "workspace:*",
     "@worklite/config": "workspace:*",
     "@worklite/contracts": "workspace:*",
     "@worklite/db": "workspace:*",
     "@worklite/model-gateway": "workspace:*",
     "@worklite/workflow-engine": "workspace:*",
+    "better-sqlite3": "^12.4.1",
     "drizzle-orm": "^0.45.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"

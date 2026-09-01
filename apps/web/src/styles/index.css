@@ -170,12 +170,38 @@
 }
 
 .workflow-react-flow {
+  --xy-background-color: var(--background);
+  --xy-background-pattern-color: color-mix(in srgb, var(--muted-foreground) 45%, transparent);
+  --xy-edge-stroke: color-mix(in srgb, var(--muted-foreground) 65%, transparent);
+  --xy-edge-stroke-selected: var(--brand);
+  --xy-connectionline-stroke: var(--brand);
   background: var(--background);
 }
 
-.workflow-react-flow:focus-within {
+.workflow-react-flow .react-flow__node:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--ring) 72%, transparent);
-  outline-offset: -2px;
+  outline-offset: 3px;
+}
+
+.workflow-react-flow .react-flow__edge.selected .react-flow__edge-path,
+.workflow-react-flow .react-flow__edge:focus-visible .react-flow__edge-path {
+  stroke: var(--brand);
+  stroke-width: 2;
+}
+
+.workflow-node-handle {
+  background: var(--brand) !important;
+  transition: background-color 120ms ease-out, box-shadow 120ms ease-out;
+}
+
+.workflow-node-handle.connecting {
+  background: var(--danger) !important;
+  box-shadow: 0 0 0 3px var(--danger-subtle);
+}
+
+.workflow-node-handle.connecting.valid {
+  background: var(--success) !important;
+  box-shadow: 0 0 0 3px var(--success-subtle);
 }
 
 .workflow-react-flow .react-flow__controls {

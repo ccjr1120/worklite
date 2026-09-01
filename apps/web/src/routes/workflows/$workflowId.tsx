@@ -1,12 +1,13 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import { addEdge, Background, BackgroundVariant, Controls, MarkerType, ReactFlow, reconnectEdge, useEdgesState, useNodesState, type Connection, type OnConnect, type OnReconnect, type ReactFlowInstance } from '@xyflow/react';
+import { addEdge, Background, BackgroundVariant, Controls, MarkerType, PanOnScrollMode, ReactFlow, reconnectEdge, useEdgesState, useNodesState, type OnConnect, type OnConnectEnd, type OnReconnect, type ReactFlowInstance } from '@xyflow/react';
 import { ArrowLeft, Bot, Braces, Check, Copy, FilePlus2, PanelRight, Plus, Redo2, Search, SlidersHorizontal, Trash2, Undo2, Workflow, Wrench } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import type { WorkflowDefinition, WorkflowEditOperation, WorkflowNodeDefinition } from '@worklite/contracts';
 import { SaveIndicator } from '@/components/save-indicator';
+import { useTheme } from '@/components/theme-provider';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -36,6 +37,7 @@ const emptyDefinition: WorkflowDefinition = {
 
 function WorkflowEditorPage() {
   const { t } = useTranslation(['workflows', 'common']);
+  const { resolvedTheme } = useTheme();
   const { workflowId } = Route.useParams();
   const workspaceSlug = 'personal';
   const isNew = workflowId === 'new';
@@ -52,32 +54,28 @@ function WorkflowEditorPage() {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [contextPanelOpen, setContextPanelOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(isNew);
   const [executionPolicy, setExecutionPolicy] = useState<'stop' | 'retry'>('stop');
   const [publishOpen, setPublishOpen] = useState(false);
   const [runSubmitting, setRunSubmitting] = useState(false);
   const [saveError, setSaveError] = useState('');
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<WorkflowCanvasNode, WorkflowCanvasEdge> | null>(null);
+  const canvasRef = useRef<HTMLElement>(null);
   const navigate = useNavigate();
 
   const updateText = useCallback((nodeId: string, value: string) => {
     setNodes((current) => current.map((node) => node.id === nodeId ? { ...node, data: { ...node.data, text: value } } : node));
     setSaveState('unsaved');
-  }, []);
+  }, [setNodes]);
 
   const hydrateDefinition = useCallback((definition: WorkflowDefinition, preferredNodeId?: string | null) => {
     const nextNodes = toFlowNodes(definition, updateText);
     const nextEdges = toFlowEdges(definition);
-    const nextSelection = preferredNodeId && nextNodes.some((node) => node.id === preferredNodeId) ? preferredNodeId : nextNodes[0]?.id ?? null;
+    const nextSelection = preferredNodeId && nextNodes.some((node) => node.id === preferredNodeId) ? preferredNodeId : null;
     setNodes(nextNodes.map((node) => ({ ...node, selected: node.id === nextSelection })));
-    setEdges(nextEdges);
-    setSelectedNodeId(nextSelection);
-    setSelectedEdgeId(null);
+    setEdges(nextEdges.map((edge) => ({ ...edge, selected: false })));
   }, [setEdges, setNodes, updateText]);
 
   useEffect(() => {
@@ -96,8 +94,18 @@ function WorkflowEditorPage() {
     setSaveState('saved');
   }, [existing, hydrateDefinition]);
 
-  const selectedNode = nodes.find((node) => node.id === selectedNodeId);
-  const selectedEdge = edges.find((edge) => edge.id === selectedEdgeId);
+  useEffect(() => {
+    const desktopPanel = window.matchMedia('(min-width: 1024px)');
+    const closeSheetForDesktop = () => {
+      if (desktopPanel.matches) setContextPanelOpen(false);
+    };
+    closeSheetForDesktop();
+    desktopPanel.addEventListener('change', closeSheetForDesktop);
+    return () => desktopPanel.removeEventListener('change', closeSheetForDesktop);
+  }, []);
+
+  const selectedNode = nodes.find((node) => node.selected);
+  const selectedEdge = edges.find((edge) => edge.selected);
   const selectedAgentVersionsQuery = useAgentVersionsQuery(workspaceSlug, selectedNode?.data.nodeType === 'generic-agent' ? selectedNode.data.agentId ?? '' : '');
   const publishedAgents = useMemo(() => availableAgents.filter((agent) => Boolean(agent.latestVersionId)), [availableAgents]);
   const filteredAgents = useMemo(() => {
@@ -139,14 +147,26 @@ function WorkflowEditorPage() {
   }
 
   function nextPosition() {
-    if (flowInstance) return flowInstance.screenToFlowPosition({ x: 360, y: 240 });
+    const bounds = canvasRef.current?.getBoundingClientRect();
+    if (flowInstance && bounds) return flowInstance.screenToFlowPosition({ x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 });
     return { x: 80 + nodes.length * 48, y: 80 + nodes.length * 36 };
   }
 
   function selectOnlyNode(nodeId: string) {
     setNodes((current) => current.map((node) => ({ ...node, selected: node.id === nodeId })));
-    setSelectedNodeId(nodeId);
-    setSelectedEdgeId(null);
+    setEdges((current) => current.map((edge) => ({ ...edge, selected: false })));
+    if (!window.matchMedia('(min-width: 1024px)').matches) setContextPanelOpen(true);
+  }
+
+  function selectOnlyEdge(edgeId: string) {
+    setNodes((current) => current.map((node) => ({ ...node, selected: false })));
+    setEdges((current) => current.map((edge) => ({ ...edge, selected: edge.id === edgeId })));
+    if (!window.matchMedia('(min-width: 1024px)').matches) setContextPanelOpen(true);
+  }
+
+  function showNodePalette() {
+    setNodes((current) => current.map((node) => ({ ...node, selected: false })));
+    setEdges((current) => current.map((edge) => ({ ...edge, selected: false })));
   }
 
   const handleConnect: OnConnect = useCallback((connection) => {
@@ -154,10 +174,13 @@ function WorkflowEditorPage() {
       toast.error(t('editor.invalidConnection'));
       return;
     }
-    setEdges((current) => addEdge({ ...connection, id: createId('edge'), type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed } }, current));
-    setSelectedEdgeId(null);
+    setEdges((current) => addEdge({ ...connection, id: createId('edge'), type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed }, selected: false }, current.map((edge) => ({ ...edge, selected: false }))));
     setSaveState('unsaved');
   }, [edges, nodes, setEdges, t]);
+
+  const handleConnectEnd: OnConnectEnd = useCallback((_event, connectionState) => {
+    if (connectionState.toNode && connectionState.isValid === false) toast.error(t('editor.invalidConnection'));
+  }, [t]);
 
   const handleReconnect: OnReconnect = useCallback((oldEdge, connection) => {
     const nextEdges = reconnectEdge(oldEdge, connection, edges);
@@ -165,8 +188,7 @@ function WorkflowEditorPage() {
       toast.error(t('editor.invalidConnection'));
       return;
     }
-    setEdges(nextEdges.map((edge) => ({ ...edge, type: edge.type ?? 'smoothstep', markerEnd: edge.markerEnd ?? { type: MarkerType.ArrowClosed } })));
-    setSelectedEdgeId(null);
+    setEdges(nextEdges.map((edge) => ({ ...edge, type: edge.type ?? 'smoothstep', markerEnd: edge.markerEnd ?? { type: MarkerType.ArrowClosed }, selected: false })));
     setSaveState('unsaved');
   }, [edges, nodes, setEdges, t]);
 
@@ -222,17 +244,13 @@ function WorkflowEditorPage() {
 
   function addNode(node: WorkflowCanvasNode) {
     setNodes((current) => [...current.map((item) => ({ ...item, selected: false })), node]);
-    setSelectedNodeId(node.id);
-    setSelectedEdgeId(null);
-    setPaletteOpen(false);
+    setEdges((current) => current.map((edge) => ({ ...edge, selected: false })));
     setSaveState('unsaved');
   }
 
   function removeNode(nodeId: string) {
     setNodes((current) => current.filter((node) => node.id !== nodeId));
     setEdges((current) => current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId));
-    setSelectedNodeId(null);
-    setSelectedEdgeId(null);
     setSaveState('unsaved');
   }
 
@@ -242,14 +260,12 @@ function WorkflowEditorPage() {
     const id = createId(source.data.nodeType);
     const duplicate: WorkflowCanvasNode = { ...source, id, position: { x: source.position.x + 40, y: source.position.y + 40 }, selected: true, data: { ...source.data, onTextChange: updateText } };
     setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), duplicate]);
-    setSelectedNodeId(id);
-    setSelectedEdgeId(null);
+    setEdges((current) => current.map((edge) => ({ ...edge, selected: false })));
     setSaveState('unsaved');
   }
 
   function removeEdge(edgeId: string) {
     setEdges((current) => current.filter((edge) => edge.id !== edgeId));
-    setSelectedEdgeId(null);
     setSaveState('unsaved');
   }
 
@@ -261,14 +277,14 @@ function WorkflowEditorPage() {
       const definition = currentDefinition();
       if (isNew) {
         const saved = await api.createWorkflow(workspaceSlug, { name, definition });
-        syncDraft(saved, selectedNodeId);
+        syncDraft(saved, selectedNode?.id);
         setSaveState('saved');
         void navigate({ to: '/workflows/$workflowId', params: { workflowId: saved.id }, replace: true });
         return;
       }
       await api.updateWorkflow(workspaceSlug, workflowId, { name });
       const saved = await api.applyWorkflowOperations(workspaceSlug, workflowId, { baseRevisionId: draftRevisionId, operations: replaceOperations(persistedDefinition, definition) });
-      syncDraft(saved, selectedNodeId);
+      syncDraft(saved, selectedNode?.id);
       setSaveState('saved');
       void queryClient.invalidateQueries({ queryKey: workflowsQueryKey() }).catch(() => undefined);
     } catch (error: unknown) {
@@ -332,7 +348,6 @@ function WorkflowEditorPage() {
       setInput('');
       setNodes([]);
       setEdges([]);
-      setSelectedNodeId(null);
     } else {
       const agent = publishedAgents[0];
       if (!agent?.latestVersionId) return;
@@ -352,15 +367,13 @@ function WorkflowEditorPage() {
       setInput(t('editor.templateDailyInput'));
       setNodes(templateNodes);
       setEdges(templateEdges);
-      setSelectedNodeId(inputNodeId);
     }
-    setSelectedEdgeId(null);
     setSaveState('unsaved');
     setTemplateOpen(false);
   }
 
   const palette = (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col">
       <div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-semibold">{t('editor.nodePalette')}</h2><p className="mt-1 text-[12px] text-muted-foreground">{t('editor.paletteHint')}</p></div><FilePlus2 className="size-4 text-muted-foreground" aria-hidden="true" /></div>
       <label className="relative mt-4 block"><span className="sr-only">{t('editor.searchNodes')}</span><Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" aria-hidden="true" /><Input className="pl-8" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} placeholder={t('editor.searchNodes')} /></label>
       <div className="mt-3 min-h-0 flex-1 space-y-1 overflow-auto">
@@ -374,8 +387,8 @@ function WorkflowEditorPage() {
   );
 
   const inspector = selectedNode ? (
-    <div className="flex min-h-0 flex-col">
-      <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">{nodeTypeLabel(selectedNode.data.nodeType, t)}</p><h2 className="mt-1 truncate text-sm font-semibold">{selectedNode.data.label}</h2></div><PanelRight className="size-4 text-muted-foreground" aria-hidden="true" /></div>
+    <div className="flex min-h-0 w-full min-w-0 flex-col">
+      <div className="flex items-start gap-2"><Button type="button" variant="ghost" size="icon-compact" aria-label={t('editor.nodePalette')} onClick={showNodePalette}><ArrowLeft className="size-4" /></Button><div className="min-w-0 flex-1"><p className="text-xs font-medium text-muted-foreground">{nodeTypeLabel(selectedNode.data.nodeType, t)}</p><h2 className="mt-1 truncate text-sm font-semibold">{selectedNode.data.label}</h2></div><PanelRight className="mt-2 size-4 text-muted-foreground" aria-hidden="true" /></div>
       <div className="mt-5 flex flex-col gap-4">
         <Field label={t('editor.nodeName')} htmlFor="node-name"><Input id="node-name" value={selectedNode.data.label} onChange={(event) => { const label = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, label } } : node)); setSaveState('unsaved'); }} /></Field>
         {selectedNode.data.nodeType === 'text' ? <Field label={t('editor.systemPromptNode')} htmlFor="node-text"><Textarea id="node-text" value={selectedNode.data.text ?? ''} onChange={(event) => updateText(selectedNode.id, event.target.value)} placeholder={t('editor.textPlaceholder')} /></Field> : null}
@@ -390,8 +403,10 @@ function WorkflowEditorPage() {
       </div>
     </div>
   ) : selectedEdge ? (
-    <div className="flex min-h-0 flex-col"><p className="text-xs font-medium text-muted-foreground">{t('editor.connection')}</p><h2 className="mt-1 text-sm font-semibold">{nodeLabel(nodes, selectedEdge.source)} → {nodeLabel(nodes, selectedEdge.target)}</h2><div className="mt-5 rounded-md border border-border bg-surface-subtle p-3 font-mono text-[12px] text-muted-foreground"><p>{selectedEdge.sourceHandle ?? 'output'}</p><p className="my-1">↓</p><p>{selectedEdge.targetHandle ?? 'input'}</p></div><Button type="button" variant="destructive" size="compact" className="mt-4" onClick={() => removeEdge(selectedEdge.id)}><Trash2 className="size-4" />{t('editor.remove')}</Button></div>
+    <div className="flex min-h-0 w-full min-w-0 flex-col"><div className="flex items-start gap-2"><Button type="button" variant="ghost" size="icon-compact" aria-label={t('editor.nodePalette')} onClick={showNodePalette}><ArrowLeft className="size-4" /></Button><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">{t('editor.connection')}</p><h2 className="mt-1 text-sm font-semibold">{nodeLabel(nodes, selectedEdge.source)} → {nodeLabel(nodes, selectedEdge.target)}</h2></div></div><div className="mt-5 rounded-md border border-border bg-surface-subtle p-3 font-mono text-[12px] text-muted-foreground"><p>{selectedEdge.sourceHandle ?? 'output'}</p><p className="my-1">↓</p><p>{selectedEdge.targetHandle ?? 'input'}</p></div><Button type="button" variant="destructive" size="compact" className="mt-4" onClick={() => removeEdge(selectedEdge.id)}><Trash2 className="size-4" />{t('editor.remove')}</Button></div>
   ) : <div className="flex h-full min-h-32 items-center justify-center text-center text-[13px] text-muted-foreground">{t('editor.selectCanvasItem')}</div>;
+
+  const contextPanel = selectedNode || selectedEdge ? inspector : palette;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -399,11 +414,10 @@ function WorkflowEditorPage() {
         back={<Button variant="ghost" size="icon-compact" type="button" aria-label={t('common:actions.back')} onClick={() => void navigate({ to: '/workflows' })}><ArrowLeft className="size-4" /></Button>}
         crumbs={[{ label: t('title'), to: '/workflows' }, { label: isNew ? t('editor.new') : existing?.name ?? t('editor.fallback') }]}
         status={<SaveIndicator state={saveState} />}
-        actions={<div className="flex items-center gap-1.5"><Button variant="ghost" size="icon-compact" className="lg:hidden" type="button" aria-label={t('editor.nodePalette')} onClick={() => setPaletteOpen(true)}><Plus className="size-4" /></Button><Button variant="ghost" size="icon-compact" className="xl:hidden" type="button" aria-label={t('editor.configureStep')} onClick={() => setInspectorOpen(true)} disabled={!selectedNode && !selectedEdge}><PanelRight className="size-4" /></Button><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" type="button" aria-label={t('editor.undo')} onClick={() => void moveRevision('undo')} disabled={!canUndo || saveState === 'saving'}><Undo2 className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('editor.undo')}</TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" type="button" aria-label={t('editor.redo')} onClick={() => void moveRevision('redo')} disabled={!canRedo || saveState === 'saving'}><Redo2 className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('editor.redo')}</TooltipContent></Tooltip><Button variant="ghost" size="compact" onClick={() => setSettingsOpen(true)}><SlidersHorizontal className="size-4" />{t('editor.workflowSettings')}</Button><Button asChild variant="ghost" size="compact" className="hidden sm:inline-flex"><Link to="/workflows/$workflowId/versions" params={{ workflowId }}>{t('editor.versions')}</Link></Button><Button variant="secondary" size="compact" className="hidden sm:inline-flex" onClick={save} disabled={saveState === 'saving'}>{t('common:actions.save')}</Button><Button variant="secondary" size="compact" className="hidden sm:inline-flex" onClick={() => void runWorkflow()} disabled={runSubmitting || isNew || saveState !== 'saved' || !existing?.latestVersionId}>{runSubmitting ? t('editor.running') : existing?.latestVersion ? t('editor.runVersion', { version: existing.latestVersion }) : t('editor.run')}</Button><Button size="compact" onClick={() => setPublishOpen(true)}>{t('common:actions.publish')}</Button></div>}
+        actions={<div className="flex items-center gap-1.5"><Button variant="ghost" size="icon-compact" className="lg:hidden" type="button" aria-label={t('editor.nodePalette')} onClick={() => { showNodePalette(); setContextPanelOpen(true); }}><Plus className="size-4" /></Button><Button variant="ghost" size="icon-compact" className="lg:hidden" type="button" aria-label={t('editor.configureStep')} onClick={() => setContextPanelOpen(true)} disabled={!selectedNode && !selectedEdge}><PanelRight className="size-4" /></Button><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" type="button" aria-label={t('editor.undo')} onClick={() => void moveRevision('undo')} disabled={!canUndo || saveState === 'saving'}><Undo2 className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('editor.undo')}</TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" type="button" aria-label={t('editor.redo')} onClick={() => void moveRevision('redo')} disabled={!canRedo || saveState === 'saving'}><Redo2 className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('editor.redo')}</TooltipContent></Tooltip><Button variant="ghost" size="compact" onClick={() => setSettingsOpen(true)}><SlidersHorizontal className="size-4" />{t('editor.workflowSettings')}</Button><Button asChild variant="ghost" size="compact" className="hidden sm:inline-flex"><Link to="/workflows/$workflowId/versions" params={{ workflowId }}>{t('editor.versions')}</Link></Button><Button variant="secondary" size="compact" className="hidden sm:inline-flex" onClick={save} disabled={saveState === 'saving'}>{t('common:actions.save')}</Button><Button variant="secondary" size="compact" className="hidden sm:inline-flex" onClick={() => void runWorkflow()} disabled={runSubmitting || isNew || saveState !== 'saved' || !existing?.latestVersionId}>{runSubmitting ? t('editor.running') : existing?.latestVersion ? t('editor.runVersion', { version: existing.latestVersion }) : t('editor.run')}</Button><Button size="compact" onClick={() => setPublishOpen(true)}>{t('common:actions.publish')}</Button></div>}
       />
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-64 shrink-0 overflow-auto border-r border-border bg-surface p-4 lg:flex">{palette}</aside>
-        <main className="relative min-w-0 flex-1 bg-background" aria-label={t('editor.canvas')}>
+        <main ref={canvasRef} className="relative min-w-0 flex-1 bg-background" aria-label={t('editor.canvas')}>
           {saveError ? <p className="absolute left-4 top-4 z-10 rounded-md border border-danger/30 bg-danger-subtle px-3 py-2 text-[13px] text-danger" role="alert">{saveError}</p> : null}
           <div className="absolute right-3 top-3 z-10 flex items-center gap-2 rounded-md border border-border bg-surface-raised px-2.5 py-1.5 text-[12px] text-muted-foreground"><span>{t('editor.nodeCount', { count: nodes.length })}</span><span aria-hidden="true">·</span><span>{t('editor.edgeCount', { count: edges.length })}</span><Button variant="secondary" size="compact" className="sm:hidden" onClick={save} disabled={saveState === 'saving'}><Check className="size-4" />{t('common:actions.save')}</Button><Button variant="secondary" size="compact" className="sm:hidden" onClick={() => void runWorkflow()} disabled={runSubmitting || isNew || saveState !== 'saved' || !existing?.latestVersionId}>{t('editor.run')}</Button></div>
           {nodes.length === 0 ? <div className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center p-6 text-center"><div><Workflow className="mx-auto size-6 text-muted-foreground" aria-hidden="true" /><p className="mt-3 text-sm font-medium">{t('editor.emptyCanvas')}</p></div></div> : null}
@@ -411,18 +425,26 @@ function WorkflowEditorPage() {
             nodes={nodes}
             edges={edges}
             nodeTypes={workflowNodeTypes}
+            colorMode={resolvedTheme}
             onInit={setFlowInstance}
             onNodesChange={(changes) => { onNodesChange(changes); if (changes.some((change) => change.type === 'position' && change.dragging === false)) setSaveState('unsaved'); }}
-            onEdgesChange={(changes) => { onEdgesChange(changes); if (changes.some((change) => change.type === 'remove')) { setSelectedEdgeId(null); setSaveState('unsaved'); } }}
+            onEdgesChange={(changes) => { onEdgesChange(changes); if (changes.some((change) => change.type === 'remove')) setSaveState('unsaved'); }}
             isValidConnection={(connection) => canConnect(connection, nodes, edges)}
             onConnect={handleConnect}
+            onConnectEnd={handleConnectEnd}
             onReconnect={handleReconnect}
             onNodeClick={(_, node) => selectOnlyNode(node.id)}
-            onEdgeClick={(_, edge) => { setSelectedNodeId(null); setSelectedEdgeId(edge.id); }}
-            onPaneClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}
-            onNodesDelete={(deleted) => { if (deleted.length > 0) { const deletedIds = new Set(deleted.map((node) => node.id)); setEdges((current) => current.filter((edge) => !deletedIds.has(edge.source) && !deletedIds.has(edge.target))); setSelectedNodeId(null); setSaveState('unsaved'); } }}
-            onEdgesDelete={(deleted) => { if (deleted.length > 0) { setSelectedEdgeId(null); setSaveState('unsaved'); } }}
+            onEdgeClick={(_, edge) => selectOnlyEdge(edge.id)}
+            onPaneClick={showNodePalette}
+            onSelectionChange={({ nodes: selectedNodes, edges: selectedEdges }) => { if (selectedNodes.length + selectedEdges.length > 0 && !window.matchMedia('(min-width: 1024px)').matches) setContextPanelOpen(true); }}
+            onNodesDelete={(deleted) => { if (deleted.length > 0) { const deletedIds = new Set(deleted.map((node) => node.id)); setEdges((current) => current.filter((edge) => !deletedIds.has(edge.source) && !deletedIds.has(edge.target))); setSaveState('unsaved'); } }}
+            onEdgesDelete={(deleted) => { if (deleted.length > 0) setSaveState('unsaved'); }}
             deleteKeyCode={['Backspace', 'Delete']}
+            multiSelectionKeyCode={null}
+            selectionKeyCode={null}
+            panOnScroll
+            panOnScrollMode={PanOnScrollMode.Free}
+            zoomOnScroll={false}
             fitView
             fitViewOptions={{ padding: 0.2, duration: 180 }}
             proOptions={{ hideAttribution: true }}
@@ -432,12 +454,11 @@ function WorkflowEditorPage() {
             <Controls showInteractive={false} />
           </ReactFlow>
         </main>
-        {(selectedNode || selectedEdge) ? <aside className="hidden w-[360px] shrink-0 overflow-auto border-l border-border bg-surface p-4 xl:block">{inspector}</aside> : null}
+        <aside className="hidden w-[360px] min-w-0 shrink-0 overflow-auto border-l border-border bg-surface p-4 lg:flex">{contextPanel}</aside>
       </div>
       <Dialog open={templateOpen} onOpenChange={setTemplateOpen}><DialogContent><DialogHeader><DialogTitle>{t('editor.chooseTemplate')}</DialogTitle><DialogDescription>{t('editor.chooseTemplateDescription')}</DialogDescription></DialogHeader><div className="grid gap-2 sm:grid-cols-2"><button type="button" className="rounded-lg border border-border bg-surface p-4 text-left transition-colors duration-[120ms] hover:border-brand hover:bg-brand-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45" onClick={() => applyTemplate('blank')}><p className="text-sm font-semibold">{t('editor.blankTemplate')}</p><p className="mt-1 text-[13px] text-muted-foreground">{t('editor.blankTemplateDescription')}</p></button><button type="button" className="rounded-lg border border-border bg-surface p-4 text-left transition-colors duration-[120ms] hover:border-brand hover:bg-brand-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:opacity-50" onClick={() => applyTemplate('daily')} disabled={publishedAgents.length === 0}><p className="text-sm font-semibold">{t('editor.dailyTemplate')}</p><p className="mt-1 text-[13px] text-muted-foreground">{publishedAgents.length === 0 ? t('editor.dailyTemplateUnavailable') : t('editor.dailyTemplateDescription')}</p></button></div></DialogContent></Dialog>
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}><DialogContent className="max-h-[85vh] overflow-auto"><DialogHeader><DialogTitle>{t('editor.workflowSettings')}</DialogTitle><DialogDescription>{t('editor.workflowSettingsDescription')}</DialogDescription></DialogHeader><div className="flex flex-col gap-5"><section><h3 className="text-sm font-semibold">{t('editor.general')}</h3><Field className="mt-3" label={t('editor.name')} htmlFor="wf-name"><Input id="wf-name" value={name} onChange={(event) => { setName(event.target.value); setSaveState('unsaved'); }} /></Field></section><section><h3 className="text-sm font-semibold">{t('editor.inputs')}</h3><Field className="mt-3" label={t('editor.input')} htmlFor="wf-input"><Textarea id="wf-input" className="font-mono text-[13px]" value={input} onChange={(event) => { setInput(event.target.value); setSaveState('unsaved'); }} /></Field></section><section><h3 className="text-sm font-semibold">{t('editor.execution')}</h3><Field className="mt-3" label={t('editor.defaultErrorPolicy')} htmlFor="default-policy"><Select value={executionPolicy} onValueChange={(value) => { setExecutionPolicy(value as 'stop' | 'retry'); setSaveState('unsaved'); }}><SelectTrigger id="default-policy"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="stop">{t('editor.stop')}</SelectItem><SelectItem value="retry">{t('editor.retry')}</SelectItem></SelectContent></Select></Field></section><section className="rounded-md border border-border bg-surface-subtle p-3"><h3 className="text-sm font-semibold">{t('editor.versioning')}</h3><p className="mt-1 text-[13px] text-muted-foreground">{t('editor.versioningHint')}</p></section></div><DialogFooter><Button onClick={() => setSettingsOpen(false)}>{t('common:actions.close')}</Button></DialogFooter></DialogContent></Dialog>
-      <Sheet open={paletteOpen} onOpenChange={setPaletteOpen}><SheetContent side="left" className="p-4 pt-5 sm:max-w-[280px]"><SheetHeader className="sr-only"><SheetTitle>{t('editor.nodePalette')}</SheetTitle><SheetDescription>{t('editor.paletteHint')}</SheetDescription></SheetHeader>{palette}</SheetContent></Sheet>
-      <Sheet open={inspectorOpen} onOpenChange={setInspectorOpen}><SheetContent side="right" className="overflow-auto p-4 pt-5"><SheetHeader className="sr-only"><SheetTitle>{t('editor.configureStep')}</SheetTitle><SheetDescription>{t('editor.selectCanvasItem')}</SheetDescription></SheetHeader>{inspector}</SheetContent></Sheet>
+      <Sheet open={contextPanelOpen} onOpenChange={setContextPanelOpen}><SheetContent side="right" className="overflow-auto p-4 pt-5"><SheetHeader className="sr-only"><SheetTitle>{selectedNode || selectedEdge ? t('editor.configureStep') : t('editor.nodePalette')}</SheetTitle><SheetDescription>{selectedNode || selectedEdge ? t('editor.selectCanvasItem') : t('editor.paletteHint')}</SheetDescription></SheetHeader>{contextPanel}</SheetContent></Sheet>
       <Dialog open={publishOpen} onOpenChange={setPublishOpen}><DialogContent><DialogHeader><DialogTitle>{t('editor.publishTitle')}</DialogTitle><DialogDescription>{t('editor.publishDescription')}</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setPublishOpen(false)}>{t('common:actions.cancel')}</Button><Button onClick={() => void publishWorkflow()}>{t('common:actions.publish')}</Button></DialogFooter></DialogContent></Dialog>
     </div>
   );

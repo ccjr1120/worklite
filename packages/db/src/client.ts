@@ -140,9 +140,9 @@ print({ worklite: { type: 'snapshot' }, data });
   ['scripts/create-provider.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, oneOf, optionalString, print, requiredString, stringArray } from './lib.mjs';
 const raw = input();
-exactKeys(raw, ['name', 'kind', 'baseUrl', 'organization', 'project', 'models']);
-const body = { name: requiredString(raw.name, 'name', 120), kind: oneOf(raw.kind, 'kind', ['deepseek', 'openai', 'openai-compatible']), models: stringArray(raw.models, 'models', 100, 200) };
-for (const [field, maxLength] of [['baseUrl', 2048], ['organization', 200], ['project', 200]]) {
+exactKeys(raw, ['name', 'protocol', 'baseURL', 'models']);
+const body = { name: requiredString(raw.name, 'name', 120), protocol: oneOf(raw.protocol, 'protocol', ['openai/chat', 'openai/responses', 'deepseek/chat']), baseURL: requiredString(raw.baseURL, 'baseURL', 2048), models: stringArray(raw.models, 'models', 100, 200) };
+for (const [field, maxLength] of [['baseURL', 2048]]) {
   const value = optionalString(raw[field], field, maxLength);
   if (value !== undefined) body[field] = value;
 }
@@ -202,7 +202,7 @@ print({ worklite: action });
   ['references/contracts.md', `# WorkLite platform script contracts
 
 - inspect-workspace.mjs: no arguments
-- create-provider.mjs: { "name": string, "kind": "deepseek" | "openai" | "openai-compatible", "baseUrl"?: string, "organization"?: string, "project"?: string, "models": string[] }
+- create-provider.mjs: { "name": string, "protocol": "openai/chat" | "openai/responses" | "deepseek/chat", "baseURL": string, "models": string[] }
 - create-agent.mjs: { "name": string, "responsibility": string, "systemPrompt": string, "providerId": string | null, "model": string, "skillIds": string[], "mcpServerIds": string[] }
 - create-skill.mjs: { "name": string, "source": "online", "files": [{ "path": string, "content": string }] }
 - create-mcp-server.mjs: { "name": string, "endpoint": string }

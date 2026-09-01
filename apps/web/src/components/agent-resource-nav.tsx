@@ -1,10 +1,10 @@
 import { Link } from '@tanstack/react-router';
-import { Blocks, Bot, KeyRound, Server } from 'lucide-react';
+import { Blocks, Bot, Server } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { cn } from '@/lib/utils';
 
-type AgentResourceView = 'agents' | 'skills' | 'mcp-servers' | 'providers';
+type AgentResourceView = 'agents' | 'skills' | 'mcp-servers';
 
 function AgentResourceNav({ active }: { active: AgentResourceView }) {
   const { t } = useTranslation('workspace');
@@ -12,7 +12,6 @@ function AgentResourceNav({ active }: { active: AgentResourceView }) {
     { id: 'agents', label: t('nav.agents'), to: '/agents', icon: Bot },
     { id: 'skills', label: t('nav.skills'), to: '/skills', icon: Blocks },
     { id: 'mcp-servers', label: t('nav.mcpServers'), to: '/mcp-servers', icon: Server },
-    { id: 'providers', label: t('nav.modelProviders'), to: '/model-providers', icon: KeyRound },
   ] as const;
 
   return (

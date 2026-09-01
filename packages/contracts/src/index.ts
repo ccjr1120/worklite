@@ -299,6 +299,20 @@ export type WorkspaceSettingsView = {
 
 export type UpdateWorkspaceSettingsRequest = Partial<Pick<WorkspaceSettingsView, 'appearance' | 'locale'>>;
 
+export type PortkeyGatewayStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'failed';
+
+export type PortkeyGatewayView = {
+  port: number;
+  host: string;
+  status: PortkeyGatewayStatus;
+  error: string | null;
+  updatedAt: string;
+};
+
+export type UpdatePortkeyGatewayRequest = {
+  port: number;
+};
+
 export type WorkliteScriptResult =
   | { type: 'resource'; resourceType: 'provider' | 'agent' | 'skill' | 'mcp-server' | 'workflow'; id: string; route: string }
   | { type: 'navigation'; target: WorkliteNavigationTarget; route: string }
@@ -501,13 +515,13 @@ export type McpServerView = {
   updatedAt: string;
 };
 
+export type ModelProviderProtocol = 'openai/chat' | 'openai/responses' | 'deepseek/chat';
+
 export type ModelProviderView = {
   id: string;
   name: string;
-  kind: 'deepseek' | 'openai' | 'openai-compatible';
-  baseUrl: string | null;
-  organization: string | null;
-  project: string | null;
+  baseURL: string | null;
+  protocol: ModelProviderProtocol;
   status: 'connected' | 'unconfigured' | 'invalid';
   maskedKey: string;
   models: string[];
@@ -550,13 +564,31 @@ export type UsageRow = {
 
 export type CreateModelProviderRequest = {
   name: string;
-  kind?: 'deepseek' | 'openai' | 'openai-compatible';
+  protocol?: ModelProviderView['protocol'];
   apiKey?: string;
-  baseUrl?: string;
-  organization?: string;
-  project?: string;
+  baseURL?: string;
   models?: string[];
   headers?: Record<string, string>;
+};
+
+export type UpdateModelProviderRequest = {
+  name?: string;
+  protocol?: ModelProviderView['protocol'];
+  apiKey?: string;
+  baseURL?: string;
+  models?: string[];
+  headers?: Record<string, string>;
+};
+
+export type DiscoverModelProviderRequest = {
+  protocol?: CreateModelProviderRequest['protocol'];
+  apiKey: string;
+  baseURL?: string;
+  headers?: Record<string, string>;
+};
+
+export type DiscoverModelProviderResult = {
+  models: string[];
 };
 
 export type CreateMcpServerRequest = {

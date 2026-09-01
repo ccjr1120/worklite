@@ -179,14 +179,14 @@ Present persistent child Agent sessions in a compact unframed status band betwee
 ### Workflow Editor
 
 - Represent workflows on a focused React Flow node canvas with explicit input and output handles, directional edges, and persisted spatial layout.
-- Use a three-region editor workspace: a node palette, a central pan-and-zoom canvas, and a contextual inspector for the selected node or edge.
+- Use a canvas with one right-side contextual panel. The panel shows the searchable node palette when nothing is selected and replaces it with the selected node or edge inspector.
 - Keep nodes visually consistent and expose essential node-owned parameters, including editable Text content, without requiring the inspector for common work.
 - Add nodes through the searchable palette at a predictable viewport position and allow direct node dragging for spatial organization.
 - Provide familiar icon controls for zoom in, zoom out, fit view, and deletion.
-- Keep edge direction and handle compatibility visible through shape, labels, and interaction state rather than color alone.
-- Preserve a keyboard-accessible inspector path for reviewing configuration and removing selected nodes or edges.
-- Keep the inspector available at every breakpoint; collapse it to a drawer or bottom sheet when the layout cannot support a side panel.
-- Use persimmon borders or indicators for the selected and currently executing node or edge.
+- Keep edge direction and handle compatibility visible through shape, persistent port labels, and valid or invalid interaction state rather than color alone.
+- Preserve a keyboard-accessible inspector path for reviewing configuration and removing selected nodes or edges, with an explicit return to the node palette.
+- Keep the contextual panel available at every breakpoint; collapse the combined palette and inspector to one drawer or bottom sheet when the layout cannot support a side panel.
+- Use persimmon borders or indicators for the selected and currently executing node or edge. Selection belongs to the graph and must remain synchronized with contextual panel content and keyboard focus.
 - Represent successful and failed states through compact green or red markers rather than filling the whole node.
 - Render edges with restrained neutral strokes and reserve stronger treatment for selection and execution.
 - Present AI-assisted edits in a side panel and make proposed structured operations understandable and reviewable.
@@ -247,6 +247,11 @@ Before confirming a UI proposal, verify that it:
 - Introduces a documented design-system decision before implementation when no existing rule applies.
 
 ## Changelog
+
+### 2026-09-01
+
+- Combined the node palette and contextual inspector into one right-side panel that switches content based on canvas selection.
+- Required synchronized graph and panel selection, node-local selected and keyboard-focus states, visible port labels, and theme-aware canvas primitives.
 
 ### 2026-08-31
 

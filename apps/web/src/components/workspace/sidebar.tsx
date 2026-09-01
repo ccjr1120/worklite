@@ -1,5 +1,5 @@
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Bot, Home, Puzzle, Settings, Workflow } from 'lucide-react';
+import { Bot, Home, KeyRound, Puzzle, Settings, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { focusRingInset } from '@/components/ui/interaction';
@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 const primaryItems = [
   { id: 'home', labelKey: 'nav.home', to: '/home', icon: Home },
   { id: 'agents', labelKey: 'nav.agents', to: '/agents', icon: Bot },
+  { id: 'providers', labelKey: 'nav.modelProviders', to: '/model-providers', icon: KeyRound },
   { id: 'plugins', labelKey: 'nav.plugins', to: '/plugins', icon: Puzzle },
   { id: 'workflows', labelKey: 'nav.workflows', to: '/workflows', icon: Workflow },
   { id: 'settings', labelKey: 'nav.settings', to: '/settings/appearance', icon: Settings },
@@ -20,7 +21,7 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
   const pathname = useRouterState({ select: (state) => state.location.pathname });
 
   function primaryActive(id: (typeof primaryItems)[number]['id'], to: string) {
-    if (id === 'agents') return ['/agents', '/skills', '/mcp-servers', '/model-providers'].some((path) => pathname.startsWith(path));
+    if (id === 'agents') return ['/agents', '/skills', '/mcp-servers'].some((path) => pathname.startsWith(path));
     if (id === 'settings') return pathname.startsWith('/settings');
     return pathname === to || pathname.startsWith(`${to}/`);
   }

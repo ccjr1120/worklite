@@ -45,7 +45,7 @@ function WorkflowVersionsPage() {
                 <span className="tabular-nums text-[13px]">{item.definition.nodes.length}</span>
                 <span className="flex items-center gap-3 text-[13px] text-muted-foreground">
                   {t('common:empty.dash')}
-                  <ButtonLink workspaceSlug={workspaceSlug} workflowId={workflowId} />
+                  <ButtonLink workflowId={workflowId} />
                 </span>
               </CollectionRow>
             ))}
@@ -56,7 +56,7 @@ function WorkflowVersionsPage() {
   );
 }
 
-function ButtonLink({ workspaceSlug, workflowId }: { workspaceSlug: string; workflowId: string }) {
+function ButtonLink({ workflowId }: { workflowId: string }) {
   const { t } = useTranslation('common');
   return (
     <Link to="/workflows/$workflowId" params={{ workflowId }} className="text-muted-foreground hover:text-foreground">

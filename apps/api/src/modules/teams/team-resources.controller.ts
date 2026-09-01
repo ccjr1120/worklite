@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
-import type { CreateMcpServerRequest, CreateModelProviderRequest, CreateSkillRequest, ExecuteSkillScriptRequest, UpdateMcpServerRequest, UpdateSkillRequest, UpdateWorkspaceSettingsRequest } from '@worklite/contracts';
+import type { CreateMcpServerRequest, CreateModelProviderRequest, CreateSkillRequest, ExecuteSkillScriptRequest, UpdateMcpServerRequest, UpdateModelProviderRequest, UpdateSkillRequest, UpdateWorkspaceSettingsRequest } from '@worklite/contracts';
 import { WorkspaceResourcesService } from './team-resources.service';
 
 @Controller()
@@ -55,8 +55,8 @@ export class WorkspaceResourcesController {
   @Post('model-providers')
   upsertProvider(@Req() request: Request, @Body() body: CreateModelProviderRequest) { return this.resources.upsertProvider(request, 'personal', body); }
 
-  @Post('model-providers/:providerId/test')
-  testProvider(@Req() request: Request, @Param('providerId') providerId: string) { return this.resources.testProvider(request, 'personal', providerId); }
+  @Patch('model-providers/:providerId')
+  updateProvider(@Req() request: Request, @Param('providerId') providerId: string, @Body() body: UpdateModelProviderRequest) { return this.resources.updateProvider(request, 'personal', providerId, body); }
 
   @Delete('model-providers/:providerId')
   deleteProvider(@Req() request: Request, @Param('providerId') providerId: string) { return this.resources.deleteProvider(request, 'personal', providerId); }

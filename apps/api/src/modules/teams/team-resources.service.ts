@@ -15,7 +15,9 @@ import type {
   McpServerView,
   ModelProviderView,
   ModelProviderTestResult,
+  ModelProviderProtocol,
   SkillView,
+  UpdateModelProviderRequest,
   UpdateWorkspaceSettingsRequest,
   UpdateSkillRequest,
   UsageRow,
@@ -88,7 +90,7 @@ function headerNames(value: string | null): string[] {
 }
 
 function providerView(row: typeof modelProviders.$inferSelect): ModelProviderView {
-  return { id: row.id, name: row.name, kind: row.kind, baseUrl: row.baseUrl, organization: row.organization, project: row.project, status: row.status, maskedKey: row.maskedKey, models: row.models ?? [], headerNames: headerNames(row.headers) };
+  return { id: row.id, name: row.name, baseURL: row.baseURL, protocol: row.protocol, status: row.status, maskedKey: row.maskedKey, models: row.models ?? [], headerNames: headerNames(row.headers) };
 }
 
 function mcpServerView(row: typeof mcpServers.$inferSelect, workspaceSlug: string): McpServerView {
@@ -192,9 +194,9 @@ function providerHeaders(value: string | null): Record<string, string> | undefin
 }
 
 function providerConfig(row: typeof modelProviders.$inferSelect, apiKey: string): ModelProviderConfig {
-  const common = { id: row.id, apiKey, baseUrl: row.baseUrl ?? undefined, headers: providerHeaders(row.headers) };
-  if (row.kind === 'deepseek') return { ...common, kind: 'deepseek' };
-  return { ...common, kind: row.kind, organization: row.organization ?? undefined, project: row.project ?? undefined };
+  const common = { id: row.id, apiKey, baseURL: row.baseURL ?? undefined, headers: providerHeaders(row.headers) };
+  if (row.protocol.startsWith('deepseek/')) return { ...common, adapter: 'deepseek' };
+  return { ...common, adapter: 'openai', operation: row.protocol === 'openai/responses' ? 'responses' : 'chat/completions' };
 }
 
 // Fixed multilingual smoke-test prompt requested by the product.
@@ -401,7 +403,7 @@ export class WorkspaceResourcesService {
       modelProviders: providerRows.map((provider) => ({
         id: provider.id,
         name: provider.name,
-        kind: provider.kind,
+        protocol: provider.protocol,
         status: provider.status,
         models: provider.models ?? [],
       })),
@@ -471,22 +473,57 @@ export class WorkspaceResourcesService {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const name = input.name.trim();
     if (!name) throw new BadRequestException('Provider name is required.');
-    const kind = input.kind ?? 'openai-compatible';
-    const validKinds = new Set(['deepseek', 'openai', 'openai-compatible']);
-    if (!validKinds.has(kind)) throw new BadRequestException('Unsupported model provider kind.');
+    const protocol = input.protocol ?? 'openai/chat';
+    const validProtocols: ModelProviderProtocol[] = ['openai/chat', 'openai/responses', 'deepseek/chat'];
+    if (!validProtocols.includes(protocol)) throw new BadRequestException('Unsupported model provider protocol.');
     const headers = normalizeHeaders(input.headers);
     const serializedHeaders = headers === undefined ? undefined : encryptSecret(JSON.stringify(headers));
-    const baseUrl = input.baseUrl?.trim() || null;
-    const organization = input.organization?.trim() || null;
-    const project = input.project?.trim() || null;
+    const baseURL = input.baseURL?.trim() || null;
+    if (!baseURL) throw new BadRequestException('Base URL is required.');
     const models = input.models?.map((model) => model.trim()).filter(Boolean);
     const [existing] = await this.db.select().from(modelProviders).where(and(eq(modelProviders.workspaceId, team.id), eq(modelProviders.name, name))).limit(1);
     const apiKey = input.apiKey?.trim();
     const [row] = existing
-      ? await this.db.update(modelProviders).set({ kind, baseUrl, organization, project, ...(apiKey ? { apiKey: encryptSecret(apiKey), maskedKey: maskSecret(apiKey), status: 'connected' as const } : {}), ...(models ? { models } : {}), ...(serializedHeaders !== undefined ? { headers: serializedHeaders } : {}), updatedAt: new Date() }).where(eq(modelProviders.id, existing.id)).returning()
-      : await this.db.insert(modelProviders).values({ id: `prov_${randomUUID()}`, workspaceId: team.id, name, kind, baseUrl, organization, project, apiKey: apiKey ? encryptSecret(apiKey) : null, maskedKey: apiKey ? maskSecret(apiKey) : '', status: apiKey ? 'connected' : 'unconfigured', models: models ?? [], headers: serializedHeaders ?? null }).returning();
+      ? await this.db.update(modelProviders).set({ protocol, baseURL, ...(apiKey ? { apiKey: encryptSecret(apiKey), maskedKey: maskSecret(apiKey), status: 'connected' as const } : {}), ...(models ? { models } : {}), ...(serializedHeaders !== undefined ? { headers: serializedHeaders } : {}), updatedAt: new Date() }).where(eq(modelProviders.id, existing.id)).returning()
+      : await this.db.insert(modelProviders).values({ id: `prov_${randomUUID()}`, workspaceId: team.id, name, protocol, baseURL, apiKey: apiKey ? encryptSecret(apiKey) : null, maskedKey: apiKey ? maskSecret(apiKey) : '', status: apiKey ? 'connected' : 'unconfigured', models: models ?? [], headers: serializedHeaders ?? null }).returning();
     if (!row) throw new NotFoundException('Model provider could not be saved');
     if (models) {
+      const boundAgents = await this.db.select({ id: agents.id, model: agents.model }).from(agents).where(eq(agents.providerId, row.id));
+      const fallbackModel = models[0] ?? '';
+      for (const agent of boundAgents) {
+        if (agent.model && models.includes(agent.model)) continue;
+        await this.db.update(agents).set({ model: fallbackModel, updatedAt: new Date() }).where(eq(agents.id, agent.id));
+      }
+    }
+    return providerView(row);
+  }
+
+  async updateProvider(request: Request, workspaceSlug: string, providerId: string, input: UpdateModelProviderRequest): Promise<ModelProviderView> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const [existing] = await this.db.select().from(modelProviders).where(and(eq(modelProviders.id, providerId), eq(modelProviders.workspaceId, team.id))).limit(1);
+    if (!existing) throw new NotFoundException('Model provider not found');
+    const name = input.name === undefined ? existing.name : input.name.trim();
+    if (!name) throw new BadRequestException('Provider name is required.');
+    const protocol = input.protocol ?? existing.protocol;
+    const validProtocols: ModelProviderProtocol[] = ['openai/chat', 'openai/responses', 'deepseek/chat'];
+    if (!validProtocols.includes(protocol)) throw new BadRequestException('Unsupported model provider protocol.');
+    const baseURL = input.baseURL === undefined ? existing.baseURL : input.baseURL.trim() || null;
+    if (!baseURL) throw new BadRequestException('Base URL is required.');
+    const headers = normalizeHeaders(input.headers);
+    const serializedHeaders = headers === undefined ? undefined : encryptSecret(JSON.stringify(headers));
+    const models = input.models === undefined ? undefined : input.models.map((model) => model.trim()).filter(Boolean);
+    const apiKey = input.apiKey?.trim();
+    const [row] = await this.db.update(modelProviders).set({
+      name,
+      protocol,
+      baseURL,
+      ...(apiKey ? { apiKey: encryptSecret(apiKey), maskedKey: maskSecret(apiKey), status: 'connected' as const } : {}),
+      ...(models === undefined ? {} : { models }),
+      ...(serializedHeaders === undefined ? {} : { headers: serializedHeaders }),
+      updatedAt: new Date(),
+    }).where(and(eq(modelProviders.id, providerId), eq(modelProviders.workspaceId, team.id))).returning();
+    if (!row) throw new NotFoundException('Model provider could not be saved');
+    if (models !== undefined) {
       const boundAgents = await this.db.select({ id: agents.id, model: agents.model }).from(agents).where(eq(agents.providerId, row.id));
       const fallbackModel = models[0] ?? '';
       for (const agent of boundAgents) {
@@ -527,7 +564,7 @@ export class WorkspaceResourcesService {
     workspaceSlug: string,
     providerId: string,
     selectedModel?: string,
-  ): Promise<{ provider: ModelProviderConfig; model: string }> {
+  ): Promise<{ provider: ModelProviderConfig; model: string; protocol: ModelProviderView['protocol'] }> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [row] = await this.db.select().from(modelProviders).where(and(eq(modelProviders.id, providerId), eq(modelProviders.workspaceId, workspace.id))).limit(1);
     if (!row) throw new NotFoundException('Model provider not found');
@@ -536,7 +573,7 @@ export class WorkspaceResourcesService {
     if (!model) throw new BadRequestException('Add at least one model id before using this provider.');
     if (selectedModel && !configuredModels.includes(model)) throw new BadRequestException('The selected model is not configured for this provider.');
     if (!row.apiKey) throw new BadRequestException('Add an API key before using this provider.');
-    return { provider: providerConfig(row, decryptSecret(row.apiKey)), model };
+    return { provider: providerConfig(row, decryptSecret(row.apiKey)), model, protocol: row.protocol };
   }
 
   async deleteProvider(request: Request, workspaceSlug: string, providerId: string): Promise<void> {

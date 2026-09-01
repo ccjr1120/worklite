@@ -105,7 +105,7 @@ function SkillEditorPage() {
       disposed = true;
       source.close();
     };
-  }, [execution?.id, t]);
+  }, [execution, t]);
 
   useEffect(() => {
     const output = outputRef.current;
@@ -258,7 +258,7 @@ function SkillEditorPage() {
             <form className="mt-2 space-y-2 border-y border-border py-3" onSubmit={addFile}>
               <label htmlFor="skill-file-path" className="text-xs font-medium text-muted-foreground">{t('editor.filePath')}</label>
               <div className="flex gap-1.5">
-                <Input id="skill-file-path" className="h-8 font-mono text-xs" value={newFilePath} onChange={(event) => { setNewFilePath(event.target.value); setPathError(''); }} aria-invalid={Boolean(pathError)} autoFocus />
+                <Input id="skill-file-path" className="h-8 font-mono text-xs" value={newFilePath} onChange={(event) => { setNewFilePath(event.target.value); setPathError(''); }} aria-invalid={Boolean(pathError)} />
                 <Button type="submit" size="icon-compact" aria-label={t('editor.addFile')} title={t('editor.addFile')}><FilePlus2 className="size-4" /></Button>
                 <Button type="button" variant="ghost" size="icon-compact" aria-label={t('common:actions.cancel')} title={t('common:actions.cancel')} onClick={() => { setAddingFile(false); setPathError(''); }}><X className="size-4" /></Button>
               </div>

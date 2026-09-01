@@ -18,7 +18,8 @@ Before UI work, read the design system, this index, every applicable document un
 - First-use setup: [Onboarding](onboarding/README.md)
 - [Home](home/README.md)
 - [Workspace System Helper Chat](assistant/README.md)
-- Agents: [List and resource views](agents/list.md), [Editor](agents/editor.md), [Model providers](model-providers.md)
+- Agents: [List and resource views](agents/list.md), [Editor](agents/editor.md)
+- Providers: [Model providers and Portkey Gateway](model-providers.md)
 - Workflows: [List](workflows/list.md), [Editor](workflows/editor.md), [Versions](workflows/versions.md)
 - Runs: [List](runs/list.md), [Details](runs/details.md)
 - Skills: [List](skills/list.md), [Editor](skills/editor.md)
@@ -42,7 +43,7 @@ Before UI work, read the design system, this index, every applicable document un
 /settings/{usage,audit-log,appearance}
 ```
 
-The root route opens Home. First-use setup is an optional checklist for configuring a Model Provider and binding that Provider and a model to System Helper Chat; there is no account, invitation, team, first custom Agent, Workflow, or Run setup step.
+The root route opens Home. First-use setup is an optional checklist for configuring a Model Provider and binding that Provider and a model to System Helper Chat; there is no account, invitation, team, first custom Agent, Workflow, or Run setup step. The `/model-providers` page is the top-level Providers destination and switches between Model Providers and Portkey Gateway administration within the same page context.
 
 ## Shared Component Inventory
 

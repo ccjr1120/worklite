@@ -21,7 +21,10 @@ type StatusKey =
   | 'available'
   | 'missing'
   | 'qr_pending'
-  | 'error';
+  | 'error'
+  | 'stopped'
+  | 'starting'
+  | 'stopping';
 
 const STATUS_CONFIG: Record<
   StatusKey,
@@ -48,6 +51,9 @@ const STATUS_CONFIG: Record<
   missing: { variant: 'danger', icon: XCircle },
   qr_pending: { variant: 'warning', icon: LoaderCircle },
   error: { variant: 'danger', icon: XCircle },
+  stopped: { variant: 'neutral', icon: CircleDashed },
+  starting: { variant: 'info', icon: LoaderCircle },
+  stopping: { variant: 'warning', icon: LoaderCircle },
 };
 
 type StatusBadgeProps = {
@@ -59,7 +65,7 @@ function StatusBadge({ status, className }: StatusBadgeProps) {
   const { t } = useTranslation('common');
   const config = STATUS_CONFIG[status];
   const Icon = config.icon;
-  const spinning = status === 'running' || status === 'pending' || status === 'qr_pending';
+  const spinning = status === 'running' || status === 'pending' || status === 'qr_pending' || status === 'starting' || status === 'stopping';
 
   return (
     <Badge variant={config.variant} className={cn('tabular-nums', className)}>

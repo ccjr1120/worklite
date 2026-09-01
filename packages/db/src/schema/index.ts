@@ -11,6 +11,7 @@ export const workspaceSettings = sqliteTable('workspace_settings', {
   workspaceId: text('workspace_id').primaryKey().references(() => workspaces.id, { onDelete: 'cascade' }),
   appearance: text('appearance').$type<'system' | 'light' | 'dark'>().notNull().default('system'),
   locale: text('locale').$type<'en' | 'zh-CN'>().notNull().default('en'),
+  portkeyGatewayPort: integer('portkey_gateway_port').notNull().default(4547),
   updatedAt: timestamp('updated_at'),
 });
 
@@ -249,7 +250,7 @@ export const agentMcpServers = sqliteTable('agent_mcp_servers', {
 }, (table) => [primaryKey({ columns: [table.agentId, table.mcpServerId] })]);
 
 export const modelProviders = sqliteTable('model_providers', {
-  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), kind: text('kind').$type<'deepseek' | 'openai' | 'openai-compatible'>().notNull().default('openai-compatible'), baseUrl: text('base_url'), organization: text('organization'), project: text('project'), status: text('status').$type<'connected' | 'unconfigured' | 'invalid'>().notNull().default('unconfigured'), maskedKey: text('masked_key').notNull().default(''), models: text('models', { mode: 'json' }).$type<string[]>().notNull().default([]), apiKey: text('api_key'), headers: text('headers'), updatedAt: timestamp('updated_at'),
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), baseURL: text('base_url'), protocol: text('protocol').$type<'openai/chat' | 'openai/responses' | 'deepseek/chat'>().notNull().default('openai/chat'), status: text('status').$type<'connected' | 'unconfigured' | 'invalid'>().notNull().default('unconfigured'), maskedKey: text('masked_key').notNull().default(''), models: text('models', { mode: 'json' }).$type<string[]>().notNull().default([]), apiKey: text('api_key'), headers: text('headers'), updatedAt: timestamp('updated_at'),
 });
 
 export const artifacts = sqliteTable('artifacts', {

@@ -28,6 +28,14 @@ Implement only the smallest direct change required by the confirmed request. Do 
 
 When an out-of-scope concern is discovered, mention it briefly instead of expanding the implementation.
 
+## Development Verification
+
+Unless the user explicitly authorizes it in the current request, do not run tests, builds, development or start servers, browser checks, `curl` requests, or other behavioral verification. Limit verification to the simple TypeScript check: `pnpm typecheck`.
+
+## Durable Corrections
+
+When the user corrects agent behavior or states a durable repository-specific working preference, update this `AGENTS.md` in the same change so future work follows that correction.
+
 ## Git Worktree Directory Rule
 
 Place additional worktrees in the parent directory of the primary checkout. Name each worktree as `../<repository-name>-<purpose>`, such as `../work-lite-workflow-optimization`.

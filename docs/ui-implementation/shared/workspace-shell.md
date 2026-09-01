@@ -4,7 +4,7 @@
 
 Use a persistent `232px` sidebar, a `52px` context bar, fluid main content, an optional `360px` inspector, and an optional resizable bottom run panel. The sidebar collapses to `56px`.
 
-Primary navigation is a single level containing `Home`, `Agents`, `Plugins`, `Workflows`, and `Settings`; it never reveals nested navigation. `Agents`, `Skills`, `MCP Servers`, and `Providers` are related resource collection views and use shared page-level tabs in that order. Plugins remains a separate first-level destination and does not appear in those tabs.
+Primary navigation is a single level containing `Home`, `Agents`, `Providers`, `Plugins`, `Workflows`, and `Settings`; it never reveals nested navigation. Providers owns the Model Providers and Portkey Gateway views in one page context. Agents, Skills, and MCP Servers remain related Agent resource views; Providers is not nested under Agents.
 
 The non-mobile sidebar may use its compact `56px` icon rail at constrained widths. Agents remains one direct link in both sidebar widths and stays selected for every Agent resource collection or editor route. The mobile navigation drawer uses the same first-level destinations. Usage, audit log, and appearance are reached from Settings. Runs and Artifacts remain available from dashboard widgets, detail links, and command search but are not primary navigation destinations. System Helper Chat is available throughout the workspace shell, presented prominently on Home and as a floating control elsewhere. Counts indicate actionable state only. The WorkLite mark is at the top and the personal preferences menu is at the bottom.
 

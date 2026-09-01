@@ -1,6 +1,6 @@
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { ArrowLeft, ArrowUp, Ban, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleX, Download, FileCode2, History, LoaderCircle, MessageSquareText, Plus, RefreshCw, ShieldAlert, Square, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentSubSessionView, AgentToolCallView, AgentView } from '@worklite/contracts';
 import { ApiError, api, parseAgentExecutionEvent } from '@/api/client';
@@ -143,6 +143,32 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
               ? t('assistant:execution.restarted')
               : visibleExecution?.error ?? '';
 
+  const applyCompletedResult = useCallback(async (call: AgentToolCallView) => {
+    const result = call.result;
+    if (!result) return;
+    if (result.type === 'resource') {
+      const queryKey = result.resourceType === 'provider' ? 'model-providers' : result.resourceType === 'mcp-server' ? 'mcp-servers' : `${result.resourceType}s`;
+      await queryClient.invalidateQueries({ queryKey: [queryKey] });
+      return;
+    }
+    if (result.type === 'settings') {
+      const saved = await api.settings();
+      queryClient.setQueryData(['settings'], saved);
+      applyAppearancePreference(saved.appearance);
+      applyLocalePreference(saved.locale);
+      return;
+    }
+    if (result.type === 'navigation') void navigate({ to: result.route as never });
+  }, [applyAppearancePreference, applyLocalePreference, navigate]);
+
+  const applyCompletedResults = useCallback(async (next: AgentExecutionView) => {
+    for (const call of next.toolCalls) {
+      if (call.status !== 'completed' || appliedResultIdsRef.current.has(call.id)) continue;
+      appliedResultIdsRef.current.add(call.id);
+      await applyCompletedResult(call);
+    }
+  }, [applyCompletedResult]);
+
   useEffect(() => {
     window.localStorage.setItem(storageKey(workspaceSlug), JSON.stringify({ activeId, activeTarget: target, targetIds, activeSubSessionId, archived } satisfies StoredExecutionState));
   }, [activeId, activeSubSessionId, archived, target, targetIds, workspaceSlug]);
@@ -221,7 +247,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
       }
     };
     return () => source.close();
-  }, [activeId, execution?.status, executionAgentId]);
+  }, [activeId, applyCompletedResults, execution?.status, executionAgentId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -263,7 +289,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
     };
     void load();
     return () => { cancelled = true; if (retryTimer !== undefined) window.clearTimeout(retryTimer); };
-  }, [activeSubSession?.agentId, activeSubSession?.executionId, activeSubSessionId, subSessionsQuery.isLoading, t, workspaceSlug]);
+  }, [activeSubSession, activeSubSessionId, subSessionsQuery.isLoading, t, workspaceSlug]);
 
   useEffect(() => {
     if (!activeSubSession || (subExecution?.status !== 'running' && subExecution?.status !== 'waiting_for_input')) return;
@@ -292,7 +318,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
       }
     };
     return () => source.close();
-  }, [activeSubSession?.agentId, activeSubSession?.executionId, subExecution?.status]);
+  }, [activeSubSession, subExecution?.status]);
 
   useEffect(() => {
     if (!activeSubSession || !activeSubSession.unread || subExecution?.status === 'running') return;
@@ -461,32 +487,6 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
     } finally {
       setBusy(false);
     }
-  }
-
-  async function applyCompletedResults(next: AgentExecutionView) {
-    for (const call of next.toolCalls) {
-      if (call.status !== 'completed' || appliedResultIdsRef.current.has(call.id)) continue;
-      appliedResultIdsRef.current.add(call.id);
-      await applyCompletedResult(call);
-    }
-  }
-
-  async function applyCompletedResult(call: AgentToolCallView) {
-    const result = call.result;
-    if (!result) return;
-    if (result.type === 'resource') {
-      const queryKey = result.resourceType === 'provider' ? 'model-providers' : result.resourceType === 'mcp-server' ? 'mcp-servers' : `${result.resourceType}s`;
-      await queryClient.invalidateQueries({ queryKey: [queryKey] });
-      return;
-    }
-    if (result.type === 'settings') {
-      const saved = await api.settings();
-      queryClient.setQueryData(['settings'], saved);
-      applyAppearancePreference(saved.appearance);
-      applyLocalePreference(saved.locale);
-      return;
-    }
-    if (result.type === 'navigation') void navigate({ to: result.route as never });
   }
 
   function archiveCurrent() {

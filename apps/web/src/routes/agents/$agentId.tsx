@@ -599,7 +599,7 @@ function AgentConfigurationFields({
                 <Checkbox checked={selectedSkillIds.includes(skill.id)} onCheckedChange={(checked) => onSkillChange(skill.id, checked === true)} aria-label={skill.name} />
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span tabIndex={0} className="min-w-0 flex-1 truncate font-medium" aria-label={skill.name}>{skill.name}</span>
+                    <span className="min-w-0 flex-1 truncate font-medium" aria-label={skill.name}>{skill.name}</span>
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs break-words">{skill.name}</TooltipContent>
                 </Tooltip>
@@ -623,7 +623,7 @@ function AgentConfigurationFields({
                 <Checkbox checked={selectedMcpServerIds.includes(server.id)} onCheckedChange={(checked) => onMcpServerChange(server.id, checked === true)} aria-label={server.name} />
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span tabIndex={0} className="min-w-0 flex-1 truncate font-medium" aria-label={server.name}>{server.name}</span>
+                    <span className="min-w-0 flex-1 truncate font-medium" aria-label={server.name}>{server.name}</span>
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs break-words">{server.name}</TooltipContent>
                 </Tooltip>

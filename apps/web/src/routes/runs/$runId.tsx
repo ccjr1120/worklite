@@ -28,7 +28,7 @@ function RunDetailsPage() {
   const { runId } = Route.useParams();
   const workspaceSlug = "personal";
   const { data: run } = useRunQuery(workspaceSlug, runId);
-  const steps = run?.nodeRuns ?? [];
+  const steps = useMemo(() => run?.nodeRuns ?? [], [run?.nodeRuns]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [nodeDeltas, setNodeDeltas] = useState<Record<string, string>>({});
   const [events, setEvents] = useState<RunProgressEvent[]>([]);
@@ -62,7 +62,7 @@ function RunDetailsPage() {
       }
     };
     return () => source.close();
-  }, [run?.id, run?.status, runId]);
+  }, [run, runId]);
 
   async function cancelRun() {
     if (cancelling) return;
