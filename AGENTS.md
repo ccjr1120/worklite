@@ -39,3 +39,7 @@ When the user corrects agent behavior or states a durable repository-specific wo
 ## Git Worktree Directory Rule
 
 Place additional worktrees in the parent directory of the primary checkout. Name each worktree as `../<repository-name>-<purpose>`, such as `../work-lite-workflow-optimization`.
+
+## GitHub Research Rule
+
+Use the authenticated `gh` CLI for GitHub repository searches, metadata inspection, and source browsing instead of direct web requests or browser search.
