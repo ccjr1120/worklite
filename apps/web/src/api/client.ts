@@ -16,6 +16,7 @@ import type {
   UpdateAgentRequest,
   ArtifactView,
   AuditEventView,
+  DiagnosticLogView,
   CreateMcpServerRequest,
   UpdateMcpServerRequest,
   CreateModelProviderRequest,
@@ -47,7 +48,7 @@ import type {
 } from '@worklite/contracts';
 
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string) {
+  constructor(public readonly status: number, message: string, public readonly traceId?: string) {
     super(message);
     this.name = 'ApiError';
   }
@@ -64,13 +65,15 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   });
   if (!response.ok) {
     let message = `Request failed: ${response.status}`;
+    let traceId: string | undefined;
     try {
-      const body = (await response.json()) as { message?: string | string[] };
+      const body = (await response.json()) as { message?: string | string[]; traceId?: string };
       if (body.message) message = Array.isArray(body.message) ? body.message.join(', ') : body.message;
+      traceId = body.traceId;
     } catch {
       // Keep the status-based error when the server does not return JSON.
     }
-    throw new ApiError(response.status, message);
+    throw new ApiError(response.status, message, traceId);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -161,6 +164,7 @@ export const api = {
   artifact: (_workspace: string | undefined, artifactId: string) => apiGet<ArtifactView>(`/api/artifacts/${encodeURIComponent(artifactId)}`),
   usage: (_workspace?: string) => apiGet<UsageRow[]>('/api/usage'),
   auditLogs: (_workspace?: string) => apiGet<AuditEventView[]>('/api/audit-logs'),
+  diagnosticLogs: (_workspace?: string, traceId?: string) => apiGet<DiagnosticLogView[]>(`/api/diagnostic-logs${traceId ? `?traceId=${encodeURIComponent(traceId)}` : ''}`),
   runs: (_workspace?: string) => apiGet<RunView[]>('/api/runs'),
   run: (_workspace: string | undefined, runId: string) => apiGet<RunView>(`/api/runs/${encodeURIComponent(runId)}`),
   runEventsUrl: (runId: string) => `/api/runs/${encodeURIComponent(runId)}/events`,

@@ -35,7 +35,7 @@ type ProviderDialog =
 type ProviderTestDialog =
   | { provider: ModelProviderView; status: 'loading'; startedAt: number; elapsedSeconds: number }
   | { provider: ModelProviderView; status: 'success'; result: ModelProviderTestResult; elapsedSeconds: number }
-  | { provider: ModelProviderView; status: 'error'; message: string; elapsedSeconds: number };
+  | { provider: ModelProviderView; status: 'error'; message: string; traceId?: string; elapsedSeconds: number };
 
 const PROVIDER_TEST_PROMPT = '\u4f60\u597d';
 
@@ -316,7 +316,8 @@ function ModelProvidersPage() {
       setTestDialog((current) => current?.provider.id === provider.id ? { provider, status: 'success', result, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1_000) } : current);
     }).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : t('providers.testFailed');
-      setTestDialog((current) => current?.provider.id === provider.id ? { provider, status: 'error', message, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1_000) } : current);
+      const traceId = error instanceof Error && 'traceId' in error && typeof error.traceId === 'string' ? error.traceId : undefined;
+      setTestDialog((current) => current?.provider.id === provider.id ? { provider, status: 'error', message, traceId, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1_000) } : current);
     });
   }
 
@@ -463,7 +464,7 @@ function ModelProvidersPage() {
                 ) : testDialog?.status === 'success' ? (
                   <div aria-live="polite"><p className="whitespace-pre-wrap break-words">{testDialog.result.response}</p><p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></div>
                 ) : testDialog?.status === 'error' ? (
-                  <><p role="alert" className="text-danger">{testDialog.message}</p><p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></>
+                  <><p role="alert" className="break-words text-danger">{testDialog.message}</p>{testDialog.traceId ? <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2"><span className="font-mono text-xs text-muted-foreground">{t('providers.traceId', { id: testDialog.traceId })}</span><Button type="button" variant="ghost" size="compact" onClick={() => window.location.assign(`/settings/logs?traceId=${encodeURIComponent(testDialog.traceId ?? '')}`)}>{t('providers.viewLogs')}</Button></div> : null}<p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></>
                 ) : null}
               </div>
             </div>

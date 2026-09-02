@@ -26,7 +26,7 @@ Before UI work, read the design system, this index, every applicable document un
 - MCP servers: [List](mcp-servers/list.md), [Configuration](mcp-servers/configuration.md)
 - Plugins: [List](plugins/list.md), [Configuration](plugins/configuration.md)
 - Artifacts: [List](artifacts/list.md), [Details](artifacts/details.md)
-- Settings: [Usage](settings/usage.md), [Audit log](settings/audit-log.md), [Appearance](settings/appearance.md)
+- Settings: [Usage](settings/usage.md), [Audit log](settings/audit-log.md), [Diagnostic logs](settings/logs.md), [Appearance](settings/appearance.md)
 
 ## Route Map
 
@@ -40,14 +40,14 @@ Before UI work, read the design system, this index, every applicable document un
 /mcp-servers/{new,:serverId}
 /plugins/:pluginId
 /artifacts/:artifactId
-/settings/{usage,audit-log,appearance}
+/settings/{usage,audit-log,logs,appearance}
 ```
 
 The root route opens Home. First-use setup is an optional checklist for configuring a Model Provider and binding that Provider and a model to System Helper Chat; there is no account, invitation, team, first custom Agent, Workflow, or Run setup step. The `/model-providers` page is the top-level Providers destination and switches between Model Providers and Portkey Gateway administration within the same page context.
 
 ## Shared Component Inventory
 
-Theme provider and appearance selector; application shell; sidebar; context bar; personal preferences menu; command menu; shell-level System Helper Chat with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; React Flow workflow graph canvas; run timeline; plugin configuration; viewers for logs, output and artifacts; skeletons, errors, offline banner.
+Theme provider and appearance selector; application shell; sidebar; context bar; personal preferences menu; command menu; shell-level System Helper Chat with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; React Flow workflow graph canvas; run timeline; plugin configuration; viewers for diagnostic logs, run output and artifacts; skeletons, errors, offline banner.
 
 Domain-neutral reusable components belong in the shared UI package. Feature composition remains near its feature. Abstract only demonstrated repeated patterns.
 
@@ -62,6 +62,11 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-09-02
+
+- Added the Settings Diagnostic Logs page for trace-oriented Provider connection troubleshooting.
+- Defined a dedicated `/settings/logs` route alongside Audit Log, with filtering and expandable event details.
 
 ### 2026-08-31
 

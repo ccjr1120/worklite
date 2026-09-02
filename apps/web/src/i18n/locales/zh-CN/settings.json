@@ -3,6 +3,7 @@
     "title": "设置",
     "usage": "用量",
     "auditLog": "审计日志",
+    "logs": "Diagnostic logs",
     "appearance": "外观"
   },
   "providers": {
@@ -70,6 +71,8 @@
     "waitingReplyAccessible": "正在等待模型回复。",
     "testDuration": "耗时：{{seconds}} 秒",
     "testFailed": "提供商测试失败。",
+    "traceId": "Trace {{id}}",
+    "viewLogs": "View logs",
     "saved": "提供商已保存",
     "delete": "删除提供商",
     "deleteTitle": "删除 {{provider}}？",
@@ -107,6 +110,34 @@
       "resource": "资源",
       "metadata": "元数据"
     }
+  },
+  "logs": {
+    "title": "Diagnostic logs",
+    "description": "Detailed local traces for Provider and Gateway operations.",
+    "search": "Filter by trace, Provider, stage, or message",
+    "traceFilter": "Trace: {{id}}",
+    "clearTrace": "Clear trace",
+    "loading": "Loading diagnostic logs...",
+    "error": "Unable to load diagnostic logs.",
+    "retry": "Retry",
+    "emptyTitle": "No diagnostic events",
+    "emptyDescription": "Provider connection tests and Gateway diagnostics will appear here.",
+    "noMatchesTitle": "No matching events",
+    "noMatchesDescription": "No diagnostic events match the current filters.",
+    "columns": {
+      "time": "Time",
+      "level": "Level",
+      "trace": "Trace",
+      "provider": "Provider",
+      "stage": "Stage",
+      "status": "Status",
+      "message": "Message"
+    },
+    "details": "Event details",
+    "metadata": "Metadata",
+    "duration": "Duration: {{ms}} ms",
+    "copyTrace": "Copy trace ID",
+    "copied": "Copied"
   },
   "appearance": {
     "title": "外观",

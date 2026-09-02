@@ -96,6 +96,10 @@ export function useAuditLogsQuery(workspace?: string) {
   return useQuery({ queryKey: ['audit-logs'] as const, queryFn: () => api.auditLogs(workspace) });
 }
 
+export function useDiagnosticLogsQuery(workspace?: string, traceId?: string) {
+  return useQuery({ queryKey: ['diagnostic-logs', traceId ?? 'all'] as const, queryFn: () => api.diagnosticLogs(workspace, traceId) });
+}
+
 export function useWorkspaceSettingsQuery() {
   return useQuery({ queryKey: ['settings'] as const, queryFn: api.settings });
 }

@@ -30,6 +30,7 @@ import { Route as RunsRunIdRouteImport } from './routes/runs/$runId'
 import { Route as SettingsIndexRouteImport } from './routes/settings/index'
 import { Route as SettingsAppearanceRouteImport } from './routes/settings/appearance'
 import { Route as SettingsAuditLogRouteImport } from './routes/settings/audit-log'
+import { Route as SettingsLogsRouteImport } from './routes/settings/logs'
 import { Route as SettingsUsageRouteImport } from './routes/settings/usage'
 import { Route as SkillsIndexRouteImport } from './routes/skills/index'
 import { Route as SkillsSkillIdRouteImport } from './routes/skills/$skillId'
@@ -142,6 +143,11 @@ const SettingsAuditLogRoute = SettingsAuditLogRouteImport.update({
   path: '/audit-log',
   getParentRoute: () => SettingsRouteRoute,
 } as any)
+const SettingsLogsRoute = SettingsLogsRouteImport.update({
+  id: '/logs',
+  path: '/logs',
+  getParentRoute: () => SettingsRouteRoute,
+} as any)
 const SettingsUsageRoute = SettingsUsageRouteImport.update({
   id: '/usage',
   path: '/usage',
@@ -189,6 +195,7 @@ export interface FileRoutesByFullPath {
   '/runs/$runId': typeof RunsRunIdRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/audit-log': typeof SettingsAuditLogRoute
+  '/settings/logs': typeof SettingsLogsRoute
   '/settings/usage': typeof SettingsUsageRoute
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
@@ -216,6 +223,7 @@ export interface FileRoutesByTo {
   '/runs/$runId': typeof RunsRunIdRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/audit-log': typeof SettingsAuditLogRoute
+  '/settings/logs': typeof SettingsLogsRoute
   '/settings/usage': typeof SettingsUsageRoute
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
@@ -246,6 +254,7 @@ export interface FileRoutesById {
   '/runs/$runId': typeof RunsRunIdRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/audit-log': typeof SettingsAuditLogRoute
+  '/settings/logs': typeof SettingsLogsRoute
   '/settings/usage': typeof SettingsUsageRoute
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
@@ -277,6 +286,7 @@ export interface FileRouteTypes {
     | '/runs/$runId'
     | '/settings/appearance'
     | '/settings/audit-log'
+    | '/settings/logs'
     | '/settings/usage'
     | '/skills/$skillId'
     | '/workflows/$workflowId'
@@ -304,6 +314,7 @@ export interface FileRouteTypes {
     | '/runs/$runId'
     | '/settings/appearance'
     | '/settings/audit-log'
+    | '/settings/logs'
     | '/settings/usage'
     | '/skills/$skillId'
     | '/workflows/$workflowId'
@@ -333,6 +344,7 @@ export interface FileRouteTypes {
     | '/runs/$runId'
     | '/settings/appearance'
     | '/settings/audit-log'
+    | '/settings/logs'
     | '/settings/usage'
     | '/skills/$skillId'
     | '/workflows/$workflowId'
@@ -519,6 +531,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsAuditLogRouteImport
       parentRoute: typeof SettingsRouteRoute
     }
+    '/settings/logs': {
+      id: '/settings/logs'
+      path: '/logs'
+      fullPath: '/settings/logs'
+      preLoaderRoute: typeof SettingsLogsRouteImport
+      parentRoute: typeof SettingsRouteRoute
+    }
     '/settings/usage': {
       id: '/settings/usage'
       path: '/usage'
@@ -583,6 +602,7 @@ const OnboardingRouteRouteWithChildren = OnboardingRouteRoute._addFileChildren(
 interface SettingsRouteRouteChildren {
   SettingsAppearanceRoute: typeof SettingsAppearanceRoute
   SettingsAuditLogRoute: typeof SettingsAuditLogRoute
+  SettingsLogsRoute: typeof SettingsLogsRoute
   SettingsUsageRoute: typeof SettingsUsageRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
 }
@@ -590,6 +610,7 @@ interface SettingsRouteRouteChildren {
 const SettingsRouteRouteChildren: SettingsRouteRouteChildren = {
   SettingsAppearanceRoute: SettingsAppearanceRoute,
   SettingsAuditLogRoute: SettingsAuditLogRoute,
+  SettingsLogsRoute: SettingsLogsRoute,
   SettingsUsageRoute: SettingsUsageRoute,
   SettingsIndexRoute: SettingsIndexRoute,
 }

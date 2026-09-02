@@ -43,6 +43,13 @@
       "when": 1788250945108,
       "tag": "0006_misty_apocalypse",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1788316800000,
+      "tag": "0007_provider_diagnostic_logs",
+      "breakpoints": true
     }
   ]
 }

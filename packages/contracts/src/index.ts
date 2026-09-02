@@ -532,6 +532,24 @@ export type ModelProviderTestResult = {
   prompt: string;
   model: string;
   response: string;
+  traceId: string;
+};
+
+export type DiagnosticLogLevel = 'debug' | 'info' | 'warn' | 'error';
+export type DiagnosticLogStatus = 'started' | 'succeeded' | 'failed';
+
+export type DiagnosticLogView = {
+  id: string;
+  traceId: string;
+  providerId: string | null;
+  operation: string;
+  stage: string;
+  level: DiagnosticLogLevel;
+  status: DiagnosticLogStatus;
+  message: string;
+  durationMs: number | null;
+  metadata: Record<string, unknown>;
+  timestamp: string;
 };
 
 export type ArtifactView = {

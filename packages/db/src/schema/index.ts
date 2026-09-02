@@ -261,6 +261,10 @@ export const auditLogs = sqliteTable('audit_logs', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), actorId: text('actor_id'), action: text('action').notNull(), resource: text('resource').notNull(), metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}), createdAt: timestamp('created_at'),
 });
 
+export const diagnosticLogs = sqliteTable('diagnostic_logs', {
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), traceId: text('trace_id').notNull(), providerId: text('provider_id'), operation: text('operation').notNull(), stage: text('stage').notNull(), level: text('level').$type<'debug' | 'info' | 'warn' | 'error'>().notNull(), status: text('status').$type<'started' | 'succeeded' | 'failed'>().notNull(), message: text('message').notNull(), durationMs: integer('duration_ms'), metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}), createdAt: timestamp('created_at'),
+});
+
 export type Workspace = typeof workspaces.$inferSelect;
 export type Plugin = typeof plugins.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
@@ -284,3 +288,4 @@ export type McpServer = typeof mcpServers.$inferSelect;
 export type ModelProvider = typeof modelProviders.$inferSelect;
 export type Artifact = typeof artifacts.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;
+export type DiagnosticLog = typeof diagnosticLogs.$inferSelect;

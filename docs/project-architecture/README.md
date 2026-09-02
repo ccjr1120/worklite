@@ -201,7 +201,7 @@ A published workflow locks every referenced `AgentVersion`; later agent edits ca
 
 Model providers are workspace-scoped resources and are presented in the Providers destination. Agents may reference models exposed by a provider belonging to the same workspace. Provider configuration uses a user-supplied `baseURL`, a namespaced protocol such as `openai/chat`, `openai/responses`, or `deepseek/chat`, an API key, a model catalog, and optional headers. Header values are encrypted at rest with the same secret-storage boundary as API keys and passed to the gateway without exposing their values. API responses return only header names and counts. Provider credentials remain write-only and provider changes do not mutate immutable published workflow versions.
 
-Provider connection tests are synchronous, bounded smoke tests through the same model gateway used by runtime execution. `POST /api/portkey-gateway/providers/:providerId/test` loads the stored provider configuration, selects the first configured model, sends the fixed prompt `你好`, limits output, and times out after 30 seconds. The result is returned directly to the requesting browser and is not persisted as a Run, Artifact, conversation, or audit payload. Test failures expose only a classified, credential-safe message and never include provider secrets, custom-header values, or raw upstream response bodies.
+Provider connection tests are synchronous, bounded smoke tests through the same model gateway used by runtime execution. `POST /api/portkey-gateway/providers/:providerId/test` loads the stored provider configuration, selects the first configured model, sends the fixed prompt `你好`, limits output, and times out after 30 seconds. The result is returned directly to the requesting browser and is not persisted as a Run, Artifact, conversation, or audit payload. Each request also creates a persistent diagnostic trace containing ordered events for provider resolution, Gateway readiness, upstream request/response, and model response parsing. This is a local-installation debugging surface: diagnostic events may retain raw provider and Gateway errors, request/response metadata, and response bodies to make failures fully inspectable. The trace must never execute or render untrusted content as markup, and the API returns a trace identifier with test failures.
 
 ## Workspace Assistant Architecture
 
@@ -397,7 +397,7 @@ This increment intentionally does not add compatibility routes for the previous 
 
 The second API increment extends the same typed, same-origin boundary to the remaining workspace resources: Skills, MCP Servers, Model Providers, Artifacts, Usage, and Audit Logs. These resources remain workspace-owned and are queried through TanStack Query; browser pages no longer import mock records at runtime. The local persistence target is SQLite.
 
-Provider and MCP credentials are write-only inputs. API responses expose connection state, masked metadata, protocol, endpoint metadata, allowed tool names, model catalogs, and header names, but never secret values. Provider headers must be a JSON object with string keys and values; omitted headers preserve the stored value during an update, while an explicit empty object clears them. Skill and artifact content is treated as untrusted data. The local implementation stores textual artifact content and skill metadata in SQLite; binary archive processing and large-payload storage remain deferred. Audit events are append-only records written by resource services. Usage is a read model derived from persisted runs for the initial increment.
+Provider and MCP credentials are write-only inputs. API responses expose connection state, masked metadata, protocol, endpoint metadata, allowed tool names, model catalogs, and header names, but never secret values. Provider headers must be a JSON object with string keys and values; omitted headers preserve the stored value during an update, while an explicit empty object clears them. Skill and artifact content is treated as untrusted data. The local implementation stores textual artifact content and skill metadata in SQLite; binary archive processing and large-payload storage remain deferred. Audit events are append-only records written by resource services. Usage is a read model derived from persisted runs for the initial increment. Provider diagnostics are append-only SQLite events grouped by trace identifier and are exposed through a dedicated logs API and Settings page; because this is a local debugging surface, events may include raw upstream errors, response bodies, and request metadata.
 
 This increment does not add third-party identity-provider integration, arbitrary MCP `stdio` execution, binary archive processing, or compatibility aliases for mock routes.
 
@@ -506,6 +506,13 @@ The MCP client, skill SDK, and observability code may begin inside applications 
 Adding a deferred capability requires an approved architecture change.
 
 ## Changelog
+
+### 2026-09-02 - Local Provider Diagnostic Logs
+
+- Added append-only Provider diagnostic events grouped by a trace identifier for connection-test troubleshooting.
+- Persisted ordered lifecycle stages covering Provider resolution, Gateway readiness, upstream transport, and response parsing, with raw local errors and response/request metadata available to the operator.
+- Added a dedicated diagnostic logs API and Settings page; connection-test failures return the trace identifier for direct investigation.
+- Intentionally limited this capability to the local installation and did not create Run, Artifact, Usage, or Audit records for provider tests.
 
 ### 2026-09-01 - Portkey Provider Proxy
 

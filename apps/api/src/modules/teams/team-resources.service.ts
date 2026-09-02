@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException, RequestTimeoutException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, HttpException, Inject, Injectable, NotFoundException, RequestTimeoutException, ServiceUnavailableException } from '@nestjs/common';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Request } from 'express';
@@ -44,6 +44,7 @@ import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from './teams.service';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
 import { McpClientService } from '../mcp-servers/mcp-client.service';
+import { DiagnosticsService } from '../diagnostics/diagnostics.service';
 
 function maskSecret(value: string): string {
   return value.length > 4 ? `****${value.slice(-4)}` : '****';
@@ -199,6 +200,19 @@ function providerConfig(row: typeof modelProviders.$inferSelect, apiKey: string)
   return { ...common, adapter: 'openai', operation: row.protocol === 'openai/responses' ? 'responses' : 'chat/completions' };
 }
 
+function errorDetails(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    const details: Record<string, unknown> = { name: error.name, message: error.message, stack: error.stack ?? null, cause: error.cause instanceof Error ? error.cause.message : error.cause ?? null };
+    for (const key of Object.getOwnPropertyNames(error)) {
+      if (key in details) continue;
+      const value = (error as unknown as Record<string, unknown>)[key];
+      try { JSON.stringify(value); details[key] = value; } catch { details[key] = String(value); }
+    }
+    return details;
+  }
+  return { value: String(error) };
+}
+
 // Fixed multilingual smoke-test prompt requested by the product.
 const PROVIDER_TEST_PROMPT = '\u4f60\u597d';
 
@@ -209,6 +223,7 @@ export class WorkspaceResourcesService {
     private readonly workspaces: WorkspaceService,
     private readonly skillScripts: SkillScriptRunnerService,
     private readonly mcpClient: McpClientService,
+    private readonly diagnostics: DiagnosticsService,
   ) {}
 
   async skills(request: Request, workspaceSlug: string): Promise<SkillView[]> {
@@ -535,10 +550,25 @@ export class WorkspaceResourcesService {
   }
 
   async testProvider(request: Request, workspaceSlug: string, providerId: string): Promise<ModelProviderTestResult> {
-    const runtime = await this.providerRuntime(request, workspaceSlug, providerId);
+    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const traceId = this.diagnostics.start(workspace.id, providerId, 'provider_test', 'request', 'Provider connection test started.', { prompt: PROVIDER_TEST_PROMPT });
+    const startedAt = Date.now();
+    let runtime: Awaited<ReturnType<WorkspaceResourcesService['providerRuntime']>>;
+    try {
+      runtime = await this.providerRuntime(request, workspaceSlug, providerId);
+      this.diagnostics.write(workspace.id, { traceId, providerId, operation: 'provider_test', stage: 'provider_resolution', level: 'info', status: 'succeeded', message: 'Provider configuration resolved.', metadata: { model: runtime.model, protocol: runtime.protocol, baseURL: runtime.provider.baseURL ?? null }, durationMs: Date.now() - startedAt });
+    } catch (error: unknown) {
+      this.diagnostics.write(workspace.id, { traceId, providerId, operation: 'provider_test', stage: 'provider_resolution', level: 'error', status: 'failed', message: error instanceof Error ? error.message : String(error), metadata: errorDetails(error), durationMs: Date.now() - startedAt });
+      throw new HttpException({ message: error instanceof Error ? error.message : String(error), traceId }, error instanceof HttpException ? error.getStatus() : 500);
+    }
 
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), 30_000);
+    const gatewayStartedAt = Date.now();
+    const gatewayPort = Number.parseInt(process.env.PORTKEY_GATEWAY_PORT ?? '4547', 10);
+    const gatewayOperation = runtime.protocol === 'openai/responses' ? 'responses' : 'chat/completions';
+    this.diagnostics.write(workspace.id, { traceId, providerId, operation: 'provider_test', stage: 'gateway_request', level: 'info', status: 'started', message: 'Sending the smoke-test request through the Portkey Gateway.', metadata: { model: runtime.model, protocol: runtime.protocol, request: { method: 'POST', path: `/v1/${gatewayOperation}` }, gateway: { host: '127.0.0.1', port: gatewayPort } } });
+    let stage = 'gateway_request';
     try {
       const result = createModelGateway().streamText({
         provider: runtime.provider,
@@ -549,14 +579,26 @@ export class WorkspaceResourcesService {
         abortSignal: abortController.signal,
       });
       const response = (await result.result).text.trim();
+      this.diagnostics.write(workspace.id, { traceId, providerId, operation: 'provider_test', stage: 'gateway_response', level: 'info', status: 'succeeded', message: 'Gateway returned a model response.', metadata: { statusCode: 200, responseLength: response.length, responseBody: response }, durationMs: Date.now() - gatewayStartedAt });
+      stage = 'response_parse';
       if (!response) throw new Error('Empty model response');
-      return { prompt: PROVIDER_TEST_PROMPT, model: runtime.model, response };
-    } catch {
-      if (abortController.signal.aborted) throw new RequestTimeoutException('Model provider test timed out after 30 seconds.');
-      throw new ServiceUnavailableException('Model provider test failed. Check the API key, endpoint, custom headers, and model id.');
+      this.diagnostics.write(workspace.id, { traceId, providerId, operation: 'provider_test', stage: 'response_parse', level: 'info', status: 'succeeded', message: 'Model response parsed successfully.', metadata: { model: runtime.model }, durationMs: Date.now() - gatewayStartedAt });
+      return { prompt: PROVIDER_TEST_PROMPT, model: runtime.model, response, traceId };
+    } catch (error: unknown) {
+      const details = errorDetails(error);
+      const message = abortController.signal.aborted ? 'Model provider test timed out after 30 seconds.' : 'Model provider test failed.';
+      this.diagnostics.write(workspace.id, { traceId, providerId, operation: 'provider_test', stage: abortController.signal.aborted ? 'timeout' : stage, level: 'error', status: 'failed', message, metadata: { ...details, traceId }, durationMs: Date.now() - gatewayStartedAt });
+      throw abortController.signal.aborted
+        ? new RequestTimeoutException({ message, traceId })
+        : new ServiceUnavailableException({ message, traceId });
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async diagnosticLogs(request: Request, workspaceSlug: string, traceId?: string) {
+    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    return this.diagnostics.list(workspace.id, traceId);
   }
 
   async providerRuntime(

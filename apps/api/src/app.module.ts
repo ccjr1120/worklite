@@ -15,6 +15,7 @@ import { UsageModule } from './modules/usage/usage.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { CommandsModule } from './modules/commands/commands.module';
 import { PluginsModule } from './modules/plugins/plugins.module';
+import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { PluginsModule } from './modules/plugins/plugins.module';
     ModelProvidersModule,
     UsageModule,
     AuditLogsModule,
+    DiagnosticsModule,
   ],
   controllers: [HealthController],
 })
