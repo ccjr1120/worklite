@@ -37,6 +37,7 @@ Static Web Hosting / Reverse Proxy
   `-- /api --> NestJS API
                   |-- SQLite
                   |-- Portkey Gateway sidecar
+                  |-- Optional Codex Proxy sidecar
                   |-- Host command executor
                   |-- In-process run executor
                   |     |-- Model providers
@@ -73,7 +74,7 @@ TanStack Router owns URL and navigation state. TanStack Query owns remote server
 
 The personal installation has no public sign-in, account creation, email verification, invitation, or password recovery flow. The root route opens Home directly and the API accepts requests without a session cookie. This is intentional for local use. Because the API includes unrestricted host command execution, it binds to `127.0.0.1` by default; listening on another interface requires an explicit `API_HOST` value and transfers responsibility for network access control to the operator.
 
-Local development serves the Vite web application on port `4536` and the NestJS API on port `4546`. The Portkey Gateway sidecar defaults to port `4547`, but its configured port and lifecycle are controlled from the Providers surface. The Vite development proxy forwards same-origin `/api` requests to the API port; the sidecar port is loopback-only and is not a browser endpoint. `PORTKEY_GATEWAY_PORT` may provide an initial deployment default when no persisted Portkey Gateway port exists.
+Local development serves the Vite web application on port `4536` and the NestJS API on port `4546`. The Portkey Gateway sidecar defaults to port `4547`, and the optional Codex Proxy sidecar defaults to port `4548`; both sidecar ports are loopback-only and are not browser endpoints. The Portkey Gateway configured port and lifecycle are controlled from the Providers surface. The Vite development proxy forwards same-origin `/api` requests to the API port. `PORTKEY_GATEWAY_PORT` and `CODEX_PROXY_PORT` may provide deployment defaults for their respective sidecars.
 
 Authenticated workspace routes do not include a locale segment. The web application resolves and persists a personal locale preference, falls back to English, and translates product-owned presentation content at the UI boundary. API contracts, persisted domain values, identifiers, logs, and externally supplied content remain language-neutral. `docs/internationalization/README.md` is the source of truth for internationalization requirements.
 
@@ -84,6 +85,7 @@ Authenticated workspace routes do not include a locale segment. The web applicat
 - Server-Sent Events for one-way progress delivery.
 - An in-process asynchronous executor for the initial local runtime. A durable queue is a later production scale-out boundary.
 - Portkey Gateway as a local sidecar for all LLM communication. The `portkey-gateway` module exposes explicit configuration and lifecycle controls; the sidecar listens only on an internal loopback port. The gateway source is maintained as a pinned local workspace package so WorkLite can patch provider routing and model discovery behavior.
+- An optional Node.js/TypeScript Codex Proxy sidecar for direct Codex Responses API transport. It is a separately running workspace application on a loopback port and is reached through the existing Portkey Provider path.
 
 ### Host Command Interface
 
@@ -409,6 +411,14 @@ The sidecar is an API-owned runtime managed by the `portkey-gateway` module. Its
 
 This increment intentionally does not add proxy authentication, fallback policy, multi-provider routing, proxy request persistence, usage accounting, or compatibility routes for `local-llm-proxy`. The local Portkey source is pinned to a known revision and receives only the WorkLite-specific model-discovery and request-routing patches; upstream synchronization remains an operator-maintained dependency update.
 
+### Codex Proxy Sidecar Increment
+
+The Codex Proxy sidecar is an optional standalone Node.js/TypeScript process in `apps/codex-proxy`. It listens on a loopback-only port and exposes an OpenAI-compatible `GET /v1/models`, `POST /v1/responses`, and `POST /v1/responses/compact` surface for the existing Portkey Provider path. Portkey forwards requests to the sidecar as a normal `openai/responses` Provider, so the WorkLite API and Model Gateway do not import private Codex protocol code.
+
+The first increment reads its downstream API key, Codex access token, optional ChatGPT account id, upstream base URL, bind host, and port from sidecar environment configuration. The sidecar owns those values at runtime and never returns them to WorkLite or the browser. It forwards the Responses request body and stream through to the private Codex endpoint with the required Codex client headers, normalizes the private model catalog into an OpenAI model list, and keeps the loopback boundary as the only inbound security boundary. Codex Responses is stream-first; non-streaming response assembly, OAuth/device login, refresh-token persistence, account rotation, quota scheduling, Chat Completions translation, and WebSocket transport remain deferred capabilities.
+
+The API does not persist Codex credentials or account records in this increment. Process lifecycle management, readiness, and failure reporting may be added to the API-owned sidecar controls after the transport contract is stable; until then, local development and deployment start the sidecar as an independent workspace application.
+
 ## Repository Structure
 
 ```text
@@ -448,6 +458,7 @@ worklite/
 |   |           |-- portkey-gateway/
 |   |           |-- usage/
 |   |           `-- audit-logs/
+|   |-- codex-proxy/                   # Optional Node/TypeScript Codex sidecar
 |-- packages/
 |   |-- contracts/                    # Shared API and event contracts
 |   |-- db/                           # Drizzle schemas and migrations
@@ -502,6 +513,7 @@ The MCP client, skill SDK, and observability code may begin inside applications 
 - Temporal or another durable workflow platform.
 - Multi-installation tenancy.
 - Binary Skill assets, archive upload, package validation, and immutable Skill publication.
+- Codex OAuth/device login, refresh-token persistence, account rotation, quota scheduling, Chat Completions translation, and WebSocket transport.
 
 Adding a deferred capability requires an approved architecture change.
 
@@ -513,6 +525,12 @@ Adding a deferred capability requires an approved architecture change.
 - Persisted ordered lifecycle stages covering Provider resolution, Gateway readiness, upstream transport, and response parsing, with raw local errors and response/request metadata available to the operator.
 - Added a dedicated diagnostic logs API and Settings page; connection-test failures return the trace identifier for direct investigation.
 - Intentionally limited this capability to the local installation and did not create Run, Artifact, Usage, or Audit records for provider tests.
+
+### 2026-09-02 - Node Codex Proxy Sidecar
+
+- Added an optional standalone Node.js/TypeScript Codex Proxy sidecar boundary behind the existing Portkey Provider path.
+- Defined loopback-only `models`, `responses`, and `responses/compact` transport with environment-owned credentials and private Codex client headers.
+- Deferred OAuth/device login, refresh-token persistence, multi-account rotation, non-streaming assembly, Chat Completions translation, and WebSocket transport until the direct Responses contract is stable.
 
 ### 2026-09-01 - Portkey Provider Proxy
 
