@@ -63,8 +63,15 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-09-03
+
+- Updated the Portkey Gateway surface for one unified `/v1` integration entry point, namespaced Provider/model identifiers, and explicit no-key guidance.
+- Updated shared Agent Chat behavior so Home keeps its visible composer while other pages use a draggable lower-right icon that opens and focuses the conversation.
+- Refined the floating entry to use an Agent icon without a Tooltip and close expanded Chat on outside interaction.
+
 ### 2026-09-02
 
+- Fixed the Portkey Gateway view to display the non-editable loopback port `4547` and removed port configuration controls.
 - Added the Settings Diagnostic Logs page for trace-oriented Provider connection troubleshooting.
 - Defined a dedicated `/settings/logs` route alongside Audit Log, with filtering and expandable event details.
 

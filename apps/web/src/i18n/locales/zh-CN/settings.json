@@ -80,7 +80,7 @@
     "deleteAction": "删除提供商",
     "deleted": "提供商已删除",
     "views": { "label": "提供商管理", "providers": "模型提供商", "gateway": "Portkey Gateway" },
-    "gateway": { "title": "Portkey Gateway", "description": "控制提供商代理路由使用的本地 Portkey Gateway 进程。", "port": "Gateway 端口", "status": "状态", "loading": "正在加载 Gateway 状态...", "invalidPort": "请输入 1 到 65535 之间的端口。", "saved": "Gateway 端口已保存", "start": "启动", "stop": "停止", "restart": "重启", "actionFailed": "Gateway 操作失败。" }
+    "gateway": { "title": "Portkey Gateway", "description": "管理本地 Portkey Gateway，并为已配置的提供商共享一个 OpenAI 兼容入口。", "port": "Gateway 端口", "status": "状态", "loading": "正在加载 Gateway 状态...", "start": "启动", "stop": "停止", "restart": "重启", "actionFailed": "Gateway 操作失败。", "integrationTitle": "在其他代理中使用此 Gateway", "integrationDescription": "请求发送到这个统一入口，并从列表中选择命名空间模型；Gateway 会将请求分发到对应提供商。", "baseURL": "Base URL", "copyBaseURL": "复制 Gateway Base URL", "apiKey": "API 密钥", "noApiKey": "无需填写", "models": "可用模型", "noModels": "添加模型提供商后，才会有可用的命名空间模型。", "example": "连接示例", "copyExample": "复制示例", "copied": "已复制" }
   },
   "usage": {
     "title": "用量",

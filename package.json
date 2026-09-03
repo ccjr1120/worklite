@@ -9,6 +9,7 @@
     "dev": "node ./scripts/kill-dev-ports.mjs && turbo dev",
     "dev:web": "pnpm --filter @worklite/web dev",
     "dev:api": "pnpm --filter @worklite/api dev",
+    "diagnose:responses": "node ./scripts/check-responses-stream.mjs",
     "typecheck": "turbo typecheck",
     "lint": "eslint . --max-warnings=0",
     "knip": "knip",

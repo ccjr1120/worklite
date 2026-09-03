@@ -80,7 +80,7 @@
     "deleteAction": "Delete provider",
     "deleted": "Provider deleted",
     "views": { "label": "Provider management", "providers": "Model Providers", "gateway": "Portkey Gateway" },
-    "gateway": { "title": "Portkey Gateway", "description": "Control the local Portkey Gateway process used by provider proxy routes.", "port": "Gateway port", "status": "Status", "loading": "Loading Gateway status...", "invalidPort": "Enter a port between 1 and 65535.", "saved": "Gateway port saved", "start": "Start", "stop": "Stop", "restart": "Restart", "actionFailed": "Gateway action failed." }
+    "gateway": { "title": "Portkey Gateway", "description": "Control the local Portkey Gateway process and share one OpenAI-compatible endpoint for all configured providers.", "port": "Gateway port", "status": "Status", "loading": "Loading Gateway status...", "start": "Start", "stop": "Stop", "restart": "Restart", "actionFailed": "Gateway action failed.", "integrationTitle": "Use this Gateway from another proxy", "integrationDescription": "Send requests to this endpoint. Choose a namespaced model from the list; Gateway dispatches it to the matching provider.", "baseURL": "Base URL", "copyBaseURL": "Copy Gateway Base URL", "apiKey": "API key", "noApiKey": "Not required", "models": "Available models", "noModels": "Add a model provider to make namespaced models available.", "example": "Connection example", "copyExample": "Copy example", "copied": "Copied" }
   },
   "usage": {
     "title": "Usage",

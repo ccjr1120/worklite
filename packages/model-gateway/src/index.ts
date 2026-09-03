@@ -260,14 +260,7 @@ function resolveModel(provider: ModelProviderConfig, modelId: string): LanguageM
 }
 
 function gatewayBaseURL(): string {
-  const configured = process.env.PORTKEY_GATEWAY_URL?.trim();
-  if (configured) {
-    const root = configured.replace(/\/+$/, '');
-    return root.endsWith('/v1') ? root : `${root}/v1`;
-  }
-  const portValue = Number.parseInt(process.env.PORTKEY_GATEWAY_PORT ?? '4547', 10);
-  const port = Number.isInteger(portValue) && portValue > 0 && portValue <= 65_535 ? portValue : 4547;
-  return `http://127.0.0.1:${port}/v1`;
+  return 'http://127.0.0.1:4547/v1';
 }
 
 function toModelMessages(messages: readonly GatewayMessage[]): ModelMessage[] {

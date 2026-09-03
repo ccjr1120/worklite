@@ -101,7 +101,12 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [mainConnectionState, setMainConnectionState] = useState<'connected' | 'reconnecting'>('connected');
   const [subConnectionState, setSubConnectionState] = useState<'connected' | 'reconnecting'>('connected');
+  const [floatingPosition, setFloatingPosition] = useState({ right: 24, bottom: 24 });
   const scrollRef = useRef<HTMLDivElement>(null);
+  const chatSurfaceRef = useRef<HTMLDivElement>(null);
+  const floatingContainerRef = useRef<HTMLDivElement>(null);
+  const floatingDragRef = useRef<{ startX: number; startY: number; right: number; bottom: number; moved: boolean } | null>(null);
+  const suppressFloatingClickRef = useRef(false);
   const shouldFollowEndRef = useRef(true);
   const currentPathRef = useRef(pathname);
   const appliedResultIdsRef = useRef(new Set<string>());
@@ -118,6 +123,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const visibleExecution = activeSubSession ? subExecution : execution;
   const connectionState = activeSubSession ? subConnectionState : mainConnectionState;
   const running = visibleExecution?.status === 'running';
+  const isHome = pathname === '/home';
   const waitingForInput = visibleExecution?.status === 'waiting_for_input';
   const mainRunning = execution?.status === 'running';
   const eligibleAgents = useMemo(() => (agentsQuery.data ?? []).filter((agent) => agent.kind === 'custom' && agent.providerId && agent.model), [agentsQuery.data]);
@@ -330,6 +336,25 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   useEffect(() => {
     if (locationSearch.assistant === 'open') setOpen(true);
   }, [locationSearch.assistant]);
+
+  useEffect(() => {
+    if (!open || isHome) return;
+    const frame = window.requestAnimationFrame(() => document.getElementById('assistant-message')?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [isHome, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleOutsidePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      const element = target instanceof Element ? target : null;
+      if (chatSurfaceRef.current?.contains(target) || element?.closest('[data-radix-popper-content-wrapper]')) return;
+      setOpen(false);
+    }
+    document.addEventListener('pointerdown', handleOutsidePointerDown);
+    return () => document.removeEventListener('pointerdown', handleOutsidePointerDown);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -601,6 +626,46 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
     }
   }
 
+  function handleFloatingPointerDown(event: React.PointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    floatingDragRef.current = { startX: event.clientX, startY: event.clientY, ...floatingPosition, moved: false };
+    suppressFloatingClickRef.current = false;
+  }
+
+  function handleFloatingPointerMove(event: React.PointerEvent<HTMLButtonElement>) {
+    const drag = floatingDragRef.current;
+    const container = floatingContainerRef.current;
+    if (!drag || !container) return;
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    if (!drag.moved && Math.hypot(deltaX, deltaY) < 4) return;
+    drag.moved = true;
+    const bounds = container.getBoundingClientRect();
+    const maxRight = Math.max(12, bounds.width - 56 - 12);
+    const maxBottom = Math.max(12, bounds.height - 56 - 12);
+    setFloatingPosition({
+      right: Math.max(12, Math.min(maxRight, drag.right - deltaX)),
+      bottom: Math.max(12, Math.min(maxBottom, drag.bottom - deltaY)),
+    });
+  }
+
+  function handleFloatingPointerUp(event: React.PointerEvent<HTMLButtonElement>) {
+    const drag = floatingDragRef.current;
+    if (!drag) return;
+    suppressFloatingClickRef.current = drag.moved;
+    floatingDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+
+  function openFloatingChat() {
+    if (suppressFloatingClickRef.current) {
+      suppressFloatingClickRef.current = false;
+      return;
+    }
+    setOpen(true);
+  }
+
   const events = visibleExecution ? [
     ...visibleExecution.messages.map((item) => ({ kind: 'message' as const, occurredAt: item.createdAt, item })),
     ...visibleExecution.toolCalls.map((item) => ({ kind: 'tool' as const, occurredAt: item.createdAt, item })),
@@ -617,8 +682,11 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const composerLoading = agentQuery.isLoading || agentsQuery.isLoading || subSessionsQuery.isLoading || pluginsQuery.isLoading;
 
   return (
-    <div className="pointer-events-none absolute inset-x-3 bottom-3 z-30 sm:inset-x-6 sm:bottom-6">
-      <div className="pointer-events-auto mx-auto flex w-full max-w-[1200px] flex-col overflow-hidden rounded-lg border border-border bg-surface-raised shadow-md">
+    <div ref={floatingContainerRef} className={cn('pointer-events-none absolute z-30', isHome || open ? 'inset-x-3 bottom-3 sm:inset-x-6 sm:bottom-6' : 'inset-0')}>
+      {!isHome && !open ? <div className="pointer-events-auto absolute" style={{ right: floatingPosition.right, bottom: floatingPosition.bottom }}>
+        <button type="button" className={cn('flex size-12 touch-none items-center justify-center rounded-full border border-brand/30 bg-brand text-white shadow-lg hover:bg-brand-hover', focusRing)} aria-label={t('assistant:open')} onClick={openFloatingChat} onPointerDown={handleFloatingPointerDown} onPointerMove={handleFloatingPointerMove} onPointerUp={handleFloatingPointerUp} onPointerCancel={handleFloatingPointerUp}><Bot className="size-5" aria-hidden="true" />{status ? <span className="sr-only">{status}</span> : null}</button>
+      </div> : null}
+      {(isHome || open) ? <div ref={chatSurfaceRef} className="pointer-events-auto mx-auto flex w-full max-w-[1200px] flex-col overflow-hidden rounded-lg border border-border bg-surface-raised shadow-md">
         <div id="assistant-panel-content" aria-hidden={!open} inert={!open} className={cn('overflow-hidden transition-[height,opacity,transform] duration-200 motion-reduce:transition-none', open ? 'h-[min(680px,calc(100vh-96px))] translate-y-0 opacity-100 max-md:h-[min(70vh,680px)]' : 'pointer-events-none h-0 translate-y-2 opacity-0')}>
           <section className="flex h-full min-h-0 flex-col" aria-labelledby="assistant-panel-title">
             <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-surface px-4 py-3">
@@ -689,7 +757,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
         ) : (
           <Link to="/agents/$agentId" params={{ agentId: SYSTEM_HELPER_CHAT_ID }} className={cn('flex min-h-12 items-center gap-2 px-3 text-[13px] font-medium hover:bg-surface-subtle', surfaceInteraction, focusRingInset)}><ShieldAlert className="size-4 shrink-0 text-brand" /><span className="min-w-0 flex-1">{t('assistant:composer.configure')}</span><ChevronRight className="size-4 text-muted-foreground" /></Link>
         )}
-      </div>
+      </div> : null}
     </div>
   );
 }

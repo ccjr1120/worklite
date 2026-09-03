@@ -57,7 +57,8 @@
     "error": "Error",
     "stopped": "Stopped",
     "starting": "Starting",
-    "stopping": "Stopping"
+    "stopping": "Stopping",
+    "gateway_running": "Running"
   },
   "empty": {
     "dash": "—"

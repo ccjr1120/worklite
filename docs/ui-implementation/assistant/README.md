@@ -8,7 +8,7 @@ The canonical route is `/home`. System Helper Chat appears in command search but
 
 ## Layout
 
-Keep the workspace shell stable. Every page shows a single-line composer by default. Composer focus opens a centered conversation panel above the current page, fluid up to a `1200px` maximum width. Navigating closes the panel while preserving the current server execution identifier.
+Keep the workspace shell stable. Home shows a single-line composer by default; other pages show a draggable lower-right Chat icon by default. Clicking the icon opens a centered conversation panel above the current page and focuses the composer. Composer focus also opens the panel. The icon remains keyboard accessible and stays within the viewport safe area. Navigating closes the panel while preserving the current server execution identifier.
 
 The expanded header identifies System Helper Chat, shows the current Agent execution status, and provides an icon-only minimize control. When an execution is reconnecting, show that state separately from the server-owned execution status. A compact diagnostics disclosure may show the safe execution identifier and last-updated time without exposing provider or host secrets. Before the first message, compact task starters may populate requests for Provider, Skill, MCP server, or Agent creation without fabricating a proposal. When no provider or model is bound and no configured custom Agent is available, replace the composer with one keyboard-accessible setup link to `/agents/agt_system_helper_chat`. If a configured custom Agent is available, keep the composer for structured `@` dispatch while ordinary System Helper submission remains disabled. When the plugin catalog reports `codex-cli-chat` as enabled, show a compact keyboard-accessible target picker beside the composer. Selecting the plugin changes the active execution target, labels the transcript with the plugin name, and allows submission without a Model Provider binding. The picker remains disabled while a turn is running and selection returns to System Helper only through an explicit user action.
 
@@ -58,9 +58,14 @@ The composer accepts local slash commands before ordinary message handling. Typi
 
 Use semantic surface, border, text, brand, and status tokens in both light and dark modes. Persimmon indicates the primary action, current selection, or active execution only. Messages use neutral surface contrast and speaker labels rather than color alone.
 
-All icon-only controls require accessible names and tooltips. Send and Stop retain the same stable target dimensions and expose distinct localized accessible names. Conversation and Skill-call status changes use restrained live-region announcements. Keyboard focus remains in the editable composer after cancellation, history selection, and automatic execution updates. Reduced-motion mode replaces spinner motion with the same static working cue.
+All icon-only controls require accessible names and tooltips, except the intentionally unobtrusive cross-page floating Chat entry, which keeps an accessible name without a visible Tooltip. Send and Stop retain the same stable target dimensions and expose distinct localized accessible names. Clicking outside an expanded Chat surface closes it; Chat-owned popup menus remain interactive. Conversation and Skill-call status changes use restrained live-region announcements. Keyboard focus remains in the editable composer after cancellation, history selection, and automatic execution updates. Reduced-motion mode replaces spinner motion with the same static working cue.
 
 ## Changelog
+
+### 2026-09-03
+
+- Changed cross-page Chat minimization to a draggable lower-right icon that opens and focuses the composer, while Home retains its visible input.
+- Use the Agent icon without a Tooltip for the floating entry and close expanded Chat when the pointer lands outside its surface.
 
 ### 2026-08-29
 

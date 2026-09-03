@@ -74,7 +74,7 @@ TanStack Router owns URL and navigation state. TanStack Query owns remote server
 
 The personal installation has no public sign-in, account creation, email verification, invitation, or password recovery flow. The root route opens Home directly and the API accepts requests without a session cookie. This is intentional for local use. Because the API includes unrestricted host command execution, it binds to `127.0.0.1` by default; listening on another interface requires an explicit `API_HOST` value and transfers responsibility for network access control to the operator.
 
-Local development serves the Vite web application on port `4536` and the NestJS API on port `4546`. The Portkey Gateway sidecar defaults to port `4547`, and the optional Codex Proxy sidecar defaults to port `4548`; both sidecar ports are loopback-only and are not browser endpoints. The Portkey Gateway configured port and lifecycle are controlled from the Providers surface. The Vite development proxy forwards same-origin `/api` requests to the API port. `PORTKEY_GATEWAY_PORT` and `CODEX_PROXY_PORT` may provide deployment defaults for their respective sidecars.
+Local development serves the Vite web application on port `4536` and the NestJS API on port `4546`. The Portkey Gateway sidecar always listens on loopback port `4547`, and the optional Codex Proxy sidecar defaults to port `4548`; both sidecar ports are loopback-only and are not browser endpoints. Gateway lifecycle is controlled from the Providers surface, but its port is fixed and cannot be changed. The Vite development proxy forwards same-origin `/api` requests to the API port. `CODEX_PROXY_PORT` may provide a deployment default for the optional Codex Proxy sidecar.
 
 Authenticated workspace routes do not include a locale segment. The web application resolves and persists a personal locale preference, falls back to English, and translates product-owned presentation content at the UI boundary. API contracts, persisted domain values, identifiers, logs, and externally supplied content remain language-neutral. `docs/internationalization/README.md` is the source of truth for internationalization requirements.
 
@@ -84,7 +84,7 @@ Authenticated workspace routes do not include a locale segment. The web applicat
 - REST for configuration and command APIs.
 - Server-Sent Events for one-way progress delivery.
 - An in-process asynchronous executor for the initial local runtime. A durable queue is a later production scale-out boundary.
-- Portkey Gateway as a local sidecar for all LLM communication. The `portkey-gateway` module exposes explicit configuration and lifecycle controls; the sidecar listens only on an internal loopback port. The gateway source is maintained as a pinned local workspace package so WorkLite can patch provider routing and model discovery behavior.
+- Portkey Gateway as a local sidecar for all LLM communication. The `portkey-gateway` module exposes explicit lifecycle controls; the sidecar always listens on loopback port `4547`. The gateway source is maintained as a pinned local workspace package so WorkLite can patch provider routing and model discovery behavior.
 - An optional Node.js/TypeScript Codex Proxy sidecar for direct Codex Responses API transport. It is a separately running workspace application on a loopback port and is reached through the existing Portkey Provider path.
 
 ### Host Command Interface
@@ -115,23 +115,23 @@ The Commands module owns all process spawning. It is an API runtime primitive ra
 
 ### Provider Proxy
 
-WorkLite exposes an OpenAI-compatible proxy for each workspace Model Provider. All LLM communication, including Agent Runtime calls, Provider tests, model discovery, and public proxy requests, passes through the local Portkey Gateway sidecar. The public proxy routes are:
+WorkLite exposes one unified OpenAI-compatible proxy entry point for the workspace. All LLM communication, including Agent Runtime calls, Provider tests, model discovery, and public proxy requests, passes through the local Portkey Gateway sidecar. The public proxy routes are:
 
 ```text
-/api/portkey-gateway/providers/:providerId/v1/models
-/api/portkey-gateway/providers/:providerId/v1/chat/completions
-/api/portkey-gateway/providers/:providerId/v1/responses
+/api/portkey-gateway/v1/models
+/api/portkey-gateway/v1/chat/completions
+/api/portkey-gateway/v1/responses
 /api/portkey-gateway/providers/:providerId/test
 /api/portkey-gateway/model-providers/discover-models
 ```
 
-The API remains the sole owner of Provider records, encrypted API keys, base URLs, protocol selections, model catalogs, and headers. For every LLM request it resolves the selected Provider in the active workspace, injects the decrypted upstream credentials and stored headers into a request-scoped Portkey configuration, and never exposes the upstream key to the caller. Provider configuration has no separate vendor type: a user-supplied `baseURL` and namespaced `protocol` such as `openai/chat` or `openai/responses` identify the upstream wire contract. The locally maintained Portkey package uses the adapter named by the protocol and request-scoped custom host routing; it does not read the WorkLite database or maintain a second Provider catalog. The model-discovery route accepts an unsaved Provider draft and passes it through the same Gateway path, which forwards `baseURL/models` and returns a de-duplicated model ID list without persisting the draft or upstream response.
+The API remains the sole owner of Provider records, encrypted API keys, base URLs, protocol selections, model catalogs, and headers. The unified `models` response prefixes every configured model with its Provider id as `<providerId>/<modelId>`. For every LLM request it splits the requested namespaced model at the first `/`, resolves that Provider in the active workspace, injects the decrypted upstream credentials and stored headers into a request-scoped Portkey configuration, and never exposes the upstream key to the caller. Provider configuration has no separate vendor type: a user-supplied `baseURL` and namespaced `protocol` such as `openai/chat` or `openai/responses` identify the upstream wire contract. The locally maintained Portkey package uses the adapter named by the protocol and request-scoped custom host routing; it does not read the WorkLite database or maintain a second Provider catalog. The model-discovery route accepts an unsaved Provider draft and passes it through the same Gateway path, which forwards `baseURL/models` and returns a de-duplicated model ID list without persisting the draft or upstream response.
 
 Provider administration and Portkey Gateway administration share the top-level `Providers` menu but remain separate functions. The Providers page shows Model Providers and a Portkey Gateway view; Gateway configuration is not nested under an individual Provider and does not change Provider records.
 
 Portkey runs as a server-owned sidecar on a loopback-only internal port. The API owns sidecar startup, readiness, shutdown, and failure reporting. Client request bodies, status codes, streaming responses, and credential-safe upstream errors are proxied without creating a Run, Artifact, Agent execution, Audit Log, or Usage row. Agent Runtime requests use the same sidecar through an OpenAI-compatible local endpoint; AI SDK remains a message and streaming normalization layer, not a direct upstream transport. LLM traffic is therefore centralized in the Gateway while proxy traffic remains transport-only and is not included in Agent or Workflow runtime accounting.
 
-The proxy inherits the API's local security boundary: the API binds to `127.0.0.1` by default and has no separate inbound authentication scheme. Setting `API_HOST` to another interface exposes both the WorkLite API and Provider proxy to that network and remains the operator's responsibility. Provider configuration changes take effect on the next request; Provider versions do not snapshot proxy traffic. No compatibility aliases for the standalone `local-llm-proxy` routes are provided.
+The proxy inherits the API's local security boundary: the API binds to `127.0.0.1` by default and has no separate inbound authentication scheme, so the Gateway integration page displays that no key is required. Setting `API_HOST` to another interface exposes both the WorkLite API and Provider proxy to that network and remains the operator's responsibility. Provider configuration changes take effect on the next request; Provider versions do not snapshot proxy traffic. No compatibility aliases for the standalone `local-llm-proxy` routes are provided.
 
 ### Persistence
 
@@ -407,7 +407,7 @@ This increment does not add third-party identity-provider integration, arbitrary
 
 The Provider Proxy increment adds a Portkey Gateway sidecar behind the existing NestJS API. WorkLite remains the Provider system of record and the only component that decrypts and supplies upstream credentials. Each Provider stores a user-supplied `baseURL` and a protocol value in the `openai/chat`, `openai/responses`, or `deepseek/chat` form. The API exposes one Provider-specific OpenAI-compatible base URL and forwards `models` plus the operation selected by the Provider protocol through Portkey with request-scoped host and credential headers. A separate discovery endpoint accepts the current unsaved Provider draft and returns model IDs for the browser's editable draft token set through the same Gateway path.
 
-The sidecar is an API-owned runtime managed by the `portkey-gateway` module. Its configured loopback port is persisted with the singleton workspace settings, while process status, readiness, PID, and failure details remain in memory and reflect the current API process. The module exposes `GET /api/portkey-gateway`, `PATCH /api/portkey-gateway`, and explicit `start`, `stop`, and `restart` actions. API startup starts the sidecar and model discovery ensures it is running before forwarding the request. If the sidecar is unavailable or stopped, ordinary proxy and model-runtime requests fail with a classified gateway-unavailable response.
+The sidecar is an API-owned runtime managed by the `portkey-gateway` module. It always binds to loopback port `4547`; process status, readiness, PID, and failure details remain in memory and reflect the current API process. The module exposes `GET /api/portkey-gateway` and explicit `start`, `stop`, and `restart` actions. API startup starts the sidecar and model discovery ensures it is running before forwarding the request. If the sidecar is unavailable or stopped, ordinary proxy and model-runtime requests fail with a classified gateway-unavailable response.
 
 This increment intentionally does not add proxy authentication, fallback policy, multi-provider routing, proxy request persistence, usage accounting, or compatibility routes for `local-llm-proxy`. The local Portkey source is pinned to a known revision and receives only the WorkLite-specific model-discovery and request-routing patches; upstream synchronization remains an operator-maintained dependency update.
 
@@ -518,6 +518,18 @@ The MCP client, skill SDK, and observability code may begin inside applications 
 Adding a deferred capability requires an approved architecture change.
 
 ## Changelog
+
+### 2026-09-02 - Fixed Portkey Gateway Port
+
+- Fixed the API-owned Portkey Gateway listener to loopback port `4547`.
+- Removed persisted Gateway port configuration, environment overrides, and the port update API; existing custom values are no longer honored.
+- Kept explicit Gateway lifecycle controls and added `4547` to development port cleanup.
+
+### 2026-09-03 - Unified Portkey Gateway Proxy Entry
+
+- Changed the public Gateway proxy from Provider-specific paths to one `/api/portkey-gateway/v1` entry point.
+- Namespaced the aggregated model catalog as `<providerId>/<modelId>` so the Gateway can split the requested model and dispatch it to the configured Provider.
+- Kept the local API security boundary without a separate Gateway key; the integration surface explicitly communicates that no key is required.
 
 ### 2026-09-02 - Local Provider Diagnostic Logs
 

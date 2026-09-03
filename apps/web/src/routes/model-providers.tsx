@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { Bot, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, RotateCcw, Square, Trash2, X } from 'lucide-react';
+import { Bot, Copy, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, RotateCcw, Square, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -174,12 +174,8 @@ function ModelProvidersPage() {
   const [deleteError, setDeleteError] = useState('');
   const { data: modelProviders = [], isLoading, isError } = useModelProvidersQuery(workspaceSlug);
   const gatewayQuery = usePortkeyGatewayQuery();
-  const [gatewayPort, setGatewayPort] = useState('4547');
   const [gatewayBusy, setGatewayBusy] = useState(false);
   const [gatewayError, setGatewayError] = useState('');
-  useEffect(() => {
-    if (gatewayQuery.data) setGatewayPort(String(gatewayQuery.data.port));
-  }, [gatewayQuery.data]);
   const items = useMemo(
     () => modelProviders.filter((provider) => `${provider.name} ${provider.models.join(' ')}`.toLowerCase().includes(search.toLowerCase())),
     [modelProviders, search],
@@ -332,16 +328,9 @@ function ModelProvidersPage() {
       {view === 'gateway' ? (
         <GatewayPanel
           gateway={gatewayQuery.data}
-          port={gatewayPort}
+          providers={modelProviders}
           busy={gatewayBusy}
           error={gatewayError}
-          onPortChange={setGatewayPort}
-          onSave={async () => {
-            const parsed = Number(gatewayPort);
-            if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) { setGatewayError(t('providers.gateway.invalidPort')); return; }
-            setGatewayBusy(true); setGatewayError('');
-            try { const saved = await api.updatePortkeyGateway({ port: parsed }); queryClient.setQueryData(['portkey-gateway'], saved); toast.success(t('providers.gateway.saved')); } catch (error: unknown) { setGatewayError(error instanceof Error ? error.message : t('providers.gateway.actionFailed')); } finally { setGatewayBusy(false); }
-          }}
           onAction={async (action) => {
             setGatewayBusy(true); setGatewayError('');
             try { const result = action === 'start' ? await api.startPortkeyGateway() : action === 'stop' ? await api.stopPortkeyGateway() : await api.restartPortkeyGateway(); queryClient.setQueryData(['portkey-gateway'], result); } catch (error: unknown) { setGatewayError(error instanceof Error ? error.message : t('providers.gateway.actionFailed')); } finally { setGatewayBusy(false); }
@@ -490,18 +479,36 @@ function ModelProvidersPage() {
   );
 }
 
-function GatewayPanel({ gateway, port, busy, error, onPortChange, onSave, onAction, t }: { gateway?: { port: number; host: string; status: PortkeyGatewayStatus; error: string | null }; port: string; busy: boolean; error: string; onPortChange: (value: string) => void; onSave: () => Promise<void>; onAction: (action: 'start' | 'stop' | 'restart') => Promise<void>; t: (key: string) => string }) {
+function GatewayPanel({ gateway, providers, busy, error, onAction, t }: { gateway?: { port: number; host: string; status: PortkeyGatewayStatus; error: string | null }; providers: ModelProviderView[]; busy: boolean; error: string; onAction: (action: 'start' | 'stop' | 'restart') => Promise<void>; t: (key: string) => string }) {
   const status = gateway?.status ?? 'stopped';
   const running = status === 'running';
-  return <section className="mt-6 max-w-2xl space-y-6 rounded-lg border border-border bg-surface p-5">
+  const publicBaseUrl = `${typeof window === 'undefined' ? '' : window.location.origin}/api/portkey-gateway/v1`;
+  const namespacedModels = providers.flatMap((provider) => provider.models.map((model) => `${provider.id}/${model}`));
+  const exampleModel = namespacedModels[0] ?? '<providerId>/<modelId>';
+  const configExample = JSON.stringify({ base_url: publicBaseUrl, api_key: 'not-required', model: exampleModel }, null, 2);
+  async function copyValue(value: string) {
+    if (!navigator.clipboard) return;
+    await navigator.clipboard.writeText(value);
+    toast.success(t('providers.gateway.copied'));
+  }
+  return <section className="mt-6 max-w-3xl space-y-6 rounded-lg border border-border bg-surface p-5">
     <div><h2 className="text-base font-semibold">{t('providers.gateway.title')}</h2><p className="mt-1 text-[13px] text-muted-foreground">{t('providers.gateway.description')}</p></div>
     <div className="grid gap-4 sm:grid-cols-2">
-      <Field label={t('providers.gateway.port')} htmlFor="portkey-gateway-port"><Input id="portkey-gateway-port" value={port} onChange={(event) => onPortChange(event.target.value)} disabled={busy || running} inputMode="numeric" /></Field>
-      <div><p className="text-xs font-medium text-muted-foreground">{t('providers.gateway.status')}</p><div className="mt-2"><StatusBadge status={status} /></div></div>
+      <div><p className="text-xs font-medium text-muted-foreground">{t('providers.gateway.port')}</p><p className="mt-2 font-mono text-sm">4547</p></div>
+      <div><p className="text-xs font-medium text-muted-foreground">{t('providers.gateway.status')}</p><div className="mt-2"><StatusBadge status={running ? 'gateway_running' : status} /></div></div>
     </div>
     <p className="font-mono text-xs text-muted-foreground">{gateway ? `http://${gateway.host}:${gateway.port}` : t('providers.gateway.loading')}</p>
     {gateway?.error || error ? <p className="text-[13px] text-danger" role="alert">{error || gateway?.error}</p> : null}
-    <div className="flex flex-wrap gap-2"><Button variant="secondary" size="compact" onClick={() => void onSave()} disabled={busy || running}>{t('common:actions.save')}</Button><Button size="compact" onClick={() => void onAction('start')} disabled={busy || running}><Plus className="size-4" />{t('providers.gateway.start')}</Button><Button variant="secondary" size="compact" onClick={() => void onAction('restart')} disabled={busy || !running}><RotateCcw className="size-4" />{t('providers.gateway.restart')}</Button><Button variant="ghost" size="compact" onClick={() => void onAction('stop')} disabled={busy || !running}><Square className="size-4" />{t('providers.gateway.stop')}</Button></div>
+    <div className="flex flex-wrap gap-2"><Button size="compact" onClick={() => void onAction('start')} disabled={busy || running}><Plus className="size-4" />{t('providers.gateway.start')}</Button><Button variant="secondary" size="compact" onClick={() => void onAction('restart')} disabled={busy || !running}><RotateCcw className="size-4" />{t('providers.gateway.restart')}</Button><Button variant="ghost" size="compact" onClick={() => void onAction('stop')} disabled={busy || !running}><Square className="size-4" />{t('providers.gateway.stop')}</Button></div>
+    <div className="space-y-4 border-t border-border pt-5">
+      <div><h3 className="text-sm font-semibold">{t('providers.gateway.integrationTitle')}</h3><p className="mt-1 text-[13px] text-muted-foreground">{t('providers.gateway.integrationDescription')}</p></div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">{t('providers.gateway.baseURL')}</p><div className="mt-2 flex items-center gap-2"><code className="min-w-0 flex-1 truncate rounded-md bg-surface-subtle px-2.5 py-2 font-mono text-xs">{publicBaseUrl}</code><Button variant="ghost" size="icon-compact" aria-label={t('providers.gateway.copyBaseURL')} onClick={() => void copyValue(publicBaseUrl)}><Copy /></Button></div></div>
+        <div><p className="text-xs font-medium text-muted-foreground">{t('providers.gateway.apiKey')}</p><p className="mt-2 font-mono text-sm">{t('providers.gateway.noApiKey')}</p></div>
+      </div>
+      <div><p className="text-xs font-medium text-muted-foreground">{t('providers.gateway.models')}</p>{namespacedModels.length ? <div className="mt-2 flex flex-wrap gap-1.5">{namespacedModels.map((model) => <code key={model} className="rounded-md border border-border bg-surface-subtle px-2 py-1 font-mono text-xs">{model}</code>)}</div> : <p className="mt-2 text-[13px] text-muted-foreground">{t('providers.gateway.noModels')}</p>}</div>
+      <div><div className="flex items-center justify-between gap-3"><p className="text-xs font-medium text-muted-foreground">{t('providers.gateway.example')}</p><Button variant="ghost" size="compact" onClick={() => void copyValue(configExample)}><Copy className="size-3.5" />{t('providers.gateway.copyExample')}</Button></div><pre className="mt-2 overflow-x-auto rounded-md border border-border bg-surface-subtle p-3 font-mono text-xs text-foreground"><code>{configExample}</code></pre></div>
+    </div>
   </section>;
 }
 

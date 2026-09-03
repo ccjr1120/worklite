@@ -50,6 +50,13 @@
       "when": 1788316800000,
       "tag": "0007_provider_diagnostic_logs",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1788316860000,
+      "tag": "0008_fixed_portkey_gateway_port",
+      "breakpoints": true
     }
   ]
 }

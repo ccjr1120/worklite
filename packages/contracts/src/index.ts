@@ -309,8 +309,16 @@ export type PortkeyGatewayView = {
   updatedAt: string;
 };
 
-export type UpdatePortkeyGatewayRequest = {
-  port: number;
+export type PortkeyGatewayModel = {
+  id: string;
+  object: 'model';
+  created: number;
+  owned_by: string;
+};
+
+export type PortkeyGatewayModelList = {
+  object: 'list';
+  data: PortkeyGatewayModel[];
 };
 
 export type WorkliteScriptResult =

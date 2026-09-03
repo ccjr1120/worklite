@@ -1,5 +1,4 @@
-import { Body, Controller, Get, Patch, Post } from '@nestjs/common';
-import type { UpdatePortkeyGatewayRequest } from '@worklite/contracts';
+import { Controller, Get, Post } from '@nestjs/common';
 import { PortkeyGatewayService } from './portkey-gateway.service';
 
 @Controller('portkey-gateway')
@@ -9,11 +8,6 @@ export class PortkeyGatewayController {
   @Get()
   get() {
     return this.gateway.status();
-  }
-
-  @Patch()
-  update(@Body() body: UpdatePortkeyGatewayRequest) {
-    return this.gateway.updateGateway(body);
   }
 
   @Post('start')

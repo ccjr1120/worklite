@@ -20,7 +20,7 @@ The inspector opens only for selected contextual content, keeps its header and e
 
 The workspace shell owns the active conversation execution identifier, selected execution target, and transient composer draft. Messages, plugin process state, script requests, automatic execution state, and results remain server-owned. Page navigation closes the visible conversation without cancelling work; a browser reload fetches the active execution identifier and selected target saved by the browser.
 
-Place the System Helper Chat interaction surface at the bottom of the content region on every workspace page. Center the complete surface and cap it at `1200px`. With a bound provider it contains only the single-line input and one stable icon-button target without a repeated visible System Helper Chat title; the target shows Send while idle and Stop while the active turn is running. The input remains editable in both states. Focusing it opens the same raised conversation panel above the current page, with stable outer space around it. Without a bound provider it contains a single direct link to `/agents/agt_system_helper_chat` instead of an input or send control. Home and other pages use the same personal session, expanded dimensions, and compact execution summary.
+Place the System Helper Chat interaction surface at the bottom of the content region on every workspace page. Home keeps the single-line input visible by default. Other pages show only a draggable floating Agent icon in the lower-right corner by default; clicking it opens the same raised conversation panel above the current page and focuses the input. Clicking outside an expanded Chat surface closes it while Chat-owned popup menus remain usable. Keep the icon inside the viewport safe area and preserve a keyboard-accessible open action without a visible Tooltip. Center the complete expanded surface and cap it at `1200px`. With a bound provider the expanded composer contains the single-line input and one stable icon-button target without a repeated visible System Helper Chat title; the target shows Send while idle and Stop while the active turn is running. The input remains editable in both states. Without a bound provider the expanded surface contains a single direct link to `/agents/agt_system_helper_chat` instead of an input or send control. Home and other pages use the same personal session, expanded dimensions, and compact execution summary.
 
 The bottom panel defaults to about `240px`, resizes, and collapses to a status strip. Closing hides but never cancels a run. Logs distinguish timestamp, severity, source and content, and auto-follow only while the user is at the stream end.
 
@@ -29,6 +29,10 @@ The bottom panel defaults to about `240px`, resizes, and collapses to a status s
 `Command+K` or `Control+K` opens grouped search, recent destinations, navigation and safe creation commands. Destructive actions are excluded. Opening System Helper through the command menu changes the shell-owned conversation state through typed route search and must not rely on an ignored URL flag. The user menu contains Profile, Appearance, Keyboard shortcuts and Sign out. Appearance includes the personal theme and language preferences.
 
 ## Changelog
+
+### 2026-09-03
+
+- Kept Home's composer visible while changing other pages to a draggable lower-right Chat icon that opens and focuses the shared conversation panel.
 
 ### 2026-08-30
 

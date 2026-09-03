@@ -11,7 +11,6 @@ export const workspaceSettings = sqliteTable('workspace_settings', {
   workspaceId: text('workspace_id').primaryKey().references(() => workspaces.id, { onDelete: 'cascade' }),
   appearance: text('appearance').$type<'system' | 'light' | 'dark'>().notNull().default('system'),
   locale: text('locale').$type<'en' | 'zh-CN'>().notNull().default('en'),
-  portkeyGatewayPort: integer('portkey_gateway_port').notNull().default(4547),
   updatedAt: timestamp('updated_at'),
 });
 

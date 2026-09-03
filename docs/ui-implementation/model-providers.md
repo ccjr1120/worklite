@@ -20,9 +20,13 @@ Define unconfigured, testing, connected, invalid credentials, unavailable provid
 
 ## Portkey Gateway
 
-The Portkey Gateway view shows the configured loopback port, current process status, listener address, and credential-safe startup failure details. The operator explicitly starts, stops, or restarts the Gateway; changing the port applies on the next start and does not implicitly restart or stop a running process. API startup starts the Gateway, and model discovery ensures it is running before forwarding the request. Ordinary proxy and model-runtime requests remain unavailable while the Gateway is stopped. The view preserves stable loading, saving, starting, stopping, restarting, unavailable, and port-conflict states in both themes and keeps the primary lifecycle action visible at every breakpoint.
+The Portkey Gateway view shows the fixed loopback port `4547`, current process status, listener address, and credential-safe startup failure details. The operator explicitly starts, stops, or restarts the Gateway; there is no port editing or port-save action. API startup starts the Gateway, and model discovery ensures it is running before forwarding the request. Ordinary proxy and model-runtime requests remain unavailable while the Gateway is stopped. The view also explains the unified OpenAI-compatible entry point, shows the `/v1` Base URL, documents that no Gateway key is required under the local API security boundary, and shows namespaced models in the `<providerId>/<modelId>` format used for dispatch. The view preserves stable loading, starting, stopping, restarting, unavailable, and port-conflict states in both themes and keeps the primary lifecycle action visible at every breakpoint.
 
 ## Changelog
+
+### 2026-09-03
+
+- Defined one unified Gateway integration entry point with `<providerId>/<modelId>` model namespaces and explicit no-key guidance.
 
 ### 2026-09-01
 
@@ -30,7 +34,7 @@ The Portkey Gateway view shows the configured loopback port, current process sta
 - Defined model discovery through the same local Portkey Gateway path as all other LLM communication.
 - Defined Provider model IDs as an accessible token input with Enter commit, caret navigation, keyboard deletion, explicit remove controls, and draft-only model discovery merging.
 - Moved Providers to a top-level destination and grouped Portkey Gateway administration beside Model Providers in the same page context.
-- Defined explicit Portkey Gateway port and lifecycle controls with automatic startup from the API bootstrap and model-discovery readiness.
+- Defined fixed Portkey Gateway port `4547` and lifecycle controls with automatic startup from the API bootstrap and model-discovery readiness.
 - Replaced key-only Provider replacement with complete Provider editing by id, including model removal and optional key preservation.
 - Standardized browser-facing Gateway proxy, connection-test, and model-discovery requests under `/api/portkey-gateway`.
 

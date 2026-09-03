@@ -24,7 +24,8 @@ type StatusKey =
   | 'error'
   | 'stopped'
   | 'starting'
-  | 'stopping';
+  | 'stopping'
+  | 'gateway_running';
 
 const STATUS_CONFIG: Record<
   StatusKey,
@@ -54,6 +55,7 @@ const STATUS_CONFIG: Record<
   stopped: { variant: 'neutral', icon: CircleDashed },
   starting: { variant: 'info', icon: LoaderCircle },
   stopping: { variant: 'warning', icon: LoaderCircle },
+  gateway_running: { variant: 'success', icon: CheckCircle2 },
 };
 
 type StatusBadgeProps = {

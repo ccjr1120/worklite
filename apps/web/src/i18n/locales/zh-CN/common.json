@@ -57,7 +57,8 @@
     "error": "错误",
     "stopped": "已停止",
     "starting": "启动中",
-    "stopping": "停止中"
+    "stopping": "停止中",
+    "gateway_running": "运行中"
   },
   "empty": {
     "dash": "—"

@@ -2,14 +2,13 @@ import { createRequire } from 'node:module';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
 import { resolve } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { BadRequestException, ConflictException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import type { DiscoverModelProviderRequest, DiscoverModelProviderResult, ModelProviderProtocol, PortkeyGatewayStatus, PortkeyGatewayView, UpdatePortkeyGatewayRequest } from '@worklite/contracts';
+import type { DiscoverModelProviderRequest, DiscoverModelProviderResult, ModelProviderProtocol, PortkeyGatewayModelList, PortkeyGatewayStatus, PortkeyGatewayView } from '@worklite/contracts';
 import type { ModelProviderConfig } from '@worklite/model-gateway';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
-import { DATABASE } from '../../infrastructure/database.module';
-import { workspaceSettings, type Database } from '@worklite/db';
-import { eq } from 'drizzle-orm';
+
+const GATEWAY_PORT = 4547;
 
 const portkeyRequire = createRequire(__filename);
 const HOP_BY_HOP_HEADERS = new Set([
@@ -23,11 +22,6 @@ const HOP_BY_HOP_HEADERS = new Set([
   'transfer-encoding',
   'upgrade',
 ]);
-
-function configuredPort(): number {
-  const value = Number.parseInt(process.env.PORTKEY_GATEWAY_PORT ?? '4547', 10);
-  return Number.isInteger(value) && value > 0 && value <= 65_535 ? value : 4547;
-}
 
 function forwardedHeaders(headers: IncomingMessage['headers']): Record<string, string> {
   return Object.fromEntries(
@@ -72,8 +66,7 @@ function discoveryConfig(input: DiscoverModelProviderRequest): ModelProviderConf
 @Injectable()
 export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PortkeyGatewayService.name);
-  private configuredGatewayPort = configuredPort();
-  private activeGatewayPort = this.configuredGatewayPort;
+  private readonly activeGatewayPort = GATEWAY_PORT;
   private gateway: ChildProcess | null = null;
   private gatewayReady = false;
   private startup: Promise<void> | null = null;
@@ -82,32 +75,30 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
   private gatewayError: string | null = null;
   private gatewayUpdatedAt = new Date().toISOString();
 
-  constructor(
-    @Inject(DATABASE) private readonly db: Database,
-    private readonly resources: WorkspaceResourcesService,
-  ) {}
+  constructor(private readonly resources: WorkspaceResourcesService) {}
 
   async onModuleInit(): Promise<void> {
     await this.start();
   }
 
   async status(): Promise<PortkeyGatewayView> {
-    await this.loadConfiguredPort();
     return this.snapshot();
   }
 
-  async updateGateway(input: UpdatePortkeyGatewayRequest): Promise<PortkeyGatewayView> {
-    if (!input || !Number.isInteger(input.port) || input.port < 1 || input.port > 65_535) throw new BadRequestException('Gateway port must be an integer between 1 and 65535.');
-    const [row] = await this.db.update(workspaceSettings).set({ portkeyGatewayPort: input.port, updatedAt: new Date() }).where(eq(workspaceSettings.workspaceId, 'workspace_personal')).returning();
-    if (!row) throw new ConflictException('Workspace settings are unavailable.');
-    this.configuredGatewayPort = input.port;
-    process.env.PORTKEY_GATEWAY_PORT = String(input.port);
-    this.markStatus(this.gatewayStatus, null);
-    return this.snapshot();
+  async models(request: Request): Promise<PortkeyGatewayModelList> {
+    const providers = await this.resources.providers(request, 'personal');
+    return {
+      object: 'list',
+      data: providers.flatMap((provider) => provider.models.map((model) => ({
+        id: `${provider.id}/${model}`,
+        object: 'model' as const,
+        created: 0,
+        owned_by: provider.name,
+      }))),
+    };
   }
 
   async start(): Promise<PortkeyGatewayView> {
-    await this.loadConfiguredPort();
     if (this.gatewayStatus === 'running') return this.snapshot();
     if (this.gatewayStatus === 'starting') {
       if (this.startup) await this.startup.catch(() => undefined);
@@ -160,8 +151,8 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     await this.stop();
   }
 
-  async proxy(request: Request, response: Response, providerId: string, operation: 'models' | 'chat/completions' | 'responses'): Promise<void> {
-    const runtime = await this.resources.providerRuntime(request, 'personal', providerId);
+  async proxy(request: Request, response: Response, providerId: string, operation: 'models' | 'chat/completions' | 'responses', selectedModel?: string): Promise<void> {
+    const runtime = await this.resources.providerRuntime(request, 'personal', providerId, selectedModel);
     this.ensureGateway();
 
     const provider = runtime.provider;
@@ -175,7 +166,10 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
       ...(provider.baseURL ? { custom_host: provider.baseURL } : {}),
       ...(Object.keys(customHeaders).length > 0 ? { forward_headers: Object.keys(customHeaders) } : {}),
     };
-    const body = request.method === 'GET' || request.body === undefined ? undefined : JSON.stringify(request.body);
+    const bodyValue = selectedModel && request.body && typeof request.body === 'object' && !Array.isArray(request.body)
+      ? { ...request.body, model: runtime.model }
+      : request.body;
+    const body = request.method === 'GET' || bodyValue === undefined ? undefined : JSON.stringify(bodyValue);
     const headers = {
       ...forwardedHeaders(request.headers),
       ...customHeaders,
@@ -209,6 +203,19 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
       if (body === undefined) upstream.end();
       else upstream.end(body);
     });
+  }
+
+  async proxyUnified(request: Request, response: Response, operation: 'chat/completions' | 'responses'): Promise<void> {
+    const model = request.body && typeof request.body === 'object' && !Array.isArray(request.body) && 'model' in request.body
+      ? request.body.model
+      : undefined;
+    if (typeof model !== 'string') throw new BadRequestException('The model must use the <providerId>/<modelId> format.');
+    const separator = model.indexOf('/');
+    if (separator <= 0 || separator === model.length - 1) throw new BadRequestException('The model must use the <providerId>/<modelId> format.');
+    const providerId = model.slice(0, separator).trim();
+    const modelId = model.slice(separator + 1).trim();
+    if (!providerId || !modelId) throw new BadRequestException('The model must use the <providerId>/<modelId> format.');
+    await this.proxy(request, response, providerId, operation, modelId);
   }
 
   async discoverModels(input: DiscoverModelProviderRequest): Promise<DiscoverModelProviderResult> {
@@ -265,7 +272,6 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     if (this.gateway && !this.gateway.killed) return this.waitUntilReady();
     const gatewayEntry = portkeyRequire.resolve('@portkey-ai/gateway/build/start-server.js');
     const preload = resolve(process.cwd(), 'portkey-local-bind.cjs');
-    this.activeGatewayPort = this.configuredGatewayPort;
     const child = spawn(process.execPath, ['-r', preload, gatewayEntry, `--port=${this.activeGatewayPort}`, '--headless'], {
       cwd: process.cwd(),
       env: { ...process.env, PORT: String(this.activeGatewayPort), TRUSTED_CUSTOM_HOSTS: this.trustedHosts() },
@@ -312,14 +318,6 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     throw new Error(`Portkey Gateway did not become ready on port ${this.activeGatewayPort}.`);
   }
 
-  private async loadConfiguredPort(): Promise<void> {
-    const [row] = await this.db.select({ port: workspaceSettings.portkeyGatewayPort }).from(workspaceSettings).limit(1);
-    if (row && Number.isInteger(row.port) && row.port > 0 && row.port <= 65_535) {
-      this.configuredGatewayPort = row.port;
-      process.env.PORTKEY_GATEWAY_PORT = String(row.port);
-    }
-  }
-
   private markStatus(status: PortkeyGatewayStatus, error: string | null): void {
     this.gatewayStatus = status;
     this.gatewayError = error;
@@ -327,7 +325,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
   }
 
   private snapshot(): PortkeyGatewayView {
-    return { port: this.configuredGatewayPort, host: '127.0.0.1', status: this.gatewayStatus, error: this.gatewayError, updatedAt: this.gatewayUpdatedAt };
+    return { port: GATEWAY_PORT, host: '127.0.0.1', status: this.gatewayStatus, error: this.gatewayError, updatedAt: this.gatewayUpdatedAt };
   }
 
   private trustedHosts(): string {

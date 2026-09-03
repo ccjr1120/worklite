@@ -408,7 +408,11 @@ export function handleStreamingMode(
     });
   }
 
-  return new Response(readable, response);
+  return new Response(readable, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: new Headers(response.headers),
+  });
 }
 
 export async function handleJSONToStreamResponse(

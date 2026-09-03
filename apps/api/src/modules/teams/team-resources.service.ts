@@ -565,7 +565,7 @@ export class WorkspaceResourcesService {
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), 30_000);
     const gatewayStartedAt = Date.now();
-    const gatewayPort = Number.parseInt(process.env.PORTKEY_GATEWAY_PORT ?? '4547', 10);
+    const gatewayPort = 4547;
     const gatewayOperation = runtime.protocol === 'openai/responses' ? 'responses' : 'chat/completions';
     this.diagnostics.write(workspace.id, { traceId, providerId, operation: 'provider_test', stage: 'gateway_request', level: 'info', status: 'started', message: 'Sending the smoke-test request through the Portkey Gateway.', metadata: { model: runtime.model, protocol: runtime.protocol, request: { method: 'POST', path: `/v1/${gatewayOperation}` }, gateway: { host: '127.0.0.1', port: gatewayPort } } });
     let stage = 'gateway_request';

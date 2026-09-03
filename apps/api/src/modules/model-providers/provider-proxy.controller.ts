@@ -13,19 +13,19 @@ export class ProviderProxyController {
     return this.proxyService.discoverModels(body);
   }
 
-  @Get('providers/:providerId/v1/models')
-  models(@Req() request: Request, @Res() response: Response, @Param('providerId') providerId: string) {
-    return this.proxyService.proxy(request, response, providerId, 'models');
+  @Get('v1/models')
+  unifiedModels(@Req() request: Request) {
+    return this.proxyService.models(request);
   }
 
-  @Post('providers/:providerId/v1/chat/completions')
-  chatCompletions(@Req() request: Request, @Res() response: Response, @Param('providerId') providerId: string) {
-    return this.proxyService.proxy(request, response, providerId, 'chat/completions');
+  @Post('v1/chat/completions')
+  unifiedChatCompletions(@Req() request: Request, @Res() response: Response) {
+    return this.proxyService.proxyUnified(request, response, 'chat/completions');
   }
 
-  @Post('providers/:providerId/v1/responses')
-  responses(@Req() request: Request, @Res() response: Response, @Param('providerId') providerId: string) {
-    return this.proxyService.proxy(request, response, providerId, 'responses');
+  @Post('v1/responses')
+  unifiedResponses(@Req() request: Request, @Res() response: Response) {
+    return this.proxyService.proxyUnified(request, response, 'responses');
   }
 
   @Post('providers/:providerId/test')

@@ -30,11 +30,13 @@ When an out-of-scope concern is discovered, mention it briefly instead of expand
 
 ## Development Verification
 
-Unless the user explicitly authorizes it in the current request, do not run tests, builds, development or start servers, browser checks, `curl` requests, or other behavioral verification. Limit verification to the simple TypeScript check: `pnpm typecheck`.
+Do not run tests, test scripts, diagnostic scripts, builds, development or start servers, browser checks, `curl` requests, `pnpm typecheck`, or other verification commands unless the user explicitly instructs you to run that specific command or check in the current request. Do not perform verification proactively.
 
 ## Durable Corrections
 
 When the user corrects agent behavior or states a durable repository-specific working preference, update this `AGENTS.md` in the same change so future work follows that correction.
+
+The Portkey Gateway integration is a unified OpenAI-compatible entry point. Callers do not provide a Provider id separately; model ids use the `<providerId>/<modelId>` namespace and the Gateway dispatches from that value. The local Gateway has no separate inbound API key unless a later architecture change explicitly adds one.
 
 ## Git Worktree Directory Rule
 
