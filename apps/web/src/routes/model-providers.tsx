@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { Bot, Copy, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, RotateCcw, Square, Trash2, X } from 'lucide-react';
+import { Bot, Copy, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -174,8 +174,6 @@ function ModelProvidersPage() {
   const [deleteError, setDeleteError] = useState('');
   const { data: modelProviders = [], isLoading, isError } = useModelProvidersQuery(workspaceSlug);
   const gatewayQuery = usePortkeyGatewayQuery();
-  const [gatewayBusy, setGatewayBusy] = useState(false);
-  const [gatewayError, setGatewayError] = useState('');
   const items = useMemo(
     () => modelProviders.filter((provider) => `${provider.name} ${provider.models.join(' ')}`.toLowerCase().includes(search.toLowerCase())),
     [modelProviders, search],
@@ -329,12 +327,6 @@ function ModelProvidersPage() {
         <GatewayPanel
           gateway={gatewayQuery.data}
           providers={modelProviders}
-          busy={gatewayBusy}
-          error={gatewayError}
-          onAction={async (action) => {
-            setGatewayBusy(true); setGatewayError('');
-            try { const result = action === 'start' ? await api.startPortkeyGateway() : action === 'stop' ? await api.stopPortkeyGateway() : await api.restartPortkeyGateway(); queryClient.setQueryData(['portkey-gateway'], result); } catch (error: unknown) { setGatewayError(error instanceof Error ? error.message : t('providers.gateway.actionFailed')); } finally { setGatewayBusy(false); }
-          }}
           t={(key) => t(key as never)}
         />
       ) : null}
@@ -479,8 +471,8 @@ function ModelProvidersPage() {
   );
 }
 
-function GatewayPanel({ gateway, providers, busy, error, onAction, t }: { gateway?: { port: number; host: string; status: PortkeyGatewayStatus; error: string | null }; providers: ModelProviderView[]; busy: boolean; error: string; onAction: (action: 'start' | 'stop' | 'restart') => Promise<void>; t: (key: string) => string }) {
-  const status = gateway?.status ?? 'stopped';
+function GatewayPanel({ gateway, providers, t }: { gateway?: { port: number; host: string; status: PortkeyGatewayStatus; error: string | null }; providers: ModelProviderView[]; t: (key: string) => string }) {
+  const status = gateway?.status ?? 'starting';
   const running = status === 'running';
   const publicBaseUrl = `${typeof window === 'undefined' ? '' : window.location.origin}/api/portkey-gateway/v1`;
   const namespacedModels = providers.flatMap((provider) => provider.models.map((model) => `${provider.id}/${model}`));
@@ -498,8 +490,7 @@ function GatewayPanel({ gateway, providers, busy, error, onAction, t }: { gatewa
       <div><p className="text-xs font-medium text-muted-foreground">{t('providers.gateway.status')}</p><div className="mt-2"><StatusBadge status={running ? 'gateway_running' : status} /></div></div>
     </div>
     <p className="font-mono text-xs text-muted-foreground">{gateway ? `http://${gateway.host}:${gateway.port}` : t('providers.gateway.loading')}</p>
-    {gateway?.error || error ? <p className="text-[13px] text-danger" role="alert">{error || gateway?.error}</p> : null}
-    <div className="flex flex-wrap gap-2"><Button size="compact" onClick={() => void onAction('start')} disabled={busy || running}><Plus className="size-4" />{t('providers.gateway.start')}</Button><Button variant="secondary" size="compact" onClick={() => void onAction('restart')} disabled={busy || !running}><RotateCcw className="size-4" />{t('providers.gateway.restart')}</Button><Button variant="ghost" size="compact" onClick={() => void onAction('stop')} disabled={busy || !running}><Square className="size-4" />{t('providers.gateway.stop')}</Button></div>
+    {gateway?.error ? <p className="text-[13px] text-danger" role="alert">{gateway.error}</p> : null}
     <div className="space-y-4 border-t border-border pt-5">
       <div><h3 className="text-sm font-semibold">{t('providers.gateway.integrationTitle')}</h3><p className="mt-1 text-[13px] text-muted-foreground">{t('providers.gateway.integrationDescription')}</p></div>
       <div className="grid gap-4 sm:grid-cols-2">

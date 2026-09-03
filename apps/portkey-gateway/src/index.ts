@@ -35,6 +35,7 @@ import { messagesHandler } from './handlers/messagesHandler';
 import { imageEditsHandler } from './handlers/imageEditsHandler';
 import { messagesCountTokensHandler } from './handlers/messagesCountTokensHandler';
 import modelResponsesHandler from './handlers/modelResponsesHandler';
+import { createProvider, deleteProvider, getProvider, listProviders, providerView, updateProvider } from './worklite/provider-registry';
 
 // utils
 import { logger } from './apm';
@@ -90,6 +91,50 @@ if (runtime === 'node') {
  * Returns a greeting message.
  */
 app.get('/', (c) => c.text('AI Gateway says hey!'));
+
+app.get('/worklite/providers', async (c) => c.json(await listProviders()));
+app.get('/worklite/providers/:providerId', async (c) => {
+  const provider = await getProvider(c.req.param('providerId'));
+  return provider ? c.json(providerView(provider)) : c.json({ message: 'Model provider not found.' }, 404);
+});
+app.post('/worklite/providers/:providerId/test', async (c) => {
+  const provider = await getProvider(c.req.param('providerId'));
+  if (!provider) return c.json({ message: 'Model provider not found.' }, 404);
+  const model = provider.models[0];
+  if (!model) return c.json({ message: 'Add at least one model id before testing this provider.' }, 400);
+  const adapter = provider.protocol.startsWith('deepseek/') ? 'deepseek' : 'openai';
+  const headers = new Headers({ 'content-type': 'application/json', 'x-portkey-config': JSON.stringify({ provider: adapter, api_key: provider.apiKey, custom_host: provider.baseURL, ...(Object.keys(provider.headers ?? {}).length > 0 ? { forward_headers: Object.keys(provider.headers ?? {}) } : {}) }) });
+  for (const [name, value] of Object.entries(provider.headers ?? {})) headers.set(name, value);
+  const prompt = '\u4f60\u597d';
+  const upstream = await app.fetch(new Request(new URL('/v1/chat/completions', c.req.url), { method: 'POST', headers, body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], max_tokens: 32 }) }), c.env, c.executionCtx);
+  if (!upstream.ok) return c.json({ message: 'Provider connection failed.' }, upstream.status as 400);
+  const payload = await upstream.json() as { choices?: Array<{ message?: { content?: string } }> };
+  return c.json({ connection: 'connected', model, prompt, response: payload.choices?.[0]?.message?.content ?? '', traceId: crypto.randomUUID() });
+});
+app.post('/worklite/providers', async (c) => {
+  try { return c.json(await createProvider(await c.req.json()), 201); } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Provider could not be created.' }, 400); }
+});
+app.patch('/worklite/providers/:providerId', async (c) => {
+  try { return c.json(await updateProvider(c.req.param('providerId'), await c.req.json())); } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Provider could not be updated.' }, 400); }
+});
+app.delete('/worklite/providers/:providerId', async (c) => {
+  try { await deleteProvider(c.req.param('providerId')); return c.body(null, 204); } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Provider could not be deleted.' }, 404); }
+});
+app.all('/worklite/proxy/*', async (c) => {
+  const providerId = c.req.header('x-worklite-provider-id');
+  const provider = providerId ? await getProvider(providerId) : undefined;
+  if (!provider) return c.json({ error: { message: 'Model provider not found.' } }, 404);
+  const operation = c.req.path.slice('/worklite/proxy/'.length);
+  if (operation !== 'models' && operation !== 'chat/completions' && operation !== 'responses') return c.json({ error: { message: 'Unsupported Gateway operation.' } }, 400);
+  const adapter = provider.protocol.startsWith('deepseek/') ? 'deepseek' : 'openai';
+  const config = { provider: adapter, api_key: provider.apiKey, custom_host: provider.baseURL, ...(Object.keys(provider.headers ?? {}).length > 0 ? { forward_headers: Object.keys(provider.headers ?? {}) } : {}) };
+  const headers = new Headers(c.req.raw.headers);
+  headers.delete('x-worklite-provider-id');
+  headers.set('x-portkey-config', JSON.stringify(config));
+  for (const [name, value] of Object.entries(provider.headers ?? {})) headers.set(name, value);
+  const body = c.req.method === 'GET' || c.req.method === 'HEAD' ? undefined : await c.req.text();
+  return app.fetch(new Request(new URL(`/v1/${operation}`, c.req.url), { method: c.req.method, headers, body }), c.env, c.executionCtx);
+});
 
 // Use prettyJSON middleware for all routes
 app.use('*', prettyJSON());

@@ -1,12 +1,11 @@
-import { Body, Controller, Get, Param, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type { DiscoverModelProviderRequest } from '@worklite/contracts';
-import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { PortkeyGatewayService } from './portkey-gateway.service';
 
 @Controller('portkey-gateway')
 export class ProviderProxyController {
-  constructor(private readonly proxyService: PortkeyGatewayService, private readonly resources: WorkspaceResourcesService) {}
+  constructor(private readonly proxyService: PortkeyGatewayService) {}
 
   @Post('model-providers/discover-models')
   discoverModels(@Body() body: DiscoverModelProviderRequest) {
@@ -28,8 +27,4 @@ export class ProviderProxyController {
     return this.proxyService.proxyUnified(request, response, 'responses');
   }
 
-  @Post('providers/:providerId/test')
-  testProvider(@Req() request: Request, @Param('providerId') providerId: string) {
-    return this.resources.testProvider(request, 'personal', providerId);
-  }
 }

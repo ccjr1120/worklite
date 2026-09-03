@@ -59,7 +59,7 @@ function encryptSecret(value: string): string {
   return `${iv.toString('base64url')}.${tag.toString('base64url')}.${encrypted.toString('base64url')}`;
 }
 
-function decryptSecret(value: string): string {
+export function decryptSecret(value: string): string {
   const [ivValue, tagValue, encryptedValue] = value.split('.');
   if (!ivValue || !tagValue || !encryptedValue) throw new Error('Invalid encrypted secret');
   const key = createHash('sha256').update(process.env.SECRET_ENCRYPTION_KEY ?? 'worklite-development-secret').digest();
@@ -143,6 +143,8 @@ const WORKLITE_NAVIGATION_ROUTES = {
   'settings-usage': '/settings/usage',
   'settings-audit-log': '/settings/audit-log',
 } as const satisfies Record<WorkliteNavigationTarget, string>;
+
+export const GATEWAY_PROVIDER_ID = 'gateway-provider';
 
 function validatePackageFiles(input: unknown): PackageFile[] {
   if (!Array.isArray(input) || input.length === 0) throw new BadRequestException('A Skill package must contain SKILL.md.');
@@ -387,14 +389,14 @@ export class WorkspaceResourcesService {
 
   async providers(request: Request, workspaceSlug: string): Promise<ModelProviderView[]> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const rows = await this.db.select().from(modelProviders).where(eq(modelProviders.workspaceId, team.id)).orderBy(modelProviders.name);
+    const rows = await this.db.select().from(modelProviders).where(and(eq(modelProviders.workspaceId, team.id), sql`${modelProviders.id} <> ${GATEWAY_PROVIDER_ID}`)).orderBy(modelProviders.name);
     return rows.map(providerView);
   }
 
   async platformSnapshot(request: Request, workspaceSlug: string) {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [providerRows, skillRows, mcpRows, agentRows, workflowRows, settingsRows, agentSkillRows, agentMcpRows] = await Promise.all([
-      this.db.select().from(modelProviders).where(eq(modelProviders.workspaceId, workspace.id)).orderBy(modelProviders.name),
+      this.db.select().from(modelProviders).where(and(eq(modelProviders.workspaceId, workspace.id), sql`${modelProviders.id} <> ${GATEWAY_PROVIDER_ID}`)).orderBy(modelProviders.name),
       this.db.select().from(skills).where(eq(skills.workspaceId, workspace.id)).orderBy(skills.name),
       this.db.select().from(mcpServers).where(eq(mcpServers.workspaceId, workspace.id)).orderBy(mcpServers.name),
       this.db.select().from(agents).where(eq(agents.workspaceId, workspace.id)).orderBy(agents.name),
@@ -497,6 +499,7 @@ export class WorkspaceResourcesService {
     if (!baseURL) throw new BadRequestException('Base URL is required.');
     const models = input.models?.map((model) => model.trim()).filter(Boolean);
     const [existing] = await this.db.select().from(modelProviders).where(and(eq(modelProviders.workspaceId, team.id), eq(modelProviders.name, name))).limit(1);
+    if (existing?.id === GATEWAY_PROVIDER_ID) throw new BadRequestException('The protected Gateway Provider cannot be changed.');
     const apiKey = input.apiKey?.trim();
     const [row] = existing
       ? await this.db.update(modelProviders).set({ protocol, baseURL, ...(apiKey ? { apiKey: encryptSecret(apiKey), maskedKey: maskSecret(apiKey), status: 'connected' as const } : {}), ...(models ? { models } : {}), ...(serializedHeaders !== undefined ? { headers: serializedHeaders } : {}), updatedAt: new Date() }).where(eq(modelProviders.id, existing.id)).returning()
@@ -514,6 +517,7 @@ export class WorkspaceResourcesService {
   }
 
   async updateProvider(request: Request, workspaceSlug: string, providerId: string, input: UpdateModelProviderRequest): Promise<ModelProviderView> {
+    if (providerId === GATEWAY_PROVIDER_ID) throw new BadRequestException('The protected Gateway Provider cannot be changed.');
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [existing] = await this.db.select().from(modelProviders).where(and(eq(modelProviders.id, providerId), eq(modelProviders.workspaceId, team.id))).limit(1);
     if (!existing) throw new NotFoundException('Model provider not found');
@@ -607,6 +611,22 @@ export class WorkspaceResourcesService {
     providerId: string,
     selectedModel?: string,
   ): Promise<{ provider: ModelProviderConfig; model: string; protocol: ModelProviderView['protocol'] }> {
+    try {
+      const gatewayResponse = await fetch(`http://127.0.0.1:4547/worklite/providers/${encodeURIComponent(providerId)}`);
+      if (gatewayResponse.ok) {
+        const gatewayProvider = await gatewayResponse.json() as { id: string; protocol: ModelProviderView['protocol']; models: string[] };
+        const configuredModels = (gatewayProvider.models ?? []).map((value) => value.trim()).filter(Boolean);
+        const model = selectedModel?.trim() || configuredModels[0];
+        if (!model) throw new BadRequestException('Add at least one model id before using this provider.');
+        if (selectedModel && !configuredModels.includes(model)) throw new BadRequestException('The selected model is not configured for this provider.');
+        const provider = gatewayProvider.protocol.startsWith('deepseek/')
+          ? { id: GATEWAY_PROVIDER_ID, adapter: 'deepseek' as const, apiKey: 'worklite-gateway', gatewayProviderId: gatewayProvider.id, operation: 'chat/completions' as const }
+          : { id: GATEWAY_PROVIDER_ID, adapter: 'openai' as const, apiKey: 'worklite-gateway', gatewayProviderId: gatewayProvider.id, operation: gatewayProvider.protocol === 'openai/responses' ? 'responses' as const : 'chat/completions' as const };
+        return { provider, model, protocol: gatewayProvider.protocol };
+      }
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+    }
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [row] = await this.db.select().from(modelProviders).where(and(eq(modelProviders.id, providerId), eq(modelProviders.workspaceId, workspace.id))).limit(1);
     if (!row) throw new NotFoundException('Model provider not found');
@@ -619,6 +639,7 @@ export class WorkspaceResourcesService {
   }
 
   async deleteProvider(request: Request, workspaceSlug: string, providerId: string): Promise<void> {
+    if (providerId === GATEWAY_PROVIDER_ID) throw new BadRequestException('The protected Gateway Provider cannot be deleted.');
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     await this.db.update(agents).set({ providerId: null, model: '', updatedAt: new Date() }).where(and(eq(agents.workspaceId, team.id), eq(agents.providerId, providerId)));
     const [row] = await this.db.delete(modelProviders)

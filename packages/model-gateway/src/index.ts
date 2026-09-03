@@ -9,6 +9,7 @@ export type ModelProviderConfig =
       apiKey: string;
       baseURL?: string;
       headers?: Readonly<Record<string, string>>;
+      gatewayProviderId?: string;
       operation?: 'chat/completions';
     }
   | {
@@ -17,6 +18,7 @@ export type ModelProviderConfig =
       apiKey: string;
       baseURL?: string;
       headers?: Readonly<Record<string, string>>;
+      gatewayProviderId?: string;
       operation?: 'chat/completions' | 'responses';
     };
 
@@ -239,16 +241,18 @@ function resolveModel(provider: ModelProviderConfig, modelId: string): LanguageM
   });
   const headers = {
     ...(provider.headers ?? {}),
+    ...(provider.gatewayProviderId ? { 'x-worklite-provider-id': provider.gatewayProviderId } : {}),
     'x-portkey-config': portkeyConfig,
   };
   const baseURL = gatewayBaseURL();
+  const gatewayModel = provider.gatewayProviderId ? `${provider.gatewayProviderId}/${modelId}` : modelId;
 
   if (provider.adapter === 'deepseek') {
     return createDeepSeek({
       apiKey: 'worklite-gateway',
       baseURL,
       headers,
-    })(modelId);
+    })(gatewayModel);
   }
 
   const openai = createOpenAI({
@@ -256,11 +260,12 @@ function resolveModel(provider: ModelProviderConfig, modelId: string): LanguageM
     baseURL,
     headers,
   });
-  return provider.operation === 'responses' ? openai.responses(modelId) as unknown as LanguageModel : openai.chat(modelId);
+  return provider.operation === 'responses' ? openai.responses(gatewayModel) as unknown as LanguageModel : openai.chat(gatewayModel);
 }
 
 function gatewayBaseURL(): string {
-  return 'http://127.0.0.1:4547/v1';
+  const apiURL = process.env.WORKLITE_API_URL?.trim();
+  return apiURL ? `${apiURL.replace(/\/$/, '')}/portkey-gateway/v1` : 'http://127.0.0.1:4547/v1';
 }
 
 function toModelMessages(messages: readonly GatewayMessage[]): ModelMessage[] {

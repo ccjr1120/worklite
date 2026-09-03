@@ -2,11 +2,13 @@ import { createRequire } from 'node:module';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
 import { resolve } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { BadRequestException, Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import type { DiscoverModelProviderRequest, DiscoverModelProviderResult, ModelProviderProtocol, PortkeyGatewayModelList, PortkeyGatewayStatus, PortkeyGatewayView } from '@worklite/contracts';
+import type { CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStatus, PortkeyGatewayView, UpdateModelProviderRequest } from '@worklite/contracts';
 import type { ModelProviderConfig } from '@worklite/model-gateway';
-import { WorkspaceResourcesService } from '../teams/team-resources.service';
+import { modelProviders, type Database } from '@worklite/db';
+import { DATABASE } from '../../infrastructure/database.module';
+import { decryptSecret } from '../teams/team-resources.service';
 
 const GATEWAY_PORT = 4547;
 
@@ -70,23 +72,46 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
   private gateway: ChildProcess | null = null;
   private gatewayReady = false;
   private startup: Promise<void> | null = null;
+  private restartTimer: NodeJS.Timeout | null = null;
   private stopping = false;
-  private gatewayStatus: PortkeyGatewayStatus = 'stopped';
+  private gatewayStatus: PortkeyGatewayStatus = 'starting';
   private gatewayError: string | null = null;
   private gatewayUpdatedAt = new Date().toISOString();
 
-  constructor(private readonly resources: WorkspaceResourcesService) {}
+  constructor(@Inject(DATABASE) private readonly db: Database) {}
 
   async onModuleInit(): Promise<void> {
     await this.start();
+    await this.migrateLegacyProviders();
   }
 
   async status(): Promise<PortkeyGatewayView> {
     return this.snapshot();
   }
 
+  async providers(): Promise<ModelProviderView[]> {
+    return this.gatewayJson<ModelProviderView[]>('/worklite/providers');
+  }
+
+  async createProvider(input: CreateModelProviderRequest): Promise<ModelProviderView> {
+    return this.gatewayJson<ModelProviderView>('/worklite/providers', { method: 'POST', body: JSON.stringify(input), headers: { 'content-type': 'application/json' } });
+  }
+
+  async updateProvider(providerId: string, input: UpdateModelProviderRequest): Promise<ModelProviderView> {
+    return this.gatewayJson<ModelProviderView>(`/worklite/providers/${encodeURIComponent(providerId)}`, { method: 'PATCH', body: JSON.stringify(input), headers: { 'content-type': 'application/json' } });
+  }
+
+  async deleteProvider(providerId: string) {
+    await this.gatewayJson(`/worklite/providers/${encodeURIComponent(providerId)}`, { method: 'DELETE' });
+  }
+
+  async testProvider(providerId: string): Promise<ModelProviderTestResult> {
+    return this.gatewayJson<ModelProviderTestResult>(`/worklite/providers/${encodeURIComponent(providerId)}/test`, { method: 'POST' });
+  }
+
   async models(request: Request): Promise<PortkeyGatewayModelList> {
-    const providers = await this.resources.providers(request, 'personal');
+    this.ensureGateway();
+    const providers = await this.providers();
     return {
       object: 'list',
       data: providers.flatMap((provider) => provider.models.map((model) => ({
@@ -112,15 +137,18 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
       this.markStatus('running', null);
     } catch (error: unknown) {
       this.markStatus('failed', error instanceof Error ? error.message : 'Portkey Gateway failed to start.');
+      this.scheduleRestart();
     } finally {
       this.startup = null;
     }
     return this.snapshot();
   }
 
-  async stop(): Promise<PortkeyGatewayView> {
-    if (this.gatewayStatus === 'stopped') return this.snapshot();
-    this.markStatus('stopping', null);
+  private async shutdown(): Promise<void> {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
     this.stopping = true;
     const gateway = this.gateway;
     this.gatewayReady = false;
@@ -138,49 +166,37 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
         });
       });
     }
-    this.markStatus('stopped', null);
-    return this.snapshot();
-  }
-
-  async restart(): Promise<PortkeyGatewayView> {
-    await this.stop();
-    return this.start();
+    this.markStatus('failed', null);
   }
 
   async onModuleDestroy(): Promise<void> {
-    await this.stop();
+    await this.shutdown();
   }
 
   async proxy(request: Request, response: Response, providerId: string, operation: 'models' | 'chat/completions' | 'responses', selectedModel?: string): Promise<void> {
-    const runtime = await this.resources.providerRuntime(request, 'personal', providerId, selectedModel);
     this.ensureGateway();
-
-    const provider = runtime.provider;
-    const configuredProtocol = runtime.protocol;
-    const { adapter: portkeyProvider, operation: configuredOperation } = protocolParts(configuredProtocol);
+    const provider = (await this.providers()).find((candidate) => candidate.id === providerId);
+    if (!provider) throw new BadRequestException('Model provider not found.');
+    const model = selectedModel?.trim() || provider.models[0];
+    if (!model) throw new BadRequestException('Add at least one model id before using this provider.');
+    if (selectedModel && !provider.models.includes(model)) throw new BadRequestException('The selected model is not configured for this provider.');
+    const configuredProtocol = provider.protocol;
+    const { operation: configuredOperation } = protocolParts(configuredProtocol);
     if (operation !== 'models' && operation !== configuredOperation) throw new BadRequestException(`Provider protocol ${configuredProtocol} does not support ${operation}.`);
-    const customHeaders = Object.fromEntries(Object.entries(provider.headers ?? {}).map(([name, value]) => [name.toLowerCase(), value]));
-    const config: Record<string, unknown> = {
-      provider: portkeyProvider,
-      api_key: provider.apiKey,
-      ...(provider.baseURL ? { custom_host: provider.baseURL } : {}),
-      ...(Object.keys(customHeaders).length > 0 ? { forward_headers: Object.keys(customHeaders) } : {}),
-    };
     const bodyValue = selectedModel && request.body && typeof request.body === 'object' && !Array.isArray(request.body)
-      ? { ...request.body, model: runtime.model }
+      ? { ...request.body, model }
       : request.body;
     const body = request.method === 'GET' || bodyValue === undefined ? undefined : JSON.stringify(bodyValue);
     const headers = {
       ...forwardedHeaders(request.headers),
-      ...customHeaders,
       host: `127.0.0.1:${this.activeGatewayPort}`,
-      'x-portkey-config': JSON.stringify(config),
+      'x-worklite-provider-id': providerId,
       ...(body === undefined ? {} : { 'content-length': String(Buffer.byteLength(body)) }),
     };
 
     await new Promise<void>((resolvePromise) => {
       const upstream = httpRequest(
-        { hostname: '127.0.0.1', port: this.activeGatewayPort, path: `/v1/${operation}${request.url.includes('?') ? request.url.slice(request.url.indexOf('?')) : ''}`, method: request.method, headers },
+        { hostname: '127.0.0.1', port: this.activeGatewayPort, path: `/worklite/proxy/${operation}${request.url.includes('?') ? request.url.slice(request.url.indexOf('?')) : ''}`, method: request.method, headers },
         (upstreamResponse) => {
           response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders(upstreamResponse.headers));
           upstreamResponse.pipe(response);
@@ -259,7 +275,45 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
   }
 
   private ensureGateway(): void {
-    if (!this.gatewayReady || this.gatewayStatus !== 'running') throw new ServiceUnavailableException('Portkey Gateway is unavailable. Start the Gateway before sending proxy requests.');
+    if (!this.gatewayReady || this.gatewayStatus !== 'running') throw new ServiceUnavailableException('Portkey Gateway is unavailable while it is starting or recovering.');
+  }
+
+  private async gatewayJson<T>(path: string, init?: RequestInit): Promise<T> {
+    let response: globalThis.Response;
+    try {
+      response = await fetch(`http://127.0.0.1:${this.activeGatewayPort}${path}`, init);
+    } catch {
+      throw new ServiceUnavailableException('Portkey Gateway is unavailable while it is starting or recovering.');
+    }
+    const text = await response.text();
+    let body: unknown = undefined;
+    try { body = text ? JSON.parse(text) : undefined; } catch { body = undefined; }
+    if (!response.ok) {
+      const message = body && typeof body === 'object' && !Array.isArray(body) && 'message' in body && typeof body.message === 'string' ? body.message : 'Portkey Gateway request failed.';
+      throw new BadRequestException(message);
+    }
+    return body as T;
+  }
+
+  private async migrateLegacyProviders(): Promise<void> {
+    const existing = await this.providers().catch(() => []);
+    if (existing.length > 0) return;
+    const legacy = await this.db.select().from(modelProviders);
+    for (const provider of legacy) {
+      if (provider.id === 'gateway-provider' || !provider.baseURL) continue;
+      let apiKey = '';
+      let headers: Record<string, string> | undefined;
+      try { apiKey = provider.apiKey ? decryptSecret(provider.apiKey) : ''; } catch { apiKey = ''; }
+      try {
+        const parsed = provider.headers ? JSON.parse(decryptSecret(provider.headers)) as unknown : undefined;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) headers = parsed as Record<string, string>;
+      } catch { headers = undefined; }
+      await this.gatewayJson('/worklite/providers', {
+        method: 'POST',
+        body: JSON.stringify({ id: provider.id, name: provider.name, protocol: provider.protocol, baseURL: provider.baseURL, apiKey, models: provider.models ?? [], ...(headers ? { headers } : {}) }),
+        headers: { 'content-type': 'application/json' },
+      }).catch(() => undefined);
+    }
   }
 
   private async ensureGatewayForDiscovery(): Promise<void> {
@@ -288,7 +342,10 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     });
     child.once('exit', (code, signal) => {
       this.gatewayReady = false;
-      if (!this.stopping) this.markStatus('failed', `Portkey Gateway exited (${code ?? 'no code'}${signal ? `, ${signal}` : ''}).`);
+      if (!this.stopping) {
+        this.markStatus('failed', `Portkey Gateway exited (${code ?? 'no code'}${signal ? `, ${signal}` : ''}).`);
+        this.scheduleRestart();
+      }
       if (this.gateway === child) this.gateway = null;
       if (!this.stopping) this.logger.warn(`Portkey Gateway exited (${code ?? 'no code'}${signal ? `, ${signal}` : ''}).`);
     });
@@ -322,6 +379,14 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     this.gatewayStatus = status;
     this.gatewayError = error;
     this.gatewayUpdatedAt = new Date().toISOString();
+  }
+
+  private scheduleRestart(): void {
+    if (this.stopping || this.restartTimer) return;
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      void this.start();
+    }, 250);
   }
 
   private snapshot(): PortkeyGatewayView {

@@ -1,6 +1,6 @@
 # Model Providers
 
-Providers is a top-level workspace destination. It is not part of the Agent resource tabs and does not use the Settings local navigation. The page switches between `Model Providers` and `Portkey Gateway` views in one local navigation surface.
+Providers is a top-level workspace destination. It is not part of the Agent resource tabs and does not use the Settings local navigation. The page switches between Gateway-managed Providers and the Portkey Gateway integration view in one local navigation surface. The protected WorkLite `gateway-provider` binding is internal and never appears in this page.
 
 ## Scope
 
@@ -10,7 +10,7 @@ The create/edit dialog presents fields in this order: Provider name, Base URL, P
 
 The create/edit dialog keeps secrets write-only. During editing, an empty API key preserves the stored key; a non-empty key replaces it. A supplied Headers JSON replaces the stored headers, and `{}` clears them. The list exposes only header names/count, never header values, and omits header copy when none are configured. Invalid JSON, non-object JSON, or non-string header values prevent saving and receive an inline validation message.
 
-Provider proxy, connection-test, and draft model-discovery requests use the `/api/portkey-gateway` API prefix so every browser-facing request that reaches the Portkey Gateway has one explicit route owner.
+Provider CRUD, proxy, connection-test, and draft model-discovery requests use the `/api/portkey-gateway` API prefix so every browser-facing request that reaches the Portkey Gateway has one explicit route owner. Provider secrets are persisted by Gateway and are never stored in WorkLite resource state.
 
 Model IDs use one token input rather than a comma-separated field or a multi-row editor. Typing a model ID and pressing `Enter` commits one token inside the same bordered control and keeps focus in the input. Left and right arrow keys move through committed tokens and the text caret; `Backspace` or `Delete` removes the active or adjacent token at the corresponding boundary. Each token has an accessible remove button. Fetching models merges newly discovered IDs into the draft token set with stable de-duplication; saving remains the only persistence action.
 
@@ -20,13 +20,15 @@ Define unconfigured, testing, connected, invalid credentials, unavailable provid
 
 ## Portkey Gateway
 
-The Portkey Gateway view shows the fixed loopback port `4547`, current process status, listener address, and credential-safe startup failure details. The operator explicitly starts, stops, or restarts the Gateway; there is no port editing or port-save action. API startup starts the Gateway, and model discovery ensures it is running before forwarding the request. Ordinary proxy and model-runtime requests remain unavailable while the Gateway is stopped. The view also explains the unified OpenAI-compatible entry point, shows the `/v1` Base URL, documents that no Gateway key is required under the local API security boundary, and shows namespaced models in the `<providerId>/<modelId>` format used for dispatch. The view preserves stable loading, starting, stopping, restarting, unavailable, and port-conflict states in both themes and keeps the primary lifecycle action visible at every breakpoint.
+The Portkey Gateway view shows the fixed loopback port `4547`, current process status, listener address, and credential-safe startup failure details. Gateway startup, shutdown, and unexpected-exit recovery are automatic; the view has no lifecycle mutation controls. The view explains the unified OpenAI-compatible entry point, shows the `/v1` Base URL, documents that no Gateway key is required under the local API security boundary, and shows namespaced models in the `<providerId>/<modelId>` format used for dispatch. The view preserves stable loading, starting, running, unavailable, and port-conflict states in both themes.
 
 ## Changelog
 
 ### 2026-09-03
 
 - Defined one unified Gateway integration entry point with `<providerId>/<modelId>` model namespaces and explicit no-key guidance.
+- Moved Provider administration under the Portkey Gateway ownership boundary and kept the protected WorkLite `gateway-provider` binding out of user-facing configuration.
+- Removed Gateway start, stop, and restart controls; the surface now communicates automatic lifecycle and recovery.
 
 ### 2026-09-01
 

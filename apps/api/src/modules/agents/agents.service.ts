@@ -2,13 +2,14 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from '@nes
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import type { Request } from 'express';
-import type { AgentVersionView, AgentView, CreateAgentRequest, UpdateAgentRequest } from '@worklite/contracts';
+import type { AgentVersionView, AgentView, CreateAgentRequest, ModelProviderView, UpdateAgentRequest } from '@worklite/contracts';
 import { agentMcpServers, agentVersions, agents, agentSkills, mcpServers, modelProviders, skills, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 
 const WORKLITE_PLATFORM_SKILL_ID = 'sk_worklite_platform';
 const CODEX_CLI_AGENT_ID = 'agt_codex_cli_chat';
+const GATEWAY_PROVIDER_URL = 'http://127.0.0.1:4547/worklite/providers';
 
 function initials(name: string): string {
   return name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
@@ -29,13 +30,14 @@ export class AgentsService {
   async list(request: Request, workspaceSlug: string): Promise<AgentView[]> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const rows = await this.db.select({ agent: agents, providerName: modelProviders.name }).from(agents).leftJoin(modelProviders, eq(agents.providerId, modelProviders.id)).where(and(eq(agents.workspaceId, team.id), ne(agents.id, CODEX_CLI_AGENT_ID)));
+    const gatewayNames = await this.gatewayProviderNames();
     const assignments = await this.loadAssignments(team.id, rows.map(({ agent }) => agent.id));
     const latestRows = rows.length === 0 ? [] : await this.db.select({ agentId: agentVersions.agentId, id: agentVersions.id, version: agentVersions.version }).from(agentVersions).where(and(eq(agentVersions.workspaceId, team.id), inArray(agentVersions.agentId, rows.map(({ agent }) => agent.id)))).orderBy(desc(agentVersions.version));
     const latestByAgent = new Map<string, { id: string; version: number }>();
     for (const row of latestRows) if (!latestByAgent.has(row.agentId)) latestByAgent.set(row.agentId, { id: row.id, version: row.version });
     return rows
       .sort((left, right) => Number(left.agent.kind !== 'system') - Number(right.agent.kind !== 'system') || left.agent.name.localeCompare(right.agent.name))
-      .map(({ agent, providerName }) => this.toView(agent, workspaceSlug, providerName, assignments, latestByAgent.get(agent.id)));
+      .map(({ agent, providerName }) => this.toView(agent, workspaceSlug, providerName ?? (agent.providerId ? gatewayNames.get(agent.providerId) ?? null : null), assignments, latestByAgent.get(agent.id)));
   }
 
   async get(request: Request, workspaceSlug: string, agentId: string): Promise<AgentView> {
@@ -43,9 +45,10 @@ export class AgentsService {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [row] = await this.db.select({ agent: agents, providerName: modelProviders.name }).from(agents).leftJoin(modelProviders, eq(agents.providerId, modelProviders.id)).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
     if (!row) throw new NotFoundException('Agent not found');
+    const gatewayNames = await this.gatewayProviderNames();
     const assignments = await this.loadAssignments(team.id, [row.agent.id]);
     const [latest] = await this.db.select({ id: agentVersions.id, version: agentVersions.version }).from(agentVersions).where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, team.id))).orderBy(desc(agentVersions.version)).limit(1);
-    return this.toView(row.agent, workspaceSlug, row.providerName, assignments, latest);
+    return this.toView(row.agent, workspaceSlug, row.providerName ?? (row.agent.providerId ? gatewayNames.get(row.agent.providerId) ?? null : null), assignments, latest);
   }
 
   async create(request: Request, workspaceSlug: string, input: CreateAgentRequest): Promise<AgentView> {
@@ -177,8 +180,28 @@ export class AgentsService {
   private async validateProvider(workspaceId: string, providerId: string | null | undefined): Promise<{ name: string; models: string[] } | null> {
     if (!providerId) return null;
     const [provider] = await this.db.select({ name: modelProviders.name, models: modelProviders.models }).from(modelProviders).where(and(eq(modelProviders.id, providerId), eq(modelProviders.workspaceId, workspaceId))).limit(1);
-    if (!provider) throw new BadRequestException('Model provider not found in this workspace.');
-    return { name: provider.name, models: (provider.models ?? []).map((model) => model.trim()).filter(Boolean) };
+    if (provider) return { name: provider.name, models: (provider.models ?? []).map((model) => model.trim()).filter(Boolean) };
+    try {
+      const response = await fetch(`${GATEWAY_PROVIDER_URL}/${encodeURIComponent(providerId)}`);
+      if (response.ok) {
+        const gatewayProvider = await response.json() as Pick<ModelProviderView, 'name' | 'models'>;
+        return { name: gatewayProvider.name, models: (gatewayProvider.models ?? []).map((model) => model.trim()).filter(Boolean) };
+      }
+    } catch {
+      // Fall through to the stable domain error below.
+    }
+    throw new BadRequestException('Model provider not found in the Gateway.');
+  }
+
+  private async gatewayProviderNames(): Promise<Map<string, string>> {
+    try {
+      const response = await fetch(GATEWAY_PROVIDER_URL);
+      if (!response.ok) return new Map();
+      const providers = await response.json() as Array<Pick<ModelProviderView, 'id' | 'name'>>;
+      return new Map(providers.map((provider) => [provider.id, provider.name]));
+    } catch {
+      return new Map();
+    }
   }
 
   private async validateDraftModel(workspaceId: string, providerId: string | null | undefined, model: string): Promise<{ name: string; models: string[] } | null> {

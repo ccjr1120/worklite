@@ -299,7 +299,7 @@ export type WorkspaceSettingsView = {
 
 export type UpdateWorkspaceSettingsRequest = Partial<Pick<WorkspaceSettingsView, 'appearance' | 'locale'>>;
 
-export type PortkeyGatewayStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'failed';
+export type PortkeyGatewayStatus = 'starting' | 'running' | 'failed';
 
 export type PortkeyGatewayView = {
   port: number;

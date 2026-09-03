@@ -1,5 +1,6 @@
-import { Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
 import { PortkeyGatewayService } from './portkey-gateway.service';
+import type { CreateModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
 
 @Controller('portkey-gateway')
 export class PortkeyGatewayController {
@@ -10,18 +11,28 @@ export class PortkeyGatewayController {
     return this.gateway.status();
   }
 
-  @Post('start')
-  start() {
-    return this.gateway.start();
+  @Get('providers')
+  providers() {
+    return this.gateway.providers();
   }
 
-  @Post('stop')
-  stop() {
-    return this.gateway.stop();
+  @Post('providers')
+  createProvider(@Body() body: CreateModelProviderRequest) {
+    return this.gateway.createProvider(body);
   }
 
-  @Post('restart')
-  restart() {
-    return this.gateway.restart();
+  @Patch('providers/:providerId')
+  updateProvider(@Param('providerId') providerId: string, @Body() body: UpdateModelProviderRequest) {
+    return this.gateway.updateProvider(providerId, body);
+  }
+
+  @Delete('providers/:providerId')
+  deleteProvider(@Param('providerId') providerId: string) {
+    return this.gateway.deleteProvider(providerId);
+  }
+
+  @Post('providers/:providerId/test')
+  testProvider(@Param('providerId') providerId: string) {
+    return this.gateway.testProvider(providerId);
   }
 }
