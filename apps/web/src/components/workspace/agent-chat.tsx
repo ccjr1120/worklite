@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentSubSessionView, AgentToolCallView, AgentView } from '@worklite/contracts';
 import { ApiError, api, parseAgentExecutionEvent } from '@/api/client';
-import { agentSubSessionsQueryKey, useAgentQuery, useAgentsQuery, useAgentSubSessionsQuery, usePluginsQuery } from '@/api/queries';
+import { agentSubSessionsQueryKey, useAgentQuery, useAgentsQuery, useAgentSubSessionsQuery, useModelProvidersQuery, usePluginsQuery } from '@/api/queries';
 import { Conversation, ConversationContent } from '@/components/ai-elements/conversation';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import { PromptInput, PromptInputSubmit, PromptInputTextarea } from '@/components/ai-elements/prompt-input';
@@ -12,6 +12,7 @@ import { useLocale } from '@/components/locale-provider';
 import { useTheme } from '@/components/theme-provider';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { focusRing, focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -75,6 +76,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const locationSearch = useRouterState({ select: (state) => state.location.search as Record<string, unknown> });
   const navigate = useNavigate();
   const agentQuery = useAgentQuery(workspaceSlug, SYSTEM_HELPER_CHAT_ID);
+  const providersQuery = useModelProvidersQuery(workspaceSlug);
   const agentsQuery = useAgentsQuery(workspaceSlug);
   const subSessionsQuery = useAgentSubSessionsQuery(workspaceSlug);
   const pluginsQuery = usePluginsQuery();
@@ -90,6 +92,9 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const [selectedAgent, setSelectedAgent] = useState<AgentView | null>(null);
   const [draft, setDraft] = useState('');
   const [open, setOpen] = useState(false);
+  const [panelView, setPanelView] = useState<'chat' | 'configuration'>(initialState.activeId ? 'chat' : 'configuration');
+  const [configSelection, setConfigSelection] = useState('');
+  const [configSaving, setConfigSaving] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loadingExecution, setLoadingExecution] = useState(Boolean(initialState.activeId));
@@ -113,6 +118,22 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const mainRequestGenerationRef = useRef(0);
   const subRequestGenerationRef = useRef(0);
   const isConfigured = Boolean(agentQuery.data?.providerId && agentQuery.data?.model);
+  useEffect(() => {
+    if (!agentQuery.data) return;
+    setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
+    if (agentQuery.data.providerId && agentQuery.data.model) setPanelView('chat');
+  }, [agentQuery.data]);
+  const saveConfiguration = async (selection = configSelection) => {
+    if (!selection || configSaving) return;
+    const separator = selection.indexOf('::');
+    if (separator < 0) return;
+    setConfigSaving(true);
+    try {
+      await api.updateAgent(workspaceSlug, SYSTEM_HELPER_CHAT_ID, { providerId: selection.slice(0, separator), model: selection.slice(separator + 2) });
+      await queryClient.invalidateQueries({ queryKey: ['agent', SYSTEM_HELPER_CHAT_ID] });
+      setPanelView('chat');
+    } finally { setConfigSaving(false); }
+  };
   const activeId = targetIds[target] ?? null;
   const selectedPlugin = (pluginsQuery.data ?? []).find((plugin) => plugin.id === CODEX_CLI_PLUGIN_ID) ?? null;
   const pluginEnabled = Boolean(selectedPlugin?.enabled);
@@ -704,7 +725,25 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
               </div>
             </header>
 
-            {historyOpen ? (
+            <div className="agent-tabs" role="tablist" aria-label={t('assistant:panelTabs.label')}>
+              <button type="button" role="tab" aria-selected={panelView === 'chat'} className={cn(panelView === 'chat' && 'active')} onClick={() => setPanelView('chat')}>{t('assistant:panelTabs.chat')}</button>
+              <button type="button" role="tab" aria-selected={panelView === 'configuration'} className={cn(panelView === 'configuration' && 'active')} onClick={() => setPanelView('configuration')}>{t('assistant:panelTabs.configuration')}</button>
+            </div>
+
+            {panelView === 'configuration' ? (
+              <form className="agent-config-form" onSubmit={(event) => event.preventDefault()}>
+                <div className="agent-config-scroll">
+                  <section className="agent-config-section">
+                    <div className="agent-config-heading"><span className="font-mono text-[10px] uppercase tracking-[0.1em] text-info">Agent</span><h3>{t('assistant:configuration.title')}</h3><p>{t('assistant:configuration.description')}</p></div>
+                    <div className="agent-config-fields"><label className="config-field" htmlFor="assistant-model-selection"><span>{t('assistant:configuration.model')}</span><Select value={configSelection} onValueChange={(value) => { setConfigSelection(value); const separator = value.indexOf('::'); if (separator >= 0) void saveConfiguration(value); }}>
+                    <SelectTrigger id="assistant-model-selection"><SelectValue placeholder={t('assistant:configuration.placeholder')} /></SelectTrigger>
+                    <SelectContent>{(providersQuery.data ?? []).flatMap((provider) => (provider.models ?? []).map((model) => <SelectItem key={`${provider.id}::${model}`} value={`${provider.id}::${model}`}>{provider.name} / {model}</SelectItem>))}</SelectContent>
+                    </Select><small>{configSaving ? t('assistant:configuration.saving') : t('assistant:configuration.hint')}</small></label></div>
+                  </section>
+                </div>
+                <div className="agent-config-actions"><span>{t('assistant:configuration.hint')}</span></div>
+              </form>
+            ) : historyOpen ? (
               <HistoryPane archived={archived} loading={loadingExecution} onResume={resume} onRemove={(id) => setArchived((current) => current.filter((item) => item.id !== id))} />
             ) : (
               <Conversation
@@ -733,7 +772,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
 
         {!open && status ? <button type="button" className={cn('flex min-h-8 items-center gap-2 border-b border-border px-3 text-left text-[13px] text-muted-foreground hover:bg-surface-subtle hover:text-foreground', surfaceInteraction, focusRingInset)} onClick={() => setOpen(true)}><MessageSquareText className="size-4 shrink-0 text-brand" /><span className="min-w-0 flex-1 truncate">{status}</span><ChevronRight className="size-4" /></button> : null}
 
-        {composerLoading ? (
+        {panelView === 'configuration' ? <div className="min-h-12 border-t border-border bg-surface" aria-hidden="true" /> : composerLoading ? (
           <div className="flex min-h-12 items-center gap-2 px-3 text-[13px] text-muted-foreground" role="status"><LoaderCircle className="size-4 motion-safe:animate-spin" />{t('assistant:composer.loading')}</div>
         ) : composerAvailable ? (
           <PromptInput onSubmit={submit}>

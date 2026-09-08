@@ -9,7 +9,6 @@ import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/c
 import { EmptyState } from '@/components/empty-state';
 import { PageHeading } from '@/components/page-heading';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime, formatList } from '@/i18n/format';
@@ -27,7 +26,7 @@ function AgentListPage() {
   const [search, setSearch] = useState('');
   const { data: all = [], isLoading, isError } = useAgentsQuery(workspaceSlug);
   const items = useMemo(() => {
-    return all.filter((item) =>
+    return all.filter((item) => item.kind === 'custom').filter((item) =>
       `${item.name} ${item.responsibility} ${item.model} ${item.providerName ?? ''} ${item.skills.map((skill) => skill.name).join(' ')} ${item.mcpServers.map((server) => server.name).join(' ')}`.toLowerCase().includes(search.toLowerCase()),
     );
   }, [all, search]);
@@ -69,7 +68,6 @@ function AgentListPage() {
                     <span className="min-w-0">
                       <span className="flex items-center gap-2">
                         <span className="truncate text-sm font-medium">{item.name}</span>
-                        {item.kind === 'system' ? <Badge variant="neutral">{t('builtIn')}</Badge> : null}
                       </span>
                       <span className="block truncate text-[13px] text-muted-foreground">{item.responsibility}</span>
                     </span>

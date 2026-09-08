@@ -306,7 +306,7 @@ function DashboardLibrary({ categories, workflows, runs, artifacts, t, onOpenBoa
               <CollapsibleTrigger asChild>
                 <Button variant="ghost" className="h-auto min-w-0 flex-1 justify-start gap-2 rounded-md px-2 py-1 text-left hover:bg-surface-subtle">
                   <ChevronDown className={cn('size-4 shrink-0 text-muted-foreground transition-transform duration-[180ms]', !(openCategories[category.id] ?? true) && '-rotate-90')} aria-hidden="true" />
-                  <LayoutDashboard className="size-4 text-brand" aria-hidden="true" />
+                  <LayoutDashboard className="size-4 text-foreground" aria-hidden="true" />
                   <span className="truncate text-base font-semibold">{resolveCategoryName(category, t)}</span>
                   <span className="text-xs text-muted-foreground">{t('dashboard.category.boardCount', { count: category.boards.length })}</span>
                 </Button>

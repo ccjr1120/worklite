@@ -9,10 +9,10 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
+  --radius-sm: 5px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -62,12 +62,12 @@
   --muted-foreground: #6f747e;
   --border: #e4e6ea;
   --input: #e4e6ea;
-  --ring: #dc5f2b;
+  --ring: #4f6f9f;
 
-  --brand: #dc5f2b;
-  --brand-hover: #c95021;
-  --brand-active: #b9471c;
-  --brand-subtle: #fff0e9;
+  --brand: #4f6f9f;
+  --brand-hover: #415f8b;
+  --brand-active: #344d73;
+  --brand-subtle: #f1f2f4;
   --brand-foreground: #ffffff;
 
   --success: #1f8a4c;
@@ -91,13 +91,13 @@
   --muted-foreground: #989faa;
   --border: rgb(255 255 255 / 0.09);
   --input: rgb(255 255 255 / 0.12);
-  --ring: #f47b45;
+  --ring: #8ea8cf;
 
-  --brand: #f47b45;
-  --brand-hover: #f68d5e;
-  --brand-active: #dc6738;
-  --brand-subtle: rgb(244 123 69 / 0.14);
-  --brand-foreground: #20140e;
+  --brand: #8ea8cf;
+  --brand-hover: #a5b9d7;
+  --brand-active: #7893bd;
+  --brand-subtle: rgb(255 255 255 / 0.08);
+  --brand-foreground: #101216;
 
   --success: #3dbe72;
   --success-subtle: rgb(61 190 114 / 0.14);
@@ -122,6 +122,7 @@
 
   body {
     @apply bg-background text-foreground text-sm font-normal;
+    letter-spacing: 0;
   }
 
   :focus-visible {
@@ -154,6 +155,41 @@
   }
 }
 
+/* Project-wide Memory One surface grammar: hierarchy comes from contrast and borders. */
+.surface-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: none;
+}
+
+.surface-panel-raised {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  box-shadow: 0 8px 24px rgb(16 18 22 / 0.08);
+}
+
+.mono-data {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.worklite-mark {
+  filter: hue-rotate(195deg) saturate(0.9) brightness(0.92);
+}
+
+/* Keep decorative Lucide icons neutral; brand color remains for meaningful text and actions. */
+.text-brand:is(svg) {
+  color: var(--muted-foreground) !important;
+}
+
+.bg-brand-subtle.text-brand:has(svg) {
+  background: var(--surface-subtle) !important;
+  color: var(--foreground) !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -164,6 +200,24 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Memory One inspired embedded Agent configuration panel. */
+.agent-tabs { display:flex; gap:4px; padding:8px 16px 0; border-bottom:1px solid var(--border); background:var(--surface); }
+.agent-tabs button { display:inline-flex; align-items:center; justify-content:center; min-height:34px; padding:7px 11px; border:0; border-bottom:2px solid transparent; background:transparent; color:var(--muted-foreground); font-size:12px; cursor:pointer; }
+.agent-tabs button:hover { color:var(--foreground); }
+.agent-tabs button.active { border-bottom-color:var(--info); color:var(--info); font-weight:600; }
+.agent-config-form { display:flex; flex:1; min-height:0; flex-direction:column; }
+.agent-config-scroll { flex:1; min-height:0; overflow:auto; padding:14px 16px; }
+.agent-config-section { padding:4px 0 18px; }
+.agent-config-heading { padding-bottom:16px; border-bottom:1px solid var(--border); }
+.agent-config-heading h3 { margin:6px 0 0; color:var(--foreground); font-size:17px; font-weight:600; }
+.agent-config-heading p { margin:7px 0 0; color:var(--muted-foreground); font-size:11px; line-height:1.5; }
+.agent-config-fields { display:grid; grid-template-columns:1fr; gap:0 14px; }
+.config-field { display:block; margin-top:18px; color:var(--muted-foreground); font-size:12px; }
+.config-field > span { display:block; color:var(--foreground); }
+.config-field > small { display:block; margin-top:6px; color:var(--muted-foreground); font-size:10px; }
+.config-field > .ui-select-trigger { width:100%; margin-top:7px; background:var(--background); }
+.agent-config-actions { display:flex; align-items:center; min-height:42px; padding:11px 16px; border-top:1px solid var(--border); background:var(--surface); color:var(--muted-foreground); font-size:10px; }
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;

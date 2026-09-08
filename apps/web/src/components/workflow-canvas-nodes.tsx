@@ -50,7 +50,7 @@ function InputNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
 function TextNode({ id, data, selected }: NodeProps<WorkflowCanvasNode>) {
   const { t } = useTranslation('workflows');
   return <div className={cn(nodeClassName(selected), 'w-[280px]')}>
-    <NodeHeader icon={<span className="size-2 rounded-full bg-brand" aria-hidden="true" />}>{data.label}</NodeHeader>
+    <NodeHeader icon={<span className="size-2 rounded-full bg-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
     <div className="p-3 pb-0">
       <Textarea aria-label={t('editor.constantSource')} className="nodrag nowheel min-h-24 resize-y text-[12px]" value={data.text ?? ''} onChange={(event) => data.onTextChange(id, event.target.value)} />
     </div>

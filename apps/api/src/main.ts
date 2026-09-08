@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -8,7 +9,9 @@ async function bootstrap() {
   const host = process.env.API_HOST?.trim() || '127.0.0.1';
   process.env.WORKLITE_API_URL = `http://127.0.0.1:${port}/api`;
   process.env.WORKLITE_WORKSPACE_SLUG = 'personal';
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
+  app.useBodyParser('json', { limit: Infinity });
+  app.useBodyParser('urlencoded', { extended: true, limit: Infinity });
   app.setGlobalPrefix('api');
 
   await app.listen(port, host);

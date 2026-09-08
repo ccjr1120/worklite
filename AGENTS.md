@@ -34,9 +34,17 @@ Do not run tests, test scripts, diagnostic scripts, builds, development or start
 
 ## Durable Corrections
 
+The Memory One visual reference uses brand color sparingly. Keep WorkLite surfaces, default icons, headings, and ordinary hover states neutral; reserve the blue brand token for primary actions, selected or focused states, active execution, and a small number of meaningful links.
+
 When the user corrects agent behavior or states a durable repository-specific working preference, update this `AGENTS.md` in the same change so future work follows that correction.
 
-The Portkey Gateway integration is a unified OpenAI-compatible entry point. Callers do not provide a Provider id separately; model ids use the `<providerId>/<modelId>` namespace and the Gateway dispatches from that value. The local Gateway has no separate inbound API key unless a later architecture change explicitly adds one.
+The Portkey Gateway integration is a unified OpenAI-compatible entry point. Callers do not provide a Provider id separately; public model ids use the `<providerName>/<modelId>` namespace and the Gateway dispatches by the unique Provider name. Provider ids remain internal record keys and must not appear in public model ids. The local Gateway has no separate inbound API key unless a later architecture change explicitly adds one.
+
+The Portkey Gateway owns Provider persistence in an independent SQLite database and its dedicated `gateway_providers` table. The API SQLite database and legacy Provider JSON file are migration sources only; they are not Gateway runtime or administration stores.
+
+Codex OAuth credentials are intentionally stored in the local Gateway SQLite database without an additional encryption-key configuration. This is a single-user local installation; users should re-authenticate after changing from an earlier encrypted Codex credential format.
+
+Development and deployment profiles must use separate port ranges and data directories. Gateway startup must not import, synchronize, or alias Provider data from another profile; data transfer is explicit and owned by an operator-run script.
 
 ## Git Worktree Directory Rule
 
@@ -45,3 +53,9 @@ Place additional worktrees in the parent directory of the primary checkout. Name
 ## GitHub Research Rule
 
 Use the authenticated `gh` CLI for GitHub repository searches, metadata inspection, and source browsing instead of direct web requests or browser search.
+
+When implementing behavior that mirrors an existing open-source product or protocol, research and cite the relevant open-source implementation before proposing or coding the solution. Do not substitute assumptions or general experience for repository-backed behavior.
+
+## Chat Configuration UI
+
+The embedded Agent configuration view should follow the earlier Memory One chat-panel pattern: lightweight top tabs, unframed configuration content, and stable panel height across tabs.

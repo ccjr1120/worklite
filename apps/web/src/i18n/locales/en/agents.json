@@ -33,7 +33,7 @@
     "provider": "Model provider",
     "providerHint": "System Helper Chat provider selection is managed only here.",
     "providerHintCustom": "This provider and model apply only to this Agent.",
-    "modelHint": "Select one of the models configured for this provider.",
+    "modelHint": "Select a configured provider/model.",
     "noModels": "This provider has no configured models.",
     "systemHint": "System Helper Chat is built in. Its identity, instructions, Skills, and MCP settings cannot be changed or deleted.",
     "builtInCapabilities": "Built-in capabilities",
@@ -62,7 +62,7 @@
   "execution": {
     "title": "Run Agent",
     "newSession": "New session",
-    "configureModel": "Configure and save a model provider and model before running this Agent.",
+    "configureModel": "Configure and save a model before running this Agent.",
     "saveFirst": "Save Agent changes before starting or continuing a session.",
     "placeholder": "Send a task to this Agent",
     "messageLabel": "Agent message",

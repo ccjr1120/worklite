@@ -1,5 +1,6 @@
 import { Context } from 'hono';
 import { getRuntimeKey } from 'hono/adapter';
+import { recordRequestStat } from '../../worklite/provider-registry';
 
 let logId = 0;
 const MAX_RESPONSE_LENGTH = 100000;
@@ -56,10 +57,12 @@ async function processLog(c: Context, start: number) {
     return;
   }
 
+  let responseBody: any = undefined;
   try {
     const response = requestOptionsArray[0].requestParams.stream
       ? { message: 'The response was a stream.' }
       : await c.res.clone().json();
+    responseBody = response;
 
     const responseString = JSON.stringify(response);
     if (responseString.length > MAX_RESPONSE_LENGTH) {
@@ -72,11 +75,30 @@ async function processLog(c: Context, start: number) {
     console.error('Error processing log:', error);
   }
 
+  const requestBody = requestOptionsArray[0].requestParams ?? requestOptionsArray[0].transformedRequest?.body ?? {};
+  const requestedModel = typeof requestBody?.model === 'string' ? requestBody.model : 'Unknown';
+  const explicitProvider = c.req.header('x-worklite-stat-provider') ?? '';
+  const modelSeparator = requestedModel.indexOf('/');
+  const provider = explicitProvider || (modelSeparator > 0 ? requestedModel.slice(0, modelSeparator) : 'Unknown');
+  const model = modelSeparator > 0 ? requestedModel.slice(modelSeparator + 1) : requestedModel;
+  const usage = responseBody && typeof responseBody === 'object' && responseBody.usage && typeof responseBody.usage === 'object' ? responseBody.usage : undefined;
+  const tokenValue = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) ? value : null;
+  recordRequestStat({
+    provider,
+    model,
+    endpoint: new URL(c.req.url).pathname,
+    status: c.res.status,
+    durationMs: ms,
+    promptTokens: tokenValue(usage?.prompt_tokens ?? usage?.input_tokens),
+    completionTokens: tokenValue(usage?.completion_tokens ?? usage?.output_tokens),
+    totalTokens: tokenValue(usage?.total_tokens ?? usage?.totalTokens),
+  });
+
   await broadcastLog(
     JSON.stringify({
       time: new Date().toLocaleString(),
       method: c.req.method,
-      endpoint: c.req.url.split(':8787')[1],
+      endpoint: new URL(c.req.url).pathname,
       status: c.res.status,
       duration: ms,
       requestOptions: requestOptionsArray,

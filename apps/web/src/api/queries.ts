@@ -80,6 +80,18 @@ export function usePortkeyGatewayQuery() {
   return useQuery({ queryKey: ['portkey-gateway'] as const, queryFn: api.portkeyGateway });
 }
 
+export function useCodexAuthQuery() {
+  return useQuery({ queryKey: ['codex-auth'] as const, queryFn: api.codexAuthStatus, refetchInterval: 2_000 });
+}
+
+export function useCodexRateLimitsQuery(enabled: boolean) {
+  return useQuery({ queryKey: ['codex-rate-limits'] as const, queryFn: api.codexRateLimits, enabled, refetchInterval: 60_000 });
+}
+
+export function usePortkeyGatewayStatsQuery(window: '24h' | '7d' | '30d') {
+  return useQuery({ queryKey: ['portkey-gateway-stats', window] as const, queryFn: () => api.portkeyGatewayStats(window), refetchInterval: 30_000 });
+}
+
 export function useArtifactsQuery(workspace?: string) {
   return useQuery({ queryKey: ['artifacts'] as const, queryFn: () => api.artifacts(workspace) });
 }

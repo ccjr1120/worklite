@@ -35,7 +35,9 @@ import { messagesHandler } from './handlers/messagesHandler';
 import { imageEditsHandler } from './handlers/imageEditsHandler';
 import { messagesCountTokensHandler } from './handlers/messagesCountTokensHandler';
 import modelResponsesHandler from './handlers/modelResponsesHandler';
-import { createProvider, deleteProvider, getProvider, listProviders, providerView, updateProvider } from './worklite/provider-registry';
+import { createProvider, deleteProvider, getProvider, listProviders, providerView, requestStats, updateProvider } from './worklite/provider-registry';
+import { codexAuthStatus, logoutCodex, refreshCodexCredential, startCodexLogin, startCodexOAuthCallbackServer } from './worklite/codex-auth';
+import { codexRateLimits } from './worklite/codex-transport';
 
 // utils
 import { logger } from './apm';
@@ -46,6 +48,10 @@ import { createCacheBackendsRedis } from './shared/services/cache';
 // Create a new Hono server instance
 const app = new Hono();
 const runtime = getRuntimeKey();
+
+async function dispatchInternal(request: Request, c: Context): Promise<Response> {
+  return runtime === 'workerd' ? app.fetch(request, c.env, c.executionCtx) : app.fetch(request, c.env);
+}
 
 if (runtime === 'node' && process.env.REDIS_CONNECTION_STRING) {
   createCacheBackendsRedis(process.env.REDIS_CONNECTION_STRING);
@@ -93,6 +99,20 @@ if (runtime === 'node') {
 app.get('/', (c) => c.text('AI Gateway says hey!'));
 
 app.get('/worklite/providers', async (c) => c.json(await listProviders()));
+app.get('/worklite/stats', (c) => {
+  const requestedWindow = c.req.query('window');
+  const window = requestedWindow === '7d' || requestedWindow === '30d' ? requestedWindow : '24h';
+  return c.json(requestStats(window));
+});
+app.get('/worklite/codex/auth/status', (c) => c.json(codexAuthStatus()));
+app.get('/worklite/codex/rate-limits', async (c) => {
+  try { return c.json(await codexRateLimits()); } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Codex rate limits are unavailable.' }, 502); }
+});
+app.post('/worklite/codex/auth/login', (c) => c.json(startCodexLogin()));
+app.post('/worklite/codex/auth/refresh', async (c) => {
+  try { return c.json(await refreshCodexCredential()); } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Codex token refresh failed.' }, 502); }
+});
+app.post('/worklite/codex/auth/logout', (c) => { logoutCodex(); return c.json(codexAuthStatus()); });
 app.get('/worklite/providers/:providerId', async (c) => {
   const provider = await getProvider(c.req.param('providerId'));
   return provider ? c.json(providerView(provider)) : c.json({ message: 'Model provider not found.' }, 404);
@@ -100,16 +120,28 @@ app.get('/worklite/providers/:providerId', async (c) => {
 app.post('/worklite/providers/:providerId/test', async (c) => {
   const provider = await getProvider(c.req.param('providerId'));
   if (!provider) return c.json({ message: 'Model provider not found.' }, 404);
-  const model = provider.models[0];
-  if (!model) return c.json({ message: 'Add at least one model id before testing this provider.' }, 400);
-  const adapter = provider.protocol.startsWith('deepseek/') ? 'deepseek' : 'openai';
+  const input = await c.req.json().catch(() => null) as { model?: unknown } | null;
+  const model = typeof input?.model === 'string' ? input.model.trim() : '';
+  if (!model) return c.json({ message: 'Select a model before testing this provider.' }, 400);
+  if (!provider.models.includes(model)) return c.json({ message: 'The selected model is not configured for this provider.' }, 400);
+  const adapter = provider.protocol === 'codex/responses' ? 'codex' : provider.protocol.startsWith('deepseek/') ? 'deepseek' : 'openai';
   const headers = new Headers({ 'content-type': 'application/json', 'x-portkey-config': JSON.stringify({ provider: adapter, api_key: provider.apiKey, custom_host: provider.baseURL, ...(Object.keys(provider.headers ?? {}).length > 0 ? { forward_headers: Object.keys(provider.headers ?? {}) } : {}) }) });
   for (const [name, value] of Object.entries(provider.headers ?? {})) headers.set(name, value);
   const prompt = '\u4f60\u597d';
-  const upstream = await app.fetch(new Request(new URL('/v1/chat/completions', c.req.url), { method: 'POST', headers, body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], max_tokens: 32 }) }), c.env, c.executionCtx);
+  const isCodex = provider.protocol === 'codex/responses';
+  const path = isCodex ? '/v1/responses' : '/v1/chat/completions';
+  const body = isCodex
+    ? { model, input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }] }], store: false, stream: true }
+    : { model, messages: [{ role: 'user', content: prompt }], max_tokens: 32 };
+  const upstream = await dispatchInternal(new Request(new URL(path, c.req.url), { method: 'POST', headers, body: JSON.stringify(body) }), c);
   if (!upstream.ok) return c.json({ message: 'Provider connection failed.' }, upstream.status as 400);
-  const payload = await upstream.json() as { choices?: Array<{ message?: { content?: string } }> };
-  return c.json({ connection: 'connected', model, prompt, response: payload.choices?.[0]?.message?.content ?? '', traceId: crypto.randomUUID() });
+  const raw = await upstream.text();
+  let payload: { choices?: Array<{ message?: { content?: string } }>; output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> } = {};
+  try { payload = JSON.parse(raw); } catch {}
+  const response = isCodex
+    ? payload.output_text ?? payload.output?.flatMap((item) => item.content ?? []).map((item) => item.text ?? '').join('') ?? [...raw.matchAll(/"delta":"((?:\\.|[^"\\])*)"/g)].map((match) => JSON.parse(`"${match[1]}"`)).join('')
+    : payload.choices?.[0]?.message?.content ?? '';
+  return c.json({ connection: 'connected', model, prompt, response, traceId: crypto.randomUUID() });
 });
 app.post('/worklite/providers', async (c) => {
   try { return c.json(await createProvider(await c.req.json()), 201); } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Provider could not be created.' }, 400); }
@@ -126,14 +158,15 @@ app.all('/worklite/proxy/*', async (c) => {
   if (!provider) return c.json({ error: { message: 'Model provider not found.' } }, 404);
   const operation = c.req.path.slice('/worklite/proxy/'.length);
   if (operation !== 'models' && operation !== 'chat/completions' && operation !== 'responses') return c.json({ error: { message: 'Unsupported Gateway operation.' } }, 400);
-  const adapter = provider.protocol.startsWith('deepseek/') ? 'deepseek' : 'openai';
+  const adapter = provider.protocol === 'codex/responses' ? 'codex' : provider.protocol.startsWith('deepseek/') ? 'deepseek' : 'openai';
   const config = { provider: adapter, api_key: provider.apiKey, custom_host: provider.baseURL, ...(Object.keys(provider.headers ?? {}).length > 0 ? { forward_headers: Object.keys(provider.headers ?? {}) } : {}) };
   const headers = new Headers(c.req.raw.headers);
   headers.delete('x-worklite-provider-id');
+  headers.set('x-worklite-stat-provider', provider.name);
   headers.set('x-portkey-config', JSON.stringify(config));
   for (const [name, value] of Object.entries(provider.headers ?? {})) headers.set(name, value);
   const body = c.req.method === 'GET' || c.req.method === 'HEAD' ? undefined : await c.req.text();
-  return app.fetch(new Request(new URL(`/v1/${operation}`, c.req.url), { method: c.req.method, headers, body }), c.env, c.executionCtx);
+  return dispatchInternal(new Request(new URL(`/v1/${operation}`, c.req.url), { method: c.req.method, headers, body }), c);
 });
 
 // Use prettyJSON middleware for all routes
@@ -173,6 +206,8 @@ app.onError((err, c) => {
   c.status(500);
   return c.json({ status: 'failure', message: err.message });
 });
+
+if (runtime === 'node') startCodexOAuthCallbackServer();
 
 /**
  * POST route for '/v1/messages' in anthropic format

@@ -1,6 +1,7 @@
 import { Context, Next } from 'hono';
 import { HEADER_KEYS } from '../globals';
 import { env } from 'hono/adapter';
+import { codexModels } from '../worklite/codex-transport';
 
 /**
  * Handles the models request. Returns a list of models supported by the Ai gateway.
@@ -26,6 +27,8 @@ export const modelsHandler = async (context: Context, next: Next) => {
   const virtualKey = headers[HEADER_KEYS.VIRTUAL_KEY];
 
   const containsProvider = providerHeader || virtualKey || config?.provider || config?.virtual_key;
+
+  if (config?.provider === 'codex') return codexModels(context.req.raw);
 
   if (containsProvider && config?.custom_host) {
     let target: URL;

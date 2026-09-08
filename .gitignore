@@ -9,6 +9,7 @@ dist
 .DS_Store
 coverage
 .data
+apps/api/data/
 *.tsbuildinfo
 .idea
 .vscode/*

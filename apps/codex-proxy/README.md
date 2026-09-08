@@ -1,14 +1,11 @@
-# WorkLite Codex Proxy
+# WorkLite Codex Proxy (Deprecated)
 
-This package is an optional Node.js sidecar that exposes the direct Codex Responses transport through an OpenAI-compatible local endpoint. WorkLite reaches it through the existing Portkey Provider path; the sidecar does not import NestJS modules or access the WorkLite database.
+The Codex transport is now built into the Portkey Gateway as the `codex/responses` Provider adapter. This package is retained only as a historical standalone wrapper and is not started by WorkLite deployment scripts or required by the API.
 
-## Configuration
+Configure Codex through the Gateway process environment instead:
 
 ```text
-CODEX_PROXY_HOST=127.0.0.1
-CODEX_PROXY_PORT=4548
-CODEX_PROXY_API_KEY=choose-a-local-key
-CODEX_ACCESS_TOKEN=your-codex-access-token
+CODEX_ACCESS_TOKEN=optional-bootstrap-access-token
 CODEX_ACCOUNT_ID=optional-chatgpt-account-id
 CODEX_UPSTREAM_URL=https://chatgpt.com/backend-api/codex
 CODEX_CLIENT_VERSION=26.707.31428
@@ -17,24 +14,12 @@ CODEX_ORIGINATOR=codex_cli_rs
 CODEX_RESIDENCY=us
 ```
 
-`CODEX_ACCESS_TOKEN` and `CODEX_PROXY_API_KEY` are required for proxy requests. The sidecar reports `configured: false` from `/health` until both values are present. Credentials are read only by the sidecar process and are never returned by an endpoint.
+Create a Gateway Provider with protocol `codex/responses`. Its Base URL is descriptive metadata; private Codex routing and credentials are owned by the Gateway process. Multi-account rotation, non-streaming assembly, Chat Completions translation, and WebSocket transport remain deferred.
 
-## Endpoints
+The Gateway now provides Codex OAuth PKCE login and local SQLite refresh-token persistence. Use the Model Providers page to start login; the callback uses `http://localhost:1455/auth/callback`. `CODEX_ACCESS_TOKEN` remains an optional bootstrap fallback. No additional encryption key is required for this local-only installation.
 
-```text
-GET  /health
-GET  /v1/models
-POST /v1/responses
-POST /v1/responses/compact
-```
-
-All routes except `/health` require `Authorization: Bearer <CODEX_PROXY_API_KEY>` or `X-API-Key`. Responses are streamed from the private Codex endpoint. The sidecar currently forwards the Responses body and stream without assembling non-streaming responses.
-
-## Development
+For a remote Gateway, forward the callback port before starting login:
 
 ```bash
-pnpm --filter @worklite/codex-proxy dev
-pnpm --filter @worklite/codex-proxy typecheck
+ssh -N -L 1455:127.0.0.1:1455 user@gateway-host
 ```
-
-Keep the service bound to `127.0.0.1` unless an explicit trusted-network deployment boundary is configured. OAuth/device login, refresh-token persistence, multi-account rotation, Chat Completions translation, and WebSocket transport are deferred.

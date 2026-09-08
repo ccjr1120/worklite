@@ -4,7 +4,7 @@
 
 Use the collection pattern with the online-create entry point in the right side of the toolbar directly above the table. Skills is the second view in the shared page-level Agent resource tabs. Archive upload remains absent until package upload and extraction are implemented end to end. Rows show name, source type, current version, and update time. Do not show validation or publication state until those operations are real.
 
-Protected built-in Skills appear in the same collection with a non-color `Built-in` source label. Executable built-ins expose Unix availability or unsupported-platform state without presenting runtime availability as package validation. The `worklite-platform` row carries a `System Helper Chat only` label and remains visible for transparency even though it is excluded from custom Agent assignment controls.
+Protected built-in Skills appear in the same collection with a non-color `Built-in` source label. The platform-operation capability is owned by System Helper Chat and is not a Skill resource in this collection.
 
 Define empty, uploading, validating, invalid package, filtered no-results, permission and unavailable-file states.
 

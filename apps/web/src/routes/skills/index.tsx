@@ -8,7 +8,6 @@ import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/c
 import { EmptyState } from '@/components/empty-state';
 import { PageHeading } from '@/components/page-heading';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
@@ -24,7 +23,7 @@ function SkillListPage() {
   const workspaceSlug = "personal";
   const [search, setSearch] = useState('');
   const { data: all = [], isLoading, isError } = useSkillsQuery(workspaceSlug);
-  const items = useMemo(() => all.filter((item) => item.name.toLowerCase().includes(search.toLowerCase())), [all, search]);
+  const items = useMemo(() => all.filter((item) => item.id !== 'sk_worklite_platform' && item.name.toLowerCase().includes(search.toLowerCase())), [all, search]);
 
   return (
     <div className="mx-auto w-full max-w-[1440px] px-6 py-6">
@@ -60,7 +59,6 @@ function SkillListPage() {
                 <CollectionRow className="min-w-[640px] grid-cols-[2fr_1fr_1fr_1fr]">
                   <span className="flex min-w-0 items-center gap-2 font-medium">
                     <span className="truncate">{item.name}</span>
-                    {item.id === 'sk_worklite_platform' ? <Badge variant="info">{t('platform.systemOnly')}</Badge> : null}
                   </span>
                   <span className="text-[13px] text-muted-foreground">{t(`source.${item.source}`)}</span>
                   <span className="font-mono text-[13px]">{item.version}</span>

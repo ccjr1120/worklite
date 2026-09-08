@@ -3,14 +3,14 @@ import { request as httpRequest, type IncomingMessage } from 'node:http';
 import { resolve } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { BadRequestException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
 import type { Request, Response } from 'express';
-import type { CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStatus, PortkeyGatewayView, UpdateModelProviderRequest } from '@worklite/contracts';
+import type { CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatsWindow, PortkeyGatewayStatus, PortkeyGatewayView, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
 import type { ModelProviderConfig } from '@worklite/model-gateway';
-import { modelProviders, type Database } from '@worklite/db';
+import { agents, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
-import { decryptSecret } from '../teams/team-resources.service';
 
-const GATEWAY_PORT = 4547;
+const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 4547);
 
 const portkeyRequire = createRequire(__filename);
 const HOP_BY_HOP_HEADERS = new Set([
@@ -43,19 +43,20 @@ function responseHeaders(headers: IncomingMessage['headers']): Record<string, st
   );
 }
 
-function protocolParts(protocol: ModelProviderProtocol): { adapter: 'openai' | 'deepseek'; operation: 'chat/completions' | 'responses' } {
+function protocolParts(protocol: ModelProviderProtocol): { adapter: 'openai' | 'codex' | 'deepseek'; operation: 'chat/completions' | 'responses' } {
   if (protocol === 'deepseek/chat') return { adapter: 'deepseek', operation: 'chat/completions' };
+  if (protocol === 'codex/responses') return { adapter: 'codex', operation: 'responses' };
   if (protocol === 'openai/responses') return { adapter: 'openai', operation: 'responses' };
   return { adapter: 'openai', operation: 'chat/completions' };
 }
 
 function discoveryConfig(input: DiscoverModelProviderRequest): ModelProviderConfig {
-  const apiKey = input.apiKey.trim();
-  if (!apiKey) throw new BadRequestException('An API key is required to fetch models.');
+  const apiKey = input.apiKey?.trim() ?? '';
+  if (input.protocol !== 'codex/responses' && !apiKey) throw new BadRequestException('An API key is required to fetch models.');
   const baseURL = input.baseURL?.trim();
   if (!baseURL) throw new BadRequestException('Base URL is required to fetch models.');
   const protocol = input.protocol ?? 'openai/chat';
-  if (protocol !== 'openai/chat' && protocol !== 'openai/responses' && protocol !== 'deepseek/chat') throw new BadRequestException('Unsupported model provider protocol.');
+  if (protocol !== 'openai/chat' && protocol !== 'openai/responses' && protocol !== 'codex/responses' && protocol !== 'deepseek/chat') throw new BadRequestException('Unsupported model provider protocol.');
   if (input.headers !== undefined && (input.headers === null || typeof input.headers !== 'object' || Array.isArray(input.headers) || Object.values(input.headers).some((value) => typeof value !== 'string'))) {
     throw new BadRequestException('Custom headers must be a JSON object with string values.');
   }
@@ -63,6 +64,23 @@ function discoveryConfig(input: DiscoverModelProviderRequest): ModelProviderConf
   if (headers && Object.keys(headers).some((name) => !name)) throw new BadRequestException('Custom header names must be non-empty.');
   const { adapter } = protocolParts(protocol);
   return { id: 'discovery', adapter, apiKey, baseURL, headers };
+}
+
+function discoveredModelIds(payload: unknown): string[] {
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? Object.values(payload).find((value) => Array.isArray(value)) ?? []
+      : [];
+  return [...new Set(rows.flatMap((row) => {
+    if (typeof row === 'string') return [row.trim()];
+    if (row && typeof row === 'object' && !Array.isArray(row)) {
+      for (const key of ['id', 'name', 'model']) {
+        if (key in row && typeof row[key as keyof typeof row] === 'string') return [(row[key as keyof typeof row] as string).trim()];
+      }
+    }
+    return [];
+  }).filter(Boolean))];
 }
 
 @Injectable()
@@ -82,7 +100,6 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit(): Promise<void> {
     await this.start();
-    await this.migrateLegacyProviders();
   }
 
   async status(): Promise<PortkeyGatewayView> {
@@ -93,20 +110,61 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     return this.gatewayJson<ModelProviderView[]>('/worklite/providers');
   }
 
+  async stats(window?: string): Promise<PortkeyGatewayStats> {
+    const requested = window === '7d' || window === '30d' ? window : '24h';
+    await this.ensureGatewayForDiscovery();
+    return this.gatewayJson<PortkeyGatewayStats>(`/worklite/stats?window=${requested as PortkeyGatewayStatsWindow}`);
+  }
+
+  async codexAuthStatus(): Promise<CodexAuthStatus> {
+    await this.ensureGatewayForDiscovery();
+    return this.gatewayJson<CodexAuthStatus>('/worklite/codex/auth/status');
+  }
+
+  async codexRateLimits(): Promise<CodexRateLimitSnapshot> {
+    await this.ensureGatewayForDiscovery();
+    return this.gatewayJson<CodexRateLimitSnapshot>('/worklite/codex/rate-limits');
+  }
+
+  async startCodexLogin(): Promise<{ authorizationUrl: string; sessionId: string }> {
+    await this.ensureGatewayForDiscovery();
+    return this.gatewayJson<{ authorizationUrl: string; sessionId: string }>('/worklite/codex/auth/login', { method: 'POST' });
+  }
+
+  async refreshCodexCredential(): Promise<CodexAuthStatus> {
+    await this.ensureGatewayForDiscovery();
+    return this.gatewayJson<CodexAuthStatus>('/worklite/codex/auth/refresh', { method: 'POST' });
+  }
+
+  async logoutCodex(): Promise<CodexAuthStatus> {
+    await this.ensureGatewayForDiscovery();
+    return this.gatewayJson<CodexAuthStatus>('/worklite/codex/auth/logout', { method: 'POST' });
+  }
+
   async createProvider(input: CreateModelProviderRequest): Promise<ModelProviderView> {
     return this.gatewayJson<ModelProviderView>('/worklite/providers', { method: 'POST', body: JSON.stringify(input), headers: { 'content-type': 'application/json' } });
   }
 
   async updateProvider(providerId: string, input: UpdateModelProviderRequest): Promise<ModelProviderView> {
-    return this.gatewayJson<ModelProviderView>(`/worklite/providers/${encodeURIComponent(providerId)}`, { method: 'PATCH', body: JSON.stringify(input), headers: { 'content-type': 'application/json' } });
+    const provider = await this.gatewayJson<ModelProviderView>(`/worklite/providers/${encodeURIComponent(providerId)}`, { method: 'PATCH', body: JSON.stringify(input), headers: { 'content-type': 'application/json' } });
+    if (input.models !== undefined) {
+      const fallbackModel = provider.models[0] ?? '';
+      const boundAgents = await this.db.select({ id: agents.id, model: agents.model }).from(agents).where(eq(agents.providerId, providerId));
+      for (const agent of boundAgents) {
+        if (agent.model && provider.models.includes(agent.model)) continue;
+        await this.db.update(agents).set({ model: fallbackModel, updatedAt: new Date() }).where(eq(agents.id, agent.id));
+      }
+    }
+    return provider;
   }
 
   async deleteProvider(providerId: string) {
     await this.gatewayJson(`/worklite/providers/${encodeURIComponent(providerId)}`, { method: 'DELETE' });
+    await this.db.update(agents).set({ providerId: null, model: '', updatedAt: new Date() }).where(eq(agents.providerId, providerId));
   }
 
-  async testProvider(providerId: string): Promise<ModelProviderTestResult> {
-    return this.gatewayJson<ModelProviderTestResult>(`/worklite/providers/${encodeURIComponent(providerId)}/test`, { method: 'POST' });
+  async testProvider(providerId: string, input: TestModelProviderRequest): Promise<ModelProviderTestResult> {
+    return this.gatewayJson<ModelProviderTestResult>(`/worklite/providers/${encodeURIComponent(providerId)}/test`, { method: 'POST', body: JSON.stringify(input), headers: { 'content-type': 'application/json' } });
   }
 
   async models(request: Request): Promise<PortkeyGatewayModelList> {
@@ -115,7 +173,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     return {
       object: 'list',
       data: providers.flatMap((provider) => provider.models.map((model) => ({
-        id: `${provider.id}/${model}`,
+        id: `${provider.name}/${model}`,
         object: 'model' as const,
         created: 0,
         owned_by: provider.name,
@@ -125,8 +183,8 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
 
   async start(): Promise<PortkeyGatewayView> {
     if (this.gatewayStatus === 'running') return this.snapshot();
-    if (this.gatewayStatus === 'starting') {
-      if (this.startup) await this.startup.catch(() => undefined);
+    if (this.gatewayStatus === 'starting' && this.startup) {
+      await this.startup.catch(() => undefined);
       return this.snapshot();
     }
     this.stopping = false;
@@ -225,13 +283,15 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     const model = request.body && typeof request.body === 'object' && !Array.isArray(request.body) && 'model' in request.body
       ? request.body.model
       : undefined;
-    if (typeof model !== 'string') throw new BadRequestException('The model must use the <providerId>/<modelId> format.');
+    if (typeof model !== 'string') throw new BadRequestException('The model must use the <providerName>/<modelId> format.');
     const separator = model.indexOf('/');
-    if (separator <= 0 || separator === model.length - 1) throw new BadRequestException('The model must use the <providerId>/<modelId> format.');
-    const providerId = model.slice(0, separator).trim();
+    if (separator <= 0 || separator === model.length - 1) throw new BadRequestException('The model must use the <providerName>/<modelId> format.');
+    const providerName = model.slice(0, separator).trim();
     const modelId = model.slice(separator + 1).trim();
-    if (!providerId || !modelId) throw new BadRequestException('The model must use the <providerId>/<modelId> format.');
-    await this.proxy(request, response, providerId, operation, modelId);
+    if (!providerName || !modelId) throw new BadRequestException('The model must use the <providerName>/<modelId> format.');
+    const provider = (await this.providers()).find((candidate) => candidate.name === providerName);
+    if (!provider) throw new BadRequestException('Model provider not found.');
+    await this.proxy(request, response, provider.id, operation, modelId);
   }
 
   async discoverModels(input: DiscoverModelProviderRequest): Promise<DiscoverModelProviderResult> {
@@ -254,8 +314,9 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
         const chunks: Buffer[] = [];
         upstreamResponse.on('data', (chunk: Buffer) => chunks.push(chunk));
         upstreamResponse.once('end', () => {
-          if ((upstreamResponse.statusCode ?? 500) < 200 || (upstreamResponse.statusCode ?? 500) >= 300) {
-            rejectPromise(new ServiceUnavailableException('The provider did not return a model list.'));
+          const status = upstreamResponse.statusCode ?? 500;
+          if (status < 200 || status >= 300) {
+            rejectPromise(new ServiceUnavailableException(`The provider did not return a model list (HTTP ${status}).`));
             return;
           }
           try {
@@ -268,8 +329,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
       upstream.on('error', () => rejectPromise(new ServiceUnavailableException('Provider model discovery failed.')));
       upstream.end();
     });
-    const rows = payload && typeof payload === 'object' && !Array.isArray(payload) && 'data' in payload && Array.isArray(payload.data) ? payload.data : [];
-    const models = [...new Set(rows.flatMap((row) => row && typeof row === 'object' && !Array.isArray(row) && 'id' in row && typeof row.id === 'string' ? [row.id.trim()] : []).filter(Boolean))];
+    const models = discoveredModelIds(payload);
     if (models.length === 0) throw new ServiceUnavailableException('The provider returned no usable models.');
     return { models };
   }
@@ -295,27 +355,6 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     return body as T;
   }
 
-  private async migrateLegacyProviders(): Promise<void> {
-    const existing = await this.providers().catch(() => []);
-    if (existing.length > 0) return;
-    const legacy = await this.db.select().from(modelProviders);
-    for (const provider of legacy) {
-      if (provider.id === 'gateway-provider' || !provider.baseURL) continue;
-      let apiKey = '';
-      let headers: Record<string, string> | undefined;
-      try { apiKey = provider.apiKey ? decryptSecret(provider.apiKey) : ''; } catch { apiKey = ''; }
-      try {
-        const parsed = provider.headers ? JSON.parse(decryptSecret(provider.headers)) as unknown : undefined;
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) headers = parsed as Record<string, string>;
-      } catch { headers = undefined; }
-      await this.gatewayJson('/worklite/providers', {
-        method: 'POST',
-        body: JSON.stringify({ id: provider.id, name: provider.name, protocol: provider.protocol, baseURL: provider.baseURL, apiKey, models: provider.models ?? [], ...(headers ? { headers } : {}) }),
-        headers: { 'content-type': 'application/json' },
-      }).catch(() => undefined);
-    }
-  }
-
   private async ensureGatewayForDiscovery(): Promise<void> {
     if (this.gatewayReady && this.gatewayStatus === 'running') return;
     const gateway = await this.start();
@@ -328,7 +367,12 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     const preload = resolve(process.cwd(), 'portkey-local-bind.cjs');
     const child = spawn(process.execPath, ['-r', preload, gatewayEntry, `--port=${this.activeGatewayPort}`, '--headless'], {
       cwd: process.cwd(),
-      env: { ...process.env, PORT: String(this.activeGatewayPort), TRUSTED_CUSTOM_HOSTS: this.trustedHosts() },
+      env: {
+        ...process.env,
+        PORT: String(this.activeGatewayPort),
+        TRUSTED_CUSTOM_HOSTS: this.trustedHosts(),
+        PORTKEY_GATEWAY_DB_PATH: this.gatewayDatabasePath(),
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     this.gateway = child;
@@ -397,4 +441,10 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     const configured = process.env.PORTKEY_TRUSTED_CUSTOM_HOSTS?.trim();
     return configured || 'localhost,127.0.0.1,::1,host.docker.internal';
   }
+
+  private gatewayDatabasePath(): string {
+    const configured = process.env.PORTKEY_GATEWAY_DB_PATH?.trim();
+    return resolve(process.cwd(), configured || 'data/worklite-gateway.db');
+  }
+
 }

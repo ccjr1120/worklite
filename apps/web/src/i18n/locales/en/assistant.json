@@ -40,6 +40,8 @@
     "systemHelper": "System Helper Chat",
     "codexCli": "Codex CLI Chat"
   },
+  "panelTabs": { "label": "Agent workspace views", "chat": "Chat", "configuration": "Configuration" },
+  "configuration": { "title": "Agent configuration", "description": "Select a model already configured in this workspace.", "model": "Provider and model", "hint": "Changes are saved automatically.", "placeholder": "Choose a configured model", "saving": "Saving..." },
   "minimized": {
     "minimize": "Minimize conversation"
   },

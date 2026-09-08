@@ -19,7 +19,7 @@ Before UI work, read the design system, this index, every applicable document un
 - [Home](home/README.md)
 - [Workspace System Helper Chat](assistant/README.md)
 - Agents: [List and resource views](agents/list.md), [Editor](agents/editor.md)
-- Providers: [Model providers and Portkey Gateway](model-providers.md)
+- Providers: [Model providers and Portkey Gateway](model-providers.md), including Gateway request statistics
 - Workflows: [List](workflows/list.md), [Editor](workflows/editor.md), [Versions](workflows/versions.md)
 - Runs: [List](runs/list.md), [Details](runs/details.md)
 - Skills: [List](skills/list.md), [Editor](skills/editor.md)
@@ -43,7 +43,7 @@ Before UI work, read the design system, this index, every applicable document un
 /settings/{usage,audit-log,logs,appearance}
 ```
 
-The root route opens Home. First-use setup is an optional checklist for configuring a Model Provider and binding that Provider and a model to System Helper Chat; there is no account, invitation, team, first custom Agent, Workflow, or Run setup step. The `/model-providers` page is the top-level Providers destination and switches between Model Providers and Portkey Gateway administration within the same page context.
+The root route opens Home. First-use setup is an optional checklist for configuring a Model Provider and binding that Provider and a model to System Helper Chat; there is no account, invitation, team, first custom Agent, Workflow, or Run setup step. The `/model-providers` page is the top-level Providers destination. It shows the Portkey Gateway information first and the Gateway-managed Model Provider administration below in one continuous page.
 
 ## Shared Component Inventory
 
@@ -63,8 +63,21 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-09-08
+
+- Confirmed a project-wide Memory One visual replication direction for every WorkLite page and shared surface. Existing page specifications inherit the shared cold-white/blue-black themes, compact workspace shell, restrained borders, and execution-focused blue accent.
+
+### 2026-09-04
+
+- Added the Portkey Gateway request-statistics view to the Providers page specification.
+- Documented independent Gateway SQLite persistence for Gateway-owned Provider records and the one-time legacy Provider imports.
+- Standardized Gateway and Agent model values on the public `providerName/modelId` namespace while keeping Provider ids internal.
+
 ### 2026-09-03
 
+- Made the Gateway summary span the full content width for clearer status and listener presentation.
+- Kept Gateway details collapsed by default and used provider names for readable model labels while preserving stable dispatch identifiers.
+- Changed the Model Providers page from a Gateway/Providers tab switcher to one continuous layout with Gateway information above the provider list.
 - Updated the Portkey Gateway surface for one unified `/v1` integration entry point, namespaced Provider/model identifiers, and explicit no-key guidance.
 - Updated shared Agent Chat behavior so Home keeps its visible composer while other pages use a draggable lower-right icon that opens and focuses the conversation.
 - Refined the floating entry to use an Agent icon without a Tooltip and close expanded Chat on outside interaction.

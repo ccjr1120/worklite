@@ -35,12 +35,12 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
         className={cn(
           'relative flex h-8 items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-[120ms]',
           collapsed && 'justify-center px-0',
-          active ? 'bg-brand-subtle font-medium text-foreground' : 'text-muted-foreground hover:bg-surface-subtle hover:text-foreground',
+          active ? 'bg-surface font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:bg-surface-subtle hover:text-foreground',
           focusRingInset,
         )}
         aria-current={active ? 'page' : undefined}
       >
-        {active ? <span className="absolute left-0 top-1.5 h-5 w-0.5 rounded-full bg-brand" aria-hidden="true" /> : null}
+        {active ? <span className="absolute left-0 top-1.5 h-5 w-0.5 rounded-full bg-foreground" aria-hidden="true" /> : null}
         <item.icon className="size-[18px] shrink-0" aria-hidden="true" />
         {collapsed ? <span className="sr-only">{t(item.labelKey)}</span> : <span className="truncate">{t(item.labelKey)}</span>}
       </Link>

@@ -8,6 +8,8 @@ The canonical route is `/home`. System Helper Chat appears in command search but
 
 ## Layout
 
+The expanded conversation panel includes `Chat` and `Configuration` views in that order. Configuration belongs to the panel rather than the Agent collection and lets users select an existing workspace Provider/model pair for System Helper. Selection autosaves to the protected system Agent; an unconfigured helper opens on Configuration by default. Follow the earlier Memory One panel pattern: lightweight top tabs and unframed configuration fields inside the conversation surface. Both views share the same fixed panel height so switching tabs does not resize the surface.
+
 Keep the workspace shell stable. Home shows a single-line composer by default; other pages show a draggable lower-right Chat icon by default. Clicking the icon opens a centered conversation panel above the current page and focuses the composer. Composer focus also opens the panel. The icon remains keyboard accessible and stays within the viewport safe area. Navigating closes the panel while preserving the current server execution identifier.
 
 The expanded header identifies System Helper Chat, shows the current Agent execution status, and provides an icon-only minimize control. When an execution is reconnecting, show that state separately from the server-owned execution status. A compact diagnostics disclosure may show the safe execution identifier and last-updated time without exposing provider or host secrets. Before the first message, compact task starters may populate requests for Provider, Skill, MCP server, or Agent creation without fabricating a proposal. When no provider or model is bound and no configured custom Agent is available, replace the composer with one keyboard-accessible setup link to `/agents/agt_system_helper_chat`. If a configured custom Agent is available, keep the composer for structured `@` dispatch while ordinary System Helper submission remains disabled. When the plugin catalog reports `codex-cli-chat` as enabled, show a compact keyboard-accessible target picker beside the composer. Selecting the plugin changes the active execution target, labels the transcript with the plugin name, and allows submission without a Model Provider binding. The picker remains disabled while a turn is running and selection returns to System Helper only through an explicit user action.
@@ -26,7 +28,7 @@ Each child session owns one normal custom-Agent execution and persists independe
 
 ## Skill Execution
 
-System Helper Chat permanently owns the protected `worklite-platform` Skill. The model can request only its server-discovered shebang-bearing scripts through `skill_script`. Every valid request executes immediately on the server. The browser never authorizes the request, calls resource mutation APIs on behalf of a model response, or infers operations from message text, script names, or stdout.
+System Helper Chat permanently owns the platform-operation capability. It is an internal Chat capability, not a persisted or assignable Skill resource. The model can request only its server-discovered shebang-bearing scripts through `skill_script`. Every valid request executes immediately on the server. The browser never authorizes the request, calls resource mutation APIs on behalf of a model response, or infers operations from message text, script names, or stdout.
 
 Completed resource scripts show their returned resource route as a normal link. Provider results lead to the secure Provider form because credentials cannot be passed through Chat. A completed navigation script may include a server-validated client action; Web applies only that typed route. Appearance and language results come from persisted server settings and are applied after the settings query refreshes.
 
@@ -63,6 +65,8 @@ All icon-only controls require accessible names and tooltips, except the intenti
 ## Changelog
 
 ### 2026-09-03
+
+- Moved System Helper configuration into the chat panel with Configuration and Conversation views; configuration selects existing workspace Provider/model pairs.
 
 - Changed cross-page Chat minimization to a draggable lower-right icon that opens and focuses the composer, while Home retains its visible input.
 - Use the Agent icon without a Tooltip for the floating entry and close expanded Chat when the pointer lands outside its surface.

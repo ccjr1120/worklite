@@ -378,7 +378,7 @@ function WorkflowEditorPage() {
       <label className="relative mt-4 block"><span className="sr-only">{t('editor.searchNodes')}</span><Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" aria-hidden="true" /><Input className="pl-8" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} placeholder={t('editor.searchNodes')} /></label>
       <div className="mt-3 min-h-0 flex-1 space-y-1 overflow-auto">
         <PaletteButton icon={<Braces className="size-5 text-info" />} title={t('editor.workflowInputNode')} description={t('editor.runPayload')} onClick={addInputNode} />
-        <PaletteButton icon={<FilePlus2 className="size-5 text-brand" />} title={t('editor.systemPromptNode')} description={t('editor.systemPromptSource')} onClick={addTextNode} />
+        <PaletteButton icon={<FilePlus2 className="size-5 text-foreground" />} title={t('editor.systemPromptNode')} description={t('editor.systemPromptSource')} onClick={addTextNode} />
         <PaletteButton icon={<Wrench className="size-5 text-warning" />} title={t('editor.skillSetNode')} description={t('editor.skillSetDescription')} onClick={addSkillSetNode} />
         {publishedAgents.length === 0 ? <p className="px-2 py-6 text-center text-[13px] text-muted-foreground">{t('editor.noPublishedAgents')}</p> : filteredAgents.length === 0 ? <p className="px-2 py-6 text-center text-[13px] text-muted-foreground">{t('editor.noAgents')}</p> : null}
         {filteredAgents.map((agent) => <PaletteButton key={agent.id} icon={<Bot className="size-5 text-info" />} title={agent.name} description={`${t('editor.genericAgentNode')} · ${agent.model}`} onClick={() => addGenericAgentNode(agent.id)} />)}

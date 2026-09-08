@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { AlertCircle, Ban, FileCode2, FilePlus2, FileText, Folder, LoaderCircle, LockKeyhole, Play, RefreshCw, Save, Settings2, Trash2, X } from 'lucide-react';
+import { AlertCircle, Ban, FileCode2, FilePlus2, FileText, Folder, LoaderCircle, LockKeyhole, Play, RefreshCw, Save, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { CommandExecutionEvent, CommandExecutionStatus, CommandExecutionView, SkillView } from '@worklite/contracts';
@@ -217,7 +217,7 @@ function SkillEditorPage() {
   if (!isNew && isLoading) return <ResourceState icon={LoaderCircle} message={t('editor.loading')} animated />;
   if (!isNew && isError) return <ResourceState icon={AlertCircle} message={t('editor.loadFailed')} error />;
 
-  const CapabilityIcon = skill?.id === 'sk_worklite_platform' ? Settings2 : FileCode2;
+  const CapabilityIcon = FileCode2;
   const selectedIsScript = selectedFile?.path.startsWith('scripts/');
   const selectedIsExecutable = Boolean(selectedIsScript && selectedFile?.content.startsWith('#!'));
   const executionActive = execution?.status === 'queued' || execution?.status === 'running' || execution?.status === 'cancelling';
@@ -270,7 +270,7 @@ function SkillEditorPage() {
 
         {isBuiltIn ? (
           <div className="mt-5 border-t border-border pt-4">
-            <div className="flex flex-wrap gap-2"><Badge variant="neutral">{t('source.built-in')}</Badge>{skill?.id === 'sk_worklite_platform' ? <Badge variant="info">{t('platform.systemOnly')}</Badge> : null}</div>
+            <div className="flex flex-wrap gap-2"><Badge variant="neutral">{t('source.built-in')}</Badge></div>
             <p className={cn('mt-3 text-xs leading-5', isTerminalCommand ? 'text-warning' : 'text-muted-foreground')}>{isTerminalCommand ? t('terminal.warning') : t('platform.boundary')}</p>
           </div>
         ) : null}

@@ -9,16 +9,16 @@ export type ModelProviderConfig =
       apiKey: string;
       baseURL?: string;
       headers?: Readonly<Record<string, string>>;
-      gatewayProviderId?: string;
+      gatewayProviderName?: string;
       operation?: 'chat/completions';
     }
   | {
       id: string;
-      adapter: 'openai';
+      adapter: 'openai' | 'codex';
       apiKey: string;
       baseURL?: string;
       headers?: Readonly<Record<string, string>>;
-      gatewayProviderId?: string;
+      gatewayProviderName?: string;
       operation?: 'chat/completions' | 'responses';
     };
 
@@ -229,7 +229,7 @@ function resolveModel(provider: ModelProviderConfig, modelId: string): LanguageM
     throw new ModelGatewayError('INVALID_REQUEST', 'A model id is required.');
   }
 
-  if (!provider.apiKey.trim()) {
+  if (!provider.apiKey.trim() && provider.adapter !== 'codex') {
     throw new ModelGatewayError('INVALID_PROVIDER', `Provider ${provider.id} has no usable API key.`);
   }
 
@@ -241,11 +241,10 @@ function resolveModel(provider: ModelProviderConfig, modelId: string): LanguageM
   });
   const headers = {
     ...(provider.headers ?? {}),
-    ...(provider.gatewayProviderId ? { 'x-worklite-provider-id': provider.gatewayProviderId } : {}),
     'x-portkey-config': portkeyConfig,
   };
   const baseURL = gatewayBaseURL();
-  const gatewayModel = provider.gatewayProviderId ? `${provider.gatewayProviderId}/${modelId}` : modelId;
+  const gatewayModel = provider.gatewayProviderName ? `${provider.gatewayProviderName}/${modelId}` : modelId;
 
   if (provider.adapter === 'deepseek') {
     return createDeepSeek({
@@ -260,7 +259,7 @@ function resolveModel(provider: ModelProviderConfig, modelId: string): LanguageM
     baseURL,
     headers,
   });
-  return provider.operation === 'responses' ? openai.responses(gatewayModel) as unknown as LanguageModel : openai.chat(gatewayModel);
+  return provider.operation === 'responses' || provider.adapter === 'codex' ? openai.responses(gatewayModel) as unknown as LanguageModel : openai.chat(gatewayModel);
 }
 
 function gatewayBaseURL(): string {

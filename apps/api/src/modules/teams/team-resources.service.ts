@@ -1,6 +1,6 @@
 import { BadRequestException, HttpException, Inject, Injectable, NotFoundException, RequestTimeoutException, ServiceUnavailableException } from '@nestjs/common';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type {
   ArtifactView,
@@ -145,6 +145,8 @@ const WORKLITE_NAVIGATION_ROUTES = {
 } as const satisfies Record<WorkliteNavigationTarget, string>;
 
 export const GATEWAY_PROVIDER_ID = 'gateway-provider';
+const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 4547);
+const GATEWAY_PROVIDER_URL = `http://127.0.0.1:${GATEWAY_PORT}/worklite/providers`;
 
 function validatePackageFiles(input: unknown): PackageFile[] {
   if (!Array.isArray(input) || input.length === 0) throw new BadRequestException('A Skill package must contain SKILL.md.');
@@ -199,6 +201,7 @@ function providerHeaders(value: string | null): Record<string, string> | undefin
 function providerConfig(row: typeof modelProviders.$inferSelect, apiKey: string): ModelProviderConfig {
   const common = { id: row.id, apiKey, baseURL: row.baseURL ?? undefined, headers: providerHeaders(row.headers) };
   if (row.protocol.startsWith('deepseek/')) return { ...common, adapter: 'deepseek' };
+  if (row.protocol === 'codex/responses') return { ...common, adapter: 'codex', operation: 'responses' };
   return { ...common, adapter: 'openai', operation: row.protocol === 'openai/responses' ? 'responses' : 'chat/completions' };
 }
 
@@ -217,6 +220,7 @@ function errorDetails(error: unknown): Record<string, unknown> {
 
 // Fixed multilingual smoke-test prompt requested by the product.
 const PROVIDER_TEST_PROMPT = '\u4f60\u597d';
+const SYSTEM_HELPER_PLATFORM_SKILL_ID = 'sk_worklite_platform';
 
 @Injectable()
 export class WorkspaceResourcesService {
@@ -230,7 +234,7 @@ export class WorkspaceResourcesService {
 
   async skills(request: Request, workspaceSlug: string): Promise<SkillView[]> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const rows = await this.db.select().from(skills).where(eq(skills.workspaceId, team.id)).orderBy(desc(skills.updatedAt));
+    const rows = (await this.db.select().from(skills).where(eq(skills.workspaceId, team.id)).orderBy(desc(skills.updatedAt))).filter((row) => row.id !== SYSTEM_HELPER_PLATFORM_SKILL_ID);
     const files = rows.length === 0 ? [] : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, rows.map((row) => row.id))).orderBy(asc(skillFiles.path));
     const bySkill = new Map<string, PackageFile[]>();
     for (const file of files) bySkill.set(file.skillId, [...(bySkill.get(file.skillId) ?? []), { path: file.path, content: file.content }]);
@@ -238,6 +242,7 @@ export class WorkspaceResourcesService {
   }
 
   async skill(request: Request, workspaceSlug: string, skillId: string): Promise<SkillView> {
+    if (skillId === SYSTEM_HELPER_PLATFORM_SKILL_ID) throw new NotFoundException('Skill not found');
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [row] = await this.db.select().from(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).limit(1);
     if (!row) throw new NotFoundException('Skill not found');
@@ -388,16 +393,21 @@ export class WorkspaceResourcesService {
   }
 
   async providers(request: Request, workspaceSlug: string): Promise<ModelProviderView[]> {
-    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const rows = await this.db.select().from(modelProviders).where(and(eq(modelProviders.workspaceId, team.id), sql`${modelProviders.id} <> ${GATEWAY_PROVIDER_ID}`)).orderBy(modelProviders.name);
-    return rows.map(providerView);
+    await this.workspaces.getWorkspace(request, workspaceSlug);
+    try {
+      const response = await fetch(GATEWAY_PROVIDER_URL);
+      if (!response.ok) return [];
+      return await response.json() as ModelProviderView[];
+    } catch {
+      return [];
+    }
   }
 
   async platformSnapshot(request: Request, workspaceSlug: string) {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [providerRows, skillRows, mcpRows, agentRows, workflowRows, settingsRows, agentSkillRows, agentMcpRows] = await Promise.all([
-      this.db.select().from(modelProviders).where(and(eq(modelProviders.workspaceId, workspace.id), sql`${modelProviders.id} <> ${GATEWAY_PROVIDER_ID}`)).orderBy(modelProviders.name),
-      this.db.select().from(skills).where(eq(skills.workspaceId, workspace.id)).orderBy(skills.name),
+      this.providers(request, workspaceSlug),
+      this.db.select().from(skills).where(and(eq(skills.workspaceId, workspace.id), ne(skills.id, SYSTEM_HELPER_PLATFORM_SKILL_ID))).orderBy(skills.name),
       this.db.select().from(mcpServers).where(eq(mcpServers.workspaceId, workspace.id)).orderBy(mcpServers.name),
       this.db.select().from(agents).where(eq(agents.workspaceId, workspace.id)).orderBy(agents.name),
       this.db.select().from(workflows).where(eq(workflows.workspaceId, workspace.id)).orderBy(workflows.name),
@@ -491,7 +501,7 @@ export class WorkspaceResourcesService {
     const name = input.name.trim();
     if (!name) throw new BadRequestException('Provider name is required.');
     const protocol = input.protocol ?? 'openai/chat';
-    const validProtocols: ModelProviderProtocol[] = ['openai/chat', 'openai/responses', 'deepseek/chat'];
+    const validProtocols: ModelProviderProtocol[] = ['openai/chat', 'openai/responses', 'codex/responses', 'deepseek/chat'];
     if (!validProtocols.includes(protocol)) throw new BadRequestException('Unsupported model provider protocol.');
     const headers = normalizeHeaders(input.headers);
     const serializedHeaders = headers === undefined ? undefined : encryptSecret(JSON.stringify(headers));
@@ -524,7 +534,7 @@ export class WorkspaceResourcesService {
     const name = input.name === undefined ? existing.name : input.name.trim();
     if (!name) throw new BadRequestException('Provider name is required.');
     const protocol = input.protocol ?? existing.protocol;
-    const validProtocols: ModelProviderProtocol[] = ['openai/chat', 'openai/responses', 'deepseek/chat'];
+    const validProtocols: ModelProviderProtocol[] = ['openai/chat', 'openai/responses', 'codex/responses', 'deepseek/chat'];
     if (!validProtocols.includes(protocol)) throw new BadRequestException('Unsupported model provider protocol.');
     const baseURL = input.baseURL === undefined ? existing.baseURL : input.baseURL.trim() || null;
     if (!baseURL) throw new BadRequestException('Base URL is required.');
@@ -569,8 +579,8 @@ export class WorkspaceResourcesService {
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), 30_000);
     const gatewayStartedAt = Date.now();
-    const gatewayPort = 4547;
-    const gatewayOperation = runtime.protocol === 'openai/responses' ? 'responses' : 'chat/completions';
+    const gatewayPort = GATEWAY_PORT;
+    const gatewayOperation = runtime.protocol === 'openai/responses' || runtime.protocol === 'codex/responses' ? 'responses' : 'chat/completions';
     this.diagnostics.write(workspace.id, { traceId, providerId, operation: 'provider_test', stage: 'gateway_request', level: 'info', status: 'started', message: 'Sending the smoke-test request through the Portkey Gateway.', metadata: { model: runtime.model, protocol: runtime.protocol, request: { method: 'POST', path: `/v1/${gatewayOperation}` }, gateway: { host: '127.0.0.1', port: gatewayPort } } });
     let stage = 'gateway_request';
     try {
@@ -611,31 +621,25 @@ export class WorkspaceResourcesService {
     providerId: string,
     selectedModel?: string,
   ): Promise<{ provider: ModelProviderConfig; model: string; protocol: ModelProviderView['protocol'] }> {
+    await this.workspaces.getWorkspace(request, workspaceSlug);
+    let gatewayResponse: globalThis.Response;
     try {
-      const gatewayResponse = await fetch(`http://127.0.0.1:4547/worklite/providers/${encodeURIComponent(providerId)}`);
-      if (gatewayResponse.ok) {
-        const gatewayProvider = await gatewayResponse.json() as { id: string; protocol: ModelProviderView['protocol']; models: string[] };
-        const configuredModels = (gatewayProvider.models ?? []).map((value) => value.trim()).filter(Boolean);
-        const model = selectedModel?.trim() || configuredModels[0];
-        if (!model) throw new BadRequestException('Add at least one model id before using this provider.');
-        if (selectedModel && !configuredModels.includes(model)) throw new BadRequestException('The selected model is not configured for this provider.');
-        const provider = gatewayProvider.protocol.startsWith('deepseek/')
-          ? { id: GATEWAY_PROVIDER_ID, adapter: 'deepseek' as const, apiKey: 'worklite-gateway', gatewayProviderId: gatewayProvider.id, operation: 'chat/completions' as const }
-          : { id: GATEWAY_PROVIDER_ID, adapter: 'openai' as const, apiKey: 'worklite-gateway', gatewayProviderId: gatewayProvider.id, operation: gatewayProvider.protocol === 'openai/responses' ? 'responses' as const : 'chat/completions' as const };
-        return { provider, model, protocol: gatewayProvider.protocol };
-      }
-    } catch (error) {
-      if (error instanceof BadRequestException) throw error;
+      gatewayResponse = await fetch(`${GATEWAY_PROVIDER_URL}/${encodeURIComponent(providerId)}`);
+    } catch {
+      throw new ServiceUnavailableException('Portkey Gateway is unavailable.');
     }
-    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [row] = await this.db.select().from(modelProviders).where(and(eq(modelProviders.id, providerId), eq(modelProviders.workspaceId, workspace.id))).limit(1);
-    if (!row) throw new NotFoundException('Model provider not found');
-    const configuredModels = (row.models ?? []).map((value) => value.trim()).filter(Boolean);
+    if (!gatewayResponse.ok) throw new NotFoundException('Model provider not found');
+    const gatewayProvider = await gatewayResponse.json() as { name: string; protocol: ModelProviderView['protocol']; models: string[] };
+    const configuredModels = (gatewayProvider.models ?? []).map((value) => value.trim()).filter(Boolean);
     const model = (selectedModel?.trim() || configuredModels[0]);
     if (!model) throw new BadRequestException('Add at least one model id before using this provider.');
     if (selectedModel && !configuredModels.includes(model)) throw new BadRequestException('The selected model is not configured for this provider.');
-    if (!row.apiKey) throw new BadRequestException('Add an API key before using this provider.');
-    return { provider: providerConfig(row, decryptSecret(row.apiKey)), model, protocol: row.protocol };
+    const provider = gatewayProvider.protocol.startsWith('deepseek/')
+      ? { id: GATEWAY_PROVIDER_ID, adapter: 'deepseek' as const, apiKey: 'worklite-gateway', gatewayProviderName: gatewayProvider.name, operation: 'chat/completions' as const }
+      : gatewayProvider.protocol === 'codex/responses'
+      ? { id: GATEWAY_PROVIDER_ID, adapter: 'codex' as const, apiKey: 'worklite-gateway', gatewayProviderName: gatewayProvider.name, operation: 'responses' as const }
+      : { id: GATEWAY_PROVIDER_ID, adapter: 'openai' as const, apiKey: 'worklite-gateway', gatewayProviderName: gatewayProvider.name, operation: gatewayProvider.protocol === 'openai/responses' ? 'responses' as const : 'chat/completions' as const };
+    return { provider, model, protocol: gatewayProvider.protocol };
   }
 
   async deleteProvider(request: Request, workspaceSlug: string, providerId: string): Promise<void> {

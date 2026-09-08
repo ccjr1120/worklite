@@ -309,6 +309,71 @@ export type PortkeyGatewayView = {
   updatedAt: string;
 };
 
+export type CodexAuthStatus = {
+  status: 'connected' | 'disconnected' | 'login_pending' | 'error';
+  authMethod: 'oauth' | 'environment' | null;
+  email: string | null;
+  accountId: string | null;
+  planType: string | null;
+  expiresAt: string | null;
+  authorizationUrl?: string;
+  sessionId?: string;
+  error?: string;
+};
+
+export type CodexRateLimitWindow = {
+  usedPercent: number;
+  limitWindowSeconds: number;
+  resetsAt: string;
+};
+
+export type CodexRateLimit = {
+  id: string;
+  name: string | null;
+  primary: CodexRateLimitWindow | null;
+  secondary: CodexRateLimitWindow | null;
+};
+
+export type CodexRateLimitSnapshot = {
+  planType: string | null;
+  limits: CodexRateLimit[];
+};
+
+export type PortkeyGatewayStatsWindow = '24h' | '7d' | '30d';
+
+export type PortkeyGatewayStatsBreakdown = {
+  provider: string;
+  model: string;
+  requests: number;
+  successful: number;
+  failed: number;
+  averageLatencyMs: number | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  usageRequests: number;
+  endpoints: Array<{ endpoint: string; requests: number }>;
+  statuses: Array<{ status: number; requests: number }>;
+};
+
+export type PortkeyGatewayStats = {
+  window: PortkeyGatewayStatsWindow;
+  from: string;
+  to: string;
+  summary: {
+    requests: number;
+    successful: number;
+    failed: number;
+    successRate: number | null;
+    averageLatencyMs: number | null;
+    promptTokens: number | null;
+    completionTokens: number | null;
+    totalTokens: number | null;
+    usageRequests: number;
+  };
+  breakdown: PortkeyGatewayStatsBreakdown[];
+};
+
 export type PortkeyGatewayModel = {
   id: string;
   object: 'model';
@@ -523,7 +588,7 @@ export type McpServerView = {
   updatedAt: string;
 };
 
-export type ModelProviderProtocol = 'openai/chat' | 'openai/responses' | 'deepseek/chat';
+export type ModelProviderProtocol = 'openai/chat' | 'openai/responses' | 'codex/responses' | 'deepseek/chat';
 
 export type ModelProviderView = {
   id: string;
@@ -541,6 +606,10 @@ export type ModelProviderTestResult = {
   model: string;
   response: string;
   traceId: string;
+};
+
+export type TestModelProviderRequest = {
+  model: string;
 };
 
 export type DiagnosticLogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -608,7 +677,7 @@ export type UpdateModelProviderRequest = {
 
 export type DiscoverModelProviderRequest = {
   protocol?: CreateModelProviderRequest['protocol'];
-  apiKey: string;
+  apiKey?: string;
   baseURL?: string;
   headers?: Record<string, string>;
 };

@@ -49,8 +49,7 @@ function AgentEditorPage() {
   const [name, setName] = useState('');
   const [responsibility, setResponsibility] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
-  const [model, setModel] = useState('');
-  const [providerId, setProviderId] = useState<string | null>(null);
+  const [modelSelection, setModelSelection] = useState('');
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [selectedMcpServerIds, setSelectedMcpServerIds] = useState<string[]>([]);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'unsaved'>(isNew ? 'unsaved' : 'saved');
@@ -71,8 +70,7 @@ function AgentEditorPage() {
     setName(existing.name);
     setResponsibility(existing.responsibility);
     setSystemPrompt(existing.systemPrompt);
-    setModel(existing.model);
-    setProviderId(existing.providerId);
+    setModelSelection(formatModelSelection(existing.providerName, existing.model));
     setSelectedSkillIds(existing.skills.map((skill) => skill.id));
     setSelectedMcpServerIds(existing.mcpServers.map((server) => server.id));
     setNameError('');
@@ -111,13 +109,6 @@ function AgentEditorPage() {
     setSaveState('unsaved');
   }
 
-  function changeProvider(nextProviderId: string | null) {
-    const provider = providersQuery.data?.find((item) => item.id === nextProviderId);
-    setProviderId(nextProviderId);
-    setModel(provider?.models.includes(model) ? model : provider?.models[0] ?? '');
-    markUnsaved();
-  }
-
   function toggleSelection(id: string, checked: boolean, selected: string[], setSelected: (next: string[]) => void) {
     setSelected(checked ? [...new Set([...selected, id])] : selected.filter((item) => item !== id));
     markUnsaved();
@@ -132,6 +123,9 @@ function AgentEditorPage() {
     setSaveError('');
     setSaveState('saving');
     try {
+      const { providerName, model } = parseModelSelection(modelSelection);
+      const providerId = providersQuery.data?.find((provider) => provider.name === providerName)?.id
+        ?? (providerName === existing?.providerName ? existing.providerId : null);
       const saved = isNew
         ? await api.createAgent(workspaceSlug, {
             name,
@@ -236,8 +230,7 @@ function AgentEditorPage() {
   const editorFailed = !isNew && agentQuery.isError;
   const configurationProps = {
     isSystem,
-    providerId,
-    model,
+    modelSelection,
     providers: providersQuery.data ?? [],
     providersLoading: providersQuery.isLoading,
     providersFailed: providersQuery.isError,
@@ -249,9 +242,8 @@ function AgentEditorPage() {
     mcpServersLoading: mcpServersQuery.isLoading,
     mcpServersFailed: mcpServersQuery.isError,
     selectedMcpServerIds,
-    onProviderChange: changeProvider,
     onModelChange: (value: string) => {
-      setModel(value);
+      setModelSelection(value);
       markUnsaved();
     },
     onSkillChange: (id: string, checked: boolean) => toggleSelection(id, checked, selectedSkillIds, setSelectedSkillIds),
@@ -497,11 +489,20 @@ function AgentToolCallPanel({ call }: { call: AgentToolCallView }) {
   );
 }
 
+function formatModelSelection(providerName: string | null, model: string): string {
+  return providerName && model ? `${providerName}/${model}` : '';
+}
+
+function parseModelSelection(selection: string): { providerName: string | null; model: string } {
+  const separator = selection.indexOf('/');
+  if (separator <= 0 || separator === selection.length - 1) return { providerName: null, model: '' };
+  return { providerName: selection.slice(0, separator), model: selection.slice(separator + 1) };
+}
+
 type AgentConfigurationFieldsProps = {
   idPrefix: string;
   isSystem: boolean;
-  providerId: string | null;
-  model: string;
+  modelSelection: string;
   providers: ModelProviderView[];
   providersLoading: boolean;
   providersFailed: boolean;
@@ -513,7 +514,6 @@ type AgentConfigurationFieldsProps = {
   mcpServersLoading: boolean;
   mcpServersFailed: boolean;
   selectedMcpServerIds: string[];
-  onProviderChange: (providerId: string | null) => void;
   onModelChange: (model: string) => void;
   onSkillChange: (skillId: string, checked: boolean) => void;
   onMcpServerChange: (serverId: string, checked: boolean) => void;
@@ -522,8 +522,7 @@ type AgentConfigurationFieldsProps = {
 function AgentConfigurationFields({
   idPrefix,
   isSystem,
-  providerId,
-  model,
+  modelSelection,
   providers,
   providersLoading,
   providersFailed,
@@ -535,39 +534,29 @@ function AgentConfigurationFields({
   mcpServersLoading,
   mcpServersFailed,
   selectedMcpServerIds,
-  onProviderChange,
   onModelChange,
   onSkillChange,
   onMcpServerChange,
 }: AgentConfigurationFieldsProps) {
   const { t } = useTranslation(['agents', 'common']);
-  const selectedProvider = providers.find((provider) => provider.id === providerId);
-  const models = selectedProvider?.models ?? [];
-  const providerFieldId = `${idPrefix}-provider`;
   const modelFieldId = `${idPrefix}-model`;
 
   return (
     <div className="flex flex-col gap-5">
-      <Field label={t('editor.provider')} htmlFor={providerFieldId} hint={isSystem ? t('editor.providerHint') : t('editor.providerHintCustom')}>
-        <Select value={providerId ?? 'not-configured'} onValueChange={(value) => onProviderChange(value === 'not-configured' ? null : value)} disabled={providersLoading || providersFailed}>
-          <SelectTrigger id={providerFieldId}><SelectValue /></SelectTrigger>
+      <Field label={t('editor.model')} htmlFor={modelFieldId} hint={t('editor.modelHint')}>
+        <Select value={modelSelection || 'not-configured'} onValueChange={(value) => onModelChange(value === 'not-configured' ? '' : value)} disabled={providersLoading || providersFailed}>
+          <SelectTrigger id={modelFieldId}><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="not-configured">{t('notConfigured')}</SelectItem>
-            {providers.map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>)}
+            {providers.flatMap((provider) => provider.models.map((providerModel) => {
+              const value = `${provider.name}/${providerModel}`;
+              return <SelectItem key={value} value={value}>{value}</SelectItem>;
+            }))}
           </SelectContent>
         </Select>
       </Field>
       {providersLoading ? <ResourceMessage loading>{t('editor.resourcesLoading')}</ResourceMessage> : null}
       {providersFailed ? <ResourceMessage error>{t('loadFailed')}</ResourceMessage> : null}
-      <Field label={t('editor.model')} htmlFor={modelFieldId} hint={providerId && models.length === 0 ? t('editor.noModels') : t('editor.modelHint')}>
-        <Select value={model || 'not-configured'} onValueChange={(value) => onModelChange(value === 'not-configured' ? '' : value)} disabled={!providerId || providersLoading || providersFailed}>
-          <SelectTrigger id={modelFieldId}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="not-configured">{t('notConfigured')}</SelectItem>
-            {models.map((providerModel) => <SelectItem key={providerModel} value={providerModel}>{providerModel}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </Field>
 
       {isSystem ? (
         <div className="border-y border-border py-3">

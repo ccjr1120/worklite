@@ -63,8 +63,11 @@
     "testing": "正在测试...",
     "test": "测试连接",
     "testTitle": "测试 {{provider}}",
-    "testDescription": "正在通过配置的第一个模型发送固定只读消息。",
+    "testDescription": "Select a model, then send the fixed read-only test message.",
     "testDescriptionWithModel": "来自 {{model}} 的回复。",
+    "testModel": "Model",
+    "testModelPlaceholder": "Select a model",
+    "runTest": "Run test",
     "testPromptLabel": "测试消息",
     "testReplyLabel": "模型回复",
     "waitingReply": "正在等待模型回复 · {{seconds}} 秒",
@@ -79,8 +82,9 @@
     "deleteDescription": "这会删除提供商及其已保存的凭据。使用其模型的 Agent 下一次运行可能会失败。",
     "deleteAction": "删除提供商",
     "deleted": "提供商已删除",
-    "views": { "label": "提供商管理", "providers": "模型提供商", "gateway": "Portkey Gateway" },
-    "gateway": { "title": "Portkey Gateway", "description": "本地 Portkey Gateway 会持续运行，并为已配置的提供商共享一个 OpenAI 兼容入口。", "port": "Gateway 端口", "status": "状态", "loading": "正在加载 Gateway 状态...", "integrationTitle": "在其他代理中使用此 Gateway", "integrationDescription": "请求发送到这个统一入口，并从列表中选择命名空间模型；Gateway 会将请求分发到对应提供商。", "baseURL": "Base URL", "copyBaseURL": "复制 Gateway Base URL", "apiKey": "API 密钥", "noApiKey": "无需填写", "models": "可用模型", "noModels": "添加模型提供商后，才会有可用的命名空间模型。", "example": "连接示例", "copyExample": "复制示例", "copied": "已复制" }
+    "views": { "label": "提供商管理", "providers": "模型提供商", "statistics": "统计", "gateway": "Portkey Gateway" },
+    "gateway": { "title": "Portkey Gateway", "description": "本地 Portkey Gateway 会持续运行，并为已配置的提供商共享一个 OpenAI 兼容入口。", "port": "Gateway 端口", "status": "状态", "loading": "正在加载 Gateway 状态...", "integrationTitle": "在其他代理中使用此 Gateway", "integrationDescription": "请求发送到这个统一入口，并从列表中选择命名空间模型；Gateway 会将请求分发到对应提供商。", "baseURL": "Base URL", "copyBaseURL": "复制 Gateway Base URL", "apiKey": "API 密钥", "noApiKey": "无需填写", "models": "可用模型", "noModels": "添加模型提供商后，才会有可用的命名空间模型。", "example": "连接示例", "copyExample": "复制示例", "copied": "已复制", "codex": { "title": "Codex 订阅", "description": "为 codex/responses Provider 连接一个 Codex 账号。", "login": "使用 ChatGPT 登录", "loginPending": "等待登录", "loginStarted": "已开始 Codex 登录", "loginFailed": "无法开始 Codex 登录。", "refresh": "刷新令牌", "refreshFailed": "Codex 令牌刷新失败。", "refreshed": "Codex 令牌已刷新", "logout": "退出登录", "logoutFailed": "Codex 退出登录失败。", "loggedOut": "Codex 账号已断开", "rateLimitsLoading": "Loading rate limits...", "rateLimitsUnavailable": "Rate limits are unavailable.", "rateLimitsEmpty": "No rate-limit windows were reported.", "used": "used", "resets": "Resets", "minutes": "minutes", "hours": "hours", "days": "days" } },
+    "statistics": { "title": "Gateway 统计", "description": "由本地 Portkey Gateway 记录的安全请求指标。", "window": "时间范围", "last24h": "最近 24 小时", "last7d": "最近 7 天", "last30d": "最近 30 天", "loading": "正在加载 Gateway 统计...", "error": "无法加载 Gateway 统计。", "emptyTitle": "暂无 Gateway 请求", "emptyDescription": "通过 Portkey Gateway 的请求会显示在这里。", "requests": "请求数", "successRate": "成功率", "averageLatency": "平均延迟", "totalTokens": "Token 总量", "provider": "提供商", "model": "模型", "endpoints": "接口", "statuses": "状态码", "tokens": "Token 用量", "input": "输入", "output": "输出", "total": "总计", "unavailable": "不可用", "windowRange": "时间范围：" }
   },
   "usage": {
     "title": "用量",

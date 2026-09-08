@@ -33,7 +33,7 @@
     "provider": "模型提供商",
     "providerHint": "System Helper Chat 的提供商只能在这里选择。",
     "providerHintCustom": "此提供商和模型仅应用于当前 Agent。",
-    "modelHint": "只能选择此提供商已配置的模型。",
+    "modelHint": "选择一个已配置的提供商/模型。",
     "noModels": "此提供商尚未配置模型。",
     "systemHint": "System Helper Chat 是内置 Agent，无法修改或删除它的身份、指令、技能和 MCP 设置。",
     "builtInCapabilities": "内置能力",
@@ -62,7 +62,7 @@
   "execution": {
     "title": "运行 Agent",
     "newSession": "新会话",
-    "configureModel": "请先配置并保存模型提供商和模型，然后再运行此 Agent。",
+    "configureModel": "请先配置并保存模型，然后再运行此 Agent。",
     "saveFirst": "开始或继续会话前，请先保存 Agent 更改。",
     "placeholder": "向此 Agent 发送任务",
     "messageLabel": "Agent 消息",

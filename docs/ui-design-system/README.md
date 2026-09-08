@@ -6,7 +6,7 @@ This document is the source of truth for WorkLite user-interface principles and 
 
 WorkLite is a professional personal workspace for creating and running AI agents and workflows. Its interface should feel calm, precise, focused, and warm.
 
-The visual direction is inspired by the clarity and efficiency of Linear without copying its brand. WorkLite establishes its own identity through persimmon orange, execution-oriented interaction patterns, and a consistent visual language for agents, workflows, and runs.
+The visual direction is inspired by the clarity and efficiency of Linear without copying its brand. WorkLite establishes its own identity through a clear blue accent, execution-oriented interaction patterns, and a consistent visual language for agents, workflows, and runs.
 
 The interface must:
 
@@ -42,18 +42,18 @@ All implementation colors must be exposed through semantic design tokens. Raw co
 | `text-primary` | `#202126` | `#ECEEF2` | Primary text |
 | `text-secondary` | `#6F747E` | `#989FAA` | Supporting text |
 | `border` | `#E4E6EA` | `rgba(255, 255, 255, 0.09)` | Standard boundaries |
-| `brand` | `#DC5F2B` | `#F47B45` | Primary action and brand emphasis |
-| `brand-hover` | `#C95021` | `#F68D5E` | Brand control hover |
-| `brand-active` | `#B9471C` | `#DC6738` | Brand control active state |
-| `brand-subtle` | `#FFF0E9` | `rgba(244, 123, 69, 0.14)` | Selection and restrained emphasis |
+| `brand` | `#4F6F9F` | `#8EA8CF` | Primary action and brand emphasis |
+| `brand-hover` | `#415F8B` | `#A5B9D7` | Brand control hover |
+| `brand-active` | `#344D73` | `#7893BD` | Brand control active state |
+| `brand-subtle` | `#F1F2F4` | `rgba(255, 255, 255, 0.08)` | Selection and restrained emphasis |
 
-Persimmon orange is the signature color. It represents primary action, current focus, selection, and active execution. It must not be applied indiscriminately to headings, icons, large backgrounds, or ordinary content.
+The blue brand color is the signature accent. It represents primary action and current focus. It must not be applied indiscriminately to headings, icons, large backgrounds, or ordinary content.
 
 ### Semantic Status Colors
 
 Brand color must not replace status meaning.
 
-- **Running:** persimmon orange plus a text or icon cue.
+- **Running:** blue brand accent plus a text or icon cue.
 - **Success and completed:** green.
 - **Warning and paused:** amber or yellow, visually distinct from brand orange.
 - **Error and failed:** red.
@@ -125,11 +125,11 @@ Use cards only when content is a distinct object or group. Avoid placing every s
 
 ### Navigation
 
-Keep navigation neutral. The selected item uses a subtle brand surface, stronger text, and optionally a narrow persimmon indicator. Do not fill the entire sidebar with brand color.
+Keep navigation neutral. The selected item uses a subtle brand surface, stronger text, and optionally a narrow blue indicator. Do not fill the entire sidebar with brand color.
 
 ### Buttons
 
-- **Primary:** solid persimmon orange for the most important action in the current context.
+- **Primary:** solid blue for the most important action in the current context.
 - **Secondary:** neutral fill or restrained border for supporting actions.
 - **Ghost:** toolbars, inline actions, and low-emphasis controls.
 - **Destructive:** red and reserved for genuinely destructive actions.
@@ -186,7 +186,7 @@ Present persistent child Agent sessions in a compact unframed status band betwee
 - Keep edge direction and handle compatibility visible through shape, persistent port labels, and valid or invalid interaction state rather than color alone.
 - Preserve a keyboard-accessible inspector path for reviewing configuration and removing selected nodes or edges, with an explicit return to the node palette.
 - Keep the contextual panel available at every breakpoint; collapse the combined palette and inspector to one drawer or bottom sheet when the layout cannot support a side panel.
-- Use persimmon borders or indicators for the selected and currently executing node or edge. Selection belongs to the graph and must remain synchronized with contextual panel content and keyboard focus.
+- Use blue borders or indicators for the selected and currently executing node or edge. Selection belongs to the graph and must remain synchronized with contextual panel content and keyboard focus.
 - Represent successful and failed states through compact green or red markers rather than filling the whole node.
 - Render edges with restrained neutral strokes and reserve stronger treatment for selection and execution.
 - Present AI-assisted edits in a side panel and make proposed structured operations understandable and reviewable.
@@ -224,7 +224,7 @@ Show the current step and continuing progress for long operations. Append logs w
 
 Do not introduce:
 
-- Large areas of persimmon orange or decorative AI gradients.
+- Large areas of blue or decorative AI gradients.
 - Glassmorphism, excessive glow, or pervasive shadows.
 - Oversized marketing typography inside the application workspace.
 - Excessive card nesting or large consumer-style rounded corners.
@@ -241,12 +241,21 @@ Before confirming a UI proposal, verify that it:
 - Uses existing semantic tokens and patterns where possible.
 - Defines both light and dark behavior.
 - Preserves clear information hierarchy at the intended density.
-- Uses persimmon orange only for brand, focus, selection, or execution.
+- Uses blue only for brand, focus, selection, or execution.
 - Includes loading, empty, error, disabled, and long-content states where relevant.
 - Meets keyboard, focus, contrast, reduced-motion, and non-color-cue requirements.
 - Introduces a documented design-system decision before implementation when no existing rule applies.
 
 ## Changelog
+
+### 2026-09-08
+
+- Adopted Memory One as the full WorkLite visual direction across all web surfaces: cold-white and blue-black themes, compact three-column workspace geometry, flat neutral surfaces with crisp borders, restrained blue reserved for primary action and execution, and lightweight tabbed configuration panels.
+- Standardized this direction as a global implementation decision rather than a page-specific reference, so collections, editors, settings, runs, integrations, onboarding, and chat share the same visual grammar.
+
+### 2026-09-07
+
+- Adopted the Memory One visual reference for the shared WorkLite shell: a restrained blue accent, compact neutral surfaces, restrained borders, and lightweight interaction feedback. Execution and status colors remain semantically distinct; brand color is reserved for primary actions, selection, focus, and active execution.
 
 ### 2026-09-01
 
