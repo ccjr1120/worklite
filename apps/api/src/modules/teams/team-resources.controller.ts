@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
-import type { CreateMcpServerRequest, CreateSkillRequest, ExecuteSkillScriptRequest, UpdateMcpServerRequest, UpdateSkillRequest, UpdateWorkspaceSettingsRequest } from '@worklite/contracts';
+import type { CreateMcpServerRequest, CreateSkillRequest, ExecuteSkillScriptRequest, ImportSkillRequest, UpdateMcpServerRequest, UpdateSkillRequest, UpdateWorkspaceSettingsRequest } from '@worklite/contracts';
 import { WorkspaceResourcesService } from './team-resources.service';
 
 @Controller()
@@ -10,6 +10,9 @@ export class WorkspaceResourcesController {
   @Get('skills')
   skills(@Req() request: Request) { return this.resources.skills(request, 'personal'); }
 
+  @Post('skills/import')
+  importSkill(@Req() request: Request, @Body() body: ImportSkillRequest) { return this.resources.importSkill(request, 'personal', body); }
+
   @Get('skills/:skillId')
   skill(@Req() request: Request, @Param('skillId') skillId: string) { return this.resources.skill(request, 'personal', skillId); }
 
@@ -18,6 +21,9 @@ export class WorkspaceResourcesController {
 
   @Patch('skills/:skillId')
   updateSkill(@Req() request: Request, @Param('skillId') skillId: string, @Body() body: UpdateSkillRequest) { return this.resources.updateSkill(request, 'personal', skillId, body); }
+
+  @Delete('skills/:skillId')
+  deleteSkill(@Req() request: Request, @Param('skillId') skillId: string) { return this.resources.deleteSkill(request, 'personal', skillId); }
 
   @Post('skills/:skillId/executions')
   executeSkillScript(@Req() request: Request, @Param('skillId') skillId: string, @Body() body: ExecuteSkillScriptRequest) { return this.resources.executeSkillScript(request, 'personal', skillId, body); }
@@ -33,6 +39,9 @@ export class WorkspaceResourcesController {
 
   @Patch('mcp-servers/:serverId')
   updateMcpServer(@Req() request: Request, @Param('serverId') serverId: string, @Body() body: UpdateMcpServerRequest) { return this.resources.updateMcpServer(request, 'personal', serverId, body); }
+
+  @Delete('mcp-servers/:serverId')
+  deleteMcpServer(@Req() request: Request, @Param('serverId') serverId: string) { return this.resources.deleteMcpServer(request, 'personal', serverId); }
 
   @Post('mcp-servers/:serverId/test')
   testMcpServer(@Req() request: Request, @Param('serverId') serverId: string) { return this.resources.testMcpServer(request, 'personal', serverId); }
@@ -54,6 +63,9 @@ export class WorkspaceResourcesController {
 
   @Get('artifacts/:artifactId')
   artifact(@Req() request: Request, @Param('artifactId') artifactId: string) { return this.resources.artifact(request, 'personal', artifactId); }
+
+  @Delete('artifacts/:artifactId')
+  deleteArtifact(@Req() request: Request, @Param('artifactId') artifactId: string) { return this.resources.deleteArtifact(request, 'personal', artifactId); }
 
   @Get('usage')
   usage(@Req() request: Request) { return this.resources.usage(request, 'personal'); }

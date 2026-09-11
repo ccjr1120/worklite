@@ -16,7 +16,8 @@
     "connection": "连接",
     "transport": "传输",
     "allowedTools": "允许的工具",
-    "version": "版本"
+    "version": "版本",
+    "actions": "操作"
   },
   "config": {
     "new": "连接服务器",
@@ -40,5 +41,13 @@
       "unsupported_protocol": "服务器不支持所需的 MCP 协议。",
       "malformed_response": "服务器返回了无效的 MCP 响应。"
     }
+  },
+  "delete": {
+    "title": "删除 {{name}}？",
+    "description": "这会永久删除该 MCP 服务器连接。此操作无法撤销。",
+    "action": "删除 {{name}}",
+    "deleting": "正在删除...",
+    "success": "MCP 服务器已删除",
+    "failed": "无法删除MCP 服务器。"
   }
 }

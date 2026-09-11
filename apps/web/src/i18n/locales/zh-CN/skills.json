@@ -15,7 +15,8 @@
     "skill": "技能",
     "source": "来源",
     "version": "版本",
-    "updated": "更新时间"
+    "updated": "更新时间",
+    "actions": "操作"
   },
   "source": {
     "online": "在线",
@@ -69,5 +70,21 @@
     "saveFailed": "无法保存技能。请检查包内容后重试。",
     "loading": "正在加载技能...",
     "loadFailed": "无法加载此技能。"
+  },
+  "import": {
+    "action": "导入技能",
+    "importing": "正在导入...",
+    "missingSkillFile": "所选文件夹的根目录必须包含 SKILL.md。",
+    "readFailed": "无法读取所选文件夹。",
+    "failed": "无法导入技能，请检查文件夹后重试。",
+    "defaultName": "导入的技能"
+  },
+  "delete": {
+    "title": "删除 {{name}}？",
+    "description": "这会永久删除该技能包。此操作无法撤销。",
+    "action": "删除 {{name}}",
+    "deleting": "正在删除...",
+    "success": "技能已删除",
+    "failed": "无法删除技能。"
   }
 }

@@ -38,6 +38,15 @@ The Memory One visual reference uses brand color sparingly. Keep WorkLite surfac
 
 When the user corrects agent behavior or states a durable repository-specific working preference, update this `AGENTS.md` in the same change so future work follows that correction.
 
+WorkLite’s primary product services are Workflow automation and the customizable Home Dashboard. Source-specific features such as Meegle todos are workflow use cases, not standalone products or navigation destinations. Standalone Agents and Workflows are independent. Workflows do not reference Agent or AgentVersion resources. Workflow Agent nodes own their public model id, system prompt, Skill selections, and MCP server selections inside the immutable WorkflowVersion while reusing shared Agent runtime infrastructure and emit the fixed Dashboard payload. Plugins and Agents are peer-level capabilities; Skills and MCP servers serve Agents.
+
+Workflow deletion is permanent and removes its draft, edit revisions, published versions, schedules, dashboard dataset, and run history. Related Artifacts remain available with detached Workflow and Run references.
+
+
+Whenever WorkLite product architecture, resource relationships, supported Workflow nodes, or platform operations change, update the built-in System Helper prompt and `worklite-platform` Skill knowledge, contracts, scripts, and platform snapshot capability metadata in the same change.
+
+Custom Agent deletion permanently removes its versions, assignments, schedules, executions, sessions, and execution history; system Agents remain protected. Skills and MCP servers cannot be deleted while referenced by an Agent or Workflow. Artifacts are independently permanently deletable. Runs, immutable versions, logs, and built-in resources are not independently deletable.
+
 The Portkey Gateway integration is a unified OpenAI-compatible entry point. Callers do not provide a Provider id separately; public model ids use the `<providerName>/<modelId>` namespace and the Gateway dispatches by the unique Provider name. Provider ids remain internal record keys and must not appear in public model ids. The local Gateway has no separate inbound API key unless a later architecture change explicitly adds one.
 
 The Portkey Gateway owns Provider persistence in an independent SQLite database and its dedicated `gateway_providers` table. The API SQLite database and legacy Provider JSON file are migration sources only; they are not Gateway runtime or administration stores.

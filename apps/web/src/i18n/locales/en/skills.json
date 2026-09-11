@@ -15,7 +15,8 @@
     "skill": "Skill",
     "source": "Source",
     "version": "Version",
-    "updated": "Updated"
+    "updated": "Updated",
+    "actions": "Actions"
   },
   "source": {
     "online": "Online",
@@ -69,5 +70,21 @@
     "saveFailed": "The Skill could not be saved. Review the package and try again.",
     "loading": "Loading Skill...",
     "loadFailed": "Unable to load this Skill."
+  },
+  "import": {
+    "action": "Import Skill",
+    "importing": "Importing...",
+    "missingSkillFile": "The selected folder must contain SKILL.md at its root.",
+    "readFailed": "The selected folder could not be read.",
+    "failed": "The Skill could not be imported. Review the folder and try again.",
+    "defaultName": "Imported Skill"
+  },
+  "delete": {
+    "title": "Delete {{name}}?",
+    "description": "This permanently deletes the Skill package. This action cannot be undone.",
+    "action": "Delete {{name}}",
+    "deleting": "Deleting...",
+    "success": "Skill deleted",
+    "failed": "Unable to delete skill."
   }
 }

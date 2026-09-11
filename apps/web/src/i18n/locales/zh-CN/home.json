@@ -95,12 +95,40 @@
       "remove": "移除组件"
     },
     "widgets": {
-      "attention": { "title": "需要关注", "empty": "目前没有需要关注的事项。" },
-      "active_runs": { "title": "进行中的运行", "empty": "当前没有正在进行的运行。" },
-      "workflow_health": { "title": "工作流健康度", "empty": "暂无工作流。" },
-      "recent_workflows": { "title": "最近的工作流", "empty": "暂无工作流。" },
-      "recent_activity": { "title": "最近动态", "empty": "暂无最近动态。" },
-      "recent_artifacts": { "title": "最近产物", "empty": "暂无产物。" }
+      "attention": {
+        "title": "需要关注",
+        "empty": "目前没有需要关注的事项。"
+      },
+      "active_runs": {
+        "title": "进行中的运行",
+        "empty": "当前没有正在进行的运行。"
+      },
+      "workflow_health": {
+        "title": "工作流健康度",
+        "empty": "暂无工作流。"
+      },
+      "recent_workflows": {
+        "title": "最近的工作流",
+        "empty": "暂无工作流。"
+      },
+      "recent_activity": {
+        "title": "最近动态",
+        "empty": "暂无最近动态。"
+      },
+      "recent_artifacts": {
+        "title": "最近产物",
+        "empty": "暂无产物。"
+      }
+    },
+    "workflow": {
+      "workflow": "工作流",
+      "workflowPlaceholder": "选择已发布的工作流",
+      "presentation": "展示方式",
+      "kanban": "看板",
+      "list": "列表",
+      "runNow": "立即运行",
+      "unconfigured": "选择一个已发布的工作流，为首页看板提供数据。",
+      "empty": "该工作流尚未生成看板数据。"
     }
   },
   "firstUse": {

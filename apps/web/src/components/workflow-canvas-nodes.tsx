@@ -4,14 +4,15 @@ import { useTranslation } from 'react-i18next';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 
-export type WorkflowCanvasNodeType = 'input' | 'text' | 'skill-set' | 'generic-agent';
+export type WorkflowCanvasNodeType = 'input' | 'text' | 'skill-set' | 'agent';
 
 export type WorkflowCanvasNodeData = {
   nodeType: WorkflowCanvasNodeType;
   label: string;
-  agentId?: string;
-  agentVersion?: string;
-  agentVersionId?: string;
+  model?: string;
+  systemPrompt?: string;
+  mcpServerIds?: string[];
+  mcpServerNames?: string[];
   text?: string;
   skillIds?: string[];
   skillNames?: string[];
@@ -68,15 +69,13 @@ function SkillSetNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   </div>;
 }
 
-function GenericAgentNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
+function AgentNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   const { t } = useTranslation('workflows');
   return <div className={cn(nodeClassName(selected), 'w-[300px]')}>
     <NodeHeader icon={<Bot className="size-4 text-info" aria-hidden="true" />}>{data.label}</NodeHeader>
     <div className="py-3 text-[12px] text-muted-foreground">
-      <p className="px-3 pb-1">{data.agentVersion ?? 'draft'}</p>
+      <p className="px-3 pb-1">{data.model || t('editor.selectModel')}</p>
       <PortRow label={t('editor.contextPort')}><Handle type="target" position={Position.Left} id="context" className={handleClass} aria-label={t('editor.contextPort')} /></PortRow>
-      <PortRow label={t('editor.systemPromptPort')}><Handle type="target" position={Position.Left} id="systemPrompt" className={handleClass} aria-label={t('editor.systemPromptPort')} /></PortRow>
-      <PortRow label={t('editor.skillsPort')}><Handle type="target" position={Position.Left} id="skills" className={handleClass} aria-label={t('editor.skillsPort')} /></PortRow>
       <div className="relative flex h-7 items-center justify-end px-3 text-[11px] font-medium"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
     </div>
   </div>;
@@ -90,5 +89,5 @@ export const workflowNodeTypes = {
   input: InputNode,
   text: TextNode,
   'skill-set': SkillSetNode,
-  'generic-agent': GenericAgentNode,
+  agent: AgentNode,
 };

@@ -1,17 +1,19 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { Trash2, LoaderCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Field } from '@/components/ui/field';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { PasswordInput } from '@/components/password-input';
 import { SaveIndicator } from '@/components/save-indicator';
 import { StatusBadge } from '@/components/status-badge';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { api } from '@/api/client';
-import { useMcpServerQuery } from '@/api/queries';
+import { mcpServersQueryKey, useMcpServerQuery } from '@/api/queries';
 import { queryClient } from '@/lib/query-client';
 import type { McpServerView } from '@worklite/contracts';
 
@@ -38,6 +40,9 @@ function McpConfigPage() {
   const [token, setToken] = useState('');
   const [saveError, setSaveError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   useEffect(() => {
     if (!server) return;
@@ -74,6 +79,23 @@ function McpConfigPage() {
     }
   }
 
+  async function deleteMcpServer() {
+    if (isNew || deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError('');
+    try {
+      await api.deleteMcpServer(workspaceSlug, serverId);
+      setDeleteOpen(false);
+      toast.success(t('delete.success'));
+      await queryClient.invalidateQueries({ queryKey: mcpServersQueryKey() });
+      void navigate({ to: '/mcp-servers' });
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : t('delete.failed'));
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
   async function testConnection() {
     setTestState('pending');
     setTestError('');
@@ -107,9 +129,10 @@ function McpConfigPage() {
         ]}
         status={<SaveIndicator state={saveState} />}
         actions={
-          <Button size="compact" onClick={() => void save()} disabled={saving || !name.trim() || !endpoint.trim()}>
-            {t('common:actions.save')}
-          </Button>
+          <div className="flex items-center gap-2">
+            {!isNew ? <Button type="button" variant="ghost" size="icon-compact" aria-label={t('delete.action', { name: server?.name ?? name })} title={t('delete.action', { name: server?.name ?? name })} onClick={() => { setDeleteError(''); setDeleteOpen(true); }}><Trash2 className="size-4" /></Button> : null}
+            <Button size="compact" onClick={() => void save()} disabled={saving || !name.trim() || !endpoint.trim()}>{t('common:actions.save')}</Button>
+          </div>
         }
       />
       <div className="flex flex-col gap-4">
@@ -157,6 +180,19 @@ function McpConfigPage() {
         </fieldset>
         <p className="text-[13px] text-muted-foreground">{t('config.saveHint')}</p>
       </div>
+      <Dialog open={deleteOpen} onOpenChange={(open) => { if (!open && !deleteBusy) { setDeleteOpen(false); setDeleteError(''); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('delete.title', { name: server?.name ?? name })}</DialogTitle>
+            <DialogDescription>{t('delete.description')}</DialogDescription>
+          </DialogHeader>
+          {deleteError ? <p className="text-[13px] text-danger" role="alert">{deleteError}</p> : null}
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setDeleteOpen(false)} disabled={deleteBusy}>{t('common:actions.cancel')}</Button>
+            <Button variant="destructive" onClick={() => void deleteMcpServer()} disabled={deleteBusy}>{deleteBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}{deleteBusy ? t('delete.deleting') : t('delete.action', { name: server?.name ?? name })}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

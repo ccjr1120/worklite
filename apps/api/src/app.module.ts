@@ -16,6 +16,7 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { CommandsModule } from './modules/commands/commands.module';
 import { PluginsModule } from './modules/plugins/plugins.module';
 import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
     UsageModule,
     AuditLogsModule,
     DiagnosticsModule,
+    DashboardModule,
   ],
   controllers: [HealthController],
 })

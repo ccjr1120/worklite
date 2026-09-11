@@ -24,7 +24,8 @@ exec /bin/sh -lc "$1"
 `;
 
 const SYSTEM_HELPER_PROMPT = `You are System Helper Chat, the WorkLite workspace setup assistant.
-Use only assigned Skill scripts for platform inspection and operations. Never invent configured resources, models, MCP tools, script results, or platform capabilities.
+Use only assigned Skill scripts for platform inspection and operations. For product capability questions, rely on the assigned Skill knowledge and the current workspace snapshot. Never invent configured resources, models, MCP tools, script results, or platform capabilities.
+For Workflow requests, call scripts/inspect-workspace.mjs first. Choose only node capabilities returned in capabilities.workflow.supportedNodeTypes and only workspace resource ids returned in the snapshot. Organize the request as a logical Workflow Plan with stable human-readable node keys; do not invent durable node ids or canvas positions. Use scripts/edit-workflow.mjs to apply the plan to a draft. The server owns normalization, ids, layout, port and configuration validation, workspace resource validation, DAG validation, and assistant revision history.
 Never ask the user to paste API keys, tokens, passwords, or other secrets into conversation or script arguments. Provider credentials must be entered in the dedicated secure form.
 Before claiming a platform operation completed, wait for the script result. Keep responses concise and practical.`;
 
@@ -32,7 +33,15 @@ const WORKLITE_PLATFORM_SKILL_MD = `# worklite-platform
 
 Use the exact scripts in this package for WorkLite platform operations.
 
-Use \`scripts/inspect-workspace.mjs\` before answering questions about configured resources. Creation, settings, and navigation scripts accept exactly one JSON object argument. Every valid Agent script call executes immediately without browser approval. Provider scripts never accept credentials; direct the user to the secure Provider form after creation.
+Use \`scripts/inspect-workspace.mjs\` before answering questions about configured resources or Workflow capabilities. Creation, settings, and navigation scripts accept exactly one JSON object argument. Every valid Agent script call executes automatically after server validation. Provider scripts never accept credentials; direct the user to the secure Provider form after creation.
+
+Workflow automation and the customizable Home Dashboard are WorkLite's primary product services. Standalone Agents and Workflows are independent. A Workflow never selects or references a standalone Agent or Agent version.
+
+Workflow node capabilities are dynamic. Always use the current snapshot's \`capabilities.workflow.supportedNodeTypes\` list, including each type, version, purpose, ports, and configuration schema. Do not assume a node exists when it is absent from the snapshot. A logical plan uses model-chosen node keys and edges between those keys; the server generates durable ids and positions.
+
+Workflow graphs are directed acyclic graphs. Conditions, loops, dynamic joins, parallel execution, webhook triggers, API triggers, notification nodes, and template selection are unavailable unless the current snapshot reports them as supported.
+
+Creating a Workflow creates a draft. Use \`scripts/edit-workflow.mjs\` to replace a draft graph from a logical plan; it fetches the current revision, submits an assistant edit, and returns the authoritative Workflow resource.
 
 Never call arbitrary URLs, access the database directly, delete resources, invoke terminal execution, or claim completion before the script result is returned. See \`references/contracts.md\` for input shapes.`;
 
@@ -180,6 +189,18 @@ exactKeys(raw, ['name']);
 const resource = await call('/workflows', { method: 'POST', body: { name: requiredString(raw.name, 'name', 120) } });
 print({ worklite: { type: 'resource', resourceType: 'workflow', id: resource.id, route: '/workflows/' + encodeURIComponent(resource.id) }, data: resource });
 `],
+  ['scripts/edit-workflow.mjs', `#!/usr/bin/env node
+import { boundedString, call, exactKeys, input, print, requiredString } from './lib.mjs';
+const raw = input();
+exactKeys(raw, ['workflowId', 'sourceInstruction', 'plan']);
+const workflowId = requiredString(raw.workflowId, 'workflowId', 240);
+const sourceInstruction = boundedString(raw.sourceInstruction, 'sourceInstruction', 4000);
+if (!raw.plan || typeof raw.plan !== 'object' || Array.isArray(raw.plan)) throw new Error('plan must be an object.');
+const current = await call('/workflows/' + encodeURIComponent(workflowId));
+if (!current.draft || typeof current.draft.revisionId !== 'string') throw new Error('The Workflow draft revision is unavailable.');
+const resource = await call('/workflows/' + encodeURIComponent(workflowId) + '/draft/operations', { method: 'POST', body: { baseRevisionId: current.draft.revisionId, plan: raw.plan, source: 'assistant', sourceInstruction } });
+print({ worklite: { type: 'resource', resourceType: 'workflow', id: resource.id, route: '/workflows/' + encodeURIComponent(resource.id) }, data: resource });
+`],
   ['scripts/update-settings.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, oneOf, print } from './lib.mjs';
 const raw = input();
@@ -206,7 +227,28 @@ print({ worklite: action });
 - create-agent.mjs: { "name": string, "responsibility": string, "systemPrompt": string, "providerId": string | null, "model": string, "skillIds": string[], "mcpServerIds": string[] }
 - create-skill.mjs: { "name": string, "source": "online", "files": [{ "path": string, "content": string }] }
 - create-mcp-server.mjs: { "name": string, "endpoint": string }
-- create-workflow.mjs: { "name": string }
+- create-workflow.mjs: { "name": string }. Creates a Workflow draft and returns its resource route.
+- edit-workflow.mjs: { "workflowId": string, "sourceInstruction": string, "plan": WorkflowPlan }. Fetches the current draft revision and applies a server-normalized assistant plan.
+
+## Workflow capability contract
+
+Workflows never reference standalone Agent or AgentVersion records. A Workflow Agent node is embedded and self-contained.
+
+The current capability contract is returned by inspect-workspace.mjs at \`capabilities.workflow.supportedNodeTypes\`. Each entry includes its public type, version, purpose, input and output ports, and configuration schema. Use only entries present in that snapshot.
+
+A WorkflowPlan has this shape:
+\`\`\`json
+{
+  "nodes": [{ "key": "input", "type": "worklite/input", "config": {} }],
+  "edges": [{ "source": "input", "target": "agent", "targetPort": "context" }],
+  "input": { "example": "optional example" },
+  "defaults": { "errorPolicy": "stop" }
+}
+\`\`\`
+Node keys are local to the plan. Omit node ids and positions; the server generates both. Omit ports only when the capability has an unambiguous output or required input. The server validates node types, configuration, ports, workspace Skill/MCP references, and DAG constraints, then records an assistant revision.
+
+Workflow graphs are directed acyclic graphs. Conditions, loops, dynamic joins, parallel execution, webhook triggers, API triggers, notification nodes, and template selection are unavailable unless the current snapshot reports them as supported. Use edit-workflow.mjs for Workflow graph creation and later edits; never write the database directly.
+
 - update-settings.mjs: { "appearance"?: "system" | "light" | "dark", "locale"?: "en" | "zh-CN" }
 - navigate.mjs: { "target": "home" | "agents" | "system-helper-chat" | "skills" | "mcp-servers" | "model-providers" | "workflows" | "runs" | "artifacts" | "settings-appearance" | "settings-usage" | "settings-audit-log" }
 `],

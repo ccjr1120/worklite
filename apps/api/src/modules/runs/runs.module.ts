@@ -4,5 +4,5 @@ import { AgentsModule } from '../agents/agents.module';
 import { RunsController } from './runs.controller';
 import { RunsService } from './runs.service';
 
-@Module({ imports: [WorkspaceModule, AgentsModule], controllers: [RunsController], providers: [RunsService] })
+@Module({ imports: [WorkspaceModule, AgentsModule], controllers: [RunsController], providers: [RunsService], exports: [RunsService] })
 export class RunsModule {}

@@ -24,6 +24,7 @@ import type {
   DiscoverModelProviderRequest,
   DiscoverModelProviderResult,
   CreateSkillRequest,
+  ImportSkillRequest,
   McpServerView,
   McpServerTestResult,
   ModelProviderTestResult,
@@ -42,6 +43,7 @@ import type {
   UpdateWorkspaceSettingsRequest,
   WorkspaceSettingsView,
   PortkeyGatewayView,
+  CodexAccountUsageSnapshot,
   CodexAuthStatus,
   CodexRateLimitSnapshot,
   PortkeyGatewayStats,
@@ -49,6 +51,12 @@ import type {
   PluginView,
   PluginTestResult,
   UpdatePluginRequest,
+  DashboardView,
+  UpdateDashboardRequest,
+  UpsertWorkflowScheduleRequest,
+  WorkflowScheduleView,
+  ImportWorkflowRequest,
+  PortableWorkflowDocument,
 } from '@worklite/contracts';
 
 export class ApiError extends Error {
@@ -79,8 +87,10 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
     }
     throw new ApiError(response.status, message, traceId);
   }
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  if (response.status === 204 || response.headers.get('content-length') === '0') return undefined as T;
+  const text = await response.text();
+  if (!text.trim()) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 export function apiGet<T>(path: string): Promise<T> {
@@ -136,13 +146,23 @@ export const api = {
   portkeyGateway: () => apiGet<PortkeyGatewayView>('/api/portkey-gateway'),
   codexAuthStatus: () => apiGet<CodexAuthStatus>('/api/portkey-gateway/codex/auth/status'),
   codexRateLimits: () => apiGet<CodexRateLimitSnapshot>('/api/portkey-gateway/codex/rate-limits'),
+  codexAccountUsages: () => apiGet<CodexAccountUsageSnapshot>('/api/portkey-gateway/codex/accounts/usage'),
   startCodexLogin: () => apiPost<{ authorizationUrl: string; sessionId: string }>('/api/portkey-gateway/codex/auth/login'),
-  refreshCodexCredential: () => apiPost<CodexAuthStatus>('/api/portkey-gateway/codex/auth/refresh'),
-  logoutCodex: () => apiPost<CodexAuthStatus>('/api/portkey-gateway/codex/auth/logout'),
+  importCodexAccounts: (input: unknown) => apiPost<CodexAuthStatus>('/api/portkey-gateway/codex/accounts/import', input),
+  updateCodexAccount: (accountId: string, enabled: boolean) => apiPatch<CodexAuthStatus>(`/api/portkey-gateway/codex/accounts/${encodeURIComponent(accountId)}`, { enabled }),
+  refreshCodexAccount: (accountId: string) => apiPost<CodexAuthStatus>(`/api/portkey-gateway/codex/accounts/${encodeURIComponent(accountId)}/refresh`),
+  deleteCodexAccount: (accountId: string) => apiDelete<CodexAuthStatus>(`/api/portkey-gateway/codex/accounts/${encodeURIComponent(accountId)}`),
   portkeyGatewayStats: (window: PortkeyGatewayStatsWindow = '24h') => apiGet<PortkeyGatewayStats>(`/api/portkey-gateway/stats?window=${window}`),
+  dashboard: () => apiGet<DashboardView>('/api/dashboard'),
+  updateDashboard: (input: UpdateDashboardRequest) => apiRequest<DashboardView>('/api/dashboard', { method: 'PUT', body: JSON.stringify(input), headers: { 'Content-Type': 'application/json' } }),
+  updateDashboardSchedule: (input: UpsertWorkflowScheduleRequest) => apiRequest<WorkflowScheduleView>('/api/dashboard/schedule', { method: 'PUT', body: JSON.stringify(input), headers: { 'Content-Type': 'application/json' } }),
+  runDashboard: () => apiPost<{ runId: string }>('/api/dashboard/run'),
   workflows: (_workspace?: string) => apiGet<WorkflowView[]>('/api/workflows'),
   workflow: (_workspace: string | undefined, workflowId: string) => apiGet<WorkflowDetailView>(`/api/workflows/${encodeURIComponent(workflowId)}`),
   createWorkflow: (_workspace: string | undefined, input: CreateWorkflowRequest) => apiPost<WorkflowDetailView>('/api/workflows', input),
+  importWorkflow: (_workspace: string | undefined, input: ImportWorkflowRequest) => apiPost<WorkflowDetailView>('/api/workflows/import', input),
+  exportWorkflow: (_workspace: string | undefined, workflowId: string) => apiGet<PortableWorkflowDocument>(`/api/workflows/${encodeURIComponent(workflowId)}/export`),
+  deleteWorkflow: (_workspace: string | undefined, workflowId: string) => apiDelete(`/api/workflows/${encodeURIComponent(workflowId)}`),
   updateWorkflow: (_workspace: string | undefined, workflowId: string, input: Partial<CreateWorkflowRequest>) => apiPatch<WorkflowDetailView>(`/api/workflows/${encodeURIComponent(workflowId)}`, input),
   applyWorkflowOperations: (_workspace: string | undefined, workflowId: string, input: ApplyWorkflowDraftOperationsRequest) => apiPost<WorkflowDetailView>(`/api/workflows/${encodeURIComponent(workflowId)}/draft/operations`, input),
   undoWorkflow: (_workspace: string | undefined, workflowId: string) => apiPost<WorkflowDetailView>(`/api/workflows/${encodeURIComponent(workflowId)}/draft/undo`),
@@ -153,12 +173,15 @@ export const api = {
   skills: (_workspace?: string) => apiGet<SkillView[]>('/api/skills'),
   skill: (_workspace: string | undefined, skillId: string) => apiGet<SkillView>(`/api/skills/${encodeURIComponent(skillId)}`),
   createSkill: (_workspace: string | undefined, input: CreateSkillRequest) => apiPost<SkillView>('/api/skills', input),
+  importSkill: (_workspace: string | undefined, input: ImportSkillRequest) => apiPost<SkillView>('/api/skills/import', input),
   updateSkill: (_workspace: string | undefined, skillId: string, input: UpdateSkillRequest) => apiPatch<SkillView>(`/api/skills/${encodeURIComponent(skillId)}`, input),
+  deleteSkill: (_workspace: string | undefined, skillId: string) => apiDelete(`/api/skills/${encodeURIComponent(skillId)}`),
   executeSkillScript: (_workspace: string | undefined, skillId: string, input: ExecuteSkillScriptRequest) => apiPost<CommandExecutionView>(`/api/skills/${encodeURIComponent(skillId)}/executions`, input),
   mcpServers: (_workspace?: string) => apiGet<McpServerView[]>('/api/mcp-servers'),
   mcpServer: (_workspace: string | undefined, serverId: string) => apiGet<McpServerView>(`/api/mcp-servers/${encodeURIComponent(serverId)}`),
   createMcpServer: (_workspace: string | undefined, input: CreateMcpServerRequest) => apiPost<McpServerView>('/api/mcp-servers', input),
   updateMcpServer: (_workspace: string | undefined, serverId: string, input: UpdateMcpServerRequest) => apiPatch<McpServerView>(`/api/mcp-servers/${encodeURIComponent(serverId)}`, input),
+  deleteMcpServer: (_workspace: string | undefined, serverId: string) => apiDelete(`/api/mcp-servers/${encodeURIComponent(serverId)}`),
   testMcpServer: (_workspace: string | undefined, serverId: string) => apiPost<McpServerTestResult>(`/api/mcp-servers/${encodeURIComponent(serverId)}/test`),
   modelProviders: (_workspace?: string) => apiGet<ModelProviderView[]>('/api/portkey-gateway/providers'),
   saveModelProvider: (_workspace: string | undefined, input: CreateModelProviderRequest) => apiPost<ModelProviderView>('/api/portkey-gateway/providers', input),
@@ -168,6 +191,7 @@ export const api = {
   deleteModelProvider: (_workspace: string | undefined, providerId: string) => apiDelete(`/api/portkey-gateway/providers/${encodeURIComponent(providerId)}`),
   artifacts: (_workspace?: string) => apiGet<ArtifactView[]>('/api/artifacts'),
   artifact: (_workspace: string | undefined, artifactId: string) => apiGet<ArtifactView>(`/api/artifacts/${encodeURIComponent(artifactId)}`),
+  deleteArtifact: (_workspace: string | undefined, artifactId: string) => apiDelete(`/api/artifacts/${encodeURIComponent(artifactId)}`),
   usage: (_workspace?: string) => apiGet<UsageRow[]>('/api/usage'),
   auditLogs: (_workspace?: string) => apiGet<AuditEventView[]>('/api/audit-logs'),
   diagnosticLogs: (_workspace?: string, traceId?: string) => apiGet<DiagnosticLogView[]>(`/api/diagnostic-logs${traceId ? `?traceId=${encodeURIComponent(traceId)}` : ''}`),

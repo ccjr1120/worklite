@@ -4,7 +4,7 @@
 
 Every Skill detail uses the same editor workspace: a compact package tree on the left and the selected file viewer or editor in the remaining space. The tree renders only files returned by the API, derives folder nodes from their paths, and never hard-codes example entries. Empty directories are not shown. Use the shared monospace editor for current text files; introduce CodeMirror 6 only when a concrete editing requirement needs structured editing behavior.
 
-Online user Skills support a required root `SKILL.md`, executable text files under `scripts/`, and text files under `references/`. New Skills begin with `SKILL.md`. A compact add-file icon exposes an inline relative-path field; deleting a selected non-root file requires an explicit action, while `SKILL.md` cannot be deleted. File paths and content use the typed package API and retain visible unsaved, saving, saved, path-validation, and durable error states. Archive upload, binary assets, validation, and publication remain absent until those operations are implemented end to end.
+Online user Skills support a required root `SKILL.md`, executable text files under `scripts/`, and text files under `references/`. New Skills begin with `SKILL.md`. A compact add-file icon exposes an inline relative-path field; deleting a selected non-root file requires an explicit action, while `SKILL.md` cannot be deleted. File paths and content use the typed package API and retain visible unsaved, saving, saved, path-validation, and durable error states. Folder-imported Skills use the same editable package surface and retain their archive source label. Binary assets, validation, and publication remain absent.
 
 Saved script files with a Unix shebang expose a compact `Run` action in the selected-file header, including scripts in read-only built-in packages. A single-line JSON string-array field supplies exact arguments without shell parsing ambiguity. Direct execution uses the persisted package, so `Run` is disabled while an editable Skill has unsaved changes, while saving, or when the selected script lacks a shebang. Clicking `Run` starts the script immediately on the server without Agent assignment, a Model Provider, model selection, or a second approval step.
 
@@ -14,7 +14,18 @@ Protected built-ins use the same package tree and file surface, with read-only c
 
 For `terminal-command`, show its product-owned `scripts/run.sh`, built-in status, explicit per-Agent assignment, automatic Agent execution, API process working directory, `/bin/sh -lc`, and the non-sandbox host-permission warning. Do not present it as a special runtime capability. For `worklite-platform`, show its product-owned scripts and contract reference, built-in status, permanent System Helper Chat assignment, loopback API boundary, automatic script execution, secure credential rules, constrained client navigation, and the exclusion of external APIs, direct database access, deletion, terminal execution, editing, publication, and manual assignment.
 
+Saved non-built-in Skills expose a destructive Delete action. Dependency conflicts remain visible in the named confirmation dialog; successful deletion returns to the Skill list.
+
 ## Changelog
+
+### 2026-09-10
+
+- Standardized resource deletion actions, named confirmation, success feedback, dependency errors, and navigation.
+
+
+### 2026-09-10
+
+- Added editable archive-source Skills created by folder import.
 
 ### 2026-08-29
 

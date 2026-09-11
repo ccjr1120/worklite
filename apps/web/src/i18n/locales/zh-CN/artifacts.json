@@ -15,7 +15,8 @@
     "type": "类型",
     "workflow": "工作流",
     "size": "大小",
-    "created": "创建时间"
+    "created": "创建时间",
+    "actions": "操作"
   },
   "details": {
     "unavailableTitle": "产物不可用",
@@ -23,5 +24,13 @@
     "downloadStarted": "已开始下载",
     "noRun": "未关联运行",
     "unsupported": "此内容无法在页面中预览。请改为下载文件。"
+  },
+  "delete": {
+    "title": "删除 {{name}}？",
+    "description": "这会永久删除该产物。此操作无法撤销。",
+    "action": "删除 {{name}}",
+    "deleting": "正在删除...",
+    "success": "产物已删除",
+    "failed": "无法删除产物。"
   }
 }

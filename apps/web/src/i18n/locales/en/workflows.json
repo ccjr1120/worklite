@@ -1,11 +1,11 @@
 {
   "title": "Workflows",
-  "description": "Directed workflow graphs of published agent versions.",
+  "description": "Directed workflow graphs with embedded Agent configurations.",
   "create": "Create workflow",
   "search": "Search workflows",
   "empty": {
     "title": "No workflows yet",
-    "description": "Compose existing agents into a linear sequence, then publish an immutable version."
+    "description": "Create a blank Workflow, then add and configure nodes in the editor."
   },
   "noMatches": {
     "title": "No matching workflows",
@@ -16,7 +16,8 @@
     "state": "State",
     "steps": "Steps",
     "lastRun": "Last run",
-    "updated": "Updated"
+    "updated": "Updated",
+    "actions": "Actions"
   },
   "editor": {
     "new": "New workflow",
@@ -28,7 +29,7 @@
     "stepCount": "{{count}} steps",
     "agentPalette": "Agent palette",
     "nodePalette": "Node palette",
-    "paletteHint": "Inputs, prompts, Skill Sets, and Generic Agents",
+    "paletteHint": "Inputs, constants, Skill Sets, and Agents",
     "searchNodes": "Search nodes",
     "canvas": "Workflow canvas",
     "zoomIn": "Zoom in",
@@ -37,7 +38,6 @@
     "nodeCount": "{{count}} nodes",
     "edgeCount": "{{count}} connections",
     "agentNode": "Agent",
-    "genericAgentNode": "Generic Agent",
     "workflowInputNode": "Workflow Input",
     "runPayload": "Run payload",
     "systemPromptNode": "System Prompt",
@@ -47,8 +47,6 @@
     "skillCount": "{{count}} Skills",
     "noSkillsSelected": "No Skills selected",
     "contextPort": "Context",
-    "systemPromptPort": "System prompt",
-    "skillsPort": "Skills",
     "nodeName": "Node name",
     "skills": "Skills",
     "constantSource": "Constant text source",
@@ -64,7 +62,6 @@
     "invalidConnection": "This connection would create an invalid workflow graph.",
     "emptyCanvas": "The canvas is empty",
     "searchAgents": "Search agents",
-    "noAgents": "No agents match this search.",
     "configureStep": "Configure step",
     "selectStep": "Select a step to configure it.",
     "inputMapping": "Input mapping",
@@ -77,15 +74,7 @@
     "execution": "Execution",
     "defaultErrorPolicy": "Default error policy",
     "versioning": "Versioning",
-    "versioningHint": "Draft edits stay mutable until you publish. Published versions lock referenced agent versions.",
-    "chooseTemplate": "Start a workflow",
-    "chooseTemplateDescription": "Choose a starting point. You can change every step after creation.",
-    "blankTemplate": "Blank workflow",
-    "blankTemplateDescription": "Start with an empty canvas and add nodes as you go.",
-    "dailyTemplate": "Daily research brief",
-    "dailyTemplateDescription": "Research, write, and review a concise daily brief.",
-    "templateDailyName": "Daily research brief",
-    "templateDailyInput": "topic: daily market brief",
+    "versioningHint": "Draft edits remain mutable. Publishing locks the complete workflow definition.",
     "dailyTemplatePrompt": "Research the supplied topic and return a concise evidence-based brief.",
     "agentFallback": "Agent",
     "textNode": "Text",
@@ -95,11 +84,6 @@
     "mappingLiteralOutput": "literal → output",
     "mappingInputOutput": "input → output",
     "mappingPreviousOutput": "previous output → output",
-    "noPublishedAgents": "Publish an Agent before adding it to a workflow.",
-    "loadingVersions": "Loading versions...",
-    "selectImmutableVersion": "Select an immutable version",
-    "selectVersionBeforePublish": "Select an immutable AgentVersion before publishing.",
-    "dailyTemplateUnavailable": "Publish at least one Agent to use this template.",
     "versions": "Versions",
     "aiEdit": "AI edit",
     "run": "Run",
@@ -111,7 +95,6 @@
     "runVersion": "Run v{{version}}",
     "running": "Starting...",
     "step": "Step {{position}}",
-    "agentVersion": "Agent version",
     "errorPolicy": "Error policy",
     "stop": "Stop",
     "retry": "Retry",
@@ -128,7 +111,7 @@
     "applied": "Applied",
     "runOutput": "Run output",
     "publishTitle": "Publish workflow",
-    "publishDescription": "Publishing locks each referenced agent version. Later agent edits will not change this workflow or its historical runs.",
+    "publishDescription": "Publishing locks the embedded Agent configuration. Later standalone Agent edits do not change this workflow or its historical runs.",
     "published": "Workflow published",
     "publishFailed": "The workflow could not be published.",
     "saveFailed": "The workflow could not be saved.",
@@ -138,14 +121,24 @@
     "moveUp": "Move up",
     "moveDown": "Move down",
     "duplicate": "Duplicate",
-    "remove": "Remove"
+    "remove": "Remove",
+    "exportJson": "Export JSON",
+    "saveBeforeExport": "Save the workflow before exporting it.",
+    "exported": "Workflow JSON exported",
+    "exportFailed": "The workflow JSON could not be exported.",
+    "agentNodeDescription": "Configure model, prompt, Skills, and MCP servers",
+    "model": "Model",
+    "selectModel": "Select a model",
+    "systemPrompt": "System prompt",
+    "mcpServers": "MCP servers",
+    "noMcpServersSelected": "No MCP servers selected"
   },
   "versions": {
     "title": "Versions",
     "description": "Immutable publications. Runs always bind to an exact version.",
     "empty": {
       "title": "No published versions",
-      "description": "Publish the workflow to lock agent versions and enable runs."
+      "description": "Publish the workflow to lock its complete definition and enable runs."
     },
     "columns": {
       "version": "Version",
@@ -154,5 +147,16 @@
       "steps": "Steps",
       "recentRun": "Recent run"
     }
+  },
+  "importJson": "Import JSON",
+  "importing": "Importing...",
+  "importFailed": "The workflow JSON could not be imported.",
+  "delete": {
+    "title": "Delete {{name}}?",
+    "description": "This permanently deletes the workflow, its drafts, published versions, schedules, dashboard data, and run history. This action cannot be undone.",
+    "action": "Delete {{name}}",
+    "deleting": "Deleting...",
+    "success": "Workflow deleted",
+    "failed": "Unable to delete workflow."
   }
 }

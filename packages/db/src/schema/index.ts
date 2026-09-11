@@ -94,7 +94,7 @@ export type StoredWorkflowEditOperation =
   | { type: 'updateSettings'; input?: { example?: unknown }; defaults?: { errorPolicy: 'stop' | 'retry' } };
 
 export const emptyWorkflowDefinition: StoredWorkflowDefinition = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   input: {},
   defaults: { errorPolicy: 'stop' },
   nodes: [],
@@ -129,6 +129,10 @@ export const workflowVersions = sqliteTable('workflow_versions', {
   schemaVersion: integer('schema_version').notNull().default(1), nodes: text('nodes', { mode: 'json' }).$type<StoredWorkflowNode[]>().notNull().default([]), definition: text('definition', { mode: 'json' }).$type<StoredWorkflowDefinition | null>(), sourceRevisionId: text('source_revision_id'), publishedAt: integer('published_at', { mode: 'timestamp_ms' }), publishedBy: text('published_by'), createdAt: timestamp('created_at'),
 });
 
+export const workflowSchedules = sqliteTable('workflow_schedules', {
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), workflowId: text('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }), workflowVersionId: text('workflow_version_id').notNull().references(() => workflowVersions.id, { onDelete: 'restrict' }), intervalSeconds: integer('interval_seconds').notNull(), enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true), running: integer('running', { mode: 'boolean' }).notNull().default(false), nextRunAt: timestamp('next_run_at'), lastRunAt: integer('last_run_at', { mode: 'timestamp_ms' }), lastRunId: text('last_run_id'), lastStatus: text('last_status').$type<'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out'>(), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
+}, (table) => [unique().on(table.workflowId), index('workflow_schedules_due_idx').on(table.workspaceId, table.enabled, table.nextRunAt)]);
+
 export const workflowRuns = sqliteTable('workflow_runs', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), workflowId: text('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }), workflowVersionId: text('workflow_version_id').notNull().references(() => workflowVersions.id, { onDelete: 'restrict' }),
   status: text('status').$type<'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out'>().notNull().default('queued'), input: text('input', { mode: 'json' }).$type<unknown>().notNull(), result: text('result', { mode: 'json' }).$type<unknown>(), currentNodeId: text('current_node_id'),
@@ -142,6 +146,10 @@ export const workflowNodeRuns = sqliteTable('workflow_node_runs', {
 export const workflowRunEvents = sqliteTable('workflow_run_events', {
   runId: text('run_id').notNull().references(() => workflowRuns.id, { onDelete: 'cascade' }), sequence: integer('sequence').notNull(), type: text('type').$type<'run.status' | 'node.started' | 'node.delta' | 'node.completed' | 'node.failed' | 'artifact.created'>().notNull(), payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(), createdAt: timestamp('created_at'),
 }, (table) => [primaryKey({ columns: [table.runId, table.sequence] })]);
+
+export const dashboardDatasets = sqliteTable('dashboard_datasets', {
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), workflowId: text('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }), presentation: text('presentation').$type<'list' | 'kanban'>().notNull().default('kanban'), payload: text('payload', { mode: 'json' }).$type<unknown>(), lastRunId: text('last_run_id'), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
+}, (table) => [unique().on(table.workspaceId), unique().on(table.workflowId)]);
 
 export const commandExecutions = sqliteTable('command_executions', {
   id: text('id').primaryKey(),

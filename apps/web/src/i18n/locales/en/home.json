@@ -95,12 +95,40 @@
       "remove": "Remove widget"
     },
     "widgets": {
-      "attention": { "title": "Needs attention", "empty": "Nothing needs attention." },
-      "active_runs": { "title": "Active runs", "empty": "No runs in progress." },
-      "workflow_health": { "title": "Workflow health", "empty": "No workflows available." },
-      "recent_workflows": { "title": "Recent workflows", "empty": "No workflows available." },
-      "recent_activity": { "title": "Recent activity", "empty": "No recent activity." },
-      "recent_artifacts": { "title": "Recent artifacts", "empty": "No artifacts available." }
+      "attention": {
+        "title": "Needs attention",
+        "empty": "Nothing needs attention."
+      },
+      "active_runs": {
+        "title": "Active runs",
+        "empty": "No runs in progress."
+      },
+      "workflow_health": {
+        "title": "Workflow health",
+        "empty": "No workflows available."
+      },
+      "recent_workflows": {
+        "title": "Recent workflows",
+        "empty": "No workflows available."
+      },
+      "recent_activity": {
+        "title": "Recent activity",
+        "empty": "No recent activity."
+      },
+      "recent_artifacts": {
+        "title": "Recent artifacts",
+        "empty": "No artifacts available."
+      }
+    },
+    "workflow": {
+      "workflow": "Workflow",
+      "workflowPlaceholder": "Select a published workflow",
+      "presentation": "Presentation",
+      "kanban": "Kanban",
+      "list": "List",
+      "runNow": "Run now",
+      "unconfigured": "Select a published workflow to provide this Home dashboard dataset.",
+      "empty": "The workflow has not produced dashboard items yet."
     }
   },
   "firstUse": {

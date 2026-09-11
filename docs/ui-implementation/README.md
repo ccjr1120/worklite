@@ -19,7 +19,7 @@ Before UI work, read the design system, this index, every applicable document un
 - [Home](home/README.md)
 - [Workspace System Helper Chat](assistant/README.md)
 - Agents: [List and resource views](agents/list.md), [Editor](agents/editor.md)
-- Providers: [Model providers and Portkey Gateway](model-providers.md), including Gateway request statistics
+- Providers: [Model providers and Portkey Gateway](model-providers.md), including the dedicated Codex Account Pool and Gateway request statistics
 - Workflows: [List](workflows/list.md), [Editor](workflows/editor.md), [Versions](workflows/versions.md)
 - Runs: [List](runs/list.md), [Details](runs/details.md)
 - Skills: [List](skills/list.md), [Editor](skills/editor.md)
@@ -43,7 +43,7 @@ Before UI work, read the design system, this index, every applicable document un
 /settings/{usage,audit-log,logs,appearance}
 ```
 
-The root route opens Home. First-use setup is an optional checklist for configuring a Model Provider and binding that Provider and a model to System Helper Chat; there is no account, invitation, team, first custom Agent, Workflow, or Run setup step. The `/model-providers` page is the top-level Providers destination. It shows the Portkey Gateway information first and the Gateway-managed Model Provider administration below in one continuous page.
+The root route opens Home. First-use setup is an optional checklist for configuring a Model Provider and binding that Provider and a model to System Helper Chat; there is no account, invitation, team, first custom Agent, Workflow, or Run setup step. The `/model-providers` page is the top-level Providers destination. It uses page-level tabs for Model Providers, the dedicated Codex Account Pool, and Gateway Statistics; the Gateway summary remains on the Model Providers view.
 
 ## Shared Component Inventory
 
@@ -62,6 +62,19 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-09-11
+
+- Standardized page-level tab persistence through validated URL Search parameters so refreshes and direct links retain the selected view.
+- Added the dedicated Codex Account Pool view to the Providers page specification and linked its per-account quota behavior to the Gateway usage contract.
+
+### 2026-09-10
+
+- Defined workflow-backed Home dashboards as the generic destination for source data and removed the standalone Meegle board page.
+
+### 2026-09-09
+
+- Replaced the standalone Meegle board route with generic workflow-backed dashboards inside Home.
 
 ### 2026-09-08
 

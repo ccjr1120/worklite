@@ -10,7 +10,7 @@ This is the approved initial baseline. Target-state components may be introduced
 
 WorkLite is a single-user personal tool for creating and running AI agents and workflows. One local workspace manages model providers, agents, skills, MCP servers, workflows, runs, and artifacts.
 
-Agents are configured manually with their own prompts, model settings, skills, and MCP access. Users compose existing agents into workflows. A workflow can be edited with explicit add-node controls or through a natural-language AI assistant. Every AI change is recorded and reversible, similar to an AI-assisted code editor.
+Standalone Agents are configured manually with their own prompts, model settings, Skills, and MCP access for Home chat, `@Agent` invocation, and independent execution. Workflows do not reference Agent or AgentVersion resources. Instead, each Workflow Agent node owns its public model id, system prompt, Skill selections, and MCP server selections inside the versioned workflow definition. A workflow can be edited with explicit add-node controls or through a natural-language AI assistant. Every AI change is recorded and reversible, similar to an AI-assisted code editor.
 
 The workspace assistant can also inspect the workspace and create Provider, Skill, MCP server, Agent, and Workflow drafts through assigned Skill scripts. Every script request is explicit, executes automatically after server validation, and remains subject to the same validation, secret-handling, publication, and audit rules as manual configuration.
 
@@ -124,13 +124,14 @@ WorkLite exposes one unified OpenAI-compatible proxy entry point for the workspa
 /api/portkey-gateway/providers/:providerId
 /api/portkey-gateway/providers/:providerId/test
 /api/portkey-gateway/model-providers/discover-models
+/api/portkey-gateway/codex/accounts/usage
 ```
 
 Portkey Gateway is the sole owner of Provider records, encrypted API keys, base URLs, protocol selections, model catalogs, and headers. The unified `models` response prefixes every configured model with its unique Provider name as `<providerName>/<modelId>`. Provider ids remain internal record keys for persisted Agent bindings and administration routes; they are not part of the public OpenAI-compatible model namespace. Gateway administration routes persist and return credential-safe Provider metadata; the WorkLite API proxies those routes without decrypting or storing upstream secrets. For every LLM request the Gateway resolves the Provider name from the requested namespaced model, validates the model against that Provider's catalog, and applies the stored upstream credentials and headers. Provider names are unique. Renaming a Provider changes its public model namespace immediately, and the previous name is not retained as a compatibility alias. Provider configuration has no separate vendor type: a user-supplied `baseURL` and namespaced `protocol` such as `openai/chat`, `openai/responses`, or `codex/responses` identify the upstream wire contract. The Codex adapter uses the Gateway-owned local credential record for its private upstream access token; its Provider `baseURL` is metadata and does not control private Codex routing. The model-discovery route accepts an unsaved Provider draft and returns a de-duplicated model ID list without persisting the draft.
 
-Provider administration is a Gateway-owned view exposed through the top-level `Providers` menu. WorkLite retains one protected `gateway-provider` binding for Agent and Workflow runtime resolution; that record is an internal implementation detail and is never returned by Provider APIs or rendered in user configuration. The Providers page shows user-managed Gateway Providers and the unified Gateway endpoint. When the Gateway has a connected Codex OAuth credential or `CODEX_ACCESS_TOKEN`, it automatically upserts one Gateway-owned Provider named `codex` with protocol `codex/responses`, no API key, and a model catalog synchronized from the Codex `/models` endpoint. This automatic Provider uses a stable internal id, is not created through the browser CRUD form, and is omitted from Provider responses while Codex is not configured. A temporary Codex model-discovery failure does not remove the automatic Provider or erase its last known catalog. Logging out or removing the environment credential hides the automatic Provider and leaves Agent bindings unresolved until Codex is configured again.
+Provider administration is a Gateway-owned view exposed through the top-level `Providers` menu. WorkLite retains one protected `gateway-provider` binding for Agent and Workflow runtime resolution; that record is an internal implementation detail and is never returned by Provider APIs or rendered in user configuration. The Providers page shows user-managed Gateway Providers and the unified Gateway endpoint. When the Gateway has at least one enabled Codex account with usable OAuth credentials, or `CODEX_ACCESS_TOKEN`, it automatically upserts one Gateway-owned Provider named `codex` with protocol `codex/responses`, no API key, and a model catalog synchronized from the Codex `/models` endpoint. The Gateway owns a Codex account pool in its SQLite database. Operators can add accounts through OAuth login or import the supported account-export JSON document; imported accounts are upserted by ChatGPT account id without returning tokens to the browser. Each account stores its enabled state, priority, concurrency, automatic-expiry pause preference, and rate multiplier metadata. Requests select an enabled usable account from the highest available priority using round-robin scheduling while respecting its configured concurrency. An unauthorized response refreshes only the selected account; a failed refresh or expired credential pauses that account when automatic expiry pause is enabled and allows another eligible account to serve a later request. Operators can explicitly enable or disable each account. The imported `proxies` collection is ignored, and rate multiplier is retained as metadata rather than used for weighted routing. This automatic Provider uses a stable internal id, is not created through the browser CRUD form, and is omitted from Provider responses while neither the account pool nor the environment credential is usable. A temporary Codex model-discovery failure does not remove the automatic Provider or erase its last known catalog. Removing or disabling every account and removing the environment credential hides the automatic Provider and leaves Agent bindings unresolved until Codex is configured again. No legacy single-account compatibility layer is retained; existing local credentials must be re-authenticated or imported after the schema change.
 
-For a connected Codex credential, the Gateway exposes a read-only Codex rate-limit snapshot sourced from the same account usage endpoint used by the open-source Codex client. The Gateway requests the ChatGPT `/wham/usage` endpoint with its current access token and account id, refreshes once after an unauthorized response, and returns the provider-reported primary, secondary, and additional limit windows. Each window preserves its used percentage, duration, and reset time. The API proxies this credential-safe snapshot to the Providers page without persisting it or adding it to Gateway request statistics. A usage-query failure does not change Codex authentication state.
+For each Codex account, the Gateway exposes a credential-safe account usage view through `GET /worklite/codex/accounts/usage`. Enabled accounts are queried independently from the ChatGPT `/wham/usage` endpoint with their current access token and account id; a token is refreshed once after an unauthorized response. Disabled accounts return their persisted account status without an upstream usage request. Each result preserves the provider-reported plan type, primary and secondary windows, used percentage, duration, reset time, and fetch time. A single account failure is returned on that account while other accounts continue to load, and a usage-query failure does not change Codex authentication state. The API proxies this per-account snapshot to the Providers page without persisting it or adding it to Gateway request statistics.
 
 Portkey runs as a server-owned sidecar on a loopback-only internal port. The API owns automatic sidecar startup, readiness, crash recovery, shutdown, and failure reporting; it does not expose lifecycle mutation controls to clients. Client request bodies, status codes, streaming responses, and credential-safe upstream errors are proxied without creating a Run, Artifact, Agent execution, Audit Log, or Usage row. Agent Runtime requests use the hidden `gateway-provider` binding through the same sidecar; AI SDK remains a message and streaming normalization layer, not a direct upstream transport. LLM traffic is therefore centralized in the Gateway while proxy traffic remains transport-only and is not included in Agent or Workflow runtime accounting.
 
@@ -140,7 +141,7 @@ Portkey Gateway records one credential-safe request statistic for each `/v1` req
 
 ### Persistence
 
-- SQLite is the initial local system of record for WorkLite resources, stored in a profile-specific data directory. Development uses the repository `.data` defaults; the local deployment script uses an isolated `.data/deployment` directory. Portkey Gateway owns an independent SQLite database file (configured by `PORTKEY_GATEWAY_DB_PATH`) and dedicated `gateway_providers`, `codex_auth_credentials`, and `gateway_request_stats` tables for Gateway state; the API SQLite database is not used for Gateway Provider runtime, administration state, or Gateway statistics.
+- SQLite is the initial local system of record for WorkLite resources, stored in a profile-specific data directory. Development uses the repository `.data` defaults; the local deployment script uses an isolated `.data/deployment` directory. Portkey Gateway owns an independent SQLite database file (configured by `PORTKEY_GATEWAY_DB_PATH`) and dedicated `gateway_providers`, `codex_accounts`, and `gateway_request_stats` tables for Gateway state; the API SQLite database is not used for Gateway Provider runtime, administration state, or Gateway statistics.
 - Drizzle ORM for schemas, migrations, and type-safe queries.
 - PostgreSQL, Redis, and BullMQ are deferred until multi-instance execution and durable queue requirements justify them.
 - Textual skill and artifact content remains in SQLite for the local runtime. Binary archives and large payload storage are deferred until an implemented storage boundary requires them.
@@ -188,11 +189,11 @@ All workspace-owned records include `workspace_id`. The API resolves the singlet
 
 An agent is manually configured with a name, description, optional avatar, model selected from the Gateway's configured model catalog, system prompt, skills, MCP access, and supported runtime settings. Every Agent uses the protected `gateway-provider` binding; the binding is not a user-selectable Provider and is omitted from Provider listings and forms. Skill and MCP definitions remain reusable workspace resources, but their assignment is explicit and independent for every Agent. Creating or editing one Agent never grants those resources to another Agent. The API validates that every selected Skill and MCP server belongs to the same workspace.
 
-The Agent row is the mutable configuration draft. `agent_skills` and `agent_mcp_servers` relational tables own the many-to-many draft assignments; the Agent row owns its provider, model, and system prompt. Publishing creates an immutable `AgentVersion` snapshot containing the resolved model configuration and assigned Skill/MCP version references. AgentVersion records are the only Agent references allowed in published workflows and remain executable after the mutable Agent draft changes.
+The Agent row is the mutable configuration draft. `agent_skills` and `agent_mcp_servers` relational tables own the many-to-many draft assignments; the Agent row owns its provider, model, and system prompt. Publishing creates an immutable `AgentVersion` snapshot containing the resolved model configuration and assigned Skill/MCP version references. AgentVersion records remain executable snapshots for standalone Agent use. Workflows never reference Agent or AgentVersion records.
 
 The singleton workspace owns one protected system Agent with the stable identifier `agt_system_helper_chat`. It represents the product's System Helper Chat and is created during startup bootstrap. It always appears before custom Agents, cannot be deleted, and exposes a nullable Model Provider binding plus a model selection for user configuration. Its name, responsibility, prompt, Skills, and MCP configuration are product-owned and read-only. Startup permanently assigns the protected `worklite-platform` Skill and repairs that assignment if local data is changed; the Skill cannot be assigned to a custom Agent. The binding and model can be changed only from the System Helper Chat entry in the Agent editor; provider pages and the Chat surface do not own configuration selectors. The selected model must belong to the selected provider's configured model catalog. Changing or deleting a provider clears the binding when necessary and resets an invalid model selection to an unconfigured state. When configured, System Helper Chat resolves the bound provider and selected model through the WorkLite model gateway. When unconfigured, ordinary System Helper submission is unavailable; the surface links to the protected Agent's configuration form unless a configured custom Agent keeps the composer available for structured `@` dispatch.
 
-Workflow nodes are generic typed execution units. Each node references a registered Node Type and contains versioned configuration, a persisted canvas position, and declared input and output ports. Workflow edges connect one output port to one named input port. The workflow runtime assembles each node request as an object keyed by its declared input ports after every upstream dependency has completed. A Node Type declares configuration, input, and output schemas and executes behind the Workflow Engine contract.
+Workflow nodes are generic typed execution units. Each node references a registered Node Type and contains versioned configuration, a persisted canvas position, and declared input and output ports. Workflow edges connect one output port to one named input port. The workflow runtime assembles each node request as an object keyed by its declared input ports after every upstream dependency has completed. A Node Type declares configuration, input, and output schemas and executes behind the Workflow Engine contract. The registered node catalog is also the source of truth for node capability metadata consumed by graph validation and the workspace platform snapshot.
 
 Plugins are the extension and composition boundary. A trusted in-process plugin may register Node Types, runtime capabilities, typed lifecycle events, and optional browser metadata. The Workflow Engine does not import concrete plugin implementations; it resolves a Node Type from its registry and invokes its execution contract. Plugin registration is separate from node execution: a plugin may contribute capabilities without being a workflow node.
 
@@ -202,9 +203,9 @@ The `wechat-clawbot` capability is a server-owned iLink text transport. It keeps
 
 The Codex CLI plugin owns an editable executable command configuration, defaulting to `codex`, in the persisted Plugin row. The value contains one executable name or path followed by optional fixed leading arguments. The API parses that value into an argument vector without shell operators, expansion, or environment-variable substitution, uses the same vector for availability probing and execution, and appends its product-owned `exec --json` arguments afterward. It never reads a command override from an environment variable. The command is executed through the existing shell command boundary with each parsed value quoted independently, using the API process working directory and inherited process environment to match the existing Host Command Interface. The browser exposes Plugins as a first-level workspace resource alongside Agents, with a dedicated list and configuration page; saving and testing are server-owned operations. The same page owns WeChat QR login and connection controls for the transport capability. Skills, MCP servers, and Model Providers remain workspace resources presented with Agents through shared page-level resource tabs because Agents consume their versions and runtime settings. There is no user-uploaded plugin code, marketplace installation, or network authorization layer in this increment. Existing `codex` values remain valid without migration. Existing routes, Agent, Workflow, and execution records remain valid without migration; startup bootstrap adds or repairs the protected plugin rows and Agent row without removing user data.
 
-Agent is one Node Type rather than the Workflow Engine's universal primitive. The first-party `worklite/generic-agent` adapter references an immutable AgentVersion for its Provider, model, and maximum Skill authorization. Its `context`, `systemPrompt`, and `skills` inputs define one isolated invocation. The supplied Skill set must be a subset of the Skill identifiers locked by the AgentVersion. The adapter returns text, structured data, and artifact references through the generic node result. Agent Runtime remains independent from Workflow Engine.
+Agent is one Node Type rather than the Workflow Engine's universal primitive. The first-party `worklite/agent` adapter stores a public `<providerName>/<modelId>` model id, system prompt, Skill identifiers, and MCP server identifiers directly in its immutable WorkflowVersion configuration. Its `context` input defines one isolated invocation. The adapter returns text, structured data, and artifact references through the generic node result. It reuses shared Agent Runtime infrastructure without creating or referencing Agent or AgentVersion records.
 
-A published workflow locks every referenced `AgentVersion`; later agent edits cannot alter published workflows or historical runs. Deleted referenced agents use soft deletion so historical versions remain executable and auditable.
+Standalone Agent publications remain immutable and auditable. Workflow publications independently lock the complete embedded Agent node configuration, so later standalone Agent edits cannot alter workflows or historical runs.
 
 Gateway Providers are installation-scoped resources and are presented in the Providers destination through the WorkLite API proxy. Provider configuration uses a user-supplied `baseURL`, a namespaced protocol such as `openai/chat`, `openai/responses`, `codex/responses`, or `deepseek/chat`, an API key for ordinary upstreams, a model catalog, and optional headers. Header values and ordinary Provider API keys are encrypted or protected by the Gateway storage boundary; the Codex access token and private Codex headers are Gateway process environment configuration and are never persisted in Provider records. WorkLite API responses return only header names, masks, and counts. Provider changes take effect on the next request and do not mutate immutable published workflow versions.
 
@@ -275,7 +276,7 @@ The Commands module uses the API process's current working directory and complet
 
 Agent execution uses a server-owned session for custom and protected system Agents. The browser sends user messages, the API resolves the saved Agent, its assigned Skill instructions and executable Skill scripts, and the model gateway returns normalized text and tool-call steps. A valid `skill_script` tool call is persisted as `running`, delegated once to Commands immediately, and linked to the created Command before waiting for completion. If the turn remains active, the matching result resumes the same Agent turn and another tool request may then execute through the same sequence. Agent executions and tool calls use `running`, `completed`, `failed`, and `cancelled` runtime states and are mutable runtime records rather than immutable AgentVersions or WorkflowRuns. In-memory abort controllers coordinate active model cancellation in the initial single-process runtime; persisted state remains authoritative and every asynchronous continuation rechecks it before writing. There is no public Agent tool-call decision route. The former approval route, `pending_approval` and `rejected` states, `terminal_command` model tool, System Helper proposal stream, and pending-call behavior are removed without aliases or adapters; existing pending approval sessions are not migrated and must be replaced with new executions. Existing command execution history remains ordinary Commands data.
 
-A Generic Agent workflow node uses the same model gateway and Skill-script runner without creating a conversational AgentExecution. The node resolves only the Skill packages named by its `skills` input and authorized by its locked AgentVersion, adds their instructions and exact executable script allowlist to the supplied system prompt, and executes one requested script at a time. Script results are appended to the isolated node model context until the model returns final text or reaches the bounded workflow tool-round budget. Commands persist each host invocation, while the Workflow NodeRun persists the assembled port input, final output, failure, and cancellation state. Workflow cancellation aborts the active model request and terminates an active Skill command before it can resume the node.
+A Workflow Agent node uses the same model gateway, Skill-script runner, and MCP runtime without creating a conversational AgentExecution. The node resolves only the Skill packages and MCP servers selected in its configuration, adds Skill instructions and exact executable script allowlists to its system prompt, and executes one requested tool at a time. Script results are appended to the isolated node model context until the model returns final text or reaches the bounded workflow tool-round budget. Commands persist each host invocation, while the Workflow NodeRun persists the assembled port input, final output, failure, and cancellation state. Workflow cancellation aborts the active model request and terminates an active Skill command before it can resume the node.
 
 ## MCP Architecture
 
@@ -305,20 +306,22 @@ The graph permits at most one incoming edge for each named input port and any nu
 
 The API validates the complete graph and the Workflow Engine derives a deterministic topological order, using definition order as the stable tie breaker. Before a node executes, the runtime gathers every connected predecessor output into an object keyed by target port. Ready nodes execute one at a time in that order. Every node executes at most once. The final workflow result is an object keyed by leaf node identifier so fan-out results remain explicit. Large values are represented by Artifact references rather than copied into every node record.
 
-The first-party Node Types are:
+The first-party Node Types are discovered from the trusted registered node catalog at runtime. Capability metadata includes the public type and version, display name, purpose, input and output port metadata, and configuration schema. Only registered/trusted node types are executable or usable in a workflow; this first phase does not load arbitrary remote node code or frontend components. The current first-party Node Types are:
 
 - `worklite/input` exposes the WorkflowRun input through `output`.
 - `worklite/text` exposes configured text through `output` and is used for visible system prompts and other constants.
 - `worklite/skill-set` locks a configured list of workspace Skill identifiers and exposes typed Skill references through `output`.
-- `worklite/generic-agent` locks one AgentVersion, accepts `context`, `systemPrompt`, and `skills`, and exposes the isolated invocation result through `output`.
+- `worklite/agent` owns its model, system prompt, Skill selections, and MCP server selections, accepts `context`, and exposes the isolated invocation result through `output`.
 
-Publication requires every Generic Agent to reference an AgentVersion from the workspace and every Skill Set identifier to be authorized by each connected Generic Agent's AgentVersion. Context accepts arbitrary JSON-compatible values, system prompt accepts text, and skills accepts only the output of a Skill Set node. Conditions, loops, dynamic joins, and concurrent branch scheduling require separate architecture decisions.
+Publication requires every Workflow Agent node to contain a valid public model id and to reference only Skills and MCP servers from the workspace. Context accepts arbitrary JSON-compatible values. Conditions, loops, dynamic joins, and concurrent branch scheduling require separate architecture decisions.
 
-Graph definitions use `schemaVersion: 3`. The multi-port increment intentionally provides no schema-version adapter or migration for version 1 or version 2 definitions. Earlier drafts and published versions are not editable, publishable, or executable after the change. The personal workspace contains no Workflow records when this increment is introduced, so no persisted workflow data is rewritten.
+Graph definitions use `schemaVersion: 4`. The multi-port increment intentionally provides no schema-version adapter or migration for version 1 or version 2 definitions. Earlier drafts and published versions are not editable, publishable, or executable after the change. The personal workspace contains no Workflow records when this increment is introduced, so no persisted workflow data is rewritten.
 
 ### Editing and AI Assistance
 
-The editor uses `@xyflow/react` with node dragging, edge creation and reconnection, panning, zooming, and fit-to-view. Users add nodes from a palette and configure node-owned fields directly through React-rendered nodes or the contextual inspector. The inspector remains the complete keyboard-accessible path for reviewing configuration and removing graph state. A side-panel AI assistant may modify the workflow from natural-language instructions.
+The editor uses `@xyflow/react` with node dragging, edge creation and reconnection, panning, zooming, and fit-to-view. Users add nodes from a palette and configure node-owned fields directly through React-rendered nodes or the contextual inspector. The inspector remains the complete keyboard-accessible path for reviewing configuration and removing graph state. A side-panel AI assistant may modify the workflow from natural-language instructions. Before proposing a graph, System Helper reads the current platform snapshot and chooses only the dynamically reported node capabilities and workspace resources. The assistant produces a logical Workflow Plan keyed by model-chosen node keys; it does not generate durable node IDs, canvas positions, or direct database state.
+
+The server normalizes each logical plan into generated node identifiers, deterministic canvas positions, formal edges, and validated node configuration. It validates registered node types, configuration schemas, port existence and compatibility, workspace Skill/MCP references, and DAG constraints before converting the plan into the existing structured operations.
 
 AI edits are validated structured operations: add, delete, update, or move a node; add or delete an edge; or update workflow settings. The AI cannot write arbitrary workflow state directly. The server validates and atomically applies operations.
 
@@ -332,15 +335,53 @@ The persisted definition includes the schema version, an optional workflow-input
 
 Workflow draft operations are exposed through `POST /workflows/:workflowId/draft/operations` with a required `baseRevisionId`. The response returns the authoritative draft, revision identifier, and undo/redo availability. `POST /workflows/:workflowId/draft/undo` and `POST /workflows/:workflowId/draft/redo` move the server-owned draft pointer without mutating immutable revision snapshots. A stale base revision is rejected so concurrent browser tabs or assistant edits cannot silently overwrite one another.
 
+Workflow deletion is permanent. Deleting a Workflow removes its mutable draft, edit revisions, immutable published versions, schedules, dashboard dataset, run history, node runs, and run events in one workspace-scoped operation. Artifacts are retained and detached because their Workflow and Run references use `ON DELETE SET NULL`. There is no recycle bin, soft deletion, compatibility alias, or restoration path.
+
+Workspace resource deletion follows one explicit lifecycle policy. Deleting a custom Agent permanently removes its versions, assignments, schedules, executions, sub-sessions, tool-call history, and execution events; the built-in System Helper Agent is protected. Skills and MCP servers may be deleted only when no standalone Agent assignment and no Workflow draft or immutable version references the resource. Provider deletion remains owned by the Gateway. Artifact deletion permanently removes the Artifact record and its WorkLite-managed object when one exists. Runs, immutable Agent and Workflow versions, audit logs, diagnostic logs, and built-in Plugins are not independently deletable.
+
 ### Drafts and Published Versions
 
 ```text
 WorkflowDraft --publish--> immutable WorkflowVersion --run--> WorkflowRun
 ```
 
-Drafts can change. Published versions cannot. A publication copies the current draft definition into a new immutable WorkflowVersion with its source revision and locked Node Type/resource references. Every execution is tied to one immutable workflow version; draft workflows cannot be run directly. Publication rejects Generic Agent nodes that cannot be locked to an AgentVersion or whose connected Skill Set exceeds that version's authorization. The editor offers only Agents with immutable versions for Generic Agent nodes, disables Run while the draft has unsaved changes, and identifies that Run targets the latest published version.
+Drafts can change. Published versions cannot. A publication copies the current draft definition into a new immutable WorkflowVersion with its source revision and locked Node Type/resource references. Every execution is tied to one immutable workflow version; draft workflows cannot be run directly. Publication rejects Workflow Agent nodes whose public model id is invalid or whose selected Skills or MCP servers do not belong to the workspace. The editor configures Workflow Agent nodes directly, disables Run while the draft has unsaved changes, and identifies that Run targets the latest published version.
 
 The graph increment does not rewrite existing drafts or published versions. Version 1 definitions remain stored but are rejected by graph reads, publication, and execution. New drafts and publications use version 2 without a compatibility adapter.
+
+## Workflow Automation and Home Dashboard
+
+WorkLite has two primary product services: Workflow automation and the customizable Home Dashboard. Workflows acquire, process, and produce data; Home consumes a stable WorkLite dashboard payload and renders user-selected boards and widgets. Source-specific integrations such as Meegle are workflow use cases rather than standalone products, API domains, routes, or navigation destinations.
+
+Published workflows may have one fixed-interval schedule. A schedule references the selected immutable WorkflowVersion, persists its next-run time, creates ordinary Workflow Runs through the asynchronous Runs boundary, prevents overlapping runs, and advances an overdue schedule once after restart. Scheduling belongs to Workflow rather than Dashboard. The initial schedule contract supports fixed intervals of at least five minutes; cron expressions, calendars, webhook triggers, catch-up replay, and compatibility adapters for scheduled Agent tasks are intentionally omitted.
+
+A workflow may invoke an embedded Workflow Agent node configured with instructions, a public model id, Skills, and MCP server access. Skill and MCP capabilities serve Agent execution. Plugins and Agents remain peer-level workspace capabilities: a Plugin may register runtime capabilities or Node Types, while an Agent performs model-driven work and may consume Skills and MCP servers. Workflow composes these capabilities without making a source-specific integration a first-class product surface.
+
+A workflow that feeds Home must return a versioned dashboard payload:
+
+```json
+{
+  "type": "worklite.dashboard",
+  "version": 1,
+  "source": { "kind": "meegle", "name": "Personal Todos" },
+  "updatedAt": "2026-09-10T00:00:00.000Z",
+  "items": [
+    {
+      "id": "task-123",
+      "title": "Review dashboard contract",
+      "status": "in_progress",
+      "priority": "high",
+      "dueAt": null,
+      "url": null,
+      "metadata": {}
+    }
+  ]
+}
+```
+
+`type` and `version` identify the contract. `source.kind` and `source.name` describe provenance without changing Home behavior. Every item requires a source-stable `id`, a `title`, and a non-empty `status`; `priority`, `dueAt`, `url`, and JSON-compatible `metadata` are optional. Home stores the latest successful payload for a configured dashboard and renders it through generic list or kanban widgets. The browser does not query an upstream service directly and does not interpret source-specific fields.
+
+The first generic dashboard data increment supports one workflow-backed dataset per dashboard, the latest successful snapshot, a manual Run now action, fixed-interval schedule configuration, and list or kanban presentation. Kanban columns are derived from the distinct item `status` values rather than a Meegle-specific status map. Arbitrary field mapping, combining multiple workflows into one dataset, historical dataset browsing, source-specific change notifications, direct upstream mutation, and additional payload types are deferred. Existing Meegle-specific tables and endpoints are removed without aliases or data migration; users rerun the workflow to populate the generic dashboard dataset.
 
 ## Runtime Architecture
 
@@ -424,7 +465,7 @@ The adapter uses a Gateway-owned Codex authentication manager. It supports the C
 
 Before a request uses a Codex credential, the manager refreshes it when it is within a five-minute pre-expiry window. Refreshes are serialized per credential, use bounded retry with backoff, and publish the new token atomically so concurrent requests cannot consume the same rotating refresh token. A Codex upstream 401 triggers one forced refresh and retry. Logout clears the local persisted credential and runtime cache. The Gateway exposes login start, callback, status, refresh, and logout control routes through the existing API boundary. Tokens never reach WorkLite API responses or the browser.
 
-The adapter forwards the Responses request body and stream to the private Codex endpoint with the required Codex client headers and normalizes the private model catalog into an OpenAI model list. A Codex Provider uses the explicit `codex/responses` protocol; its configured `baseURL` is retained as Provider metadata and does not override the private Codex upstream URL. Codex Responses remains stream-first. This increment supports one Gateway credential only; multi-account rotation, quota scheduling, Chat Completions translation, non-streaming assembly, and WebSocket transport remain deferred capabilities.
+The adapter forwards the Responses request body and stream to the private Codex endpoint with the required Codex client headers and normalizes the private model catalog into an OpenAI model list. A Codex Provider uses the explicit `codex/responses` protocol; its configured `baseURL` is retained as Provider metadata and does not override the private Codex upstream URL. Codex Responses remains stream-first. The Gateway selects credentials from its enabled Codex account pool with priority-aware round-robin scheduling and per-account concurrency. Chat Completions translation, non-streaming assembly, weighted rate-multiplier routing, and WebSocket transport remain deferred capabilities.
 
 Existing Providers configured as `openai/responses` against the former `apps/codex-proxy` loopback URL are not compatibility aliases; they must be changed to `codex/responses`. Remote deployments must provide a secure path for the fixed localhost callback, such as an SSH tunnel to port 1455; arbitrary public redirect URIs are not assumed.
 
@@ -525,7 +566,67 @@ The MCP client, skill SDK, and observability code may begin inside applications 
 
 Adding a deferred capability requires an approved architecture change.
 
+### Portable Workflow JSON
+
+Workflows support a versioned portable JSON envelope for moving editable definitions between WorkLite workspaces. Export reads the current draft and emits `format: "worklite.workflow"`, `version: 1`, the workflow name, and its graph definition. Database identifiers, workspace identifiers, run history, schedules, credentials, and secrets are excluded. Workflow Agent public model ids and system prompts remain embedded. Skill and MCP server identifiers in Agent node configuration are replaced by workspace-portable references using resource names. Import resolves those names in the current workspace, rejects missing references, creates a draft, and never publishes or enables schedules.
+
+Import validates the envelope and workflow DAG, resolves every Agent and Skill reference against the destination workspace, and creates a new mutable draft. Missing or ambiguous references reject the entire import. Import never overwrites an existing workflow, publishes a version, or enables a schedule.
+
 ## Changelog
+
+### 2026-09-11 - Per-Account Codex Usage
+
+- Added a Gateway-owned `GET /worklite/codex/accounts/usage` contract that fetches usage independently for every enabled Codex account and returns disabled or failed accounts without blocking the remaining pool.
+- Kept usage snapshots read-only and non-persistent; account tokens remain Gateway-owned and never cross the API boundary.
+- Defined the Providers page account pool as a separate management view instead of embedding account controls in the Gateway summary.
+
+### 2026-09-10 - Codex Account Pool and JSON Import
+
+- Replaced the single Codex OAuth credential with a Gateway-owned multi-account pool.
+- Added account-export JSON import, per-account enable and disable controls, priority-aware round-robin selection, and configured concurrency enforcement.
+- Defined account-local refresh and automatic pause behavior, retained rate multiplier as non-routing metadata, and ignored imported proxy definitions.
+- Intentionally omitted a legacy single-account compatibility layer; existing credentials require re-authentication or import.
+
+### 2026-09-10 - Dynamic Workflow Capability Planning
+
+- Made the trusted registered Workflow node catalog the source of truth for runtime node execution, graph validation, and platform snapshot capability metadata.
+- Added an assistant-facing logical Workflow Plan contract; the server owns node identifiers, layout, normalization, resource validation, port validation, and DAG validation.
+- Updated System Helper guidance to inspect current capabilities and use controlled Workflow draft mutation scripts.
+- Kept arbitrary remote node code loading, direct database writes, arbitrary URL/API calls, and runtime-extensible frontend node components out of scope.
+
+
+### 2026-09-10
+
+- Required the built-in System Helper platform Skill and platform snapshot capability metadata to stay synchronized with current Workflow architecture and editor capabilities. Workflow guidance now describes embedded Agent nodes instead of standalone Agent references.
+
+### 2026-09-10
+
+- Defined a platform-wide resource lifecycle for Agent, Skill, MCP server, Provider, Artifact, Run, immutable version, log, and built-in resource deletion.
+- Defined permanent Workflow deletion across drafts, versions, schedules, dashboard datasets, and run history while retaining detached Artifacts.
+
+### 2026-09-10 - Embedded Workflow Agent Nodes
+
+- Separated standalone Agent and AgentVersion resources from Workflow definitions and execution.
+- Replaced `worklite/generic-agent` with the self-contained `worklite/agent` node, which stores its public model id, system prompt, Skill selections, and MCP server selections in each immutable WorkflowVersion.
+- Removed compatibility for legacy Generic Agent workflows; existing definitions must be recreated with the new Agent node.
+### 2026-09-10
+
+- Reframed WorkLite around Workflow automation and the customizable Home Dashboard.
+- Defined the version 1 workflow-to-dashboard payload and one workflow-backed dataset per dashboard.
+- Kept Plugins and Agents as peer capabilities while Skills and MCP servers serve Agents.
+- Removed Meegle as a standalone product surface; Meegle personal todos are a generic scheduled-workflow use case.
+
+### 2026-09-09
+
+- Added versioned portable Workflow JSON export and import. Exports omit runtime and credential state; imports resolve Agent and Skill references in the destination workspace and create a new draft without publishing or scheduling it.
+
+
+### 2026-09-09 - Scheduled Meegle Todo Board
+
+- Added fixed-interval triggers for published workflows, with persisted next-run state and overlap prevention.
+- Added a local Meegle todo read model populated from structured workflow results with deterministic snapshot comparison.
+- Added internal change notifications and a personal kanban surface with manual synchronization.
+- Intentionally omitted cron, webhook triggers, Feishu IM delivery, custom mappings, and scheduled-Agent-task compatibility.
 
 ### 2026-09-08 - Codex Rate-Limit Visibility
 

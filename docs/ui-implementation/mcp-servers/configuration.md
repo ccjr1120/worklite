@@ -8,7 +8,14 @@ Connection tests define pending, success, authentication failure, unreachable en
 
 Existing drafts restore their endpoint and persisted allowed-tool selection. Test performs a real server-side MCP handshake and replaces the displayed discovery result with the returned tools; it never fabricates success or tool names. Save persists draft configuration and uses Save language. Publication language appears only when an immutable MCP version is actually created.
 
+Saved MCP servers expose a destructive Delete action. Dependency conflicts remain visible in the named confirmation dialog; successful deletion returns to the MCP server list.
+
 ## Changelog
+
+### 2026-09-10
+
+- Standardized resource deletion actions, named confirmation, success feedback, dependency errors, and navigation.
+
 
 ### 2026-08-29
 

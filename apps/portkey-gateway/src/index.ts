@@ -36,8 +36,8 @@ import { imageEditsHandler } from './handlers/imageEditsHandler';
 import { messagesCountTokensHandler } from './handlers/messagesCountTokensHandler';
 import modelResponsesHandler from './handlers/modelResponsesHandler';
 import { createProvider, deleteProvider, getProvider, listProviders, providerView, requestStats, updateProvider } from './worklite/provider-registry';
-import { codexAuthStatus, logoutCodex, refreshCodexCredential, startCodexLogin, startCodexOAuthCallbackServer } from './worklite/codex-auth';
-import { codexRateLimits } from './worklite/codex-transport';
+import { codexAuthStatus, deleteCodexAccount, importCodexAccounts, refreshCodexAccount, startCodexLogin, startCodexOAuthCallbackServer, updateCodexAccount } from './worklite/codex-auth';
+import { codexAccountUsages, codexRateLimits } from './worklite/codex-transport';
 
 // utils
 import { logger } from './apm';
@@ -108,11 +108,22 @@ app.get('/worklite/codex/auth/status', (c) => c.json(codexAuthStatus()));
 app.get('/worklite/codex/rate-limits', async (c) => {
   try { return c.json(await codexRateLimits()); } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Codex rate limits are unavailable.' }, 502); }
 });
-app.post('/worklite/codex/auth/login', (c) => c.json(startCodexLogin()));
-app.post('/worklite/codex/auth/refresh', async (c) => {
-  try { return c.json(await refreshCodexCredential()); } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Codex token refresh failed.' }, 502); }
+app.get('/worklite/codex/accounts/usage', async (c) => {
+  try { return c.json(await codexAccountUsages()); } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Codex account usage is unavailable.' }, 502); }
 });
-app.post('/worklite/codex/auth/logout', (c) => { logoutCodex(); return c.json(codexAuthStatus()); });
+app.post('/worklite/codex/auth/login', (c) => c.json(startCodexLogin()));
+app.post('/worklite/codex/accounts/import', async (c) => {
+  try { return c.json(importCodexAccounts(await c.req.json())); } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Codex account import failed.' }, 400); }
+});
+app.patch('/worklite/codex/accounts/:accountId', async (c) => {
+  const body = await c.req.json().catch(() => null) as { enabled?: unknown } | null;
+  if (typeof body?.enabled !== 'boolean') return c.json({ message: 'Enabled must be a boolean.' }, 400);
+  try { return c.json(updateCodexAccount(c.req.param('accountId'), body.enabled)); } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Codex account update failed.' }, 404); }
+});
+app.post('/worklite/codex/accounts/:accountId/refresh', async (c) => {
+  try { return c.json(await refreshCodexAccount(c.req.param('accountId'))); } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Codex token refresh failed.' }, 502); }
+});
+app.delete('/worklite/codex/accounts/:accountId', (c) => c.json(deleteCodexAccount(c.req.param('accountId'))));
 app.get('/worklite/providers/:providerId', async (c) => {
   const provider = await getProvider(c.req.param('providerId'));
   return provider ? c.json(providerView(provider)) : c.json({ message: 'Model provider not found.' }, 404);

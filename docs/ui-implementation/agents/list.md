@@ -8,7 +8,14 @@ System Helper Chat is a protected system Agent owned by the chat panel. It is no
 
 Define first-use empty, filtered no-results, loading, partial failure, permission and long-name states. Filters and sort should remain navigable and persist when useful.
 
+Custom Agent rows expose a separate destructive Delete action. The named confirmation explains permanent removal of versions, schedules, executions, sessions, and resource assignments. Success closes the dialog, shows a toast, and refreshes the list; failure remains visible in the dialog. The Actions header and icon action are centered within the same fixed-width grid column so every row remains aligned.
+
 ## Changelog
+
+### 2026-09-10
+
+- Standardized resource deletion actions, named confirmation, success feedback, dependency errors, and navigation.
+
 
 ### 2026-08-30
 

@@ -11,6 +11,7 @@ type StatusKey =
   | 'draft'
   | 'published'
   | 'connected'
+  | 'disabled'
   | 'disconnected'
   | 'unreachable'
   | 'auth_failed'
@@ -41,6 +42,7 @@ const STATUS_CONFIG: Record<
   draft: { variant: 'warning', icon: CircleDashed },
   published: { variant: 'success', icon: CheckCircle2 },
   connected: { variant: 'success', icon: CheckCircle2 },
+  disabled: { variant: 'neutral', icon: Ban },
   disconnected: { variant: 'neutral', icon: CircleDashed },
   unreachable: { variant: 'danger', icon: XCircle },
   auth_failed: { variant: 'danger', icon: XCircle },

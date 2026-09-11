@@ -19,7 +19,8 @@
     "agent": "Agent",
     "model": "Model / provider",
     "resources": "Skills / MCP",
-    "updated": "Updated"
+    "updated": "Updated",
+    "actions": "Actions"
   },
   "editor": {
     "new": "New agent",
@@ -93,5 +94,13 @@
         "failed": "Failed"
       }
     }
+  },
+  "delete": {
+    "title": "Delete {{name}}?",
+    "description": "This permanently deletes the Agent, its versions, schedules, execution history, sessions, and resource assignments. This action cannot be undone.",
+    "action": "Delete {{name}}",
+    "deleting": "Deleting...",
+    "success": "Agent deleted",
+    "failed": "Unable to delete agent."
   }
 }

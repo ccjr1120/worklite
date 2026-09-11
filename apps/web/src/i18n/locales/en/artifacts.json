@@ -15,7 +15,8 @@
     "type": "Type",
     "workflow": "Workflow",
     "size": "Size",
-    "created": "Created"
+    "created": "Created",
+    "actions": "Actions"
   },
   "details": {
     "unavailableTitle": "Artifact unavailable",
@@ -23,5 +24,13 @@
     "downloadStarted": "Download started",
     "noRun": "Unlinked run",
     "unsupported": "This content cannot be previewed inline. Download the file instead."
+  },
+  "delete": {
+    "title": "Delete {{name}}?",
+    "description": "This permanently deletes the Artifact. This action cannot be undone.",
+    "action": "Delete {{name}}",
+    "deleting": "Deleting...",
+    "success": "Artifact deleted",
+    "failed": "Unable to delete artifact."
   }
 }

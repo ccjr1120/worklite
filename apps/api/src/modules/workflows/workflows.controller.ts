@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
-import type { ApplyWorkflowDraftOperationsRequest, CreateWorkflowRequest } from '@worklite/contracts';
+import type { ApplyWorkflowDraftOperationsRequest, CreateWorkflowRequest, ImportWorkflowRequest } from '@worklite/contracts';
 import { WorkflowsService } from './workflows.service';
 
 @Controller('workflows')
@@ -22,9 +22,24 @@ export class WorkflowsController {
     return this.workflows.create(request, 'personal', body);
   }
 
+  @Post('import')
+  importWorkflow(@Req() request: Request, @Body() body: ImportWorkflowRequest) {
+    return this.workflows.importWorkflow(request, 'personal', body);
+  }
+
+  @Get(':workflowId/export')
+  exportWorkflow(@Req() request: Request, @Param('workflowId') workflowId: string) {
+    return this.workflows.exportWorkflow(request, 'personal', workflowId);
+  }
+
   @Patch(':workflowId')
   update(@Req() request: Request, @Param('workflowId') workflowId: string, @Body() body: Partial<CreateWorkflowRequest>) {
     return this.workflows.update(request, 'personal', workflowId, body);
+  }
+
+  @Delete(':workflowId')
+  delete(@Req() request: Request, @Param('workflowId') workflowId: string) {
+    return this.workflows.delete(request, 'personal', workflowId);
   }
 
   @Post(':workflowId/draft/operations')

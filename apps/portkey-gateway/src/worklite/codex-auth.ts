@@ -13,242 +13,69 @@ const SESSION_TTL_MS = 30 * 60 * 1000;
 const REFRESH_WINDOW_MS = 5 * 60 * 1000;
 
 type OAuthSession = { state: string; verifier: string; createdAt: number };
-type StoredCredential = {
-  refresh_token: string;
-  access_token: string | null;
-  id_token: string | null;
-  expires_at: number | null;
-  account_id: string | null;
-  email: string | null;
-  plan_type: string | null;
+type StoredAccount = {
+  id: string; name: string; enabled: number; auto_pause_on_expired: number; concurrency: number; priority: number; rate_multiplier: number;
+  refresh_token: string; access_token: string | null; id_token: string | null; expires_at: number | null; account_id: string | null;
+  user_id: string | null; organization_id: string | null; email: string | null; plan_type: string | null; updated_at: number;
 };
-
-export type CodexAuthStatus = {
-  status: 'connected' | 'disconnected' | 'login_pending' | 'error';
-  authMethod: 'oauth' | 'environment' | null;
-  email: string | null;
-  accountId: string | null;
-  planType: string | null;
-  expiresAt: string | null;
-  authorizationUrl?: string;
-  sessionId?: string;
-  error?: string;
-};
+export type CodexAccountView = { id: string; name: string; enabled: boolean; autoPauseOnExpired: boolean; concurrency: number; priority: number; rateMultiplier: number; email: string | null; accountId: string | null; planType: string | null; expiresAt: string | null; status: 'connected' | 'expired' | 'disabled' | 'error'; error?: string };
+export type CodexAuthStatus = { status: 'connected' | 'disconnected' | 'login_pending' | 'error'; authMethod: 'oauth' | 'environment' | null; email: string | null; accountId: string | null; planType: string | null; expiresAt: string | null; accounts: CodexAccountView[]; authorizationUrl?: string; sessionId?: string; error?: string };
+export type CodexAccountLease = { accountId?: string; accessToken: string; release: () => void; refresh: () => Promise<string> };
 
 let database: BetterSqlite3.Database | null = null;
 const sessions = new Map<string, OAuthSession>();
+const accountErrors = new Map<string, string>();
+const activeRequests = new Map<string, number>();
+const refreshPromises = new Map<string, Promise<string>>();
 let lastError: string | null = null;
-let refreshPromise: Promise<string> | null = null;
 let callbackServer: ReturnType<typeof createServer> | null = null;
 let refreshTimer: NodeJS.Timeout | null = null;
+let roundRobinCursor = 0;
 
-function databasePath(): string {
-  const configured = process.env.PORTKEY_GATEWAY_DB_PATH?.trim();
-  return configured ? resolve(process.cwd(), configured) : resolve(process.cwd(), 'data/worklite-gateway.db');
-}
-
+function databasePath(): string { const configured = process.env.PORTKEY_GATEWAY_DB_PATH?.trim(); return configured ? resolve(process.cwd(), configured) : resolve(process.cwd(), 'data/worklite-gateway.db'); }
 function db(): BetterSqlite3.Database {
   if (database) return database;
-  const path = databasePath();
-  mkdirSync(dirname(path), { recursive: true });
-  database = new BetterSqlite3(path);
-  database.pragma('busy_timeout = 5000');
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS codex_auth_credentials (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      refresh_token TEXT NOT NULL,
-      access_token TEXT,
-      id_token TEXT,
-      expires_at INTEGER,
-      account_id TEXT,
-      email TEXT,
-      plan_type TEXT,
-      updated_at INTEGER NOT NULL
-    );
-  `);
+  const path = databasePath(); mkdirSync(dirname(path), { recursive: true }); database = new BetterSqlite3(path); database.pragma('busy_timeout = 5000');
+  database.exec(`DROP TABLE IF EXISTS codex_auth_credentials; CREATE TABLE IF NOT EXISTS codex_accounts (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, auto_pause_on_expired INTEGER NOT NULL DEFAULT 1,
+    concurrency INTEGER NOT NULL DEFAULT 1, priority INTEGER NOT NULL DEFAULT 50, rate_multiplier REAL NOT NULL DEFAULT 1,
+    refresh_token TEXT NOT NULL, access_token TEXT, id_token TEXT, expires_at INTEGER, account_id TEXT, user_id TEXT,
+    organization_id TEXT, email TEXT, plan_type TEXT, updated_at INTEGER NOT NULL
+  ); CREATE UNIQUE INDEX IF NOT EXISTS codex_accounts_account_id_unique ON codex_accounts(account_id) WHERE account_id IS NOT NULL;`);
   return database;
 }
-
-function stored(): StoredCredential | null {
-  const row = db().prepare('SELECT refresh_token, access_token, id_token, expires_at, account_id, email, plan_type FROM codex_auth_credentials WHERE id = 1').get() as (StoredCredential | undefined);
-  if (!row) return null;
-  return row;
+function accounts(): StoredAccount[] { return db().prepare('SELECT * FROM codex_accounts ORDER BY priority DESC, updated_at ASC').all() as StoredAccount[]; }
+function account(id: string): StoredAccount | null { return db().prepare('SELECT * FROM codex_accounts WHERE id = ?').get(id) as StoredAccount | undefined ?? null; }
+function decodeClaims(token?: string | null): Record<string, any> { try { if (!token) return {}; return JSON.parse(Buffer.from(token.split('.')[1] || '', 'base64url').toString('utf8')); } catch { return {}; } }
+function metadata(accessToken: string, idToken?: string | null) {
+  const access = decodeClaims(accessToken); const identity = decodeClaims(idToken); const auth = access['https://api.openai.com/auth'] ?? identity['https://api.openai.com/auth'] ?? {};
+  const profile = access['https://api.openai.com/profile'] ?? {};
+  return { accountId: auth.chatgpt_account_id as string | undefined, userId: auth.chatgpt_user_id as string | undefined, organizationId: auth.poid as string | undefined, email: (identity.email ?? profile.email) as string | undefined, planType: auth.chatgpt_plan_type as string | undefined };
 }
-
-function saveCredential(value: { refreshToken: string; accessToken: string; idToken?: string; expiresIn?: number; accountId?: string; email?: string; planType?: string }): void {
-  const expiresAt = typeof value.expiresIn === 'number' && value.expiresIn > 0 ? Date.now() + value.expiresIn * 1000 : null;
-  db().prepare(`
-    INSERT INTO codex_auth_credentials (id, refresh_token, access_token, id_token, expires_at, account_id, email, plan_type, updated_at)
-    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET refresh_token = excluded.refresh_token, access_token = excluded.access_token, id_token = excluded.id_token, expires_at = excluded.expires_at, account_id = excluded.account_id, email = excluded.email, plan_type = excluded.plan_type, updated_at = excluded.updated_at
-  `).run(value.refreshToken, value.accessToken, value.idToken ?? null, expiresAt, value.accountId ?? null, value.email ?? null, value.planType ?? null, Date.now());
-  lastError = null;
+function saveAccount(value: { id?: string; name?: string; enabled?: boolean; autoPauseOnExpired?: boolean; concurrency?: number; priority?: number; rateMultiplier?: number; refreshToken: string; accessToken?: string; idToken?: string; expiresAt?: number | null; expiresIn?: number; accountId?: string; userId?: string; organizationId?: string; email?: string; planType?: string }): StoredAccount {
+  const meta = metadata(value.accessToken || '', value.idToken); const accountId = value.accountId || meta.accountId || null; const existingId = accountId ? (db().prepare('SELECT id FROM codex_accounts WHERE account_id = ?').get(accountId) as { id: string } | undefined)?.id : undefined; const id = value.id || existingId || accountId || `codex_${createHash('sha256').update(value.refreshToken).digest('hex').slice(0, 24)}`;
+  const expiresAt = value.expiresAt !== undefined ? value.expiresAt : typeof value.expiresIn === 'number' ? Date.now() + value.expiresIn * 1000 : null;
+  db().prepare(`INSERT INTO codex_accounts (id,name,enabled,auto_pause_on_expired,concurrency,priority,rate_multiplier,refresh_token,access_token,id_token,expires_at,account_id,user_id,organization_id,email,plan_type,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,enabled=excluded.enabled,auto_pause_on_expired=excluded.auto_pause_on_expired,concurrency=excluded.concurrency,priority=excluded.priority,rate_multiplier=excluded.rate_multiplier,refresh_token=excluded.refresh_token,access_token=excluded.access_token,id_token=excluded.id_token,expires_at=excluded.expires_at,account_id=excluded.account_id,user_id=excluded.user_id,organization_id=excluded.organization_id,email=excluded.email,plan_type=excluded.plan_type,updated_at=excluded.updated_at`).run(
+    id, value.name || value.email || meta.email || accountId || 'Codex account', value.enabled === false ? 0 : 1, value.autoPauseOnExpired === false ? 0 : 1, Math.max(1, Math.trunc(value.concurrency ?? 1)), Math.trunc(value.priority ?? 50), Number.isFinite(value.rateMultiplier) ? value.rateMultiplier : 1, value.refreshToken, value.accessToken || null, value.idToken || null, expiresAt, accountId, value.userId || meta.userId || null, value.organizationId || meta.organizationId || null, value.email || meta.email || null, value.planType || meta.planType || null, Date.now());
+  accountErrors.delete(id); lastError = null; return account(id)!;
 }
-
-function decodeClaims(token: string): Record<string, unknown> {
-  try {
-    const part = token.split('.')[1];
-    if (!part) return {};
-    const parsed = JSON.parse(Buffer.from(part, 'base64url').toString('utf8')) as unknown;
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-  } catch {
-    return {};
-  }
-}
-
-function stringClaim(claims: Record<string, unknown>, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = claims[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return undefined;
-}
-
-function tokenMetadata(idToken: string | undefined, accessToken: string): { accountId?: string; email?: string; planType?: string } {
-  const claims = decodeClaims(idToken || accessToken);
-  const authClaims = claims['https://api.openai.com/auth'];
-  const auth = authClaims && typeof authClaims === 'object' && !Array.isArray(authClaims) ? authClaims as Record<string, unknown> : {};
-  return {
-    accountId: stringClaim(claims, ['account_id', 'chatgpt_account_id']) || stringClaim(auth, ['account_id', 'chatgpt_account_id']),
-    email: stringClaim(claims, ['email']),
-    planType: stringClaim(claims, ['plan_type', 'chatgpt_plan_type']) || stringClaim(auth, ['plan_type', 'chatgpt_plan_type']),
-  };
-}
-
-function cleanupSessions(): void {
-  const cutoff = Date.now() - SESSION_TTL_MS;
-  for (const [id, session] of sessions) if (session.createdAt < cutoff) sessions.delete(id);
-}
-
-function codeChallenge(verifier: string): string {
-  return createHash('sha256').update(verifier).digest('base64url');
-}
-
-export function startCodexLogin(): { authorizationUrl: string; sessionId: string } {
-  cleanupSessions();
-  const sessionId = randomBytes(16).toString('hex');
-  const state = randomBytes(32).toString('base64url');
-  const verifier = randomBytes(64).toString('base64url');
-  sessions.set(sessionId, { state, verifier, createdAt: Date.now() });
-  const params = new URLSearchParams({ response_type: 'code', client_id: CLIENT_ID, redirect_uri: REDIRECT_URI, scope: 'openid profile email offline_access', state, code_challenge: codeChallenge(verifier), code_challenge_method: 'S256', id_token_add_organizations: 'true', codex_cli_simplified_flow: 'true' });
-  return { authorizationUrl: `${AUTHORIZE_URL}?${params.toString()}`, sessionId };
-}
-
-async function exchangeCode(code: string, session: OAuthSession): Promise<void> {
-  const body = new URLSearchParams({ grant_type: 'authorization_code', client_id: CLIENT_ID, code, redirect_uri: REDIRECT_URI, code_verifier: session.verifier });
-  const response = await fetch(TOKEN_URL, { method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'codex-cli' }, body, signal: AbortSignal.timeout(30_000) });
-  if (!response.ok) throw new Error(`Codex authorization exchange failed (${response.status}).`);
-  const payload = await response.json() as { access_token?: string; refresh_token?: string; id_token?: string; expires_in?: number };
-  if (!payload.access_token || !payload.refresh_token) throw new Error('Codex authorization did not return both access and refresh tokens.');
-  const metadata = tokenMetadata(payload.id_token, payload.access_token);
-  saveCredential({ refreshToken: payload.refresh_token, accessToken: payload.access_token, idToken: payload.id_token, expiresIn: payload.expires_in, ...metadata });
-}
-
-export async function handleCodexOAuthCallback(code: string, state: string): Promise<string> {
-  cleanupSessions();
-  const entry = [...sessions.entries()].find(([, value]) => value.state === state);
-  if (!entry) return callbackPage('Codex login failed', 'The login session is missing or expired.', false);
-  try {
-    await exchangeCode(code, entry[1]);
-    sessions.delete(entry[0]);
-    return callbackPage('Codex login complete', 'You can close this window and return to WorkLite.', true);
-  } catch (error) {
-    lastError = error instanceof Error ? error.message : 'Codex login failed.';
-    return callbackPage('Codex login failed', lastError, false);
-  }
-}
-
-function callbackPage(title: string, message: string, success: boolean): string {
-  const color = success ? '#218739' : '#b42318';
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head><body style="font-family:system-ui;padding:3rem"><h1 style="color:${color}">${title}</h1><p>${message}</p></body></html>`;
-}
-
-async function refreshStoredCredential(): Promise<string> {
-  const current = stored();
-  if (!current?.refresh_token) throw new Error('No persisted Codex refresh token is available.');
-  const body = new URLSearchParams({ grant_type: 'refresh_token', client_id: CLIENT_ID, refresh_token: current.refresh_token, scope: 'openid profile email offline_access' });
-  let lastFailure = 'Codex token refresh failed.';
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const response = await fetch(TOKEN_URL, { method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'codex-cli' }, body, signal: AbortSignal.timeout(30_000) });
-      if (!response.ok) {
-        lastFailure = `Codex token refresh failed (${response.status}).`;
-        if (response.status < 500 || attempt === 2) throw new Error(lastFailure);
-      } else {
-        const payload = await response.json() as { access_token?: string; refresh_token?: string; id_token?: string; expires_in?: number };
-        if (!payload.access_token) throw new Error('Codex token refresh did not return an access token.');
-        const metadata = tokenMetadata(payload.id_token, payload.access_token);
-        saveCredential({ refreshToken: payload.refresh_token || current.refresh_token, accessToken: payload.access_token, idToken: payload.id_token || current.id_token || undefined, expiresIn: payload.expires_in, accountId: metadata.accountId || current.account_id || undefined, email: metadata.email || current.email || undefined, planType: metadata.planType || current.plan_type || undefined });
-        return payload.access_token;
-      }
-    } catch (error) {
-      lastFailure = error instanceof Error ? error.message : lastFailure;
-      if (attempt === 2 || /failed \(4\d\d\)/.test(lastFailure)) throw new Error(lastFailure);
-    }
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250 * (attempt + 1)));
-  }
-  throw new Error(lastFailure);
-}
-
-export async function getCodexAccessToken(forceRefresh = false): Promise<string> {
-  const current = stored();
-  if (current?.access_token && !forceRefresh && (!current.expires_at || current.expires_at - Date.now() > REFRESH_WINDOW_MS)) return current.access_token;
-  if (current?.refresh_token) {
-    if (!refreshPromise) {
-      refreshPromise = refreshStoredCredential().finally(() => { refreshPromise = null; });
-    }
-    try { return await refreshPromise; } catch (error) { lastError = error instanceof Error ? error.message : 'Codex token refresh failed.'; }
-  }
-  if (current?.access_token && (!current.expires_at || current.expires_at > Date.now())) return current.access_token;
-  return process.env.CODEX_ACCESS_TOKEN?.trim() || '';
-}
-
-export async function refreshCodexCredential(): Promise<CodexAuthStatus> {
-  const token = await getCodexAccessToken(true);
-  if (!token) throw new Error(lastError || 'No Codex credential is available to refresh.');
-  return codexAuthStatus();
-}
-
-export function logoutCodex(): void {
-  db().prepare('DELETE FROM codex_auth_credentials WHERE id = 1').run();
-  lastError = null;
-}
-
-export function codexAuthStatus(): CodexAuthStatus {
-  cleanupSessions();
-  const current = stored();
-  const envToken = process.env.CODEX_ACCESS_TOKEN?.trim();
-  if (current?.access_token || envToken) {
-    return { status: 'connected', authMethod: current ? 'oauth' : 'environment', email: current?.email ?? null, accountId: current?.account_id ?? process.env.CODEX_ACCOUNT_ID?.trim() ?? null, planType: current?.plan_type ?? null, expiresAt: current?.expires_at ? new Date(current.expires_at).toISOString() : null, error: lastError ?? undefined };
-  }
-  if (sessions.size > 0) {
-    const [sessionId] = sessions.keys();
-    return { status: 'login_pending', authMethod: null, email: null, accountId: null, planType: null, expiresAt: null, sessionId };
-  }
-  return { status: lastError ? 'error' : 'disconnected', authMethod: null, email: null, accountId: null, planType: null, expiresAt: null, error: lastError ?? undefined };
-}
-
-export function codexAccountId(): string | undefined {
-  return stored()?.account_id ?? process.env.CODEX_ACCOUNT_ID?.trim() ?? undefined;
-}
-
-export function startCodexOAuthCallbackServer(): void {
-  if (!refreshTimer) {
-    refreshTimer = setInterval(() => { void getCodexAccessToken(); }, 60_000);
-    refreshTimer.unref?.();
-  }
-  if (callbackServer || process.env.CODEX_OAUTH_CALLBACK_ENABLED === 'false') return;
-  callbackServer = createServer(async (request: IncomingMessage, response: ServerResponse) => {
-    const requestURL = new URL(request.url || '/', `http://127.0.0.1:${CALLBACK_PORT}`);
-    if (requestURL.pathname !== new URL(REDIRECT_URI).pathname) {
-      response.writeHead(404).end('Not found');
-      return;
-    }
-    const code = requestURL.searchParams.get('code');
-    const state = requestURL.searchParams.get('state');
-    const html = code && state ? await handleCodexOAuthCallback(code, state) : callbackPage('Codex login failed', 'The callback did not include code and state.', false);
-    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(html);
-  });
-  callbackServer.on('error', (error) => { lastError = `Codex OAuth callback listener failed: ${error.message}`; callbackServer = null; });
-  callbackServer.listen(CALLBACK_PORT, '127.0.0.1');
-}
+function cleanupSessions() { const cutoff = Date.now() - SESSION_TTL_MS; for (const [id, session] of sessions) if (session.createdAt < cutoff) sessions.delete(id); }
+function view(row: StoredAccount): CodexAccountView { const expired = Boolean(row.expires_at && row.expires_at <= Date.now()); const error = accountErrors.get(row.id); return { id: row.id, name: row.name, enabled: Boolean(row.enabled), autoPauseOnExpired: Boolean(row.auto_pause_on_expired), concurrency: row.concurrency, priority: row.priority, rateMultiplier: row.rate_multiplier, email: row.email, accountId: row.account_id, planType: row.plan_type, expiresAt: row.expires_at ? new Date(row.expires_at).toISOString() : null, status: !row.enabled ? 'disabled' : error ? 'error' : expired ? 'expired' : 'connected', ...(error ? { error } : {}) }; }
+function callbackPage(title: string, message: string, success: boolean): string { return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head><body style="font-family:system-ui;padding:32px"><h1>${title}</h1><p>${message}</p>${success ? '<script>setTimeout(()=>window.close(),1200)</script>' : ''}</body></html>`; }
+function verifierChallenge(verifier: string): string { return createHash('sha256').update(verifier).digest('base64url'); }
+export function startCodexLogin(): { authorizationUrl: string; sessionId: string } { cleanupSessions(); const sessionId = randomBytes(18).toString('base64url'); const verifier = randomBytes(48).toString('base64url'); const state = randomBytes(24).toString('base64url'); sessions.set(sessionId, { state, verifier, createdAt: Date.now() }); const url = new URL(AUTHORIZE_URL); Object.entries({ response_type: 'code', client_id: CLIENT_ID, redirect_uri: REDIRECT_URI, scope: 'openid profile email offline_access', code_challenge: verifierChallenge(verifier), code_challenge_method: 'S256', state: `${sessionId}.${state}`, id_token_add_organizations: 'true', codex_cli_simplified_flow: 'true', originator: 'codex_cli_rs' }).forEach(([key,value]) => url.searchParams.set(key,value)); return { authorizationUrl: url.toString(), sessionId }; }
+async function exchangeCode(code: string, session: OAuthSession): Promise<void> { const response = await fetch(TOKEN_URL, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'authorization_code', client_id: CLIENT_ID, code, code_verifier: session.verifier, redirect_uri: REDIRECT_URI }) }); const payload = await response.json().catch(() => ({})) as any; if (!response.ok || !payload.access_token || !payload.refresh_token) throw new Error(payload.error_description || `Codex OAuth exchange failed (${response.status}).`); saveAccount({ refreshToken: payload.refresh_token, accessToken: payload.access_token, idToken: payload.id_token, expiresIn: payload.expires_in }); }
+export async function handleCodexOAuthCallback(code: string, stateValue: string): Promise<string> { const [sessionId, suppliedState] = stateValue.split('.', 2); const session = sessions.get(sessionId); if (!session || suppliedState !== session.state) return callbackPage('Codex login failed', 'The authorization state is invalid or expired.', false); sessions.delete(sessionId); try { await exchangeCode(code, session); return callbackPage('Codex account added', 'The account is available in WorkLite.', true); } catch (error) { lastError = error instanceof Error ? error.message : 'Codex login failed.'; return callbackPage('Codex login failed', lastError, false); } }
+async function refreshAccount(id: string): Promise<string> { const current = account(id); if (!current) throw new Error('Codex account was not found.'); let failure = 'Codex token refresh failed.'; for (let attempt=0; attempt<3; attempt++) { try { const response = await fetch(TOKEN_URL, { method:'POST', headers:{'content-type':'application/x-www-form-urlencoded'}, body:new URLSearchParams({grant_type:'refresh_token',client_id:CLIENT_ID,refresh_token:current.refresh_token}) }); const payload=await response.json().catch(()=>({})) as any; if (!response.ok || !payload.access_token) throw new Error(payload.error_description || `Codex token refresh failed (${response.status}).`); const updated=saveAccount({ id:current.id,name:current.name,enabled:Boolean(current.enabled),autoPauseOnExpired:Boolean(current.auto_pause_on_expired),concurrency:current.concurrency,priority:current.priority,rateMultiplier:current.rate_multiplier,refreshToken:payload.refresh_token || current.refresh_token,accessToken:payload.access_token,idToken:payload.id_token || current.id_token || undefined,expiresIn:payload.expires_in,accountId:current.account_id || undefined,userId:current.user_id || undefined,organizationId:current.organization_id || undefined,email:current.email || undefined,planType:current.plan_type || undefined }); return updated.access_token!; } catch (error) { failure=error instanceof Error ? error.message : failure; if (attempt===2 || /failed \(4\d\d\)/.test(failure)) break; await new Promise(r=>setTimeout(r,250*(attempt+1))); } } accountErrors.set(id,failure); if (current.auto_pause_on_expired) db().prepare('UPDATE codex_accounts SET enabled = 0, updated_at = ? WHERE id = ?').run(Date.now(), id); throw new Error(failure); }
+async function tokenFor(row: StoredAccount, force=false): Promise<string> { if (row.access_token && !force && (!row.expires_at || row.expires_at-Date.now()>REFRESH_WINDOW_MS)) return row.access_token; if (!refreshPromises.has(row.id)) refreshPromises.set(row.id, refreshAccount(row.id).finally(()=>refreshPromises.delete(row.id))); return refreshPromises.get(row.id)!; }
+function selectAccount(): StoredAccount | null { const eligible=accounts().filter(row=>row.enabled && (activeRequests.get(row.id) ?? 0)<row.concurrency); if (!eligible.length) return null; const highest=Math.max(...eligible.map(row=>row.priority)); const group=eligible.filter(row=>row.priority===highest); const selected=group[roundRobinCursor % group.length]; roundRobinCursor=(roundRobinCursor+1)%Math.max(group.length,1); return selected; }
+async function leaseForAccount(selected: StoredAccount): Promise<CodexAccountLease> { activeRequests.set(selected.id,(activeRequests.get(selected.id)??0)+1); try { const accessToken=await tokenFor(selected); let released=false; return { accountId:selected.account_id || undefined, accessToken, refresh:()=>tokenFor(account(selected.id)!,true), release:()=>{ if(released)return; released=true; activeRequests.set(selected.id,Math.max(0,(activeRequests.get(selected.id)??1)-1)); } }; } catch(error){ activeRequests.set(selected.id,Math.max(0,(activeRequests.get(selected.id)??1)-1)); throw error; } }
+export async function acquireCodexAccountById(id: string): Promise<CodexAccountLease> { const selected=account(id); if (!selected || !selected.enabled) throw new Error('No enabled Codex account is available.'); return leaseForAccount(selected); }
+export async function acquireCodexAccount(): Promise<CodexAccountLease> { const selected=selectAccount(); if (selected) return leaseForAccount(selected); const env=process.env.CODEX_ACCESS_TOKEN?.trim(); if(env) return { accountId:process.env.CODEX_ACCOUNT_ID?.trim(),accessToken:env,refresh:async()=>env,release:()=>undefined }; throw new Error('No enabled Codex account is available.'); }
+export async function refreshCodexAccount(id: string): Promise<CodexAuthStatus> { await refreshAccount(id); return codexAuthStatus(); }
+export function updateCodexAccount(id:string, enabled:boolean): CodexAuthStatus { if (!account(id)) throw new Error('Codex account was not found.'); db().prepare('UPDATE codex_accounts SET enabled=?, updated_at=? WHERE id=?').run(enabled?1:0,Date.now(),id); if(enabled) accountErrors.delete(id); return codexAuthStatus(); }
+export function deleteCodexAccount(id:string): CodexAuthStatus { db().prepare('DELETE FROM codex_accounts WHERE id=?').run(id); accountErrors.delete(id); activeRequests.delete(id); return codexAuthStatus(); }
+export function importCodexAccounts(input: unknown): CodexAuthStatus { if(!input || typeof input!=='object' || !Array.isArray((input as any).accounts)) throw new Error('The import document must contain an accounts array.'); let imported = 0; for(const item of (input as any).accounts){ const c=item?.credentials; if(!item || item.platform!=='openai' || item.type!=='oauth' || !c?.refresh_token) continue; const expiresAt=typeof c.expires_at==='string' ? Date.parse(c.expires_at) : null; saveAccount({ name:typeof item.name==='string'?item.name:undefined,enabled:item.enabled!==false,autoPauseOnExpired:item.auto_pause_on_expired!==false,concurrency:Number(item.concurrency)||1,priority:Number.isFinite(Number(item.priority))?Number(item.priority):50,rateMultiplier:Number.isFinite(Number(item.rate_multiplier))?Number(item.rate_multiplier):1,refreshToken:c.refresh_token,accessToken:c.access_token,idToken:c.id_token,expiresAt:Number.isFinite(expiresAt)?expiresAt:null,accountId:c.chatgpt_account_id,userId:c.chatgpt_user_id,organizationId:c.organization_id,email:c.email,planType:c.plan_type }); imported += 1; } if (!imported) throw new Error('The import document contains no supported OpenAI OAuth accounts.'); return codexAuthStatus(); }
+export function codexAuthStatus(): CodexAuthStatus { cleanupSessions(); const rows=accounts(); const views=rows.map(view); const connected=rows.find(row=>row.enabled && Boolean(row.access_token || row.refresh_token)); const env=process.env.CODEX_ACCESS_TOKEN?.trim(); if(connected || env) return { status:'connected',authMethod:connected?'oauth':'environment',email:connected?.email??null,accountId:connected?.account_id??process.env.CODEX_ACCOUNT_ID?.trim()??null,planType:connected?.plan_type??null,expiresAt:connected?.expires_at?new Date(connected.expires_at).toISOString():null,accounts:views,error:lastError??undefined }; if(sessions.size){const [sessionId]=sessions.keys();return{status:'login_pending',authMethod:null,email:null,accountId:null,planType:null,expiresAt:null,accounts:views,sessionId};} return {status:lastError?'error':'disconnected',authMethod:null,email:null,accountId:null,planType:null,expiresAt:null,accounts:views,error:lastError??undefined}; }
+export function startCodexOAuthCallbackServer():void { if(!refreshTimer){refreshTimer=setInterval(()=>{for(const row of accounts().filter(a=>a.enabled)) void tokenFor(row).catch(()=>undefined);},60_000);refreshTimer.unref?.();} if(callbackServer||process.env.CODEX_OAUTH_CALLBACK_ENABLED==='false')return; callbackServer=createServer(async(request:IncomingMessage,response:ServerResponse)=>{const requestURL=new URL(request.url||'/',`http://127.0.0.1:${CALLBACK_PORT}`);if(requestURL.pathname!==new URL(REDIRECT_URI).pathname){response.writeHead(404).end('Not found');return;}const code=requestURL.searchParams.get('code');const state=requestURL.searchParams.get('state');const html=code&&state?await handleCodexOAuthCallback(code,state):callbackPage('Codex login failed','The callback did not include code and state.',false);response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'}).end(html);});callbackServer.on('error',error=>{lastError=`Codex OAuth callback listener failed: ${error.message}`;callbackServer=null;});callbackServer.listen(CALLBACK_PORT,'127.0.0.1');}

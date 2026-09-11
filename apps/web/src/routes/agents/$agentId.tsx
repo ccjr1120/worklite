@@ -217,10 +217,10 @@ function AgentEditorPage() {
       await api.deleteAgent(workspaceSlug, agentId);
       setDeleteOpen(false);
       toast.success(t('editor.deleted'));
-      void navigate({ to: '/home' });
+      void navigate({ to: '/agents' });
       void queryClient.invalidateQueries({ queryKey: agentsQueryKey() }).catch(() => undefined);
-    } catch {
-      setDeleteError(t('editor.deleteFailed'));
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : t('editor.deleteFailed'));
     } finally {
       setDeleteBusy(false);
     }

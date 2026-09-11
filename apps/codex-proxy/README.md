@@ -14,9 +14,9 @@ CODEX_ORIGINATOR=codex_cli_rs
 CODEX_RESIDENCY=us
 ```
 
-Create a Gateway Provider with protocol `codex/responses`. Its Base URL is descriptive metadata; private Codex routing and credentials are owned by the Gateway process. Multi-account rotation, non-streaming assembly, Chat Completions translation, and WebSocket transport remain deferred.
+Create a Gateway Provider with protocol `codex/responses`. Its Base URL is descriptive metadata; private Codex routing and credentials are owned by the Gateway process. The Gateway supports a SQLite-backed Codex account pool, exported JSON account import, priority-aware round-robin selection, per-account concurrency, and explicit account enable or disable controls. Non-streaming assembly, Chat Completions translation, and WebSocket transport remain deferred.
 
-The Gateway now provides Codex OAuth PKCE login and local SQLite refresh-token persistence. Use the Model Providers page to start login; the callback uses `http://localhost:1455/auth/callback`. `CODEX_ACCESS_TOKEN` remains an optional bootstrap fallback. No additional encryption key is required for this local-only installation.
+The Gateway provides Codex OAuth PKCE login and local SQLite refresh-token persistence for each account in the pool. Use the Model Providers page to start login; the callback uses `http://localhost:1455/auth/callback`. `CODEX_ACCESS_TOKEN` remains an optional bootstrap fallback. No additional encryption key is required for this local-only installation.
 
 For a remote Gateway, forward the callback port before starting login:
 

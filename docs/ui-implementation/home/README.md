@@ -14,7 +14,7 @@ Every clickable control uses a pointer cursor and a visible hover state. Categor
 
 Opening a dashboard navigates to its detail view. Dashboard widgets link to the existing resource surfaces: workflow rows open Workflow details, active run rows open Run details, artifact rows open Artifact details, and section actions open the corresponding collection list. These links must remain keyboard accessible and show hover and focus states.
 
-Dashboard detail supports editing the dashboard name, adding supported widgets, reordering widgets, and removing widgets. Supported initial widgets are `Needs attention`, `Active runs`, `Workflow health`, `Recent workflows`, `Recent activity`, and `Recent artifacts`.
+Dashboard detail supports editing the dashboard name, adding supported widgets, reordering widgets, and removing widgets. Supported platform widgets are `Needs attention`, `Active runs`, `Workflow health`, `Recent workflows`, `Recent activity`, and `Recent artifacts`. A workflow-backed dashboard additionally selects one published Workflow, configures its fixed interval, exposes a neutral Run now action, and renders the latest successful `worklite.dashboard` version 1 payload as either a list or a kanban. Kanban columns come from item status values. Source names remain provenance labels rather than product navigation.
 
 ## Embedded System Helper Chat
 
@@ -37,6 +37,11 @@ Show a two-step guided sequence: configure at least one Model Provider, then bin
 Derive completion from persisted server resources rather than browser preferences. Do not show the guide until both Provider and System Helper Chat queries have resolved successfully. Remove the complete guide as soon as both steps are complete. Creating a custom Agent, creating a Workflow, and running or inspecting a Workflow are not first-use steps.
 
 ## Changelog
+
+### 2026-09-10
+
+- Added generic workflow-backed list and kanban dashboards that consume the fixed dashboard payload inside Home.
+- Kept schedule and manual execution controls attached to the selected Workflow and removed source-specific navigation.
 
 ### 2026-08-27
 

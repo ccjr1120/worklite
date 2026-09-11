@@ -11,6 +11,7 @@ import type {
   CreateSkillRequest,
   CommandExecutionView,
   ExecuteSkillScriptRequest,
+  ImportSkillRequest,
   McpServerTestResult,
   McpServerView,
   ModelProviderView,
@@ -34,12 +35,15 @@ import {
   modelProviders,
   skillFiles,
   skills,
+  workflowDrafts,
   workflowRuns,
+  workflowVersions,
   workflows,
   workspaceSettings,
   type Database,
 } from '@worklite/db';
 import { createModelGateway, type ModelProviderConfig } from '@worklite/model-gateway';
+import { listWorkflowNodeCapabilities } from '@worklite/workflow-engine';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from './teams.service';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
@@ -266,6 +270,32 @@ export class WorkspaceResourcesService {
     return skillView(row, workspaceSlug, files);
   }
 
+  async importSkill(request: Request, workspaceSlug: string, input: ImportSkillRequest): Promise<SkillView> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const name = input.name?.trim();
+    if (!name) throw new BadRequestException('Skill name is required.');
+    const files = validatePackageFiles(input.files);
+    const id = `sk_${randomUUID()}`;
+    const [row] = await this.db.transaction((transaction) => {
+      const inserted = transaction.insert(skills).values({ id, workspaceId: team.id, name, source: 'archive', version: 'draft', validation: 'pending', instructions: files.find((file) => file.path === 'SKILL.md')?.content ?? '' }).returning().all();
+      transaction.insert(skillFiles).values(files.map((file) => ({ skillId: id, ...file }))).run();
+      return inserted;
+    });
+    if (!row) throw new NotFoundException('Skill could not be imported');
+    return skillView(row, workspaceSlug, files);
+  }
+
+  async deleteSkill(request: Request, workspaceSlug: string, skillId: string): Promise<void> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const [existing] = await this.db.select().from(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).limit(1);
+    if (!existing) throw new NotFoundException('Skill not found');
+    if (existing.source === 'built-in') throw new BadRequestException('Built-in Skills cannot be deleted.');
+    const [assignment] = await this.db.select({ agentId: agentSkills.agentId }).from(agentSkills).where(eq(agentSkills.skillId, skillId)).limit(1);
+    if (assignment) throw new BadRequestException('Remove this Skill from every Agent before deleting it.');
+    if (await this.workflowResourceIsReferenced(team.id, 'skillIds', skillId)) throw new BadRequestException('Remove this Skill from every Workflow draft and published version before deleting it.');
+    await this.db.delete(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id)));
+  }
+
   async updateSkill(request: Request, workspaceSlug: string, skillId: string, input: UpdateSkillRequest): Promise<SkillView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [existing] = await this.db.select().from(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).limit(1);
@@ -313,6 +343,33 @@ export class WorkspaceResourcesService {
     return mcpServerView(row, workspaceSlug);
   }
 
+  async workflowMcpRuntimes(workspaceId: string, serverIds: string[]): Promise<AgentMcpRuntime[]> {
+    const uniqueIds = [...new Set(serverIds)];
+    if (uniqueIds.length === 0) return [];
+    const rows = await this.db.select().from(mcpServers).where(and(eq(mcpServers.workspaceId, workspaceId), inArray(mcpServers.id, uniqueIds)));
+    if (rows.length !== uniqueIds.length) throw new NotFoundException('A Workflow Agent MCP server is no longer available.');
+    return rows.flatMap((server) => {
+      if (!server.endpoint.trim()) return [];
+      let authToken: string | undefined;
+      try {
+        authToken = server.authSecret ? decryptSecret(server.authSecret) : undefined;
+      } catch {
+        authToken = undefined;
+      }
+      return [{ id: server.id, name: server.name, endpoint: server.endpoint, ...(authToken ? { authToken } : {}), allowedTools: server.allowedToolNames ?? [] }];
+    });
+  }
+
+  async publicModelRuntime(workspaceId: string, publicModelId: string) {
+    const separator = publicModelId.indexOf('/');
+    if (separator <= 0 || separator === publicModelId.length - 1) throw new BadRequestException('A public provider/model id is required.');
+    const providerName = publicModelId.slice(0, separator);
+    const model = publicModelId.slice(separator + 1);
+    const [provider] = await this.db.select({ id: modelProviders.id }).from(modelProviders).where(and(eq(modelProviders.workspaceId, workspaceId), eq(modelProviders.name, providerName))).limit(1);
+    if (!provider) throw new NotFoundException(`Model provider ${providerName} was not found.`);
+    return this.providerRuntime({} as Request, 'personal', provider.id, model);
+  }
+
   async agentMcpRuntimes(request: Request, workspaceSlug: string, agentId: string): Promise<AgentMcpRuntime[]> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const rows = await this.db.select({ server: mcpServers }).from(agentMcpServers)
@@ -329,6 +386,16 @@ export class WorkspaceResourcesService {
       }
       return [{ id: server.id, name: server.name, endpoint: server.endpoint, ...(authToken ? { authToken } : {}), allowedTools: server.allowedToolNames ?? [] }];
     });
+  }
+
+  async deleteMcpServer(request: Request, workspaceSlug: string, serverId: string): Promise<void> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const [existing] = await this.db.select().from(mcpServers).where(and(eq(mcpServers.id, serverId), eq(mcpServers.workspaceId, team.id))).limit(1);
+    if (!existing) throw new NotFoundException('MCP server not found');
+    const [assignment] = await this.db.select({ agentId: agentMcpServers.agentId }).from(agentMcpServers).where(eq(agentMcpServers.mcpServerId, serverId)).limit(1);
+    if (assignment) throw new BadRequestException('Remove this MCP server from every Agent before deleting it.');
+    if (await this.workflowResourceIsReferenced(team.id, 'mcpServerIds', serverId)) throw new BadRequestException('Remove this MCP server from every Workflow draft and published version before deleting it.');
+    await this.db.delete(mcpServers).where(and(eq(mcpServers.id, serverId), eq(mcpServers.workspaceId, team.id)));
   }
 
   async createMcpServer(request: Request, workspaceSlug: string, input: CreateMcpServerRequest): Promise<McpServerView> {
@@ -422,7 +489,26 @@ export class WorkspaceResourcesService {
     return {
       workspace: { id: workspace.id, slug: workspace.slug, name: workspace.name },
       capabilities: {
-        supportedResourceOperations: ['inspect workspace resources', 'navigate to known WorkLite pages', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server draft', 'create Agent draft', 'create Workflow draft', 'change appearance', 'change language'],
+        supportedResourceOperations: ['inspect workspace resources', 'inspect Workflow capabilities', 'navigate to known WorkLite pages', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server draft', 'create Agent draft', 'create Workflow draft', 'edit Workflow draft from a logical plan', 'change appearance', 'change language'],
+        workflow: {
+          primaryService: true,
+          standaloneAgentsAreIndependent: true,
+          creation: 'blank draft opened directly in the editor',
+          supportedNodeTypes: listWorkflowNodeCapabilities().map((capability) => ({
+            type: capability.id,
+            version: capability.version,
+            name: capability.name,
+            purpose: capability.purpose,
+            inputs: capability.inputs,
+            outputs: capability.outputs,
+            inputSchema: capability.inputSchema,
+            outputSchema: capability.outputSchema,
+            configSchema: capability.configSchema,
+          })),
+          unsupportedFeatures: ['standalone Agent references', 'Agent version references', 'template selection', 'conditions', 'loops', 'dynamic joins', 'parallel execution', 'webhook triggers', 'API triggers', 'notification nodes'],
+          graphMutationAvailable: true,
+          graphMutationNote: 'Use edit-workflow.mjs with a logical Workflow Plan. The server generates node IDs and positions, validates capabilities, ports, resources, and DAG constraints, then records an assistant revision.',
+        },
         requiresExplicitConfirmation: true,
         mcpToolNamesAvailable: false,
         mcpToolDataNote: 'Only the allowed-tool count is persisted. Do not invent or infer MCP tool names.',
@@ -663,6 +749,25 @@ export class WorkspaceResourcesService {
     const [row] = await this.db.select({ artifact: artifacts, workflowName: workflows.name }).from(artifacts).leftJoin(workflows, eq(artifacts.workflowId, workflows.id)).where(and(eq(artifacts.id, artifactId), eq(artifacts.workspaceId, team.id))).limit(1);
     if (!row) throw new NotFoundException('Artifact not found');
     return this.toArtifact(row.artifact, workspaceSlug, row.workflowName ?? 'Unknown workflow');
+  }
+
+  async deleteArtifact(request: Request, workspaceSlug: string, artifactId: string): Promise<void> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const [deleted] = await this.db.delete(artifacts).where(and(eq(artifacts.id, artifactId), eq(artifacts.workspaceId, team.id))).returning({ id: artifacts.id });
+    if (!deleted) throw new NotFoundException('Artifact not found');
+  }
+
+  private async workflowResourceIsReferenced(workspaceId: string, field: 'skillIds' | 'mcpServerIds', resourceId: string): Promise<boolean> {
+    const [draftRows, versionRows] = await Promise.all([
+      this.db.select({ definition: workflowDrafts.definition }).from(workflowDrafts).where(eq(workflowDrafts.workspaceId, workspaceId)),
+      this.db.select({ definition: workflowVersions.definition }).from(workflowVersions).where(eq(workflowVersions.workspaceId, workspaceId)),
+    ]);
+    return [...draftRows, ...versionRows].some(({ definition }) => definition?.nodes.some((node) => {
+      if (node.type !== 'worklite/agent' && node.type !== 'worklite/skill-set') return false;
+      if (!node.config || typeof node.config !== 'object' || Array.isArray(node.config)) return false;
+      const ids = (node.config as Record<string, unknown>)[field];
+      return Array.isArray(ids) && ids.includes(resourceId);
+    }));
   }
 
   async usage(request: Request, workspaceSlug: string): Promise<UsageRow[]> {

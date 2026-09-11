@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { AgentVersionView, AgentView, CreateAgentRequest, ModelProviderView, UpdateAgentRequest } from '@worklite/contracts';
-import { agentMcpServers, agentVersions, agents, agentSkills, mcpServers, skills, type Database } from '@worklite/db';
+import { agentExecutions, agentMcpServers, agentVersions, agents, agentSkills, mcpServers, scheduledAgentTasks, skills, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 
@@ -125,7 +125,7 @@ export class AgentsService {
     if (!existing) throw new NotFoundException('Agent not found');
 
     if (existing.kind === 'system') {
-      if (Object.keys(input).some((key) => key !== 'providerId' && key !== 'model')) throw new BadRequestException('Only the provider and model can be changed for a built-in Agent.');
+      if (Object.keys(input).some((key) => !['providerId', 'model', 'mcpServerIds'].includes(key))) throw new BadRequestException('Only the provider, model, and MCP servers can be changed for a built-in Agent.');
       const nextProviderId = input.providerId === undefined ? existing.providerId : input.providerId;
       const provider = await this.validateProvider(team.id, nextProviderId);
       let model = '';
@@ -134,8 +134,16 @@ export class AgentsService {
         if (requestedModel && !provider.models.includes(requestedModel)) throw new BadRequestException('The selected model is not configured for this provider.');
         model = requestedModel || provider.models[0] || '';
       }
+      const assignmentInput = await this.validateAssignments(team.id, undefined, input.mcpServerIds);
       const [row] = await this.db.update(agents).set({ providerId: nextProviderId ?? null, model, updatedAt: new Date() }).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).returning();
       if (!row) throw new NotFoundException('Agent not found');
+      const mcpServerIds = assignmentInput.mcpServerIds;
+      if (mcpServerIds !== undefined) {
+        await this.db.transaction(async (transaction) => {
+          transaction.delete(agentMcpServers).where(eq(agentMcpServers.agentId, agentId)).run();
+          if (mcpServerIds.length > 0) transaction.insert(agentMcpServers).values(mcpServerIds.map((mcpServerId) => ({ agentId, mcpServerId }))).run();
+        });
+      }
       const assignments = await this.loadAssignments(team.id, [row.id]);
       const [latest] = await this.db.select({ id: agentVersions.id, version: agentVersions.version }).from(agentVersions).where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, team.id))).orderBy(desc(agentVersions.version)).limit(1);
       return this.toView(row, workspaceSlug, provider?.name ?? null, assignments, latest);
@@ -175,7 +183,14 @@ export class AgentsService {
     const [existing] = await this.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
     if (!existing) throw new NotFoundException('Agent not found');
     if (existing.kind === 'system') throw new BadRequestException('Built-in Agents cannot be deleted.');
-    await this.db.delete(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id)));
+    await this.db.transaction((transaction) => {
+      transaction.delete(scheduledAgentTasks).where(and(eq(scheduledAgentTasks.agentId, agentId), eq(scheduledAgentTasks.workspaceId, team.id))).run();
+      transaction.delete(agentExecutions).where(and(eq(agentExecutions.agentId, agentId), eq(agentExecutions.workspaceId, team.id))).run();
+      transaction.delete(agentSkills).where(eq(agentSkills.agentId, agentId)).run();
+      transaction.delete(agentMcpServers).where(eq(agentMcpServers.agentId, agentId)).run();
+      transaction.delete(agentVersions).where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, team.id))).run();
+      transaction.delete(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).run();
+    });
   }
 
   private async validateProvider(workspaceId: string, providerId: string | null | undefined): Promise<{ name: string; models: string[] } | null> {

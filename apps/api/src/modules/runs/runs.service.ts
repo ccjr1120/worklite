@@ -14,7 +14,7 @@ import {
   type StoredWorkflowDefinition,
   type StoredWorkflowNode,
 } from '@worklite/db';
-import { collectNodeInputs, getLeafNodeIds, NodeTypeRegistry, topologicallySortWorkflow, type NodeExecutionRequest } from '@worklite/workflow-engine';
+import { collectNodeInputs, getLeafNodeIds, NodeTypeRegistry, resolveWorkflowNodeCapability, topologicallySortWorkflow, type NodeExecutionRequest } from '@worklite/workflow-engine';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from '../agents/agent-executions.service';
@@ -40,31 +40,24 @@ export class RunsService {
     private readonly workspaces: WorkspaceService,
     private readonly agentExecutions: AgentExecutionsService,
   ) {
+    const capability = (id: string) => {
+      const value = resolveWorkflowNodeCapability(id, '1');
+      if (!value) throw new Error(`Workflow node capability is unavailable: ${id}@1`);
+      return value;
+    };
     this.registry.register({
-      id: 'worklite/input',
-      version: '1',
-      inputSchema: { type: 'object' },
-      outputSchema: {},
-      configSchema: { type: 'object' },
+      ...capability('worklite/input'),
       execute: async ({ context }) => ({ output: context.variables.workflowInput }),
     });
     this.registry.register({
-      id: 'worklite/text',
-      version: '1',
-      inputSchema: { type: 'string' },
-      outputSchema: { type: 'string' },
-      configSchema: { type: 'object' },
+      ...capability('worklite/text'),
       execute: async ({ config }) => {
         const value = asRecord(config)?.text;
         return { output: typeof value === 'string' ? value : '' };
       },
     });
     this.registry.register({
-      id: 'worklite/skill-set',
-      version: '1',
-      inputSchema: { type: 'object' },
-      outputSchema: { type: 'object', required: ['type', 'skillIds'] },
-      configSchema: { type: 'object', required: ['skillIds'] },
+      ...capability('worklite/skill-set'),
       execute: async ({ config }) => {
         const skillIds = asRecord(config)?.skillIds;
         if (!Array.isArray(skillIds) || skillIds.some((skillId) => typeof skillId !== 'string')) throw new Error('Skill Set node requires Skill identifiers.');
@@ -72,32 +65,17 @@ export class RunsService {
       },
     });
     this.registry.register({
-      id: 'worklite/generic-agent',
-      version: '1',
-      inputSchema: { type: 'object', required: ['context', 'systemPrompt'] },
-      outputSchema: {},
-      configSchema: { type: 'object', required: ['agentVersionId'] },
+      ...capability('worklite/agent'),
       execute: async (request) => {
         const config = asRecord(request.config);
         const inputs = asRecord(request.input);
-        if (!config || typeof config.agentVersionId !== 'string' || !config.agentVersionId.trim()) throw new Error('Generic Agent node requires an AgentVersion.');
-        if (!inputs || typeof inputs.systemPrompt !== 'string') throw new Error('Generic Agent node requires a systemPrompt input.');
-        const skillSet = inputs.skills === undefined ? null : asRecord(inputs.skills);
-        if (skillSet && (skillSet.type !== 'skill-set' || !Array.isArray(skillSet.skillIds) || skillSet.skillIds.some((skillId) => typeof skillId !== 'string'))) {
-          throw new Error('Generic Agent skills input must come from a Skill Set node.');
-        }
-        const output = await this.agentExecutions.executeGenericWorkflowAgent(
-          request.context.workspaceId,
-          config.agentVersionId,
-          inputs.context,
-          inputs.systemPrompt,
-          skillSet ? skillSet.skillIds as string[] : [],
-          request.signal,
-          (delta) => { void this.publish(request.context.workflowRunId, 'node.delta', { nodeId: request.context.nodeId, delta }); },
-        );
+        if (!config || typeof config.model !== 'string' || typeof config.systemPrompt !== 'string') throw new Error('Agent node requires a model and system prompt.');
+        if (!Array.isArray(config.skillIds) || config.skillIds.some((id) => typeof id !== 'string')) throw new Error('Agent node requires valid Skill identifiers.');
+        if (!Array.isArray(config.mcpServerIds) || config.mcpServerIds.some((id) => typeof id !== 'string')) throw new Error('Agent node requires valid MCP server identifiers.');
+        const output = await this.agentExecutions.executeWorkflowAgent(request.context.workspaceId, config.model, inputs?.context, config.systemPrompt, config.skillIds as string[], config.mcpServerIds as string[], request.signal, (delta) => { void this.publish(request.context.workflowRunId, 'node.delta', { nodeId: request.context.nodeId, delta }); });
         return { output };
       },
-    });
+    });;
   }
 
   async list(request: Request, workspaceSlug: string): Promise<RunView[]> {
@@ -142,8 +120,12 @@ export class RunsService {
       .innerJoin(workflows, eq(workflowVersions.workflowId, workflows.id))
       .where(and(eq(workflowVersions.id, workflowVersionId), eq(workflowVersions.workspaceId, workspace.id), eq(workflowVersions.published, true))).limit(1);
     if (!version) throw new NotFoundException('Published workflow version not found');
+    return this.createScheduledRun(version.workflow.workspaceId, version.workflow.id, workflowVersionId, input?.input ?? null);
+  }
+
+  async createScheduledRun(workspaceId: string, workflowId: string, workflowVersionId: string, input: unknown): Promise<{ runId: string }> {
     const runId = `run_${randomUUID()}`;
-    await this.db.insert(workflowRuns).values({ id: runId, workspaceId: version.workflow.workspaceId, workflowId: version.workflow.id, workflowVersionId, input: input?.input ?? null, status: 'queued' });
+    await this.db.insert(workflowRuns).values({ id: runId, workspaceId, workflowId, workflowVersionId, input: input ?? null, status: 'queued' });
     await this.publish(runId, 'run.status', { status: 'queued' });
     this.schedule(runId);
     return { runId };
@@ -176,7 +158,7 @@ export class RunsService {
       const [version] = await this.db.select().from(workflowVersions).where(eq(workflowVersions.id, run.workflowVersionId)).limit(1);
       if (!version) throw new Error('Workflow version not found');
       const definition = version.definition as StoredWorkflowDefinition | null;
-      if (!definition || definition.schemaVersion !== 3 || !Array.isArray(definition.edges)) throw new Error('Workflow schema version 3 is required.');
+      if (!definition || definition.schemaVersion !== 4 || !Array.isArray(definition.edges)) throw new Error('Workflow schema version 4 is required.');
       const executionPlan = topologicallySortWorkflow(definition);
       await this.db.update(workflowRuns).set({ status: 'running', updatedAt: new Date() }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.status, 'queued')));
       await this.publish(runId, 'run.status', { status: 'running' });

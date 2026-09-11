@@ -16,6 +16,10 @@ Home is centered up to `1200px`; collections are fluid up to `1440px`; settings 
 
 Keep status near the name, use predictable sortable columns, preserve useful filters in URL state, expose row actions to pointer and keyboard users, and make truncated identifiers copyable. Use bulk actions only for proven repeated work.
 
+## Persistent Tab State
+
+All page-level tabs must persist the selected tab in the route URL through a named Search parameter. The default tab is used when the parameter is missing or invalid. Changing tabs updates the URL without changing the page's visual shell, and a refresh or direct link restores the selected tab. Tab parameters must be validated at the route boundary so unsupported values never select an undefined view.
+
 ## Editors and Versions
 
 Show `Saving`, `Saved`, and `Unsaved changes`. Distinguish mutable drafts from immutable published versions. Validation navigates directly to affected content. Publish actions explain immutability and locked dependencies.
@@ -25,6 +29,10 @@ Show `Saving`, `Saved`, and `Unsaved changes`. Distinguish mutable drafts from i
 A page defines route and workspace context, one primary action, both themes, applicable states, keyboard behavior, accessible names, responsive behavior, persistent state ownership, security-sensitive behavior, and semantic-token usage.
 
 ## Changelog
+
+### 2026-09-11
+
+- Standardized page-level tab persistence through validated URL Search parameters so refreshes and direct links retain the selected view.
 
 ### 2026-08-14
 

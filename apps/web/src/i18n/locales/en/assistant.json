@@ -35,13 +35,21 @@
     "configure": "Bind a model provider and model to use System Helper Chat"
   },
   "open": "Open System Helper Chat",
-  "plugin": {
-    "targetLabel": "Conversation target",
-    "systemHelper": "System Helper Chat",
-    "codexCli": "Codex CLI Chat"
+  "panelTabs": {
+    "label": "Agent workspace views",
+    "chat": "Chat",
+    "configuration": "Configuration"
   },
-  "panelTabs": { "label": "Agent workspace views", "chat": "Chat", "configuration": "Configuration" },
-  "configuration": { "title": "Agent configuration", "description": "Select a model already configured in this workspace.", "model": "Provider and model", "hint": "Changes are saved automatically.", "placeholder": "Choose a configured model", "saving": "Saving..." },
+  "configuration": {
+    "title": "Agent configuration",
+    "description": "Select a model already configured in this workspace.",
+    "model": "Provider and model",
+    "hint": "Changes are saved automatically.",
+    "placeholder": "Choose a configured model",
+    "saving": "Saving...",
+    "mcpServers": "MCP servers",
+    "mcpServersHint": "Select the MCP servers available to System Helper."
+  },
   "minimized": {
     "minimize": "Minimize conversation"
   },
@@ -90,7 +98,7 @@
   "mentions": {
     "menuLabel": "Available Agents",
     "empty": "No matching configured Agents.",
-    "remove": "Remove selected Agent"
+    "remove": "Remove Agent mention"
   },
   "subAgents": {
     "label": "Sub Agents",

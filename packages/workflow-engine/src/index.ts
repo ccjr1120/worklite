@@ -2,6 +2,25 @@ import type { WorkflowDefinition, WorkflowEdgeDefinition, WorkflowNodeDefinition
 
 export type JsonSchema = Readonly<Record<string, unknown>>;
 
+export type WorkflowPortDefinition = {
+  name: string;
+  required: boolean;
+  dataType: string;
+  multiple: boolean;
+};
+
+export type WorkflowNodeCapability = {
+  id: string;
+  version: string;
+  name: string;
+  purpose: string;
+  inputs: WorkflowPortDefinition[];
+  outputs: WorkflowPortDefinition[];
+  inputSchema: JsonSchema;
+  outputSchema: JsonSchema;
+  configSchema: JsonSchema;
+};
+
 export type ArtifactRef = {
   id: string;
   type: string;
@@ -34,6 +53,10 @@ export type NodeTypeDefinition = {
   inputSchema: JsonSchema;
   outputSchema: JsonSchema;
   configSchema: JsonSchema;
+  name?: string;
+  purpose?: string;
+  inputs?: WorkflowPortDefinition[];
+  outputs?: WorkflowPortDefinition[];
   execute(request: NodeExecutionRequest): Promise<NodeExecutionResult>;
 };
 
@@ -45,6 +68,65 @@ export type WorkflowPlugin = {
 
 export function mountWorkflowPlugin(registry: NodeTypeRegistry, plugin: WorkflowPlugin): () => void {
   return plugin.register(registry) ?? (() => undefined);
+}
+
+const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
+  {
+    id: 'worklite/input',
+    version: '1',
+    name: 'Workflow Input',
+    purpose: 'Expose the Workflow run input.',
+    inputs: [],
+    outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
+    inputSchema: { type: 'object' },
+    outputSchema: {},
+    configSchema: { type: 'object' },
+  },
+  {
+    id: 'worklite/text',
+    version: '1',
+    name: 'Text',
+    purpose: 'Provide editable text such as a system prompt.',
+    inputs: [],
+    outputs: [{ name: 'output', required: false, dataType: 'string', multiple: true }],
+    inputSchema: { type: 'string' },
+    outputSchema: { type: 'string' },
+    configSchema: { type: 'object', properties: { text: { type: 'string' } } },
+  },
+  {
+    id: 'worklite/skill-set',
+    version: '1',
+    name: 'Skill Set',
+    purpose: 'Select workspace Skills for an embedded Agent input.',
+    inputs: [],
+    outputs: [{ name: 'output', required: false, dataType: 'skill-set', multiple: true }],
+    inputSchema: { type: 'object' },
+    outputSchema: { type: 'object', required: ['type', 'skillIds'] },
+    configSchema: { type: 'object', required: ['skillIds'], properties: { skillIds: { type: 'array', items: { type: 'string' } } } },
+  },
+  {
+    id: 'worklite/agent',
+    version: '1',
+    name: 'Agent',
+    purpose: 'Embed a public model id, system prompt, Skill ids, and MCP server ids.',
+    inputs: [{ name: 'context', required: true, dataType: 'json', multiple: false }],
+    outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
+    inputSchema: { type: 'object', required: ['context'] },
+    outputSchema: {},
+    configSchema: { type: 'object', required: ['model', 'systemPrompt', 'skillIds', 'mcpServerIds'], properties: { model: { type: 'string' }, systemPrompt: { type: 'string' }, skillIds: { type: 'array', items: { type: 'string' } }, mcpServerIds: { type: 'array', items: { type: 'string' } } } },
+  },
+];
+
+export function listWorkflowNodeCapabilities(): WorkflowNodeCapability[] {
+  return WORKLITE_WORKFLOW_NODE_CAPABILITIES.map((capability) => ({
+    ...capability,
+    inputs: capability.inputs.map((port) => ({ ...port })),
+    outputs: capability.outputs.map((port) => ({ ...port })),
+  }));
+}
+
+export function resolveWorkflowNodeCapability(id: string, version: string): WorkflowNodeCapability | undefined {
+  return WORKLITE_WORKFLOW_NODE_CAPABILITIES.find((capability) => capability.id === id && capability.version === version);
 }
 
 export class NodeTypeRegistry {

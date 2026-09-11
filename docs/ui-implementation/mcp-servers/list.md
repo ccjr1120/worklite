@@ -6,7 +6,14 @@ Use the collection pattern with `Connect MCP server` in the right side of the to
 
 Define first-use guidance, testing, unreachable, authentication failure, filtered no-results, permission and secret-configuration attention states.
 
+MCP server rows expose a separate destructive Delete action. Deletion is blocked with visible dependency feedback when an Agent or Workflow references the server. Success closes the dialog, shows a toast, and refreshes the list.
+
 ## Changelog
+
+### 2026-09-10
+
+- Standardized resource deletion actions, named confirmation, success feedback, dependency errors, and navigation.
+
 
 ### 2026-08-30
 

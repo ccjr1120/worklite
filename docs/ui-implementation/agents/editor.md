@@ -12,13 +12,20 @@ When the model requests an assigned Skill's `skill_script`, append a compact inl
 
 On desktop, configuration uses the existing `360px` inspector. Below the desktop breakpoint, render the same controls inline after the main fields so configuration never disappears. Both presentations use the same draft state and semantic tokens rather than duplicate state ownership.
 
-The protected System Helper Chat entry uses the same editor route in restricted system mode. Name, responsibility, prompt, Skills, and MCP settings are read-only product configuration; Preview, Publish, duplication, and deletion actions are absent. Show `worklite-platform` as a compact read-only built-in capability with no checkbox, remove action, or empty state. Its editable control is one namespaced Model selector populated from configured Gateway providers, including an explicit `Not configured` option. Each option uses `providerName/modelId` as its label and value; the API resolves the Provider name to the internal binding id on save. These binding controls exist only here. Deleting the selected provider removes its namespaced model option and returns the control to an unconfigured state without moving configuration into the Chat or provider surfaces.
+The protected System Helper Chat entry uses the same editor route in restricted system mode. Name, responsibility, and prompt are read-only product configuration; MCP settings are editable through a multi-select list of configured workspace MCP servers; Preview, Publish, duplication, and deletion actions are absent. Show `worklite-platform` as a compact read-only built-in capability with no checkbox, remove action, or empty state. Its editable control is one namespaced Model selector populated from configured Gateway providers, including an explicit `Not configured` option. Each option uses `providerName/modelId` as its label and value; the API resolves the Provider name to the internal binding id on save. These binding controls exist only here. Deleting the selected provider removes its namespaced model option and returns the control to an unconfigured state without moving configuration into the Chat or provider surfaces.
 
 ## States
 
 Support new unsaved, loading, saving, saved, validation failure, resource loading failure, and empty-resource states. Save errors remain visible near the action or affected configuration instead of disappearing into save-state chrome. Never expose secrets in fields or resource summaries.
 
+Saved custom Agents expose a destructive Delete action with the same named confirmation and feedback as the list. Successful deletion returns to the Agent list. The System Helper Agent never exposes deletion.
+
 ## Changelog
+
+### 2026-09-10
+
+- Standardized resource deletion actions, named confirmation, success feedback, dependency errors, and navigation.
+
 
 ### 2026-09-04
 

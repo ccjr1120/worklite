@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useMemo, useState } from 'react';
-import { Blocks, Plus, Server } from 'lucide-react';
+import { Blocks, Plus, Server, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { AgentMark } from '@/components/agent-mark';
 import { AgentResourceNav } from '@/components/agent-resource-nav';
@@ -9,10 +9,14 @@ import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/c
 import { EmptyState } from '@/components/empty-state';
 import { PageHeading } from '@/components/page-heading';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime, formatList } from '@/i18n/format';
-import { useAgentsQuery } from '@/api/queries';
+import { agentsQueryKey, useAgentsQuery } from '@/api/queries';
+import { api } from '@/api/client';
+import { queryClient } from '@/lib/query-client';
+import { toast } from 'sonner';
 
 export const Route = createFileRoute('/agents/')({
   component: AgentListPage,
@@ -24,12 +28,31 @@ function AgentListPage() {
   const workspaceSlug = "personal";
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<(typeof all)[number] | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const { data: all = [], isLoading, isError } = useAgentsQuery(workspaceSlug);
   const items = useMemo(() => {
     return all.filter((item) => item.kind === 'custom').filter((item) =>
       `${item.name} ${item.responsibility} ${item.model} ${item.providerName ?? ''} ${item.skills.map((skill) => skill.name).join(' ')} ${item.mcpServers.map((server) => server.name).join(' ')}`.toLowerCase().includes(search.toLowerCase()),
     );
   }, [all, search]);
+
+  async function deleteAgent() {
+    if (!deleteTarget) return;
+    setDeleteBusy(true);
+    setDeleteError('');
+    try {
+      await api.deleteAgent(workspaceSlug, deleteTarget.id);
+      setDeleteTarget(null);
+      toast.success(t('delete.success'));
+      await queryClient.invalidateQueries({ queryKey: agentsQueryKey() });
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : t('delete.failed'));
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
 
   return (
     <div className="mx-auto w-full max-w-[1440px] px-6 py-6">
@@ -59,10 +82,10 @@ function AgentListPage() {
           <EmptyState title={t('noMatches.title')} description={t('noMatches.description', { search })} actionLabel={t('common:actions.clearFilters')} onAction={() => setSearch('')} />
         ) : (
           <CollectionTable>
-            <CollectionHeader className="grid-cols-[2fr_1.25fr_1.5fr_1fr]" columns={[t('columns.agent'), t('columns.model'), t('columns.resources'), t('columns.updated')]} />
+            <CollectionHeader className="min-w-[940px] grid-cols-[2fr_1.25fr_1.5fr_1fr_40px] [&>span:last-child]:text-center" columns={[t('columns.agent'), t('columns.model'), t('columns.resources'), t('columns.updated'), t('columns.actions')]} />
             {items.map((item) => (
-              <Link key={item.id} to="/agents/$agentId" params={{ agentId: item.id }} className="block">
-                <CollectionRow className="grid-cols-[2fr_1.25fr_1.5fr_1fr]">
+              <CollectionRow key={item.id} className="min-w-[940px] whitespace-nowrap grid-cols-[2fr_1.25fr_1.5fr_1fr_40px]">
+                <Link to="/agents/$agentId" params={{ agentId: item.id }} className="contents">
                   <span className="flex min-w-0 items-center gap-3">
                     <AgentMark initials={item.initials} />
                     <span className="min-w-0">
@@ -78,12 +101,14 @@ function AgentListPage() {
                     <span className="flex min-w-0 items-center gap-2"><Server className="size-3.5 shrink-0" aria-hidden="true" /><span className="truncate"><span className="sr-only">{t('editor.mcpServers')}: </span>{formatList(item.mcpServers.map((server) => server.name), locale) || t('common:empty.dash')}</span></span>
                   </span>
                   <span className="tabular-nums text-[13px] text-muted-foreground">{formatDateTime(item.updatedAt, locale)}</span>
-                </CollectionRow>
-              </Link>
+                </Link>
+                <Button type="button" variant="ghost" size="icon-compact" className="mx-auto text-danger hover:text-danger" aria-label={t('delete.action', { name: item.name })} onClick={() => { setDeleteError(''); setDeleteTarget(item); }}><Trash2 className="size-4" /></Button>
+              </CollectionRow>
             ))}
           </CollectionTable>
         )}
       </div>
+      <Dialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open && !deleteBusy) setDeleteTarget(null); }}><DialogContent><DialogHeader><DialogTitle>{t('delete.title', { name: deleteTarget?.name ?? '' })}</DialogTitle><DialogDescription>{t('delete.description')}</DialogDescription></DialogHeader>{deleteError ? <p className="text-[13px] text-danger" role="alert">{deleteError}</p> : null}<DialogFooter><Button variant="secondary" disabled={deleteBusy} onClick={() => setDeleteTarget(null)}>{t('common:actions.cancel')}</Button><Button variant="destructive" disabled={deleteBusy} onClick={() => void deleteAgent()}>{deleteBusy ? t('delete.deleting') : t('common:actions.delete')}</Button></DialogFooter></DialogContent></Dialog>
     </div>
   );
 }

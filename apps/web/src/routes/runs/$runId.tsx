@@ -232,12 +232,12 @@ function nodeLabel(node: WorkflowNodeRunView): string {
   if (node.type === 'worklite/input') return `Workflow input ${node.position}`;
   if (node.type === 'worklite/text') return `Text source ${node.position}`;
   if (node.type === 'worklite/skill-set') return `Skill Set ${node.position}`;
-  if (node.type === 'worklite/generic-agent') return `Generic Agent ${node.position}`;
+  if (node.type === 'worklite/agent') return `Agent ${node.position}`;
   return `Step ${node.position}`;
 }
 
 function nodeProcessor(type: string | undefined): string {
-  if (type === 'worklite/generic-agent') return 'Agent model and authorized Skills';
+  if (type === 'worklite/agent') return 'Embedded Agent model, Skills, and MCP servers';
   if (type === 'worklite/input') return 'Workflow input source';
   if (type === 'worklite/skill-set') return 'Skill reference source';
   return type === 'worklite/text' ? 'Text source' : 'Node processor';

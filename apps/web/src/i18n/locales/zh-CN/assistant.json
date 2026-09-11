@@ -35,11 +35,6 @@
     "configure": "绑定模型提供商和模型后使用 System Helper Chat"
   },
   "open": "打开 System Helper Chat",
-  "plugin": {
-    "targetLabel": "对话目标",
-    "systemHelper": "System Helper Chat",
-    "codexCli": "Codex CLI Chat"
-  },
   "minimized": {
     "minimize": "最小化对话"
   },
@@ -88,7 +83,7 @@
   "mentions": {
     "menuLabel": "可用 Agent",
     "empty": "没有匹配且已配置的 Agent。",
-    "remove": "移除已选择的 Agent"
+    "remove": "移除 Agent 提及"
   },
   "subAgents": {
     "label": "子 Agent",
@@ -160,5 +155,9 @@
       "cancelled": "已中断",
       "failed": "失败"
     }
+  },
+  "configuration": {
+    "mcpServers": "MCP 服务器",
+    "mcpServersHint": "选择 System Helper 可使用的 MCP 服务器。"
   }
 }

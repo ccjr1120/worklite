@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { addEdge, Background, BackgroundVariant, Controls, MarkerType, PanOnScrollMode, ReactFlow, reconnectEdge, useEdgesState, useNodesState, type OnConnect, type OnConnectEnd, type OnReconnect, type ReactFlowInstance } from '@xyflow/react';
-import { ArrowLeft, Bot, Braces, Check, Copy, FilePlus2, PanelRight, Plus, Redo2, Search, SlidersHorizontal, Trash2, Undo2, Workflow, Wrench } from 'lucide-react';
+import { ArrowLeft, Bot, Braces, Check, Copy, Download, FilePlus2, PanelRight, Plus, Redo2, Search, SlidersHorizontal, Trash2, Undo2, Workflow, Wrench } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
@@ -20,7 +20,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { workflowNodeTypes, type WorkflowCanvasEdge, type WorkflowCanvasNode } from '@/components/workflow-canvas-nodes';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { api } from '@/api/client';
-import { useAgentVersionsQuery, useAgentsQuery, useSkillsQuery, useWorkflowQuery, workflowsQueryKey } from '@/api/queries';
+import { useMcpServersQuery, useModelProvidersQuery, useSkillsQuery, useWorkflowQuery, workflowsQueryKey } from '@/api/queries';
 import { queryClient } from '@/lib/query-client';
 
 export const Route = createFileRoute('/workflows/$workflowId')({
@@ -28,7 +28,7 @@ export const Route = createFileRoute('/workflows/$workflowId')({
 });
 
 const emptyDefinition: WorkflowDefinition = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   input: {},
   defaults: { errorPolicy: 'stop' },
   nodes: [],
@@ -42,12 +42,13 @@ function WorkflowEditorPage() {
   const workspaceSlug = 'personal';
   const isNew = workflowId === 'new';
   const { data: existing } = useWorkflowQuery(workspaceSlug, workflowId);
-  const { data: availableAgents = [] } = useAgentsQuery(workspaceSlug);
   const { data: availableSkills = [] } = useSkillsQuery(workspaceSlug);
+  const { data: availableMcpServers = [] } = useMcpServersQuery(workspaceSlug);
+  const { data: availableProviders = [] } = useModelProvidersQuery(workspaceSlug);
   const [nodes, setNodes, onNodesChange] = useNodesState<WorkflowCanvasNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<WorkflowCanvasEdge>([]);
   const [name, setName] = useState(existing?.name ?? t('editor.untitled'));
-  const [input, setInput] = useState(() => t('editor.templateDailyInput'));
+  const [input, setInput] = useState('');
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'unsaved'>(isNew ? 'unsaved' : 'saved');
   const [draftRevisionId, setDraftRevisionId] = useState('');
   const [persistedDefinition, setPersistedDefinition] = useState<WorkflowDefinition>(emptyDefinition);
@@ -56,9 +57,11 @@ function WorkflowEditorPage() {
   const [paletteQuery, setPaletteQuery] = useState('');
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [templateOpen, setTemplateOpen] = useState(isNew);
   const [executionPolicy, setExecutionPolicy] = useState<'stop' | 'retry'>('stop');
   const [publishOpen, setPublishOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const [runSubmitting, setRunSubmitting] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<WorkflowCanvasNode, WorkflowCanvasEdge> | null>(null);
@@ -106,17 +109,12 @@ function WorkflowEditorPage() {
 
   const selectedNode = nodes.find((node) => node.selected);
   const selectedEdge = edges.find((edge) => edge.selected);
-  const selectedAgentVersionsQuery = useAgentVersionsQuery(workspaceSlug, selectedNode?.data.nodeType === 'generic-agent' ? selectedNode.data.agentId ?? '' : '');
-  const publishedAgents = useMemo(() => availableAgents.filter((agent) => Boolean(agent.latestVersionId)), [availableAgents]);
-  const filteredAgents = useMemo(() => {
-    const query = paletteQuery.trim().toLowerCase();
-    if (!query) return publishedAgents;
-    return publishedAgents.filter((agent) => `${agent.name} ${agent.responsibility} ${agent.model}`.toLowerCase().includes(query));
-  }, [paletteQuery, publishedAgents]);
+  const modelOptions = useMemo(() => availableProviders.flatMap((provider) => provider.models.map((model) => `${provider.name}/${model}`)), [availableProviders]);
+  const filteredAgentVisible = !paletteQuery.trim() || `${t('editor.agentNode')} ${t('editor.agentNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
 
   function currentDefinition(): WorkflowDefinition {
     return {
-      schemaVersion: 3,
+      schemaVersion: 4,
       input: input ? { example: input } : {},
       defaults: { errorPolicy: executionPolicy },
       nodes: nodes.map(toDefinitionNode),
@@ -228,16 +226,14 @@ function WorkflowEditorPage() {
     addNode(node);
   }
 
-  function addGenericAgentNode(agentId: string) {
-    const agent = availableAgents.find((item) => item.id === agentId);
-    if (!agent?.latestVersionId) return;
-    const id = createId('generic-agent');
+  function addAgentNode() {
+    const id = createId('agent');
     const node: WorkflowCanvasNode = {
       id,
-      type: 'generic-agent',
+      type: 'agent',
       position: nextPosition(),
       selected: true,
-      data: { nodeType: 'generic-agent', label: agent.name, agentId: agent.id, agentVersion: agent.latestVersion ? `v${agent.latestVersion}` : agent.version, agentVersionId: agent.latestVersionId, errorPolicy: executionPolicy, onTextChange: updateText },
+      data: { nodeType: 'agent', label: t('editor.agentNode'), model: modelOptions[0] ?? '', systemPrompt: '', skillIds: [], skillNames: [], mcpServerIds: [], mcpServerNames: [], errorPolicy: executionPolicy, onTextChange: updateText },
     };
     addNode(node);
   }
@@ -306,6 +302,43 @@ function WorkflowEditorPage() {
     }
   }
 
+  async function exportWorkflow() {
+    if (isNew || !existing) {
+      toast.message(t('editor.saveBeforeExport'));
+      return;
+    }
+    try {
+      const document = await api.exportWorkflow(workspaceSlug, workflowId);
+      const blob = new Blob([`${JSON.stringify(document, null, 2)}\n`], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = window.document.createElement('a');
+      anchor.href = url;
+      anchor.download = `${existing.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'workflow'}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      toast.success(t('editor.exported'));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('editor.exportFailed'));
+    }
+  }
+
+  async function deleteWorkflow() {
+    if (isNew) return;
+    setDeleteBusy(true);
+    setDeleteError('');
+    try {
+      await api.deleteWorkflow(workspaceSlug, workflowId);
+      setDeleteOpen(false);
+      setDeleteError('');
+      toast.success(t('delete.success'));
+      await queryClient.invalidateQueries({ queryKey: workflowsQueryKey() });
+      void navigate({ to: '/workflows' });
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : t('delete.failed'));
+      setDeleteBusy(false);
+    }
+  }
+
   async function publishWorkflow() {
     if (isNew || saveState !== 'saved') {
       toast.message(isNew ? t('editor.saveBeforeRun') : t('editor.saveBeforePublish'));
@@ -342,36 +375,6 @@ function WorkflowEditorPage() {
     }
   }
 
-  function applyTemplate(template: 'blank' | 'daily') {
-    if (template === 'blank') {
-      setName(t('editor.untitled'));
-      setInput('');
-      setNodes([]);
-      setEdges([]);
-    } else {
-      const agent = publishedAgents[0];
-      if (!agent?.latestVersionId) return;
-      const inputNodeId = createId('input');
-      const promptNodeId = createId('text');
-      const agentNodeId = createId('generic-agent');
-      const templateNodes: WorkflowCanvasNode[] = [
-        { id: inputNodeId, type: 'input', position: { x: 80, y: 80 }, selected: true, data: { nodeType: 'input', label: t('editor.workflowInputNode'), errorPolicy: executionPolicy, onTextChange: updateText } },
-        { id: promptNodeId, type: 'text', position: { x: 80, y: 240 }, data: { nodeType: 'text', label: t('editor.systemPromptNode'), text: t('editor.dailyTemplatePrompt'), errorPolicy: executionPolicy, onTextChange: updateText } },
-        { id: agentNodeId, type: 'generic-agent', position: { x: 440, y: 140 }, data: { nodeType: 'generic-agent', label: agent.name, agentId: agent.id, agentVersion: `v${agent.latestVersion}`, agentVersionId: agent.latestVersionId, errorPolicy: executionPolicy, onTextChange: updateText } },
-      ];
-      const templateEdges: WorkflowCanvasEdge[] = [
-        { id: createId('edge'), source: inputNodeId, sourceHandle: 'output', target: agentNodeId, targetHandle: 'context', type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed } },
-        { id: createId('edge'), source: promptNodeId, sourceHandle: 'output', target: agentNodeId, targetHandle: 'systemPrompt', type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed } },
-      ];
-      setName(t('editor.templateDailyName'));
-      setInput(t('editor.templateDailyInput'));
-      setNodes(templateNodes);
-      setEdges(templateEdges);
-    }
-    setSaveState('unsaved');
-    setTemplateOpen(false);
-  }
-
   const palette = (
     <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col">
       <div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-semibold">{t('editor.nodePalette')}</h2><p className="mt-1 text-[12px] text-muted-foreground">{t('editor.paletteHint')}</p></div><FilePlus2 className="size-4 text-muted-foreground" aria-hidden="true" /></div>
@@ -380,8 +383,7 @@ function WorkflowEditorPage() {
         <PaletteButton icon={<Braces className="size-5 text-info" />} title={t('editor.workflowInputNode')} description={t('editor.runPayload')} onClick={addInputNode} />
         <PaletteButton icon={<FilePlus2 className="size-5 text-foreground" />} title={t('editor.systemPromptNode')} description={t('editor.systemPromptSource')} onClick={addTextNode} />
         <PaletteButton icon={<Wrench className="size-5 text-warning" />} title={t('editor.skillSetNode')} description={t('editor.skillSetDescription')} onClick={addSkillSetNode} />
-        {publishedAgents.length === 0 ? <p className="px-2 py-6 text-center text-[13px] text-muted-foreground">{t('editor.noPublishedAgents')}</p> : filteredAgents.length === 0 ? <p className="px-2 py-6 text-center text-[13px] text-muted-foreground">{t('editor.noAgents')}</p> : null}
-        {filteredAgents.map((agent) => <PaletteButton key={agent.id} icon={<Bot className="size-5 text-info" />} title={agent.name} description={`${t('editor.genericAgentNode')} · ${agent.model}`} onClick={() => addGenericAgentNode(agent.id)} />)}
+        {filteredAgentVisible ? <PaletteButton icon={<Bot className="size-5 text-info" />} title={t('editor.agentNode')} description={t('editor.agentNodeDescription')} onClick={addAgentNode} /> : null}
       </div>
     </div>
   );
@@ -393,9 +395,11 @@ function WorkflowEditorPage() {
         <Field label={t('editor.nodeName')} htmlFor="node-name"><Input id="node-name" value={selectedNode.data.label} onChange={(event) => { const label = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, label } } : node)); setSaveState('unsaved'); }} /></Field>
         {selectedNode.data.nodeType === 'text' ? <Field label={t('editor.systemPromptNode')} htmlFor="node-text"><Textarea id="node-text" value={selectedNode.data.text ?? ''} onChange={(event) => updateText(selectedNode.id, event.target.value)} placeholder={t('editor.textPlaceholder')} /></Field> : null}
         {selectedNode.data.nodeType === 'skill-set' ? <div><p className="text-[12px] font-medium">{t('editor.skills')}</p><div className="mt-2 space-y-2">{availableSkills.map((skill) => { const checked = (selectedNode.data.skillIds ?? []).includes(skill.id); return <label key={skill.id} className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-[13px]"><Checkbox checked={checked} onCheckedChange={(value) => { const nextIds = value === true ? [...new Set([...(selectedNode.data.skillIds ?? []), skill.id])] : (selectedNode.data.skillIds ?? []).filter((id) => id !== skill.id); const nextNames = availableSkills.filter((item) => nextIds.includes(item.id)).map((item) => item.name); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, skillIds: nextIds, skillNames: nextNames } } : node)); setSaveState('unsaved'); }} aria-label={skill.name} /><span>{skill.name}</span></label>; })}</div></div> : null}
-        {selectedNode.data.nodeType === 'generic-agent' ? <>
-          <Field label={t('editor.genericAgentNode')} htmlFor="agent"><Select value={selectedNode.data.agentId} onValueChange={(value) => { const agent = availableAgents.find((item) => item.id === value); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, agentId: value, label: agent?.name ?? node.data.label, agentVersion: agent?.latestVersion ? `v${agent.latestVersion}` : agent?.version ?? node.data.agentVersion, agentVersionId: agent?.latestVersionId ?? undefined } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="agent"><SelectValue /></SelectTrigger><SelectContent>{publishedAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>)}</SelectContent></Select></Field>
-          <Field label={t('editor.agentVersion')} htmlFor="agent-version"><Select value={selectedNode.data.agentVersionId} onValueChange={(value) => { const version = selectedAgentVersionsQuery.data?.find((item) => item.id === value); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, agentVersionId: value, agentVersion: version ? `v${version.version}` : node.data.agentVersion } } : node)); setSaveState('unsaved'); }} disabled={selectedAgentVersionsQuery.isLoading || selectedAgentVersionsQuery.isError || !(selectedAgentVersionsQuery.data?.length)}><SelectTrigger id="agent-version"><SelectValue placeholder={selectedAgentVersionsQuery.isLoading ? t('editor.loadingVersions') : t('editor.selectImmutableVersion')} /></SelectTrigger><SelectContent>{(selectedAgentVersionsQuery.data ?? []).map((version) => <SelectItem key={version.id} value={version.id}>v{version.version} · {version.model}</SelectItem>)}</SelectContent></Select>{!selectedNode.data.agentVersionId ? <p className="mt-1 text-[12px] text-danger">{t('editor.selectVersionBeforePublish')}</p> : null}</Field>
+        {selectedNode.data.nodeType === 'agent' ? <>
+          <Field label={t('editor.model')} htmlFor="agent-model"><Select value={selectedNode.data.model} onValueChange={(value) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, model: value } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="agent-model"><SelectValue placeholder={t('editor.selectModel')} /></SelectTrigger><SelectContent>{modelOptions.map((model) => <SelectItem key={model} value={model}>{model}</SelectItem>)}</SelectContent></Select></Field>
+          <Field label={t('editor.systemPrompt')} htmlFor="agent-system-prompt"><Textarea id="agent-system-prompt" value={selectedNode.data.systemPrompt ?? ''} onChange={(event) => { const systemPrompt = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, systemPrompt } } : node)); setSaveState('unsaved'); }} /></Field>
+          <div><p className="text-[12px] font-medium">{t('editor.skills')}</p><div className="mt-2 space-y-2">{availableSkills.map((skill) => { const checked = (selectedNode.data.skillIds ?? []).includes(skill.id); return <label key={skill.id} className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-[13px]"><Checkbox checked={checked} onCheckedChange={(value) => { const nextIds = value === true ? [...new Set([...(selectedNode.data.skillIds ?? []), skill.id])] : (selectedNode.data.skillIds ?? []).filter((id) => id !== skill.id); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, skillIds: nextIds, skillNames: availableSkills.filter((item) => nextIds.includes(item.id)).map((item) => item.name) } } : node)); setSaveState('unsaved'); }} aria-label={skill.name} /><span>{skill.name}</span></label>; })}</div></div>
+          <div><p className="text-[12px] font-medium">{t('editor.mcpServers')}</p><div className="mt-2 space-y-2">{availableMcpServers.map((server) => { const checked = (selectedNode.data.mcpServerIds ?? []).includes(server.id); return <label key={server.id} className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-[13px]"><Checkbox checked={checked} onCheckedChange={(value) => { const nextIds = value === true ? [...new Set([...(selectedNode.data.mcpServerIds ?? []), server.id])] : (selectedNode.data.mcpServerIds ?? []).filter((id) => id !== server.id); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, mcpServerIds: nextIds, mcpServerNames: availableMcpServers.filter((item) => nextIds.includes(item.id)).map((item) => item.name) } } : node)); setSaveState('unsaved'); }} aria-label={server.name} /><span>{server.name}</span></label>; })}</div></div>
           <Field label={t('editor.errorPolicy')} htmlFor="policy"><Select value={selectedNode.data.errorPolicy} onValueChange={(value) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, errorPolicy: value as 'stop' | 'retry' } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="policy"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="stop">{t('editor.stop')}</SelectItem><SelectItem value="retry">{t('editor.retry')}</SelectItem></SelectContent></Select></Field>
         </> : null}
         <div className="rounded-md border border-border bg-surface-subtle p-3"><p className="text-[12px] font-medium">{t('editor.connections')}</p><div className="mt-2 flex justify-between gap-3 text-[12px] text-muted-foreground"><span>{t('editor.incomingConnections')}</span><span className="tabular-nums">{edges.filter((edge) => edge.target === selectedNode.id).length}</span></div><div className="mt-1 flex justify-between gap-3 text-[12px] text-muted-foreground"><span>{t('editor.outgoingConnections')}</span><span className="tabular-nums">{edges.filter((edge) => edge.source === selectedNode.id).length}</span></div></div>
@@ -414,7 +418,7 @@ function WorkflowEditorPage() {
         back={<Button variant="ghost" size="icon-compact" type="button" aria-label={t('common:actions.back')} onClick={() => void navigate({ to: '/workflows' })}><ArrowLeft className="size-4" /></Button>}
         crumbs={[{ label: t('title'), to: '/workflows' }, { label: isNew ? t('editor.new') : existing?.name ?? t('editor.fallback') }]}
         status={<SaveIndicator state={saveState} />}
-        actions={<div className="flex items-center gap-1.5"><Button variant="ghost" size="icon-compact" className="lg:hidden" type="button" aria-label={t('editor.nodePalette')} onClick={() => { showNodePalette(); setContextPanelOpen(true); }}><Plus className="size-4" /></Button><Button variant="ghost" size="icon-compact" className="lg:hidden" type="button" aria-label={t('editor.configureStep')} onClick={() => setContextPanelOpen(true)} disabled={!selectedNode && !selectedEdge}><PanelRight className="size-4" /></Button><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" type="button" aria-label={t('editor.undo')} onClick={() => void moveRevision('undo')} disabled={!canUndo || saveState === 'saving'}><Undo2 className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('editor.undo')}</TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" type="button" aria-label={t('editor.redo')} onClick={() => void moveRevision('redo')} disabled={!canRedo || saveState === 'saving'}><Redo2 className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('editor.redo')}</TooltipContent></Tooltip><Button variant="ghost" size="compact" onClick={() => setSettingsOpen(true)}><SlidersHorizontal className="size-4" />{t('editor.workflowSettings')}</Button><Button asChild variant="ghost" size="compact" className="hidden sm:inline-flex"><Link to="/workflows/$workflowId/versions" params={{ workflowId }}>{t('editor.versions')}</Link></Button><Button variant="secondary" size="compact" className="hidden sm:inline-flex" onClick={save} disabled={saveState === 'saving'}>{t('common:actions.save')}</Button><Button variant="secondary" size="compact" className="hidden sm:inline-flex" onClick={() => void runWorkflow()} disabled={runSubmitting || isNew || saveState !== 'saved' || !existing?.latestVersionId}>{runSubmitting ? t('editor.running') : existing?.latestVersion ? t('editor.runVersion', { version: existing.latestVersion }) : t('editor.run')}</Button><Button size="compact" onClick={() => setPublishOpen(true)}>{t('common:actions.publish')}</Button></div>}
+        actions={<div className="flex items-center gap-1.5"><Button variant="ghost" size="icon-compact" className="lg:hidden" type="button" aria-label={t('editor.nodePalette')} onClick={() => { showNodePalette(); setContextPanelOpen(true); }}><Plus className="size-4" /></Button><Button variant="ghost" size="icon-compact" className="lg:hidden" type="button" aria-label={t('editor.configureStep')} onClick={() => setContextPanelOpen(true)} disabled={!selectedNode && !selectedEdge}><PanelRight className="size-4" /></Button><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" type="button" aria-label={t('editor.undo')} onClick={() => void moveRevision('undo')} disabled={!canUndo || saveState === 'saving'}><Undo2 className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('editor.undo')}</TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" type="button" aria-label={t('editor.redo')} onClick={() => void moveRevision('redo')} disabled={!canRedo || saveState === 'saving'}><Redo2 className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('editor.redo')}</TooltipContent></Tooltip><Button variant="ghost" size="compact" onClick={() => setSettingsOpen(true)}><SlidersHorizontal className="size-4" />{t('editor.workflowSettings')}</Button><Button asChild variant="ghost" size="compact" className="hidden sm:inline-flex"><Link to="/workflows/$workflowId/versions" params={{ workflowId }}>{t('editor.versions')}</Link></Button><Button variant="ghost" size="compact" className="hidden sm:inline-flex" onClick={() => void exportWorkflow()} disabled={isNew}><Download className="size-4" />{t('editor.exportJson')}</Button><Button variant="ghost" size="icon-compact" className="hidden text-danger hover:text-danger sm:inline-flex" type="button" aria-label={t('delete.action', { name: existing?.name ?? name })} onClick={() => { setDeleteError(''); setDeleteOpen(true); }} disabled={isNew}><Trash2 className="size-4" /></Button><Button variant="secondary" size="compact" className="hidden sm:inline-flex" onClick={save} disabled={saveState === 'saving'}>{t('common:actions.save')}</Button><Button variant="secondary" size="compact" className="hidden sm:inline-flex" onClick={() => void runWorkflow()} disabled={runSubmitting || isNew || saveState !== 'saved' || !existing?.latestVersionId}>{runSubmitting ? t('editor.running') : existing?.latestVersion ? t('editor.runVersion', { version: existing.latestVersion }) : t('editor.run')}</Button><Button size="compact" onClick={() => setPublishOpen(true)}>{t('common:actions.publish')}</Button></div>}
       />
       <div className="flex min-h-0 flex-1">
         <main ref={canvasRef} className="relative min-w-0 flex-1 bg-background" aria-label={t('editor.canvas')}>
@@ -456,10 +460,10 @@ function WorkflowEditorPage() {
         </main>
         <aside className="hidden w-[360px] min-w-0 shrink-0 overflow-auto border-l border-border bg-surface p-4 lg:flex">{contextPanel}</aside>
       </div>
-      <Dialog open={templateOpen} onOpenChange={setTemplateOpen}><DialogContent><DialogHeader><DialogTitle>{t('editor.chooseTemplate')}</DialogTitle><DialogDescription>{t('editor.chooseTemplateDescription')}</DialogDescription></DialogHeader><div className="grid gap-2 sm:grid-cols-2"><button type="button" className="rounded-lg border border-border bg-surface p-4 text-left transition-colors duration-[120ms] hover:border-brand hover:bg-brand-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45" onClick={() => applyTemplate('blank')}><p className="text-sm font-semibold">{t('editor.blankTemplate')}</p><p className="mt-1 text-[13px] text-muted-foreground">{t('editor.blankTemplateDescription')}</p></button><button type="button" className="rounded-lg border border-border bg-surface p-4 text-left transition-colors duration-[120ms] hover:border-brand hover:bg-brand-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:opacity-50" onClick={() => applyTemplate('daily')} disabled={publishedAgents.length === 0}><p className="text-sm font-semibold">{t('editor.dailyTemplate')}</p><p className="mt-1 text-[13px] text-muted-foreground">{publishedAgents.length === 0 ? t('editor.dailyTemplateUnavailable') : t('editor.dailyTemplateDescription')}</p></button></div></DialogContent></Dialog>
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}><DialogContent className="max-h-[85vh] overflow-auto"><DialogHeader><DialogTitle>{t('editor.workflowSettings')}</DialogTitle><DialogDescription>{t('editor.workflowSettingsDescription')}</DialogDescription></DialogHeader><div className="flex flex-col gap-5"><section><h3 className="text-sm font-semibold">{t('editor.general')}</h3><Field className="mt-3" label={t('editor.name')} htmlFor="wf-name"><Input id="wf-name" value={name} onChange={(event) => { setName(event.target.value); setSaveState('unsaved'); }} /></Field></section><section><h3 className="text-sm font-semibold">{t('editor.inputs')}</h3><Field className="mt-3" label={t('editor.input')} htmlFor="wf-input"><Textarea id="wf-input" className="font-mono text-[13px]" value={input} onChange={(event) => { setInput(event.target.value); setSaveState('unsaved'); }} /></Field></section><section><h3 className="text-sm font-semibold">{t('editor.execution')}</h3><Field className="mt-3" label={t('editor.defaultErrorPolicy')} htmlFor="default-policy"><Select value={executionPolicy} onValueChange={(value) => { setExecutionPolicy(value as 'stop' | 'retry'); setSaveState('unsaved'); }}><SelectTrigger id="default-policy"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="stop">{t('editor.stop')}</SelectItem><SelectItem value="retry">{t('editor.retry')}</SelectItem></SelectContent></Select></Field></section><section className="rounded-md border border-border bg-surface-subtle p-3"><h3 className="text-sm font-semibold">{t('editor.versioning')}</h3><p className="mt-1 text-[13px] text-muted-foreground">{t('editor.versioningHint')}</p></section></div><DialogFooter><Button onClick={() => setSettingsOpen(false)}>{t('common:actions.close')}</Button></DialogFooter></DialogContent></Dialog>
       <Sheet open={contextPanelOpen} onOpenChange={setContextPanelOpen}><SheetContent side="right" className="overflow-auto p-4 pt-5"><SheetHeader className="sr-only"><SheetTitle>{selectedNode || selectedEdge ? t('editor.configureStep') : t('editor.nodePalette')}</SheetTitle><SheetDescription>{selectedNode || selectedEdge ? t('editor.selectCanvasItem') : t('editor.paletteHint')}</SheetDescription></SheetHeader>{contextPanel}</SheetContent></Sheet>
       <Dialog open={publishOpen} onOpenChange={setPublishOpen}><DialogContent><DialogHeader><DialogTitle>{t('editor.publishTitle')}</DialogTitle><DialogDescription>{t('editor.publishDescription')}</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setPublishOpen(false)}>{t('common:actions.cancel')}</Button><Button onClick={() => void publishWorkflow()}>{t('common:actions.publish')}</Button></DialogFooter></DialogContent></Dialog>
+      <Dialog open={deleteOpen} onOpenChange={(open) => { if (!deleteBusy) { setDeleteOpen(open); if (!open) setDeleteError(''); } }}><DialogContent><DialogHeader><DialogTitle>{t('delete.title', { name: existing?.name ?? name })}</DialogTitle><DialogDescription>{t('delete.description')}</DialogDescription></DialogHeader>{deleteError ? <p className="text-[13px] text-danger" role="alert">{deleteError}</p> : null}<DialogFooter><Button type="button" variant="secondary" disabled={deleteBusy} onClick={() => setDeleteOpen(false)}>{t('common:actions.cancel')}</Button><Button type="button" variant="destructive" disabled={deleteBusy} onClick={() => void deleteWorkflow()}>{deleteBusy ? t('delete.deleting') : t('common:actions.delete')}</Button></DialogFooter></DialogContent></Dialog>
     </div>
   );
 }
@@ -467,10 +471,8 @@ function WorkflowEditorPage() {
 function toFlowNodes(definition: WorkflowDefinition, onTextChange: (nodeId: string, value: string) => void): WorkflowCanvasNode[] {
   return definition.nodes.map((node) => {
     const config = asRecord(node.config);
-    const nodeType = node.type === 'worklite/input' ? 'input' : node.type === 'worklite/text' ? 'text' : node.type === 'worklite/skill-set' ? 'skill-set' : 'generic-agent';
-    const agentId = typeof config.agentId === 'string' ? config.agentId : undefined;
-    const label = typeof config.label === 'string' ? config.label : nodeType === 'input' ? 'Workflow Input' : nodeType === 'text' ? 'System Prompt' : nodeType === 'skill-set' ? 'Skill Set' : agentId ?? node.id;
-    const agentVersion = typeof config.agentVersion === 'string' ? config.agentVersion : 'draft';
+    const nodeType = node.type === 'worklite/input' ? 'input' : node.type === 'worklite/text' ? 'text' : node.type === 'worklite/skill-set' ? 'skill-set' : 'agent';
+    const label = typeof config.label === 'string' ? config.label : nodeType === 'input' ? 'Workflow Input' : nodeType === 'text' ? 'System Prompt' : nodeType === 'skill-set' ? 'Skill Set' : 'Agent';
     return {
       id: node.id,
       type: nodeType,
@@ -478,9 +480,10 @@ function toFlowNodes(definition: WorkflowDefinition, onTextChange: (nodeId: stri
       data: {
         nodeType,
         label,
-        agentId,
-        agentVersion,
-        agentVersionId: typeof config.agentVersionId === 'string' ? config.agentVersionId : undefined,
+        model: typeof config.model === 'string' ? config.model : '',
+        systemPrompt: typeof config.systemPrompt === 'string' ? config.systemPrompt : '',
+        mcpServerIds: Array.isArray(config.mcpServerIds) ? config.mcpServerIds.filter((value): value is string => typeof value === 'string') : [],
+        mcpServerNames: Array.isArray(config.mcpServerNames) ? config.mcpServerNames.filter((value): value is string => typeof value === 'string') : [],
         text: typeof config.text === 'string' ? config.text : '',
         skillIds: Array.isArray(config.skillIds) ? config.skillIds.filter((value): value is string => typeof value === 'string') : [],
         skillNames: Array.isArray(config.skillNames) ? config.skillNames.filter((value): value is string => typeof value === 'string') : [],
@@ -503,14 +506,11 @@ function canConnect(connection: { source: string | null; sourceHandle?: string |
   if (!source || !target || source === target || !targetHandle) return false;
   const sourceNode = nodes.find((node) => node.id === source);
   const targetNode = nodes.find((node) => node.id === target);
-  if (!sourceNode || !targetNode || targetNode.data.nodeType !== 'generic-agent') return false;
+  if (!sourceNode || !targetNode || targetNode.data.nodeType !== 'agent') return false;
   const sourceType = sourceNode.data.nodeType;
   const sourcePort = sourceHandle ?? 'output';
   if (sourcePort !== 'output') return false;
-  if (targetHandle === 'systemPrompt' && sourceType !== 'text') return false;
-  if (targetHandle === 'skills' && sourceType !== 'skill-set') return false;
-  if (targetHandle === 'context' && sourceType === 'skill-set') return false;
-  if (!['context', 'systemPrompt', 'skills'].includes(targetHandle)) return false;
+  if (targetHandle !== 'context' || sourceType === 'skill-set') return false;
   if (edges.some((edge) => edge.source === source && edge.target === target && (edge.sourceHandle ?? 'output') === sourcePort && (edge.targetHandle ?? 'input') === targetHandle)) return false;
   if (edges.some((edge) => edge.target === target && (edge.targetHandle ?? 'input') === targetHandle)) return false;
   return !wouldCreateCycle(source, target, edges);
@@ -531,7 +531,7 @@ function wouldCreateCycle(source: string, target: string, edges: WorkflowCanvasE
 
 function toDefinitionNode(node: WorkflowCanvasNode): WorkflowNodeDefinition {
   const base = { label: node.data.label };
-  let type = 'worklite/generic-agent';
+  let type = 'worklite/agent';
   let config: Record<string, unknown> = base;
   if (node.data.nodeType === 'input') {
     type = 'worklite/input';
@@ -544,9 +544,10 @@ function toDefinitionNode(node: WorkflowCanvasNode): WorkflowNodeDefinition {
   } else {
     config = {
       ...base,
-      agentId: node.data.agentId,
-      agentVersion: node.data.agentVersion,
-      ...(node.data.agentVersionId ? { agentVersionId: node.data.agentVersionId } : {}),
+      model: node.data.model ?? '',
+      systemPrompt: node.data.systemPrompt ?? '',
+      skillIds: node.data.skillIds ?? [],
+      mcpServerIds: node.data.mcpServerIds ?? [],
       ...(node.data.outputType === 'file' ? { outputType: 'file', fileName: node.data.fileName ?? 'workflow-output.txt', fileType: node.data.fileType ?? 'markdown' } : {}),
     };
   }
@@ -572,7 +573,7 @@ function nodeTypeLabel(nodeType: WorkflowCanvasNode['data']['nodeType'], t: TFun
   if (nodeType === 'input') return t('editor.workflowInputNode');
   if (nodeType === 'text') return t('editor.systemPromptNode');
   if (nodeType === 'skill-set') return t('editor.skillSetNode');
-  return t('editor.genericAgentNode');
+  return t('editor.agentNode');
 }
 
 function PaletteButton({ icon, title, description, onClick }: { icon: ReactNode; title: string; description: string; onClick: () => void }) {

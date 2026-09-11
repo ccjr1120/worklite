@@ -1,13 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { Context } from 'hono';
-import { codexAccountId, getCodexAccessToken } from './codex-auth';
+import { acquireCodexAccount, acquireCodexAccountById, codexAuthStatus } from './codex-auth';
 
 type RateLimitWindow = { usedPercent: number; limitWindowSeconds: number; resetsAt: string };
 export type CodexRateLimitSnapshot = { planType: string | null; limits: Array<{ id: string; name: string | null; primary: RateLimitWindow | null; secondary: RateLimitWindow | null }> };
+export type CodexAccountUsageSnapshot = { accounts: Array<{ accountId: string; status: 'connected' | 'disabled' | 'expired' | 'error' | 'unavailable'; planType: string | null; primary: RateLimitWindow | null; secondary: RateLimitWindow | null; fetchedAt: string | null; error?: string }>; fetchedAt: string };
 
 type CodexConfig = {
-  accessToken: string;
-  accountId?: string;
   upstreamBaseURL: string;
   clientVersion: string;
   userAgent: string;
@@ -17,8 +16,6 @@ type CodexConfig = {
 
 function config(): CodexConfig {
   return {
-    accessToken: process.env.CODEX_ACCESS_TOKEN?.trim() || '',
-    accountId: codexAccountId(),
     upstreamBaseURL: (process.env.CODEX_UPSTREAM_URL?.trim() || 'https://chatgpt.com/backend-api/codex').replace(/\/+$/, ''),
     clientVersion: process.env.CODEX_CLIENT_VERSION?.trim() || '26.707.31428',
     userAgent: process.env.CODEX_USER_AGENT?.trim() || 'Codex Desktop/26.707.31428 (win32; x64)',
@@ -35,7 +32,7 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
 }
 
-function upstreamHeaders(requestHeaders: Record<string, string>, accessToken: string, accept: string, includeBeta = false): Headers {
+function upstreamHeaders(requestHeaders: Record<string, string>, accessToken: string, accountId: string | undefined, accept: string, includeBeta = false): Headers {
   const current = config();
   const headers = new Headers({
     authorization: `Bearer ${accessToken}`,
@@ -45,7 +42,7 @@ function upstreamHeaders(requestHeaders: Record<string, string>, accessToken: st
     'x-openai-internal-codex-residency': current.residency,
     'x-client-request-id': requestHeaders['x-client-request-id']?.trim() || `req_${randomUUID()}`,
   });
-  if (current.accountId) headers.set('chatgpt-account-id', current.accountId);
+  if (accountId) headers.set('chatgpt-account-id', accountId);
   if (includeBeta) headers.set('openai-beta', requestHeaders['openai-beta']?.trim() || 'responses_websockets=2026-02-06');
   for (const name of ['openai-beta', 'x-codex-turn-state']) {
     const value = requestHeaders[name]?.trim();
@@ -87,49 +84,76 @@ function rateLimit(value: unknown, id: string, name: string | null) {
   return { id, name, primary: rateLimitWindow(row.primary_window), secondary: rateLimitWindow(row.secondary_window) };
 }
 
-export async function codexRateLimits(): Promise<CodexRateLimitSnapshot> {
-  let accessToken = await getCodexAccessToken();
-  if (!accessToken) throw new Error('Codex Provider is not configured.');
-  const accountId = codexAccountId();
+async function fetchUsage(lease: Awaited<ReturnType<typeof acquireCodexAccountById>>): Promise<{ planType: string | null; primary: RateLimitWindow | null; secondary: RateLimitWindow | null }> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const headers = new Headers({ authorization: `Bearer ${accessToken}`, accept: 'application/json', 'user-agent': config().userAgent });
-    if (accountId) headers.set('chatgpt-account-id', accountId);
+    const headers = new Headers({ authorization: `Bearer ${lease.accessToken}`, accept: 'application/json', 'user-agent': config().userAgent });
+    if (lease.accountId) headers.set('chatgpt-account-id', lease.accountId);
     const response = await fetch(usageURL(), { headers, signal: AbortSignal.timeout(30_000) });
-    if (response.status === 401 && attempt === 0) {
-      accessToken = await getCodexAccessToken(true);
-      if (!accessToken) break;
-      continue;
-    }
-    if (!response.ok) throw new Error(`Codex rate-limit request failed (${response.status}).`);
+    if (response.status === 401 && attempt === 0) { lease.accessToken = await lease.refresh(); continue; }
+    if (!response.ok) throw new Error(`Codex usage request failed (${response.status}).`);
     const payload = await response.json() as Record<string, unknown>;
-    const limits = [rateLimit(payload.rate_limit, 'codex', null)];
-    if (Array.isArray(payload.additional_rate_limits)) {
-      payload.additional_rate_limits.forEach((item, index) => {
+    const current = rateLimit(payload.rate_limit, 'codex', null);
+    return {
+      planType: typeof payload.plan_type === 'string' ? payload.plan_type : null,
+      primary: current.primary,
+      secondary: current.secondary,
+    };
+  }
+  throw new Error('Codex authentication expired.');
+}
+
+export async function codexAccountUsages(): Promise<CodexAccountUsageSnapshot> {
+  const accounts = codexAuthStatus().accounts;
+  const usage = await Promise.all(accounts.map(async (account) => {
+    if (!account.enabled) return { accountId: account.id, status: 'disabled' as const, planType: account.planType, primary: null, secondary: null, fetchedAt: null };
+    let lease: Awaited<ReturnType<typeof acquireCodexAccountById>> | undefined;
+    try {
+      lease = await acquireCodexAccountById(account.id);
+      const snapshot = await fetchUsage(lease);
+      return { accountId: account.id, status: 'connected' as const, ...snapshot, fetchedAt: new Date().toISOString() };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Codex account usage is unavailable.';
+      const status = /authentication expired|refresh|401/i.test(message) ? 'error' as const : 'unavailable' as const;
+      return { accountId: account.id, status, planType: account.planType, primary: null, secondary: null, fetchedAt: null, error: message };
+    } finally {
+      lease?.release();
+    }
+  }));
+  return { accounts: usage, fetchedAt: new Date().toISOString() };
+}
+
+export async function codexRateLimits(): Promise<CodexRateLimitSnapshot> {
+  const lease = await acquireCodexAccount();
+  try {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const headers = new Headers({ authorization: `Bearer ${lease.accessToken}`, accept: 'application/json', 'user-agent': config().userAgent });
+      if (lease.accountId) headers.set('chatgpt-account-id', lease.accountId);
+      const response = await fetch(usageURL(), { headers, signal: AbortSignal.timeout(30_000) });
+      if (response.status === 401 && attempt === 0) { lease.accessToken = await lease.refresh(); continue; }
+      if (!response.ok) throw new Error(`Codex rate-limit request failed (${response.status}).`);
+      const payload = await response.json() as Record<string, unknown>;
+      const limits = [rateLimit(payload.rate_limit, 'codex', null)];
+      if (Array.isArray(payload.additional_rate_limits)) payload.additional_rate_limits.forEach((item, index) => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return;
         const row = item as Record<string, unknown>;
         const id = typeof row.metered_limit_name === 'string' ? row.metered_limit_name : typeof row.limit_name === 'string' ? row.limit_name : `additional_${index + 1}`;
         const name = typeof row.limit_name === 'string' ? row.limit_name : typeof row.metered_limit_name === 'string' ? row.metered_limit_name : null;
         limits.push(rateLimit(row.rate_limit, id, name));
       });
+      return { planType: typeof payload.plan_type === 'string' ? payload.plan_type : null, limits: limits.filter((limit) => limit.primary || limit.secondary) };
     }
-    return { planType: typeof payload.plan_type === 'string' ? payload.plan_type : null, limits: limits.filter((limit) => limit.primary || limit.secondary) };
-  }
-  throw new Error('Codex authentication expired.');
+    throw new Error('Codex authentication expired.');
+  } finally { lease.release(); }
 }
-
 export async function codexModels(request: Request): Promise<Response> {
   const current = config();
-  let accessToken = await getCodexAccessToken();
-  if (!accessToken) return unavailable();
+  let lease;
+  try { lease = await acquireCodexAccount(); } catch { return unavailable(); }
   try {
-    let upstream = await fetch(upstreamURL('/models', `?client_version=${encodeURIComponent(current.clientVersion)}`), {
-      headers: upstreamHeaders(Object.fromEntries(request.headers), accessToken, 'application/json'),
-      signal: request.signal,
-    });
+    let upstream = await fetch(upstreamURL('/models', `?client_version=${encodeURIComponent(current.clientVersion)}`), { headers: upstreamHeaders(Object.fromEntries(request.headers), lease.accessToken, lease.accountId, 'application/json'), signal: request.signal });
     if (upstream.status === 401) {
-      accessToken = await getCodexAccessToken(true);
-      if (!accessToken) return unavailable();
-      upstream = await fetch(upstreamURL('/models', `?client_version=${encodeURIComponent(current.clientVersion)}`), { headers: upstreamHeaders(Object.fromEntries(request.headers), accessToken, 'application/json'), signal: request.signal });
+      lease.accessToken = await lease.refresh();
+      upstream = await fetch(upstreamURL('/models', `?client_version=${encodeURIComponent(current.clientVersion)}`), { headers: upstreamHeaders(Object.fromEntries(request.headers), lease.accessToken, lease.accountId, 'application/json'), signal: request.signal });
     }
     if (!upstream.ok) return new Response(upstream.body, { status: 502, headers: copyResponseHeaders(upstream) });
     const payload = await upstream.json() as { models?: unknown; data?: unknown };
@@ -142,33 +166,27 @@ export async function codexModels(request: Request): Promise<Response> {
       return id ? [{ id, object: 'model', owned_by: 'openai' }] : [];
     });
     return json({ object: 'list', data: [...new Map(data.map((model) => [model.id, model])).values()] });
-  } catch {
-    return json({ error: { message: 'Codex model discovery failed.', type: 'upstream_error' } }, 502);
-  }
+  } catch { return json({ error: { message: 'Codex model discovery failed.', type: 'upstream_error' } }, 502); }
+  finally { lease.release(); }
 }
-
 async function responses(request: Request, requestHeaders: Record<string, string>, body: unknown, compact: boolean): Promise<Response> {
-  const current = config();
   const forwardedBody = body && typeof body === 'object' && !Array.isArray(body)
     ? (() => { const value = { ...(body as Record<string, unknown>), store: false, ...(typeof (body as Record<string, unknown>).model === 'string' ? { model: String((body as Record<string, unknown>).model).split('/').slice(1).join('/') || (body as Record<string, unknown>).model } : {}) }; delete value.max_output_tokens; return value; })()
     : body;
-  let accessToken = await getCodexAccessToken();
-  if (!accessToken) return unavailable();
+  let lease;
+  try { lease = await acquireCodexAccount(); } catch { return unavailable(); }
   try {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const headers = upstreamHeaders(requestHeaders, accessToken, compact ? 'application/json' : 'text/event-stream', true);
+      const headers = upstreamHeaders(requestHeaders, lease.accessToken, lease.accountId, compact ? 'application/json' : 'text/event-stream', true);
       headers.set('content-type', requestHeaders['content-type'] || 'application/json');
       const upstream = await fetch(upstreamURL(compact ? '/responses/compact' : '/responses'), { method: 'POST', headers, body: forwardedBody === undefined ? undefined : JSON.stringify(forwardedBody), signal: request.signal });
       if (upstream.status !== 401 || attempt === 1) return new Response(upstream.body, { status: upstream.status, headers: copyResponseHeaders(upstream) });
-      accessToken = await getCodexAccessToken(true);
-      if (!accessToken) return unavailable();
+      lease.accessToken = await lease.refresh();
     }
     return unavailable();
-  } catch {
-    return json({ error: { message: 'Codex upstream request failed.', type: 'upstream_error' } }, 502);
-  }
+  } catch { return json({ error: { message: 'Codex upstream request failed.', type: 'upstream_error' } }, 502); }
+  finally { lease.release(); }
 }
-
 export function codexRequestHandler({ c, requestURL, requestHeaders, requestBody }: { c: Context; requestURL: string; requestHeaders: Record<string, string>; requestBody: unknown }): Promise<Response> {
   const request = c.req.raw;
   const pathname = new URL(requestURL).pathname;

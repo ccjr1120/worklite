@@ -309,6 +309,22 @@ export type PortkeyGatewayView = {
   updatedAt: string;
 };
 
+export type CodexAccountView = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  autoPauseOnExpired: boolean;
+  concurrency: number;
+  priority: number;
+  rateMultiplier: number;
+  email: string | null;
+  accountId: string | null;
+  planType: string | null;
+  expiresAt: string | null;
+  status: 'connected' | 'expired' | 'disabled' | 'error';
+  error?: string;
+};
+
 export type CodexAuthStatus = {
   status: 'connected' | 'disconnected' | 'login_pending' | 'error';
   authMethod: 'oauth' | 'environment' | null;
@@ -316,6 +332,7 @@ export type CodexAuthStatus = {
   accountId: string | null;
   planType: string | null;
   expiresAt: string | null;
+  accounts: CodexAccountView[];
   authorizationUrl?: string;
   sessionId?: string;
   error?: string;
@@ -337,6 +354,21 @@ export type CodexRateLimit = {
 export type CodexRateLimitSnapshot = {
   planType: string | null;
   limits: CodexRateLimit[];
+};
+
+export type CodexAccountUsageView = {
+  accountId: string;
+  status: 'connected' | 'disabled' | 'expired' | 'error' | 'unavailable';
+  planType: string | null;
+  primary: CodexRateLimitWindow | null;
+  secondary: CodexRateLimitWindow | null;
+  fetchedAt: string | null;
+  error?: string;
+};
+
+export type CodexAccountUsageSnapshot = {
+  accounts: CodexAccountUsageView[];
+  fetchedAt: string;
 };
 
 export type PortkeyGatewayStatsWindow = '24h' | '7d' | '30d';
@@ -436,6 +468,28 @@ export type WorkflowEditOperation =
   | { type: 'removeEdge'; edgeId: string }
   | { type: 'updateSettings'; input?: { example?: unknown }; defaults?: { errorPolicy: NodeErrorPolicy } };
 
+export type WorkflowPlanNode = {
+  key: string;
+  type: string;
+  typeVersion?: string;
+  config: unknown;
+  errorPolicy?: NodeErrorPolicy;
+};
+
+export type WorkflowPlanEdge = {
+  source: string;
+  target: string;
+  sourcePort?: string;
+  targetPort?: string;
+};
+
+export type WorkflowPlan = {
+  nodes: WorkflowPlanNode[];
+  edges: WorkflowPlanEdge[];
+  input?: { example?: unknown };
+  defaults?: { errorPolicy: NodeErrorPolicy };
+};
+
 export type WorkflowDraftView = {
   id: string;
   workflowId: string;
@@ -475,7 +529,8 @@ export type WorkflowDetailView = WorkflowView & {
 
 export type ApplyWorkflowDraftOperationsRequest = {
   baseRevisionId: string;
-  operations: WorkflowEditOperation[];
+  operations?: WorkflowEditOperation[];
+  plan?: WorkflowPlan;
   source?: 'manual' | 'assistant';
   sourceInstruction?: string;
 };
@@ -484,6 +539,32 @@ export type CreateWorkflowRequest = {
   name: string;
   definition?: WorkflowDefinition;
 };
+
+export type PortableWorkflowSkillReference = {
+  name: string;
+};
+
+export type PortableWorkflowMcpServerReference = {
+  name: string;
+};
+
+export type PortableWorkflowNodeDefinition = Omit<WorkflowNodeDefinition, 'config'> & {
+  config: Record<string, unknown> & {
+    skills?: PortableWorkflowSkillReference[];
+    mcpServers?: PortableWorkflowMcpServerReference[];
+  };
+};
+
+export type PortableWorkflowDocument = {
+  format: 'worklite.workflow';
+  version: 1;
+  workflow: {
+    name: string;
+    definition: Omit<WorkflowDefinition, 'nodes'> & { nodes: PortableWorkflowNodeDefinition[] };
+  };
+};
+
+export type ImportWorkflowRequest = PortableWorkflowDocument;
 
 export type WorkflowVersionView = {
   id: string;
@@ -710,6 +791,14 @@ export type CreateSkillRequest = {
   }>;
 };
 
+export type ImportSkillRequest = {
+  name: string;
+  files: Array<{
+    path: string;
+    content: string;
+  }>;
+};
+
 export type UpdateSkillRequest = {
   name?: string;
   files?: Array<{
@@ -721,4 +810,64 @@ export type UpdateSkillRequest = {
 export type ExecuteSkillScriptRequest = {
   scriptPath: string;
   arguments: string[];
+};
+
+
+export type WorkflowScheduleView = {
+  id: string;
+  workflowId: string;
+  workflowName: string;
+  workflowVersionId: string;
+  workflowVersion: number;
+  intervalSeconds: number;
+  enabled: boolean;
+  running: boolean;
+  nextRunAt: string;
+  lastRunAt: string | null;
+  lastRunId: string | null;
+  lastStatus: RunStatus | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type UpsertWorkflowScheduleRequest = {
+  workflowId: string;
+  intervalSeconds: number;
+  enabled: boolean;
+};
+
+export type DashboardPayloadItem = {
+  id: string;
+  title: string;
+  status: string;
+  priority?: string | null;
+  dueAt?: string | null;
+  url?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type DashboardPayload = {
+  type: 'worklite.dashboard';
+  version: 1;
+  source?: {
+    kind: string;
+    name?: string;
+  };
+  updatedAt: string;
+  items: DashboardPayloadItem[];
+};
+
+export type DashboardPresentation = 'list' | 'kanban';
+
+export type DashboardView = {
+  workflowId: string | null;
+  workflowName: string | null;
+  presentation: DashboardPresentation;
+  payload: DashboardPayload | null;
+  schedule: WorkflowScheduleView | null;
+};
+
+export type UpdateDashboardRequest = {
+  workflowId: string;
+  presentation: DashboardPresentation;
 };

@@ -19,7 +19,8 @@
     "agent": "Agent",
     "model": "模型 / 提供商",
     "resources": "技能 / MCP",
-    "updated": "更新时间"
+    "updated": "更新时间",
+    "actions": "操作"
   },
   "editor": {
     "new": "新建 Agent",
@@ -93,5 +94,13 @@
         "failed": "失败"
       }
     }
+  },
+  "delete": {
+    "title": "删除 {{name}}？",
+    "description": "这会永久删除该 Agent 及其版本、定时任务、执行历史、会话和资源关联。此操作无法撤销。",
+    "action": "删除 {{name}}",
+    "deleting": "正在删除...",
+    "success": "Agent已删除",
+    "failed": "无法删除Agent。"
   }
 }

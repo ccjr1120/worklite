@@ -56,11 +56,11 @@ export type Workflow = {
 export type WorkflowStep = {
   id: string;
   position: number;
-  agentId: string;
-  agentName: string;
-  agentVersion: string;
+  model: string;
+  systemPrompt: string;
+  skillIds: string[];
+  mcpServerIds: string[];
   nodeType?: 'text' | 'agent';
-  agentVersionId?: string;
   text?: string;
   outputType?: 'text' | 'file';
   fileName?: string;
@@ -232,9 +232,10 @@ export const workflowSteps: Record<string, WorkflowStep[]> = {
     {
       id: 'step_1',
       position: 1,
-      agentId: 'agt_researcher',
-      agentName: 'Researcher',
-      agentVersion: 'v3',
+      model: 'provider/model',
+      systemPrompt: '',
+      skillIds: [],
+      mcpServerIds: [],
       inputSummary: 'topic → query',
       errorPolicy: 'retry',
       status: 'completed',
@@ -242,9 +243,10 @@ export const workflowSteps: Record<string, WorkflowStep[]> = {
     {
       id: 'step_2',
       position: 2,
-      agentId: 'agt_writer',
-      agentName: 'Brief writer',
-      agentVersion: 'v2',
+      model: 'provider/model',
+      systemPrompt: '',
+      skillIds: [],
+      mcpServerIds: [],
       inputSummary: 'findings → brief',
       errorPolicy: 'stop',
       status: 'running',
@@ -252,9 +254,10 @@ export const workflowSteps: Record<string, WorkflowStep[]> = {
     {
       id: 'step_3',
       position: 3,
-      agentId: 'agt_reviewer',
-      agentName: 'Reviewer',
-      agentVersion: 'v1',
+      model: 'provider/model',
+      systemPrompt: '',
+      skillIds: [],
+      mcpServerIds: [],
       inputSummary: 'brief → review',
       errorPolicy: 'stop',
       status: 'queued',
@@ -264,18 +267,20 @@ export const workflowSteps: Record<string, WorkflowStep[]> = {
     {
       id: 'step_inc_1',
       position: 1,
-      agentId: 'agt_researcher',
-      agentName: 'Researcher',
-      agentVersion: 'v3',
+      model: 'provider/model',
+      systemPrompt: '',
+      skillIds: [],
+      mcpServerIds: [],
       inputSummary: 'incident → timeline',
       errorPolicy: 'retry',
     },
     {
       id: 'step_inc_2',
       position: 2,
-      agentId: 'agt_writer',
-      agentName: 'Brief writer',
-      agentVersion: 'v2',
+      model: 'provider/model',
+      systemPrompt: '',
+      skillIds: [],
+      mcpServerIds: [],
       inputSummary: 'timeline → summary',
       errorPolicy: 'stop',
     },

@@ -3,10 +3,13 @@ import { api } from './client';
 
 export const agentsQueryKey = () => ['agents'] as const;
 export const agentSubSessionsQueryKey = () => ['agent-sub-sessions'] as const;
+export const dashboardQueryKey = () => ['dashboard'] as const;
 export const agentScheduledTasksQueryKey = () => ['agent-scheduled-tasks'] as const;
 export const pluginsQueryKey = () => ['plugins'] as const;
 export const workflowsQueryKey = () => ['workflows'] as const;
 export const runsQueryKey = () => ['runs'] as const;
+export const mcpServersQueryKey = () => ['mcp-servers'] as const;
+export const artifactsQueryKey = () => ['artifacts'] as const;
 
 export function useAgentsQuery(workspace?: string) {
   return useQuery({ queryKey: agentsQueryKey(), queryFn: () => api.agents(workspace) });
@@ -22,6 +25,10 @@ export function useAgentVersionsQuery(workspace: string | undefined, agentId: st
 
 export function useAgentSubSessionsQuery(workspace?: string) {
   return useQuery({ queryKey: agentSubSessionsQueryKey(), queryFn: () => api.agentSubSessions(workspace), refetchInterval: 1_500 });
+}
+
+export function useDashboardQuery() {
+  return useQuery({ queryKey: dashboardQueryKey(), queryFn: api.dashboard, refetchInterval: 5_000 });
 }
 
 export function useAgentScheduledTasksQuery(workspace?: string) {
@@ -56,8 +63,10 @@ export function useRunQuery(workspace: string | undefined, runId: string) {
   return useQuery({ queryKey: ['run', runId] as const, queryFn: () => api.run(workspace, runId), enabled: Boolean(runId), refetchInterval: 3_000 });
 }
 
+export const skillsQueryKey = (_workspace?: string) => ['skills'] as const;
+
 export function useSkillsQuery(workspace?: string) {
-  return useQuery({ queryKey: ['skills'] as const, queryFn: () => api.skills(workspace) });
+  return useQuery({ queryKey: skillsQueryKey(workspace), queryFn: () => api.skills(workspace) });
 }
 
 export function useSkillQuery(workspace: string | undefined, skillId: string) {
@@ -65,7 +74,7 @@ export function useSkillQuery(workspace: string | undefined, skillId: string) {
 }
 
 export function useMcpServersQuery(workspace?: string) {
-  return useQuery({ queryKey: ['mcp-servers'] as const, queryFn: () => api.mcpServers(workspace) });
+  return useQuery({ queryKey: mcpServersQueryKey(), queryFn: () => api.mcpServers(workspace) });
 }
 
 export function useMcpServerQuery(workspace: string | undefined, serverId: string) {
@@ -88,12 +97,16 @@ export function useCodexRateLimitsQuery(enabled: boolean) {
   return useQuery({ queryKey: ['codex-rate-limits'] as const, queryFn: api.codexRateLimits, enabled, refetchInterval: 60_000 });
 }
 
+export function useCodexAccountUsagesQuery(enabled: boolean) {
+  return useQuery({ queryKey: ['codex-account-usages'] as const, queryFn: api.codexAccountUsages, enabled, refetchInterval: 60_000 });
+}
+
 export function usePortkeyGatewayStatsQuery(window: '24h' | '7d' | '30d') {
   return useQuery({ queryKey: ['portkey-gateway-stats', window] as const, queryFn: () => api.portkeyGatewayStats(window), refetchInterval: 30_000 });
 }
 
 export function useArtifactsQuery(workspace?: string) {
-  return useQuery({ queryKey: ['artifacts'] as const, queryFn: () => api.artifacts(workspace) });
+  return useQuery({ queryKey: artifactsQueryKey(), queryFn: () => api.artifacts(workspace) });
 }
 
 export function useArtifactQuery(workspace: string | undefined, artifactId: string) {

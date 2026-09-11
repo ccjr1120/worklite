@@ -16,7 +16,8 @@
     "connection": "Connection",
     "transport": "Transport",
     "allowedTools": "Allowed tools",
-    "version": "Version"
+    "version": "Version",
+    "actions": "Actions"
   },
   "config": {
     "new": "Connect server",
@@ -40,5 +41,13 @@
       "unsupported_protocol": "The server does not support the required MCP protocol.",
       "malformed_response": "The server returned an invalid MCP response."
     }
+  },
+  "delete": {
+    "title": "Delete {{name}}?",
+    "description": "This permanently deletes the MCP server connection. This action cannot be undone.",
+    "action": "Delete {{name}}",
+    "deleting": "Deleting...",
+    "success": "MCP server deleted",
+    "failed": "Unable to delete mcp server."
   }
 }

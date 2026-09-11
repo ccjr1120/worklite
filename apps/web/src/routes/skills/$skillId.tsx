@@ -2,13 +2,15 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { AlertCircle, Ban, FileCode2, FilePlus2, FileText, Folder, LoaderCircle, LockKeyhole, Play, RefreshCw, Save, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import type { CommandExecutionEvent, CommandExecutionStatus, CommandExecutionView, SkillView } from '@worklite/contracts';
 import { api, parseCommandEvent } from '@/api/client';
-import { useSkillQuery } from '@/api/queries';
+import { skillsQueryKey, useSkillQuery } from '@/api/queries';
 import { SaveIndicator } from '@/components/save-indicator';
 import { StatusBadge } from '@/components/status-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
@@ -44,6 +46,9 @@ function SkillEditorPage() {
   const [streamDisconnected, setStreamDisconnected] = useState(false);
   const [launching, setLaunching] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const outputRef = useRef<HTMLDivElement>(null);
   const followingOutputRef = useRef(true);
 
@@ -214,6 +219,23 @@ function SkillEditorPage() {
     }
   }
 
+  async function deleteSkill() {
+    if (isNew || isBuiltIn || deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError('');
+    try {
+      await api.deleteSkill(workspaceSlug, skillId);
+      setDeleteOpen(false);
+      toast.success(t('delete.success'));
+      await queryClient.invalidateQueries({ queryKey: skillsQueryKey() });
+      void navigate({ to: '/skills' });
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : t('delete.failed'));
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
   if (!isNew && isLoading) return <ResourceState icon={LoaderCircle} message={t('editor.loading')} animated />;
   if (!isNew && isError) return <ResourceState icon={AlertCircle} message={t('editor.loadFailed')} error />;
 
@@ -228,7 +250,7 @@ function SkillEditorPage() {
       <WorkspaceChrome
         crumbs={[{ label: t('title'), to: '/skills' }, { label: isNew ? t('editor.new') : skill?.name ?? t('editor.fallback') }]}
         status={editable ? <SaveIndicator state={saveState} /> : <span className="inline-flex items-center gap-1.5 text-[13px] text-muted-foreground"><LockKeyhole className="size-3.5" aria-hidden="true" />{t('editor.readOnly')}</span>}
-        actions={editable ? <Button size="compact" onClick={() => void save()} disabled={saveState === 'saving'}>{saveState === 'saving' ? <LoaderCircle className="size-4 motion-safe:animate-spin" /> : <Save className="size-4" />}{isNew ? t('editor.create') : t('common:actions.save')}</Button> : null}
+        actions={editable ? <div className="flex items-center gap-2">{!isNew ? <Button type="button" variant="ghost" size="icon-compact" aria-label={t('delete.action', { name: skill?.name ?? name })} title={t('delete.action', { name: skill?.name ?? name })} onClick={() => { setDeleteError(''); setDeleteOpen(true); }}><Trash2 className="size-4" /></Button> : null}<Button size="compact" onClick={() => void save()} disabled={saveState === 'saving'}>{saveState === 'saving' ? <LoaderCircle className="size-4 motion-safe:animate-spin" /> : <Save className="size-4" />}{isNew ? t('editor.create') : t('common:actions.save')}</Button></div> : null}
       />
 
       <aside className="max-h-72 w-full shrink-0 overflow-auto border-b border-border bg-surface p-4 md:max-h-none md:w-72 md:border-b-0 md:border-r">
@@ -359,6 +381,19 @@ function SkillEditorPage() {
         {executionError ? <p className="shrink-0 border-t border-danger/30 bg-danger/5 px-4 py-2 text-xs text-danger" role="alert">{executionError}</p> : null}
         {saveError ? <p className="shrink-0 border-t border-danger/30 bg-danger/5 px-4 py-3 text-[13px] text-danger" role="alert">{saveError}</p> : null}
       </main>
+      <Dialog open={deleteOpen} onOpenChange={(open) => { if (!open && !deleteBusy) { setDeleteOpen(false); setDeleteError(''); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('delete.title', { name: skill?.name ?? name })}</DialogTitle>
+            <DialogDescription>{t('delete.description')}</DialogDescription>
+          </DialogHeader>
+          {deleteError ? <p className="text-[13px] text-danger" role="alert">{deleteError}</p> : null}
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setDeleteOpen(false)} disabled={deleteBusy}>{t('common:actions.cancel')}</Button>
+            <Button variant="destructive" onClick={() => void deleteSkill()} disabled={deleteBusy}>{deleteBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}{deleteBusy ? t('delete.deleting') : t('delete.action', { name: skill?.name ?? name })}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

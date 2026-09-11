@@ -5,7 +5,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { BadRequestException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import type { Request, Response } from 'express';
-import type { CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatsWindow, PortkeyGatewayStatus, PortkeyGatewayView, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
+import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatsWindow, PortkeyGatewayStatus, PortkeyGatewayView, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
 import type { ModelProviderConfig } from '@worklite/model-gateway';
 import { agents, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
@@ -126,19 +126,34 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     return this.gatewayJson<CodexRateLimitSnapshot>('/worklite/codex/rate-limits');
   }
 
+  async codexAccountUsages(): Promise<CodexAccountUsageSnapshot> {
+    await this.ensureGatewayForDiscovery();
+    return this.gatewayJson<CodexAccountUsageSnapshot>('/worklite/codex/accounts/usage');
+  }
+
   async startCodexLogin(): Promise<{ authorizationUrl: string; sessionId: string }> {
     await this.ensureGatewayForDiscovery();
     return this.gatewayJson<{ authorizationUrl: string; sessionId: string }>('/worklite/codex/auth/login', { method: 'POST' });
   }
 
-  async refreshCodexCredential(): Promise<CodexAuthStatus> {
+  async importCodexAccounts(input: unknown): Promise<CodexAuthStatus> {
     await this.ensureGatewayForDiscovery();
-    return this.gatewayJson<CodexAuthStatus>('/worklite/codex/auth/refresh', { method: 'POST' });
+    return this.gatewayJson<CodexAuthStatus>('/worklite/codex/accounts/import', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
   }
 
-  async logoutCodex(): Promise<CodexAuthStatus> {
+  async updateCodexAccount(accountId: string, enabled: boolean): Promise<CodexAuthStatus> {
     await this.ensureGatewayForDiscovery();
-    return this.gatewayJson<CodexAuthStatus>('/worklite/codex/auth/logout', { method: 'POST' });
+    return this.gatewayJson<CodexAuthStatus>(`/worklite/codex/accounts/${encodeURIComponent(accountId)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled }) });
+  }
+
+  async refreshCodexAccount(accountId: string): Promise<CodexAuthStatus> {
+    await this.ensureGatewayForDiscovery();
+    return this.gatewayJson<CodexAuthStatus>(`/worklite/codex/accounts/${encodeURIComponent(accountId)}/refresh`, { method: 'POST' });
+  }
+
+  async deleteCodexAccount(accountId: string): Promise<CodexAuthStatus> {
+    await this.ensureGatewayForDiscovery();
+    return this.gatewayJson<CodexAuthStatus>(`/worklite/codex/accounts/${encodeURIComponent(accountId)}`, { method: 'DELETE' });
   }
 
   async createProvider(input: CreateModelProviderRequest): Promise<ModelProviderView> {

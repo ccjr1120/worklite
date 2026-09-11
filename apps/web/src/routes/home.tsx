@@ -14,8 +14,10 @@ import {
   Plus,
   Trash2,
   Workflow as WorkflowIcon,
+  RefreshCw,
 } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { create } from 'zustand';
 import { Button } from '@/components/ui/button';
@@ -29,7 +31,9 @@ import { PageHeading } from '@/components/page-heading';
 import { StatusBadge } from '@/components/status-badge';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import type { Artifact, Run, Workflow } from '@/mock/data';
-import { useAgentQuery, useArtifactsQuery, useAuditLogsQuery, useModelProvidersQuery, useRunsQuery, useWorkflowsQuery } from '@/api/queries';
+import { dashboardQueryKey, useAgentQuery, useArtifactsQuery, useAuditLogsQuery, useDashboardQuery, useModelProvidersQuery, useRunsQuery, useWorkflowsQuery } from '@/api/queries';
+import { api } from '@/api/client';
+import type { DashboardPayloadItem } from '@worklite/contracts';
 import { cn } from '@/lib/utils';
 
 type DashboardWidgetType = 'attention' | 'active_runs' | 'workflow_health' | 'recent_workflows' | 'recent_activity' | 'recent_artifacts';
@@ -136,6 +140,7 @@ function HomePage() {
   const { data: apiRuns = [] } = useRunsQuery(workspaceKey);
   const { data: apiArtifacts = [] } = useArtifactsQuery(workspaceKey);
   const { data: apiAuditLogs = [] } = useAuditLogsQuery(workspaceKey);
+  const { data: workflowDashboard } = useDashboardQuery();
   const categories = useDashboardStore((state) => state.categoriesByWorkspace[workspaceKey] ?? DEFAULT_DASHBOARD_CATEGORIES);
   const updateCategories = useDashboardStore((state) => state.updateCategories);
   const [categoryDialog, setCategoryDialog] = useState<{ mode: 'create' | 'rename'; categoryId?: string } | null>(null);
@@ -270,7 +275,7 @@ function HomePage() {
         <div className="mx-auto w-full max-w-[1200px] px-6 pb-36 pt-6">
           {firstUseStateReady && !systemHelperConfigured ? <FirstUseGuide providerConfigured={providerConfigured} /> : null}
           {selectedBoard && selectedBoardEntry ? (
-            <DashboardDetail board={selectedBoard} category={selectedBoardEntry.category} workflows={workspaceWorkflows} runs={workspaceRuns} artifacts={workspaceArtifacts} activity={workspaceActivity} t={t} onAddWidget={() => setWidgetDialogOpen(true)} onMoveWidget={moveWidget} onRemoveWidget={removeWidget} onRename={(name) => updateBoard(selectedBoard.id, (board) => ({ ...board, name, nameKey: undefined }))} />
+            <DashboardDetail board={selectedBoard} category={selectedBoardEntry.category} workflowDashboard={workflowDashboard} workflows={workspaceWorkflows} runs={workspaceRuns} artifacts={workspaceArtifacts} activity={workspaceActivity} t={t} onAddWidget={() => setWidgetDialogOpen(true)} onMoveWidget={moveWidget} onRemoveWidget={removeWidget} onRename={(name) => updateBoard(selectedBoard.id, (board) => ({ ...board, name, nameKey: undefined }))} />
           ) : (
             <DashboardLibrary categories={categories} workflows={workspaceWorkflows} runs={workspaceRuns} artifacts={workspaceArtifacts} t={t} onOpenBoard={openBoard} onAddCategory={() => { setCategoryDialog({ mode: 'create' }); setCategoryName(''); }} onAddBoard={(categoryId) => { setBoardDialog({ categoryId }); setBoardName(''); setBoardTemplate('blank'); }} onRenameCategory={(category) => { setCategoryDialog({ mode: 'rename', categoryId: category.id }); setCategoryName(resolveCategoryName(category, t)); }} onDeleteCategory={setDeleteCategoryId} />
           )}
@@ -338,7 +343,7 @@ function BoardSummary({ board, workflows, runs, artifacts, t }: { board: Dashboa
   return <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 border-t border-border pt-3 text-xs text-muted-foreground">{metrics.map((metric) => <span key={metric.key} className="inline-flex items-center gap-1.5">{metric.icon}<span>{t(`dashboard.summary.${metric.key}`, { count: metric.value })}</span></span>)}</div>;
 }
 
-function DashboardDetail({ board, category, workflows, runs, artifacts, activity, t, onAddWidget, onMoveWidget, onRemoveWidget, onRename }: { board: DashboardBoard; category: DashboardCategory; workflows: Workflow[]; runs: Run[]; artifacts: Artifact[]; activity: { id: string; text: string; time: string }[]; t: Translate; onAddWidget: () => void; onMoveWidget: (index: number, direction: -1 | 1) => void; onRemoveWidget: (index: number) => void; onRename: (name: string) => void }) {
+function DashboardDetail({ board, category, workflowDashboard, workflows, runs, artifacts, activity, t, onAddWidget, onMoveWidget, onRemoveWidget, onRename }: { board: DashboardBoard; category: DashboardCategory; workflowDashboard: Awaited<ReturnType<typeof api.dashboard>> | undefined; workflows: Workflow[]; runs: Run[]; artifacts: Artifact[]; activity: { id: string; text: string; time: string }[]; t: Translate; onAddWidget: () => void; onMoveWidget: (index: number, direction: -1 | 1) => void; onRemoveWidget: (index: number) => void; onRename: (name: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(resolveBoardName(board, t));
   function saveName() { const value = name.trim(); if (value) onRename(value); setEditing(false); }
@@ -346,9 +351,33 @@ function DashboardDetail({ board, category, workflows, runs, artifacts, activity
   return (
     <>
       <div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><p className="text-[13px] text-muted-foreground">{resolveCategoryName(category, t)}</p>{editing ? <div className="mt-1 flex max-w-xl items-center gap-2"><Input value={name} onChange={(event) => setName(event.target.value)} aria-label={t('dashboard.board.nameLabel')} /><Button size="compact" onClick={saveName}>{t('common:actions.save')}</Button></div> : <h1 className="mt-1 text-2xl font-semibold tracking-tight">{resolveBoardName(board, t)}</h1>}<p className="mt-2 max-w-2xl text-[13px] text-muted-foreground">{resolveBoardDescription(board, t)}</p></div><div className="flex items-center gap-2"><Button variant="secondary" size="compact" onClick={() => setEditing((value) => !value)}><Pencil className="size-4" />{editing ? t('common:actions.cancel') : t('dashboard.actions.editBoard')}</Button><Button size="compact" onClick={onAddWidget}><Plus className="size-4" />{t('dashboard.actions.addWidget')}</Button></div></div>
+      <WorkflowDashboardPanel dashboard={workflowDashboard} workflows={workflows} t={t} />
       {board.widgets.length === 0 ? <div className="mt-8 flex min-h-48 flex-col items-center justify-center rounded-lg border border-dashed border-border px-6 text-center"><LayoutDashboard className="size-6 text-muted-foreground" aria-hidden="true" /><h2 className="mt-3 text-sm font-semibold">{t('dashboard.widget.emptyTitle')}</h2><p className="mt-1 max-w-sm text-[13px] text-muted-foreground">{t('dashboard.widget.emptyDescription')}</p><Button className="mt-4" size="compact" onClick={onAddWidget}><Plus className="size-4" />{t('dashboard.actions.addWidget')}</Button></div> : <div className="mt-8 grid gap-4 md:grid-cols-2">{board.widgets.map((widget, index) => <DashboardWidget key={`${widget}-${index}`} type={widget} index={index} workflows={workflows} runs={runs} artifacts={artifacts} activity={activity} t={t} onMove={onMoveWidget} onRemove={onRemoveWidget} />)}</div>}
     </>
   );
+}
+
+function WorkflowDashboardPanel({ dashboard, workflows, t }: { dashboard: Awaited<ReturnType<typeof api.dashboard>> | undefined; workflows: Workflow[]; t: Translate }) {
+  const queryClient = useQueryClient();
+  const [workflowId, setWorkflowId] = useState(dashboard?.workflowId ?? '');
+  const [presentation, setPresentation] = useState<'list' | 'kanban'>(dashboard?.presentation ?? 'kanban');
+  useEffect(() => { setWorkflowId(dashboard?.workflowId ?? ''); setPresentation(dashboard?.presentation ?? 'kanban'); }, [dashboard?.workflowId, dashboard?.presentation]);
+  const published = workflows.filter((workflow) => workflow.state === 'published');
+  const save = useMutation({ mutationFn: () => api.updateDashboard({ workflowId, presentation }), onSuccess: () => queryClient.invalidateQueries({ queryKey: dashboardQueryKey() }) });
+  const run = useMutation({ mutationFn: api.runDashboard, onSuccess: () => queryClient.invalidateQueries({ queryKey: dashboardQueryKey() }) });
+  const items = dashboard?.payload?.items ?? [];
+  const statuses = [...new Set(items.map((item) => item.status))];
+  return <section className="mt-8 rounded-lg border border-border bg-surface p-4">
+    <div className="flex flex-wrap items-end gap-3"><div className="min-w-56 flex-1"><label className="text-xs font-medium text-muted-foreground">{t('dashboard.workflow.workflow')}</label><Select value={workflowId} onValueChange={setWorkflowId}><SelectTrigger className="mt-1"><SelectValue placeholder={t('dashboard.workflow.workflowPlaceholder')} /></SelectTrigger><SelectContent>{published.map((workflow) => <SelectItem key={workflow.id} value={workflow.id}>{workflow.name}</SelectItem>)}</SelectContent></Select></div><div className="w-40"><label className="text-xs font-medium text-muted-foreground">{t('dashboard.workflow.presentation')}</label><Select value={presentation} onValueChange={(value) => setPresentation(value as 'list' | 'kanban')}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="kanban">{t('dashboard.workflow.kanban')}</SelectItem><SelectItem value="list">{t('dashboard.workflow.list')}</SelectItem></SelectContent></Select></div><Button variant="secondary" disabled={!workflowId || save.isPending} onClick={() => save.mutate()}>{t('common:actions.save')}</Button><Button disabled={!dashboard?.workflowId || run.isPending} onClick={() => run.mutate()}><RefreshCw className="size-4" />{t('dashboard.workflow.runNow')}</Button></div>
+    {dashboard?.workflowName ? <p className="mt-3 text-xs text-muted-foreground">{dashboard.workflowName}{dashboard.payload?.source?.name ? ` · ${dashboard.payload.source.name}` : ''}{dashboard.payload?.updatedAt ? ` · ${dashboard.payload.updatedAt}` : ''}</p> : null}
+    {!dashboard?.workflowId ? <WidgetEmpty text={t('dashboard.workflow.unconfigured')} /> : items.length === 0 ? <WidgetEmpty text={t('dashboard.workflow.empty')} /> : dashboard.presentation === 'list' ? <div className="mt-4 divide-y divide-border border-y border-border">{items.map((item) => <DashboardDataItem key={item.id} item={item} />)}</div> : <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">{statuses.map((status) => <div key={status} className="rounded-lg bg-surface-subtle p-3"><div className="flex items-center justify-between"><h3 className="text-sm font-semibold">{status}</h3><span className="text-xs text-muted-foreground">{items.filter((item) => item.status === status).length}</span></div><div className="mt-3 space-y-2">{items.filter((item) => item.status === status).map((item) => <DashboardDataItem key={item.id} item={item} card />)}</div></div>)}</div>}
+  </section>;
+}
+
+function DashboardDataItem({ item, card = false }: { item: DashboardPayloadItem; card?: boolean }) {
+  const content = <><span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium">{item.title}</span><span className="mt-1 block text-xs text-muted-foreground">{[item.priority, item.dueAt].filter(Boolean).join(' · ') || item.status}</span></span>{item.url ? <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" /> : null}</>;
+  const className = cn('flex items-start gap-3', card ? 'rounded-md border border-border bg-background p-3' : 'px-3 py-3');
+  return item.url ? <a href={item.url} target="_blank" rel="noreferrer" className={cn(className, surfaceInteraction, focusRing)}>{content}</a> : <div className={className}>{content}</div>;
 }
 
 function DashboardWidget({ type, index, workflows, runs, artifacts, activity, t, onMove, onRemove }: { type: DashboardWidgetType; index: number; workflows: Workflow[]; runs: Run[]; artifacts: Artifact[]; activity: { id: string; text: string; time: string }[]; t: Translate; onMove: (index: number, direction: -1 | 1) => void; onRemove: (index: number) => void }) {

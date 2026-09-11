@@ -1,11 +1,11 @@
 {
   "title": "工作流",
-  "description": "已发布 Agent 版本组成的有序序列。",
+  "description": "包含内嵌 Agent 配置的有向工作流图。",
   "create": "创建工作流",
   "search": "搜索工作流",
   "empty": {
     "title": "还没有工作流",
-    "description": "将现有 Agent 组成线性序列，然后发布一个不可变版本。"
+    "description": "创建空白工作流，然后在编辑器中添加和配置节点。"
   },
   "noMatches": {
     "title": "没有匹配的工作流",
@@ -16,7 +16,8 @@
     "state": "状态",
     "steps": "步骤",
     "lastRun": "最近运行",
-    "updated": "更新时间"
+    "updated": "更新时间",
+    "actions": "操作"
   },
   "editor": {
     "new": "新建工作流",
@@ -28,7 +29,7 @@
     "stepCount": "{{count}} 个步骤",
     "agentPalette": "Agent 面板",
     "nodePalette": "Node palette",
-    "paletteHint": "Inputs, prompts, Skill Sets, and Generic Agents",
+    "paletteHint": "输入、常量、Skill Set 和 Agent",
     "searchNodes": "Search nodes",
     "canvas": "Workflow canvas",
     "zoomIn": "放大",
@@ -37,7 +38,6 @@
     "nodeCount": "{{count}} nodes",
     "edgeCount": "{{count}} connections",
     "agentNode": "Agent",
-    "genericAgentNode": "Generic Agent",
     "workflowInputNode": "Workflow Input",
     "runPayload": "Run payload",
     "systemPromptNode": "System Prompt",
@@ -47,8 +47,6 @@
     "skillCount": "{{count}} Skills",
     "noSkillsSelected": "No Skills selected",
     "contextPort": "Context",
-    "systemPromptPort": "System prompt",
-    "skillsPort": "Skills",
     "nodeName": "Node name",
     "skills": "Skills",
     "constantSource": "Constant text source",
@@ -64,7 +62,6 @@
     "invalidConnection": "This connection would create an invalid workflow graph.",
     "emptyCanvas": "The canvas is empty",
     "searchAgents": "搜索 Agent",
-    "noAgents": "没有匹配的 Agent。",
     "configureStep": "配置步骤",
     "selectStep": "选择一个步骤进行配置。",
     "inputMapping": "输入映射",
@@ -77,15 +74,7 @@
     "execution": "执行",
     "defaultErrorPolicy": "默认错误策略",
     "versioning": "版本",
-    "versioningHint": "草稿编辑保持可变，发布后会锁定引用的 Agent 版本。",
-    "chooseTemplate": "开始一个工作流",
-    "chooseTemplateDescription": "选择起点，创建后仍可修改所有步骤。",
-    "blankTemplate": "空白工作流",
-    "blankTemplateDescription": "从空序列开始，按需添加 Agent。",
-    "dailyTemplate": "日报研究简报",
-    "dailyTemplateDescription": "研究、撰写并审阅一份简洁的日报。",
-    "templateDailyName": "日报研究简报",
-    "templateDailyInput": "主题：每日市场简报",
+    "versioningHint": "草稿编辑保持可变，发布后会锁定完整工作流定义。",
     "dailyTemplatePrompt": "Research the supplied topic and return a concise evidence-based brief.",
     "agentFallback": "Agent",
     "textNode": "文本",
@@ -95,11 +84,6 @@
     "mappingLiteralOutput": "字面值 → 输出",
     "mappingInputOutput": "输入 → 输出",
     "mappingPreviousOutput": "上一步输出 → 输出",
-    "noPublishedAgents": "请先发布 Agent，再将其添加到工作流。",
-    "loadingVersions": "正在加载版本...",
-    "selectImmutableVersion": "选择不可变版本",
-    "selectVersionBeforePublish": "发布前请选择不可变的 Agent 版本。",
-    "dailyTemplateUnavailable": "至少发布一个 Agent 后才能使用此模板。",
     "versions": "版本",
     "aiEdit": "AI 编辑",
     "run": "运行",
@@ -111,7 +95,6 @@
     "runVersion": "运行 v{{version}}",
     "running": "启动中...",
     "step": "步骤 {{position}}",
-    "agentVersion": "Agent 版本",
     "errorPolicy": "错误策略",
     "stop": "停止",
     "retry": "重试",
@@ -128,7 +111,7 @@
     "applied": "已应用",
     "runOutput": "运行输出",
     "publishTitle": "发布工作流",
-    "publishDescription": "发布会锁定每个引用的 Agent 版本。之后对 Agent 的编辑不会改变此工作流或其历史运行。",
+    "publishDescription": "发布会锁定内嵌 Agent 配置。之后对独立 Agent 的编辑不会改变此工作流或历史运行。",
     "published": "工作流已发布",
     "publishFailed": "无法发布工作流。",
     "saveFailed": "无法保存工作流。",
@@ -138,14 +121,24 @@
     "moveUp": "上移",
     "moveDown": "下移",
     "duplicate": "复制",
-    "remove": "移除"
+    "remove": "移除",
+    "exportJson": "导出 JSON",
+    "saveBeforeExport": "请先保存工作流再导出。",
+    "exported": "工作流 JSON 已导出",
+    "exportFailed": "无法导出工作流 JSON。",
+    "agentNodeDescription": "配置模型、系统提示词、Skill 和 MCP 服务",
+    "model": "模型",
+    "selectModel": "选择模型",
+    "systemPrompt": "系统提示词",
+    "mcpServers": "MCP 服务",
+    "noMcpServersSelected": "未选择 MCP 服务"
   },
   "versions": {
     "title": "版本",
     "description": "不可变的已发布版本。运行始终绑定到确切版本。",
     "empty": {
       "title": "没有已发布版本",
-      "description": "发布工作流以锁定 Agent 版本并启用运行。"
+      "description": "发布工作流以锁定完整定义并启用运行。"
     },
     "columns": {
       "version": "版本",
@@ -154,5 +147,16 @@
       "steps": "步骤",
       "recentRun": "最近运行"
     }
+  },
+  "importJson": "导入 JSON",
+  "importing": "正在导入...",
+  "importFailed": "无法导入工作流 JSON。",
+  "delete": {
+    "title": "删除 {{name}}？",
+    "description": "这会永久删除该工作流及其草稿、已发布版本、定时计划、看板数据和运行历史。此操作无法撤销。",
+    "action": "删除 {{name}}",
+    "deleting": "正在删除...",
+    "success": "工作流已删除",
+    "failed": "无法删除工作流。"
   }
 }
