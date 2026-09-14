@@ -7,12 +7,14 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Kbd } from '@/components/ui/kbd';
 import { cn } from '@/lib/utils';
+import { APP_VERSION_LABEL } from '@/app-version';
 
 function UserMenu({ collapsed }: { collapsed: boolean }) {
   const { t } = useTranslation('workspace');
@@ -27,10 +29,13 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
               P
             </span>
             {collapsed ? null : (
-              <span className="min-w-0 text-left">
-                <span className="block truncate text-[13px] font-medium">{t('userMenu.personalWorkspace')}</span>
-                <span className="block truncate text-xs text-muted-foreground">{t('userMenu.localOnly')}</span>
-              </span>
+              <>
+                <span className="min-w-0 flex-1 text-left">
+                  <span className="block truncate text-[13px] font-medium">{t('userMenu.personalWorkspace')}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{t('userMenu.localOnly')}</span>
+                </span>
+                <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{APP_VERSION_LABEL}</span>
+              </>
             )}
           </Button>
         </DropdownMenuTrigger>
@@ -46,6 +51,12 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
             <Keyboard className="size-4" />
             {t('userMenu.shortcuts')}
           </DropdownMenuItem>
+          {collapsed ? (
+            <>
+              <DropdownMenuSeparator />
+              <div className="px-2 py-1.5 text-xs text-muted-foreground">{APP_VERSION_LABEL}</div>
+            </>
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
       <Dialog open={shortcutsOpen} onOpenChange={setShortcutsOpen}>

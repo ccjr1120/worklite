@@ -14,6 +14,7 @@
     "artifact": "Artifact",
     "type": "Type",
     "workflow": "Workflow",
+    "run": "Run",
     "size": "Size",
     "created": "Created",
     "actions": "Actions"
@@ -23,7 +24,8 @@
     "unavailableDescription": "This artifact is missing, expired, or you do not have access.",
     "downloadStarted": "Download started",
     "noRun": "Unlinked run",
-    "unsupported": "This content cannot be previewed inline. Download the file instead."
+    "unsupported": "This content cannot be previewed inline. Download the file instead.",
+    "run": "Run"
   },
   "delete": {
     "title": "Delete {{name}}?",

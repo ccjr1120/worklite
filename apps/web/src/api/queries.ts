@@ -59,8 +59,8 @@ export function useRunsQuery(workspace?: string) {
   return useQuery({ queryKey: runsQueryKey(), queryFn: () => api.runs(workspace), refetchInterval: 5_000 });
 }
 
-export function useRunQuery(workspace: string | undefined, runId: string) {
-  return useQuery({ queryKey: ['run', runId] as const, queryFn: () => api.run(workspace, runId), enabled: Boolean(runId), refetchInterval: 3_000 });
+export function useRunQuery(workspace: string | undefined, runId: string, enabled = true) {
+  return useQuery({ queryKey: ['run', runId] as const, queryFn: () => api.run(workspace, runId), enabled: Boolean(runId) && enabled, refetchInterval: 3_000 });
 }
 
 export const skillsQueryKey = (_workspace?: string) => ['skills'] as const;

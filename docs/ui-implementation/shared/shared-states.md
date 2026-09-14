@@ -4,6 +4,8 @@
 
 Keep the shell stable. Use content-shaped skeletons instead of ordinary full-page spinners. Show progress locally for local mutations and prevent duplicate submissions without hiding context.
 
+Use one destructive confirmation pattern for permanent removal: name the object, state the consequence, keep Cancel as the lower-emphasis action, use destructive styling only for the confirmed action, prevent duplicate submission, and retain the failure in the dialog until recovery or dismissal. Cancellation of work is not destructive: present it as a neutral secondary execution control with a text or icon cue and a distinct busy state.
+
 ## Empty and No Results
 
 An empty collection explains the object and provides one authorized next action. No-results state names the active filtering and offers `Clear filters`. Do not use large generic AI illustrations.
@@ -21,6 +23,10 @@ Use a restrained persistent reconnecting bar. Explain whether edits are local, b
 Truncate only summaries and provide expand, copy, download or details access. Inline Agent Skill calls stay collapsed by default, retain status and exit context in their summary, and reveal height-bounded scrollable raw output only on request. Never reveal secrets in fields, logs, errors or audit metadata. Untrusted content is rendered without inline execution.
 
 ## Changelog
+
+### 2026-09-14
+
+- Standardized destructive confirmation structure and reclassified execution cancellation as neutral, non-destructive feedback.
 
 ### 2026-08-27
 

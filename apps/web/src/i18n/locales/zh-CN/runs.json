@@ -33,5 +33,12 @@
     "artifacts": "产物",
     "logs": "日志",
     "followEnd": "跟随末尾"
-  }
+  },
+  "loading": "正在加载运行记录...",
+  "loadFailed": "无法加载运行记录。",
+  "artifacts": "产物",
+  "artifactsLoading": "正在加载产物...",
+  "artifactsFailed": "无法加载产物。",
+  "noArtifacts": "暂无产物",
+  "openDetails": "打开详情"
 }

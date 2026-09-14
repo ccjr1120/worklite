@@ -25,7 +25,7 @@ Before UI work, read the design system, this index, every applicable document un
 - Skills: [List](skills/list.md), [Editor](skills/editor.md)
 - MCP servers: [List](mcp-servers/list.md), [Configuration](mcp-servers/configuration.md)
 - Plugins: [List](plugins/list.md), [Configuration](plugins/configuration.md)
-- Artifacts: [List](artifacts/list.md), [Details](artifacts/details.md)
+- Artifacts: [Run card artifacts](artifacts/list.md), [Details](artifacts/details.md)
 - Settings: [Usage](settings/usage.md), [Audit log](settings/audit-log.md), [Diagnostic logs](settings/logs.md), [Appearance](settings/appearance.md)
 
 ## Route Map
@@ -35,6 +35,7 @@ Before UI work, read the design system, this index, every applicable document un
 /agents/{new,:agentId}
 /model-providers
 /workflows/{new,:workflowId,:workflowId/versions}
+/runs
 /runs/:runId
 /skills/{new,:skillId}
 /mcp-servers/{new,:serverId}
@@ -62,6 +63,12 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-09-14
+
+- Added the application version to the sidebar's compact personal preferences control and defined browser-first locale startup with an explicit local override and server preference reconciliation.
+- Removed the standalone Artifact list route; Run cards now expose their artifacts inline while Artifact details remain directly routable.
+- Refined shared interaction trust with grouped one-click sidebar navigation, a `1024px` expanded-sidebar breakpoint, consistent brand selection states, unified destructive confirmation, and neutral execution cancellation.
 
 ### 2026-09-11
 

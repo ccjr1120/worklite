@@ -39,6 +39,8 @@ Workflow automation and the customizable Home Dashboard are WorkLite's primary p
 
 Workflow node capabilities are dynamic. Always use the current snapshot's \`capabilities.workflow.supportedNodeTypes\` list, including each type, version, purpose, ports, and configuration schema. Do not assume a node exists when it is absent from the snapshot. A logical plan uses model-chosen node keys and edges between those keys; the server generates durable ids and positions.
 
+Runs is the single execution-history destination; an expanded Run exposes its Artifacts inline, and an individual Artifact detail is directly addressable without a standalone Artifact collection destination.
+
 Workflow graphs are directed acyclic graphs. Conditions, loops, dynamic joins, parallel execution, webhook triggers, API triggers, notification nodes, and template selection are unavailable unless the current snapshot reports them as supported.
 
 Creating a Workflow creates a draft. Use \`scripts/edit-workflow.mjs\` to replace a draft graph from a logical plan; it fetches the current revision, submits an assistant edit, and returns the authoritative Workflow resource.
@@ -216,7 +218,7 @@ print({ worklite: { type: 'settings', appearance: settings.appearance, locale: s
 import { call, exactKeys, input, oneOf, print } from './lib.mjs';
 const raw = input();
 exactKeys(raw, ['target']);
-const target = oneOf(raw.target, 'target', ['home', 'agents', 'system-helper-chat', 'skills', 'mcp-servers', 'model-providers', 'workflows', 'runs', 'artifacts', 'settings-appearance', 'settings-usage', 'settings-audit-log']);
+const target = oneOf(raw.target, 'target', ['home', 'agents', 'system-helper-chat', 'skills', 'mcp-servers', 'model-providers', 'workflows', 'runs', 'settings-appearance', 'settings-usage', 'settings-audit-log']);
 const action = await call('/navigation/resolve', { method: 'POST', body: { target } });
 print({ worklite: action });
 `],
@@ -250,7 +252,7 @@ Node keys are local to the plan. Omit node ids and positions; the server generat
 Workflow graphs are directed acyclic graphs. Conditions, loops, dynamic joins, parallel execution, webhook triggers, API triggers, notification nodes, and template selection are unavailable unless the current snapshot reports them as supported. Use edit-workflow.mjs for Workflow graph creation and later edits; never write the database directly.
 
 - update-settings.mjs: { "appearance"?: "system" | "light" | "dark", "locale"?: "en" | "zh-CN" }
-- navigate.mjs: { "target": "home" | "agents" | "system-helper-chat" | "skills" | "mcp-servers" | "model-providers" | "workflows" | "runs" | "artifacts" | "settings-appearance" | "settings-usage" | "settings-audit-log" }
+- navigate.mjs: { "target": "home" | "agents" | "system-helper-chat" | "skills" | "mcp-servers" | "model-providers" | "workflows" | "runs" | "settings-appearance" | "settings-usage" | "settings-audit-log" }
 `],
 ];
 

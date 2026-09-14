@@ -10,7 +10,7 @@ import { useMediaQuery } from '@/hooks/use-media-query';
 import { AgentChat } from '@/components/workspace/agent-chat';
 
 function WorkspaceShell() {
-  const isWide = useMediaQuery('(min-width: 1280px)');
+  const isWide = useMediaQuery('(min-width: 1024px)');
   const isMobile = useMediaQuery('(max-width: 767px)');
   const collapsed = !isWide && !isMobile;
   const [mobileNavOpen, setMobileNavOpen] = useState(false);

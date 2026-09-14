@@ -20,6 +20,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { create } from 'zustand';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -288,9 +289,16 @@ function HomePage() {
       <Dialog open={Boolean(boardDialog)} onOpenChange={(open) => !open && setBoardDialog(null)}>
         <DialogContent><DialogHeader><DialogTitle>{t('dashboard.board.createTitle')}</DialogTitle><DialogDescription>{t('dashboard.board.createDescription')}</DialogDescription></DialogHeader><label htmlFor="dashboard-board-name" className="text-sm font-medium">{t('dashboard.board.nameLabel')}</label><Input id="dashboard-board-name" value={boardName} onChange={(event) => setBoardName(event.target.value)} /><label htmlFor="dashboard-board-template" className="text-sm font-medium">{t('dashboard.board.templateLabel')}</label><Select value={boardTemplate} onValueChange={(value) => setBoardTemplate(value as DashboardTemplate)}><SelectTrigger id="dashboard-board-template"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="blank">{t('dashboard.templates.blank')}</SelectItem><SelectItem value="workflow-overview">{t('dashboard.templates.workflowOverview')}</SelectItem><SelectItem value="workflow-health">{t('dashboard.templates.workflowHealth')}</SelectItem><SelectItem value="recent-activity">{t('dashboard.templates.recentActivity')}</SelectItem></SelectContent></Select><DialogFooter><Button variant="secondary" onClick={() => setBoardDialog(null)}>{t('common:actions.cancel')}</Button><Button onClick={submitBoard} disabled={!boardName.trim()}>{t('dashboard.actions.createBoard')}</Button></DialogFooter></DialogContent>
       </Dialog>
-      <Dialog open={Boolean(deleteCategoryId)} onOpenChange={(open) => !open && setDeleteCategoryId(null)}>
-        <DialogContent><DialogHeader><DialogTitle>{t('dashboard.category.deleteTitle')}</DialogTitle><DialogDescription>{t('dashboard.category.deleteDescription')}</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setDeleteCategoryId(null)}>{t('common:actions.cancel')}</Button><Button variant="destructive" onClick={removeCategory}>{t('common:actions.delete')}</Button></DialogFooter></DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={Boolean(deleteCategoryId)}
+        onOpenChange={(nextOpen) => { if (!nextOpen) setDeleteCategoryId(null); }}
+        title={t('dashboard.category.deleteTitle')}
+        description={t('dashboard.category.deleteDescription')}
+        confirmLabel={t('common:actions.delete')}
+        cancelLabel={t('common:actions.cancel')}
+        busyLabel={t('common:actions.delete')}
+        onConfirm={removeCategory}
+      />
       <Dialog open={widgetDialogOpen} onOpenChange={setWidgetDialogOpen}>
         <DialogContent><DialogHeader><DialogTitle>{t('dashboard.widget.addTitle')}</DialogTitle><DialogDescription>{t('dashboard.widget.addDescription')}</DialogDescription></DialogHeader><div className="grid gap-2 sm:grid-cols-2">{ALL_WIDGETS.map((widget) => <Button key={widget} variant="secondary" className="justify-start" onClick={() => addWidget(widget)}>{getWidgetIcon(widget, 'size-4')}{t(`dashboard.widgets.${widget}.title`)}</Button>)}</div></DialogContent>
       </Dialog>
@@ -383,7 +391,7 @@ function DashboardDataItem({ item, card = false }: { item: DashboardPayloadItem;
 function DashboardWidget({ type, index, workflows, runs, artifacts, activity, t, onMove, onRemove }: { type: DashboardWidgetType; index: number; workflows: Workflow[]; runs: Run[]; artifacts: Artifact[]; activity: { id: string; text: string; time: string }[]; t: Translate; onMove: (index: number, direction: -1 | 1) => void; onRemove: (index: number) => void }) {
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-surface" aria-labelledby={`dashboard-widget-${index}`}>
-      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3"><div className="flex min-w-0 items-center gap-2">{getWidgetIcon(type, 'size-4 text-brand')}<h2 id={`dashboard-widget-${index}`} className="truncate text-sm font-semibold">{t(`dashboard.widgets.${type}.title`)}</h2></div><div className="flex shrink-0 items-center gap-1"><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" aria-label={t('dashboard.widget.moveUp')} onClick={() => onMove(index, -1)} disabled={index === 0}><ChevronDown className="size-3.5 rotate-180" /></Button></TooltipTrigger><TooltipContent>{t('dashboard.widget.moveUp')}</TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" aria-label={t('dashboard.widget.moveDown')} onClick={() => onMove(index, 1)}><ChevronDown className="size-3.5" /></Button></TooltipTrigger><TooltipContent>{t('dashboard.widget.moveDown')}</TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" aria-label={t('dashboard.widget.remove')} onClick={() => onRemove(index)}><Trash2 className="size-3.5" /></Button></TooltipTrigger><TooltipContent>{t('dashboard.widget.remove')}</TooltipContent></Tooltip>{type === 'active_runs' ? <WidgetLink to="/runs">{t('dashboard.actions.viewAll')}</WidgetLink> : null}{type === 'recent_artifacts' ? <WidgetLink to="/artifacts">{t('dashboard.actions.viewAll')}</WidgetLink> : null}{type === 'recent_workflows' || type === 'workflow_health' ? <WidgetLink to="/workflows">{t('dashboard.actions.viewAll')}</WidgetLink> : null}</div></div>
+      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3"><div className="flex min-w-0 items-center gap-2">{getWidgetIcon(type, 'size-4 text-brand')}<h2 id={`dashboard-widget-${index}`} className="truncate text-sm font-semibold">{t(`dashboard.widgets.${type}.title`)}</h2></div><div className="flex shrink-0 items-center gap-1"><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" aria-label={t('dashboard.widget.moveUp')} onClick={() => onMove(index, -1)} disabled={index === 0}><ChevronDown className="size-3.5 rotate-180" /></Button></TooltipTrigger><TooltipContent>{t('dashboard.widget.moveUp')}</TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" aria-label={t('dashboard.widget.moveDown')} onClick={() => onMove(index, 1)}><ChevronDown className="size-3.5" /></Button></TooltipTrigger><TooltipContent>{t('dashboard.widget.moveDown')}</TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" aria-label={t('dashboard.widget.remove')} onClick={() => onRemove(index)}><Trash2 className="size-3.5" /></Button></TooltipTrigger><TooltipContent>{t('dashboard.widget.remove')}</TooltipContent></Tooltip>{type === 'active_runs' ? <WidgetLink to="/runs">{t('dashboard.actions.viewAll')}</WidgetLink> : null}{type === 'recent_artifacts' ? <WidgetLink to="/runs">{t('dashboard.actions.viewAll')}</WidgetLink> : null}{type === 'recent_workflows' || type === 'workflow_health' ? <WidgetLink to="/workflows">{t('dashboard.actions.viewAll')}</WidgetLink> : null}</div></div>
       <div className="min-h-36">{renderWidgetContent(type, { workflows, runs, artifacts, activity, t })}</div>
     </section>
   );
@@ -424,7 +432,7 @@ function ArtifactRow({ artifact }: { artifact: Artifact }) {
 
 function WidgetEmpty({ text }: { text: string }) { return <p className="px-4 py-8 text-center text-[13px] text-muted-foreground">{text}</p>; }
 
-function WidgetLink({ to, children }: { to: '/runs' | '/artifacts' | '/workflows'; children: string }) { return <Link to={to} className={cn('flex items-center gap-1 rounded-sm text-xs font-medium text-muted-foreground hover:text-foreground', surfaceInteraction, focusRing)}>{children}<ArrowUpRight className="size-3.5" /></Link>; }
+function WidgetLink({ to, children }: { to: '/runs' | '/workflows'; children: string }) { return <Link to={to} className={cn('flex items-center gap-1 rounded-sm text-xs font-medium text-muted-foreground hover:text-foreground', surfaceInteraction, focusRing)}>{children}<ArrowUpRight className="size-3.5" /></Link>; }
 
 function getWidgetIcon(type: DashboardWidgetType, className: string) {
   if (type === 'attention') return <AlertTriangle className={className} aria-hidden="true" />;
@@ -462,7 +470,7 @@ function FirstUseGuide({ providerConfigured }: { providerConfigured: boolean }) 
           {providerConfigured ? (
             <span className="text-xs font-medium text-success">{t('common:status.completed')}</span>
           ) : (
-            <Button size="compact" asChild><Link to="/model-providers">{t('common:actions.continue')}<ChevronRight /></Link></Button>
+            <Button size="compact" asChild><Link to="/model-providers" search={{ tab: 'providers' }}>{t('common:actions.continue')}<ChevronRight /></Link></Button>
           )}
         </li>
         <li className={cn(rowClassName, !providerConfigured && 'bg-surface-subtle/50 text-muted-foreground')}>

@@ -154,6 +154,12 @@ Do not expose partially translated locales in the production language selector.
 
 ## Changelog
 
+### 2026-09-14 - Browser-First Locale Startup
+
+- Clarified startup as explicit browser-local choice, compatible browser language, non-default server preference, then English fallback.
+- Required locale and `document.lang` initialization before first paint to avoid an English flash for Chinese browser sessions.
+- Kept an explicit local choice as the immediate browser preference while continuing to persist selections through workspace settings.
+
 ### 2026-08-14 - Initial Internationalization Standard
 
 - Established internationalization as a daily development requirement rather than a separate workflow.

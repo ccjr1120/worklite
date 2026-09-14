@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObjec
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitWindow, DiscoverModelProviderRequest, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayStats, PortkeyGatewayStatus } from '@worklite/contracts';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { CollectionTable, CollectionHeader, CollectionRow } from '@/components/collection-table';
 import { CollectionToolbar } from '@/components/collection-toolbar';
 import { EmptyState } from '@/components/empty-state';
@@ -586,19 +587,18 @@ function ModelProvidersPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(deleteProvider)} onOpenChange={(open) => { if (!open && !deleteBusy) { setDeleteProvider(null); setDeleteError(''); } }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('providers.deleteTitle', { provider: deleteProvider?.name })}</DialogTitle>
-            <DialogDescription>{t('providers.deleteDescription')}</DialogDescription>
-          </DialogHeader>
-          {deleteError ? <p className="text-[13px] text-danger" role="alert">{deleteError}</p> : null}
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setDeleteProvider(null)} disabled={deleteBusy}>{t('common:actions.cancel')}</Button>
-            <Button variant="destructive" onClick={() => void removeProvider()} disabled={deleteBusy}>{deleteBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}{t('providers.deleteAction')}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={Boolean(deleteProvider)}
+        onOpenChange={(nextOpen) => { if (!nextOpen) { setDeleteProvider(null); setDeleteError(''); } }}
+        title={t('providers.deleteTitle', { provider: deleteProvider?.name })}
+        description={t('providers.deleteDescription')}
+        confirmLabel={t('providers.deleteAction')}
+        cancelLabel={t('common:actions.cancel')}
+        busyLabel={t('providers.deleteAction')}
+        error={deleteError}
+        busy={deleteBusy}
+        onConfirm={() => void removeProvider()}
+      />
     </div>
   );
 }

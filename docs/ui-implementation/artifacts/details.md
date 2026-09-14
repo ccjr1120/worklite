@@ -6,9 +6,13 @@ Use the safest appropriate preview. Text and structured data receive readable vi
 
 Always link to the producing run and step. Large content loads without blocking the shell. Define loading, processing, preview failure, unavailable storage, permission and download failure states.
 
-Artifact details expose a destructive Delete action. Successful deletion closes the dialog and returns to the Artifact list; failure remains visible in the dialog.
+Artifact details expose a destructive Delete action. Successful deletion closes the dialog and returns to the producing Run context; failure remains visible in the dialog.
 
 ## Changelog
+
+### 2026-09-14
+
+- Updated deletion navigation to the producing Run context after removal of the standalone Artifact list route.
 
 ### 2026-09-10
 

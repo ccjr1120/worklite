@@ -1,9 +1,9 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import { Trash2, LoaderCircle } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CopyableId } from '@/components/copyable-id';
 import { PageHeading } from '@/components/page-heading';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
@@ -19,7 +19,7 @@ export const Route = createFileRoute('/artifacts/$artifactId')({
 });
 
 function ArtifactDetailsPage() {
-  const { t } = useTranslation(['artifacts', 'common']);
+  const { t } = useTranslation(['artifacts', 'runs', 'common']);
   const { locale } = useLocale();
   const { artifactId } = Route.useParams();
   const navigate = useNavigate();
@@ -38,7 +38,8 @@ function ArtifactDetailsPage() {
       setDeleteOpen(false);
       toast.success(t('delete.success'));
       await queryClient.invalidateQueries({ queryKey: artifactsQueryKey() });
-      void navigate({ to: '/artifacts' });
+      await queryClient.invalidateQueries({ queryKey: ['run', artifact.runId] });
+      void navigate({ to: '/runs/$runId', params: { runId: artifact.runId } });
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : t('delete.failed'));
     } finally {
@@ -58,7 +59,7 @@ function ArtifactDetailsPage() {
     <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
       <WorkspaceChrome
         crumbs={[
-          { label: t('title'), to: '/artifacts' },
+          { label: t('runs:title'), to: '/runs' },
           { label: artifact.name },
         ]}
         actions={
@@ -82,19 +83,18 @@ function ArtifactDetailsPage() {
           <pre className="whitespace-pre-wrap font-mono text-[13px]">{artifact.content}</pre>
         )}
       </div>
-      <Dialog open={deleteOpen} onOpenChange={(open) => { if (!open && !deleteBusy) { setDeleteOpen(false); setDeleteError(''); } }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('delete.title', { name: artifact.name })}</DialogTitle>
-            <DialogDescription>{t('delete.description')}</DialogDescription>
-          </DialogHeader>
-          {deleteError ? <p className="text-[13px] text-danger" role="alert">{deleteError}</p> : null}
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setDeleteOpen(false)} disabled={deleteBusy}>{t('common:actions.cancel')}</Button>
-            <Button variant="destructive" onClick={() => void deleteArtifact()} disabled={deleteBusy}>{deleteBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}{deleteBusy ? t('delete.deleting') : t('delete.action', { name: artifact.name })}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={(nextOpen) => { setDeleteOpen(nextOpen); if (!nextOpen) setDeleteError(''); }}
+        title={t('delete.title', { name: artifact.name })}
+        description={t('delete.description')}
+        confirmLabel={t('delete.action', { name: artifact.name })}
+        cancelLabel={t('common:actions.cancel')}
+        busyLabel={t('delete.deleting')}
+        error={deleteError}
+        busy={deleteBusy}
+        onConfirm={() => void deleteArtifact()}
+      />
     </div>
   );
 }

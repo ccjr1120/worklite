@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router';
-import { Blocks, Bot, FileStack, Home, KeyRound, MessageSquareText, Play, Plus, Puzzle, Server, Workflow } from 'lucide-react';
+import { Bot, Home, KeyRound, MessageSquareText, Play, Plus, Puzzle, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   CommandDialog,
@@ -33,29 +33,20 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/home' }))}>
             <Home className="size-4" /> {t('nav.home')}
           </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/agents' }))}>
-            <Bot className="size-4" /> {t('nav.agents')}
-          </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/skills' }))}>
-            <Blocks className="size-4" /> {t('nav.skills')}
-          </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/mcp-servers' }))}>
-            <Server className="size-4" /> {t('nav.mcpServers')}
-          </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/model-providers' }))}>
-            <KeyRound className="size-4" /> {t('nav.modelProviders')}
-          </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/plugins' }))}>
-            <Puzzle className="size-4" /> {t('nav.plugins')}
-          </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/workflows' }))}>
             <Workflow className="size-4" /> {t('nav.workflows')}
           </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/runs' }))}>
             <Play className="size-4" /> {t('nav.runs')}
           </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/artifacts' }))}>
-            <FileStack className="size-4" /> {t('nav.artifacts')}
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/agents' }))}>
+            <Bot className="size-4" /> {t('nav.agents')}
+          </CommandItem>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/plugins' }))}>
+            <Puzzle className="size-4" /> {t('nav.plugins')}
+          </CommandItem>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/model-providers', search: { tab: 'providers' } }))}>
+            <KeyRound className="size-4" /> {t('nav.modelProviders')}
           </CommandItem>
         </CommandGroup>
         <CommandSeparator />

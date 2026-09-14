@@ -1,12 +1,12 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { Trash2, LoaderCircle } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Field } from '@/components/ui/field';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { PasswordInput } from '@/components/password-input';
 import { SaveIndicator } from '@/components/save-indicator';
@@ -180,19 +180,18 @@ function McpConfigPage() {
         </fieldset>
         <p className="text-[13px] text-muted-foreground">{t('config.saveHint')}</p>
       </div>
-      <Dialog open={deleteOpen} onOpenChange={(open) => { if (!open && !deleteBusy) { setDeleteOpen(false); setDeleteError(''); } }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('delete.title', { name: server?.name ?? name })}</DialogTitle>
-            <DialogDescription>{t('delete.description')}</DialogDescription>
-          </DialogHeader>
-          {deleteError ? <p className="text-[13px] text-danger" role="alert">{deleteError}</p> : null}
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setDeleteOpen(false)} disabled={deleteBusy}>{t('common:actions.cancel')}</Button>
-            <Button variant="destructive" onClick={() => void deleteMcpServer()} disabled={deleteBusy}>{deleteBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}{deleteBusy ? t('delete.deleting') : t('delete.action', { name: server?.name ?? name })}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={(nextOpen) => { setDeleteOpen(nextOpen); if (!nextOpen) setDeleteError(''); }}
+        title={t('delete.title', { name: server?.name ?? name })}
+        description={t('delete.description')}
+        confirmLabel={t('delete.action', { name: server?.name ?? name })}
+        cancelLabel={t('common:actions.cancel')}
+        busyLabel={t('delete.deleting')}
+        error={deleteError}
+        busy={deleteBusy}
+        onConfirm={() => void deleteMcpServer()}
+      />
     </div>
   );
 }

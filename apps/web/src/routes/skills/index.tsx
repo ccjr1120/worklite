@@ -4,13 +4,13 @@ import { FolderUp, Plus, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { AgentResourceNav } from '@/components/agent-resource-nav';
 import { CollectionToolbar } from '@/components/collection-toolbar';
 import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/collection-table';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeading } from '@/components/page-heading';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
@@ -125,7 +125,18 @@ function SkillListPage() {
           </CollectionTable>
         )}
       </div>
-      <Dialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open && !deleteBusy) setDeleteTarget(null); }}><DialogContent><DialogHeader><DialogTitle>{t('delete.title', { name: deleteTarget?.name ?? '' })}</DialogTitle><DialogDescription>{t('delete.description')}</DialogDescription></DialogHeader>{deleteError ? <p className="text-[13px] text-danger" role="alert">{deleteError}</p> : null}<DialogFooter><Button variant="secondary" disabled={deleteBusy} onClick={() => setDeleteTarget(null)}>{t('common:actions.cancel')}</Button><Button variant="destructive" disabled={deleteBusy} onClick={() => void deleteResource()}>{deleteBusy ? t('delete.deleting') : t('common:actions.delete')}</Button></DialogFooter></DialogContent></Dialog>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(nextOpen) => { if (!nextOpen && !deleteBusy) setDeleteTarget(null); }}
+        title={t('delete.title', { name: deleteTarget?.name ?? '' })}
+        description={t('delete.description')}
+        confirmLabel={t('common:actions.delete')}
+        cancelLabel={t('common:actions.cancel')}
+        busyLabel={t('delete.deleting')}
+        error={deleteError}
+        busy={deleteBusy}
+        onConfirm={() => void deleteResource()}
+      />
     </div>
   );
 }

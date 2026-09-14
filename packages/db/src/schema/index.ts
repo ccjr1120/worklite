@@ -208,7 +208,7 @@ export type StoredAgentPendingQuestion = {
 
 export type StoredWorkliteScriptResult =
   | { type: 'resource'; resourceType: 'provider' | 'agent' | 'skill' | 'mcp-server' | 'workflow'; id: string; route: string }
-  | { type: 'navigation'; target: 'home' | 'agents' | 'system-helper-chat' | 'skills' | 'mcp-servers' | 'model-providers' | 'workflows' | 'runs' | 'artifacts' | 'settings-appearance' | 'settings-usage' | 'settings-audit-log'; route: string }
+  | { type: 'navigation'; target: 'home' | 'agents' | 'system-helper-chat' | 'skills' | 'mcp-servers' | 'model-providers' | 'workflows' | 'runs' | 'settings-appearance' | 'settings-usage' | 'settings-audit-log'; route: string }
   | { type: 'settings'; appearance: 'system' | 'light' | 'dark'; locale: 'en' | 'zh-CN' }
   | { type: 'snapshot' };
 

@@ -1,6 +1,9 @@
 {
   "nav": {
     "home": "Home",
+    "workspace": "Workspace",
+    "capabilities": "Capabilities",
+    "configuration": "Configuration",
     "assistant": "System Helper Chat",
     "build": "Build",
     "operate": "Operate",
@@ -12,7 +15,6 @@
     "plugins": "Plugins",
     "modelProviders": "Providers",
     "runs": "Runs",
-    "artifacts": "Artifacts",
     "usage": "Usage",
     "settings": "Settings",
     "agentResources": "Agent resources",

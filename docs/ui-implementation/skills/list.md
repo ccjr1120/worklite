@@ -2,7 +2,7 @@
 
 ## Structure
 
-Use the collection pattern with Import Skill and Create Skill actions on the right side of the toolbar directly above the table. Import Skill opens the browser folder picker, recursively reads text files with their relative paths, requires a root `SKILL.md`, and creates a new archive-source Skill without executing or assigning it. Rows show name, source type, current version, and update time. Do not show validation or publication state until those operations are real.
+Use the collection pattern with the shared Agents page-level tabs. Skills is the second tab. Use Import Skill and Create Skill actions on the right side of the toolbar directly above the table. Import Skill opens the browser folder picker, recursively reads text files with their relative paths, requires a root `SKILL.md`, and creates a new archive-source Skill without executing or assigning it. Rows show name, source type, current version, and update time. Do not show validation or publication state until those operations are real.
 
 Protected built-in Skills appear in the same collection with a non-color `Built-in` source label. The platform-operation capability is owned by System Helper Chat and is not a Skill resource in this collection.
 
@@ -11,6 +11,10 @@ Define empty, uploading, validating, invalid package, filtered no-results, permi
 Skill rows expose a separate destructive Delete action. Deletion is blocked with visible dependency feedback when an Agent or Workflow references the Skill. Success closes the dialog, shows a toast, and refreshes the list.
 
 ## Changelog
+
+### 2026-09-14
+
+- Restored Skills as the second page-level tab within the single Agents sidebar destination.
 
 ### 2026-09-10
 

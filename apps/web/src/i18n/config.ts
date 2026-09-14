@@ -1,6 +1,6 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
-import { DEFAULT_LOCALE } from './locale';
+import { applyDocumentLocale, DEFAULT_LOCALE, resolveInitialLocale } from './locale';
 import enAgents from './locales/en/agents.json';
 import enAssistant from './locales/en/assistant.json';
 import enArtifacts from './locales/en/artifacts.json';
@@ -77,9 +77,13 @@ const resources = {
   },
 } as const;
 
+const initialLocale = resolveInitialLocale();
+
+applyDocumentLocale(initialLocale);
+
 void i18n.use(initReactI18next).init({
   resources,
-  lng: DEFAULT_LOCALE,
+  lng: initialLocale,
   fallbackLng: DEFAULT_LOCALE,
   supportedLngs: ['en', 'zh-CN'],
   defaultNS: 'common',

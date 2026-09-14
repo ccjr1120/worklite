@@ -16,7 +16,6 @@ import { Route as OnboardingRouteRouteImport } from './routes/onboarding/route'
 import { Route as SettingsRouteRouteImport } from './routes/settings/route'
 import { Route as AgentsIndexRouteImport } from './routes/agents/index'
 import { Route as AgentsAgentIdRouteImport } from './routes/agents/$agentId'
-import { Route as ArtifactsIndexRouteImport } from './routes/artifacts/index'
 import { Route as ArtifactsArtifactIdRouteImport } from './routes/artifacts/$artifactId'
 import { Route as McpServersIndexRouteImport } from './routes/mcp-servers/index'
 import { Route as McpServersServerIdRouteImport } from './routes/mcp-servers/$serverId'
@@ -71,11 +70,6 @@ const AgentsIndexRoute = AgentsIndexRouteImport.update({
 const AgentsAgentIdRoute = AgentsAgentIdRouteImport.update({
   id: '/agents/$agentId',
   path: '/agents/$agentId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ArtifactsIndexRoute = ArtifactsIndexRouteImport.update({
-  id: '/artifacts/',
-  path: '/artifacts/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ArtifactsArtifactIdRoute = ArtifactsArtifactIdRouteImport.update({
@@ -200,7 +194,6 @@ export interface FileRoutesByFullPath {
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
   '/agents/': typeof AgentsIndexRoute
-  '/artifacts/': typeof ArtifactsIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/onboarding/': typeof OnboardingIndexRoute
   '/plugins/': typeof PluginsIndexRoute
@@ -228,7 +221,6 @@ export interface FileRoutesByTo {
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
   '/agents': typeof AgentsIndexRoute
-  '/artifacts': typeof ArtifactsIndexRoute
   '/mcp-servers': typeof McpServersIndexRoute
   '/onboarding': typeof OnboardingIndexRoute
   '/plugins': typeof PluginsIndexRoute
@@ -259,7 +251,6 @@ export interface FileRoutesById {
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
   '/agents/': typeof AgentsIndexRoute
-  '/artifacts/': typeof ArtifactsIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/onboarding/': typeof OnboardingIndexRoute
   '/plugins/': typeof PluginsIndexRoute
@@ -291,7 +282,6 @@ export interface FileRouteTypes {
     | '/skills/$skillId'
     | '/workflows/$workflowId'
     | '/agents/'
-    | '/artifacts/'
     | '/mcp-servers/'
     | '/onboarding/'
     | '/plugins/'
@@ -319,7 +309,6 @@ export interface FileRouteTypes {
     | '/skills/$skillId'
     | '/workflows/$workflowId'
     | '/agents'
-    | '/artifacts'
     | '/mcp-servers'
     | '/onboarding'
     | '/plugins'
@@ -349,7 +338,6 @@ export interface FileRouteTypes {
     | '/skills/$skillId'
     | '/workflows/$workflowId'
     | '/agents/'
-    | '/artifacts/'
     | '/mcp-servers/'
     | '/onboarding/'
     | '/plugins/'
@@ -374,7 +362,6 @@ export interface RootRouteChildren {
   SkillsSkillIdRoute: typeof SkillsSkillIdRoute
   WorkflowsWorkflowIdRoute: typeof WorkflowsWorkflowIdRouteWithChildren
   AgentsIndexRoute: typeof AgentsIndexRoute
-  ArtifactsIndexRoute: typeof ArtifactsIndexRoute
   McpServersIndexRoute: typeof McpServersIndexRoute
   PluginsIndexRoute: typeof PluginsIndexRoute
   RunsIndexRoute: typeof RunsIndexRoute
@@ -431,13 +418,6 @@ declare module '@tanstack/react-router' {
       path: '/agents/$agentId'
       fullPath: '/agents/$agentId'
       preLoaderRoute: typeof AgentsAgentIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/artifacts/': {
-      id: '/artifacts/'
-      path: '/artifacts'
-      fullPath: '/artifacts/'
-      preLoaderRoute: typeof ArtifactsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/artifacts/$artifactId': {
@@ -644,7 +624,6 @@ const rootRouteChildren: RootRouteChildren = {
   SkillsSkillIdRoute: SkillsSkillIdRoute,
   WorkflowsWorkflowIdRoute: WorkflowsWorkflowIdRouteWithChildren,
   AgentsIndexRoute: AgentsIndexRoute,
-  ArtifactsIndexRoute: ArtifactsIndexRoute,
   McpServersIndexRoute: McpServersIndexRoute,
   PluginsIndexRoute: PluginsIndexRoute,
   RunsIndexRoute: RunsIndexRoute,

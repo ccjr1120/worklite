@@ -125,7 +125,7 @@ Use cards only when content is a distinct object or group. Avoid placing every s
 
 ### Navigation
 
-Keep navigation neutral. The selected item uses a subtle brand surface, stronger text, and optionally a narrow blue indicator. Do not fill the entire sidebar with brand color.
+Keep navigation neutral and grouped by task. Keep the first-level menu concise and direct; related views owned by a destination use stable in-page tabs instead of child sidebar menus. The selected item uses a subtle brand surface, stronger text, and a narrow blue indicator. Do not fill the entire sidebar with brand color.
 
 ### Buttons
 
@@ -247,6 +247,13 @@ Before confirming a UI proposal, verify that it:
 - Introduces a documented design-system decision before implementation when no existing rule applies.
 
 ## Changelog
+
+### 2026-09-14
+
+- Added a neutral application-version label to the compact sidebar preferences control, keeping version metadata visible without adding a navigation destination or color emphasis.
+- Grouped primary navigation into Workspace, Capabilities, and Configuration sections with seven concise destinations: Home, Workflows, Runs, Agents, Plugins, Providers, and Settings.
+- Kept related Agent resources and Run-produced Artifacts behind stable page contexts rather than expanding the primary sidebar.
+- Reaffirmed that destructive styling is reserved for permanent removal and cancellation is a neutral execution control.
 
 ### 2026-09-08
 

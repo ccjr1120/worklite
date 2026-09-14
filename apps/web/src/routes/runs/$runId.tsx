@@ -102,7 +102,7 @@ function RunDetailsPage() {
         ]}
         actions={
           cancellable ? (
-            <Button variant="destructive" size="compact" onClick={() => void cancelRun()} disabled={cancelling}>
+            <Button variant="secondary" size="compact" onClick={() => void cancelRun()} disabled={cancelling}>
               {cancelling ? t('details.cancelling') : t('details.cancel')}
             </Button>
           ) : undefined

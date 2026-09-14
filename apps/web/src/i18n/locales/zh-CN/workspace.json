@@ -1,6 +1,9 @@
 {
   "nav": {
     "home": "首页",
+    "workspace": "工作区",
+    "capabilities": "能力",
+    "configuration": "配置",
     "assistant": "System Helper Chat",
     "build": "构建",
     "operate": "运行",
@@ -12,7 +15,6 @@
     "plugins": "插件",
     "modelProviders": "模型提供商",
     "runs": "运行记录",
-    "artifacts": "产物",
     "usage": "用量",
     "settings": "设置",
     "agentResources": "Agent 资源",

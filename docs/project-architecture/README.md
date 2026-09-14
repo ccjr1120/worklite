@@ -574,6 +574,12 @@ Import validates the envelope and workflow DAG, resolves every Agent and Skill r
 
 ## Changelog
 
+### 2026-09-14 - Run-to-Artifact Traceability
+
+- Removed the standalone Artifact collection web destination and the `artifacts` System Helper navigation target.
+- Kept Artifact details directly routable and made expanded Run cards the run-to-Artifact traceability surface.
+- Did not add a compatibility alias for the removed Artifact collection route.
+
 ### 2026-09-11 - Per-Account Codex Usage
 
 - Added a Gateway-owned `GET /worklite/codex/accounts/usage` contract that fetches usage independently for every enabled Codex account and returns disabled or failed accounts without blocking the remaining pool.

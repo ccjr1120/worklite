@@ -286,7 +286,6 @@ export type WorkliteNavigationTarget =
   | 'model-providers'
   | 'workflows'
   | 'runs'
-  | 'artifacts'
   | 'settings-appearance'
   | 'settings-usage'
   | 'settings-audit-log';

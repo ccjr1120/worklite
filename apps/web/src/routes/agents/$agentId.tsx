@@ -13,13 +13,13 @@ import {
   useModelProvidersQuery,
   useSkillsQuery,
 } from '@/api/queries';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { SaveIndicator } from '@/components/save-indicator';
 import { StatusBadge } from '@/components/status-badge';
 import { StreamingMarkdown } from '@/components/ai/streaming-markdown';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
@@ -348,22 +348,18 @@ function AgentEditorPage() {
         <h2 id="agent-configuration-title" className="text-sm font-semibold">{t('editor.configuration')}</h2>
         <div className="mt-4"><AgentConfigurationFields {...configurationProps} idPrefix="desktop" /></div>
       </aside>
-      <Dialog open={deleteOpen} onOpenChange={(open) => { if (!open && !deleteBusy) { setDeleteOpen(false); setDeleteError(''); } }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('editor.deleteTitle', { name: existing?.name ?? name })}</DialogTitle>
-            <DialogDescription>{t('editor.deleteDescription')}</DialogDescription>
-          </DialogHeader>
-          {deleteError ? <ResourceMessage error>{deleteError}</ResourceMessage> : null}
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setDeleteOpen(false)} disabled={deleteBusy}>{t('common:actions.cancel')}</Button>
-            <Button variant="destructive" onClick={() => void deleteAgent()} disabled={deleteBusy}>
-              {deleteBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}
-              {t('editor.deleteAction')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={(nextOpen) => { setDeleteOpen(nextOpen); if (!nextOpen) setDeleteError(''); }}
+        title={t('editor.deleteTitle', { name: existing?.name ?? name })}
+        description={t('editor.deleteDescription')}
+        confirmLabel={t('editor.deleteAction')}
+        cancelLabel={t('common:actions.cancel')}
+        busyLabel={t('editor.deleteAction')}
+        error={deleteError}
+        busy={deleteBusy}
+        onConfirm={() => void deleteAgent()}
+      />
     </div>
   );
 }

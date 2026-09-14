@@ -2,19 +2,28 @@
 
 ## Wide Desktop
 
-At `1280px` and above, expand the sidebar, allow side-by-side inspectors, and retain useful table columns. Home keeps the Agent Chat composer visible; other pages use a lower-right draggable Chat icon until opened. The expanded Agent Chat panel uses the same centered panel up to `1200px` wide and approximately `680px` high, constrained by `24px` outer space. Its message region keeps `16px` horizontal padding, and automatic Skill execution regions remain inline as compact collapsed disclosure rows.
+At `1024px` and above, expand the sidebar, allow side-by-side inspectors, and retain useful table columns. Home keeps the Agent Chat composer visible; other pages use a lower-right draggable Chat icon until opened. The expanded Agent Chat panel uses the same centered panel up to `1200px` wide and approximately `680px` high, constrained by `24px` outer space. Its message region keeps `16px` horizontal padding, and automatic Skill execution regions remain inline as compact collapsed disclosure rows.
 
 ## Compact Desktop and Tablet
 
-From `768px` to `1279px`, use the `56px` single-level icon rail, hide low-priority columns, and let inspectors overlay or reduce content according to task importance. The workflow contextual Sheet yields to its fixed right-side panel as soon as that panel's desktop breakpoint becomes active. Agent resource tabs remain horizontally scrollable within their collection pages. Keep the Home composer visible and use the draggable lower-right Chat icon on other pages; constrain the expanded Agent Chat panel within `16px` to `24px` outer space, and keep expanded Skill arguments, execution states, and bounded results inside the transcript column.
+From `768px` to `1023px`, use the `56px` grouped icon rail, hide low-priority columns, and let inspectors overlay or reduce content according to task importance. The workflow contextual Sheet yields to its fixed right-side panel as soon as that panel's desktop breakpoint becomes active. Agent resource tabs remain horizontally scrollable within their collection pages, and expanded Run cards keep artifact rows readable without a second collection tab. Keep the Home composer visible and use the draggable lower-right Chat icon on other pages; constrain the expanded Agent Chat panel within `16px` to `24px` outer space, and keep expanded Skill arguments, execution states, and bounded results inside the transcript column.
 
 ## Mobile
 
-Below `768px`, use a navigation drawer, retain page identity, state and primary action in the context bar, convert the workflow editor's combined palette and inspector to one full-screen or bottom sheet, keep the workflow canvas full-bleed within its editor region, replace wide tables with object rows, and show detailed logs full-screen or in a resizable sheet. Canvas zoom, fit-to-view, selection, and deletion controls remain reachable with `40px` to `44px` touch targets. The drawer preserves the desktop first-level destinations, including Agents and Plugins; Agent resource collection tabs remain reachable through horizontal scrolling. Home keeps its composer visible; other pages use a draggable lower-right Chat icon with `12px` safe-area margins until opened. Agent Chat uses at most about `70vh`; it does not become full-screen. Its single-line composer remains reachable above browser controls, and Chat and Proposed changes use internal views.
+Below `768px`, use a navigation drawer, retain page identity, state and primary action in the context bar, convert the workflow editor's combined palette and inspector to one full-screen or bottom sheet, keep the workflow canvas full-bleed within its editor region, replace wide tables with object rows, and show detailed logs full-screen or in a resizable sheet. Canvas zoom, fit-to-view, selection, and deletion controls remain reachable with `40px` to `44px` touch targets. The drawer preserves the seven grouped desktop destinations, including Agents and Plugins; Agent resource collection tabs remain reachable through horizontal scrolling, and Run cards expose Artifacts through in-place expansion. Home keeps its composer visible; other pages use a draggable lower-right Chat icon with `12px` safe-area margins until opened. Agent Chat uses at most about `70vh`; it does not become full-screen. Its single-line composer remains reachable above browser controls, and Chat and Proposed changes use internal views.
 
 Responsive layouts must not remove status, recovery, or cancellation controls. The Agent composer retains a stable Send-or-Stop target, editable input, and keyboard-accessible `@` Agent mention menu at every breakpoint; working feedback remains in the scrollable transcript rather than consuming composer space. Onboarding uses a centered column with `20px` horizontal padding and no decorative side panel.
 
 ## Changelog
+
+### 2026-09-14
+
+- Aligned sidebar responsive behavior with concise grouped navigation: expanded at `1024px`, grouped icon rail from `768px` to `1023px`, and the grouped drawer below `768px`.
+- Kept related Agent resources and execution outputs reachable through horizontally scrollable page tabs at constrained widths.
+
+### 2026-09-14
+
+- Replaced the separate execution collection tabs with in-place Run-card artifact disclosure.
 
 ### 2026-09-03
 

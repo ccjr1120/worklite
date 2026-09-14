@@ -33,5 +33,12 @@
     "artifacts": "Artifacts",
     "logs": "Logs",
     "followEnd": "Follow end"
-  }
+  },
+  "loading": "Loading runs...",
+  "loadFailed": "Unable to load runs.",
+  "artifacts": "Artifacts",
+  "artifactsLoading": "Loading artifacts...",
+  "artifactsFailed": "Unable to load artifacts.",
+  "noArtifacts": "No artifacts",
+  "openDetails": "Open details"
 }

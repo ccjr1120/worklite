@@ -142,7 +142,6 @@ const WORKLITE_NAVIGATION_ROUTES = {
   'model-providers': '/model-providers',
   workflows: '/workflows',
   runs: '/runs',
-  artifacts: '/artifacts',
   'settings-appearance': '/settings/appearance',
   'settings-usage': '/settings/usage',
   'settings-audit-log': '/settings/audit-log',

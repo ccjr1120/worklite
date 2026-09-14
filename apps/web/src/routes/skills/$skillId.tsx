@@ -6,11 +6,11 @@ import { toast } from 'sonner';
 import type { CommandExecutionEvent, CommandExecutionStatus, CommandExecutionView, SkillView } from '@worklite/contracts';
 import { api, parseCommandEvent } from '@/api/client';
 import { skillsQueryKey, useSkillQuery } from '@/api/queries';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { SaveIndicator } from '@/components/save-indicator';
 import { StatusBadge } from '@/components/status-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
@@ -354,7 +354,7 @@ function SkillEditorPage() {
                 {execution.signal ? <span className="text-xs text-muted-foreground">{t('editor.run.signal', { signal: execution.signal })}</span> : null}
               </div>
               {executionActive ? (
-                <Button type="button" variant="destructive" size="compact" disabled={cancelling} onClick={() => void cancelExecution()}>
+                <Button type="button" variant="secondary" size="compact" disabled={cancelling} onClick={() => void cancelExecution()}>
                   {cancelling ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <Ban aria-hidden="true" />}
                   {t('editor.run.cancel')}
                 </Button>
@@ -381,19 +381,18 @@ function SkillEditorPage() {
         {executionError ? <p className="shrink-0 border-t border-danger/30 bg-danger/5 px-4 py-2 text-xs text-danger" role="alert">{executionError}</p> : null}
         {saveError ? <p className="shrink-0 border-t border-danger/30 bg-danger/5 px-4 py-3 text-[13px] text-danger" role="alert">{saveError}</p> : null}
       </main>
-      <Dialog open={deleteOpen} onOpenChange={(open) => { if (!open && !deleteBusy) { setDeleteOpen(false); setDeleteError(''); } }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('delete.title', { name: skill?.name ?? name })}</DialogTitle>
-            <DialogDescription>{t('delete.description')}</DialogDescription>
-          </DialogHeader>
-          {deleteError ? <p className="text-[13px] text-danger" role="alert">{deleteError}</p> : null}
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setDeleteOpen(false)} disabled={deleteBusy}>{t('common:actions.cancel')}</Button>
-            <Button variant="destructive" onClick={() => void deleteSkill()} disabled={deleteBusy}>{deleteBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}{deleteBusy ? t('delete.deleting') : t('delete.action', { name: skill?.name ?? name })}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={(nextOpen) => { setDeleteOpen(nextOpen); if (!nextOpen) setDeleteError(''); }}
+        title={t('delete.title', { name: skill?.name ?? name })}
+        description={t('delete.description')}
+        confirmLabel={t('delete.action', { name: skill?.name ?? name })}
+        cancelLabel={t('common:actions.cancel')}
+        busyLabel={t('delete.deleting')}
+        error={deleteError}
+        busy={deleteBusy}
+        onConfirm={() => void deleteSkill()}
+      />
     </div>
   );
 }

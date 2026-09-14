@@ -3,13 +3,13 @@ import { useMemo, useRef, useState } from 'react';
 import { FileUp, Plus, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { CollectionToolbar } from '@/components/collection-toolbar';
 import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/collection-table';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeading } from '@/components/page-heading';
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
@@ -116,19 +116,18 @@ function WorkflowListPage() {
           </CollectionTable>
         )}
       </div>
-      <Dialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open && !deleteBusy) { setDeleteTarget(null); setDeleteError(''); } }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('delete.title', { name: deleteTarget?.name ?? '' })}</DialogTitle>
-            <DialogDescription>{t('delete.description')}</DialogDescription>
-          </DialogHeader>
-          {deleteError ? <p className="text-[13px] text-danger" role="alert">{deleteError}</p> : null}
-          <DialogFooter>
-            <Button type="button" variant="secondary" disabled={deleteBusy} onClick={() => setDeleteTarget(null)}>{t('common:actions.cancel')}</Button>
-            <Button type="button" variant="destructive" disabled={deleteBusy} onClick={() => void deleteWorkflow()}>{deleteBusy ? t('delete.deleting') : t('common:actions.delete')}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(nextOpen) => { if (!nextOpen && !deleteBusy) { setDeleteTarget(null); setDeleteError(''); } }}
+        title={t('delete.title', { name: deleteTarget?.name ?? '' })}
+        description={t('delete.description')}
+        confirmLabel={t('common:actions.delete')}
+        cancelLabel={t('common:actions.cancel')}
+        busyLabel={t('delete.deleting')}
+        error={deleteError}
+        busy={deleteBusy}
+        onConfirm={() => void deleteWorkflow()}
+      />
     </div>
   );
 }

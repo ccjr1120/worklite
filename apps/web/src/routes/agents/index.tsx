@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useMemo, useState } from 'react';
 import { Blocks, Plus, Server, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { AgentMark } from '@/components/agent-mark';
 import { AgentResourceNav } from '@/components/agent-resource-nav';
 import { CollectionToolbar } from '@/components/collection-toolbar';
@@ -9,7 +10,6 @@ import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/c
 import { EmptyState } from '@/components/empty-state';
 import { PageHeading } from '@/components/page-heading';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime, formatList } from '@/i18n/format';
@@ -108,7 +108,18 @@ function AgentListPage() {
           </CollectionTable>
         )}
       </div>
-      <Dialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open && !deleteBusy) setDeleteTarget(null); }}><DialogContent><DialogHeader><DialogTitle>{t('delete.title', { name: deleteTarget?.name ?? '' })}</DialogTitle><DialogDescription>{t('delete.description')}</DialogDescription></DialogHeader>{deleteError ? <p className="text-[13px] text-danger" role="alert">{deleteError}</p> : null}<DialogFooter><Button variant="secondary" disabled={deleteBusy} onClick={() => setDeleteTarget(null)}>{t('common:actions.cancel')}</Button><Button variant="destructive" disabled={deleteBusy} onClick={() => void deleteAgent()}>{deleteBusy ? t('delete.deleting') : t('common:actions.delete')}</Button></DialogFooter></DialogContent></Dialog>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(nextOpen) => { if (!nextOpen && !deleteBusy) setDeleteTarget(null); }}
+        title={t('delete.title', { name: deleteTarget?.name ?? '' })}
+        description={t('delete.description')}
+        confirmLabel={t('common:actions.delete')}
+        cancelLabel={t('common:actions.cancel')}
+        busyLabel={t('delete.deleting')}
+        error={deleteError}
+        busy={deleteBusy}
+        onConfirm={() => void deleteAgent()}
+      />
     </div>
   );
 }
