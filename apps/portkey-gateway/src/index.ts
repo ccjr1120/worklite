@@ -128,6 +128,43 @@ app.get('/worklite/providers/:providerId', async (c) => {
   const provider = await getProvider(c.req.param('providerId'));
   return provider ? c.json(providerView(provider)) : c.json({ message: 'Model provider not found.' }, 404);
 });
+type ResponsesTestPayload = {
+  output_text?: string;
+  output?: Array<{ type?: string; content?: unknown; summary?: unknown }>;
+};
+
+const responseContentText = (content: unknown): string => {
+  const parts = Array.isArray(content) ? content : content ? [content] : [];
+  return parts.map((part) => (
+    part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string'
+      ? (part as { text: string }).text
+      : ''
+  )).join('');
+};
+
+const parseResponsesTestOutput = (payload: ResponsesTestPayload): string => {
+  const sections: string[] = [];
+
+  for (const item of payload.output ?? []) {
+    if (item.type === 'reasoning') {
+      const reasoning = [responseContentText(item.content), responseContentText(item.summary)]
+        .filter((text) => text.length > 0)
+        .join('\n');
+      if (reasoning) sections.push(`Reasoning\n${reasoning}`);
+    } else if (item.type === 'message' && Array.isArray(item.content)) {
+      const response = item.content.map((part) => {
+        if (!part || typeof part !== 'object') return '';
+        const content = part as { type?: string; text?: unknown; refusal?: unknown };
+        if (content.type === 'refusal') return typeof content.refusal === 'string' ? content.refusal : '';
+        return typeof content.text === 'string' ? content.text : '';
+      }).join('');
+      if (response) sections.push(`Response\n${response}`);
+    }
+  }
+
+  return sections.join('\n\n');
+};
+
 app.post('/worklite/providers/:providerId/test', async (c) => {
   const provider = await getProvider(c.req.param('providerId'));
   if (!provider) return c.json({ message: 'Model provider not found.' }, 404);
@@ -140,18 +177,24 @@ app.post('/worklite/providers/:providerId/test', async (c) => {
   for (const [name, value] of Object.entries(provider.headers ?? {})) headers.set(name, value);
   const prompt = '\u4f60\u597d';
   const isCodex = provider.protocol === 'codex/responses';
-  const path = isCodex ? '/v1/responses' : '/v1/chat/completions';
+  const isResponses = isCodex || provider.protocol === 'openai/responses';
+  const path = isResponses ? '/v1/responses' : '/v1/chat/completions';
   const body = isCodex
     ? { model, input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }] }], store: false, stream: true }
-    : { model, messages: [{ role: 'user', content: prompt }], max_tokens: 32 };
+    : isResponses
+      ? { model, input: prompt, max_output_tokens: 1024 }
+      : { model, messages: [{ role: 'user', content: prompt }], max_tokens: 32 };
   const upstream = await dispatchInternal(new Request(new URL(path, c.req.url), { method: 'POST', headers, body: JSON.stringify(body) }), c);
   if (!upstream.ok) return c.json({ message: 'Provider connection failed.' }, upstream.status as 400);
   const raw = await upstream.text();
-  let payload: { choices?: Array<{ message?: { content?: string } }>; output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> } = {};
+  let payload: { choices?: Array<{ message?: { content?: string } }>; output_text?: string; output?: Array<{ type?: string; content?: unknown; summary?: unknown }> } = {};
   try { payload = JSON.parse(raw); } catch {}
-  const response = isCodex
-    ? payload.output_text ?? payload.output?.flatMap((item) => item.content ?? []).map((item) => item.text ?? '').join('') ?? [...raw.matchAll(/"delta":"((?:\\.|[^"\\])*)"/g)].map((match) => JSON.parse(`"${match[1]}"`)).join('')
-    : payload.choices?.[0]?.message?.content ?? '';
+  const streamedResponse = [...raw.matchAll(/"delta":"((?:\\.|[^"\\])*)"/g)].map((match) => JSON.parse(`"${match[1]}"`)).join('');
+  const response = provider.protocol === 'openai/responses'
+    ? parseResponsesTestOutput(payload) || payload.output_text || streamedResponse
+    : isCodex
+      ? payload.output_text ?? streamedResponse
+      : payload.choices?.[0]?.message?.content ?? '';
   return c.json({ connection: 'connected', model, prompt, response, traceId: crypto.randomUUID() });
 });
 app.post('/worklite/providers', async (c) => {
