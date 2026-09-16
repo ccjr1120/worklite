@@ -69,6 +69,11 @@ export class RunsController {
   cancel(@Req() request: Request, @Param('runId') runId: string) {
     return this.runs.cancel(request, 'personal', runId);
   }
+
+  @Post('runs/:runId/pending-action/refresh')
+  refreshPendingAction(@Req() request: Request, @Param('runId') runId: string) {
+    return this.runs.refreshPendingAction(request, 'personal', runId);
+  }
 }
 
 function parseLastEventId(value: string | undefined): number {

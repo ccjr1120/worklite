@@ -2,11 +2,24 @@
 
 ## Structure
 
-There is no standalone Artifact collection route or execution tab. Artifacts are presented in the expanded card of the Run that produced them and in direct Artifact details. A Run-card artifact row emphasizes name, type, useful size metadata, creation time, and provenance context; its name links to `/artifacts/:artifactId`.
+There is no standalone Artifact collection route or execution tab. Successful `worklite/artifact` node execution creates Artifacts; they are presented in the expanded Run row inside the Workflow List Run records dialog and in direct Artifact details. A Run-card artifact row emphasizes name, type, useful size metadata, creation time, and provenance context; its name links to `/artifacts/:artifactId`.
 
-The expanded Run card defines loading, empty, failure, and long-collection states. Artifact deletion remains available from Artifact details.
+The expanded Run row renders Artifact disclosure only when the Run's immutable Workflow version contains an Artifact node. Eligible runs define loading, empty, failure, and long-collection states; runs whose versions cannot produce Artifacts omit the section entirely. Artifact deletion remains available from Artifact details.
 
 ## Changelog
+
+### 2026-09-15
+
+- Limited Run Artifact disclosure and its empty state to immutable Workflow versions that contain an Artifact node.
+
+
+### 2026-09-15
+
+- Defined successful Artifact-node execution as the source of Run-created Artifacts.
+
+### 2026-09-15
+
+- Moved expandable Run artifact presentation into the per-Workflow Run records dialog after removing standalone Run routes.
 
 ### 2026-09-14
 

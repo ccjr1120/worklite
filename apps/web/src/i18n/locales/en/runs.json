@@ -1,44 +1,26 @@
 {
-  "title": "Runs",
-  "description": "Recent executions of immutable workflow versions.",
-  "search": "Search runs",
-  "empty": {
-    "title": "No runs yet",
-    "description": "Run a published workflow to see execution history here."
-  },
-  "noMatches": {
-    "title": "No matching runs",
-    "description": "No runs match the current filters."
-  },
-  "columns": {
-    "workflow": "Workflow",
-    "status": "Status",
-    "currentStep": "Current step",
-    "started": "Started",
-    "duration": "Duration"
-  },
-  "details": {
-    "unavailableTitle": "Run unavailable",
-    "unavailableDescription": "This run does not exist or is no longer accessible.",
-    "cancel": "Cancel run",
-    "cancelling": "Cancelling...",
-    "cancelFailed": "The run could not be cancelled.",
-    "version": "Version {{version}}",
-    "failed": "Failed on {{step}}. Earlier completed work is retained.",
-    "openWorkflow": "Open workflow",
-    "stepFallback": "Step",
-    "input": "Input",
-    "model": "Model",
-    "retries": "Retries",
-    "artifacts": "Artifacts",
-    "logs": "Logs",
-    "followEnd": "Follow end"
-  },
+  "title": "Run records",
   "loading": "Loading runs...",
   "loadFailed": "Unable to load runs.",
+  "empty": {
+    "description": "No runs yet for this workflow."
+  },
+  "logs": "Execution logs",
+  "logsLoading": "Loading execution logs...",
+  "logsFailed": "Unable to load execution logs.",
+  "noLogs": "No node execution logs are available yet.",
+  "failureReason": "Failure reason",
+  "retryCount_one": "Retried {{count}} time",
+  "retryCount_other": "Retried {{count}} times",
   "artifacts": "Artifacts",
   "artifactsLoading": "Loading artifacts...",
   "artifactsFailed": "Unable to load artifacts.",
   "noArtifacts": "No artifacts",
-  "openDetails": "Open details"
+  "pendingAction": {
+    "qrAlt": "WeChat confirmation QR code",
+    "expiresAt": "QR code expires at {{value}}",
+    "expired": "This QR code expired. Refresh it to continue the same Workflow run.",
+    "refresh": "Refresh QR code",
+    "cancel": "Cancel run"
+  }
 }

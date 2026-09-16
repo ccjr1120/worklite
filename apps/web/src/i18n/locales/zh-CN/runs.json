@@ -1,44 +1,26 @@
 {
   "title": "运行记录",
-  "description": "不可变工作流版本的近期执行。",
-  "search": "搜索运行记录",
-  "empty": {
-    "title": "还没有运行记录",
-    "description": "运行已发布的工作流后，执行历史会显示在这里。"
-  },
-  "noMatches": {
-    "title": "没有匹配的运行记录",
-    "description": "当前筛选条件下没有匹配的运行记录。"
-  },
-  "columns": {
-    "workflow": "工作流",
-    "status": "状态",
-    "currentStep": "当前步骤",
-    "started": "开始时间",
-    "duration": "耗时"
-  },
-  "details": {
-    "unavailableTitle": "运行记录不可用",
-    "unavailableDescription": "此运行记录不存在，或已无法访问。",
-    "cancel": "取消运行",
-    "cancelling": "正在取消...",
-    "cancelFailed": "无法取消运行。",
-    "version": "版本 {{version}}",
-    "failed": "在 {{step}} 失败。此前已完成的工作会保留。",
-    "openWorkflow": "打开工作流",
-    "stepFallback": "步骤",
-    "input": "输入",
-    "model": "模型",
-    "retries": "重试次数",
-    "artifacts": "产物",
-    "logs": "日志",
-    "followEnd": "跟随末尾"
-  },
   "loading": "正在加载运行记录...",
   "loadFailed": "无法加载运行记录。",
+  "empty": {
+    "description": "该工作流还没有运行记录。"
+  },
+  "logs": "执行日志",
+  "logsLoading": "正在加载执行日志...",
+  "logsFailed": "无法加载执行日志。",
+  "noLogs": "暂时没有节点执行日志。",
+  "failureReason": "失败原因",
+  "retryCount_one": "已重试 {{count}} 次",
+  "retryCount_other": "已重试 {{count}} 次",
   "artifacts": "产物",
   "artifactsLoading": "正在加载产物...",
   "artifactsFailed": "无法加载产物。",
   "noArtifacts": "暂无产物",
-  "openDetails": "打开详情"
+  "pendingAction": {
+    "qrAlt": "微信确认二维码",
+    "expiresAt": "二维码有效期至 {{value}}",
+    "expired": "二维码已过期，刷新后可继续同一次工作流运行。",
+    "refresh": "刷新二维码",
+    "cancel": "取消运行"
+  }
 }

@@ -1,6 +1,6 @@
 import { createDeepSeek } from '@ai-sdk/deepseek';
 import { createOpenAI } from '@ai-sdk/openai';
-import { generateText, InvalidToolInputError, JSONParseError, jsonSchema, streamText, tool, type LanguageModel, type LanguageModelUsage, type ModelMessage } from 'ai';
+import { APICallError, generateText, InvalidToolInputError, JSONParseError, jsonSchema, NoOutputGeneratedError, Output, streamText, tool, type LanguageModel, type LanguageModelUsage, type ModelMessage } from 'ai';
 
 export type ModelProviderConfig =
   | {
@@ -38,6 +38,7 @@ export type GenerateAgentStepRequest = {
   provider: ModelProviderConfig;
   model: string;
   systemPrompt: string;
+  jsonOutput?: boolean;
   messages: readonly GatewayAgentMessage[];
   skillScripts: Array<{ skillId: string; skillName: string; path: string }>;
   builtinTools?: readonly GatewayToolDefinition[];
@@ -131,8 +132,10 @@ export class AiSdkModelGateway implements ModelGateway {
 
   async generateAgentStep(request: GenerateAgentStepRequest): Promise<AgentStepResult> {
     const model = resolveModel(request.provider, request.model);
+    const useResponses = isResponsesProvider(request.provider);
     const skillScript = tool({
       description: 'Run one script from an assigned Skill package immediately on the WorkLite host. Select only an exact Skill id and script path from the assigned script list.',
+      strict: useResponses ? false : undefined,
       inputSchema: jsonSchema<{ skillId: string; scriptPath: string; arguments: string[] }>({
         type: 'object',
         additionalProperties: false,
@@ -151,30 +154,110 @@ export class AiSdkModelGateway implements ModelGateway {
       if (!definition.name || tools[definition.name]) continue;
       tools[definition.name] = tool({
         description: definition.description,
+        strict: useResponses ? false : undefined,
         inputSchema: jsonSchema<Record<string, unknown>>(definition.inputSchema as never),
       });
     }
     const context = trimAgentMessages(request.systemPrompt, request.messages, request.maxContextTokens ?? 12_000);
-    const result = await generateAgentWithRetry({
+    const modelRequest = {
       model,
-      instructions: request.systemPrompt,
+      system: request.systemPrompt,
+      output: request.jsonOutput ? Output.json({ name: 'response' }) : undefined,
       messages: context.messages as ModelMessage[],
       tools: Object.keys(tools).length > 0 ? tools as never : undefined,
       maxOutputTokens: request.maxOutputTokens,
       abortSignal: request.abortSignal,
-    }, request.abortSignal, request.onTextDelta);
-
-    const invalidToolRequest = classifyInvalidToolRequest(result.toolCalls);
-    if (invalidToolRequest) throw invalidToolRequest;
-    const toolCalls = result.toolCalls.flatMap((call) => call ? normalizeAgentToolCall(call as { toolCallId: string; toolName: string; input: unknown }, tools) : []);
-    return {
-      text: result.text,
-      responseMessages: normalizeResponseMessages(result.responseMessages, new Set(toolCalls.map((call) => call.toolCallId))),
-      toolCalls,
-      finishReason: result.finishReason,
-      contextDropped: context.dropped,
+      providerOptions: useResponses ? { openai: { strictJsonSchema: false } } : undefined,
     };
+
+    let result: Awaited<ReturnType<typeof generateText>>;
+    try {
+      result = await generateAgentWithRetry(modelRequest, request.abortSignal, request.onTextDelta);
+    } catch (error) {
+      if (!NoOutputGeneratedError.isInstance(error) || request.abortSignal?.aborted) throw modelFailure(error, error);
+      try {
+        result = await generateText(modelRequest);
+      } catch (fallbackError) {
+        throw modelFailure(fallbackError, error.cause ?? error);
+      }
+    }
+
+    return toAgentStepResult(result, tools, context.dropped, request.jsonOutput === true);
   }
+}
+
+function extractJsonText(text: string): string {
+  const parse = (value: string) => {
+    try {
+      return JSON.stringify(JSON.parse(value));
+    } catch {
+      return null;
+    }
+  };
+
+  const exact = parse(text.trim());
+  if (exact !== null) return exact;
+
+  const source = text.trim();
+  for (const [index, character] of source.split('').entries()) {
+    if (character !== '{' && character !== '[') continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let end = index; end < source.length; end += 1) {
+      const current = source[end];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (current === '\\') escaped = true;
+        else if (current === '"') inString = false;
+        continue;
+      }
+      if (current === '"') inString = true;
+      else if (current === '{' || current === '[') depth += 1;
+      else if (current === '}' || current === ']') {
+        depth -= 1;
+        if (depth === 0) {
+          const candidate = parse(source.slice(index, end + 1));
+          if (candidate !== null) return candidate;
+          break;
+        }
+      }
+    }
+  }
+
+  throw new Error('Agent JSON output requires valid JSON.');
+}
+
+function modelFailure(error: unknown, streamCause: unknown): Error {
+  const cause = APICallError.isInstance(streamCause) ? streamCause : APICallError.isInstance(error) ? error : undefined;
+  const status = cause?.statusCode;
+  if (status) return new Error(`The model provider request failed with HTTP status ${status}.`);
+  if (NoOutputGeneratedError.isInstance(error)) {
+    return new Error('The provider returned no usable model output. Check the provider connection and model capabilities.');
+  }
+  return error instanceof Error ? error : new Error('The model request failed.');
+}
+
+function isResponsesProvider(provider: ModelProviderConfig): boolean {
+  return provider.adapter === 'codex' || provider.operation === 'responses';
+}
+
+function toAgentStepResult(
+  result: Awaited<ReturnType<typeof generateText>>,
+  tools: Record<string, unknown>,
+  contextDropped: number,
+  jsonOutput: boolean,
+): AgentStepResult {
+  const invalidToolRequest = classifyInvalidToolRequest(result.toolCalls);
+  if (invalidToolRequest) throw invalidToolRequest;
+  const toolCalls = result.toolCalls.flatMap((call) => call ? normalizeAgentToolCall(call as { toolCallId: string; toolName: string; input: unknown }, tools) : []);
+  return {
+    text: jsonOutput && toolCalls.length === 0 ? extractJsonText(result.text) : result.text,
+    responseMessages: normalizeResponseMessages(result.responseMessages, new Set(toolCalls.map((call) => call.toolCallId))),
+    toolCalls,
+    finishReason: result.finishReason,
+    contextDropped,
+  };
 }
 
 async function generateAgentWithRetry(
@@ -187,16 +270,25 @@ async function generateAgentWithRetry(
   for (let attempt = 0; ; attempt += 1) {
     signal?.throwIfAborted();
     let emitted = false;
+    let streamError: unknown;
     try {
-      const result = streamText(request);
+      const result = streamText({
+        ...request,
+        onError: ({ error }) => {
+          streamError ??= error;
+          request.onError?.({ error });
+        },
+      });
       for await (const delta of result.textStream) {
         emitted = true;
         await onTextDelta?.(delta);
       }
       const [text, toolCalls, responseMessages, finishReason] = await Promise.all([result.text, result.toolCalls, result.responseMessages, result.finishReason]);
+      if (!emitted && streamError !== undefined) throw streamError;
       return { text, toolCalls, responseMessages, finishReason } as Awaited<ReturnType<typeof generateText>>;
     } catch (error) {
-      if (attempt + 1 >= attempts || emitted || signal?.aborted || !isRetryableGatewayError(error)) throw error;
+      const failure = streamError !== undefined && NoOutputGeneratedError.isInstance(error) ? streamError : error;
+      if (attempt + 1 >= attempts || emitted || signal?.aborted || !isRetryableGatewayError(failure)) throw failure;
       await abortableDelay(Math.min(250 * 2 ** attempt, 2_000), signal);
     }
   }
@@ -264,7 +356,7 @@ function resolveModel(provider: ModelProviderConfig, modelId: string): LanguageM
 
 function gatewayBaseURL(): string {
   const apiURL = process.env.WORKLITE_API_URL?.trim();
-  return apiURL ? `${apiURL.replace(/\/$/, '')}/portkey-gateway/v1` : 'http://127.0.0.1:4547/v1';
+  return apiURL ? `${apiURL.replace(/\/$/, '')}/portkey-gateway/v1` : 'http://127.0.0.1:3392/v1';
 }
 
 function toModelMessages(messages: readonly GatewayMessage[]): ModelMessage[] {

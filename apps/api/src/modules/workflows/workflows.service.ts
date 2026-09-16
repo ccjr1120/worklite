@@ -8,6 +8,9 @@ import type {
   ImportWorkflowRequest,
   PortableWorkflowDocument,
   WorkflowDefinition,
+  WorkflowDashboardBinding,
+  WorkflowDashboardElement,
+  WorkflowDashboardField,
   WorkflowDetailView,
   WorkflowEditOperation,
   WorkflowPlan,
@@ -15,13 +18,13 @@ import type {
   WorkflowView,
 } from '@worklite/contracts';
 import {
-  dashboardDatasets,
   emptyWorkflowDefinition,
   workflowDrafts,
   workflowEditRevisions,
   workflowVersions,
   workflowRuns,
   workflowSchedules,
+  wechatOfficialAccounts,
   mcpServers,
   skills,
   workflows,
@@ -32,10 +35,15 @@ import {
 import { listWorkflowNodeCapabilities, topologicallySortWorkflow, type WorkflowNodeCapability, type WorkflowPortDefinition } from '@worklite/workflow-engine';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
+import { WorkflowSchedulesService } from './workflow-schedules.service';
 
 @Injectable()
 export class WorkflowsService {
-  constructor(@Inject(DATABASE) private readonly db: Database, private readonly workspaces: WorkspaceService) {}
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    private readonly workspaces: WorkspaceService,
+    private readonly schedules: WorkflowSchedulesService,
+  ) {}
 
   async list(request: Request, workspaceSlug: string): Promise<WorkflowView[]> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
@@ -132,7 +140,6 @@ export class WorkflowsService {
     if (!workflow) throw new NotFoundException('Workflow not found');
     await this.db.transaction((transaction) => {
       transaction.delete(workflowSchedules).where(and(eq(workflowSchedules.workspaceId, workspace.id), eq(workflowSchedules.workflowId, workflowId))).run();
-      transaction.delete(dashboardDatasets).where(and(eq(dashboardDatasets.workspaceId, workspace.id), eq(dashboardDatasets.workflowId, workflowId))).run();
       transaction.delete(workflowRuns).where(and(eq(workflowRuns.workspaceId, workspace.id), eq(workflowRuns.workflowId, workflowId))).run();
       transaction.delete(workflowEditRevisions).where(and(eq(workflowEditRevisions.workspaceId, workspace.id), eq(workflowEditRevisions.workflowId, workflowId))).run();
       transaction.delete(workflowDrafts).where(and(eq(workflowDrafts.workspaceId, workspace.id), eq(workflowDrafts.workflowId, workflowId))).run();
@@ -212,6 +219,7 @@ export class WorkflowsService {
     });
     const [version] = await this.db.select().from(workflowVersions).where(eq(workflowVersions.id, versionId)).limit(1);
     if (!version) throw new NotFoundException('Workflow version could not be published');
+    await this.schedules.syncPublishedVersion(version);
     return toVersionView(version);
   }
 
@@ -250,12 +258,15 @@ export class WorkflowsService {
   private async validateWorkspaceReferences(workspaceId: string, definition: StoredWorkflowDefinition): Promise<void> {
     const skillIds = collectWorkflowResourceIds(definition, 'skillIds');
     const mcpServerIds = collectWorkflowResourceIds(definition, 'mcpServerIds');
-    const [availableSkills, availableMcpServers] = await Promise.all([
+    const accountIds = definition.nodes.filter((node) => node.type === 'wechat-official-account/publish').map((node) => isRecord(node.config) && typeof node.config.accountId === 'string' ? node.config.accountId : '').filter(Boolean);
+    const [availableSkills, availableMcpServers, availableAccounts] = await Promise.all([
       skillIds.length === 0 ? [] : this.db.select({ id: skills.id }).from(skills).where(and(eq(skills.workspaceId, workspaceId), inArray(skills.id, skillIds))),
       mcpServerIds.length === 0 ? [] : this.db.select({ id: mcpServers.id }).from(mcpServers).where(and(eq(mcpServers.workspaceId, workspaceId), inArray(mcpServers.id, mcpServerIds))),
+      accountIds.length === 0 ? [] : this.db.select({ id: wechatOfficialAccounts.id }).from(wechatOfficialAccounts).where(and(eq(wechatOfficialAccounts.workspaceId, workspaceId), inArray(wechatOfficialAccounts.id, accountIds))),
     ]);
     if (availableSkills.length !== skillIds.length) throw new BadRequestException('Every Workflow Skill must belong to this workspace.');
     if (availableMcpServers.length !== mcpServerIds.length) throw new BadRequestException('Every Workflow MCP server must belong to this workspace.');
+    if (availableAccounts.length !== new Set(accountIds).size) throw new BadRequestException('Every WeChat Official Account must belong to this workspace.');
   }
 
   private async findWorkflow(workspaceId: string, workflowId: string) {
@@ -299,7 +310,8 @@ export class WorkflowsService {
   private async toView(row: typeof workflows.$inferSelect, workspaceSlug: string): Promise<WorkflowView> {
     const [version] = await this.db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, row.id), eq(workflowVersions.published, true))).orderBy(desc(workflowVersions.version)).limit(1);
     const [lastRun] = await this.db.select().from(workflowRuns).where(eq(workflowRuns.workflowId, row.id)).orderBy(desc(workflowRuns.createdAt)).limit(1);
-    return { id: row.id, workspaceSlug, latestVersionId: version?.id ?? null, latestVersion: version?.version ?? null, name: row.name, state: row.state, stepCount: (version?.definition as StoredWorkflowDefinition | null)?.nodes.length ?? version?.nodes.length ?? 0, lastRunStatus: lastRun?.status ?? null, lastRunAt: lastRun?.createdAt.toISOString() ?? null, updatedAt: row.updatedAt.toISOString() };
+    const definition = version?.definition as StoredWorkflowDefinition | null;
+    return { id: row.id, workspaceSlug, latestVersionId: version?.id ?? null, latestVersion: version?.version ?? null, name: row.name, state: row.state, stepCount: definition?.nodes.length ?? version?.nodes.length ?? 0, dashboard: definition ? readDashboardBinding(definition) : null, lastRunStatus: lastRun?.status ?? null, lastRunAt: lastRun?.createdAt.toISOString() ?? null, updatedAt: row.updatedAt.toISOString() };
   }
 }
 
@@ -405,6 +417,11 @@ function validateDefinition(definition: StoredWorkflowDefinition, requireComplet
   if (!definition.input || !definition.defaults || !['stop', 'retry'].includes(definition.defaults.errorPolicy) || !Array.isArray(definition.nodes) || !Array.isArray(definition.edges)) throw new BadRequestException('The workflow definition is invalid.');
   const ids = new Set<string>();
   const capabilities = new Map(listWorkflowNodeCapabilities().map((capability) => [`${capability.id}@${capability.version}`, capability]));
+  if (definition.nodes.filter((node) => node.type === 'worklite/timer').length > 1) throw new BadRequestException('A Workflow can contain only one Timer node.');
+  if (definition.nodes.filter((node) => node.type === 'worklite/dashboard').length > 1) throw new BadRequestException('A Workflow can contain only one Dashboard node.');
+  const enabledTimer = definition.nodes.some((node) => node.type === 'worklite/timer' && isRecord(node.config) && node.config.enabled === true);
+  const publishesToWechat = definition.nodes.some((node) => node.type === 'wechat-official-account/publish' && isRecord(node.config) && node.config.mode === 'publish');
+  if (enabledTimer && publishesToWechat) throw new BadRequestException('Scheduled Workflows can save WeChat drafts but cannot require publication confirmation.');
   definition.nodes.forEach((node) => {
     if (!node.id || ids.has(node.id) || !node.type || !node.typeVersion || !['stop', 'retry'].includes(node.errorPolicy) || !Number.isFinite(node.position?.x) || !Number.isFinite(node.position?.y)) throw new BadRequestException('The workflow contains an invalid node.');
     const capability = capabilities.get(`${node.type}@${node.typeVersion}`);
@@ -427,7 +444,7 @@ function validateDefinition(definition: StoredWorkflowDefinition, requireComplet
     if (!source || !target) throw new BadRequestException('A workflow edge references an unavailable node.');
     if (source.id === target.id) throw new BadRequestException('A workflow node cannot connect to itself.');
     if (!sourcePort || !targetPort) throw new BadRequestException('The workflow edge references an unavailable port.');
-    if (!portsCompatible(sourcePort, targetPort) || (source.type === 'worklite/skill-set' && target.type === 'worklite/agent')) throw new BadRequestException('The workflow edge connects incompatible ports.');
+    if (!portsCompatible(sourcePort, targetPort)) throw new BadRequestException('The workflow edge connects incompatible ports.');
     if (!targetPort.multiple && inputs.has(inputKey)) throw new BadRequestException('A workflow input port accepts only one edge.');
     if (definition.edges.some((candidate) => candidate.id !== edge.id && candidate.sourceNodeId === edge.sourceNodeId && candidate.sourcePort === edge.sourcePort && candidate.targetNodeId === edge.targetNodeId && candidate.targetPort === edge.targetPort)) throw new BadRequestException('The workflow contains a duplicate connection.');
     edgeIds.add(edge.id);
@@ -465,8 +482,59 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
   }
   if (type === 'worklite/agent') {
     if (value.systemPrompt !== undefined && typeof value.systemPrompt !== 'string') throw new BadRequestException('Agent node systemPrompt must be a string.');
+    if (value.outputFormat !== undefined && value.outputFormat !== 'text' && value.outputFormat !== 'json') throw new BadRequestException('Agent node outputFormat must be text or json.');
     if (requireCompleteAgents && (typeof value.model !== 'string' || !/^[^/]+\/.+/.test(value.model.trim()))) throw new BadRequestException('Every Agent node must contain a public provider/model id before publication.');
   }
+  if (type === 'worklite/artifact') {
+    if (typeof value.name !== 'string' || !value.name.trim()) throw new BadRequestException('Artifact node name must be a non-empty string.');
+    if (value.type !== 'text' && value.type !== 'markdown' && value.type !== 'json') throw new BadRequestException('Artifact node type must be text, markdown, or json.');
+  }
+  if (type === 'worklite/timer') {
+    if (typeof value.enabled !== 'boolean') throw new BadRequestException('Timer node enabled must be a boolean.');
+    if (typeof value.intervalSeconds !== 'number' || !Number.isFinite(value.intervalSeconds) || value.intervalSeconds < 300) throw new BadRequestException('Timer node intervalSeconds must be a finite number of at least 300.');
+  }
+  if (type === 'worklite/dashboard') {
+    if (!isRecord(value.layout)) throw new BadRequestException('Dashboard node layout must be an object.');
+    for (const region of ['header', 'main', 'footer'] as const) {
+      if (!Array.isArray(value.layout[region])) throw new BadRequestException(`Dashboard node layout ${region} must be an array.`);
+      value.layout[region].forEach((element, index) => validateDashboardElement(element, `Dashboard node layout ${region} element ${index + 1}`));
+    }
+  }
+}
+
+function validateDashboardElement(value: unknown, label: string): void {
+  if (!isRecord(value)) throw new BadRequestException(`${label} must be an object.`);
+  if (value.kind === 'text') {
+    if (typeof value.text !== 'string' || !value.text.trim()) throw new BadRequestException(`${label} text must be a non-empty string.`);
+    return;
+  }
+  if (value.kind === 'count') {
+    if (typeof value.label !== 'string' || !value.label.trim()) throw new BadRequestException(`${label} label must be a non-empty string.`);
+    return;
+  }
+  if (value.kind === 'metric') {
+    if (typeof value.label !== 'string' || !value.label.trim()) throw new BadRequestException(`${label} label must be a non-empty string.`);
+    if (typeof value.field !== 'string' || !value.field.trim()) throw new BadRequestException(`${label} field must be a non-empty string.`);
+    if (value.type !== 'text' && value.type !== 'number' && value.type !== 'boolean' && value.type !== 'datetime') throw new BadRequestException(`${label} type is not supported.`);
+    return;
+  }
+  if (value.kind === 'list') {
+    if (typeof value.titleKey !== 'string' || !value.titleKey.trim()) throw new BadRequestException(`${label} titleKey must be a non-empty string.`);
+    if (!Array.isArray(value.fields)) throw new BadRequestException(`${label} fields must be an array.`);
+    const fieldKeys = new Set<string>();
+    value.fields.forEach((field, fieldIndex) => {
+      const fieldLabel = `${label} field ${fieldIndex + 1}`;
+      if (!isRecord(field)) throw new BadRequestException(`${fieldLabel} must be an object.`);
+      if (typeof field.key !== 'string' || !field.key.trim()) throw new BadRequestException(`${fieldLabel} key must be a non-empty string.`);
+      if (typeof field.label !== 'string' || !field.label.trim()) throw new BadRequestException(`${fieldLabel} label must be a non-empty string.`);
+      if (field.type !== 'text' && field.type !== 'number' && field.type !== 'boolean' && field.type !== 'datetime' && field.type !== 'url') throw new BadRequestException(`${fieldLabel} type is not supported.`);
+      if (fieldKeys.has(field.key)) throw new BadRequestException(`${label} field keys must be unique.`);
+      fieldKeys.add(field.key);
+    });
+    if (!fieldKeys.has(value.titleKey)) throw new BadRequestException(`${label} titleKey must match a configured field key.`);
+    return;
+  }
+  throw new BadRequestException(`${label} kind is not supported.`);
 }
 
 function validateSchemaValue(value: unknown, schema: unknown, label: string): void {
@@ -494,12 +562,45 @@ function toVersionView(row: typeof workflowVersions.$inferSelect): WorkflowVersi
   return { id: row.id, workflowId: row.workflowId, version: row.version, schemaVersion: definition.schemaVersion, definition: definition as WorkflowDefinition, sourceRevisionId: row.sourceRevisionId, publishedAt: (row.publishedAt ?? row.createdAt).toISOString(), publishedBy: row.publishedBy ?? 'You' };
 }
 
+function readDashboardBinding(definition: StoredWorkflowDefinition): WorkflowDashboardBinding | null {
+  const node = definition.nodes.find((item) => item.type === 'worklite/dashboard');
+  const config = node && isRecord(node.config) ? node.config : null;
+  const layout = config && isRecord(config.layout) ? config.layout : null;
+  if (!node || !config || !layout) return null;
+  const readRegion = (value: unknown): WorkflowDashboardElement[] => Array.isArray(value) ? value.flatMap((element) => readDashboardElement(element)) : [];
+  return {
+    nodeId: node.id,
+    layout: {
+      header: readRegion(layout.header),
+      main: readRegion(layout.main),
+      footer: readRegion(layout.footer),
+    },
+  };
+}
+
+function readDashboardElement(value: unknown): WorkflowDashboardElement[] {
+  if (!isRecord(value)) return [];
+  if (value.kind === 'text' && typeof value.text === 'string') return [{ kind: 'text', text: value.text }];
+  if (value.kind === 'count' && typeof value.label === 'string') return [{ kind: 'count', label: value.label }];
+  if (value.kind === 'metric' && typeof value.label === 'string' && typeof value.field === 'string' && (value.type === 'text' || value.type === 'number' || value.type === 'boolean' || value.type === 'datetime')) {
+    return [{ kind: 'metric', label: value.label, field: value.field, type: value.type }];
+  }
+  if (value.kind === 'list' && typeof value.titleKey === 'string' && Array.isArray(value.fields)) {
+    const fields = value.fields.flatMap((field): WorkflowDashboardField[] => {
+      if (!isRecord(field) || typeof field.key !== 'string' || typeof field.label !== 'string' || (field.type !== 'text' && field.type !== 'number' && field.type !== 'boolean' && field.type !== 'datetime')) return [];
+      return [{ key: field.key, label: field.label, type: field.type }];
+    });
+    return [{ kind: 'list', titleKey: value.titleKey, fields }];
+  }
+  return [];
+}
+
 function readStringArray(value: unknown): string[] {
   return Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === 'string'))] : [];
 }
 
 function collectWorkflowResourceIds(definition: StoredWorkflowDefinition, key: 'skillIds' | 'mcpServerIds'): string[] {
-  return [...new Set(definition.nodes.flatMap((node) => (node.type === 'worklite/agent' || (node.type === 'worklite/skill-set' && key === 'skillIds')) && isRecord(node.config) ? readStringArray(node.config[key]) : []))];
+  return [...new Set(definition.nodes.flatMap((node) => node.type === 'worklite/agent' && isRecord(node.config) ? readStringArray(node.config[key]) : []))];
 }
 
 

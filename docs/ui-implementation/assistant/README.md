@@ -4,7 +4,7 @@
 
 System Helper Chat helps a person configure a model provider and create Skills, connect MCP servers, and create Agents through a guided conversation. It is a task-oriented assistant owned by the workspace shell, presented as the same full-width expandable panel on Home and other pages. It is not the default representation of the rest of the product.
 
-The canonical route is `/home`. System Helper Chat appears in command search but not as a separate primary navigation destination. The shell surface always uses the built-in System Helper Agent. Other configured custom Agents are invoked per message through an `@` mention; there is no composer-side Agent or plugin target picker.
+The canonical route is `/home`. System Helper Chat appears in command search but not as a separate primary navigation destination. The shell surface always uses the built-in System Helper Agent. Other configured custom Agents and published Workflows are invoked per message through an `@` mention; there is no composer-side target picker. Agent mentions create Agent turns, while Workflow mentions create version-bound Workflow Runs. The remaining message text becomes the Workflow Input value, and Draft Workflows are not offered as runnable mentions.
 
 ## Layout
 
@@ -13,6 +13,8 @@ The expanded conversation panel includes `Chat` and `Configuration` views in tha
 Keep the workspace shell stable. Home shows a single-line composer by default; other pages show a draggable lower-right Chat icon by default. Clicking the icon opens a centered conversation panel above the current page and focuses the composer. Composer focus also opens the panel. The icon remains keyboard accessible and stays within the viewport safe area. Navigating closes the panel while preserving the current server execution identifier.
 
 The expanded header identifies System Helper Chat, shows the current Agent execution status, and provides an icon-only minimize control. When an execution is reconnecting, show that state separately from the server-owned execution status. A compact diagnostics disclosure may show the safe execution identifier and last-updated time without exposing provider or host secrets. Before the first message, compact task starters may populate requests for Provider, Skill, MCP server, or Agent creation without fabricating a proposal. When no provider or model is bound and no configured custom Agent is available, replace the composer with one keyboard-accessible setup link to `/agents/agt_system_helper_chat`. If a configured custom Agent is available, keep the composer for structured `@` dispatch while ordinary System Helper submission remains disabled. The composer does not provide an Agent or plugin target switcher. System Helper remains the only built-in target and handles ordinary messages. Other configured custom Agents are selected with `@` in the composer; plugin execution is not exposed as a composer target.
+
+The conversation is one unframed column. Workflow Run entries use the same transcript surface: show the user input, a compact queued/running state, completion or failure feedback, and successful Artifact cards with direct detail actions. Do not merge Workflow Run state into Agent execution state or expose a second execution control.
 
 The conversation is one unframed column. User messages are right-aligned compact neutral bubbles. Agent responses are left-aligned and use the shared Markdown renderer. Immediately after submitting a user message, append an unframed Agent placeholder with a restrained loader and `Working` label in the message region. Keep it after inline Skill calls while the model resumes, and replace it with final content, a localized inline failure with a non-color error cue, or a localized non-color cancelled cue when the turn ends. Failure copy comes from a credential-safe server error and remains visible after reload; raw SDK errors, malformed tool input, provider responses, stack traces, and credentials are never shown. Skill calls appear inline between messages as compact collapsed rows showing the Skill name, script name, automatic execution status, and exit code when available. A disclosure control reveals the exact script path, JSON argument list, working directory, host-permission warning, and output. Details never open automatically for failures, and output uses a height-bounded internal scroller. Skill calls do not expose permission, `Run`, or `Reject` actions. Do not add a proposal inspector or browser-owned operation cards.
 
@@ -63,6 +65,10 @@ Use semantic surface, border, text, brand, and status tokens in both light and d
 All icon-only controls require accessible names and tooltips, except the intentionally unobtrusive cross-page floating Chat entry, which keeps an accessible name without a visible Tooltip. Send and Stop retain the same stable target dimensions and expose distinct localized accessible names. Clicking outside an expanded Chat surface closes it; Chat-owned popup menus remain interactive. Conversation and Skill-call status changes use restrained live-region announcements. Keyboard focus remains in the editable composer after cancellation, history selection, and automatic execution updates. Reduced-motion mode replaces spinner motion with the same static working cue.
 
 ## Changelog
+
+### 2026-09-15
+
+- Added published Workflow `@` mentions to the embedded chat, with remaining-message input mapping and inline Run and Artifact presentation separate from Agent sessions.
 
 ### 2026-09-09
 

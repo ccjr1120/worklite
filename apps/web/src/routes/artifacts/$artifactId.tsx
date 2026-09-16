@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -19,7 +19,7 @@ export const Route = createFileRoute('/artifacts/$artifactId')({
 });
 
 function ArtifactDetailsPage() {
-  const { t } = useTranslation(['artifacts', 'runs', 'common']);
+  const { t } = useTranslation(['artifacts', 'common']);
   const { locale } = useLocale();
   const { artifactId } = Route.useParams();
   const navigate = useNavigate();
@@ -39,7 +39,7 @@ function ArtifactDetailsPage() {
       toast.success(t('delete.success'));
       await queryClient.invalidateQueries({ queryKey: artifactsQueryKey() });
       await queryClient.invalidateQueries({ queryKey: ['run', artifact.runId] });
-      void navigate({ to: '/runs/$runId', params: { runId: artifact.runId } });
+      void navigate({ to: '/workflows' });
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : t('delete.failed'));
     } finally {
@@ -58,10 +58,7 @@ function ArtifactDetailsPage() {
   return (
     <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
       <WorkspaceChrome
-        crumbs={[
-          { label: t('runs:title'), to: '/runs' },
-          { label: artifact.name },
-        ]}
+        crumbs={[{ label: artifact.name }]}
         actions={
           <div className="flex items-center gap-2">
             <Button type="button" variant="ghost" size="icon-compact" aria-label={t('delete.action', { name: artifact.name })} title={t('delete.action', { name: artifact.name })} onClick={() => { setDeleteError(''); setDeleteOpen(true); }}><Trash2 className="size-4" /></Button>
@@ -73,7 +70,7 @@ function ArtifactDetailsPage() {
       <div className="mt-4 flex flex-wrap items-center gap-3 text-[13px] text-muted-foreground">
         <CopyableId value={artifact.id} />
         <span>{artifact.workflowName}</span>
-        {artifact.runId ? <Link className="hover:text-foreground" to="/runs/$runId" params={{ runId: artifact.runId }}>{artifact.runId}</Link> : <span>{t('details.noRun')}</span>}
+        <span>{artifact.runId}</span>
         <span className="tabular-nums">{formatDateTime(artifact.createdAt, locale)}</span>
       </div>
       <div className="mt-6 overflow-auto rounded-lg border border-border bg-surface p-4">

@@ -14,7 +14,6 @@
     "mcpServers": "MCP 服务器",
     "plugins": "插件",
     "modelProviders": "模型提供商",
-    "runs": "运行记录",
     "usage": "用量",
     "settings": "设置",
     "agentResources": "Agent 资源",
@@ -22,7 +21,7 @@
   },
   "command": {
     "title": "命令菜单",
-    "placeholder": "搜索 Agent、工作流、运行记录…",
+    "placeholder": "搜索 Agent、工作流…",
     "empty": "没有匹配的目标。",
     "navigation": "导航",
     "create": "创建",
@@ -45,5 +44,6 @@
   "offline": {
     "message": "正在重新连接。本地编辑会保留在此设备上，直到连接恢复。"
   },
+  "breadcrumbs": "面包屑导航",
   "openNavigation": "打开导航"
 }

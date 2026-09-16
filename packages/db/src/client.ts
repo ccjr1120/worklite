@@ -25,7 +25,8 @@ exec /bin/sh -lc "$1"
 
 const SYSTEM_HELPER_PROMPT = `You are System Helper Chat, the WorkLite workspace setup assistant.
 Use only assigned Skill scripts for platform inspection and operations. For product capability questions, rely on the assigned Skill knowledge and the current workspace snapshot. Never invent configured resources, models, MCP tools, script results, or platform capabilities.
-For Workflow requests, call scripts/inspect-workspace.mjs first. Choose only node capabilities returned in capabilities.workflow.supportedNodeTypes and only workspace resource ids returned in the snapshot. Organize the request as a logical Workflow Plan with stable human-readable node keys; do not invent durable node ids or canvas positions. Use scripts/edit-workflow.mjs to apply the plan to a draft. The server owns normalization, ids, layout, port and configuration validation, workspace resource validation, DAG validation, and assistant revision history.
+The development profile uses Web port 3390, API port 3391, and Portkey Gateway port 3392. The local deployment profile uses Web port 23390, API port 23391, and Portkey Gateway port 23392. Do not suggest compatibility listeners for previous development ports.
+For Workflow requests, call scripts/inspect-workspace.mjs first. Choose only node capabilities returned in capabilities.workflow.supportedNodeTypes and only workspace resource ids returned in the snapshot. Organize graph changes as a logical Workflow Plan with stable human-readable node keys; do not invent durable node ids or canvas positions. Use scripts/edit-workflow.mjs to apply the plan to a draft. Scheduling is represented by one first-party worklite/timer node in the Workflow graph: configure its enabled and intervalSeconds fields, then publish the Workflow. A Workflow has at most one Timer, the minimum interval is 300 seconds, and there is no standalone schedule script. The built-in wechat-official-account/publish node accepts Markdown plus optional metadata and can save a draft or publish it. Login and final publication confirmation create durable pending actions: the Run and current Node Run wait for a human QR scan, survive API restarts, and resume the same node without rerunning successful predecessors. An enabled Timer cannot be combined with publish mode. Home boards are represented by one first-party worklite/dashboard node with a compositional layout of header, main, and footer element arrays; elements are text, count, metric, or list, and list elements own a titleKey plus display fields. Configure its data input and publish the Workflow, then run it successfully. Dashboard output uses the board format: an object or object array whose records back list elements, with row titles from each list element's titleKey and board titles from the Workflow name. Home has no global Workflow data source. Workflow Agent nodes expose only text or parsed JSON and never create Artifacts. Persist Artifact output only with the first-party worklite/artifact node: connect required data, configure name and text/markdown/json type; successful execution stores the Artifact and emits its reference, and multiple Artifact nodes are allowed. Workflow Run records expose ordered node execution logs and credential-safe failure reasons; Artifact presentation is omitted when the immutable Workflow version has no Artifact node. Published Workflows can be selected with an \`@Workflow\` mention in workspace chat; the remaining text becomes Workflow Input, execution creates a normal version-bound Run, and Draft Workflows are not runnable mentions. Eligible boards start in the presentation-only Uncategorized group, and users can store at most one database-backed category assignment per board in the API database; organization metadata never stores Workflow output. The server owns normalization, ids, layout, port and configuration validation, workspace resource validation, DAG validation, and assistant revision history.
 Never ask the user to paste API keys, tokens, passwords, or other secrets into conversation or script arguments. Provider credentials must be entered in the dedicated secure form.
 Before claiming a platform operation completed, wait for the script result. Keep responses concise and practical.`;
 
@@ -35,15 +36,20 @@ Use the exact scripts in this package for WorkLite platform operations.
 
 Use \`scripts/inspect-workspace.mjs\` before answering questions about configured resources or Workflow capabilities. Creation, settings, and navigation scripts accept exactly one JSON object argument. Every valid Agent script call executes automatically after server validation. Provider scripts never accept credentials; direct the user to the secure Provider form after creation.
 
-Workflow automation and the customizable Home Dashboard are WorkLite's primary product services. Standalone Agents and Workflows are independent. A Workflow never selects or references a standalone Agent or Agent version.
+The development profile uses Web port \`3390\`, API port \`3391\`, and Portkey Gateway port \`3392\`. The local deployment profile remains on Web port \`23390\`, API port \`23391\`, and Portkey Gateway port \`23392\`. Previous development ports have no compatibility listeners or redirects.
+
+Workflow automation and Home are WorkLite's primary product services. Standalone Agents and Workflows are independent. A Workflow never selects or references a standalone Agent or Agent version. Home has no global Workflow data source. A Workflow appears on Home only when its latest published version contains its one \`worklite/dashboard\` node, and its selected board reads that node's object or object-array output from the latest successful Run of that version. Boards render the Dashboard layout's header, main, and footer elements; list elements define row titles through \`titleKey\` and their display fields, and board titles use the Workflow name. Eligible boards default to Uncategorized; users can move each board into at most one database-backed category, and those records only organize references. Platform-defined Workflow boards are removed. Workflow scheduling is represented by one first-party \`worklite/timer\` node. The first-party node types are Input, Timer, Agent, Dashboard, and Artifact. The built-in \`wechat-official-account/publish\` plugin node accepts Markdown article input and optional metadata, then saves a draft or publishes through a product-owned Playwright browser session. Login and final confirmation are durable pending actions with QR-only client payloads; completed predecessors are not rerun on resume. Enabled Timer nodes may use draft mode but cannot use publish mode. Workflow Agent nodes own prompts and Skill/MCP selections, and their \`context\` input is optional. Artifact nodes own Artifact creation, and Agent and WeChat nodes never create Artifacts.
 
 Workflow node capabilities are dynamic. Always use the current snapshot's \`capabilities.workflow.supportedNodeTypes\` list, including each type, version, purpose, ports, and configuration schema. Do not assume a node exists when it is absent from the snapshot. A logical plan uses model-chosen node keys and edges between those keys; the server generates durable ids and positions.
 
-Runs is the single execution-history destination; an expanded Run exposes its Artifacts inline, and an individual Artifact detail is directly addressable without a standalone Artifact collection destination.
+Published Workflows are executable from workspace chat through \`@Workflow\` mentions. The remaining message text is the Workflow Input, execution uses the latest immutable published version, and Run progress and Artifacts appear in the chat transcript. Draft Workflows are excluded. This chat dispatcher does not turn Workflows into Agents or create Agent sessions.
 
-Workflow graphs are directed acyclic graphs. Conditions, loops, dynamic joins, parallel execution, webhook triggers, API triggers, notification nodes, and template selection are unavailable unless the current snapshot reports them as supported.
+Workflow List is the user-facing access point for per-Workflow Run history. Expanded Run rows expose ordered node execution logs with failure reasons. They expose Artifacts inline only when the immutable Workflow version contains an Artifact node, and an individual Artifact detail is directly addressable without a standalone Artifact collection destination.
+
+Workflow Agent context is optional; omit its edge to use the Workflow input as context. Workflow graphs are directed acyclic graphs. Conditions, loops, dynamic joins, parallel execution, webhook triggers, API triggers, notification nodes, and template selection are unavailable unless the current snapshot reports them as supported.
 
 Creating a Workflow creates a draft. Use \`scripts/edit-workflow.mjs\` to replace a draft graph from a logical plan; it fetches the current revision, submits an assistant edit, and returns the authoritative Workflow resource.
+Scheduling uses the graph Timer node with \`{ "enabled": true, "intervalSeconds": 300 }\`. A Workflow can contain at most one Timer, its interval must be at least 300 seconds, Timer changes become active only after the Workflow is published, and overlapping scheduled runs are prevented. There is no standalone schedule script; \`GET /workflows/:workflowId/schedule\` is read-only runtime status.
 
 Never call arbitrary URLs, access the database directly, delete resources, invoke terminal execution, or claim completion before the script result is returned. See \`references/contracts.md\` for input shapes.`;
 
@@ -218,41 +224,49 @@ print({ worklite: { type: 'settings', appearance: settings.appearance, locale: s
 import { call, exactKeys, input, oneOf, print } from './lib.mjs';
 const raw = input();
 exactKeys(raw, ['target']);
-const target = oneOf(raw.target, 'target', ['home', 'agents', 'system-helper-chat', 'skills', 'mcp-servers', 'model-providers', 'workflows', 'runs', 'settings-appearance', 'settings-usage', 'settings-audit-log']);
+const target = oneOf(raw.target, 'target', ['home', 'agents', 'system-helper-chat', 'skills', 'mcp-servers', 'model-providers', 'workflows', 'settings-appearance', 'settings-usage', 'settings-audit-log']);
 const action = await call('/navigation/resolve', { method: 'POST', body: { target } });
 print({ worklite: action });
 `],
   ['references/contracts.md', `# WorkLite platform script contracts
 
 - inspect-workspace.mjs: no arguments
+- inspect-workspace.mjs reports the active Gateway listener from the current profile; development defaults to port 3392 and local deployment defaults to port 23392.
 - create-provider.mjs: { "name": string, "protocol": "openai/chat" | "openai/responses" | "codex/responses" | "deepseek/chat", "baseURL": string, "models": string[] }
 - create-agent.mjs: { "name": string, "responsibility": string, "systemPrompt": string, "providerId": string | null, "model": string, "skillIds": string[], "mcpServerIds": string[] }
 - create-skill.mjs: { "name": string, "source": "online", "files": [{ "path": string, "content": string }] }
 - create-mcp-server.mjs: { "name": string, "endpoint": string }
 - create-workflow.mjs: { "name": string }. Creates a Workflow draft and returns its resource route.
-- edit-workflow.mjs: { "workflowId": string, "sourceInstruction": string, "plan": WorkflowPlan }. Fetches the current draft revision and applies a server-normalized assistant plan.
+- edit-workflow.mjs: { "workflowId": string, "sourceInstruction": string, "plan": WorkflowPlan }. Fetches the current draft revision and applies a server-normalized assistant plan. Timer and Dashboard configuration belongs in the Workflow graph, not in a standalone script.
 
 ## Workflow capability contract
 
-Workflows never reference standalone Agent or AgentVersion records. A Workflow Agent node is embedded and self-contained.
+Workflows never reference standalone Agent or AgentVersion records. Published Workflows may be invoked from workspace chat with an \`@Workflow\` mention; the remaining text is supplied as Workflow Input and the existing latest published WorkflowVersion Run endpoint is used. Draft Workflows are not runnable mentions. A Workflow Agent node is embedded and self-contained; its optional \`outputFormat\` selects \`text\` (default) or \`json\`, and JSON mode requires valid parseable final output. Detailed Run responses include \`hasArtifactNode\`, ordered \`nodeRuns\`, and each node run's status, timing, retry count, and failure text.
 
-The current capability contract is returned by inspect-workspace.mjs at \`capabilities.workflow.supportedNodeTypes\`. Each entry includes its public type, version, purpose, input and output ports, and configuration schema. Use only entries present in that snapshot.
+The current capability contract is returned by inspect-workspace.mjs at \`capabilities.workflow.supportedNodeTypes\`. Each entry includes its public type, version, purpose, input and output ports, and configuration schema. Use only entries present in that snapshot. An Artifact node requires a \`data\` input and owns a non-empty \`name\` plus \`text\`, \`markdown\`, or \`json\` type; a successful Run stores its Artifact and its node output is an Artifact reference. Multiple Artifact nodes are allowed. The \`wechat-official-account/publish\` node requires Markdown on \`article\`, accepts optional JSON \`metadata\`, and configures \`accountId\` plus \`draft\` or \`publish\` mode. Human login and final publish confirmation suspend the Run as \`waiting_for_input\`; QR refresh continues the same Node Run, and the node never creates an Artifact. Do not combine an enabled Timer with publish mode.
 
-A WorkflowPlan has this shape:
+A WorkflowPlan has this shape (values are illustrative and must satisfy the current capability schemas):
 \`\`\`json
 {
-  "nodes": [{ "key": "input", "type": "worklite/input", "config": {} }],
-  "edges": [{ "source": "input", "target": "agent", "targetPort": "context" }],
-  "input": { "example": "optional example" },
+  "nodes": [
+    { "key": "timer", "type": "worklite/timer", "config": { "enabled": true, "intervalSeconds": 300 } },
+    { "key": "agent", "type": "worklite/agent", "config": { "model": "provider/model", "systemPrompt": "Describe the task.", "outputFormat": "json", "skillIds": [], "mcpServerIds": [] } },
+    { "key": "artifact", "type": "worklite/artifact", "config": { "name": "Result", "type": "json" } },
+    { "key": "wechat", "type": "wechat-official-account/publish", "config": { "accountId": "wechat_official_account_personal", "mode": "draft" } }
+  ],
+  "edges": [],
+  "input": {},
   "defaults": { "errorPolicy": "stop" }
 }
 \`\`\`
 Node keys are local to the plan. Omit node ids and positions; the server generates both. Omit ports only when the capability has an unambiguous output or required input. The server validates node types, configuration, ports, workspace Skill/MCP references, and DAG constraints, then records an assistant revision.
 
-Workflow graphs are directed acyclic graphs. Conditions, loops, dynamic joins, parallel execution, webhook triggers, API triggers, notification nodes, and template selection are unavailable unless the current snapshot reports them as supported. Use edit-workflow.mjs for Workflow graph creation and later edits; never write the database directly.
+Workflow Agent context is optional; omit its edge to use the Workflow input as context. Workflow graphs are directed acyclic graphs. Conditions, loops, dynamic joins, parallel execution, webhook triggers, API triggers, notification nodes, and template selection are unavailable unless the current snapshot reports them as supported. Use edit-workflow.mjs for Workflow graph creation and later edits; never write the database directly.
+
+Scheduling is part of the immutable Workflow graph through the first-party \`worklite/timer\` node. Home board eligibility is part of the immutable graph through the first-party \`worklite/dashboard\` node: use at most one, connect its required \`data\` input, configure a layout of header, main, and footer element arrays (text, count, metric, and list kinds, where list elements own a \`titleKey\` matching their display-field keys), publish, and produce a successful Run. A Workflow has at most one Timer, the minimum interval is 300 seconds, Timer changes activate after Publish, and overlapping scheduled runs are prevented. There is no standalone schedule mutation script or API; \`GET /workflows/:workflowId/schedule\` exposes read-only runtime status. Home has no global Workflow data source; platform-defined Workflow boards are removed, and only a published Dashboard-node Workflow with a successful Dashboard output can be selected. Home category assignment is a database-backed organization reference with Uncategorized as the presentation default and at most one category per board; no Workflow output is persisted and no standalone category script is provided.
 
 - update-settings.mjs: { "appearance"?: "system" | "light" | "dark", "locale"?: "en" | "zh-CN" }
-- navigate.mjs: { "target": "home" | "agents" | "system-helper-chat" | "skills" | "mcp-servers" | "model-providers" | "workflows" | "runs" | "settings-appearance" | "settings-usage" | "settings-audit-log" }
+- navigate.mjs: { "target": "home" | "agents" | "system-helper-chat" | "skills" | "mcp-servers" | "model-providers" | "workflows" | "settings-appearance" | "settings-usage" | "settings-audit-log" }
 `],
 ];
 
@@ -384,6 +398,16 @@ export async function initializeDatabase(db: Database): Promise<void> {
     }
   }
 
+  db.$client.exec(`
+    UPDATE workflow_pending_actions
+      SET status = 'expired', qr_code = NULL, updated_at = unixepoch() * 1000
+      WHERE status = 'pending' AND run_id IN (SELECT id FROM workflow_runs WHERE status = 'waiting_for_input');
+    UPDATE wechat_official_accounts
+      SET status = CASE WHEN encrypted_storage_state IS NULL THEN 'disconnected' ELSE status END,
+          qr_code = NULL, qr_expires_at = NULL, updated_at = unixepoch() * 1000
+      WHERE status = 'qr_pending';
+  `);
+
 
   db.$client.exec(`
     DELETE FROM agents WHERE id = 'agt_agent_chat';
@@ -397,6 +421,14 @@ export async function initializeDatabase(db: Database): Promise<void> {
       SELECT 'codex-cli-chat', workspaces.id, 'Codex CLI Chat', 'Chat with Codex CLI in the API workspace.', 'codex'
       FROM workspaces WHERE workspaces.slug = 'personal'
       ON CONFLICT (id) DO UPDATE SET name = excluded.name, description = excluded.description;
+    INSERT INTO plugins (id, workspace_id, name, description, command)
+      SELECT 'wechat-official-account', workspaces.id, 'WeChat Official Account', 'Publish Workflow articles through a human-confirmed browser session.', 'node'
+      FROM workspaces WHERE workspaces.slug = 'personal'
+      ON CONFLICT (id) DO UPDATE SET name = excluded.name, description = excluded.description;
+    INSERT INTO wechat_official_accounts (id, workspace_id, display_name)
+      SELECT 'wechat_official_account_personal', workspaces.id, 'Personal Official Account'
+      FROM workspaces WHERE workspaces.slug = 'personal'
+      ON CONFLICT (id) DO NOTHING;
     INSERT INTO agents (id, workspace_id, kind, name, responsibility, system_prompt, model)
       SELECT 'agt_system_helper_chat', workspaces.id, 'system', 'System Helper Chat', 'Configure workspace AI resources through guided conversation', '${SYSTEM_HELPER_PROMPT.replaceAll("'", "''")}', ''
       FROM workspaces WHERE workspaces.slug = 'personal'

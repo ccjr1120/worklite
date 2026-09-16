@@ -33,7 +33,7 @@ const HELPER_BUILTIN_TOOLS = [
 ] as const;
 
 const WORKLITE_NAVIGATION_ROUTES = {
-  home: '/home', agents: '/agents', 'system-helper-chat': '/agents/agt_system_helper_chat', skills: '/skills', 'mcp-servers': '/mcp-servers', 'model-providers': '/model-providers', workflows: '/workflows', runs: '/runs', 'settings-appearance': '/settings/appearance', 'settings-usage': '/settings/usage', 'settings-audit-log': '/settings/audit-log',
+  home: '/home', agents: '/agents', 'system-helper-chat': '/agents/agt_system_helper_chat', skills: '/skills', 'mcp-servers': '/mcp-servers', 'model-providers': '/model-providers', workflows: '/workflows', 'settings-appearance': '/settings/appearance', 'settings-usage': '/settings/usage', 'settings-audit-log': '/settings/audit-log',
 } as const satisfies Record<WorkliteNavigationTarget, string>;
 
 @Injectable()
@@ -120,6 +120,7 @@ export class AgentExecutionsService {
     requestedMcpServerIds: string[],
     signal: AbortSignal,
     onTextDelta?: (delta: string) => void | Promise<void>,
+    jsonOutput = false,
   ): Promise<string> {
     const selectedSkillIds = [...new Set(requestedSkillIds)];
     const skillRows = selectedSkillIds.length === 0
@@ -134,7 +135,7 @@ export class AgentExecutionsService {
     const effectiveSystemPrompt = [
       systemPrompt.trim(),
       skillInstructions ? `Assigned Skill instructions:\n\n${skillInstructions}` : '',
-      availableSkillScripts.length > 0 ? 'Request at most one tool at a time. Every valid request executes immediately without user approval.' : '',
+      availableSkillScripts.length > 0 ? 'Skill scripts execute immediately without user approval.' : '',
       scriptList ? `Assigned executable Skill scripts:\n${scriptList}\nUse skill_script only with an exact listed Skill id and script path.` : '',
     ].filter(Boolean).join('\n\n');
     const runtime = await this.resources.publicModelRuntime(workspaceId, model);
@@ -145,7 +146,7 @@ export class AgentExecutionsService {
 
     for (let round = 0; round <= MAX_WORKFLOW_TOOL_ROUNDS; round += 1) {
       signal.throwIfAborted();
-      const result = await createModelGateway().generateAgentStep({ provider: runtime.provider, model: runtime.model, systemPrompt: effectiveSystemPrompt, messages, skillScripts: availableSkillScripts, mcpTools, maxToolRounds: MAX_WORKFLOW_TOOL_ROUNDS, abortSignal: signal, onTextDelta });
+      const result = await createModelGateway().generateAgentStep({ provider: runtime.provider, model: runtime.model, systemPrompt: effectiveSystemPrompt, jsonOutput, messages, skillScripts: availableSkillScripts, mcpTools, maxToolRounds: MAX_WORKFLOW_TOOL_ROUNDS, abortSignal: signal, onTextDelta });
       messages.push(...result.responseMessages);
       if (result.toolCalls.length === 0) {
         const output = result.text.trim();
@@ -153,31 +154,31 @@ export class AgentExecutionsService {
         return output;
       }
       if (round === MAX_WORKFLOW_TOOL_ROUNDS) throw new Error('The Workflow Agent node reached its tool-round limit.');
-      if (result.toolCalls.length !== 1) throw new BadRequestException('Workflow Agent nodes may request only one tool at a time.');
-      const call = result.toolCalls[0];
-      if (call.toolName === 'skill_script') {
-        const skill = assignedSkills.find((item) => item.id === call.skillId);
-        const script = skill?.files.find((file) => file.path === call.scriptPath && file.path.startsWith('scripts/') && file.content.startsWith('#!'));
-        if (!skill || !script) throw new BadRequestException('The Workflow Agent requested an unavailable Skill script.');
-        const started = await this.skillScripts.start(skill.files, script.path, call.arguments ?? []);
-        const cancel = () => { void this.skillScripts.cancel(started.id).catch(() => undefined); };
-        signal.addEventListener('abort', cancel, { once: true });
-        try {
-          const completed = await this.skillScripts.wait(started.id);
-          signal.throwIfAborted();
-          const succeeded = completed.execution.status === 'succeeded';
-          const value = completed.output || (succeeded ? 'Skill script completed without output.' : `Skill script failed with exit code ${completed.execution.exitCode ?? 'unknown'}.`);
-          messages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: call.toolCallId, toolName: call.toolName, output: { type: succeeded ? 'text' : 'error-text', value } }] });
-        } finally {
-          signal.removeEventListener('abort', cancel);
+      for (const call of result.toolCalls) {
+        if (call.toolName === 'skill_script') {
+          const skill = assignedSkills.find((item) => item.id === call.skillId);
+          const script = skill?.files.find((file) => file.path === call.scriptPath && file.path.startsWith('scripts/') && file.content.startsWith('#!'));
+          if (!skill || !script) throw new BadRequestException('The Workflow Agent requested an unavailable Skill script.');
+          const started = await this.skillScripts.start(skill.files, script.path, call.arguments ?? []);
+          const cancel = () => { void this.skillScripts.cancel(started.id).catch(() => undefined); };
+          signal.addEventListener('abort', cancel, { once: true });
+          try {
+            const completed = await this.skillScripts.wait(started.id);
+            signal.throwIfAborted();
+            const succeeded = completed.execution.status === 'succeeded';
+            const value = completed.output || (succeeded ? 'Skill script completed without output.' : `Skill script failed with exit code ${completed.execution.exitCode ?? 'unknown'}.`);
+            messages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: call.toolCallId, toolName: call.toolName, output: { type: succeeded ? 'text' : 'error-text', value } }] });
+          } finally {
+            signal.removeEventListener('abort', cancel);
+          }
+          continue;
         }
-        continue;
+        const mcpTool = mcpTools.find((tool) => tool.name === call.toolName);
+        const mcpRuntime = mcpTool ? mcpRuntimes.find((item) => item.id === mcpTool.serverId) : undefined;
+        if (!mcpTool || !mcpRuntime) throw new BadRequestException('The Workflow Agent requested an unavailable MCP tool.');
+        const value = await this.mcpRuntime.call(mcpRuntime, mcpTool.remoteName, call.input, signal);
+        messages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: call.toolCallId, toolName: call.toolName, output: { type: 'text', value } }] });
       }
-      const mcpTool = mcpTools.find((tool) => tool.name === call.toolName);
-      const mcpRuntime = mcpTool ? mcpRuntimes.find((item) => item.id === mcpTool.serverId) : undefined;
-      if (!mcpTool || !mcpRuntime) throw new BadRequestException('The Workflow Agent requested an unavailable MCP tool.');
-      const value = await this.mcpRuntime.call(mcpRuntime, mcpTool.remoteName, call.input, signal);
-      messages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: call.toolCallId, toolName: call.toolName, output: { type: 'text', value } }] });
     }
     throw new Error('The Workflow Agent node did not complete.');
   }

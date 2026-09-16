@@ -32,6 +32,8 @@ export type NodeExecutionContext = {
   workflowRunId: string;
   workflowVersionId: string;
   nodeId: string;
+  nodeRunId: string;
+  pendingActionId: string;
   variables: Readonly<Record<string, unknown>>;
 };
 
@@ -42,10 +44,26 @@ export type NodeExecutionRequest = {
   signal: AbortSignal;
 };
 
-export type NodeExecutionResult = {
+export type CompletedNodeExecutionResult = {
+  status?: 'completed';
   output: unknown;
   artifacts?: ArtifactRef[];
 };
+
+export type PendingNodeExecutionResult = {
+  status: 'waiting_for_input';
+  pendingAction: {
+    id: string;
+    type: 'wechat_login' | 'wechat_publish_confirmation';
+    title: string;
+    description: string;
+    qrCode: string | null;
+    expiresAt: Date | null;
+    externalOperationId?: string;
+  };
+};
+
+export type NodeExecutionResult = CompletedNodeExecutionResult | PendingNodeExecutionResult;
 
 export type NodeTypeDefinition = {
   id: string;
@@ -83,37 +101,97 @@ const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     configSchema: { type: 'object' },
   },
   {
-    id: 'worklite/text',
+    id: 'worklite/timer',
     version: '1',
-    name: 'Text',
-    purpose: 'Provide editable text such as a system prompt.',
+    name: 'Timer',
+    purpose: 'Trigger Workflow runs at one fixed interval.',
     inputs: [],
-    outputs: [{ name: 'output', required: false, dataType: 'string', multiple: true }],
-    inputSchema: { type: 'string' },
-    outputSchema: { type: 'string' },
-    configSchema: { type: 'object', properties: { text: { type: 'string' } } },
+    outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
+    inputSchema: { type: 'object' },
+    outputSchema: { type: 'object' },
+    configSchema: {
+      type: 'object',
+      required: ['enabled', 'intervalSeconds'],
+      properties: {
+        enabled: { type: 'boolean' },
+        intervalSeconds: { type: 'number', minimum: 300 },
+      },
+    },
   },
   {
-    id: 'worklite/skill-set',
+    id: 'worklite/dashboard',
     version: '1',
-    name: 'Skill Set',
-    purpose: 'Select workspace Skills for an embedded Agent input.',
-    inputs: [],
-    outputs: [{ name: 'output', required: false, dataType: 'skill-set', multiple: true }],
-    inputSchema: { type: 'object' },
-    outputSchema: { type: 'object', required: ['type', 'skillIds'] },
-    configSchema: { type: 'object', required: ['skillIds'], properties: { skillIds: { type: 'array', items: { type: 'string' } } } },
+    name: 'Dashboard',
+    purpose: 'Publish Workflow output as a Home board.',
+    inputs: [{ name: 'data', required: true, dataType: 'json', multiple: false }],
+    outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
+    inputSchema: {},
+    outputSchema: {},
+    configSchema: {
+      type: 'object',
+      required: ['layout'],
+      properties: {
+        layout: {
+          type: 'object',
+          required: ['header', 'main', 'footer'],
+          properties: {
+            header: { type: 'array' },
+            main: { type: 'array' },
+            footer: { type: 'array' },
+          },
+        },
+      },
+    },
+  },
+  {
+    id: 'worklite/artifact',
+    version: '1',
+    name: 'Artifact',
+    purpose: 'Persist successful run data as a textual Artifact and expose its reference.',
+    inputs: [{ name: 'data', required: true, dataType: 'json', multiple: false }],
+    outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
+    inputSchema: {},
+    outputSchema: { type: 'object' },
+    configSchema: {
+      type: 'object',
+      required: ['name', 'type'],
+      properties: {
+        name: { type: 'string', minLength: 1 },
+        type: { type: 'string', enum: ['text', 'markdown', 'json'] },
+      },
+    },
+  },
+  {
+    id: 'wechat-official-account/publish',
+    version: '1',
+    name: 'WeChat Official Account',
+    purpose: 'Save an article as a WeChat Official Account draft or publish it with human QR confirmation.',
+    inputs: [
+      { name: 'article', required: true, dataType: 'string', multiple: false },
+      { name: 'metadata', required: false, dataType: 'json', multiple: false },
+    ],
+    outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
+    inputSchema: { type: 'object', required: ['article'], properties: { article: { type: 'string' }, metadata: { type: 'object' } } },
+    outputSchema: { type: 'object' },
+    configSchema: {
+      type: 'object',
+      required: ['accountId', 'mode'],
+      properties: {
+        accountId: { type: 'string', minLength: 1 },
+        mode: { type: 'string', enum: ['draft', 'publish'] },
+      },
+    },
   },
   {
     id: 'worklite/agent',
     version: '1',
     name: 'Agent',
     purpose: 'Embed a public model id, system prompt, Skill ids, and MCP server ids.',
-    inputs: [{ name: 'context', required: true, dataType: 'json', multiple: false }],
+    inputs: [{ name: 'context', required: false, dataType: 'json', multiple: false }],
     outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
-    inputSchema: { type: 'object', required: ['context'] },
+    inputSchema: { type: 'object' },
     outputSchema: {},
-    configSchema: { type: 'object', required: ['model', 'systemPrompt', 'skillIds', 'mcpServerIds'], properties: { model: { type: 'string' }, systemPrompt: { type: 'string' }, skillIds: { type: 'array', items: { type: 'string' } }, mcpServerIds: { type: 'array', items: { type: 'string' } } } },
+    configSchema: { type: 'object', required: ['model', 'systemPrompt', 'skillIds', 'mcpServerIds'], properties: { model: { type: 'string' }, systemPrompt: { type: 'string' }, outputFormat: { type: 'string', enum: ['text', 'json'] }, skillIds: { type: 'array', items: { type: 'string' } }, mcpServerIds: { type: 'array', items: { type: 'string' } } } },
   },
 ];
 

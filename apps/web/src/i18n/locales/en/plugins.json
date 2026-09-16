@@ -47,5 +47,19 @@
     "botId": "Bot ID",
     "conversations": "Mapped conversations",
     "notConnected": "Not connected"
+  },
+  "officialAccount": {
+    "title": "Official Account session",
+    "description": "Connect the account used by Workflow publishing. Browser storage stays encrypted on the API host.",
+    "login": "Start login",
+    "refresh": "Refresh QR",
+    "disconnect": "Disconnect",
+    "loginFailed": "Official Account login could not be started.",
+    "disconnectFailed": "The Official Account session could not be disconnected.",
+    "qrAlt": "WeChat Official Account login QR code",
+    "scan": "Scan with the account administrator WeChat app.",
+    "account": "Account",
+    "lastVerified": "Last verified",
+    "never": "Never"
   }
 }

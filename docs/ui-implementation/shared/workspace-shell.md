@@ -4,11 +4,11 @@
 
 Use a persistent `232px` sidebar, a `52px` context bar, fluid main content, an optional `360px` inspector, and an optional resizable bottom run panel. The sidebar collapses to `56px` only between `768px` and `1023px`.
 
-Primary navigation is grouped and single-level. It contains seven direct destinations: **Workspace** contains `Home`, `Workflows`, and `Runs`; **Capabilities** contains `Agents` and `Plugins`; **Configuration** contains `Providers` and `Settings`.
+Primary navigation is grouped and single-level. It contains six direct destinations: **Workspace** contains `Home` and `Workflows`; **Capabilities** contains `Agents` and `Plugins`; **Configuration** contains `Providers` and `Settings`.
 
-Providers owns the Model Providers and Portkey Gateway views in one page context. Agents is the single capability destination for Agent, Skills, and MCP Server page-level tabs; Plugins remains its peer. Runs is the single execution-history destination. Expanded Run cards expose that run’s Artifacts inline, while Run details and direct Artifact details provide deeper inspection. At `1024px` and above, the expanded sidebar shows group labels and all destinations. From `768px` to `1023px`, the compact icon rail uses group separators, direct icons, and tooltips. The mobile navigation drawer uses the same grouped destinations. Usage, audit log, and appearance are reached from Settings. System Helper Chat is available throughout the workspace shell, presented prominently on Home and as a floating control elsewhere. Counts indicate actionable state only. The WorkLite mark is at the top and the personal preferences menu is at the bottom. The expanded preferences control keeps its neutral status label and shows the application version as a right-aligned monospace label; the compact rail exposes the same version inside the preferences menu.
+Providers owns the Model Providers and Portkey Gateway views in one page context. Agents is the single capability destination for Agent, Skills, and MCP Server page-level tabs; Plugins remains its peer. Workflow List owns execution-history access through its per-Workflow Run records dialog, whose expanded Run rows expose Artifacts inline; direct Artifact details provide deeper inspection. At `1024px` and above, the expanded sidebar shows group labels and all destinations. From `768px` to `1023px`, the compact icon rail uses group separators, direct icons, and tooltips. The mobile navigation drawer uses the same grouped destinations. Usage, audit log, and appearance are reached from Settings. System Helper Chat is available throughout the workspace shell, presented prominently on Home and as a floating control elsewhere. Counts indicate actionable state only. The WorkLite mark is at the top and the personal preferences menu is at the bottom. The expanded preferences control keeps its neutral status label and shows the application version as a right-aligned monospace label; the compact rail exposes the same version inside the preferences menu.
 
-The selected navigation item uses `brand-subtle`, primary text, and a narrow brand indicator. The selected resource link represents its route family: Skills and MCP Server routes select Agents, while Runs and Artifact routes select Runs. Personal preferences stay in the bottom menu.
+The selected navigation item uses `brand-subtle`, primary text, and a narrow brand indicator. The selected resource link represents its route family: Skills and MCP Server routes select Agents, while Artifact routes select Workflows. Personal preferences stay in the bottom menu.
 
 ## Context Bar
 
@@ -18,7 +18,7 @@ Place navigation and breadcrumb context on the left. Place command search, state
 
 The inspector opens only for selected contextual content, keeps its header and essential actions available, scrolls internally, and does not discard unsaved work when closed. It may expand to `440px` for structured configuration.
 
-The workspace shell owns the active conversation execution identifier, the built-in System Helper execution and transient composer draft. Other Agents are selected per message with `@` mentions. Messages, plugin process state, script requests, automatic execution state, and results remain server-owned. Page navigation closes the visible conversation without cancelling work; a browser reload fetches the active execution identifier and selected target saved by the browser.
+The workspace shell owns the active conversation execution identifier, the built-in System Helper execution and transient composer draft. Other Agents and published Workflows are selected per message with `@` mentions. Agent selections create Agent turns; Workflow selections create normal Workflow Runs and remain independent from the Agent session. Messages, plugin process state, script requests, automatic execution state, and results remain server-owned. Page navigation closes the visible conversation without cancelling work; a browser reload fetches the active execution identifier and selected target saved by the browser.
 
 Place the System Helper Chat interaction surface at the bottom of the content region on every workspace page. Home keeps the single-line input visible by default. Other pages show only a draggable floating Agent icon in the lower-right corner by default; clicking it opens the same raised conversation panel above the current page and focuses the input. Clicking outside an expanded Chat surface closes it while Chat-owned popup menus remain usable. Keep the icon inside the viewport safe area and preserve a keyboard-accessible open action without a visible Tooltip. Center the complete expanded surface and cap it at `1200px`. With a bound provider the expanded composer contains the single-line input and one stable icon-button target without a repeated visible System Helper Chat title; the target shows Send while idle and Stop while the active turn is running. The input remains editable in both states. Without a bound provider the expanded surface contains a single direct link to `/agents/agt_system_helper_chat` instead of an input or send control. Home and other pages use the same personal session, expanded dimensions, and compact execution summary.
 
@@ -29,6 +29,14 @@ The bottom panel defaults to about `240px`, resizes, and collapses to a status s
 `Command+K` or `Control+K` opens grouped search, recent destinations, navigation and safe creation commands. Destructive actions are excluded. Opening System Helper through the command menu changes the shell-owned conversation state through typed route search and must not rely on an ignored URL flag. The user menu contains the personal workspace identity, Appearance, Keyboard shortcuts, and the application version. Appearance includes the personal theme and language preferences.
 
 ## Changelog
+
+### 2026-09-15
+
+- Added published Workflow mentions to the embedded chat, including keyboard selection, version-bound Run progress, cancellation, failure feedback, and Artifact links.
+
+### 2026-09-15
+
+- Removed Runs from primary navigation and made Workflow List the access point for per-Workflow Run records; Artifact contexts now select Workflows.
 
 ### 2026-09-14
 

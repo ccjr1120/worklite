@@ -10,6 +10,10 @@ import type {
   CreateAgentRequest,
   CreateRunRequest,
   CreateWorkflowRequest,
+  CreateHomeBoardCategoryRequest,
+  UpdateHomeBoardCategoryRequest,
+  AssignHomeBoardRequest,
+  HomeBoardPreferencesView,
   ApplyWorkflowDraftOperationsRequest,
   WorkflowDetailView,
   WorkflowVersionView,
@@ -51,9 +55,6 @@ import type {
   PluginView,
   PluginTestResult,
   UpdatePluginRequest,
-  DashboardView,
-  UpdateDashboardRequest,
-  UpsertWorkflowScheduleRequest,
   WorkflowScheduleView,
   ImportWorkflowRequest,
   PortableWorkflowDocument,
@@ -105,6 +106,10 @@ export function apiPatch<T>(path: string, body: unknown): Promise<T> {
   return apiRequest<T>(path, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
+export function apiPut<T>(path: string, body: unknown): Promise<T> {
+  return apiRequest<T>(path, { method: 'PUT', body: JSON.stringify(body) });
+}
+
 export function apiDelete<T = void>(path: string): Promise<T> {
   return apiRequest<T>(path, { method: 'DELETE' });
 }
@@ -116,6 +121,8 @@ export const api = {
   testPlugin: (pluginId: string) => apiPost<PluginTestResult>(`/api/plugins/${encodeURIComponent(pluginId)}/test`),
   startWechatLogin: (pluginId: string) => apiPost<PluginView['wechat']>(`/api/plugins/${encodeURIComponent(pluginId)}/wechat/login`),
   disconnectWechat: (pluginId: string) => apiPost<PluginView['wechat']>(`/api/plugins/${encodeURIComponent(pluginId)}/wechat/disconnect`),
+  startOfficialAccountLogin: (pluginId: string) => apiPost<NonNullable<PluginView['officialAccount']>>(`/api/plugins/${encodeURIComponent(pluginId)}/official-account/login`),
+  disconnectOfficialAccount: (pluginId: string) => apiPost<NonNullable<PluginView['officialAccount']>>(`/api/plugins/${encodeURIComponent(pluginId)}/official-account/disconnect`),
   command: (commandId: string) => apiGet<CommandExecutionView>(`/api/commands/${encodeURIComponent(commandId)}`),
   cancelCommand: (commandId: string) => apiPost<CommandExecutionView>(`/api/commands/${encodeURIComponent(commandId)}/cancel`),
   commandEventsUrl: (commandId: string) => `/api/commands/${encodeURIComponent(commandId)}/events`,
@@ -153,12 +160,14 @@ export const api = {
   refreshCodexAccount: (accountId: string) => apiPost<CodexAuthStatus>(`/api/portkey-gateway/codex/accounts/${encodeURIComponent(accountId)}/refresh`),
   deleteCodexAccount: (accountId: string) => apiDelete<CodexAuthStatus>(`/api/portkey-gateway/codex/accounts/${encodeURIComponent(accountId)}`),
   portkeyGatewayStats: (window: PortkeyGatewayStatsWindow = '24h') => apiGet<PortkeyGatewayStats>(`/api/portkey-gateway/stats?window=${window}`),
-  dashboard: () => apiGet<DashboardView>('/api/dashboard'),
-  updateDashboard: (input: UpdateDashboardRequest) => apiRequest<DashboardView>('/api/dashboard', { method: 'PUT', body: JSON.stringify(input), headers: { 'Content-Type': 'application/json' } }),
-  updateDashboardSchedule: (input: UpsertWorkflowScheduleRequest) => apiRequest<WorkflowScheduleView>('/api/dashboard/schedule', { method: 'PUT', body: JSON.stringify(input), headers: { 'Content-Type': 'application/json' } }),
-  runDashboard: () => apiPost<{ runId: string }>('/api/dashboard/run'),
   workflows: (_workspace?: string) => apiGet<WorkflowView[]>('/api/workflows'),
+  homeBoardPreferences: (_workspace?: string) => apiGet<HomeBoardPreferencesView>('/api/home/board-categories'),
+  createHomeBoardCategory: (_workspace: string | undefined, input: CreateHomeBoardCategoryRequest) => apiPost<HomeBoardPreferencesView>('/api/home/board-categories', input),
+  renameHomeBoardCategory: (_workspace: string | undefined, categoryId: string, input: UpdateHomeBoardCategoryRequest) => apiPatch<HomeBoardPreferencesView>(`/api/home/board-categories/${encodeURIComponent(categoryId)}`, input),
+  deleteHomeBoardCategory: (_workspace: string | undefined, categoryId: string) => apiDelete<HomeBoardPreferencesView>(`/api/home/board-categories/${encodeURIComponent(categoryId)}`),
+  assignHomeBoard: (_workspace: string | undefined, input: AssignHomeBoardRequest) => apiPut<HomeBoardPreferencesView>('/api/home/board-assignments', input),
   workflow: (_workspace: string | undefined, workflowId: string) => apiGet<WorkflowDetailView>(`/api/workflows/${encodeURIComponent(workflowId)}`),
+  workflowSchedule: (_workspace: string | undefined, workflowId: string) => apiGet<WorkflowScheduleView | null>(`/api/workflows/${encodeURIComponent(workflowId)}/schedule`),
   createWorkflow: (_workspace: string | undefined, input: CreateWorkflowRequest) => apiPost<WorkflowDetailView>('/api/workflows', input),
   importWorkflow: (_workspace: string | undefined, input: ImportWorkflowRequest) => apiPost<WorkflowDetailView>('/api/workflows/import', input),
   exportWorkflow: (_workspace: string | undefined, workflowId: string) => apiGet<PortableWorkflowDocument>(`/api/workflows/${encodeURIComponent(workflowId)}/export`),
@@ -200,6 +209,7 @@ export const api = {
   runEventsUrl: (runId: string) => `/api/runs/${encodeURIComponent(runId)}/events`,
   createRun: (workflowVersionId: string, input: CreateRunRequest) => apiPost<{ runId: string }>(`/api/workflow-versions/${encodeURIComponent(workflowVersionId)}/runs`, input),
   cancelRun: (_workspace: string | undefined, runId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/cancel`),
+  refreshRunPendingAction: (_workspace: string | undefined, runId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/pending-action/refresh`),
 };
 
 export function parseCommandEvent(value: string): CommandExecutionEvent {

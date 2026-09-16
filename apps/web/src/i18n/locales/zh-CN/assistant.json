@@ -26,7 +26,7 @@
   },
   "composer": {
     "label": "向 System Helper Chat 发送消息",
-    "placeholder": "询问 WorkLite，或输入 @ 将任务交给 Agent...",
+    "placeholder": "Ask WorkLite or type @ to run an Agent or Workflow...",
     "followUpPlaceholder": "向 {{agent}} 发送消息...",
     "send": "发送消息",
     "stop": "中断当前回复",
@@ -57,7 +57,8 @@
     "completed": "已完成",
     "cancelled": "已中断",
     "failed": "失败",
-    "reconnecting": "正在重新连接"
+    "reconnecting": "正在重新连接",
+    "queued": "Queued"
   },
   "execution": {
     "loading": "正在加载服务端执行",
@@ -81,9 +82,11 @@
     "none": "无"
   },
   "mentions": {
-    "menuLabel": "可用 Agent",
-    "empty": "没有匹配且已配置的 Agent。",
-    "remove": "移除 Agent 提及"
+    "menuLabel": "Available Agents and Workflows",
+    "empty": "No matching configured Agents or published Workflows.",
+    "remove": "移除 Agent 提及",
+    "removeWorkflow": "Remove Workflow mention",
+    "workflow": "Published Workflow"
   },
   "subAgents": {
     "label": "子 Agent",
@@ -170,5 +173,13 @@
     "label": "Agent 工作区视图",
     "chat": "对话",
     "configuration": "配置"
+  },
+  "workflowRun": {
+    "requestFailed": "The Workflow Run could not be created.",
+    "cancelFailed": "The Workflow Run could not be cancelled.",
+    "emptyInput": "No input",
+    "currentStep": "当前节点：{{step}}",
+    "waitingForConfirmation": "等待人工确认",
+    "openRunHistory": "请打开该工作流的运行记录扫码确认。"
   }
 }

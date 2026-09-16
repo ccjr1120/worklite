@@ -22,7 +22,7 @@ Define unconfigured, testing, connected, invalid credentials, unavailable provid
 
 ## Portkey Gateway
 
-The full-width Portkey Gateway section shows the fixed loopback port `4547`, current process status, listener address, and credential-safe startup failure details. Gateway startup, shutdown, and unexpected-exit recovery are automatic; the section has no lifecycle mutation controls. Integration details are collapsed by default to keep the page compact and include the `/v1` Base URL, no-key guidance, namespaced models, and a connection example. Model chips and the connection example use the actual `<providerName>/<modelId>` request value; internal Provider ids are not exposed as model prefixes. The section preserves stable loading, starting, running, unavailable, and port-conflict states in both themes.
+The full-width Portkey Gateway section shows the configured loopback listener, using development port `3392` by default, together with current process status and credential-safe startup failure details. Gateway startup, shutdown, and unexpected-exit recovery are automatic; the section has no lifecycle mutation controls. Integration details are collapsed by default to keep the page compact and include the `/v1` Base URL, no-key guidance, namespaced models, and a connection example. Model chips and the connection example use the actual `<providerName>/<modelId>` request value; internal Provider ids are not exposed as model prefixes. The section preserves stable loading, starting, running, unavailable, and port-conflict states in both themes.
 
 The dedicated Codex Account Pool view shows per-account primary and secondary remaining quota returned by the Codex account usage endpoint. Each quota row shows remaining percentage, used percentage, progress bar, and localized reset time; window names are not inferred from plan type. Loading preserves the card geometry, an unavailable account snapshot shows a restrained inline error on that account, and the pool-level Refresh all quotas action refreshes the independent snapshots. Progress remains neutral and uses text in addition to width in both themes.
 
@@ -33,6 +33,10 @@ Statistics offer 24-hour, 7-day, and 30-day windows and show request count, succ
 Provider deletion uses the shared named confirmation pattern: close before success feedback and refresh, retain visible errors on failure, and keep table cells on one line with horizontal overflow on narrow layouts.
 
 ## Changelog
+
+### 2026-09-15
+
+- Updated the displayed Portkey Gateway development default from `4547` to `3392`; the local deployment listener remains `23392`.
 
 ### 2026-09-11 - Persistent Tab State
 

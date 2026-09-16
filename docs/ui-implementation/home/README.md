@@ -2,33 +2,29 @@
 
 ## Purpose
 
-Home is the personal dashboard library. It organizes dashboards into user-manageable categories and opens a selected dashboard that answers what requires attention, what is running, where work can continue, and what changed. It also provides System Helper Chat without requiring a separate destination.
+Home shows self-contained Workflow boards owned by published Workflow Dashboard nodes, renders each board's latest successful Run output on its card, and provides System Helper Chat without requiring a separate destination.
 
-## Dashboard Library
+## Workflow Board Library
 
-Show collapsible category sections rather than a flat collection of panels. Provide a default `Workflows` category with `Workflow overview`, `Workflow health`, and `Recent activity` dashboards. Users may add, rename, reorder, and remove categories and may add dashboards from a template or as a blank dashboard. Category and dashboard configuration is local-prototype state until persistence is introduced.
+Show self-contained Workflow board cards grouped by user-managed categories, with custom categories first and Uncategorized last. Derive eligibility from the latest published WorkflowVersion: only a Workflow whose immutable version contains its single `worklite/dashboard` node is listed. Every eligible board belongs to Uncategorized until it is assigned to exactly one custom category. Render the layout header region in the card title area and display the latest published version and latest Run status or time. Board cards do not open a separate detail view.
 
-The library shows a category title, dashboard count, category actions, and an `Add dashboard` action. Category headers expand or collapse their dashboard list and expose a non-color open-state cue. Dashboard rows or tiles show their name, short description, meaningful summary metrics from their configured widgets, and a clear open affordance. Category creation sits below the category list rather than in the page header. Home does not duplicate the Workflow creation action; creation remains on the Workflow list and editor. The page keeps the existing workspace shell and does not replace the Workflow list or editor.
+Category organization is database-backed through Home board-category APIs. Provide a compact create-category control that opens a dialog with a labeled name field, a primary create action, a cancel action, and local busy and failure states, per-category rename and delete controls, and a per-category add control that opens a dialog listing eligible boards as selectable cards. Selecting a card assigns that board to the category; selecting an already-assigned card returns the board to Uncategorized. Board cards do not embed category selectors. Delete-category confirmation follows the shared permanent-removal pattern and states that its boards return to Uncategorized. Keep organization controls neutral and quiet; category loading, mutation, and failure states remain local and do not remove unaffected boards.
 
-Every clickable control uses a pointer cursor and a visible hover state. Category headers use a full-width hover surface, while dashboard cards, empty-category actions, links, and category actions retain distinct hover and keyboard focus feedback. Disabled controls use a not-allowed cursor and do not present an active hover treatment.
+Each card loads its Workflow's latest successful Run for that published version through the normal Run query and locates the successful Dashboard node output. The card title area resolves configured `header` elements such as a `count`. The card content area resolves the first configured `list` element as a compact table using up to its up to first three non-url fields, beginning with the `titleKey` field; a `url` field does not render as a column but makes the item row open the item value in a new browser tab, with the title cell remaining the accessible link. The content area paginates five rows at a time with quiet previous and next controls and a current-page indicator. Unknown fields are ignored, missing fields display an explicit empty value, and non-object list rows display their raw JSON value in a bounded monospace region. Keep run loading, empty, unavailable, and failure states local to the card.
 
-Opening a dashboard navigates to its detail view. Dashboard widgets link to the existing resource surfaces: workflow rows open Workflow details, active run rows open Run details, artifact rows open Artifact details, and section actions open the corresponding collection list. These links must remain keyboard accessible and show hover and focus states.
+A Workflow is not listed while it is draft, its latest version has no Dashboard node, or it has no matching successful Run with a committed Dashboard node output. Home has no platform-defined Workflow boards, global Workflow data source, Workflow output snapshot, Dashboard editor, scheduling control, or Run now control. Category records reference Workspace and Workflow organization only and never store Workflow output. Workflow creation and Dashboard configuration remain in the Workflow editor.
 
-Dashboard detail supports editing the dashboard name, adding supported widgets, reordering widgets, and removing widgets. Supported platform widgets are `Needs attention`, `Active runs`, `Workflow health`, `Recent workflows`, `Recent activity`, and `Recent artifacts`. A workflow-backed dashboard additionally selects one published Workflow, configures its fixed interval, exposes a neutral Run now action, and renders the latest successful `worklite.dashboard` version 1 payload as either a list or a kanban. Kanban columns come from item status values. Source names remain provenance labels rather than product navigation.
+Library board cards are static board surfaces, not full-card selection controls. The card header area shows the icon followed immediately by the configured header elements (such as a `count`) resolved against the latest successful Run Dashboard output, with the version, run time, and status metadata aligned to the right. The content area uses the first `list` element in the board layout (searched in main, header, then footer order) and renders it as an up-to-three-column paginated table. When the element has a `url` field and the item's value for it is an `http(s)` string, the row opens the item value in a new browser tab. Table titles use that element's `titleKey` and fall back to its first display field. The card renders no extra actions or count text; Dashboard icons, headings, ordinary hover states, and pagination controls remain neutral. Status uses the shared status badge and a non-color cue.
 
 ## Embedded System Helper Chat
 
-Keep the dashboard library or selected dashboard mounted as the Home content. Place a persistent, labeled, single-line System Helper Chat composer at the bottom center of the Home content region. The dashboard content reserves enough bottom space that the composer does not obscure its final content.
+Keep the self-contained board list mounted as the Home content. Place a persistent, labeled, single-line System Helper Chat composer at the bottom center of the Home content region. The board content reserves enough bottom space that the composer does not obscure its final content.
 
-Focusing the composer expands a raised conversation panel above it without waiting for message submission. The panel occupies most, but not all, of the workspace content region, up to `1200px` by approximately `680px` with at least `24px` desktop outer space. Keep the Dashboard mounted beneath the panel and preserve its scroll position. The panel contains the persisted Agent transcript and inline Skill-script approvals defined in `../assistant/README.md`.
+Focusing the composer expands a raised conversation panel above it without waiting for message submission. The panel occupies most, but not all, of the workspace content region, up to `1200px` by approximately `680px` with at least `24px` desktop outer space. Keep the board mounted beneath the panel and preserve its scroll position. The panel contains the persisted Agent transcript and inline Skill-script approvals defined in `../assistant/README.md`.
 
 Clicking outside, pressing `Escape`, using the icon-only minimize control, or navigating to another page closes the panel without cancelling work or clearing the conversation. The minimized dock retains the composer and, after the first request, a compact status summary such as preparing, tool calls in progress, needs review, completed, or failed. The summary includes a non-color cue and reopens the current conversation. Completion does not automatically minimize the conversation.
 
 Command search may open or focus System Helper Chat through the same Home state, but System Helper Chat is not a separate sidebar item.
-
-## Dashboard Content
-
-Use compact, workflow-oriented widgets rather than decorative totals or generic metric cards. The default Workflow dashboards may contain `Needs attention`, `Active runs`, `Workflow health`, `Recent workflows`, `Recent activity`, and `Recent artifacts`. Section failures remain local to the affected widget.
 
 ## First Use
 
@@ -38,10 +34,37 @@ Derive completion from persisted server resources rather than browser preference
 
 ## Changelog
 
-### 2026-09-10
+### 2026-09-15
 
-- Added generic workflow-backed list and kanban dashboards that consume the fixed dashboard payload inside Home.
-- Kept schedule and manual execution controls attached to the selected Workflow and removed source-specific navigation.
+- Made board rows with configured HTTP(S) URL values open the item URL in a new browser tab.
+- Removed separate board detail navigation and made board cards self-contained with a five-row, up-to-three-column paginated table content area.
+- Rendered card list content as compact semantic tables whose up to first three non-url fields, starting with `titleKey`, form the columns.
+- Made the configured `url` field navigate the item row to the item value while retaining the title cell as the accessible link.
+- Kept board cards as static surfaces with header elements immediately after the card icon and version, run time, and status metadata at the right.
+- Adopted the compositional Dashboard layout format and removed the Dashboard description.
+
+### 2026-09-14
+
+- Added board-card item counts with the first five titles bound to the Dashboard node `titleField`, including a first-field fallback for older versions.
+
+### 2026-09-14
+
+- Reordered category groups so Uncategorized is last, replaced board-card category selectors with a per-category add dialog of selectable board cards, and added board-card item counts with the first five item titles from the latest successful Run output.
+
+### 2026-09-14
+
+- Moved category creation into a dialog opened by a compact create-category control, with a labeled name field and local busy and failure states.
+
+### 2026-09-14
+
+- Added database-backed user categories for Workflow Dashboard-node boards, with Uncategorized first and at most one category assignment per board.
+- Defined quiet create, rename, delete, and move-board controls while preserving Run-derived board output and neutral Dashboard presentation.
+
+### 2026-09-14
+
+- Removed platform-defined Workflow categories, Workflow widgets, and local dashboard-library editing.
+- Added Workflow board selection driven only by the latest published version's `worklite/dashboard` node and its latest successful Run output.
+- Defined array/object board rendering, missing-output states, URL-selected board state, and neutral Dashboard presentation.
 
 ### 2026-08-27
 
@@ -50,18 +73,12 @@ Derive completion from persisted server resources rather than browser preference
 
 ### 2026-08-25
 
-- Reframed Home as the dashboard library for a single personal workspace.
+- Reframed Home as a dashboard library for a single personal workspace.
 - Replaced the team setup sequence with an optional provider and first-agent checklist.
 
 ### 2026-08-24
 
 - Added explicit pointer-cursor, hover, and disabled-state feedback requirements for Home controls.
-
-### 2026-08-24
-
-- Reframed Home as a categorized dashboard library with user-created categories and dashboards.
-- Defined dashboard detail editing, supported widgets, and links to existing Workflow, Run, and Artifact surfaces.
-- Added collapsible category sections, board summary metrics, and moved category creation out of the page header.
 
 ### 2026-08-20
 
@@ -70,4 +87,4 @@ Derive completion from persisted server resources rather than browser preference
 
 ### 2026-08-13
 
-- Established new-team and established-team Home specifications.
+- Established the initial Home specification.

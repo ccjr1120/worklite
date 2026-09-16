@@ -21,7 +21,6 @@ Before UI work, read the design system, this index, every applicable document un
 - Agents: [List and resource views](agents/list.md), [Editor](agents/editor.md)
 - Providers: [Model providers and Portkey Gateway](model-providers.md), including the dedicated Codex Account Pool and Gateway request statistics
 - Workflows: [List](workflows/list.md), [Editor](workflows/editor.md), [Versions](workflows/versions.md)
-- Runs: [List](runs/list.md), [Details](runs/details.md)
 - Skills: [List](skills/list.md), [Editor](skills/editor.md)
 - MCP servers: [List](mcp-servers/list.md), [Configuration](mcp-servers/configuration.md)
 - Plugins: [List](plugins/list.md), [Configuration](plugins/configuration.md)
@@ -35,8 +34,6 @@ Before UI work, read the design system, this index, every applicable document un
 /agents/{new,:agentId}
 /model-providers
 /workflows/{new,:workflowId,:workflowId/versions}
-/runs
-/runs/:runId
 /skills/{new,:skillId}
 /mcp-servers/{new,:serverId}
 /plugins/:pluginId
@@ -48,7 +45,7 @@ The root route opens Home. First-use setup is an optional checklist for configur
 
 ## Shared Component Inventory
 
-Theme provider and appearance selector; application shell; sidebar; context bar; personal preferences menu; command menu; shell-level System Helper Chat with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; React Flow workflow graph canvas; run timeline; plugin configuration; viewers for diagnostic logs, run output and artifacts; skeletons, errors, offline banner.
+Theme provider and appearance selector; application shell; sidebar; context bar; personal preferences menu; command menu; shell-level System Helper Chat with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; React Flow workflow graph canvas; workflow run history dialog; run timeline; plugin configuration; viewers for diagnostic logs, run output and artifacts; skeletons, errors, offline banner.
 
 Domain-neutral reusable components belong in the shared UI package. Feature composition remains near its feature. Abstract only demonstrated repeated patterns.
 
@@ -57,15 +54,50 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 1. Foundations: semantic dual-theme tokens, initial theme resolution, typography, focus, motion, controls and feedback.
 2. Personal workspace shell: navigation, context bar, menus and responsive behavior.
 3. Home and collections: Home states and shared collection grammar.
-4. Editors and execution: Agent editor, Workflow graph editor, Runs, logs and artifacts.
+4. Editors and execution: Agent editor, Workflow graph editor, Workflow run history, logs and artifacts.
 5. Integrations and preferences: Skills, MCP servers and Settings.
 
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-09-16
+
+- Made Workflow List latest-run statuses interactive for every status so any latest run opens its matching Run records dialog.
+
+### 2026-09-16
+
+- Added resumable Workflow pending actions, WeChat QR authentication in Run records, and the WeChat Official Account Plugin configuration surface.
+
+### 2026-09-15
+
+- Added published Workflow mentions to the embedded chat, including keyboard selection, version-bound Run progress, cancellation, failure feedback, and Artifact links.
+
+### 2026-09-15
+
+- Updated the development Web, API, and Portkey Gateway ports to `3390`, `3391`, and `3392` while leaving local deployment ports unchanged.
+- Added the Workflow Artifact node and removed implicit Agent file-output controls while preserving inline Run Artifact disclosure and direct Artifact details.
+
+### 2026-09-15
+
+- Consolidated Workflow list actions by removing the Steps and Run records columns, moving Run records into Actions, removing direct table deletion, and making failed latest-run status open the matching Run record.
+- Made Home board rows with configured HTTP(S) URL values open the item URL in a new browser tab.
+- Removed the standalone Runs routes and navigation destination; Workflow List now exposes per-Workflow Run records in a dialog with inline Artifact disclosure.
+- Removed separate Home board detail navigation and made board cards self-contained with paginated up-to-three-column list tables.
+- Rendered Home Dashboard `list` elements as compact semantic tables with configured title and value columns and full-row pointer activation for the item URL.
+
 ### 2026-09-14
 
+- Added a Workflow Agent output-format selector for text or parsed JSON responses.
+
+### 2026-09-14
+
+- Added database-backed Home board categories with an Uncategorized default, custom category management, and single-category board assignment.
+
+### 2026-09-14
+
+- Replaced platform Workflow boards with Workflow Dashboard-node boards and defined Home selection from the latest published version and successful Run.
+- Removed workflow-backed Home data sources and represented fixed-interval scheduling as a versioned Timer node in the Workflow editor.
 - Added the application version to the sidebar's compact personal preferences control and defined browser-first locale startup with an explicit local override and server preference reconciliation.
 - Removed the standalone Artifact list route; Run cards now expose their artifacts inline while Artifact details remain directly routable.
 - Refined shared interaction trust with grouped one-click sidebar navigation, a `1024px` expanded-sidebar breakpoint, consistent brand selection states, unified destructive confirmation, and neutral execution cancellation.

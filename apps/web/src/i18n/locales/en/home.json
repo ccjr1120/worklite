@@ -1,139 +1,42 @@
 {
-  "greeting": {
-    "morning": "Good morning, {{name}}",
-    "afternoon": "Good afternoon, {{name}}",
-    "evening": "Good evening, {{name}}",
-    "night": "Good evening, {{name}}",
-    "teamFallback": "workspace"
-  },
-  "description": "What needs attention, what is running, and where to continue.",
-  "createWorkflow": "Create workflow",
-  "attention": {
-    "title": "Needs attention",
-    "empty": "Nothing needs attention."
-  },
-  "activeRuns": {
-    "title": "Active runs",
-    "empty": "No runs in progress."
-  },
-  "recentWorkflows": "Recent workflows",
-  "recentActivity": "Recent activity",
-  "dashboard": {
-    "title": "Dashboards",
-    "description": "Organize workflow views into focused, reusable dashboards.",
-    "categories": {
-      "workflows": "Workflows"
-    },
-    "actions": {
-      "addCategory": "Add category",
-      "addBoard": "Add dashboard",
-      "createBoard": "Create dashboard",
-      "backToDashboards": "All dashboards",
-      "editBoard": "Edit dashboard",
-      "addWidget": "Add widget",
-      "viewAll": "View all"
-    },
-    "emptyCategory": "Add the first dashboard",
-    "summary": {
-      "workflows_one": "{{count}} workflow",
-      "workflows_other": "{{count}} workflows",
-      "attention_one": "{{count}} needs attention",
-      "attention_other": "{{count}} need attention",
-      "activeRuns_one": "{{count}} active run",
-      "activeRuns_other": "{{count}} active runs",
-      "artifacts_one": "{{count}} artifact",
-      "artifacts_other": "{{count}} artifacts"
-    },
-    "category": {
-      "boardCount_one": "{{count}} dashboard",
-      "boardCount_other": "{{count}} dashboards",
-      "rename": "Rename category",
-      "delete": "Delete category",
-      "createTitle": "Add category",
-      "renameTitle": "Rename category",
-      "description": "Group dashboards so the workspace stays easy to scan.",
-      "nameLabel": "Category name",
-      "deleteTitle": "Delete category?",
-      "deleteDescription": "Dashboards in this category will no longer appear in the dashboard library."
-    },
-    "board": {
-      "createTitle": "Add dashboard",
-      "createDescription": "Start with a default layout or create an empty dashboard.",
-      "nameLabel": "Dashboard name",
-      "templateLabel": "Starting layout"
-    },
-    "templates": {
-      "blank": "Blank dashboard",
-      "workflowOverview": "Workflow overview",
-      "workflowHealth": "Workflow health",
-      "recentActivity": "Recent activity"
-    },
-    "boards": {
-      "workflowOverview": {
-        "title": "Workflow overview",
-        "description": "See attention items, active runs, workflows, and recent changes."
-      },
-      "workflowHealth": {
-        "title": "Workflow health",
-        "description": "Review workflow states, active runs, and generated artifacts."
-      },
-      "recentActivity": {
-        "title": "Recent activity",
-        "description": "Follow recent workflow changes and the artifacts they produced."
-      },
-      "custom": {
-        "description": "A customizable dashboard for this workspace."
-      }
-    },
-    "widget": {
-      "addTitle": "Add widget",
-      "addDescription": "Choose a workflow view to add to this dashboard.",
-      "emptyTitle": "This dashboard is empty",
-      "emptyDescription": "Add a widget to start organizing this view.",
-      "moveUp": "Move up",
-      "moveDown": "Move down",
-      "remove": "Remove widget"
-    },
-    "widgets": {
-      "attention": {
-        "title": "Needs attention",
-        "empty": "Nothing needs attention."
-      },
-      "active_runs": {
-        "title": "Active runs",
-        "empty": "No runs in progress."
-      },
-      "workflow_health": {
-        "title": "Workflow health",
-        "empty": "No workflows available."
-      },
-      "recent_workflows": {
-        "title": "Recent workflows",
-        "empty": "No workflows available."
-      },
-      "recent_activity": {
-        "title": "Recent activity",
-        "empty": "No recent activity."
-      },
-      "recent_artifacts": {
-        "title": "Recent artifacts",
-        "empty": "No artifacts available."
-      }
-    },
-    "workflow": {
-      "workflow": "Workflow",
-      "workflowPlaceholder": "Select a published workflow",
-      "presentation": "Presentation",
-      "kanban": "Kanban",
-      "list": "List",
-      "runNow": "Run now",
-      "unconfigured": "Select a published workflow to provide this Home dashboard dataset.",
-      "empty": "The workflow has not produced dashboard items yet."
-    }
-  },
   "firstUse": {
     "intro": "Your workspace is ready to set up. Complete the sequence below.",
     "configureProvider": "Configure a provider",
     "configureSystemHelper": "Choose a provider and model for System Helper Chat"
+  },
+  "boards": {
+    "title": "Workflow boards",
+    "description": "Boards published by Workflow Dashboard nodes.",
+    "version": "v{{version}}",
+    "loading": "Loading boards...",
+    "unavailable": "Unable to load Workflow boards.",
+    "empty": "No Workflow has a published Dashboard node with a successful run.",
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "pageIndicator": "Page {{current}} of {{total}}",
+    "emptyValue": "Empty",
+    "trueValue": "True",
+    "falseValue": "False",
+    "emptyOutput": "This run produced an empty board output."
+  },
+  "categories": {
+    "uncategorized": "Uncategorized",
+    "namePlaceholder": "New category name",
+    "nameLabel": "Category name",
+    "createTitle": "Create category",
+    "createDescription": "Name this board category. Boards can belong to one category.",
+    "create": "Create",
+    "rename": "Rename category {{name}}",
+    "delete": "Delete category {{name}}",
+    "deleteTitle": "Delete {{name}}?",
+    "deleteDescription": "This category will be removed. Its boards will return to Uncategorized.",
+    "addBoards": "Add boards to {{name}}",
+    "addTitle": "Add boards to {{name}}",
+    "addDescription": "Select a board to add it to this category. Select it again to return the board to Uncategorized.",
+    "added": "Added",
+    "addEmpty": "No eligible boards.",
+    "deleting": "Deleting...",
+    "empty": "No boards in this category.",
+    "unavailable": "Unable to save Home board categories."
   }
 }

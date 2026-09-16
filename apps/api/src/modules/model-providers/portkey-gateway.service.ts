@@ -10,7 +10,7 @@ import type { ModelProviderConfig } from '@worklite/model-gateway';
 import { agents, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 
-const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 4547);
+const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 3392);
 
 const portkeyRequire = createRequire(__filename);
 const HOP_BY_HOP_HEADERS = new Set([

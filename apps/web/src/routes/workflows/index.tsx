@@ -1,9 +1,8 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useMemo, useRef, useState } from 'react';
-import { FileUp, Plus, Trash2 } from 'lucide-react';
+import { FileUp, History, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { ConfirmDialog } from '@/components/confirm-dialog';
 import { CollectionToolbar } from '@/components/collection-toolbar';
 import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/collection-table';
 import { EmptyState } from '@/components/empty-state';
@@ -12,14 +11,24 @@ import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
+import { focusRingInset } from '@/components/ui/interaction';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatDateTime } from '@/i18n/format';
 import { api } from '@/api/client';
 import { useWorkflowsQuery, workflowsQueryKey } from '@/api/queries';
+import { WorkflowRunHistoryDialog } from '@/features/workflows/run-history-dialog';
 import { queryClient } from '@/lib/query-client';
+import { cn } from '@/lib/utils';
 
 export const Route = createFileRoute('/workflows/')({
   component: WorkflowListPage,
 });
+
+type RunHistoryTarget = {
+  id: string;
+  name: string;
+  failed?: boolean;
+};
 
 function WorkflowListPage() {
   const { t } = useTranslation(['workflows', 'common']);
@@ -27,9 +36,7 @@ function WorkflowListPage() {
   const workspaceSlug = "personal";
   const [search, setSearch] = useState('');
   const [importing, setImporting] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<(typeof all)[number] | null>(null);
-  const [deleteBusy, setDeleteBusy] = useState(false);
-  const [deleteError, setDeleteError] = useState('');
+  const [runHistoryWorkflow, setRunHistoryWorkflow] = useState<RunHistoryTarget | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const { data: all = [], isLoading, isError } = useWorkflowsQuery(workspaceSlug);
   async function importWorkflow(file: File | undefined) {
@@ -52,23 +59,6 @@ function WorkflowListPage() {
     () => all.filter((item) => item.name.toLowerCase().includes(search.toLowerCase())),
     [all, search],
   );
-
-  async function deleteWorkflow() {
-    if (!deleteTarget) return;
-    setDeleteBusy(true);
-    setDeleteError('');
-    try {
-      await api.deleteWorkflow(workspaceSlug, deleteTarget.id);
-      setDeleteTarget(null);
-      setDeleteError('');
-      toast.success(t('delete.success'));
-      await queryClient.invalidateQueries({ queryKey: workflowsQueryKey() });
-    } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : t('delete.failed'));
-    } finally {
-      setDeleteBusy(false);
-    }
-  }
 
   return (
     <div className="mx-auto w-full max-w-[1440px] px-6 py-6">
@@ -99,35 +89,57 @@ function WorkflowListPage() {
           <EmptyState title={t('noMatches.title')} description={t('noMatches.description', { search })} actionLabel={t('common:actions.clearFilters')} onAction={() => setSearch('')} />
         ) : (
           <CollectionTable>
-            <CollectionHeader className="min-w-[980px] md:grid-cols-[minmax(220px,2fr)_minmax(110px,1fr)_minmax(72px,0.6fr)_minmax(210px,1.4fr)_minmax(170px,1fr)_40px]" columns={[t('columns.workflow'), t('columns.state'), t('columns.steps'), t('columns.lastRun'), t('columns.updated'), t('columns.actions')]} />
-            {items.map((item) => (
-              <CollectionRow key={item.id} className="min-w-[980px] whitespace-nowrap md:grid-cols-[minmax(220px,2fr)_minmax(110px,1fr)_minmax(72px,0.6fr)_minmax(210px,1.4fr)_minmax(170px,1fr)_40px]">
-                <Link to="/workflows/$workflowId" params={{ workflowId: item.id }} className="min-w-0 truncate text-sm font-medium hover:underline" title={item.name}>{item.name}</Link>
-                <StatusBadge status={item.state} />
-                <span className="tabular-nums text-[13px]">{item.stepCount}</span>
-                <span className="flex items-center gap-2 whitespace-nowrap text-[13px]">
-                  {item.lastRunStatus ? <StatusBadge status={item.lastRunStatus === 'succeeded' ? 'completed' : item.lastRunStatus === 'timed_out' ? 'failed' : item.lastRunStatus} /> : t('common:empty.dash')}
-                  <span className="tabular-nums text-muted-foreground">{item.lastRunAt ? formatDateTime(item.lastRunAt, locale) : ''}</span>
-                </span>
-                <span className="whitespace-nowrap tabular-nums text-[13px] text-muted-foreground">{formatDateTime(item.updatedAt, locale)}</span>
-                <Button type="button" variant="ghost" size="icon-compact" className="text-danger hover:text-danger" aria-label={t('delete.action', { name: item.name })} onClick={() => { setDeleteError(''); setDeleteTarget(item); }}><Trash2 className="size-4" /></Button>
-              </CollectionRow>
-            ))}
+            <CollectionHeader className="min-w-[880px] md:grid-cols-[minmax(190px,1.7fr)_minmax(104px,0.8fr)_minmax(140px,1fr)_minmax(144px,0.9fr)_40px]" columns={[t('columns.workflow'), t('columns.state'), t('columns.lastRun'), t('columns.updated'), t('columns.actions')]} />
+            {items.map((item) => {
+              const failedRun = item.lastRunStatus === 'failed' || item.lastRunStatus === 'timed_out';
+              const lastRunAt = item.lastRunAt ? formatDateTime(item.lastRunAt, locale) : undefined;
+
+              return (
+                <CollectionRow key={item.id} className="min-w-[880px] whitespace-nowrap md:grid-cols-[minmax(190px,1.7fr)_minmax(104px,0.8fr)_minmax(140px,1fr)_minmax(144px,0.9fr)_40px]">
+                  <Link to="/workflows/$workflowId" params={{ workflowId: item.id }} className="min-w-0 truncate text-sm font-medium hover:underline" title={item.name}>{item.name}</Link>
+                  <StatusBadge status={item.state} />
+	                  <span className="min-w-0" title={lastRunAt}>
+	                    {item.lastRunStatus ? (
+	                      <button
+	                        type="button"
+	                        className={cn('cursor-pointer rounded-sm transition-colors duration-[120ms] hover:opacity-90', focusRingInset)}
+	                        aria-label={t('latestRunRecordsAction', { name: item.name })}
+	                        onClick={() => setRunHistoryWorkflow({ id: item.id, name: item.name, failed: failedRun })}
+	                      >
+	                        <StatusBadge status={item.lastRunStatus === 'succeeded' ? 'completed' : item.lastRunStatus === 'timed_out' ? 'failed' : item.lastRunStatus} />
+	                      </button>
+	                    ) : t('common:empty.dash')}
+	                  </span>
+                  <span className="whitespace-nowrap tabular-nums text-[13px] text-muted-foreground">{formatDateTime(item.updatedAt, locale)}</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-compact"
+                        aria-label={t('runRecordsAction', { name: item.name })}
+                        onClick={() => setRunHistoryWorkflow({ id: item.id, name: item.name })}
+                      >
+                        <History className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t('runRecords')}</TooltipContent>
+                  </Tooltip>
+                </CollectionRow>
+              );
+            })}
           </CollectionTable>
         )}
       </div>
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        onOpenChange={(nextOpen) => { if (!nextOpen && !deleteBusy) { setDeleteTarget(null); setDeleteError(''); } }}
-        title={t('delete.title', { name: deleteTarget?.name ?? '' })}
-        description={t('delete.description')}
-        confirmLabel={t('common:actions.delete')}
-        cancelLabel={t('common:actions.cancel')}
-        busyLabel={t('delete.deleting')}
-        error={deleteError}
-        busy={deleteBusy}
-        onConfirm={() => void deleteWorkflow()}
-      />
+      {runHistoryWorkflow ? (
+        <WorkflowRunHistoryDialog
+          open
+          workflowId={runHistoryWorkflow.id}
+          workflowName={runHistoryWorkflow.name}
+          initialStatus={runHistoryWorkflow.failed ? 'failed' : undefined}
+          onOpenChange={(nextOpen) => { if (!nextOpen) setRunHistoryWorkflow(null); }}
+        />
+      ) : null}
     </div>
   );
 }

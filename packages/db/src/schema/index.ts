@@ -133,23 +133,79 @@ export const workflowSchedules = sqliteTable('workflow_schedules', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), workflowId: text('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }), workflowVersionId: text('workflow_version_id').notNull().references(() => workflowVersions.id, { onDelete: 'restrict' }), intervalSeconds: integer('interval_seconds').notNull(), enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true), running: integer('running', { mode: 'boolean' }).notNull().default(false), nextRunAt: timestamp('next_run_at'), lastRunAt: integer('last_run_at', { mode: 'timestamp_ms' }), lastRunId: text('last_run_id'), lastStatus: text('last_status').$type<'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out'>(), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
 }, (table) => [unique().on(table.workflowId), index('workflow_schedules_due_idx').on(table.workspaceId, table.enabled, table.nextRunAt)]);
 
+export const homeBoardCategories = sqliteTable('home_board_categories', {
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), position: integer('position').notNull(), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
+}, (table) => [unique('home_board_categories_workspace_name_unique').on(table.workspaceId, table.name), index('home_board_categories_workspace_position_idx').on(table.workspaceId, table.position)]);
+
+export const homeBoardAssignments = sqliteTable('home_board_assignments', {
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  workflowId: text('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }),
+  categoryId: text('category_id').notNull().references(() => homeBoardCategories.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
+}, (table) => [primaryKey({ columns: [table.workspaceId, table.workflowId] }), index('home_board_assignments_category_idx').on(table.categoryId)]);
+
 export const workflowRuns = sqliteTable('workflow_runs', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), workflowId: text('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }), workflowVersionId: text('workflow_version_id').notNull().references(() => workflowVersions.id, { onDelete: 'restrict' }),
-  status: text('status').$type<'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out'>().notNull().default('queued'), input: text('input', { mode: 'json' }).$type<unknown>().notNull(), result: text('result', { mode: 'json' }).$type<unknown>(), currentNodeId: text('current_node_id'),
+  status: text('status').$type<'queued' | 'running' | 'waiting_for_input' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out'>().notNull().default('queued'), input: text('input', { mode: 'json' }).$type<unknown>().notNull(), result: text('result', { mode: 'json' }).$type<unknown>(), currentNodeId: text('current_node_id'),
   createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'), finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
 });
 
 export const workflowNodeRuns = sqliteTable('workflow_node_runs', {
-  id: text('id').primaryKey(), runId: text('run_id').notNull().references(() => workflowRuns.id, { onDelete: 'cascade' }), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), nodeId: text('node_id').notNull(), position: integer('position').notNull(), type: text('type').notNull(), typeVersion: text('type_version').notNull(), status: text('status').$type<'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'>().notNull().default('queued'), input: text('input', { mode: 'json' }).$type<unknown>(), output: text('output', { mode: 'json' }).$type<unknown>(), artifactIds: text('artifact_ids', { mode: 'json' }).$type<string[]>().notNull().default([]), error: text('error'), retryCount: integer('retry_count').notNull().default(0), startedAt: integer('started_at', { mode: 'timestamp_ms' }), finishedAt: integer('finished_at', { mode: 'timestamp_ms' }), createdAt: timestamp('created_at'),
+  id: text('id').primaryKey(), runId: text('run_id').notNull().references(() => workflowRuns.id, { onDelete: 'cascade' }), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), nodeId: text('node_id').notNull(), position: integer('position').notNull(), type: text('type').notNull(), typeVersion: text('type_version').notNull(), status: text('status').$type<'queued' | 'running' | 'waiting_for_input' | 'succeeded' | 'failed' | 'cancelled'>().notNull().default('queued'), input: text('input', { mode: 'json' }).$type<unknown>(), output: text('output', { mode: 'json' }).$type<unknown>(), artifactIds: text('artifact_ids', { mode: 'json' }).$type<string[]>().notNull().default([]), error: text('error'), retryCount: integer('retry_count').notNull().default(0), startedAt: integer('started_at', { mode: 'timestamp_ms' }), finishedAt: integer('finished_at', { mode: 'timestamp_ms' }), createdAt: timestamp('created_at'),
+});
+
+export const workflowPendingActions = sqliteTable('workflow_pending_actions', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  runId: text('run_id').notNull().references(() => workflowRuns.id, { onDelete: 'cascade' }),
+  nodeRunId: text('node_run_id').notNull().references(() => workflowNodeRuns.id, { onDelete: 'cascade' }),
+  type: text('type').$type<'wechat_login' | 'wechat_publish_confirmation'>().notNull(),
+  status: text('status').$type<'pending' | 'completed' | 'expired' | 'cancelled'>().notNull().default('pending'),
+  title: text('title').notNull(),
+  description: text('description').notNull(),
+  qrCode: text('qr_code'),
+  externalOperationId: text('external_operation_id'),
+  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (table) => [index('workflow_pending_actions_run_status_idx').on(table.runId, table.status)]);
+
+export const wechatOfficialAccounts = sqliteTable('wechat_official_accounts', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  displayName: text('display_name').notNull(),
+  status: text('status').$type<'disconnected' | 'qr_pending' | 'connected' | 'error'>().notNull().default('disconnected'),
+  encryptedStorageState: text('encrypted_storage_state'),
+  qrCode: text('qr_code'),
+  qrExpiresAt: integer('qr_expires_at', { mode: 'timestamp_ms' }),
+  lastVerifiedAt: integer('last_verified_at', { mode: 'timestamp_ms' }),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (table) => [unique().on(table.workspaceId, table.displayName)]);
+
+export const wechatPublications = sqliteTable('wechat_publications', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  accountId: text('account_id').notNull().references(() => wechatOfficialAccounts.id, { onDelete: 'restrict' }),
+  runId: text('run_id').notNull().references(() => workflowRuns.id, { onDelete: 'cascade' }),
+  nodeRunId: text('node_run_id').notNull().references(() => workflowNodeRuns.id, { onDelete: 'cascade' }),
+  idempotencyKey: text('idempotency_key').notNull().unique(),
+  mode: text('mode').$type<'draft' | 'publish'>().notNull(),
+  status: text('status').$type<'preparing' | 'draft_saved' | 'confirmation_pending' | 'published' | 'failed'>().notNull().default('preparing'),
+  title: text('title').notNull(),
+  article: text('article').notNull(),
+  metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+  draftId: text('draft_id'),
+  publishedUrl: text('published_url'),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
 });
 
 export const workflowRunEvents = sqliteTable('workflow_run_events', {
-  runId: text('run_id').notNull().references(() => workflowRuns.id, { onDelete: 'cascade' }), sequence: integer('sequence').notNull(), type: text('type').$type<'run.status' | 'node.started' | 'node.delta' | 'node.completed' | 'node.failed' | 'artifact.created'>().notNull(), payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(), createdAt: timestamp('created_at'),
+  runId: text('run_id').notNull().references(() => workflowRuns.id, { onDelete: 'cascade' }), sequence: integer('sequence').notNull(), type: text('type').$type<'run.status' | 'node.started' | 'node.delta' | 'node.waiting' | 'node.completed' | 'node.failed' | 'pending_action.updated' | 'artifact.created'>().notNull(), payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(), createdAt: timestamp('created_at'),
 }, (table) => [primaryKey({ columns: [table.runId, table.sequence] })]);
-
-export const dashboardDatasets = sqliteTable('dashboard_datasets', {
-  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), workflowId: text('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }), presentation: text('presentation').$type<'list' | 'kanban'>().notNull().default('kanban'), payload: text('payload', { mode: 'json' }).$type<unknown>(), lastRunId: text('last_run_id'), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
-}, (table) => [unique().on(table.workspaceId), unique().on(table.workflowId)]);
 
 export const commandExecutions = sqliteTable('command_executions', {
   id: text('id').primaryKey(),
@@ -208,7 +264,7 @@ export type StoredAgentPendingQuestion = {
 
 export type StoredWorkliteScriptResult =
   | { type: 'resource'; resourceType: 'provider' | 'agent' | 'skill' | 'mcp-server' | 'workflow'; id: string; route: string }
-  | { type: 'navigation'; target: 'home' | 'agents' | 'system-helper-chat' | 'skills' | 'mcp-servers' | 'model-providers' | 'workflows' | 'runs' | 'settings-appearance' | 'settings-usage' | 'settings-audit-log'; route: string }
+  | { type: 'navigation'; target: 'home' | 'agents' | 'system-helper-chat' | 'skills' | 'mcp-servers' | 'model-providers' | 'workflows' | 'settings-appearance' | 'settings-usage' | 'settings-audit-log'; route: string }
   | { type: 'settings'; appearance: 'system' | 'light' | 'dark'; locale: 'en' | 'zh-CN' }
   | { type: 'snapshot' };
 
@@ -280,6 +336,8 @@ export type Workflow = typeof workflows.$inferSelect;
 export type WorkflowDraft = typeof workflowDrafts.$inferSelect;
 export type WorkflowEditRevision = typeof workflowEditRevisions.$inferSelect;
 export type WorkflowVersion = typeof workflowVersions.$inferSelect;
+export type HomeBoardCategory = typeof homeBoardCategories.$inferSelect;
+export type HomeBoardAssignment = typeof homeBoardAssignments.$inferSelect;
 export type WorkflowRun = typeof workflowRuns.$inferSelect;
 export type WorkflowNodeRun = typeof workflowNodeRuns.$inferSelect;
 export type WorkflowRunEvent = typeof workflowRunEvents.$inferSelect;

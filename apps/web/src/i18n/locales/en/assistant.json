@@ -26,7 +26,7 @@
   },
   "composer": {
     "label": "Message System Helper Chat",
-    "placeholder": "Ask WorkLite or type @ to delegate to an Agent...",
+    "placeholder": "Ask WorkLite or type @ to run an Agent or Workflow...",
     "followUpPlaceholder": "Message {{agent}}...",
     "send": "Send message",
     "stop": "Stop current response",
@@ -72,7 +72,8 @@
     "completed": "Completed",
     "cancelled": "Cancelled",
     "failed": "Failed",
-    "reconnecting": "Reconnecting"
+    "reconnecting": "Reconnecting",
+    "queued": "Queued"
   },
   "execution": {
     "loading": "Loading the server execution",
@@ -96,9 +97,11 @@
     "none": "none"
   },
   "mentions": {
-    "menuLabel": "Available Agents",
-    "empty": "No matching configured Agents.",
-    "remove": "Remove Agent mention"
+    "menuLabel": "Available Agents and Workflows",
+    "empty": "No matching configured Agents or published Workflows.",
+    "remove": "Remove Agent mention",
+    "removeWorkflow": "Remove Workflow mention",
+    "workflow": "Published Workflow"
   },
   "subAgents": {
     "label": "Sub Agents",
@@ -170,5 +173,13 @@
       "cancelled": "Cancelled",
       "failed": "Failed"
     }
+  },
+  "workflowRun": {
+    "requestFailed": "The Workflow Run could not be created.",
+    "cancelFailed": "The Workflow Run could not be cancelled.",
+    "emptyInput": "No input",
+    "currentStep": "Current step: {{step}}",
+    "waitingForConfirmation": "Waiting for confirmation",
+    "openRunHistory": "Open this Workflow's run history to scan the QR code."
   }
 }

@@ -1,13 +1,14 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { addEdge, Background, BackgroundVariant, Controls, MarkerType, PanOnScrollMode, ReactFlow, reconnectEdge, useEdgesState, useNodesState, type OnConnect, type OnConnectEnd, type OnReconnect, type ReactFlowInstance } from '@xyflow/react';
-import { ArrowLeft, Bot, Braces, Check, Copy, Download, FilePlus2, PanelRight, Plus, Redo2, Search, SlidersHorizontal, Trash2, Undo2, Workflow, Wrench } from 'lucide-react';
+import { ArrowLeft, Bot, Braces, Check, Copy, Download, FilePlus2, FileText, LayoutDashboard, PanelRight, Plus, Redo2, Search, Send, SlidersHorizontal, Timer, Trash2, Undo2, Workflow } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import type { WorkflowDefinition, WorkflowEditOperation, WorkflowNodeDefinition } from '@worklite/contracts';
+import type { WorkflowDashboardElement, WorkflowDashboardField, WorkflowDashboardFieldType, WorkflowDashboardLayout, WorkflowDefinition, WorkflowEditOperation, WorkflowNodeDefinition } from '@worklite/contracts';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { SaveIndicator } from '@/components/save-indicator';
+import { useLocale } from '@/components/locale-provider';
 import { useTheme } from '@/components/theme-provider';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -21,8 +22,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { workflowNodeTypes, type WorkflowCanvasEdge, type WorkflowCanvasNode } from '@/components/workflow-canvas-nodes';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { api } from '@/api/client';
-import { useMcpServersQuery, useModelProvidersQuery, useSkillsQuery, useWorkflowQuery, workflowsQueryKey } from '@/api/queries';
+import { useMcpServersQuery, useModelProvidersQuery, runsQueryKey, useSkillsQuery, useWorkflowQuery, useWorkflowScheduleQuery, workflowScheduleQueryKey, workflowsQueryKey } from '@/api/queries';
 import { queryClient } from '@/lib/query-client';
+import { formatDateTime } from '@/i18n/format';
 
 export const Route = createFileRoute('/workflows/$workflowId')({
   component: WorkflowEditorPage,
@@ -39,10 +41,12 @@ const emptyDefinition: WorkflowDefinition = {
 function WorkflowEditorPage() {
   const { t } = useTranslation(['workflows', 'common']);
   const { resolvedTheme } = useTheme();
+  const { locale } = useLocale();
   const { workflowId } = Route.useParams();
   const workspaceSlug = 'personal';
   const isNew = workflowId === 'new';
   const { data: existing } = useWorkflowQuery(workspaceSlug, workflowId);
+  const scheduleQuery = useWorkflowScheduleQuery(workspaceSlug, workflowId);
   const { data: availableSkills = [] } = useSkillsQuery(workspaceSlug);
   const { data: availableMcpServers = [] } = useMcpServersQuery(workspaceSlug);
   const { data: availableProviders = [] } = useModelProvidersQuery(workspaceSlug);
@@ -69,18 +73,13 @@ function WorkflowEditorPage() {
   const canvasRef = useRef<HTMLElement>(null);
   const navigate = useNavigate();
 
-  const updateText = useCallback((nodeId: string, value: string) => {
-    setNodes((current) => current.map((node) => node.id === nodeId ? { ...node, data: { ...node.data, text: value } } : node));
-    setSaveState('unsaved');
-  }, [setNodes]);
-
   const hydrateDefinition = useCallback((definition: WorkflowDefinition, preferredNodeId?: string | null) => {
-    const nextNodes = toFlowNodes(definition, updateText);
+    const nextNodes = toFlowNodes(definition);
     const nextEdges = toFlowEdges(definition);
     const nextSelection = preferredNodeId && nextNodes.some((node) => node.id === preferredNodeId) ? preferredNodeId : null;
     setNodes(nextNodes.map((node) => ({ ...node, selected: node.id === nextSelection })));
     setEdges(nextEdges.map((edge) => ({ ...edge, selected: false })));
-  }, [setEdges, setNodes, updateText]);
+  }, [setEdges, setNodes]);
 
   useEffect(() => {
     if (!existing) return;
@@ -111,7 +110,11 @@ function WorkflowEditorPage() {
   const selectedNode = nodes.find((node) => node.selected);
   const selectedEdge = edges.find((edge) => edge.selected);
   const modelOptions = useMemo(() => availableProviders.flatMap((provider) => provider.models.map((model) => `${provider.name}/${model}`)), [availableProviders]);
+  const filteredTimerVisible = !paletteQuery.trim() || `${t('editor.timerNode')} ${t('editor.timerNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredAgentVisible = !paletteQuery.trim() || `${t('editor.agentNode')} ${t('editor.agentNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
+  const filteredDashboardVisible = !paletteQuery.trim() || `${t('editor.dashboardNode')} ${t('editor.dashboardNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
+  const filteredArtifactVisible = !paletteQuery.trim() || `${t('editor.artifactNode')} ${t('editor.artifactNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
+  const filteredWechatVisible = !paletteQuery.trim() || `${t('editor.wechatNode')} ${t('editor.wechatNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
 
   function currentDefinition(): WorkflowDefinition {
     return {
@@ -198,31 +201,39 @@ function WorkflowEditorPage() {
       type: 'input',
       position: nextPosition(),
       selected: true,
-      data: { nodeType: 'input', label: t('editor.workflowInputNode'), errorPolicy: executionPolicy, onTextChange: updateText },
+      data: { nodeType: 'input', label: t('editor.workflowInputNode'), errorPolicy: executionPolicy },
     };
     addNode(node);
   }
 
-  function addTextNode() {
-    const id = createId('text');
+  function addTimerNode() {
+    if (nodes.some((node) => node.data.nodeType === 'timer')) {
+      toast.error(t('editor.timerLimit'));
+      return;
+    }
+    const id = createId('timer');
     const node: WorkflowCanvasNode = {
       id,
-      type: 'text',
+      type: 'timer',
       position: nextPosition(),
       selected: true,
-      data: { nodeType: 'text', label: t('editor.systemPromptNode'), text: '', outputType: 'text', errorPolicy: executionPolicy, onTextChange: updateText },
+      data: { nodeType: 'timer', label: t('editor.timerNode'), timerEnabled: true, timerIntervalSeconds: 300, errorPolicy: executionPolicy },
     };
     addNode(node);
   }
 
-  function addSkillSetNode() {
-    const id = createId('skills');
+  function addDashboardNode() {
+    if (nodes.some((node) => node.data.nodeType === 'dashboard')) {
+      toast.error(t('editor.dashboardLimit'));
+      return;
+    }
+    const id = createId('dashboard');
     const node: WorkflowCanvasNode = {
       id,
-      type: 'skill-set',
+      type: 'dashboard',
       position: nextPosition(),
       selected: true,
-      data: { nodeType: 'skill-set', label: t('editor.skillSetNode'), skillIds: [], skillNames: [], errorPolicy: executionPolicy, onTextChange: updateText },
+      data: { nodeType: 'dashboard', label: t('editor.dashboardNode'), dashboardLayout: { header: [], main: [{ kind: 'list', titleKey: 'title', fields: [{ key: 'title', label: t('editor.fieldTitle'), type: 'text' }] }], footer: [] }, errorPolicy: executionPolicy },
     };
     addNode(node);
   }
@@ -234,7 +245,31 @@ function WorkflowEditorPage() {
       type: 'agent',
       position: nextPosition(),
       selected: true,
-      data: { nodeType: 'agent', label: t('editor.agentNode'), model: modelOptions[0] ?? '', systemPrompt: '', skillIds: [], skillNames: [], mcpServerIds: [], mcpServerNames: [], errorPolicy: executionPolicy, onTextChange: updateText },
+      data: { nodeType: 'agent', label: t('editor.agentNode'), model: modelOptions[0] ?? '', systemPrompt: '', outputFormat: 'text', skillIds: [], skillNames: [], mcpServerIds: [], mcpServerNames: [], errorPolicy: executionPolicy },
+    };
+    addNode(node);
+  }
+
+  function addArtifactNode() {
+    const id = createId('artifact');
+    const node: WorkflowCanvasNode = {
+      id,
+      type: 'artifact',
+      position: nextPosition(),
+      selected: true,
+      data: { nodeType: 'artifact', label: t('editor.artifactNode'), artifactName: '', artifactType: 'text', errorPolicy: executionPolicy },
+    };
+    addNode(node);
+  }
+
+  function addWechatPublishNode() {
+    const id = createId('wechat');
+    const node: WorkflowCanvasNode = {
+      id,
+      type: 'wechatPublish',
+      position: nextPosition(),
+      selected: true,
+      data: { nodeType: 'wechatPublish', label: t('editor.wechatNode'), wechatAccountId: 'wechat_official_account_personal', wechatMode: 'draft', errorPolicy: executionPolicy },
     };
     addNode(node);
   }
@@ -254,11 +289,50 @@ function WorkflowEditorPage() {
   function duplicateNode(nodeId: string) {
     const source = nodes.find((node) => node.id === nodeId);
     if (!source) return;
+    if (source.data.nodeType === 'timer' && nodes.some((node) => node.id !== source.id && node.data.nodeType === 'timer')) {
+      toast.error(t('editor.timerLimit'));
+      return;
+    }
+    if (source.data.nodeType === 'dashboard' && nodes.some((node) => node.id !== source.id && node.data.nodeType === 'dashboard')) {
+      toast.error(t('editor.dashboardLimit'));
+      return;
+    }
     const id = createId(source.data.nodeType);
-    const duplicate: WorkflowCanvasNode = { ...source, id, position: { x: source.position.x + 40, y: source.position.y + 40 }, selected: true, data: { ...source.data, onTextChange: updateText } };
+    const duplicate: WorkflowCanvasNode = { ...source, id, position: { x: source.position.x + 40, y: source.position.y + 40 }, selected: true, data: { ...source.data } };
     setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), duplicate]);
     setEdges((current) => current.map((edge) => ({ ...edge, selected: false })));
     setSaveState('unsaved');
+  }
+
+  function updateDashboardNode(nodeId: string, update: (data: WorkflowCanvasNode['data']) => WorkflowCanvasNode['data']) {
+    setNodes((current) => current.map((node) => node.id === nodeId ? { ...node, data: update(node.data) } : node));
+    setSaveState('unsaved');
+  }
+
+  function updateDashboardRegion(nodeId: string, region: DashboardLayoutRegion, elements: WorkflowDashboardElement[]) {
+    updateDashboardNode(nodeId, (data) => ({ ...data, dashboardLayout: { header: [], main: [], footer: [], ...data.dashboardLayout, [region]: elements } }));
+  }
+
+  function updateDashboardElement(nodeId: string, region: DashboardLayoutRegion, index: number, element: WorkflowDashboardElement) {
+    const elements = [...(nodes.find((node) => node.id === nodeId)?.data.dashboardLayout?.[region] ?? [])];
+    elements[index] = element;
+    updateDashboardRegion(nodeId, region, elements);
+  }
+
+  function removeDashboardElement(nodeId: string, region: DashboardLayoutRegion, index: number) {
+    const elements = (nodes.find((node) => node.id === nodeId)?.data.dashboardLayout?.[region] ?? []).filter((_, itemIndex) => itemIndex !== index);
+    updateDashboardRegion(nodeId, region, elements);
+  }
+
+  function addDashboardElement(nodeId: string, region: DashboardLayoutRegion, kind: WorkflowDashboardElement['kind']) {
+    const blank: WorkflowDashboardElement = kind === 'text'
+      ? { kind: 'text', text: '' }
+      : kind === 'count'
+        ? { kind: 'count', label: t('editor.newElementLabel') }
+        : kind === 'metric'
+          ? { kind: 'metric', label: t('editor.newElementLabel'), field: 'value', type: 'text' }
+          : { kind: 'list', titleKey: 'title', fields: [{ key: 'title', label: t('editor.fieldTitle'), type: 'text' }] };
+    updateDashboardRegion(nodeId, region, [...(nodes.find((node) => node.id === nodeId)?.data.dashboardLayout?.[region] ?? []), blank]);
   }
 
   function removeEdge(edgeId: string) {
@@ -350,6 +424,7 @@ function WorkflowEditorPage() {
       await api.publishWorkflow(workspaceSlug, workflowId);
       await queryClient.invalidateQueries({ queryKey: ['workflow', workflowId] });
       await queryClient.invalidateQueries({ queryKey: workflowsQueryKey() });
+      await queryClient.invalidateQueries({ queryKey: workflowScheduleQueryKey(workflowId) });
       toast.success(t('editor.published'));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('editor.publishFailed'));
@@ -367,8 +442,9 @@ function WorkflowEditorPage() {
         toast.error(t('editor.publishBeforeRun'));
         return;
       }
-      const result = await api.createRun(existing.latestVersionId, { input });
-      void navigate({ to: '/runs/$runId', params: { runId: result.runId } });
+      await api.createRun(existing.latestVersionId, { input });
+      await queryClient.invalidateQueries({ queryKey: runsQueryKey() });
+      toast.success(t('editor.runStarted'));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('editor.runFailed'));
     } finally {
@@ -382,9 +458,11 @@ function WorkflowEditorPage() {
       <label className="relative mt-4 block"><span className="sr-only">{t('editor.searchNodes')}</span><Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" aria-hidden="true" /><Input className="pl-8" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} placeholder={t('editor.searchNodes')} /></label>
       <div className="mt-3 min-h-0 flex-1 space-y-1 overflow-auto">
         <PaletteButton icon={<Braces className="size-5 text-info" />} title={t('editor.workflowInputNode')} description={t('editor.runPayload')} onClick={addInputNode} />
-        <PaletteButton icon={<FilePlus2 className="size-5 text-foreground" />} title={t('editor.systemPromptNode')} description={t('editor.systemPromptSource')} onClick={addTextNode} />
-        <PaletteButton icon={<Wrench className="size-5 text-warning" />} title={t('editor.skillSetNode')} description={t('editor.skillSetDescription')} onClick={addSkillSetNode} />
+        {filteredTimerVisible ? <PaletteButton icon={<Timer className="size-5 text-foreground" />} title={t('editor.timerNode')} description={t('editor.timerNodeDescription')} onClick={addTimerNode} /> : null}
         {filteredAgentVisible ? <PaletteButton icon={<Bot className="size-5 text-info" />} title={t('editor.agentNode')} description={t('editor.agentNodeDescription')} onClick={addAgentNode} /> : null}
+        {filteredDashboardVisible ? <PaletteButton icon={<LayoutDashboard className="size-5 text-foreground" />} title={t('editor.dashboardNode')} description={t('editor.dashboardNodeDescription')} onClick={addDashboardNode} /> : null}
+        {filteredArtifactVisible ? <PaletteButton icon={<FileText className="size-5 text-foreground" />} title={t('editor.artifactNode')} description={t('editor.artifactNodeDescription')} onClick={addArtifactNode} /> : null}
+        {filteredWechatVisible ? <PaletteButton icon={<Send className="size-5 text-foreground" />} title={t('editor.wechatNode')} description={t('editor.wechatNodeDescription')} onClick={addWechatPublishNode} /> : null}
       </div>
     </div>
   );
@@ -394,11 +472,57 @@ function WorkflowEditorPage() {
       <div className="flex items-start gap-2"><Button type="button" variant="ghost" size="icon-compact" aria-label={t('editor.nodePalette')} onClick={showNodePalette}><ArrowLeft className="size-4" /></Button><div className="min-w-0 flex-1"><p className="text-xs font-medium text-muted-foreground">{nodeTypeLabel(selectedNode.data.nodeType, t)}</p><h2 className="mt-1 truncate text-sm font-semibold">{selectedNode.data.label}</h2></div><PanelRight className="mt-2 size-4 text-muted-foreground" aria-hidden="true" /></div>
       <div className="mt-5 flex flex-col gap-4">
         <Field label={t('editor.nodeName')} htmlFor="node-name"><Input id="node-name" value={selectedNode.data.label} onChange={(event) => { const label = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, label } } : node)); setSaveState('unsaved'); }} /></Field>
-        {selectedNode.data.nodeType === 'text' ? <Field label={t('editor.systemPromptNode')} htmlFor="node-text"><Textarea id="node-text" value={selectedNode.data.text ?? ''} onChange={(event) => updateText(selectedNode.id, event.target.value)} placeholder={t('editor.textPlaceholder')} /></Field> : null}
-        {selectedNode.data.nodeType === 'skill-set' ? <div><p className="text-[12px] font-medium">{t('editor.skills')}</p><div className="mt-2 space-y-2">{availableSkills.map((skill) => { const checked = (selectedNode.data.skillIds ?? []).includes(skill.id); return <label key={skill.id} className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-[13px]"><Checkbox checked={checked} onCheckedChange={(value) => { const nextIds = value === true ? [...new Set([...(selectedNode.data.skillIds ?? []), skill.id])] : (selectedNode.data.skillIds ?? []).filter((id) => id !== skill.id); const nextNames = availableSkills.filter((item) => nextIds.includes(item.id)).map((item) => item.name); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, skillIds: nextIds, skillNames: nextNames } } : node)); setSaveState('unsaved'); }} aria-label={skill.name} /><span>{skill.name}</span></label>; })}</div></div> : null}
+        {selectedNode.data.nodeType === 'timer' ? <>
+          <label className="flex items-center gap-2 text-[13px]"><Checkbox checked={selectedNode.data.timerEnabled !== false} onCheckedChange={(checked) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, timerEnabled: checked === true } } : node)); setSaveState('unsaved'); }} aria-label={t('editor.timerEnabled')} /><span>{t('editor.timerEnabled')}</span></label>
+          <Field label={t('editor.timerInterval')} htmlFor="timer-interval"><div className="flex items-center gap-2"><Input id="timer-interval" type="number" min={5} step={1} value={String(Math.round((selectedNode.data.timerIntervalSeconds ?? 300) / 60))} onChange={(event) => { const intervalSeconds = Math.round(Number(event.target.value) * 60); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, timerIntervalSeconds: intervalSeconds } } : node)); setSaveState('unsaved'); }} /><span className="text-[13px] text-muted-foreground">{t('editor.timerMinutes')}</span></div></Field>
+          <p className="text-[12px] text-muted-foreground">{t('editor.timerActivatesOnPublish')}</p>
+          {scheduleQuery.isLoading ? <p className="text-xs text-muted-foreground">{t('editor.scheduleLoading')}</p> : scheduleQuery.isError ? <p className="text-xs text-destructive">{t('editor.scheduleUnavailable')}</p> : scheduleQuery.data ? <dl className="grid gap-2 rounded-md border border-border bg-surface-subtle p-3 text-xs"><div className="flex justify-between gap-3"><dt className="text-muted-foreground">{t('editor.scheduleVersion')}</dt><dd className="font-medium">v{scheduleQuery.data.workflowVersion}</dd></div><div className="flex justify-between gap-3"><dt className="text-muted-foreground">{t('editor.scheduleNextRun')}</dt><dd className="font-medium">{scheduleQuery.data.enabled ? formatDateTime(scheduleQuery.data.nextRunAt, locale) : '—'}</dd></div><div className="flex justify-between gap-3"><dt className="text-muted-foreground">{t('editor.scheduleLastStatus')}</dt><dd className="font-medium">{scheduleQuery.data.running ? t('editor.scheduleRunning') : scheduleQuery.data.lastStatus ?? t('editor.scheduleNeverRun')}</dd></div></dl> : <p className="text-xs text-muted-foreground">{t('editor.timerNoActiveSchedule')}</p>}
+        </> : null}
+        {selectedNode.data.nodeType === 'dashboard' ? <>
+          {(['header', 'main', 'footer'] as const).map((region) => {
+            const elements = selectedNode.data.dashboardLayout?.[region] ?? [];
+            return (
+              <div key={region}>
+                <div className="flex min-h-8 items-center justify-between gap-2">
+                  <p className="text-[12px] font-medium">{t(`editor.dashboardRegion.${region}`)}</p>
+                  <Select value="" onValueChange={(value) => addDashboardElement(selectedNode.id, region, value as WorkflowDashboardElement['kind'])}>
+                    <SelectTrigger className="h-7 w-[136px]" aria-label={t('editor.dashboardAddElement')}><SelectValue placeholder={t('editor.dashboardAddElement')} /></SelectTrigger>
+                    <SelectContent>
+                      {(['text', 'count', 'metric', 'list'] as const).map((kind) => <SelectItem key={kind} value={kind}>{t(`editor.elementKinds.${kind}`)}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="mt-2 space-y-3">
+                  {elements.map((element, index) => (
+                    <DashboardElementEditor
+                      key={index}
+                      idPrefix={`dashboard-${region}-${index}`}
+                      element={element}
+                      t={t}
+                      onChange={(next) => updateDashboardElement(selectedNode.id, region, index, next)}
+                      onRemove={() => removeDashboardElement(selectedNode.id, region, index)}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          <p className="text-[12px] text-muted-foreground">{t('editor.dashboardActivation')}</p>
+        </> : null}
+        {selectedNode.data.nodeType === 'artifact' ? <>
+          <Field label={t('editor.artifactName')} htmlFor="artifact-name"><Input id="artifact-name" value={selectedNode.data.artifactName ?? ''} onChange={(event) => { const artifactName = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, artifactName } } : node)); setSaveState('unsaved'); }} /></Field>
+          <Field label={t('editor.artifactType')} htmlFor="artifact-type"><Select value={selectedNode.data.artifactType ?? 'text'} onValueChange={(value) => { const artifactType = value as 'text' | 'markdown' | 'json'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, artifactType } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="artifact-type"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">{t('editor.artifactTypes.text')}</SelectItem><SelectItem value="markdown">{t('editor.artifactTypes.markdown')}</SelectItem><SelectItem value="json">{t('editor.artifactTypes.json')}</SelectItem></SelectContent></Select></Field>
+          <p className="text-[12px] text-muted-foreground">{t('editor.artifactCreationDescription')}</p>
+        </> : null}
+        {selectedNode.data.nodeType === 'wechatPublish' ? <>
+          <Field label={t('editor.wechatAccount')} htmlFor="wechat-account"><Select value={selectedNode.data.wechatAccountId ?? 'wechat_official_account_personal'} onValueChange={(wechatAccountId) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, wechatAccountId } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="wechat-account"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="wechat_official_account_personal">{t('editor.wechatPersonalAccount')}</SelectItem></SelectContent></Select></Field>
+          <Field label={t('editor.wechatMode')} htmlFor="wechat-mode"><Select value={selectedNode.data.wechatMode ?? 'draft'} onValueChange={(value) => { const wechatMode = value as 'draft' | 'publish'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, wechatMode } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="wechat-mode"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="draft">{t('editor.wechatModes.draft')}</SelectItem><SelectItem value="publish">{t('editor.wechatModes.publish')}</SelectItem></SelectContent></Select></Field>
+          <p className="text-[12px] text-muted-foreground">{selectedNode.data.wechatMode === 'publish' ? t('editor.wechatPublishPendingHint') : t('editor.wechatDraftHint')}</p>
+        </> : null}
         {selectedNode.data.nodeType === 'agent' ? <>
           <Field label={t('editor.model')} htmlFor="agent-model"><Select value={selectedNode.data.model} onValueChange={(value) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, model: value } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="agent-model"><SelectValue placeholder={t('editor.selectModel')} /></SelectTrigger><SelectContent>{modelOptions.map((model) => <SelectItem key={model} value={model}>{model}</SelectItem>)}</SelectContent></Select></Field>
           <Field label={t('editor.systemPrompt')} htmlFor="agent-system-prompt"><Textarea id="agent-system-prompt" value={selectedNode.data.systemPrompt ?? ''} onChange={(event) => { const systemPrompt = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, systemPrompt } } : node)); setSaveState('unsaved'); }} /></Field>
+          <Field label={t('editor.outputFormat')} htmlFor="agent-output-format" hint={t('editor.outputFormatDescription')}><Select value={selectedNode.data.outputFormat ?? 'text'} onValueChange={(value) => { const outputFormat = value as 'text' | 'json'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, outputFormat } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="agent-output-format"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">{t('editor.outputFormats.text')}</SelectItem><SelectItem value="json">{t('editor.outputFormats.json')}</SelectItem></SelectContent></Select></Field>
           <div><p className="text-[12px] font-medium">{t('editor.skills')}</p><div className="mt-2 space-y-2">{availableSkills.map((skill) => { const checked = (selectedNode.data.skillIds ?? []).includes(skill.id); return <label key={skill.id} className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-[13px]"><Checkbox checked={checked} onCheckedChange={(value) => { const nextIds = value === true ? [...new Set([...(selectedNode.data.skillIds ?? []), skill.id])] : (selectedNode.data.skillIds ?? []).filter((id) => id !== skill.id); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, skillIds: nextIds, skillNames: availableSkills.filter((item) => nextIds.includes(item.id)).map((item) => item.name) } } : node)); setSaveState('unsaved'); }} aria-label={skill.name} /><span>{skill.name}</span></label>; })}</div></div>
           <div><p className="text-[12px] font-medium">{t('editor.mcpServers')}</p><div className="mt-2 space-y-2">{availableMcpServers.map((server) => { const checked = (selectedNode.data.mcpServerIds ?? []).includes(server.id); return <label key={server.id} className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-[13px]"><Checkbox checked={checked} onCheckedChange={(value) => { const nextIds = value === true ? [...new Set([...(selectedNode.data.mcpServerIds ?? []), server.id])] : (selectedNode.data.mcpServerIds ?? []).filter((id) => id !== server.id); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, mcpServerIds: nextIds, mcpServerNames: availableMcpServers.filter((item) => nextIds.includes(item.id)).map((item) => item.name) } } : node)); setSaveState('unsaved'); }} aria-label={server.name} /><span>{server.name}</span></label>; })}</div></div>
           <Field label={t('editor.errorPolicy')} htmlFor="policy"><Select value={selectedNode.data.errorPolicy} onValueChange={(value) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, errorPolicy: value as 'stop' | 'retry' } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="policy"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="stop">{t('editor.stop')}</SelectItem><SelectItem value="retry">{t('editor.retry')}</SelectItem></SelectContent></Select></Field>
@@ -461,7 +585,21 @@ function WorkflowEditorPage() {
         </main>
         <aside className="hidden w-[360px] min-w-0 shrink-0 overflow-auto border-l border-border bg-surface p-4 lg:flex">{contextPanel}</aside>
       </div>
-      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}><DialogContent className="max-h-[85vh] overflow-auto"><DialogHeader><DialogTitle>{t('editor.workflowSettings')}</DialogTitle><DialogDescription>{t('editor.workflowSettingsDescription')}</DialogDescription></DialogHeader><div className="flex flex-col gap-5"><section><h3 className="text-sm font-semibold">{t('editor.general')}</h3><Field className="mt-3" label={t('editor.name')} htmlFor="wf-name"><Input id="wf-name" value={name} onChange={(event) => { setName(event.target.value); setSaveState('unsaved'); }} /></Field></section><section><h3 className="text-sm font-semibold">{t('editor.inputs')}</h3><Field className="mt-3" label={t('editor.input')} htmlFor="wf-input"><Textarea id="wf-input" className="font-mono text-[13px]" value={input} onChange={(event) => { setInput(event.target.value); setSaveState('unsaved'); }} /></Field></section><section><h3 className="text-sm font-semibold">{t('editor.execution')}</h3><Field className="mt-3" label={t('editor.defaultErrorPolicy')} htmlFor="default-policy"><Select value={executionPolicy} onValueChange={(value) => { setExecutionPolicy(value as 'stop' | 'retry'); setSaveState('unsaved'); }}><SelectTrigger id="default-policy"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="stop">{t('editor.stop')}</SelectItem><SelectItem value="retry">{t('editor.retry')}</SelectItem></SelectContent></Select></Field></section><section className="rounded-md border border-border bg-surface-subtle p-3"><h3 className="text-sm font-semibold">{t('editor.versioning')}</h3><p className="mt-1 text-[13px] text-muted-foreground">{t('editor.versioningHint')}</p></section></div><DialogFooter><Button onClick={() => setSettingsOpen(false)}>{t('common:actions.close')}</Button></DialogFooter></DialogContent></Dialog>
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className="max-h-[85vh] overflow-auto">
+          <DialogHeader><DialogTitle>{t('editor.workflowSettings')}</DialogTitle><DialogDescription>{t('editor.workflowSettingsDescription')}</DialogDescription></DialogHeader>
+          <div className="flex flex-col gap-5">
+            <section><h3 className="text-sm font-semibold">{t('editor.general')}</h3><Field className="mt-3" label={t('editor.name')} htmlFor="wf-name"><Input id="wf-name" value={name} onChange={(event) => { setName(event.target.value); setSaveState('unsaved'); }} /></Field></section>
+            <section><h3 className="text-sm font-semibold">{t('editor.inputs')}</h3><Field className="mt-3" label={t('editor.input')} htmlFor="wf-input"><Textarea id="wf-input" className="font-mono text-[13px]" value={input} onChange={(event) => { setInput(event.target.value); setSaveState('unsaved'); }} /></Field></section>
+            <section>
+              <h3 className="text-sm font-semibold">{t('editor.execution')}</h3>
+              <Field className="mt-3" label={t('editor.defaultErrorPolicy')} htmlFor="default-policy"><Select value={executionPolicy} onValueChange={(value) => { setExecutionPolicy(value as 'stop' | 'retry'); setSaveState('unsaved'); }}><SelectTrigger id="default-policy"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="stop">{t('editor.stop')}</SelectItem><SelectItem value="retry">{t('editor.retry')}</SelectItem></SelectContent></Select></Field>
+            </section>
+            <section className="rounded-md border border-border bg-surface-subtle p-3"><h3 className="text-sm font-semibold">{t('editor.versioning')}</h3><p className="mt-1 text-[13px] text-muted-foreground">{t('editor.versioningHint')}</p></section>
+          </div>
+          <DialogFooter><Button onClick={() => setSettingsOpen(false)}>{t('common:actions.close')}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Sheet open={contextPanelOpen} onOpenChange={setContextPanelOpen}><SheetContent side="right" className="overflow-auto p-4 pt-5"><SheetHeader className="sr-only"><SheetTitle>{selectedNode || selectedEdge ? t('editor.configureStep') : t('editor.nodePalette')}</SheetTitle><SheetDescription>{selectedNode || selectedEdge ? t('editor.selectCanvasItem') : t('editor.paletteHint')}</SheetDescription></SheetHeader>{contextPanel}</SheetContent></Sheet>
       <Dialog open={publishOpen} onOpenChange={setPublishOpen}><DialogContent><DialogHeader><DialogTitle>{t('editor.publishTitle')}</DialogTitle><DialogDescription>{t('editor.publishDescription')}</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setPublishOpen(false)}>{t('common:actions.cancel')}</Button><Button onClick={() => void publishWorkflow()}>{t('common:actions.publish')}</Button></DialogFooter></DialogContent></Dialog>
       <ConfirmDialog
@@ -480,11 +618,11 @@ function WorkflowEditorPage() {
   );
 }
 
-function toFlowNodes(definition: WorkflowDefinition, onTextChange: (nodeId: string, value: string) => void): WorkflowCanvasNode[] {
+function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
   return definition.nodes.map((node) => {
     const config = asRecord(node.config);
-    const nodeType = node.type === 'worklite/input' ? 'input' : node.type === 'worklite/text' ? 'text' : node.type === 'worklite/skill-set' ? 'skill-set' : 'agent';
-    const label = typeof config.label === 'string' ? config.label : nodeType === 'input' ? 'Workflow Input' : nodeType === 'text' ? 'System Prompt' : nodeType === 'skill-set' ? 'Skill Set' : 'Agent';
+    const nodeType = node.type === 'worklite/input' ? 'input' : node.type === 'worklite/timer' ? 'timer' : node.type === 'worklite/dashboard' ? 'dashboard' : node.type === 'worklite/artifact' ? 'artifact' : node.type === 'wechat-official-account/publish' ? 'wechatPublish' : 'agent';
+    const label = typeof config.label === 'string' ? config.label : nodeType === 'input' ? 'Workflow Input' : nodeType === 'timer' ? 'Timer' : nodeType === 'dashboard' ? 'Dashboard' : nodeType === 'artifact' ? 'Artifact' : nodeType === 'wechatPublish' ? 'WeChat Official Account' : 'Agent';
     return {
       id: node.id,
       type: nodeType,
@@ -494,16 +632,19 @@ function toFlowNodes(definition: WorkflowDefinition, onTextChange: (nodeId: stri
         label,
         model: typeof config.model === 'string' ? config.model : '',
         systemPrompt: typeof config.systemPrompt === 'string' ? config.systemPrompt : '',
+        outputFormat: config.outputFormat === 'json' || config.outputFormat === 'text' ? config.outputFormat : 'text',
         mcpServerIds: Array.isArray(config.mcpServerIds) ? config.mcpServerIds.filter((value): value is string => typeof value === 'string') : [],
         mcpServerNames: Array.isArray(config.mcpServerNames) ? config.mcpServerNames.filter((value): value is string => typeof value === 'string') : [],
-        text: typeof config.text === 'string' ? config.text : '',
+        timerEnabled: typeof config.enabled === 'boolean' ? config.enabled : true,
+        timerIntervalSeconds: typeof config.intervalSeconds === 'number' && Number.isFinite(config.intervalSeconds) ? config.intervalSeconds : 300,
         skillIds: Array.isArray(config.skillIds) ? config.skillIds.filter((value): value is string => typeof value === 'string') : [],
         skillNames: Array.isArray(config.skillNames) ? config.skillNames.filter((value): value is string => typeof value === 'string') : [],
-        outputType: config.outputType === 'file' ? 'file' : nodeType === 'text' ? 'text' : undefined,
-        fileName: typeof config.fileName === 'string' ? config.fileName : undefined,
-        fileType: config.fileType === 'json' || config.fileType === 'text' || config.fileType === 'markdown' ? config.fileType : undefined,
+        dashboardLayout: readDashboardLayout(config.layout),
+        artifactName: typeof config.name === 'string' ? config.name : undefined,
+        artifactType: config.type === 'json' || config.type === 'text' || config.type === 'markdown' ? config.type : undefined,
+        wechatAccountId: typeof config.accountId === 'string' ? config.accountId : undefined,
+        wechatMode: config.mode === 'draft' || config.mode === 'publish' ? config.mode : undefined,
         errorPolicy: node.errorPolicy,
-        onTextChange,
       },
     };
   });
@@ -518,11 +659,16 @@ function canConnect(connection: { source: string | null; sourceHandle?: string |
   if (!source || !target || source === target || !targetHandle) return false;
   const sourceNode = nodes.find((node) => node.id === source);
   const targetNode = nodes.find((node) => node.id === target);
-  if (!sourceNode || !targetNode || targetNode.data.nodeType !== 'agent') return false;
-  const sourceType = sourceNode.data.nodeType;
-  const sourcePort = sourceHandle ?? 'output';
+  if (!sourceNode || !targetNode) return false;
+    const sourcePort = sourceHandle ?? 'output';
   if (sourcePort !== 'output') return false;
-  if (targetHandle !== 'context' || sourceType === 'skill-set') return false;
+  if (targetNode.data.nodeType === 'dashboard' || targetNode.data.nodeType === 'artifact') {
+    if (targetHandle !== 'data') return false;
+  } else if (targetNode.data.nodeType === 'wechatPublish') {
+    if (targetHandle !== 'article' && targetHandle !== 'metadata') return false;
+  } else if (targetNode.data.nodeType !== 'agent' || targetHandle !== 'context') {
+    return false;
+  }
   if (edges.some((edge) => edge.source === source && edge.target === target && (edge.sourceHandle ?? 'output') === sourcePort && (edge.targetHandle ?? 'input') === targetHandle)) return false;
   if (edges.some((edge) => edge.target === target && (edge.targetHandle ?? 'input') === targetHandle)) return false;
   return !wouldCreateCycle(source, target, edges);
@@ -547,20 +693,26 @@ function toDefinitionNode(node: WorkflowCanvasNode): WorkflowNodeDefinition {
   let config: Record<string, unknown> = base;
   if (node.data.nodeType === 'input') {
     type = 'worklite/input';
-  } else if (node.data.nodeType === 'text') {
-    type = 'worklite/text';
-    config = { ...base, text: node.data.text ?? '' };
-  } else if (node.data.nodeType === 'skill-set') {
-    type = 'worklite/skill-set';
-    config = { ...base, skillIds: node.data.skillIds ?? [], skillNames: node.data.skillNames ?? [] };
+  } else if (node.data.nodeType === 'timer') {
+    type = 'worklite/timer';
+    config = { ...base, enabled: node.data.timerEnabled !== false, intervalSeconds: node.data.timerIntervalSeconds ?? 300 };
+  } else if (node.data.nodeType === 'dashboard') {
+    type = 'worklite/dashboard';
+    config = { ...base, layout: node.data.dashboardLayout ?? { header: [], main: [], footer: [] } };
+  } else if (node.data.nodeType === 'artifact') {
+    type = 'worklite/artifact';
+    config = { ...base, name: node.data.artifactName ?? '', type: node.data.artifactType ?? 'text' };
+  } else if (node.data.nodeType === 'wechatPublish') {
+    type = 'wechat-official-account/publish';
+    config = { ...base, accountId: node.data.wechatAccountId ?? 'wechat_official_account_personal', mode: node.data.wechatMode ?? 'draft' };
   } else {
     config = {
       ...base,
       model: node.data.model ?? '',
       systemPrompt: node.data.systemPrompt ?? '',
+      outputFormat: node.data.outputFormat === 'json' ? 'json' : 'text',
       skillIds: node.data.skillIds ?? [],
       mcpServerIds: node.data.mcpServerIds ?? [],
-      ...(node.data.outputType === 'file' ? { outputType: 'file', fileName: node.data.fileName ?? 'workflow-output.txt', fileType: node.data.fileType ?? 'markdown' } : {}),
     };
   }
   return {
@@ -581,10 +733,146 @@ function nodeLabel(nodes: WorkflowCanvasNode[], nodeId: string): string {
   return nodes.find((node) => node.id === nodeId)?.data.label ?? nodeId;
 }
 
+type DashboardLayoutRegion = 'header' | 'main' | 'footer';
+
+const dashboardMetricFieldTypes = ['text', 'number', 'boolean', 'datetime'] as const;
+const dashboardListFieldTypes = [...dashboardMetricFieldTypes, 'url'] as const;
+
+function DashboardElementEditor({ idPrefix, element, t, onChange, onRemove }: {
+  idPrefix: string;
+  element: WorkflowDashboardElement;
+  t: TFunction<'workflows'>;
+  onChange: (element: WorkflowDashboardElement) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="rounded-md border border-border p-3">
+      <div className="grid gap-3">
+        {element.kind === 'text' ? (
+          <Field label={t('editor.elementTextLabel')} htmlFor={`${idPrefix}-text`}>
+            <Textarea id={`${idPrefix}-text`} value={element.text} onChange={(event) => onChange({ kind: 'text', text: event.target.value })} />
+          </Field>
+        ) : null}
+        {element.kind === 'count' || element.kind === 'metric' ? (
+          <Field label={t('editor.elementLabel')} htmlFor={`${idPrefix}-label`}>
+            <Input id={`${idPrefix}-label`} value={element.label} onChange={(event) => onChange({ ...element, label: event.target.value })} />
+          </Field>
+        ) : null}
+        {element.kind === 'metric' ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label={t('editor.elementMetricField')} htmlFor={`${idPrefix}-field`}>
+              <Input id={`${idPrefix}-field`} value={element.field} onChange={(event) => onChange({ ...element, field: event.target.value })} />
+            </Field>
+            <Field label={t('editor.fieldType')} htmlFor={`${idPrefix}-type`}>
+              <Select value={element.type} onValueChange={(value) => onChange({ ...element, type: value as WorkflowDashboardFieldType })}>
+                <SelectTrigger id={`${idPrefix}-type`}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {dashboardMetricFieldTypes.map((type) => <SelectItem key={type} value={type}>{t(`editor.fieldTypes.${type}`)}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+        ) : null}
+        {element.kind === 'list' ? (
+          <>
+            <Field label={t('editor.elementListTitleKey')} htmlFor={`${idPrefix}-title-key`}>
+              <Select value={element.titleKey} onValueChange={(value) => onChange({ ...element, titleKey: value })}>
+                <SelectTrigger id={`${idPrefix}-title-key`}><SelectValue /></SelectTrigger>
+                <SelectContent>{element.fields.map((field) => <SelectItem key={field.key} value={field.key}>{field.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </Field>
+            <div>
+              <p className="text-[12px] font-medium">{t('editor.dashboardFields')}</p>
+              <div className="mt-2 space-y-2">
+                {element.fields.map((field, fieldIndex) => (
+                  <div key={fieldIndex} className="rounded-md border border-border p-2">
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <Field label={t('editor.fieldKey')} htmlFor={`${idPrefix}-field-key-${fieldIndex}`}>
+                        <Input id={`${idPrefix}-field-key-${fieldIndex}`} value={field.key} onChange={(event) => { const key = event.target.value; onChange({ ...element, fields: element.fields.map((item, itemIndex) => itemIndex === fieldIndex ? { ...item, key } : item) }); }} />
+                      </Field>
+                      <Field label={t('editor.fieldLabel')} htmlFor={`${idPrefix}-field-label-${fieldIndex}`}>
+                        <Input id={`${idPrefix}-field-label-${fieldIndex}`} value={field.label} onChange={(event) => { const label = event.target.value; onChange({ ...element, fields: element.fields.map((item, itemIndex) => itemIndex === fieldIndex ? { ...item, label } : item) }); }} />
+                      </Field>
+                      <Field label={t('editor.fieldType')} htmlFor={`${idPrefix}-field-type-${fieldIndex}`}>
+                        <Select value={field.type} onValueChange={(value) => { const type = value as WorkflowDashboardFieldType; onChange({ ...element, fields: element.fields.map((item, itemIndex) => itemIndex === fieldIndex ? { ...item, type } : item) }); }}>
+                          <SelectTrigger id={`${idPrefix}-field-type-${fieldIndex}`}><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {dashboardListFieldTypes.map((type) => <SelectItem key={type} value={type}>{t(`editor.fieldTypes.${type}`)}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                    </div>
+                    <Button type="button" variant="ghost" size="compact" className="mt-1 text-muted-foreground" disabled={element.fields.length <= 1} onClick={() => onChange({ ...element, fields: element.fields.filter((_, itemIndex) => itemIndex !== fieldIndex) })}>
+                      <Trash2 className="size-4" />{t('editor.removeDashboardField')}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="compact"
+                className="mt-2"
+                onClick={() => {
+                  const fields = element.fields;
+                  let suffix = fields.length + 1;
+                  while (fields.some((item) => item.key === `field_${suffix}`)) suffix += 1;
+                  onChange({ ...element, fields: [...fields, { key: `field_${suffix}`, label: t('editor.newFieldLabel'), type: 'text' }] });
+                }}
+              >
+                <Plus className="size-4" />{t('editor.addDashboardField')}
+              </Button>
+            </div>
+          </>
+        ) : null}
+      </div>
+      <Button type="button" variant="ghost" size="compact" className="mt-2 text-muted-foreground" onClick={onRemove}>
+        <Trash2 className="size-4" />{t('editor.removeDashboardElement')}
+      </Button>
+    </div>
+  );
+}
+
+function readDashboardLayout(value: unknown): WorkflowDashboardLayout {
+  const empty: WorkflowDashboardLayout = { header: [], main: [], footer: [] };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return empty;
+  const layout = value as Record<string, unknown>;
+  return {
+    header: readDashboardElements(layout.header),
+    main: readDashboardElements(layout.main),
+    footer: readDashboardElements(layout.footer),
+  };
+}
+
+function readDashboardElements(value: unknown): WorkflowDashboardElement[] {
+  if (!Array.isArray(value)) return [];
+  const supportedType = (candidate: unknown): candidate is WorkflowDashboardFieldType => candidate === 'text' || candidate === 'number' || candidate === 'boolean' || candidate === 'datetime' || candidate === 'url';
+  const supportedMetricType = (candidate: unknown): candidate is WorkflowDashboardFieldType => candidate === 'text' || candidate === 'number' || candidate === 'boolean' || candidate === 'datetime';
+  return value.flatMap((item): WorkflowDashboardElement[] => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const element = item as Record<string, unknown>;
+    if (element.kind === 'text' && typeof element.text === 'string') return [{ kind: 'text', text: element.text }];
+    if (element.kind === 'count' && typeof element.label === 'string') return [{ kind: 'count', label: element.label }];
+    if (element.kind === 'metric' && typeof element.label === 'string' && typeof element.field === 'string' && supportedMetricType(element.type)) return [{ kind: 'metric', label: element.label, field: element.field, type: element.type }];
+    if (element.kind === 'list' && typeof element.titleKey === 'string' && Array.isArray(element.fields)) {
+      const fields: WorkflowDashboardField[] = [];
+      for (const field of element.fields) {
+        if (!field || typeof field !== 'object' || Array.isArray(field)) continue;
+        const record = field as Record<string, unknown>;
+        if (typeof record.key === 'string' && typeof record.label === 'string' && supportedType(record.type)) fields.push({ key: record.key, label: record.label, type: record.type });
+      }
+      return [{ kind: 'list', titleKey: element.titleKey, fields }];
+    }
+    return [];
+  });
+}
+
 function nodeTypeLabel(nodeType: WorkflowCanvasNode['data']['nodeType'], t: TFunction<'workflows'>): string {
   if (nodeType === 'input') return t('editor.workflowInputNode');
-  if (nodeType === 'text') return t('editor.systemPromptNode');
-  if (nodeType === 'skill-set') return t('editor.skillSetNode');
+  if (nodeType === 'timer') return t('editor.timerNode');
+  if (nodeType === 'dashboard') return t('editor.dashboardNode');
+  if (nodeType === 'artifact') return t('editor.artifactNode');
+  if (nodeType === 'wechatPublish') return t('editor.wechatNode');
   return t('editor.agentNode');
 }
 

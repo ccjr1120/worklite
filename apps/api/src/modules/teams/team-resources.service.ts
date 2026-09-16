@@ -37,7 +37,9 @@ import {
   skills,
   workflowDrafts,
   workflowRuns,
+  workflowSchedules,
   workflowVersions,
+  wechatOfficialAccounts,
   workflows,
   workspaceSettings,
   type Database,
@@ -141,14 +143,13 @@ const WORKLITE_NAVIGATION_ROUTES = {
   'mcp-servers': '/mcp-servers',
   'model-providers': '/model-providers',
   workflows: '/workflows',
-  runs: '/runs',
   'settings-appearance': '/settings/appearance',
   'settings-usage': '/settings/usage',
   'settings-audit-log': '/settings/audit-log',
 } as const satisfies Record<WorkliteNavigationTarget, string>;
 
 export const GATEWAY_PROVIDER_ID = 'gateway-provider';
-const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 4547);
+const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 3392);
 const GATEWAY_PROVIDER_URL = `http://127.0.0.1:${GATEWAY_PORT}/worklite/providers`;
 
 function validatePackageFiles(input: unknown): PackageFile[] {
@@ -359,12 +360,21 @@ export class WorkspaceResourcesService {
     });
   }
 
-  async publicModelRuntime(workspaceId: string, publicModelId: string) {
+  async publicModelRuntime(_workspaceId: string, publicModelId: string) {
     const separator = publicModelId.indexOf('/');
     if (separator <= 0 || separator === publicModelId.length - 1) throw new BadRequestException('A public provider/model id is required.');
-    const providerName = publicModelId.slice(0, separator);
-    const model = publicModelId.slice(separator + 1);
-    const [provider] = await this.db.select({ id: modelProviders.id }).from(modelProviders).where(and(eq(modelProviders.workspaceId, workspaceId), eq(modelProviders.name, providerName))).limit(1);
+    const providerName = publicModelId.slice(0, separator).trim();
+    const model = publicModelId.slice(separator + 1).trim();
+    if (!providerName || !model) throw new BadRequestException('A public provider/model id is required.');
+    let gatewayResponse: globalThis.Response;
+    try {
+      gatewayResponse = await fetch(GATEWAY_PROVIDER_URL);
+    } catch {
+      throw new ServiceUnavailableException('Portkey Gateway is unavailable.');
+    }
+    if (!gatewayResponse.ok) throw new ServiceUnavailableException('Portkey Gateway is unavailable.');
+    const providers = await gatewayResponse.json() as Array<Pick<ModelProviderView, 'id' | 'name'>>;
+    const provider = providers.find((candidate) => candidate.name === providerName);
     if (!provider) throw new NotFoundException(`Model provider ${providerName} was not found.`);
     return this.providerRuntime({} as Request, 'personal', provider.id, model);
   }
@@ -471,15 +481,17 @@ export class WorkspaceResourcesService {
 
   async platformSnapshot(request: Request, workspaceSlug: string) {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [providerRows, skillRows, mcpRows, agentRows, workflowRows, settingsRows, agentSkillRows, agentMcpRows] = await Promise.all([
+    const [providerRows, skillRows, mcpRows, agentRows, workflowRows, scheduleRows, settingsRows, agentSkillRows, agentMcpRows, officialAccountRows] = await Promise.all([
       this.providers(request, workspaceSlug),
       this.db.select().from(skills).where(and(eq(skills.workspaceId, workspace.id), ne(skills.id, SYSTEM_HELPER_PLATFORM_SKILL_ID))).orderBy(skills.name),
       this.db.select().from(mcpServers).where(eq(mcpServers.workspaceId, workspace.id)).orderBy(mcpServers.name),
       this.db.select().from(agents).where(eq(agents.workspaceId, workspace.id)).orderBy(agents.name),
       this.db.select().from(workflows).where(eq(workflows.workspaceId, workspace.id)).orderBy(workflows.name),
+      this.db.select().from(workflowSchedules).where(eq(workflowSchedules.workspaceId, workspace.id)),
       this.db.select().from(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspace.id)).limit(1),
       this.db.select({ agentId: agentSkills.agentId, skillId: agentSkills.skillId }).from(agentSkills).innerJoin(agents, eq(agentSkills.agentId, agents.id)).where(eq(agents.workspaceId, workspace.id)),
       this.db.select({ agentId: agentMcpServers.agentId, mcpServerId: agentMcpServers.mcpServerId }).from(agentMcpServers).innerJoin(agents, eq(agentMcpServers.agentId, agents.id)).where(eq(agents.workspaceId, workspace.id)),
+      this.db.select({ id: wechatOfficialAccounts.id, displayName: wechatOfficialAccounts.displayName, status: wechatOfficialAccounts.status }).from(wechatOfficialAccounts).where(eq(wechatOfficialAccounts.workspaceId, workspace.id)),
     ]);
     const providerNames = new Map(providerRows.map((provider) => [provider.id, provider.name]));
     const skillNames = new Map(skillRows.map((skill) => [skill.id, skill.name]));
@@ -507,7 +519,13 @@ export class WorkspaceResourcesService {
           unsupportedFeatures: ['standalone Agent references', 'Agent version references', 'template selection', 'conditions', 'loops', 'dynamic joins', 'parallel execution', 'webhook triggers', 'API triggers', 'notification nodes'],
           graphMutationAvailable: true,
           graphMutationNote: 'Use edit-workflow.mjs with a logical Workflow Plan. The server generates node IDs and positions, validates capabilities, ports, resources, and DAG constraints, then records an assistant revision.',
+          scheduling: { available: true, owner: 'timer_node', nodeType: 'worklite/timer', minimumIntervalSeconds: 300, maximumPerWorkflow: 1, activatesOnPublish: true, preventsOverlap: true },
+          runHistory: { location: 'workflow_list_dialog', nodeExecutionLogs: true, failureReasons: true, artifactEligibilitySource: 'immutable_workflow_version' },
+          humanGatedExecution: { durable: true, runStatus: 'waiting_for_input', resumesSameNode: true, qrPayloadOnly: true, supportedActions: ['wechat_login', 'wechat_publish_confirmation'] },
+          wechatOfficialAccounts: officialAccountRows,
+          chatInvocation: { available: true, syntax: '@Workflow', publishedOnly: true, inputSource: 'remaining_message_text', execution: 'latest_published_version_run', presentsArtifacts: true },
         },
+        homeDashboard: { globalWorkflowDataSource: false, boardEligibility: 'dashboard_node_and_successful_run', workflowOutputPersistence: false, boardCategories: { defaultGroup: 'uncategorized', databaseBacked: true, maximumPerBoard: 1 } },
         requiresExplicitConfirmation: true,
         mcpToolNamesAvailable: false,
         mcpToolDataNote: 'Only the allowed-tool count is persisted. Do not invent or infer MCP tool names.',
@@ -545,7 +563,15 @@ export class WorkspaceResourcesService {
         skills: agentSkillRows.filter((assignment) => assignment.agentId === agent.id).map((assignment) => ({ id: assignment.skillId, name: skillNames.get(assignment.skillId) ?? assignment.skillId })),
         mcpServers: agentMcpRows.filter((assignment) => assignment.agentId === agent.id).map((assignment) => ({ id: assignment.mcpServerId, name: mcpNames.get(assignment.mcpServerId) ?? assignment.mcpServerId })),
       })),
-      workflows: workflowRows.map((workflow) => ({ id: workflow.id, name: workflow.name, state: workflow.state })),
+      workflows: workflowRows.map((workflow) => {
+        const schedule = scheduleRows.find((candidate) => candidate.workflowId === workflow.id);
+        return {
+          id: workflow.id,
+          name: workflow.name,
+          state: workflow.state,
+          schedule: schedule ? { enabled: schedule.enabled, intervalSeconds: schedule.intervalSeconds, workflowVersionId: schedule.workflowVersionId, nextRunAt: schedule.nextRunAt.toISOString(), lastStatus: schedule.lastStatus } : null,
+        };
+      }),
       settings: settingsRows[0] ? { appearance: settingsRows[0].appearance, locale: settingsRows[0].locale } : null,
     };
   }
@@ -762,7 +788,7 @@ export class WorkspaceResourcesService {
       this.db.select({ definition: workflowVersions.definition }).from(workflowVersions).where(eq(workflowVersions.workspaceId, workspaceId)),
     ]);
     return [...draftRows, ...versionRows].some(({ definition }) => definition?.nodes.some((node) => {
-      if (node.type !== 'worklite/agent' && node.type !== 'worklite/skill-set') return false;
+      if (node.type !== 'worklite/agent') return false;
       if (!node.config || typeof node.config !== 'object' || Array.isArray(node.config)) return false;
       const ids = (node.config as Record<string, unknown>)[field];
       return Array.isArray(ids) && ids.includes(resourceId);

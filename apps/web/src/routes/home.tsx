@@ -1,457 +1,520 @@
-import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import {
-  AlertTriangle,
-  ArrowLeft,
-  ArrowUpRight,
-  BarChart3,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  FileStack,
-  LayoutDashboard,
-  Pencil,
-  Play,
-  Plus,
-  Trash2,
-  Workflow as WorkflowIcon,
-  RefreshCw,
-} from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { createFileRoute, Link } from '@tanstack/react-router';
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, LayoutDashboard, LoaderCircle, Pencil, Plus, Trash2 } from 'lucide-react';
+import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
-import { create } from 'zustand';
-import { ConfirmDialog } from '@/components/confirm-dialog';
+import type { HomeBoardCategoryView, RunView, WorkflowDashboardBinding, WorkflowDashboardElement, WorkflowDashboardField, WorkflowView } from '@worklite/contracts';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { Input } from '@/components/ui/input';
-import { focusRing, focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ConfirmDialog } from '@/components/confirm-dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import { PageHeading } from '@/components/page-heading';
 import { StatusBadge } from '@/components/status-badge';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
-import type { Artifact, Run, Workflow } from '@/mock/data';
-import { dashboardQueryKey, useAgentQuery, useArtifactsQuery, useAuditLogsQuery, useDashboardQuery, useModelProvidersQuery, useRunsQuery, useWorkflowsQuery } from '@/api/queries';
-import { api } from '@/api/client';
-import type { DashboardPayloadItem } from '@worklite/contracts';
+import {
+  useAgentQuery,
+  useAssignHomeBoardMutation,
+  useCreateHomeBoardCategoryMutation,
+  useDeleteHomeBoardCategoryMutation,
+  useHomeBoardPreferencesQuery,
+  useModelProvidersQuery,
+  useRenameHomeBoardCategoryMutation,
+  useRunQuery,
+  useRunsQuery,
+  useWorkflowsQuery,
+} from '@/api/queries';
+import { useLocale } from '@/components/locale-provider';
+import { formatDateTime, formatNumber } from '@/i18n/format';
+import type { AppLocale } from '@/i18n/locale';
 import { cn } from '@/lib/utils';
 
-type DashboardWidgetType = 'attention' | 'active_runs' | 'workflow_health' | 'recent_workflows' | 'recent_activity' | 'recent_artifacts';
-type DashboardTemplate = 'workflow-overview' | 'workflow-health' | 'recent-activity' | 'blank';
-
-type DashboardBoard = {
-  id: string;
-  categoryId: string;
-  name?: string;
-  nameKey?: string;
-  description?: string;
-  descriptionKey?: string;
-  template: DashboardTemplate;
-  widgets: DashboardWidgetType[];
-};
-
-type DashboardCategory = {
-  id: string;
-  name?: string;
-  nameKey?: string;
-  boards: DashboardBoard[];
-};
-
-type DashboardStore = {
-  categoriesByWorkspace: Record<string, DashboardCategory[]>;
-  updateCategories: (workspaceKey: string, update: (current: DashboardCategory[]) => DashboardCategory[]) => void;
-};
+const SYSTEM_HELPER_CHAT_ID = 'agt_system_helper_chat';
 
 type HomeSearch = {
   assistant?: 'open';
-  board?: string;
 };
 
-type Translate = (key: string, options?: Record<string, unknown>) => string;
+type HomeBoard = {
+  workflow: WorkflowView;
+  dashboard: WorkflowDashboardBinding;
+  run: RunView;
+};
 
-const ALL_WIDGETS: DashboardWidgetType[] = ['attention', 'active_runs', 'workflow_health', 'recent_workflows', 'recent_activity', 'recent_artifacts'];
-const SYSTEM_HELPER_CHAT_ID = 'agt_system_helper_chat';
-
-function createDefaultCategories(): DashboardCategory[] {
-  return [
-    {
-      id: 'category_workflows',
-      nameKey: 'dashboard.categories.workflows',
-      boards: [
-        {
-          id: 'board_workflow_overview',
-          categoryId: 'category_workflows',
-          nameKey: 'dashboard.boards.workflowOverview.title',
-          descriptionKey: 'dashboard.boards.workflowOverview.description',
-          template: 'workflow-overview',
-          widgets: ['attention', 'active_runs', 'recent_workflows', 'recent_activity'],
-        },
-        {
-          id: 'board_workflow_health',
-          categoryId: 'category_workflows',
-          nameKey: 'dashboard.boards.workflowHealth.title',
-          descriptionKey: 'dashboard.boards.workflowHealth.description',
-          template: 'workflow-health',
-          widgets: ['workflow_health', 'active_runs', 'recent_artifacts'],
-        },
-        {
-          id: 'board_recent_activity',
-          categoryId: 'category_workflows',
-          nameKey: 'dashboard.boards.recentActivity.title',
-          descriptionKey: 'dashboard.boards.recentActivity.description',
-          template: 'recent-activity',
-          widgets: ['recent_activity', 'recent_workflows', 'recent_artifacts'],
-        },
-      ],
-    },
-  ];
-}
-
-const DEFAULT_DASHBOARD_CATEGORIES = createDefaultCategories();
-
-const useDashboardStore = create<DashboardStore>((set) => ({
-  categoriesByWorkspace: {},
-  updateCategories: (workspaceKey, update) =>
-    set((state) => ({
-      categoriesByWorkspace: {
-        ...state.categoriesByWorkspace,
-        [workspaceKey]: update(state.categoriesByWorkspace[workspaceKey] ?? createDefaultCategories()),
-      },
-    })),
-}));
+type HomeBoardGroup = {
+  category: HomeBoardCategoryView | null;
+  boards: HomeBoard[];
+};
 
 export const Route = createFileRoute('/home')({
   validateSearch: (search: Record<string, unknown>): HomeSearch => ({
     assistant: search.assistant === 'open' ? 'open' : undefined,
-    board: typeof search.board === 'string' && search.board.length > 0 ? search.board : undefined,
   }),
   component: HomePage,
 });
 
 function HomePage() {
-  const { t: translate } = useTranslation(['home', 'workspace', 'common']);
-  const t = translate as unknown as Translate;
+  const { t } = useTranslation(['home', 'workspace', 'common']);
+  const { locale } = useLocale();
   const workspaceKey = 'personal';
   const search = Route.useSearch();
-  const navigate = useNavigate();
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
+  const [renamingCategoryId, setRenamingCategoryId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [deletingCategory, setDeletingCategory] = useState<HomeBoardCategoryView | null>(null);
+  const [addingCategory, setAddingCategory] = useState<HomeBoardCategoryView | null>(null);
   const modelProvidersQuery = useModelProvidersQuery(workspaceKey);
   const systemHelperQuery = useAgentQuery(workspaceKey, SYSTEM_HELPER_CHAT_ID);
-  const { data: apiWorkflows = [] } = useWorkflowsQuery(workspaceKey);
-  const { data: apiRuns = [] } = useRunsQuery(workspaceKey);
-  const { data: apiArtifacts = [] } = useArtifactsQuery(workspaceKey);
-  const { data: apiAuditLogs = [] } = useAuditLogsQuery(workspaceKey);
-  const { data: workflowDashboard } = useDashboardQuery();
-  const categories = useDashboardStore((state) => state.categoriesByWorkspace[workspaceKey] ?? DEFAULT_DASHBOARD_CATEGORIES);
-  const updateCategories = useDashboardStore((state) => state.updateCategories);
-  const [categoryDialog, setCategoryDialog] = useState<{ mode: 'create' | 'rename'; categoryId?: string } | null>(null);
-  const [categoryName, setCategoryName] = useState('');
-  const [deleteCategoryId, setDeleteCategoryId] = useState<string | null>(null);
-  const [boardDialog, setBoardDialog] = useState<{ categoryId: string } | null>(null);
-  const [boardName, setBoardName] = useState('');
-  const [boardTemplate, setBoardTemplate] = useState<DashboardTemplate>('blank');
-  const [widgetDialogOpen, setWidgetDialogOpen] = useState(false);
+  const workflowsQuery = useWorkflowsQuery(workspaceKey);
+  const runsQuery = useRunsQuery(workspaceKey);
+  const categoriesQuery = useHomeBoardPreferencesQuery(workspaceKey);
+  const createCategoryMutation = useCreateHomeBoardCategoryMutation(workspaceKey);
+  const renameCategoryMutation = useRenameHomeBoardCategoryMutation(workspaceKey);
+  const deleteCategoryMutation = useDeleteHomeBoardCategoryMutation(workspaceKey);
+  const assignBoardMutation = useAssignHomeBoardMutation(workspaceKey);
 
-  const workspaceWorkflows: Workflow[] = apiWorkflows.map((item) => ({
-    id: item.id,
-    teamSlug: item.workspaceSlug,
-    name: item.name,
-    state: item.state,
-    stepCount: item.stepCount,
-    lastRunStatus: item.lastRunStatus === 'succeeded' ? 'completed' : item.lastRunStatus === 'timed_out' ? 'failed' : item.lastRunStatus,
-    lastRunAt: item.lastRunAt,
-    updatedAt: item.updatedAt,
-    needsAttention: item.state === 'draft' && item.lastRunStatus === 'failed',
-  }));
-  const workspaceRuns: Run[] = apiRuns.map((item) => ({
-    id: item.id,
-    teamSlug: item.workspaceSlug,
-    workflowId: item.workflowId,
-    workflowName: item.workflowName,
-    version: item.version,
-    status: item.status === 'succeeded' ? 'completed' : item.status === 'timed_out' ? 'failed' : item.status,
-    currentStep: item.currentStep,
-    startedAt: item.startedAt,
-    durationSeconds: item.durationSeconds,
-    initiator: item.initiator,
-  }));
-  const workspaceArtifacts: Artifact[] = apiArtifacts.map((item) => ({ ...item, teamSlug: workspaceKey }));
-  const workspaceActivity = apiAuditLogs.map((item) => ({ id: item.id, text: `${item.actor} ${item.action}`, time: item.timestamp }));
+  const boards = useMemo<HomeBoard[]>(() => {
+    const workflows = workflowsQuery.data ?? [];
+    const runs = runsQuery.data ?? [];
+
+    return workflows.flatMap((workflow) => {
+      if (!workflow.dashboard || !workflow.latestVersionId || workflow.latestVersion === null) return [];
+      const expectedVersion = `v${workflow.latestVersion}`;
+      const run = runs.find((item) => item.workflowId === workflow.id && item.version === expectedVersion && item.status === 'succeeded');
+      return run ? [{ workflow, dashboard: workflow.dashboard, run }] : [];
+    });
+  }, [runsQuery.data, workflowsQuery.data]);
+
+  const boardCategories = useMemo(() => new Map((categoriesQuery.data?.categories ?? []).flatMap((category) => category.workflowIds.map((workflowId) => [workflowId, category]))), [categoriesQuery.data]);
+  const boardGroups = useMemo<HomeBoardGroup[]>(() => {
+    const uncategorized = boards.filter((board) => !boardCategories.has(board.workflow.id));
+    const groups: HomeBoardGroup[] = [];
+    for (const category of categoriesQuery.data?.categories ?? []) {
+      groups.push({ category, boards: boards.filter((board) => boardCategories.get(board.workflow.id)?.id === category.id) });
+    }
+    groups.push({ category: null, boards: uncategorized });
+    return groups;
+  }, [boards, boardCategories, categoriesQuery.data]);
+
   const firstUseStateReady = modelProvidersQuery.isSuccess && systemHelperQuery.isSuccess;
   const providerConfigured = (modelProvidersQuery.data?.length ?? 0) > 0;
   const systemHelperConfigured = providerConfigured && Boolean(systemHelperQuery.data?.providerId && systemHelperQuery.data.model);
-  const selectedBoardEntry = categories
-    .flatMap((category) => category.boards.map((board) => ({ category, board })))
-    .find(({ board }) => board.id === search.board);
-  const selectedBoard = selectedBoardEntry?.board;
+  const libraryUnavailable = workflowsQuery.isError || runsQuery.isError || categoriesQuery.isError;
+  const categoriesBusy = createCategoryMutation.isPending || renameCategoryMutation.isPending || deleteCategoryMutation.isPending || assignBoardMutation.isPending;
+  const categoryError = categoriesQuery.isError || createCategoryMutation.isError || renameCategoryMutation.isError || deleteCategoryMutation.isError || assignBoardMutation.isError;
 
-  function openBoard(boardId: string) {
-    void navigate({ to: '/home', search: { board: boardId } });
+  function createCategory(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = newCategoryName.trim();
+    if (!name || createCategoryMutation.isPending) return;
+    createCategoryMutation.mutate({ name }, { onSuccess: () => { setNewCategoryName(''); setCreateCategoryOpen(false); } });
   }
 
-  function closeBoard() {
-    void navigate({ to: '/home', search: {} });
+  function renameCategory(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = renameValue.trim();
+    if (!renamingCategoryId || !name || renameCategoryMutation.isPending) return;
+    renameCategoryMutation.mutate({ categoryId: renamingCategoryId, name }, { onSuccess: () => setRenamingCategoryId(null) });
   }
 
-  function updateBoard(boardId: string, update: (board: DashboardBoard) => DashboardBoard) {
-    updateCategories(workspaceKey, (current) => current.map((category) => ({
-      ...category,
-      boards: category.boards.map((board) => (board.id === boardId ? update(board) : board)),
-    })));
-  }
-
-  function submitCategory() {
-    const value = categoryName.trim();
-    if (!value) return;
-    if (categoryDialog?.mode === 'rename' && categoryDialog.categoryId) {
-      updateCategories(workspaceKey, (current) => current.map((category) => (
-        category.id === categoryDialog.categoryId ? { ...category, name: value, nameKey: undefined } : category
-      )));
-    } else {
-      updateCategories(workspaceKey, (current) => [...current, { id: `category-${Date.now()}`, name: value, boards: [] }]);
+  async function deleteCategory() {
+    if (!deletingCategory || deleteCategoryMutation.isPending) return;
+    try {
+      await deleteCategoryMutation.mutateAsync(deletingCategory.id);
+      setDeletingCategory(null);
+    } catch {
+      // Keep the confirmation open so its local failure state remains available.
     }
-    setCategoryDialog(null);
-    setCategoryName('');
   }
 
-  function removeCategory() {
-    if (!deleteCategoryId) return;
-    const deletedBoardIds = new Set(categories.find((category) => category.id === deleteCategoryId)?.boards.map((board) => board.id));
-    updateCategories(workspaceKey, (current) => current.filter((category) => category.id !== deleteCategoryId));
-    if (search.board && deletedBoardIds.has(search.board)) closeBoard();
-    setDeleteCategoryId(null);
+  function assignBoard(workflowId: string, categoryId: string | null) {
+    assignBoardMutation.mutate({ workflowId, categoryId });
   }
 
-  function submitBoard() {
-    const value = boardName.trim();
-    if (!value || !boardDialog) return;
-    const board: DashboardBoard = {
-      id: `board-${Date.now()}`,
-      categoryId: boardDialog.categoryId,
-      name: value,
-      description: t('dashboard.boards.custom.description'),
-      template: boardTemplate,
-      widgets: getTemplateWidgets(boardTemplate),
-    };
-    updateCategories(workspaceKey, (current) => current.map((category) => (
-      category.id === boardDialog.categoryId ? { ...category, boards: [...category.boards, board] } : category
-    )));
-    setBoardDialog(null);
-    setBoardName('');
-    setBoardTemplate('blank');
-    openBoard(board.id);
-  }
-
-  function addWidget(type: DashboardWidgetType) {
-    if (!selectedBoard) return;
-    updateBoard(selectedBoard.id, (board) => ({ ...board, widgets: [...board.widgets, type] }));
-    setWidgetDialogOpen(false);
-  }
-
-  function moveWidget(index: number, direction: -1 | 1) {
-    if (!selectedBoard) return;
-    updateBoard(selectedBoard.id, (board) => {
-      const nextIndex = index + direction;
-      if (nextIndex < 0 || nextIndex >= board.widgets.length) return board;
-      const widgets = [...board.widgets];
-      const [moved] = widgets.splice(index, 1);
-      widgets.splice(nextIndex, 0, moved);
-      return { ...board, widgets };
-    });
-  }
-
-  function removeWidget(index: number) {
-    if (!selectedBoard) return;
-    updateBoard(selectedBoard.id, (board) => ({ ...board, widgets: board.widgets.filter((_, itemIndex) => itemIndex !== index) }));
-  }
-
-  const pageActions = selectedBoard ? (
-    <Button variant="ghost" size="compact" onClick={closeBoard}><ArrowLeft className="size-4" />{t('dashboard.actions.backToDashboards')}</Button>
-  ) : null;
+  const deleteBusy = deleteCategoryMutation.isPending;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background">
-      <WorkspaceChrome crumbs={[{ label: t('workspace:nav.home') }]} actions={pageActions} />
+      <WorkspaceChrome crumbs={[{ label: t('workspace:nav.home') }]} />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1200px] px-6 pb-36 pt-6">
           {firstUseStateReady && !systemHelperConfigured ? <FirstUseGuide providerConfigured={providerConfigured} /> : null}
-          {selectedBoard && selectedBoardEntry ? (
-            <DashboardDetail board={selectedBoard} category={selectedBoardEntry.category} workflowDashboard={workflowDashboard} workflows={workspaceWorkflows} runs={workspaceRuns} artifacts={workspaceArtifacts} activity={workspaceActivity} t={t} onAddWidget={() => setWidgetDialogOpen(true)} onMoveWidget={moveWidget} onRemoveWidget={removeWidget} onRename={(name) => updateBoard(selectedBoard.id, (board) => ({ ...board, name, nameKey: undefined }))} />
-          ) : (
-            <DashboardLibrary categories={categories} workflows={workspaceWorkflows} runs={workspaceRuns} artifacts={workspaceArtifacts} t={t} onOpenBoard={openBoard} onAddCategory={() => { setCategoryDialog({ mode: 'create' }); setCategoryName(''); }} onAddBoard={(categoryId) => { setBoardDialog({ categoryId }); setBoardName(''); setBoardTemplate('blank'); }} onRenameCategory={(category) => { setCategoryDialog({ mode: 'rename', categoryId: category.id }); setCategoryName(resolveCategoryName(category, t)); }} onDeleteCategory={setDeleteCategoryId} />
-          )}
+
+          <div className="mt-8">
+            <PageHeading title={t('home:boards.title')} description={t('home:boards.description')} />
+
+            <div className="mt-5 flex justify-end">
+              <Button type="button" size="compact" disabled={categoriesBusy} onClick={() => setCreateCategoryOpen(true)}>
+                <Plus className="size-4" />
+                {t('home:categories.create')}
+              </Button>
+            </div>
+
+              {categoryError ? (
+                <p className="mt-3 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[13px] text-danger" role="alert">{t('home:categories.unavailable')}</p>
+              ) : null}
+
+              {workflowsQuery.isLoading || runsQuery.isLoading || categoriesQuery.isLoading ? (
+                <Notice className="mt-5" text={t('home:boards.loading')} />
+              ) : libraryUnavailable ? (
+                <Notice className="mt-5" tone="danger" icon={<AlertTriangle className="size-4" aria-hidden="true" />} text={t('home:boards.unavailable')} />
+              ) : boards.length === 0 ? (
+                <Notice className="mt-5" text={t('home:boards.empty')} />
+              ) : (
+              <div className="mt-6 space-y-7">
+                {boardGroups.map((group) => {
+                  const category = group.category;
+                  const isRenaming = category !== null && renamingCategoryId === category.id;
+                  return (
+                    <section key={category?.id ?? 'uncategorized'} aria-labelledby={`home-category-${category?.id ?? 'uncategorized'}`}>
+                      <div className="flex min-h-9 items-center justify-between gap-3">
+                          {isRenaming && category ? (
+                            <form className="flex w-full max-w-md gap-2" onSubmit={renameCategory}>
+                              <Input value={renameValue} onChange={(event) => setRenameValue(event.target.value)} aria-label={t('home:categories.nameLabel')} disabled={categoriesBusy} autoFocus />
+                              <Button type="submit" size="compact" disabled={!renameValue.trim() || categoriesBusy}>{t('common:actions.save')}</Button>
+                              <Button type="button" variant="secondary" size="compact" disabled={categoriesBusy} onClick={() => setRenamingCategoryId(null)}>{t('common:actions.cancel')}</Button>
+                            </form>
+                          ) : (
+                            <h2 id={`home-category-${category?.id ?? 'uncategorized'}`} className="text-sm font-semibold">
+                              {category ? category.name : t('home:categories.uncategorized')}
+                            </h2>
+                          )}
+
+                          {category && !isRenaming ? (
+                            <span className="flex items-center gap-1">
+                              <Button type="button" variant="ghost" size="icon-compact" disabled={categoriesBusy} aria-label={t('home:categories.addBoards', { name: category.name })} onClick={() => setAddingCategory(category)}>
+                                <Plus className="size-4" />
+                              </Button>
+                              <Button type="button" variant="ghost" size="icon-compact" disabled={categoriesBusy} aria-label={t('home:categories.rename', { name: category.name })} onClick={() => { setRenamingCategoryId(category.id); setRenameValue(category.name); }}>
+                                <Pencil className="size-4" />
+                              </Button>
+                              <Button type="button" variant="ghost" size="icon-compact" disabled={categoriesBusy} aria-label={t('home:categories.delete', { name: category.name })} onClick={() => setDeletingCategory(category)}>
+                                <Trash2 className="size-4" />
+                              </Button>
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {group.boards.length === 0 ? (
+                          <p className="rounded-lg border border-dashed border-border bg-surface/50 px-4 py-5 text-[13px] text-muted-foreground">{t('home:categories.empty')}</p>
+                        ) : (
+                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                            {group.boards.map((board) => (
+                              <BoardCard key={board.workflow.id} board={board} />
+                            ))}
+                          </div>
+                        )}
+                      </section>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      <Dialog open={Boolean(categoryDialog)} onOpenChange={(open) => !open && setCategoryDialog(null)}>
-        <DialogContent><DialogHeader><DialogTitle>{t(categoryDialog?.mode === 'rename' ? 'dashboard.category.renameTitle' : 'dashboard.category.createTitle')}</DialogTitle><DialogDescription>{t('dashboard.category.description')}</DialogDescription></DialogHeader><label htmlFor="dashboard-category-name" className="text-sm font-medium">{t('dashboard.category.nameLabel')}</label><Input id="dashboard-category-name" value={categoryName} onChange={(event) => setCategoryName(event.target.value)} /><DialogFooter><Button variant="secondary" onClick={() => setCategoryDialog(null)}>{t('common:actions.cancel')}</Button><Button onClick={submitCategory} disabled={!categoryName.trim()}>{t('common:actions.save')}</Button></DialogFooter></DialogContent>
+      <Dialog
+        open={createCategoryOpen}
+        onOpenChange={(open) => { if (!createCategoryMutation.isPending) setCreateCategoryOpen(open); }}
+      >
+        <DialogContent aria-busy={createCategoryMutation.isPending}>
+          <DialogHeader>
+            <DialogTitle>{t('home:categories.createTitle')}</DialogTitle>
+            <DialogDescription>{t('home:categories.createDescription')}</DialogDescription>
+          </DialogHeader>
+          <form className="grid gap-4" onSubmit={createCategory}>
+            <div className="grid gap-2">
+              <Label htmlFor="home-category-name">{t('home:categories.nameLabel')}</Label>
+              <Input
+                id="home-category-name"
+                value={newCategoryName}
+                onChange={(event) => setNewCategoryName(event.target.value)}
+                placeholder={t('home:categories.namePlaceholder')}
+                disabled={createCategoryMutation.isPending}
+                autoFocus
+              />
+            </div>
+            {createCategoryMutation.isError ? (
+              <p className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[13px] text-danger" role="alert">{t('home:categories.unavailable')}</p>
+            ) : null}
+            <DialogFooter>
+              <Button type="button" variant="secondary" size="compact" disabled={createCategoryMutation.isPending} onClick={() => setCreateCategoryOpen(false)}>
+                {t('common:actions.cancel')}
+              </Button>
+              <Button type="submit" size="compact" disabled={!newCategoryName.trim() || createCategoryMutation.isPending}>
+                {createCategoryMutation.isPending ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <Plus className="size-4" aria-hidden="true" />}
+                {t('home:categories.create')}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
       </Dialog>
-      <Dialog open={Boolean(boardDialog)} onOpenChange={(open) => !open && setBoardDialog(null)}>
-        <DialogContent><DialogHeader><DialogTitle>{t('dashboard.board.createTitle')}</DialogTitle><DialogDescription>{t('dashboard.board.createDescription')}</DialogDescription></DialogHeader><label htmlFor="dashboard-board-name" className="text-sm font-medium">{t('dashboard.board.nameLabel')}</label><Input id="dashboard-board-name" value={boardName} onChange={(event) => setBoardName(event.target.value)} /><label htmlFor="dashboard-board-template" className="text-sm font-medium">{t('dashboard.board.templateLabel')}</label><Select value={boardTemplate} onValueChange={(value) => setBoardTemplate(value as DashboardTemplate)}><SelectTrigger id="dashboard-board-template"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="blank">{t('dashboard.templates.blank')}</SelectItem><SelectItem value="workflow-overview">{t('dashboard.templates.workflowOverview')}</SelectItem><SelectItem value="workflow-health">{t('dashboard.templates.workflowHealth')}</SelectItem><SelectItem value="recent-activity">{t('dashboard.templates.recentActivity')}</SelectItem></SelectContent></Select><DialogFooter><Button variant="secondary" onClick={() => setBoardDialog(null)}>{t('common:actions.cancel')}</Button><Button onClick={submitBoard} disabled={!boardName.trim()}>{t('dashboard.actions.createBoard')}</Button></DialogFooter></DialogContent>
+
+      <Dialog
+        open={addingCategory !== null}
+        onOpenChange={(open) => { if (!assignBoardMutation.isPending) setAddingCategory(open ? addingCategory : null); }}
+      >
+        <DialogContent aria-busy={assignBoardMutation.isPending}>
+          <DialogHeader>
+            <DialogTitle>{t('home:categories.addTitle', { name: addingCategory?.name ?? '' })}</DialogTitle>
+            <DialogDescription>{t('home:categories.addDescription')}</DialogDescription>
+          </DialogHeader>
+          {assignBoardMutation.isError ? (
+            <p className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[13px] text-danger" role="alert">{t('home:categories.unavailable')}</p>
+          ) : null}
+          <div className="grid max-h-[60vh] gap-2 overflow-y-auto">
+            {boards.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-border bg-surface/50 px-4 py-5 text-[13px] text-muted-foreground">{t('home:categories.addEmpty')}</p>
+            ) : boards.map((board) => {
+              const added = boardCategories.get(board.workflow.id)?.id === addingCategory?.id;
+              return (
+                <button
+                  key={board.workflow.id}
+                  type="button"
+                  aria-pressed={added}
+                  disabled={assignBoardMutation.isPending}
+                  className={cn(
+                    'flex min-w-0 items-start gap-3 rounded-lg border p-3 text-left',
+                    surfaceInteraction,
+                    focusRingInset,
+                    added ? 'border-brand/40 bg-brand-subtle' : 'border-border bg-surface hover:bg-surface-subtle',
+                  )}
+                  onClick={() => assignBoard(board.workflow.id, added ? null : addingCategory?.id ?? null)}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold">{board.workflow.name}</span>
+                  </span>
+                  {added ? (
+                    <span className="shrink-0 rounded-full bg-surface px-2 py-0.5 text-xs font-medium text-foreground">{t('home:categories.added')}</span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        </DialogContent>
       </Dialog>
+
       <ConfirmDialog
-        open={Boolean(deleteCategoryId)}
-        onOpenChange={(nextOpen) => { if (!nextOpen) setDeleteCategoryId(null); }}
-        title={t('dashboard.category.deleteTitle')}
-        description={t('dashboard.category.deleteDescription')}
+        open={deletingCategory !== null}
+        onOpenChange={(open) => { if (!open && !deleteBusy) setDeletingCategory(null); }}
+        title={t('home:categories.deleteTitle', { name: deletingCategory?.name ?? '' })}
+        description={t('home:categories.deleteDescription')}
         confirmLabel={t('common:actions.delete')}
         cancelLabel={t('common:actions.cancel')}
-        busyLabel={t('common:actions.delete')}
-        onConfirm={removeCategory}
+        busyLabel={t('home:categories.deleting')}
+        busy={deleteBusy}
+        error={deleteCategoryMutation.isError ? t('home:categories.unavailable') : undefined}
+        onConfirm={() => void deleteCategory()}
       />
-      <Dialog open={widgetDialogOpen} onOpenChange={setWidgetDialogOpen}>
-        <DialogContent><DialogHeader><DialogTitle>{t('dashboard.widget.addTitle')}</DialogTitle><DialogDescription>{t('dashboard.widget.addDescription')}</DialogDescription></DialogHeader><div className="grid gap-2 sm:grid-cols-2">{ALL_WIDGETS.map((widget) => <Button key={widget} variant="secondary" className="justify-start" onClick={() => addWidget(widget)}>{getWidgetIcon(widget, 'size-4')}{t(`dashboard.widgets.${widget}.title`)}</Button>)}</div></DialogContent>
-      </Dialog>
     </div>
   );
 }
 
-function DashboardLibrary({ categories, workflows, runs, artifacts, t, onOpenBoard, onAddCategory, onAddBoard, onRenameCategory, onDeleteCategory }: { categories: DashboardCategory[]; workflows: Workflow[]; runs: Run[]; artifacts: Artifact[]; t: Translate; onOpenBoard: (boardId: string) => void; onAddCategory: () => void; onAddBoard: (categoryId: string) => void; onRenameCategory: (category: DashboardCategory) => void; onDeleteCategory: (categoryId: string) => void }) {
-  const [openCategories, setOpenCategories] = useState<Record<string, boolean>>({});
+const BOARD_TABLE_PAGE_SIZE = 5;
+const BOARD_TABLE_COLUMNS = 3;
+
+function BoardCardHeaderElement({ element, items, t, locale }: { element: WorkflowDashboardElement; items: unknown[]; t: TFunction<'home'>; locale: AppLocale }) {
+  if (element.kind === 'text') return <span className="mt-1 block truncate text-[13px] leading-5 text-muted-foreground">{element.text}</span>;
+  if (element.kind === 'count') return <span className="mt-1 block text-[13px] leading-5 text-muted-foreground">{element.label}: <span className="font-medium text-foreground">{formatNumber(items.length, locale)}</span></span>;
+  if (element.kind === 'metric') {
+    const source = items.length > 0 && isRecord(items[0]) ? items[0] : null;
+    const field: WorkflowDashboardField = { key: element.field, label: element.label, type: element.type };
+    return <span className="mt-1 block truncate text-[13px] leading-5 text-muted-foreground">{element.label}: <span className="font-medium text-foreground">{source ? formatFieldValue(field, source[element.field], t, locale) : t('boards.emptyValue')}</span></span>;
+  }
+  return null;
+}
+
+function BoardCard({ board }: { board: HomeBoard }) {
+  const { t } = useTranslation('home');
+  const { locale } = useLocale();
+  const [page, setPage] = useState(0);
+  const runDetailQuery = useRunQuery('personal', board.run.id, true);
+  const output = runDetailQuery.data ? findDashboardOutput(board.dashboard, runDetailQuery.data) : undefined;
+  const listElement = dashboardListElement(board.dashboard);
+  const items = runDetailQuery.isSuccess && output !== undefined ? outputItems(output) : [];
+  const pageCount = Math.max(1, Math.ceil(items.length / BOARD_TABLE_PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pageItems = items.slice(currentPage * BOARD_TABLE_PAGE_SIZE, (currentPage + 1) * BOARD_TABLE_PAGE_SIZE);
+  const tableFields = listElement ? listTableFields(listElement) : [];
+  const headerElements = board.dashboard.layout.header.filter((element) => element.kind !== 'list');
 
   return (
-    <>
-      <PageHeading title={t('dashboard.title')} description={t('dashboard.description')} />
-      <div className="mt-8 flex flex-col gap-10">
-        {categories.map((category) => (
-          <Collapsible key={category.id} open={openCategories[category.id] ?? true} onOpenChange={(open) => setOpenCategories((current) => ({ ...current, [category.id]: open }))}>
-            <div className="flex items-center gap-3">
-              <CollapsibleTrigger asChild>
-                <Button variant="ghost" className="h-auto min-w-0 flex-1 justify-start gap-2 rounded-md px-2 py-1 text-left hover:bg-surface-subtle">
-                  <ChevronDown className={cn('size-4 shrink-0 text-muted-foreground transition-transform duration-[180ms]', !(openCategories[category.id] ?? true) && '-rotate-90')} aria-hidden="true" />
-                  <LayoutDashboard className="size-4 text-foreground" aria-hidden="true" />
-                  <span className="truncate text-base font-semibold">{resolveCategoryName(category, t)}</span>
-                  <span className="text-xs text-muted-foreground">{t('dashboard.category.boardCount', { count: category.boards.length })}</span>
-                </Button>
-              </CollapsibleTrigger>
-              <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" aria-label={t('dashboard.category.rename')} onClick={() => onRenameCategory(category)}><Pencil className="size-3.5" /></Button></TooltipTrigger><TooltipContent>{t('dashboard.category.rename')}</TooltipContent></Tooltip>
-              <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" aria-label={t('dashboard.category.delete')} onClick={() => onDeleteCategory(category.id)}><Trash2 className="size-3.5" /></Button></TooltipTrigger><TooltipContent>{t('dashboard.category.delete')}</TooltipContent></Tooltip>
-              <Button variant="secondary" size="compact" onClick={() => onAddBoard(category.id)}><Plus className="size-4" />{t('dashboard.actions.addBoard')}</Button>
-            </div>
-            <CollapsibleContent>
-              {category.boards.length === 0 ? <button type="button" className={cn('mt-3 flex min-h-20 w-full items-center justify-center rounded-lg border border-dashed border-border text-[13px] text-muted-foreground hover:border-brand hover:bg-brand-subtle hover:text-foreground', surfaceInteraction, focusRing)} onClick={() => onAddBoard(category.id)}><Plus className="mr-2 size-4" />{t('dashboard.emptyCategory')}</button> : <div className="mt-3 grid gap-3 md:grid-cols-2">{category.boards.map((board) => <button key={board.id} type="button" className={cn('group flex min-h-28 items-start gap-3 rounded-lg border border-border bg-surface p-4 text-left hover:border-brand/50 hover:bg-surface-subtle hover:shadow-sm', surfaceInteraction, focusRing)} onClick={() => onOpenBoard(board.id)}><span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand-subtle text-brand" aria-hidden="true"><LayoutDashboard className="size-[18px]" /></span><span className="min-w-0 flex-1"><span className="flex items-center gap-2 text-sm font-semibold"><span className="truncate">{resolveBoardName(board, t)}</span><ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100" aria-hidden="true" /></span><span className="mt-1 block text-[13px] leading-5 text-muted-foreground">{resolveBoardDescription(board, t)}</span><BoardSummary board={board} workflows={workflows} runs={runs} artifacts={artifacts} t={t} /></span><ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground" aria-hidden="true" /></button>)}</div>}
-            </CollapsibleContent>
-          </Collapsible>
-        ))}
-      </div>
-      <div className="mt-8 border-t border-border pt-4"><Button variant="ghost" size="compact" onClick={onAddCategory}><Plus className="size-4" />{t('dashboard.actions.addCategory')}</Button></div>
-    </>
+    <article className="flex w-full min-w-0 flex-col items-stretch gap-2 rounded-lg border border-border bg-surface p-3">
+      <header className="flex items-center gap-3">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-surface-subtle text-foreground" aria-hidden="true">
+          <LayoutDashboard className="size-[18px]" />
+        </span>
+        <span className="min-w-0">
+          {headerElements.map((element, index) => (
+            <BoardCardHeaderElement key={index} element={element} items={items} t={t} locale={locale} />
+          ))}
+        </span>
+        <span className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <span>{t('boards.version', { version: board.workflow.latestVersion })}</span>
+          <span>{formatDateTime(board.run.startedAt, locale)}</span>
+          <StatusBadge status={statusLabel(board.run.status)} />
+        </span>
+      </header>
+
+      {runDetailQuery.isPending ? (
+        <p className="border-t border-border pt-2 text-[13px] text-muted-foreground">{t('boards.loading')}</p>
+      ) : !listElement || runDetailQuery.isError || output === undefined || items.length === 0 ? (
+        <p className="border-t border-border pt-2 text-[13px] text-muted-foreground">{t('boards.emptyOutput')}</p>
+      ) : (
+        <div className="border-t border-border pt-2">
+          <div className="overflow-hidden rounded-lg border border-border">
+            <table className="w-full table-fixed border-collapse text-left text-[13px]">
+              <thead>
+                <tr className="border-b border-border bg-background">
+                  {tableFields.map((field) => (
+                    <th key={field.key} scope="col" className="truncate px-3 py-2 text-xs font-medium text-muted-foreground">{field.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {pageItems.map((item, index) => {
+                  const href = itemUrl(listElement, item);
+                  const openItem = href ? () => window.open(href, '_blank', 'noopener,noreferrer') : undefined;
+                  return (
+                    <tr
+                      key={index}
+                      className={cn(href && 'cursor-pointer transition-colors duration-[120ms] hover:bg-surface-subtle')}
+                      onClick={openItem}
+                    >
+                      {isRecord(item) ? tableFields.map((field) => {
+                        const content = formatFieldValue(field, item[field.key], t, locale);
+                        return (
+                          <td key={field.key} className="truncate px-3 py-2">
+                            {field === listTableFields(listElement)[0] && href ? (
+                              <a href={href} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline" onClick={(event) => event.stopPropagation()}>{content}</a>
+                            ) : content}
+                          </td>
+                        );
+                      }) : (
+                        <td colSpan={BOARD_TABLE_COLUMNS} className="px-3 py-2">
+                          <pre className="max-h-32 overflow-auto rounded-md border border-border bg-surface-subtle p-2 text-xs whitespace-pre-wrap font-mono">{JSON.stringify(item, null, 2)}</pre>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {pageCount > 1 ? (
+            <nav className="mt-2 flex items-center justify-center gap-2" aria-label={t('boards.pageIndicator', { current: currentPage + 1, total: pageCount })}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-compact"
+                aria-label={t('boards.previousPage')}
+                disabled={currentPage === 0}
+                onClick={() => setPage(currentPage - 1)}
+              >
+                <ChevronLeft className="size-4" aria-hidden="true" />
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                {t('boards.pageIndicator', { current: currentPage + 1, total: pageCount })}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-compact"
+                aria-label={t('boards.nextPage')}
+                disabled={currentPage === pageCount - 1}
+                onClick={() => setPage(currentPage + 1)}
+              >
+                <ChevronRight className="size-4" aria-hidden="true" />
+              </Button>
+            </nav>
+          ) : null}
+        </div>
+      )}
+    </article>
   );
 }
 
-function BoardSummary({ board, workflows, runs, artifacts, t }: { board: DashboardBoard; workflows: Workflow[]; runs: Run[]; artifacts: Artifact[]; t: Translate }) {
-  const attentionCount = workflows.filter((workflow) => workflow.needsAttention).length;
-  const activeRunCount = runs.filter((run) => run.status === 'running' || run.status === 'waiting_for_input').length;
-  const metrics: Array<{ key: string; value: number; icon: ReactNode }> = [
-    { key: 'workflows', value: workflows.length, icon: <WorkflowIcon className="size-3.5" aria-hidden="true" /> },
-  ];
-  if (board.widgets.includes('attention')) metrics.push({ key: 'attention', value: attentionCount, icon: <AlertTriangle className="size-3.5" aria-hidden="true" /> });
-  if (board.widgets.includes('active_runs')) metrics.push({ key: 'activeRuns', value: activeRunCount, icon: <Play className="size-3.5" aria-hidden="true" /> });
-  if (board.widgets.includes('recent_artifacts')) metrics.push({ key: 'artifacts', value: artifacts.length, icon: <FileStack className="size-3.5" aria-hidden="true" /> });
-  return <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 border-t border-border pt-3 text-xs text-muted-foreground">{metrics.map((metric) => <span key={metric.key} className="inline-flex items-center gap-1.5">{metric.icon}<span>{t(`dashboard.summary.${metric.key}`, { count: metric.value })}</span></span>)}</div>;
+function listTableFields(element: Extract<WorkflowDashboardElement, { kind: 'list' }>): WorkflowDashboardField[] {
+  const titleField = listTitleField(element);
+  const fields = titleField ? [titleField, ...listSecondaryFields(element)] : listSecondaryFields(element);
+  return fields.slice(0, BOARD_TABLE_COLUMNS);
 }
 
-function DashboardDetail({ board, category, workflowDashboard, workflows, runs, artifacts, activity, t, onAddWidget, onMoveWidget, onRemoveWidget, onRename }: { board: DashboardBoard; category: DashboardCategory; workflowDashboard: Awaited<ReturnType<typeof api.dashboard>> | undefined; workflows: Workflow[]; runs: Run[]; artifacts: Artifact[]; activity: { id: string; text: string; time: string }[]; t: Translate; onAddWidget: () => void; onMoveWidget: (index: number, direction: -1 | 1) => void; onRemoveWidget: (index: number) => void; onRename: (name: string) => void }) {
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(resolveBoardName(board, t));
-  function saveName() { const value = name.trim(); if (value) onRename(value); setEditing(false); }
+function dashboardListElement(dashboard: WorkflowDashboardBinding): Extract<WorkflowDashboardElement, { kind: 'list' }> | null {
+  for (const region of ['main', 'header', 'footer'] as const) {
+    const element = dashboard.layout[region].find((item) => item.kind === 'list');
+    if (element) return element;
+  }
+  return null;
+}
 
+function outputItems(output: unknown): unknown[] {
+  return Array.isArray(output) ? output : [output];
+}
+
+function listTitleField(element: Extract<WorkflowDashboardElement, { kind: 'list' }>): WorkflowDashboardField | undefined {
+  if (!element.titleKey) return element.fields[0];
+  return element.fields.find((field) => field.key === element.titleKey) ?? element.fields[0];
+}
+
+function listSecondaryFields(element: Extract<WorkflowDashboardElement, { kind: 'list' }>): WorkflowDashboardField[] {
+  const titleField = listTitleField(element);
+  return element.fields.filter((field) => field !== titleField && field.type !== 'url');
+}
+
+function findDashboardOutput(dashboard: WorkflowDashboardBinding, run: RunView): unknown {
+  const nodeRun = run.nodeRuns?.find((item) => item.nodeId === dashboard.nodeId && item.type === 'worklite/dashboard' && item.status === 'succeeded');
+  return nodeRun && 'output' in nodeRun ? nodeRun.output : undefined;
+}
+
+function formatFieldValue(field: WorkflowDashboardField, value: unknown, t: TFunction<'home'>, locale: AppLocale): string {
+  if (value === undefined || value === null || value === '') return t('boards.emptyValue');
+  if (field.type === 'boolean') {
+    if (typeof value !== 'boolean') return t('boards.emptyValue');
+    return value ? t('boards.trueValue') : t('boards.falseValue');
+  }
+  if (field.type === 'datetime') {
+    const date = new Date(String(value));
+    return Number.isNaN(date.getTime()) ? t('boards.emptyValue') : formatDateTime(date, locale);
+  }
+  if (field.type === 'number' && (typeof value !== 'number' || !Number.isFinite(value))) return t('boards.emptyValue');
+  return field.type === 'number' && typeof value === 'number' ? formatNumber(value, locale) : String(value);
+}
+
+function listUrlField(element: Extract<WorkflowDashboardElement, { kind: 'list' }>): WorkflowDashboardField | undefined {
+  return element.fields.find((field) => field.type === 'url');
+}
+
+function itemUrl(element: Extract<WorkflowDashboardElement, { kind: 'list' }>, item: unknown): string | null {
+  const field = listUrlField(element);
+  if (!field || !isRecord(item)) return null;
+  const value = item[field.key];
+  return typeof value === 'string' && /^https?:\/\//i.test(value) ? value : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+type StatusUiStatus = 'queued' | 'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled';
+
+function statusLabel(status: RunView['status']): StatusUiStatus {
+  if (status === 'succeeded') return 'completed';
+  if (status === 'timed_out') return 'failed';
+  return status;
+}
+
+function Notice({ text, tone = 'neutral', icon, className }: { text: string; tone?: 'neutral' | 'danger'; icon?: ReactNode; className?: string }) {
   return (
-    <>
-      <div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><p className="text-[13px] text-muted-foreground">{resolveCategoryName(category, t)}</p>{editing ? <div className="mt-1 flex max-w-xl items-center gap-2"><Input value={name} onChange={(event) => setName(event.target.value)} aria-label={t('dashboard.board.nameLabel')} /><Button size="compact" onClick={saveName}>{t('common:actions.save')}</Button></div> : <h1 className="mt-1 text-2xl font-semibold tracking-tight">{resolveBoardName(board, t)}</h1>}<p className="mt-2 max-w-2xl text-[13px] text-muted-foreground">{resolveBoardDescription(board, t)}</p></div><div className="flex items-center gap-2"><Button variant="secondary" size="compact" onClick={() => setEditing((value) => !value)}><Pencil className="size-4" />{editing ? t('common:actions.cancel') : t('dashboard.actions.editBoard')}</Button><Button size="compact" onClick={onAddWidget}><Plus className="size-4" />{t('dashboard.actions.addWidget')}</Button></div></div>
-      <WorkflowDashboardPanel dashboard={workflowDashboard} workflows={workflows} t={t} />
-      {board.widgets.length === 0 ? <div className="mt-8 flex min-h-48 flex-col items-center justify-center rounded-lg border border-dashed border-border px-6 text-center"><LayoutDashboard className="size-6 text-muted-foreground" aria-hidden="true" /><h2 className="mt-3 text-sm font-semibold">{t('dashboard.widget.emptyTitle')}</h2><p className="mt-1 max-w-sm text-[13px] text-muted-foreground">{t('dashboard.widget.emptyDescription')}</p><Button className="mt-4" size="compact" onClick={onAddWidget}><Plus className="size-4" />{t('dashboard.actions.addWidget')}</Button></div> : <div className="mt-8 grid gap-4 md:grid-cols-2">{board.widgets.map((widget, index) => <DashboardWidget key={`${widget}-${index}`} type={widget} index={index} workflows={workflows} runs={runs} artifacts={artifacts} activity={activity} t={t} onMove={onMoveWidget} onRemove={onRemoveWidget} />)}</div>}
-    </>
+    <p className={cn('flex min-h-20 items-center gap-2 rounded-lg border px-4 py-3 text-[13px]', tone === 'danger' ? 'border-danger/30 bg-danger-subtle text-danger' : 'border-border bg-surface text-muted-foreground', className)}>
+      {icon}
+      <span>{text}</span>
+    </p>
   );
 }
-
-function WorkflowDashboardPanel({ dashboard, workflows, t }: { dashboard: Awaited<ReturnType<typeof api.dashboard>> | undefined; workflows: Workflow[]; t: Translate }) {
-  const queryClient = useQueryClient();
-  const [workflowId, setWorkflowId] = useState(dashboard?.workflowId ?? '');
-  const [presentation, setPresentation] = useState<'list' | 'kanban'>(dashboard?.presentation ?? 'kanban');
-  useEffect(() => { setWorkflowId(dashboard?.workflowId ?? ''); setPresentation(dashboard?.presentation ?? 'kanban'); }, [dashboard?.workflowId, dashboard?.presentation]);
-  const published = workflows.filter((workflow) => workflow.state === 'published');
-  const save = useMutation({ mutationFn: () => api.updateDashboard({ workflowId, presentation }), onSuccess: () => queryClient.invalidateQueries({ queryKey: dashboardQueryKey() }) });
-  const run = useMutation({ mutationFn: api.runDashboard, onSuccess: () => queryClient.invalidateQueries({ queryKey: dashboardQueryKey() }) });
-  const items = dashboard?.payload?.items ?? [];
-  const statuses = [...new Set(items.map((item) => item.status))];
-  return <section className="mt-8 rounded-lg border border-border bg-surface p-4">
-    <div className="flex flex-wrap items-end gap-3"><div className="min-w-56 flex-1"><label className="text-xs font-medium text-muted-foreground">{t('dashboard.workflow.workflow')}</label><Select value={workflowId} onValueChange={setWorkflowId}><SelectTrigger className="mt-1"><SelectValue placeholder={t('dashboard.workflow.workflowPlaceholder')} /></SelectTrigger><SelectContent>{published.map((workflow) => <SelectItem key={workflow.id} value={workflow.id}>{workflow.name}</SelectItem>)}</SelectContent></Select></div><div className="w-40"><label className="text-xs font-medium text-muted-foreground">{t('dashboard.workflow.presentation')}</label><Select value={presentation} onValueChange={(value) => setPresentation(value as 'list' | 'kanban')}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="kanban">{t('dashboard.workflow.kanban')}</SelectItem><SelectItem value="list">{t('dashboard.workflow.list')}</SelectItem></SelectContent></Select></div><Button variant="secondary" disabled={!workflowId || save.isPending} onClick={() => save.mutate()}>{t('common:actions.save')}</Button><Button disabled={!dashboard?.workflowId || run.isPending} onClick={() => run.mutate()}><RefreshCw className="size-4" />{t('dashboard.workflow.runNow')}</Button></div>
-    {dashboard?.workflowName ? <p className="mt-3 text-xs text-muted-foreground">{dashboard.workflowName}{dashboard.payload?.source?.name ? ` · ${dashboard.payload.source.name}` : ''}{dashboard.payload?.updatedAt ? ` · ${dashboard.payload.updatedAt}` : ''}</p> : null}
-    {!dashboard?.workflowId ? <WidgetEmpty text={t('dashboard.workflow.unconfigured')} /> : items.length === 0 ? <WidgetEmpty text={t('dashboard.workflow.empty')} /> : dashboard.presentation === 'list' ? <div className="mt-4 divide-y divide-border border-y border-border">{items.map((item) => <DashboardDataItem key={item.id} item={item} />)}</div> : <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">{statuses.map((status) => <div key={status} className="rounded-lg bg-surface-subtle p-3"><div className="flex items-center justify-between"><h3 className="text-sm font-semibold">{status}</h3><span className="text-xs text-muted-foreground">{items.filter((item) => item.status === status).length}</span></div><div className="mt-3 space-y-2">{items.filter((item) => item.status === status).map((item) => <DashboardDataItem key={item.id} item={item} card />)}</div></div>)}</div>}
-  </section>;
-}
-
-function DashboardDataItem({ item, card = false }: { item: DashboardPayloadItem; card?: boolean }) {
-  const content = <><span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium">{item.title}</span><span className="mt-1 block text-xs text-muted-foreground">{[item.priority, item.dueAt].filter(Boolean).join(' · ') || item.status}</span></span>{item.url ? <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" /> : null}</>;
-  const className = cn('flex items-start gap-3', card ? 'rounded-md border border-border bg-background p-3' : 'px-3 py-3');
-  return item.url ? <a href={item.url} target="_blank" rel="noreferrer" className={cn(className, surfaceInteraction, focusRing)}>{content}</a> : <div className={className}>{content}</div>;
-}
-
-function DashboardWidget({ type, index, workflows, runs, artifacts, activity, t, onMove, onRemove }: { type: DashboardWidgetType; index: number; workflows: Workflow[]; runs: Run[]; artifacts: Artifact[]; activity: { id: string; text: string; time: string }[]; t: Translate; onMove: (index: number, direction: -1 | 1) => void; onRemove: (index: number) => void }) {
-  return (
-    <section className="overflow-hidden rounded-lg border border-border bg-surface" aria-labelledby={`dashboard-widget-${index}`}>
-      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3"><div className="flex min-w-0 items-center gap-2">{getWidgetIcon(type, 'size-4 text-brand')}<h2 id={`dashboard-widget-${index}`} className="truncate text-sm font-semibold">{t(`dashboard.widgets.${type}.title`)}</h2></div><div className="flex shrink-0 items-center gap-1"><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" aria-label={t('dashboard.widget.moveUp')} onClick={() => onMove(index, -1)} disabled={index === 0}><ChevronDown className="size-3.5 rotate-180" /></Button></TooltipTrigger><TooltipContent>{t('dashboard.widget.moveUp')}</TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" aria-label={t('dashboard.widget.moveDown')} onClick={() => onMove(index, 1)}><ChevronDown className="size-3.5" /></Button></TooltipTrigger><TooltipContent>{t('dashboard.widget.moveDown')}</TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" aria-label={t('dashboard.widget.remove')} onClick={() => onRemove(index)}><Trash2 className="size-3.5" /></Button></TooltipTrigger><TooltipContent>{t('dashboard.widget.remove')}</TooltipContent></Tooltip>{type === 'active_runs' ? <WidgetLink to="/runs">{t('dashboard.actions.viewAll')}</WidgetLink> : null}{type === 'recent_artifacts' ? <WidgetLink to="/runs">{t('dashboard.actions.viewAll')}</WidgetLink> : null}{type === 'recent_workflows' || type === 'workflow_health' ? <WidgetLink to="/workflows">{t('dashboard.actions.viewAll')}</WidgetLink> : null}</div></div>
-      <div className="min-h-36">{renderWidgetContent(type, { workflows, runs, artifacts, activity, t })}</div>
-    </section>
-  );
-}
-
-function renderWidgetContent(type: DashboardWidgetType, data: { workflows: Workflow[]; runs: Run[]; artifacts: Artifact[]; activity: { id: string; text: string; time: string }[]; t: Translate }) {
-  if (type === 'attention') {
-    const items = data.workflows.filter((workflow) => workflow.needsAttention);
-    return items.length === 0 ? <WidgetEmpty text={data.t('dashboard.widgets.attention.empty')} /> : <div className="divide-y divide-border">{items.map((workflow) => <WorkflowRow key={workflow.id} workflow={workflow} attention />)}</div>;
-  }
-  if (type === 'active_runs') {
-    const items = data.runs.filter((run) => run.status === 'running' || run.status === 'waiting_for_input');
-    return items.length === 0 ? <WidgetEmpty text={data.t('dashboard.widgets.active_runs.empty')} /> : <div className="divide-y divide-border">{items.map((run) => <RunRow key={run.id} run={run} />)}</div>;
-  }
-  if (type === 'workflow_health') {
-    return data.workflows.length === 0 ? <WidgetEmpty text={data.t('dashboard.widgets.workflow_health.empty')} /> : <div className="divide-y divide-border">{data.workflows.map((workflow) => <WorkflowRow key={workflow.id} workflow={workflow} />)}</div>;
-  }
-  if (type === 'recent_workflows') {
-    return data.workflows.length === 0 ? <WidgetEmpty text={data.t('dashboard.widgets.recent_workflows.empty')} /> : <div className="divide-y divide-border">{data.workflows.slice(0, 4).map((workflow) => <WorkflowRow key={workflow.id} workflow={workflow} />)}</div>;
-  }
-  if (type === 'recent_artifacts') {
-    return data.artifacts.length === 0 ? <WidgetEmpty text={data.t('dashboard.widgets.recent_artifacts.empty')} /> : <div className="divide-y divide-border">{data.artifacts.slice(0, 4).map((artifact) => <ArtifactRow key={artifact.id} artifact={artifact} />)}</div>;
-  }
-  return <ul className="divide-y divide-border">{data.activity.map((item) => <li key={item.id} className="flex items-center justify-between gap-3 px-4 py-3 text-[13px]"><span className="min-w-0 truncate">{item.text}</span><span className="shrink-0 tabular-nums text-muted-foreground">{item.time}</span></li>)}</ul>;
-}
-
-function WorkflowRow({ workflow, attention = false }: { workflow: Workflow; attention?: boolean }) {
-  return <Link to="/workflows/$workflowId" params={{ workflowId: workflow.id }} className={cn('group flex items-center gap-3 px-4 py-3 hover:bg-surface-subtle', surfaceInteraction, focusRingInset)}>{attention ? <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden="true" /> : <WorkflowIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}<span className="min-w-0 flex-1 truncate text-[13px] font-medium">{workflow.name}</span><StatusBadge status={workflow.lastRunStatus ?? workflow.state} /><ChevronRight className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100" aria-hidden="true" /></Link>;
-}
-
-function RunRow({ run }: { run: Run }) {
-  return <Link to="/runs/$runId" params={{ runId: run.id }} className={cn('group flex items-center gap-3 px-4 py-3 hover:bg-surface-subtle', surfaceInteraction, focusRingInset)}><Play className="size-4 shrink-0 text-brand" aria-hidden="true" /><span className="min-w-0 flex-1 truncate text-[13px] font-medium">{run.workflowName}</span><StatusBadge status={run.status} /><ChevronRight className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100" aria-hidden="true" /></Link>;
-}
-
-function ArtifactRow({ artifact }: { artifact: Artifact }) {
-  return <Link to="/artifacts/$artifactId" params={{ artifactId: artifact.id }} className={cn('group flex items-center gap-3 px-4 py-3 hover:bg-surface-subtle', surfaceInteraction, focusRingInset)}><FileStack className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" /><span className="min-w-0 flex-1 truncate text-[13px] font-medium">{artifact.name}</span><span className="shrink-0 text-xs text-muted-foreground">{artifact.size}</span><ChevronRight className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100" aria-hidden="true" /></Link>;
-}
-
-function WidgetEmpty({ text }: { text: string }) { return <p className="px-4 py-8 text-center text-[13px] text-muted-foreground">{text}</p>; }
-
-function WidgetLink({ to, children }: { to: '/runs' | '/workflows'; children: string }) { return <Link to={to} className={cn('flex items-center gap-1 rounded-sm text-xs font-medium text-muted-foreground hover:text-foreground', surfaceInteraction, focusRing)}>{children}<ArrowUpRight className="size-3.5" /></Link>; }
-
-function getWidgetIcon(type: DashboardWidgetType, className: string) {
-  if (type === 'attention') return <AlertTriangle className={className} aria-hidden="true" />;
-  if (type === 'active_runs') return <Play className={className} aria-hidden="true" />;
-  if (type === 'workflow_health' || type === 'recent_workflows') return <WorkflowIcon className={className} aria-hidden="true" />;
-  if (type === 'recent_artifacts') return <FileStack className={className} aria-hidden="true" />;
-  return <BarChart3 className={className} aria-hidden="true" />;
-}
-
-function getTemplateWidgets(template: DashboardTemplate): DashboardWidgetType[] {
-  if (template === 'workflow-overview') return ['attention', 'active_runs', 'recent_workflows', 'recent_activity'];
-  if (template === 'workflow-health') return ['workflow_health', 'active_runs', 'recent_artifacts'];
-  if (template === 'recent-activity') return ['recent_activity', 'recent_workflows', 'recent_artifacts'];
-  return [];
-}
-
-function resolveCategoryName(category: DashboardCategory, t: Translate) { return category.name ?? (category.nameKey ? t(category.nameKey) : ''); }
-function resolveBoardName(board: DashboardBoard, t: Translate) { return board.name ?? (board.nameKey ? t(board.nameKey) : 'Dashboard'); }
-function resolveBoardDescription(board: DashboardBoard, t: Translate) { return board.description ?? (board.descriptionKey ? t(board.descriptionKey) : t('dashboard.boards.custom.description')); }
 
 function FirstUseGuide({ providerConfigured }: { providerConfigured: boolean }) {
   const { t } = useTranslation(['home', 'common']);
@@ -459,25 +522,29 @@ function FirstUseGuide({ providerConfigured }: { providerConfigured: boolean }) 
   const markerClassName = 'flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold';
 
   return (
-    <section className="mt-8" aria-labelledby="first-use-title">
-      <p id="first-use-title" className="text-[13px] text-muted-foreground">{t('firstUse.intro')}</p>
+    <section aria-labelledby="first-use-title">
+      <p id="first-use-title" className="text-[13px] text-muted-foreground">{t('home:firstUse.intro')}</p>
       <ol className="mt-3 space-y-2">
         <li className={cn(rowClassName, providerConfigured && 'bg-surface-subtle/50')}>
           <span className={cn(markerClassName, providerConfigured ? 'bg-success-subtle text-success' : 'bg-brand text-brand-foreground')} aria-hidden="true">
             {providerConfigured ? <Check className="size-3.5" /> : '1'}
           </span>
-          <span className={cn('min-w-0 flex-1 text-sm font-medium', providerConfigured && 'text-muted-foreground')}>{t('firstUse.configureProvider')}</span>
+          <span className={cn('min-w-0 flex-1 text-sm font-medium', providerConfigured && 'text-muted-foreground')}>{t('home:firstUse.configureProvider')}</span>
           {providerConfigured ? (
             <span className="text-xs font-medium text-success">{t('common:status.completed')}</span>
           ) : (
-            <Button size="compact" asChild><Link to="/model-providers" search={{ tab: 'providers' }}>{t('common:actions.continue')}<ChevronRight /></Link></Button>
+            <Button size="compact" asChild>
+              <Link to="/model-providers" search={{ tab: 'providers' }}>{t('common:actions.continue')}<ChevronRight /></Link>
+            </Button>
           )}
         </li>
         <li className={cn(rowClassName, !providerConfigured && 'bg-surface-subtle/50 text-muted-foreground')}>
           <span className={cn(markerClassName, providerConfigured ? 'bg-brand text-brand-foreground' : 'bg-surface-subtle text-muted-foreground')} aria-hidden="true">2</span>
-          <span className="min-w-0 flex-1 text-sm font-medium">{t('firstUse.configureSystemHelper')}</span>
+          <span className="min-w-0 flex-1 text-sm font-medium">{t('home:firstUse.configureSystemHelper')}</span>
           {providerConfigured ? (
-            <Button size="compact" asChild><Link to="/agents/$agentId" params={{ agentId: SYSTEM_HELPER_CHAT_ID }}>{t('common:actions.continue')}<ChevronRight /></Link></Button>
+            <Button size="compact" asChild>
+              <Link to="/agents/$agentId" params={{ agentId: SYSTEM_HELPER_CHAT_ID }}>{t('common:actions.continue')}<ChevronRight /></Link>
+            </Button>
           ) : null}
         </li>
       </ol>

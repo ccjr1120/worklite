@@ -14,7 +14,6 @@
     "mcpServers": "MCP Servers",
     "plugins": "Plugins",
     "modelProviders": "Providers",
-    "runs": "Runs",
     "usage": "Usage",
     "settings": "Settings",
     "agentResources": "Agent resources",
@@ -22,7 +21,7 @@
   },
   "command": {
     "title": "Command menu",
-    "placeholder": "Search agents, workflows, runs…",
+    "placeholder": "Search agents, workflows…",
     "empty": "No matching destinations.",
     "navigation": "Navigation",
     "create": "Create",
@@ -45,5 +44,6 @@
   "offline": {
     "message": "Reconnecting. Local edits stay on this device until the connection returns."
   },
+  "breadcrumbs": "Breadcrumbs",
   "openNavigation": "Open navigation"
 }

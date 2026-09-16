@@ -1,4 +1,4 @@
-const gatewayURL = (process.env.CODEX_TEST_GATEWAY_URL ?? 'http://127.0.0.1:4547').replace(/\/$/, '');
+const gatewayURL = (process.env.CODEX_TEST_GATEWAY_URL ?? 'http://127.0.0.1:3392').replace(/\/$/, '');
 
 async function request(path, options = {}) {
   const url = `${gatewayURL}${path}`;

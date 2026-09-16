@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Outlet } from '@tanstack/react-router';
+import { useTranslation } from 'react-i18next';
 import { Sidebar } from '@/components/workspace/sidebar';
 import { ContextBar } from '@/components/workspace/context-bar';
 import { CommandMenu } from '@/components/workspace/command-menu';
@@ -10,6 +11,7 @@ import { useMediaQuery } from '@/hooks/use-media-query';
 import { AgentChat } from '@/components/workspace/agent-chat';
 
 function WorkspaceShell() {
+  const { t } = useTranslation('workspace');
   const isWide = useMediaQuery('(min-width: 1024px)');
   const isMobile = useMediaQuery('(max-width: 767px)');
   const collapsed = !isWide && !isMobile;
@@ -35,7 +37,7 @@ function WorkspaceShell() {
           <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
             <SheetContent side="left" className="p-0 sm:max-w-[232px]">
               <SheetHeader className="sr-only">
-                <SheetTitle>Navigation</SheetTitle>
+                <SheetTitle>{t('nav.title')}</SheetTitle>
               </SheetHeader>
               <Sidebar collapsed={false} onNavigate={() => setMobileNavOpen(false)} />
             </SheetContent>

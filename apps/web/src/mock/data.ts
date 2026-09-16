@@ -14,7 +14,7 @@ export const RUN_STATUS_LABELS = {
 // failed -> Failed
 // cancelled -> Cancelled
 // timed_out -> Failed
-// waiting_for_input is a UI status until the API exposes it.
+// waiting_for_input is shared by Agent questions and durable Workflow pending actions.
 
 export type RunUiStatus = keyof typeof RUN_STATUS_LABELS;
 
@@ -62,9 +62,6 @@ export type WorkflowStep = {
   mcpServerIds: string[];
   nodeType?: 'text' | 'agent';
   text?: string;
-  outputType?: 'text' | 'file';
-  fileName?: string;
-  fileType?: 'json' | 'text' | 'markdown';
   promptTemplate?: string;
   inputSummary: string;
   errorPolicy: 'stop' | 'retry';

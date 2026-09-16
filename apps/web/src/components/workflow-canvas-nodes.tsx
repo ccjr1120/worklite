@@ -1,26 +1,29 @@
 import { Handle, Position, type Edge, type Node, type NodeProps } from '@xyflow/react';
-import { Bot, Braces, Wrench } from 'lucide-react';
+import { Bot, Braces, FileText, LayoutDashboard, Send, Timer } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Textarea } from '@/components/ui/textarea';
+import type { WorkflowDashboardLayout } from '@worklite/contracts';
 import { cn } from '@/lib/utils';
 
-export type WorkflowCanvasNodeType = 'input' | 'text' | 'skill-set' | 'agent';
+export type WorkflowCanvasNodeType = 'input' | 'timer' | 'agent' | 'dashboard' | 'artifact' | 'wechatPublish';
 
 export type WorkflowCanvasNodeData = {
   nodeType: WorkflowCanvasNodeType;
   label: string;
   model?: string;
   systemPrompt?: string;
+  outputFormat?: 'text' | 'json';
   mcpServerIds?: string[];
   mcpServerNames?: string[];
-  text?: string;
+  timerEnabled?: boolean;
+  timerIntervalSeconds?: number;
   skillIds?: string[];
   skillNames?: string[];
-  outputType?: 'text' | 'file';
-  fileName?: string;
-  fileType?: 'json' | 'text' | 'markdown';
+  dashboardLayout?: WorkflowDashboardLayout;
+  artifactName?: string;
+  artifactType?: 'text' | 'markdown' | 'json';
+  wechatAccountId?: string;
+  wechatMode?: 'draft' | 'publish';
   errorPolicy: 'stop' | 'retry';
-  onTextChange: (nodeId: string, value: string) => void;
 };
 
 export type WorkflowCanvasNode = Node<WorkflowCanvasNodeData, WorkflowCanvasNodeType>;
@@ -48,24 +51,39 @@ function InputNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   </div>;
 }
 
-function TextNode({ id, data, selected }: NodeProps<WorkflowCanvasNode>) {
+function TimerNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   const { t } = useTranslation('workflows');
-  return <div className={cn(nodeClassName(selected), 'w-[280px]')}>
-    <NodeHeader icon={<span className="size-2 rounded-full bg-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
-    <div className="p-3 pb-0">
-      <Textarea aria-label={t('editor.constantSource')} className="nodrag nowheel min-h-24 resize-y text-[12px]" value={data.text ?? ''} onChange={(event) => data.onTextChange(id, event.target.value)} />
-    </div>
+  const intervalMinutes = Math.round((data.timerIntervalSeconds ?? 300) / 60);
+  return <div className={nodeClassName(selected)}>
+    <NodeHeader icon={<Timer className="size-4 text-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
+    <div className="px-3 py-3 text-[12px] text-muted-foreground">{data.timerEnabled === false ? t('editor.timerDisabled') : t('editor.timerEveryInterval', { interval: intervalMinutes })}</div>
     <div className="relative flex h-9 items-center justify-end px-3 text-[11px] font-medium text-muted-foreground"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
   </div>;
 }
 
-function SkillSetNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
+function DashboardNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   const { t } = useTranslation('workflows');
-  const names = data.skillNames ?? [];
+  const layout = data.dashboardLayout;
+  const elementCount = layout ? layout.header.length + layout.main.length + layout.footer.length : 0;
   return <div className={nodeClassName(selected)}>
-    <NodeHeader icon={<Wrench className="size-4 text-warning" aria-hidden="true" />}>{data.label}</NodeHeader>
-    <div className="px-3 pt-3 text-[12px] text-muted-foreground">{names.length > 0 ? names.join(', ') : t('editor.noSkillsSelected')}</div>
-    <div className="relative flex h-9 items-center justify-end px-3 text-[11px] font-medium text-muted-foreground"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
+    <NodeHeader icon={<LayoutDashboard className="size-4 text-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
+    <div className="mt-3 border-t border-border">
+      <PortRow label={t('editor.dataPort')}><Handle type="target" position={Position.Left} id="data" className={handleClass} aria-label={t('editor.dataPort')} /></PortRow>
+      <div className="relative flex h-7 items-center justify-end px-3 text-[11px] font-medium"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
+    </div>
+    <div className="px-3 pb-3 text-[11px] text-muted-foreground">{t('editor.dashboardElementCount', { count: elementCount })}</div>
+  </div>;
+}
+
+function ArtifactNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
+  const { t } = useTranslation('workflows');
+  return <div className={nodeClassName(selected)}>
+    <NodeHeader icon={<FileText className="size-4 text-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
+    <div className="mt-3 border-t border-border">
+      <PortRow label={t('editor.dataPort')}><Handle type="target" position={Position.Left} id="data" className={handleClass} aria-label={t('editor.dataPort')} /></PortRow>
+      <div className="relative flex h-7 items-center justify-end px-3 text-[11px] font-medium"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
+    </div>
+    <div className="px-3 pb-3 text-[11px] text-muted-foreground">{data.artifactName || t('editor.artifactUnnamed')} · {t(`editor.artifactTypes.${data.artifactType ?? 'text'}`)}</div>
   </div>;
 }
 
@@ -81,13 +99,28 @@ function AgentNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   </div>;
 }
 
+function WechatPublishNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
+  const { t } = useTranslation('workflows');
+  return <div className={nodeClassName(selected)}>
+    <NodeHeader icon={<Send className="size-4 text-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
+    <div className="mt-3 border-t border-border py-1">
+      <PortRow label={t('editor.wechatArticlePort')}><Handle type="target" position={Position.Left} id="article" className={handleClass} aria-label={t('editor.wechatArticlePort')} /></PortRow>
+      <PortRow label={t('editor.wechatMetadataPort')}><Handle type="target" position={Position.Left} id="metadata" className={handleClass} aria-label={t('editor.wechatMetadataPort')} /></PortRow>
+      <div className="relative flex h-7 items-center justify-end px-3 text-[11px] font-medium"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
+    </div>
+    <div className="px-3 pb-3 text-[11px] text-muted-foreground">{t(`editor.wechatModes.${data.wechatMode ?? 'draft'}`)}</div>
+  </div>;
+}
+
 function PortRow({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="relative flex h-7 items-center px-3 text-[11px] font-medium">{children}<span>{label}</span></div>;
 }
 
 export const workflowNodeTypes = {
   input: InputNode,
-  text: TextNode,
-  'skill-set': SkillSetNode,
+  timer: TimerNode,
   agent: AgentNode,
+  dashboard: DashboardNode,
+  artifact: ArtifactNode,
+  wechatPublish: WechatPublishNode,
 };

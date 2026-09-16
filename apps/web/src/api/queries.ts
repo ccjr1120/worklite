@@ -1,9 +1,10 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
+import type { AssignHomeBoardRequest, CreateHomeBoardCategoryRequest, UpdateHomeBoardCategoryRequest } from '@worklite/contracts';
 
 export const agentsQueryKey = () => ['agents'] as const;
 export const agentSubSessionsQueryKey = () => ['agent-sub-sessions'] as const;
-export const dashboardQueryKey = () => ['dashboard'] as const;
+export const workflowScheduleQueryKey = (workflowId: string) => ['workflow-schedule', workflowId] as const;
 export const agentScheduledTasksQueryKey = () => ['agent-scheduled-tasks'] as const;
 export const pluginsQueryKey = () => ['plugins'] as const;
 export const workflowsQueryKey = () => ['workflows'] as const;
@@ -13,6 +14,10 @@ export const artifactsQueryKey = () => ['artifacts'] as const;
 
 export function useAgentsQuery(workspace?: string) {
   return useQuery({ queryKey: agentsQueryKey(), queryFn: () => api.agents(workspace) });
+}
+
+export function useWorkflowsQuery(workspace?: string) {
+  return useQuery({ queryKey: workflowsQueryKey(), queryFn: () => api.workflows(workspace) });
 }
 
 export function useAgentQuery(workspace: string | undefined, agentId: string) {
@@ -27,8 +32,13 @@ export function useAgentSubSessionsQuery(workspace?: string) {
   return useQuery({ queryKey: agentSubSessionsQueryKey(), queryFn: () => api.agentSubSessions(workspace), refetchInterval: 1_500 });
 }
 
-export function useDashboardQuery() {
-  return useQuery({ queryKey: dashboardQueryKey(), queryFn: api.dashboard, refetchInterval: 5_000 });
+export function useWorkflowScheduleQuery(workspace: string | undefined, workflowId: string) {
+  return useQuery({
+    queryKey: workflowScheduleQueryKey(workflowId),
+    queryFn: () => api.workflowSchedule(workspace, workflowId),
+    enabled: Boolean(workflowId && workflowId !== 'new'),
+    refetchInterval: 5_000,
+  });
 }
 
 export function useAgentScheduledTasksQuery(workspace?: string) {
@@ -40,11 +50,45 @@ export function usePluginsQuery() {
 }
 
 export function usePluginQuery(pluginId: string) {
-  return useQuery({ queryKey: ['plugin', pluginId] as const, queryFn: () => api.plugin(pluginId), enabled: Boolean(pluginId), refetchInterval: pluginId === 'codex-cli-chat' ? 2_000 : false });
+  return useQuery({ queryKey: ['plugin', pluginId] as const, queryFn: () => api.plugin(pluginId), enabled: Boolean(pluginId), refetchInterval: pluginId === 'codex-cli-chat' || pluginId === 'wechat-official-account' ? 2_000 : false });
 }
 
-export function useWorkflowsQuery(workspace?: string) {
-  return useQuery({ queryKey: workflowsQueryKey(), queryFn: () => api.workflows(workspace) });
+export const homeBoardPreferencesQueryKey = ['home-board-preferences'] as const;
+
+export function useHomeBoardPreferencesQuery(workspace?: string) {
+  return useQuery({ queryKey: homeBoardPreferencesQueryKey, queryFn: () => api.homeBoardPreferences(workspace) });
+}
+
+export function useCreateHomeBoardCategoryMutation(workspace?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateHomeBoardCategoryRequest) => api.createHomeBoardCategory(workspace, input),
+    onSuccess: (data) => queryClient.setQueryData(homeBoardPreferencesQueryKey, data),
+  });
+}
+
+export function useRenameHomeBoardCategoryMutation(workspace?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ categoryId, name }: UpdateHomeBoardCategoryRequest & { categoryId: string }) => api.renameHomeBoardCategory(workspace, categoryId, { name }),
+    onSuccess: (data) => queryClient.setQueryData(homeBoardPreferencesQueryKey, data),
+  });
+}
+
+export function useDeleteHomeBoardCategoryMutation(workspace?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (categoryId: string) => api.deleteHomeBoardCategory(workspace, categoryId),
+    onSuccess: (data) => queryClient.setQueryData(homeBoardPreferencesQueryKey, data),
+  });
+}
+
+export function useAssignHomeBoardMutation(workspace?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: AssignHomeBoardRequest) => api.assignHomeBoard(workspace, input),
+    onSuccess: (data) => queryClient.setQueryData(homeBoardPreferencesQueryKey, data),
+  });
 }
 
 export function useWorkflowQuery(workspace: string | undefined, workflowId: string) {

@@ -24,6 +24,7 @@
     "@worklite/workflow-engine": "workspace:*",
     "better-sqlite3": "^12.4.1",
     "drizzle-orm": "^0.45.2",
+    "playwright": "^1.55.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
   },

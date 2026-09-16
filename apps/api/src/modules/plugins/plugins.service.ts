@@ -2,7 +2,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from '@nes
 import { spawnSync } from 'node:child_process';
 import { count, eq } from 'drizzle-orm';
 import type { PluginTestResult, PluginView, UpdatePluginRequest } from '@worklite/contracts';
-import { pluginWechatConversations, plugins, type Database } from '@worklite/db';
+import { pluginWechatConversations, plugins, wechatOfficialAccounts, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 
@@ -59,8 +59,13 @@ export class PluginsService {
   }
 
   private async toView(row: typeof plugins.$inferSelect): Promise<PluginView> {
-    const availability = this.probe(row.command);
+    const availability = row.id === WECHAT_OFFICIAL_ACCOUNT_PLUGIN_ID
+      ? { enabled: true, status: 'available' as const }
+      : this.probe(row.command);
     const [{ value: conversationCount }] = await this.db.select({ value: count() }).from(pluginWechatConversations).where(eq(pluginWechatConversations.pluginId, row.id));
+    const [officialAccount] = row.id === WECHAT_OFFICIAL_ACCOUNT_PLUGIN_ID
+      ? await this.db.select().from(wechatOfficialAccounts).where(eq(wechatOfficialAccounts.workspaceId, row.workspaceId)).limit(1)
+      : [];
     return {
       id: row.id as PluginView['id'],
       name: row.name,
@@ -78,6 +83,16 @@ export class PluginsService {
         conversationCount,
         updatedAt: row.updatedAt.toISOString(),
       },
+      officialAccount: officialAccount ? {
+        id: officialAccount.id,
+        displayName: officialAccount.displayName,
+        status: officialAccount.status,
+        qrCode: officialAccount.qrCode,
+        qrExpiresAt: officialAccount.qrExpiresAt?.toISOString() ?? null,
+        lastVerifiedAt: officialAccount.lastVerifiedAt?.toISOString() ?? null,
+        lastError: officialAccount.lastError,
+        updatedAt: officialAccount.updatedAt.toISOString(),
+      } : undefined,
     };
   }
 
@@ -166,4 +181,7 @@ function decryptSecret(value: string): string {
   return Buffer.concat([decipher.update(Buffer.from(encryptedValue, 'base64url')), decipher.final()]).toString('utf8');
 }
 
-export { encryptSecret };
+export const WECHAT_OFFICIAL_ACCOUNT_PLUGIN_ID = 'wechat-official-account' as const;
+export const WECHAT_OFFICIAL_ACCOUNT_ID = 'wechat_official_account_personal' as const;
+
+export { decryptSecret, encryptSecret };

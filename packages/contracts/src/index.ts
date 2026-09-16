@@ -1,6 +1,7 @@
 export type RunStatus =
   | 'queued'
   | 'running'
+  | 'waiting_for_input'
   | 'succeeded'
   | 'failed'
   | 'cancelled'
@@ -46,7 +47,7 @@ export type WorkspaceView = {
 };
 
 export type PluginView = {
-  id: 'codex-cli-chat';
+  id: 'codex-cli-chat' | 'wechat-official-account';
   name: string;
   description: string;
   command: string;
@@ -54,6 +55,20 @@ export type PluginView = {
   status: 'available' | 'missing' | 'failed';
   updatedAt: string;
   wechat: WechatConnectionView;
+  officialAccount?: WechatOfficialAccountView;
+};
+
+export type WechatOfficialAccountStatus = 'disconnected' | 'qr_pending' | 'connected' | 'error';
+
+export type WechatOfficialAccountView = {
+  id: string;
+  displayName: string;
+  status: WechatOfficialAccountStatus;
+  qrCode: string | null;
+  qrExpiresAt: string | null;
+  lastVerifiedAt: string | null;
+  lastError: string | null;
+  updatedAt: string;
 };
 
 export type WechatConnectionStatus = 'disconnected' | 'qr_pending' | 'connected' | 'error';
@@ -285,7 +300,6 @@ export type WorkliteNavigationTarget =
   | 'mcp-servers'
   | 'model-providers'
   | 'workflows'
-  | 'runs'
   | 'settings-appearance'
   | 'settings-usage'
   | 'settings-audit-log';
@@ -453,11 +467,6 @@ export type WorkflowDefinition = {
   edges: WorkflowEdgeDefinition[];
 };
 
-export type WorkflowSkillSetValue = {
-  type: 'skill-set';
-  skillIds: string[];
-};
-
 export type WorkflowEditOperation =
   | { type: 'addNode'; node: WorkflowNodeDefinition; index: number }
   | { type: 'removeNode'; nodeId: string }
@@ -509,6 +518,31 @@ export type WorkflowRevisionView = {
   createdAt: string;
 };
 
+export type WorkflowDashboardFieldType = 'text' | 'number' | 'boolean' | 'datetime' | 'url';
+
+export type WorkflowDashboardField = {
+  key: string;
+  label: string;
+  type: WorkflowDashboardFieldType;
+};
+
+export type WorkflowDashboardElement =
+  | { kind: 'text'; text: string }
+  | { kind: 'count'; label: string }
+  | { kind: 'metric'; label: string; field: string; type: WorkflowDashboardFieldType }
+  | { kind: 'list'; titleKey: string; fields: WorkflowDashboardField[] };
+
+export type WorkflowDashboardLayout = {
+  header: WorkflowDashboardElement[];
+  main: WorkflowDashboardElement[];
+  footer: WorkflowDashboardElement[];
+};
+
+export type WorkflowDashboardBinding = {
+  nodeId: string;
+  layout: WorkflowDashboardLayout;
+};
+
 export type WorkflowView = {
   id: string;
   workspaceSlug: string;
@@ -517,6 +551,7 @@ export type WorkflowView = {
   name: string;
   state: 'draft' | 'published';
   stepCount: number;
+  dashboard: WorkflowDashboardBinding | null;
   lastRunStatus: RunStatus | null;
   lastRunAt: string | null;
   updatedAt: string;
@@ -525,6 +560,33 @@ export type WorkflowView = {
 export type WorkflowDetailView = WorkflowView & {
   draft: WorkflowDraftView;
 };
+export type HomeBoardCategoryView = {
+  id: string;
+  workspaceSlug: string;
+  name: string;
+  position: number;
+  workflowIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type HomeBoardPreferencesView = {
+  categories: HomeBoardCategoryView[];
+};
+
+export type CreateHomeBoardCategoryRequest = {
+  name: string;
+};
+
+export type UpdateHomeBoardCategoryRequest = {
+  name: string;
+};
+
+export type AssignHomeBoardRequest = {
+  workflowId: string;
+  categoryId: string | null;
+};
+
 
 export type ApplyWorkflowDraftOperationsRequest = {
   baseRevisionId: string;
@@ -589,8 +651,10 @@ export type RunView = {
   initiator: string;
   input?: unknown;
   result?: unknown;
+  hasArtifactNode: boolean;
   nodeRuns?: WorkflowNodeRunView[];
   artifacts?: ArtifactView[];
+  pendingAction?: WorkflowPendingActionView | null;
 };
 
 export type CreateRunRequest = {
@@ -614,7 +678,25 @@ export type WorkflowRunView = {
   finishedAt: string | null;
 };
 
-export type WorkflowNodeRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+export type WorkflowNodeRunStatus = 'queued' | 'running' | 'waiting_for_input' | 'succeeded' | 'failed' | 'cancelled';
+
+export type WorkflowPendingActionType = 'wechat_login' | 'wechat_publish_confirmation';
+
+export type WorkflowPendingActionStatus = 'pending' | 'completed' | 'expired' | 'cancelled';
+
+export type WorkflowPendingActionView = {
+  id: string;
+  runId: string;
+  nodeRunId: string;
+  type: WorkflowPendingActionType;
+  status: WorkflowPendingActionStatus;
+  title: string;
+  description: string;
+  qrCode: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
 
 export type WorkflowNodeRunView = {
   id: string;
@@ -636,7 +718,7 @@ export type WorkflowNodeRunView = {
 export type RunProgressEvent = {
   runId: string;
   sequence: number;
-  type: 'run.status' | 'node.started' | 'node.delta' | 'node.completed' | 'node.failed' | 'artifact.created';
+  type: 'run.status' | 'node.started' | 'node.delta' | 'node.waiting' | 'node.completed' | 'node.failed' | 'pending_action.updated' | 'artifact.created';
   payload: unknown;
   occurredAt: string;
 };
@@ -827,46 +909,4 @@ export type WorkflowScheduleView = {
   lastStatus: RunStatus | null;
   createdAt: string;
   updatedAt: string;
-};
-
-export type UpsertWorkflowScheduleRequest = {
-  workflowId: string;
-  intervalSeconds: number;
-  enabled: boolean;
-};
-
-export type DashboardPayloadItem = {
-  id: string;
-  title: string;
-  status: string;
-  priority?: string | null;
-  dueAt?: string | null;
-  url?: string | null;
-  metadata?: Record<string, unknown>;
-};
-
-export type DashboardPayload = {
-  type: 'worklite.dashboard';
-  version: 1;
-  source?: {
-    kind: string;
-    name?: string;
-  };
-  updatedAt: string;
-  items: DashboardPayloadItem[];
-};
-
-export type DashboardPresentation = 'list' | 'kanban';
-
-export type DashboardView = {
-  workflowId: string | null;
-  workflowName: string | null;
-  presentation: DashboardPresentation;
-  payload: DashboardPayload | null;
-  schedule: WorkflowScheduleView | null;
-};
-
-export type UpdateDashboardRequest = {
-  workflowId: string;
-  presentation: DashboardPresentation;
 };

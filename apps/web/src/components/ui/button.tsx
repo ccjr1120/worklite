@@ -36,9 +36,16 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> &
     asChild?: boolean;
   };
 
-function Button({ className, variant, size, asChild = false, ...props }: ButtonProps) {
+function Button({ className, variant, size, asChild = false, title, ...props }: ButtonProps) {
   const Comp = asChild ? Slot : 'button';
-  return <Comp className={cn(buttonVariants({ variant, size, className }))} {...props} />;
+  const accessibleLabel = props['aria-label'];
+  const resolvedTitle = title ?? (
+    (size === 'icon' || size === 'icon-compact') && typeof accessibleLabel === 'string'
+      ? accessibleLabel
+      : undefined
+  );
+
+  return <Comp className={cn(buttonVariants({ variant, size, className }))} title={resolvedTitle} {...props} />;
 }
 
 export { Button, buttonVariants };

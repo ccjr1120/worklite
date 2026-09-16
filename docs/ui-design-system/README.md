@@ -158,6 +158,10 @@ Use Lucide icons consistently, normally at `16px` and at `18px` in primary navig
 
 ## Product-Specific Patterns
 
+### Chat Workflow Mentions
+
+The embedded chat mention menu supports both configured Agents and published Workflows. Use distinct neutral icons and labels so users understand that an Agent mention opens an Agent turn while a Workflow mention creates a Workflow Run. Keep the selected target chip compact and removable. Workflow progress uses the existing queued, running, completed, failed, and cancelled status semantics, with text and icon cues in addition to color. Successful Workflow Artifacts appear as restrained transcript cards with a direct details action. Draft Workflows are not listed as runnable mentions.
+
 ### Agents
 
 Present agents as configurable work units, not cartoon characters. Identity comes from a restrained geometric symbol or letter mark, name, responsibility, model, available skills or tools, ownership, version, and recent run state.
@@ -196,9 +200,11 @@ Persimmon progression through the graph is a distinctive WorkLite motif. It comm
 
 ### Runs and Logs
 
-Use the following canonical run labels: `Queued`, `Running`, `Waiting for input`, `Completed`, `Failed`, and `Cancelled`.
+Workflow List exposes Run records through a per-Workflow dialog. Use the following canonical run labels: `Queued`, `Running`, `Waiting for input`, `Completed`, `Failed`, and `Cancelled`.
 
-Show the current step and continuing progress for long operations. Append logs without forcing disruptive scrolling. Use monospace text for raw output and allow users to distinguish timestamps, severity, source, and content. Successful completion should be clear but restrained; failure must include context and a next step where possible.
+A Run waiting on a human-gated browser action presents a compact amber pending-action panel before its node logs. The panel names the required action, shows the QR image and expiry when available, and retains `Refresh QR` and `Cancel run` controls. Authentication state is communicated with text and icon cues; the QR is not the only explanation. Completion updates through the existing Run event stream and does not require a separate “I scanned it” control.
+
+Show the current step and continuing progress for long operations. Expanded Workflow Run records present ordered node execution logs with node identity, status, timing, duration, and retry context. Failed Runs surface the credential-safe failure reason before the log list and repeat it on the failed node entry. Append logs without forcing disruptive scrolling. Use monospace text for identifiers and raw output, and allow users to distinguish timestamps, severity, source, and content. Successful completion should be clear but restrained; failure must include context and a next step where possible. Artifact disclosure is absent when the immutable Workflow version has no Artifact node; an empty Artifact state is reserved for eligible versions that produced none.
 
 ## Motion
 
@@ -247,6 +253,28 @@ Before confirming a UI proposal, verify that it:
 - Introduces a documented design-system decision before implementation when no existing rule applies.
 
 ## Changelog
+
+### 2026-09-16
+
+- Added the pending Workflow authentication panel for login and publish-confirmation QR actions.
+- Kept waiting states amber and neutral, reserving brand blue for the active refresh action and focus.
+
+### 2026-09-15
+
+- Added the Chat Workflow Mentions pattern for distinguishing Agent turns from published Workflow Runs and for presenting Run progress and Artifacts in the embedded chat transcript.
+
+### 2026-09-15
+
+- Added ordered node execution logs and directly visible failure reasons to expanded Workflow Run records.
+- Limited Artifact disclosure and its empty state to immutable Workflow versions that contain an Artifact node.
+
+### 2026-09-15
+
+- Added the Workflow Artifact node using the existing neutral node grammar and shared selection, focus, and execution treatments; no new color, icon, or layout language was introduced.
+
+### 2026-09-15
+
+- Moved Run records into a per-Workflow Workflow List dialog while preserving neutral execution states, canonical status labels, and inline Artifact disclosure.
 
 ### 2026-09-14
 

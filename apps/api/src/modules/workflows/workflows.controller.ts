@@ -1,11 +1,12 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import type { ApplyWorkflowDraftOperationsRequest, CreateWorkflowRequest, ImportWorkflowRequest } from '@worklite/contracts';
+import { WorkflowSchedulesService } from './workflow-schedules.service';
 import { WorkflowsService } from './workflows.service';
 
 @Controller('workflows')
 export class WorkflowsController {
-  constructor(private readonly workflows: WorkflowsService) {}
+  constructor(private readonly workflows: WorkflowsService, private readonly schedules: WorkflowSchedulesService) {}
 
   @Get()
   list(@Req() request: Request) {
@@ -40,6 +41,11 @@ export class WorkflowsController {
   @Delete(':workflowId')
   delete(@Req() request: Request, @Param('workflowId') workflowId: string) {
     return this.workflows.delete(request, 'personal', workflowId);
+  }
+
+  @Get(':workflowId/schedule')
+  getSchedule(@Req() request: Request, @Param('workflowId') workflowId: string) {
+    return this.schedules.get(request, workflowId);
   }
 
   @Post(':workflowId/draft/operations')

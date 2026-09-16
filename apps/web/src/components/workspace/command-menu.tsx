@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router';
-import { Bot, Home, KeyRound, MessageSquareText, Play, Plus, Puzzle, Workflow } from 'lucide-react';
+import { Bot, Home, KeyRound, MessageSquareText, Plus, Puzzle, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   CommandDialog,
@@ -10,14 +10,13 @@ import {
   CommandList,
   CommandSeparator,
 } from '@/components/ui/command';
-import { useAgentsQuery, useRunsQuery, useWorkflowsQuery } from '@/api/queries';
+import { useAgentsQuery, useWorkflowsQuery } from '@/api/queries';
 
 function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { t } = useTranslation('workspace');
   const navigate = useNavigate();
   const { data: workflows = [] } = useWorkflowsQuery();
   const { data: agents = [] } = useAgentsQuery();
-  const { data: runs = [] } = useRunsQuery();
 
   function closeAndGo(run: () => void) {
     onOpenChange(false);
@@ -35,9 +34,6 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
           </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/workflows' }))}>
             <Workflow className="size-4" /> {t('nav.workflows')}
-          </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/runs' }))}>
-            <Play className="size-4" /> {t('nav.runs')}
           </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/agents' }))}>
             <Bot className="size-4" /> {t('nav.agents')}
@@ -82,16 +78,6 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
                 onSelect={() => closeAndGo(() => void navigate({ to: '/agents/$agentId', params: { agentId: item.id } }))}
               >
                 <Bot className="size-4" /> {item.name}
-              </CommandItem>
-            ))}
-          {runs
-            .slice(0, 2)
-            .map((item) => (
-              <CommandItem
-                key={item.id}
-                onSelect={() => closeAndGo(() => void navigate({ to: '/runs/$runId', params: { runId: item.id } }))}
-              >
-                <Play className="size-4" /> {item.workflowName}
               </CommandItem>
             ))}
         </CommandGroup>

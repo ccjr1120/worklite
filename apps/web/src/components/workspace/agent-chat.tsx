@@ -1,10 +1,10 @@
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
-import { ArrowLeft, ArrowUp, Ban, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleX, Download, FileCode2, History, LoaderCircle, MessageSquareText, Plus, RefreshCw, ShieldAlert, Square, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { ArrowLeft, ArrowUp, Ban, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleX, Download, FileCode2, History, LoaderCircle, MessageSquareText, Play, Plus, RefreshCw, ShieldAlert, Square, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AgentExecutionView, AgentSubSessionView, AgentToolCallView, AgentView, McpServerView } from '@worklite/contracts';
+import type { AgentExecutionView, AgentSubSessionView, AgentToolCallView, AgentView, McpServerView, RunView, WorkflowView } from '@worklite/contracts';
 import { ApiError, api, parseAgentExecutionEvent } from '@/api/client';
-import { agentSubSessionsQueryKey, useAgentQuery, useAgentsQuery, useAgentSubSessionsQuery, useMcpServersQuery, useModelProvidersQuery } from '@/api/queries';
+import { agentSubSessionsQueryKey, useAgentQuery, useAgentsQuery, useAgentSubSessionsQuery, useMcpServersQuery, useModelProvidersQuery, useWorkflowsQuery } from '@/api/queries';
 import { Conversation, ConversationContent } from '@/components/ai-elements/conversation';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import { PromptInput, PromptInputSubmit, PromptInputTextarea } from '@/components/ai-elements/prompt-input';
@@ -33,6 +33,8 @@ const RESTARTED_AGENT_ERROR = 'The API restarted before this Agent turn complete
 type ArchivedExecution = { id: string; label: string; archivedAt: string };
 type StoredExecutionState = { activeId: string | null; activeSubSessionId: string | null; archived: ArchivedExecution[] };
 type SlashCommand = '/log' | '/new' | '/resume';
+type MentionItem = { kind: 'agent'; value: AgentView } | { kind: 'workflow'; value: WorkflowView };
+type ActiveWorkflowRun = { workflow: WorkflowView; run: RunView; input: string };
 
 const SLASH_COMMANDS: Array<{ value: SlashCommand; icon: typeof Download; descriptionKey: 'commands.logDescription' | 'commands.newDescription' | 'commands.resumeDescription' }> = [
   { value: '/log', icon: Download, descriptionKey: 'commands.logDescription' },
@@ -75,6 +77,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const providersQuery = useModelProvidersQuery(workspaceSlug);
   const mcpServersQuery = useMcpServersQuery(workspaceSlug);
   const agentsQuery = useAgentsQuery(workspaceSlug);
+  const workflowsQuery = useWorkflowsQuery(workspaceSlug);
   const subSessionsQuery = useAgentSubSessionsQuery(workspaceSlug);
   const { applyAppearancePreference } = useTheme();
   const { applyLocalePreference, locale } = useLocale();
@@ -85,6 +88,8 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const [activeSubSessionId, setActiveSubSessionId] = useState<string | null>(initialState.activeSubSessionId);
   const [subExecution, setSubExecution] = useState<AgentExecutionView | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<AgentView | null>(null);
+  const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowView | null>(null);
+  const [workflowRun, setWorkflowRun] = useState<ActiveWorkflowRun | null>(null);
   const [draft, setDraft] = useState('');
   const [open, setOpen] = useState(false);
   const [panelView, setPanelView] = useState<'chat' | 'configuration'>(initialState.activeId ? 'chat' : 'configuration');
@@ -142,15 +147,20 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const isHome = pathname === '/home';
   const waitingForInput = visibleExecution?.status === 'waiting_for_input';
   const mainRunning = execution?.status === 'running';
+  const workflowRunning = workflowRun?.run.status === 'queued' || workflowRun?.run.status === 'running' || workflowRun?.run.status === 'waiting_for_input';
   const eligibleAgents = useMemo(() => (agentsQuery.data ?? []).filter((agent) => agent.kind === 'custom' && agent.providerId && agent.model), [agentsQuery.data]);
-  const mentionMatch = !activeSubSession && !selectedAgent ? /(?:^|\s)@([^\s@]*)$/.exec(draft) : null;
+  const mentionMatch = !activeSubSession && !selectedAgent && !selectedWorkflow && !workflowRunning ? /(?:^|\s)@([^\s@]*)$/.exec(draft) : null;
   const mentionQuery = mentionMatch?.[1]?.toLocaleLowerCase() ?? '';
-  const mentionMatches = mentionMatch && !mentionDismissed
-    ? eligibleAgents.filter((agent) => `${agent.name} ${agent.responsibility}`.toLocaleLowerCase().includes(mentionQuery))
+  const eligibleWorkflows = useMemo(() => (workflowsQuery.data ?? []).filter((workflow) => workflow.state === 'published' && workflow.latestVersionId), [workflowsQuery.data]);
+  const mentionMatches: MentionItem[] = mentionMatch && !mentionDismissed
+    ? [
+      ...eligibleAgents.filter((agent) => `${agent.name} ${agent.responsibility}`.toLocaleLowerCase().includes(mentionQuery)).map((value) => ({ kind: 'agent' as const, value })),
+      ...eligibleWorkflows.filter((workflow) => workflow.name.toLocaleLowerCase().includes(mentionQuery)).map((value) => ({ kind: 'workflow' as const, value })),
+    ]
     : [];
   const mentionMenuOpen = Boolean(mentionMatch && !mentionDismissed);
   const slashQuery = draft.trimStart().toLowerCase();
-  const commandMatches = !activeSubSession && !selectedAgent && !mentionMenuOpen && !mainRunning && slashQuery.startsWith('/') && !slashDismissed ? SLASH_COMMANDS.filter((command) => command.value.startsWith(slashQuery)) : [];
+  const commandMatches = !activeSubSession && !selectedAgent && !selectedWorkflow && !mentionMenuOpen && !mainRunning && !workflowRunning && slashQuery.startsWith('/') && !slashDismissed ? SLASH_COMMANDS.filter((command) => command.value.startsWith(slashQuery)) : [];
   const executionError = visibleExecution?.errorCode === 'incomplete_tool_request' || visibleExecution?.error === INCOMPLETE_SKILL_REQUEST
     ? t('assistant:execution.incompleteSkillRequest')
     : visibleExecution?.errorCode === 'invalid_tool_request' || visibleExecution?.error === INVALID_SKILL_REQUEST
@@ -350,6 +360,22 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   }, [activeSubSession, subExecution?.status, workspaceSlug]);
 
   useEffect(() => {
+    if (!workflowRun || !workflowRunning) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const next = await api.run(workspaceSlug, workflowRun.run.id);
+        if (!cancelled) setWorkflowRun((current) => current && current.run.id === next.id ? { ...current, run: next } : current);
+      } catch {
+        // The run remains visible and can be refreshed from the Runs surface.
+      }
+    };
+    const timer = window.setInterval(() => void poll(), 1_000);
+    void poll();
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [workflowRun?.run.id, workflowRunning, workspaceSlug]);
+
+  useEffect(() => {
     if (locationSearch.assistant === 'open') setOpen(true);
   }, [locationSearch.assistant]);
 
@@ -384,10 +410,29 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   async function submit(event: FormEvent) {
     event.preventDefault();
     const trimmedMessage = draft.trim();
-    if (!trimmedMessage || busy) return;
+    if (busy || (!trimmedMessage && !selectedWorkflow)) return;
     const command = trimmedMessage.toLowerCase();
     if (!activeSubSession && !selectedAgent && (command === '/log' || command === '/new' || command === '/resume')) {
       runCommand(command);
+      return;
+    }
+    if (selectedWorkflow) {
+      if (!selectedWorkflow.latestVersionId) return;
+      setBusy(true);
+      setError('');
+      try {
+        const created = await api.createRun(selectedWorkflow.latestVersionId, { input: trimmedMessage });
+        const run = await api.run(workspaceSlug, created.runId);
+        setWorkflowRun({ workflow: selectedWorkflow, run, input: trimmedMessage });
+        setSelectedWorkflow(null);
+        setDraft('');
+        setMentionDismissed(false);
+        setOpen(true);
+      } catch (runError) {
+        setError(apiErrorMessage(runError, t('assistant:workflowRun.requestFailed')));
+      } finally {
+        setBusy(false);
+      }
       return;
     }
     if (selectedAgent) {
@@ -451,6 +496,19 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   }
 
   async function cancelExecution() {
+    if (workflowRunning && workflowRun && !busy) {
+      setBusy(true);
+      setError('');
+      try {
+        const run = await api.cancelRun(workspaceSlug, workflowRun.run.id);
+        setWorkflowRun((current) => current ? { ...current, run } : current);
+      } catch (cancelError) {
+        setError(apiErrorMessage(cancelError, t('assistant:workflowRun.cancelFailed')));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     if (!visibleExecution || visibleExecution.status !== 'running' || busy) return;
     setBusy(true);
     setError('');
@@ -489,11 +547,12 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
     }
   }
 
-  function selectMention(agent: AgentView) {
+  function selectMention(item: MentionItem) {
     if (!mentionMatch) return;
     const atIndex = draft.lastIndexOf('@');
     setDraft(atIndex >= 0 ? draft.slice(0, atIndex) : draft);
-    setSelectedAgent(agent);
+    setSelectedAgent(item.kind === 'agent' ? item.value : null);
+    setSelectedWorkflow(item.kind === 'workflow' ? item.value : null);
     setMentionDismissed(true);
     setActiveMentionIndex(0);
   }
@@ -606,16 +665,17 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
         }
       } else if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
-        const agent = mentionMatches[activeMentionIndex] ?? mentionMatches[0];
-        if (agent) selectMention(agent);
+        const item = mentionMatches[activeMentionIndex] ?? mentionMatches[0];
+        if (item) selectMention(item);
       } else if (event.key === 'Escape') {
         event.preventDefault();
         setMentionDismissed(true);
       }
       return;
     }
-    if (selectedAgent && !draft && event.key === 'Backspace') {
+    if ((selectedAgent || selectedWorkflow) && !draft && event.key === 'Backspace') {
       setSelectedAgent(null);
+      setSelectedWorkflow(null);
       return;
     }
     if (running && !selectedAgent && event.key === 'Enter') {
@@ -682,20 +742,39 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
     setOpen(true);
   }
 
+  function handlePanelTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const nextView = event.key === 'Home'
+      ? 'chat'
+      : event.key === 'End'
+        ? 'configuration'
+        : panelView === 'chat'
+          ? 'configuration'
+          : 'chat';
+    setPanelView(nextView);
+    window.requestAnimationFrame(() => document.getElementById(`assistant-${nextView}-tab`)?.focus());
+  }
+
   const events = visibleExecution ? [
     ...visibleExecution.messages.map((item) => ({ kind: 'message' as const, occurredAt: item.createdAt, item })),
     ...visibleExecution.toolCalls.map((item) => ({ kind: 'tool' as const, occurredAt: item.createdAt, item })),
   ].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt)) : [];
 
   const status = busy ? t('assistant:status.running')
+    : workflowRun?.run.status === 'queued' ? t('assistant:status.queued')
+    : workflowRun?.run.status === 'running' ? t('assistant:status.running')
+    : workflowRun?.run.status === 'waiting_for_input' ? t('assistant:workflowRun.waitingForConfirmation')
     : connectionState === 'reconnecting' ? t('assistant:status.reconnecting')
     : visibleExecution?.status === 'failed' ? t('assistant:status.failed')
       : visibleExecution?.status === 'cancelled' ? t('assistant:status.cancelled')
         : visibleExecution?.status === 'completed' ? t('assistant:status.completed')
     : visibleExecution?.status === 'waiting_for_input' ? t('assistant:status.waiting_for_input')
       : visibleExecution?.status === 'running' ? t('assistant:status.running') : '';
-  const composerAvailable = Boolean(activeSubSession || isConfigured || eligibleAgents.length > 0);
-  const composerLoading = agentQuery.isLoading || agentsQuery.isLoading || subSessionsQuery.isLoading || mcpServersQuery.isLoading;
+  const composerAvailable = Boolean(activeSubSession || isConfigured || eligibleAgents.length > 0 || eligibleWorkflows.length > 0);
+  const composerLoading = agentQuery.isLoading || agentsQuery.isLoading || workflowsQuery.isLoading || subSessionsQuery.isLoading || mcpServersQuery.isLoading;
+  const activeExecutionRunning = (running && !selectedAgent && !selectedWorkflow) || workflowRunning;
+  const submitDisabled = activeExecutionRunning ? busy : busy || (!draft.trim() && !selectedWorkflow) || (!activeSubSession && !selectedAgent && !selectedWorkflow && !isConfigured);
 
   return (
     <div ref={floatingContainerRef} className={cn('pointer-events-none absolute z-30', isHome || open ? 'inset-x-3 bottom-3 sm:inset-x-6 sm:bottom-6' : 'inset-0')}>
@@ -721,8 +800,8 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
             </header>
 
             <div className="agent-tabs" role="tablist" aria-label={t('assistant:panelTabs.label')}>
-              <button type="button" role="tab" aria-selected={panelView === 'chat'} className={cn(panelView === 'chat' && 'active')} onClick={() => setPanelView('chat')}>{t('assistant:panelTabs.chat')}</button>
-              <button type="button" role="tab" aria-selected={panelView === 'configuration'} className={cn(panelView === 'configuration' && 'active')} onClick={() => setPanelView('configuration')}>{t('assistant:panelTabs.configuration')}</button>
+              <button id="assistant-chat-tab" type="button" role="tab" aria-selected={panelView === 'chat'} tabIndex={panelView === 'chat' ? 0 : -1} className={cn(panelView === 'chat' && 'active')} onKeyDown={handlePanelTabKeyDown} onClick={() => setPanelView('chat')}>{t('assistant:panelTabs.chat')}</button>
+              <button id="assistant-configuration-tab" type="button" role="tab" aria-selected={panelView === 'configuration'} tabIndex={panelView === 'configuration' ? 0 : -1} className={cn(panelView === 'configuration' && 'active')} onKeyDown={handlePanelTabKeyDown} onClick={() => setPanelView('configuration')}>{t('assistant:panelTabs.configuration')}</button>
             </div>
 
             {panelView === 'configuration' ? (
@@ -750,12 +829,13 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
                 }}
               >
                 <ConversationContent>
-                  {events.length === 0 && !loadingExecution && !loadingSubExecution && !activeSubSession ? <StarterPane onSelect={(prompt) => { setDraft(prompt); setOpen(true); }} /> : null}
+                  {events.length === 0 && !workflowRun && !loadingExecution && !loadingSubExecution && !activeSubSession ? <StarterPane onSelect={(prompt) => { setDraft(prompt); setOpen(true); }} /> : null}
                   {(activeSubSession ? loadingSubExecution : loadingExecution) ? <p className="m-auto flex items-center gap-2 text-sm text-muted-foreground" role="status"><LoaderCircle className="size-4 motion-safe:animate-spin" />{t('assistant:execution.loading')}</p> : null}
                   {events.map((event) => event.kind === 'message' ? <MessageRow key={event.item.id} message={event.item} assistantName={activeSubSession?.agentName} /> : <ToolCallPanel key={event.item.id} call={event.item} />)}
           {running ? <WorkingRow /> : null}
                   {waitingForInput && visibleExecution?.pendingQuestion ? <QuestionRow question={visibleExecution.pendingQuestion} /> : null}
                   {visibleExecution?.status === 'cancelled' ? <CancelledRow /> : null}
+                  {workflowRun ? <WorkflowRunRow run={workflowRun.run} workflow={workflowRun.workflow} input={workflowRun.input} /> : null}
                   {executionError ? <FailureRow execution={visibleExecution} message={executionError} onRetry={() => void retryExecution()} retryDisabled={busy} locale={locale} /> : null}
                   {error ? <p className="mt-4 border-l-2 border-danger pl-3 text-[13px] text-danger" role="alert">{error}</p> : null}
                 </ConversationContent>
@@ -774,14 +854,14 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
             <label htmlFor="assistant-message" className="sr-only">{t('assistant:composer.label')}</label>
             <Popover open={commandMatches.length > 0 || mentionMenuOpen} onOpenChange={(next) => { if (next) return; setSlashDismissed(true); setMentionDismissed(true); }}>
               <PopoverAnchor asChild><div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 rounded-md border border-border bg-surface px-2 focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
-                {selectedAgent ? <span className="inline-flex h-7 max-w-[min(12rem,45%)] shrink-0 items-center gap-1.5 rounded-md border border-brand/30 bg-brand-subtle px-2 text-[13px] font-medium text-foreground"><Bot className="size-3.5 shrink-0 text-brand" /><span className="truncate">{selectedAgent.name}</span><Tooltip><TooltipTrigger asChild><button type="button" className={cn('rounded-sm text-muted-foreground hover:text-foreground', focusRingInset)} aria-label={t('assistant:mentions.remove')} onClick={() => setSelectedAgent(null)}><X className="size-3.5" /></button></TooltipTrigger><TooltipContent>{t('assistant:mentions.remove')}</TooltipContent></Tooltip></span> : null}
+                {selectedWorkflow ? <span className="inline-flex h-7 max-w-[min(14rem,45%)] shrink-0 items-center gap-1.5 rounded-md border border-brand/30 bg-brand-subtle px-2 text-[13px] font-medium text-foreground"><Play className="size-3.5 shrink-0 text-brand" /><span className="truncate">{selectedWorkflow.name}</span><Tooltip><TooltipTrigger asChild><button type="button" className={cn('rounded-sm text-muted-foreground hover:text-foreground', focusRingInset)} aria-label={t('assistant:mentions.removeWorkflow')} onClick={() => setSelectedWorkflow(null)}><X className="size-3.5" /></button></TooltipTrigger><TooltipContent>{t('assistant:mentions.removeWorkflow')}</TooltipContent></Tooltip></span> : null}{selectedAgent ? <span className="inline-flex h-7 max-w-[min(12rem,45%)] shrink-0 items-center gap-1.5 rounded-md border border-brand/30 bg-brand-subtle px-2 text-[13px] font-medium text-foreground"><Bot className="size-3.5 shrink-0 text-brand" /><span className="truncate">{selectedAgent.name}</span><Tooltip><TooltipTrigger asChild><button type="button" className={cn('rounded-sm text-muted-foreground hover:text-foreground', focusRingInset)} aria-label={t('assistant:mentions.remove')} onClick={() => setSelectedAgent(null)}><X className="size-3.5" /></button></TooltipTrigger><TooltipContent>{t('assistant:mentions.remove')}</TooltipContent></Tooltip></span> : null}
                 <PromptInputTextarea className="min-w-32 basis-40 border-0 bg-transparent px-1 focus:border-transparent focus:ring-0" id="assistant-message" name="system-helper-message" autoComplete="off" value={draft} onValueChange={(value) => { setDraft(value); setSlashDismissed(false); setMentionDismissed(false); setActiveCommandIndex(0); setActiveMentionIndex(0); }} onFocus={() => setOpen(true)} onKeyDown={handleComposerKeyDown} placeholder={waitingForInput ? t('assistant:composer.answerPlaceholder') : activeSubSession ? t('assistant:composer.followUpPlaceholder', { agent: activeSubSession.agentName }) : t('assistant:composer.placeholder')} role="combobox" aria-expanded={commandMatches.length > 0 || mentionMenuOpen} rows={1} />
               </div></PopoverAnchor>
               <PopoverContent side="top" align="start" className="w-[min(420px,calc(100vw-24px))] p-1" onOpenAutoFocus={(event) => event.preventDefault()} onCloseAutoFocus={(event) => event.preventDefault()}>
-                {mentionMenuOpen ? <AgentMentionMenu agents={mentionMatches} activeIndex={activeMentionIndex} onActiveIndex={setActiveMentionIndex} onSelect={selectMention} /> : <div role="listbox" aria-label={t('assistant:commands.menuLabel')}>{commandMatches.map((command, index) => { const Icon = command.icon; return <button key={command.value} type="button" role="option" aria-selected={index === activeCommandIndex} className={cn('flex w-full items-start gap-3 rounded-md px-3 py-2 text-left', surfaceInteraction, focusRingInset, index === activeCommandIndex ? 'bg-brand-subtle' : 'hover:bg-surface-subtle')} onPointerDown={(event) => event.preventDefault()} onPointerMove={() => setActiveCommandIndex(index)} onClick={() => runCommand(command.value)}><Icon className="mt-0.5 size-4 shrink-0 text-brand" /><span><span className="block font-mono text-[13px] font-medium">{command.value}</span><span className="mt-0.5 block text-xs text-muted-foreground">{t(`assistant:${command.descriptionKey}`)}</span></span></button>; })}</div>}
+                {mentionMenuOpen ? <AgentMentionMenu items={mentionMatches} activeIndex={activeMentionIndex} onActiveIndex={setActiveMentionIndex} onSelect={selectMention} /> : <div role="listbox" aria-label={t('assistant:commands.menuLabel')}>{commandMatches.map((command, index) => { const Icon = command.icon; return <button key={command.value} type="button" role="option" aria-selected={index === activeCommandIndex} className={cn('flex w-full items-start gap-3 rounded-md px-3 py-2 text-left', surfaceInteraction, focusRingInset, index === activeCommandIndex ? 'bg-brand-subtle' : 'hover:bg-surface-subtle')} onPointerDown={(event) => event.preventDefault()} onPointerMove={() => setActiveCommandIndex(index)} onClick={() => runCommand(command.value)}><Icon className="mt-0.5 size-4 shrink-0 text-brand" /><span><span className="block font-mono text-[13px] font-medium">{command.value}</span><span className="mt-0.5 block text-xs text-muted-foreground">{t(`assistant:${command.descriptionKey}`)}</span></span></button>; })}</div>}
               </PopoverContent>
             </Popover>
-            <Tooltip><TooltipTrigger asChild><PromptInputSubmit className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md bg-brand text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50" status={running && !selectedAgent ? 'streaming' : busy ? 'submitted' : 'idle'} aria-label={running && !selectedAgent ? t('assistant:composer.stop') : t('assistant:composer.send')} disabled={running && !selectedAgent ? busy : !draft.trim() || busy || (!activeSubSession && !selectedAgent && !isConfigured)} onStop={() => void cancelExecution()}>{running && !selectedAgent ? <Square className="size-3.5 fill-current" /> : busy ? <LoaderCircle className="size-4 motion-safe:animate-spin" /> : <ArrowUp className="size-4" />}</PromptInputSubmit></TooltipTrigger><TooltipContent>{running && !selectedAgent ? t('assistant:composer.stop') : t('assistant:composer.send')}</TooltipContent></Tooltip>
+            <Tooltip><TooltipTrigger asChild><PromptInputSubmit className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md bg-brand text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50" status={activeExecutionRunning ? 'streaming' : busy ? 'submitted' : 'idle'} aria-label={activeExecutionRunning ? t('assistant:composer.stop') : t('assistant:composer.send')} disabled={submitDisabled} onStop={() => void cancelExecution()}>{activeExecutionRunning ? <Square className="size-3.5 fill-current" /> : busy ? <LoaderCircle className="size-4 motion-safe:animate-spin" /> : <ArrowUp className="size-4" />}</PromptInputSubmit></TooltipTrigger><TooltipContent>{activeExecutionRunning ? t('assistant:composer.stop') : t('assistant:composer.send')}</TooltipContent></Tooltip>
           </PromptInput>
         ) : (
           <Link to="/agents/$agentId" params={{ agentId: SYSTEM_HELPER_CHAT_ID }} className={cn('flex min-h-12 items-center gap-2 px-3 text-[13px] font-medium hover:bg-surface-subtle', surfaceInteraction, focusRingInset)}><ShieldAlert className="size-4 shrink-0 text-brand" /><span className="min-w-0 flex-1">{t('assistant:composer.configure')}</span><ChevronRight className="size-4 text-muted-foreground" /></Link>
@@ -810,13 +890,18 @@ function SubAgentBand({ sessions, activeId, onSelect }: { sessions: AgentSubSess
   </div>;
 }
 
-function AgentMentionMenu({ agents, activeIndex, onActiveIndex, onSelect }: { agents: AgentView[]; activeIndex: number; onActiveIndex: (index: number) => void; onSelect: (agent: AgentView) => void }) {
+function AgentMentionMenu({ items, activeIndex, onActiveIndex, onSelect }: { items: MentionItem[]; activeIndex: number; onActiveIndex: (index: number) => void; onSelect: (item: MentionItem) => void }) {
   const { t } = useTranslation('assistant');
   return <div role="listbox" aria-label={t('mentions.menuLabel')}>
-    {agents.length === 0 ? <p className="px-3 py-2 text-[13px] text-muted-foreground">{t('mentions.empty')}</p> : agents.map((agent, index) => <button key={agent.id} type="button" role="option" aria-selected={index === activeIndex} className={cn('flex w-full items-center gap-3 rounded-md px-3 py-2 text-left', surfaceInteraction, focusRingInset, index === activeIndex ? 'bg-brand-subtle' : 'hover:bg-surface-subtle')} onPointerDown={(event) => event.preventDefault()} onPointerMove={() => onActiveIndex(index)} onClick={() => onSelect(agent)}>
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-xs font-semibold">{agent.initials}</span>
-      <span className="min-w-0"><span className="block truncate text-sm font-medium">{agent.name}</span><span className="mt-0.5 block truncate text-xs text-muted-foreground">{agent.responsibility}</span></span>
-    </button>)}
+    {items.length === 0 ? <p className="px-3 py-2 text-[13px] text-muted-foreground">{t('mentions.empty')}</p> : items.map((item, index) => {
+      const name = item.value.name;
+      const description = item.kind === 'workflow' ? t('mentions.workflow') : item.value.responsibility;
+      const identity = item.kind === 'workflow' ? <Play className="size-3.5 text-brand" /> : item.value.initials;
+      return <button key={`${item.kind}:${item.value.id}`} type="button" role="option" aria-selected={index === activeIndex} className={cn('flex w-full items-center gap-3 rounded-md px-3 py-2 text-left', surfaceInteraction, focusRingInset, index === activeIndex ? 'bg-brand-subtle' : 'hover:bg-surface-subtle')} onPointerDown={(event) => event.preventDefault()} onPointerMove={() => onActiveIndex(index)} onClick={() => onSelect(item)}>
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-xs font-semibold">{identity}</span>
+        <span className="min-w-0"><span className="block truncate text-sm font-medium">{name}</span><span className="mt-0.5 block truncate text-xs text-muted-foreground">{description}</span></span>
+      </button>;
+    })}
   </div>;
 }
 
@@ -824,6 +909,15 @@ function StarterPane({ onSelect }: { onSelect: (prompt: string) => void }) {
   const { t } = useTranslation('assistant');
   const starters = ['provider', 'skill', 'mcp', 'agent'] as const;
   return <div className="my-auto py-6"><div className="mb-5 flex items-center gap-3"><span className="flex size-9 items-center justify-center rounded-md border border-border bg-surface"><MessageSquareText className="size-[18px] text-brand" /></span><div><p className="text-sm font-semibold">{t('starters.title')}</p><p className="mt-0.5 text-[13px] text-muted-foreground">{t('messages.welcome')}</p></div></div><div className="grid gap-2 sm:grid-cols-2">{starters.map((starter) => <button key={starter} type="button" className={cn('min-h-[72px] rounded-md border border-border bg-surface p-3 text-left hover:border-foreground/20 hover:bg-surface-subtle', surfaceInteraction, focusRing)} onClick={() => onSelect(t(`starters.${starter}.prompt`))}><span className="block text-sm font-medium">{t(`starters.${starter}.title`)}</span><span className="mt-1 block text-[13px] leading-5 text-muted-foreground">{t(`starters.${starter}.description`)}</span></button>)}</div></div>;
+}
+
+function WorkflowRunRow({ run, workflow, input }: { run: RunView; workflow: WorkflowView; input: string }) {
+  const { t } = useTranslation('assistant');
+  const statusKey = run.status === 'succeeded' ? 'completed' : run.status === 'timed_out' ? 'failed' : run.status;
+  const failure = run.nodeRuns?.find((nodeRun) => nodeRun.status === 'failed')?.error;
+  return <div className="my-3 rounded-md border border-border bg-surface-subtle p-3" role="status">
+    <div className="flex items-start gap-3"><span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface"><Play className={cn('size-4 text-brand', (run.status === 'queued' || run.status === 'running') && 'motion-safe:animate-pulse')} /></span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-sm font-medium">{workflow.name}</span><Badge variant={run.status === 'failed' || run.status === 'timed_out' ? 'danger' : 'neutral'}>{run.status === 'waiting_for_input' ? t('workflowRun.waitingForConfirmation') : t(`status.${statusKey}`)}</Badge></div><p className="mt-1 break-words text-[13px] text-muted-foreground">{input || t('workflowRun.emptyInput')}</p>{run.currentStep ? <p className="mt-1 text-xs text-muted-foreground">{t('workflowRun.currentStep', { step: run.currentStep })}</p> : null}{run.status === 'waiting_for_input' ? <p className="mt-2 text-xs text-muted-foreground">{t('workflowRun.openRunHistory')}</p> : null}{failure ? <p className="mt-2 text-xs text-danger">{failure}</p> : null}{run.artifacts && run.artifacts.length > 0 ? <div className="mt-3 flex flex-wrap gap-2">{run.artifacts.map((artifact) => <Link key={artifact.id} to="/artifacts/$artifactId" params={{ artifactId: artifact.id }} className="text-xs font-medium text-brand underline-offset-2 hover:underline">{artifact.name}</Link>)}</div> : null}</div></div>
+  </div>;
 }
 
 function MessageRow({ message, assistantName }: { message: AgentExecutionView['messages'][number]; assistantName?: string }) {

@@ -9,7 +9,7 @@ import { WorkspaceService } from '../teams/teams.service';
 
 const WORKLITE_PLATFORM_SKILL_ID = 'sk_worklite_platform';
 const CODEX_CLI_AGENT_ID = 'agt_codex_cli_chat';
-const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 4547);
+const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 3392);
 const GATEWAY_PROVIDER_URL = `http://127.0.0.1:${GATEWAY_PORT}/worklite/providers`;
 
 function initials(name: string): string {

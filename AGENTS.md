@@ -38,9 +38,11 @@ The Memory One visual reference uses brand color sparingly. Keep WorkLite surfac
 
 When the user corrects agent behavior or states a durable repository-specific working preference, update this `AGENTS.md` in the same change so future work follows that correction.
 
-WorkLite’s primary product services are Workflow automation and the customizable Home Dashboard. Source-specific features such as Meegle todos are workflow use cases, not standalone products or navigation destinations. Standalone Agents and Workflows are independent. Workflows do not reference Agent or AgentVersion resources. Workflow Agent nodes own their public model id, system prompt, Skill selections, and MCP server selections inside the immutable WorkflowVersion while reusing shared Agent runtime infrastructure and emit the fixed Dashboard payload. Plugins and Agents are peer-level capabilities; Skills and MCP servers serve Agents.
+WorkLite’s primary product services are Workflow automation and Home. Home has no global Workflow data source. Workflow scheduling is represented by at most one versioned `worklite/timer` graph node with a minimum 300-second interval; publishing synchronizes the internal `workflow_schedules` runtime projection, which is not independently editable. Only a Workflow’s immutable Dashboard node makes its latest successful published-version Run output available to Home. Eligible boards default to Uncategorized and may be organized in at most one database-backed Home category; those organization references do not persist output or change eligibility. Source-specific features such as Meegle todos are workflow use cases, not standalone products or navigation destinations. Standalone Agents and Workflows are independent. Workflows do not reference Agent or AgentVersion resources. Workflow Agent nodes own their public model id, system prompt, explicit text or JSON output format, Skill selections, and MCP server selections inside the immutable WorkflowVersion while reusing shared Agent runtime infrastructure; JSON mode parses valid final responses and fails invalid JSON. Successful execution of the explicit first-party `worklite/artifact` node is the only source of Workflow-created Artifacts; the node owns its Artifact name and text, markdown, or JSON type, persists the Artifact for a successful Run, and exposes an Artifact reference. Agent nodes do not create Artifacts. Plugins and Agents are peer-level capabilities; Skills and MCP servers serve Agents.
 
-Workflow deletion is permanent and removes its draft, edit revisions, published versions, schedules, dashboard dataset, and run history. Related Artifacts remain available with detached Workflow and Run references.
+Workflow deletion is permanent and removes its draft, edit revisions, published versions, schedule, and run history. Related Artifacts remain available with detached Workflow and Run references.
+
+WeChat Official Account automation must operate the real WeChat MP pages through Playwright. Do not substitute direct WeChat APIs or captured-session shortcuts for login, draft creation, publishing, or confirmation. Use a headed browser as the verification path unless the user explicitly requests headless mode.
 
 
 Whenever WorkLite product architecture, resource relationships, supported Workflow nodes, or platform operations change, update the built-in System Helper prompt and `worklite-platform` Skill knowledge, contracts, scripts, and platform snapshot capability metadata in the same change.
@@ -49,11 +51,15 @@ Custom Agent deletion permanently removes its versions, assignments, schedules, 
 
 The Portkey Gateway integration is a unified OpenAI-compatible entry point. Callers do not provide a Provider id separately; public model ids use the `<providerName>/<modelId>` namespace and the Gateway dispatches by the unique Provider name. Provider ids remain internal record keys and must not appear in public model ids. The local Gateway has no separate inbound API key unless a later architecture change explicitly adds one.
 
+Provider protocol settings are authoritative. GLM intentionally uses the Responses API path. Do not switch a working Provider between Chat Completions and Responses merely for client compatibility.
+
 The Portkey Gateway owns Provider persistence in an independent SQLite database and its dedicated `gateway_providers` table. The API SQLite database and legacy Provider JSON file are migration sources only; they are not Gateway runtime or administration stores.
 
 Codex OAuth credentials are intentionally stored in the local Gateway SQLite database without an additional encryption-key configuration. This is a single-user local installation; users should re-authenticate after changing from an earlier encrypted Codex credential format.
 
 Development and deployment profiles must use separate port ranges and data directories. Gateway startup must not import, synchronize, or alias Provider data from another profile; data transfer is explicit and owned by an operator-run script.
+
+The development profile uses Web port `3390`, API port `3391`, and Portkey Gateway port `3392`. The local deployment profile remains on Web port `23390`, API port `23391`, and Portkey Gateway port `23392`. Do not add listeners, redirects, or fallbacks for previous development ports.
 
 ## Git Worktree Directory Rule
 

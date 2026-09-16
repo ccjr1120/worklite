@@ -3,7 +3,7 @@
 import { createRequire } from 'node:module';
 
 const DEFAULT_PROVIDER_URL = 'https://app-hk.ppapi.ai/v1';
-const DEFAULT_GATEWAY_URL = 'http://127.0.0.1:4547/v1';
+const DEFAULT_GATEWAY_URL = 'http://127.0.0.1:3392/v1';
 const DEFAULT_MODEL = 'gpt-5.6-sol';
 const DEFAULT_PROMPT = 'Hello';
 const DEFAULT_TIMEOUT_MS = 35_000;

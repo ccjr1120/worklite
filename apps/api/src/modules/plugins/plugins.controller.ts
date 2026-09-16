@@ -2,10 +2,11 @@ import { BadRequestException, Body, Controller, Get, Param, Patch, Post } from '
 import type { UpdatePluginRequest } from '@worklite/contracts';
 import { PluginsService } from './plugins.service';
 import { WechatClawbotService } from './wechat-clawbot.service';
+import { WechatOfficialAccountService } from './wechat-official-account.service';
 
 @Controller('plugins')
 export class PluginsController {
-  constructor(private readonly plugins: PluginsService, private readonly wechat: WechatClawbotService) {}
+  constructor(private readonly plugins: PluginsService, private readonly wechat: WechatClawbotService, private readonly officialAccount: WechatOfficialAccountService) {}
 
   @Get()
   list() {
@@ -37,5 +38,17 @@ export class PluginsController {
   disconnectWechat(@Param('pluginId') pluginId: string) {
     if (pluginId !== 'codex-cli-chat') throw new BadRequestException('WeChat transport is only available for the Codex plugin.');
     return this.wechat.disconnect();
+  }
+
+  @Post(':pluginId/official-account/login')
+  startOfficialAccountLogin(@Param('pluginId') pluginId: string) {
+    if (pluginId !== 'wechat-official-account') throw new BadRequestException('Official Account login is only available for the WeChat Official Account plugin.');
+    return this.officialAccount.startAccountLogin();
+  }
+
+  @Post(':pluginId/official-account/disconnect')
+  disconnectOfficialAccount(@Param('pluginId') pluginId: string) {
+    if (pluginId !== 'wechat-official-account') throw new BadRequestException('Official Account login is only available for the WeChat Official Account plugin.');
+    return this.officialAccount.disconnect();
   }
 }

@@ -1,6 +1,7 @@
 import { useLayoutEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from '@tanstack/react-router';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 
 const CRUMBS_ID = 'workspace-crumbs';
@@ -26,6 +27,7 @@ function WorkspaceChrome({
   status?: ReactNode;
   actions?: ReactNode;
 }) {
+  const { t } = useTranslation('workspace');
   const [targets, setTargets] = useState<{ crumbs: HTMLElement | null; status: HTMLElement | null; actions: HTMLElement | null }>({
     crumbs: null,
     status: null,
@@ -43,10 +45,10 @@ function WorkspaceChrome({
   const crumbNode = (
     <div className="flex min-w-0 items-center gap-2">
       {back}
-      <nav className="flex min-w-0 items-center gap-1.5 text-[13px]">
+      <nav className="flex min-w-0 items-center gap-1.5 text-[13px]" aria-label={t('breadcrumbs')}>
       {crumbs.map((crumb, index) => (
         <span key={`${crumb.label}-${index}`} className="flex min-w-0 items-center gap-1.5">
-          {index > 0 ? <span className="text-muted-foreground">/</span> : null}
+          {index > 0 ? <span className="text-muted-foreground" aria-hidden="true">/</span> : null}
           {crumb.to ? (
             <Link to={crumb.to as '/'} className={cn('truncate text-muted-foreground hover:text-foreground')}>
               {crumb.label}

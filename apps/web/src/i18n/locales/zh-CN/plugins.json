@@ -47,5 +47,19 @@
     "botId": "Bot ID",
     "conversations": "已映射会话",
     "notConnected": "未连接"
+  },
+  "officialAccount": {
+    "title": "公众号会话",
+    "description": "连接工作流发布文章使用的账号。浏览器存储状态仅加密保存在 API 主机。",
+    "login": "开始登录",
+    "refresh": "刷新二维码",
+    "disconnect": "断开连接",
+    "loginFailed": "无法开始公众号登录。",
+    "disconnectFailed": "无法断开公众号会话。",
+    "qrAlt": "微信公众号登录二维码",
+    "scan": "使用公众号管理员微信扫码。",
+    "account": "账号",
+    "lastVerified": "最近验证",
+    "never": "从未"
   }
 }

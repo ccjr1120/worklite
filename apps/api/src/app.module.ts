@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { HealthController } from './common/health.controller';
 import { DatabaseModule } from './infrastructure/database.module';
 import { WorkspaceModule } from './modules/teams/teams.module';
+import { HomeModule } from './modules/home/home.module';
 import { AgentsModule } from './modules/agents/agents.module';
 import { SkillsModule } from './modules/skills/skills.module';
 import { McpServersModule } from './modules/mcp-servers/mcp-servers.module';
@@ -16,7 +17,6 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { CommandsModule } from './modules/commands/commands.module';
 import { PluginsModule } from './modules/plugins/plugins.module';
 import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
-import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -25,6 +25,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     CommandsModule,
     PluginsModule,
     WorkspaceModule,
+    HomeModule,
     AgentsModule,
     SkillsModule,
     McpServersModule,
@@ -36,7 +37,6 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     UsageModule,
     AuditLogsModule,
     DiagnosticsModule,
-    DashboardModule,
   ],
   controllers: [HealthController],
 })

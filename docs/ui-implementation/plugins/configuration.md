@@ -6,6 +6,8 @@ The plugin editor uses the standard focused editor column with a breadcrumb back
 
 For `codex-cli-chat`, the same page includes a WeChat ClawBot connection section. It converts the server-reported QR payload URL into a local QR image for display and keeps the raw URL as an accessible fallback link. It shows the server-reported connection state, the bot identifier after login, and explicit `Start login`, `Refresh QR`, and `Disconnect` actions. The browser never receives or edits the bot token. A connected state also shows the number of mapped WeChat conversations and the last connection error when present.
 
+The built-in `wechat-official-account` Plugin uses the same focused configuration surface for one official-account connection. It shows the credential-safe account label, connection health, last verification time, and `Start login`, `Refresh QR`, and `Disconnect` actions. Login runs in a server-owned Playwright browser context and the page renders only the returned QR image and expiry. Cookies, browser storage, platform tokens, and private responses never reach Web.
+
 The editor provides a server-side `Test command` action. Testing runs the saved executable with its parsed leading arguments and the fixed test argument, then reports available, missing, or failed states without exposing raw process output or environment values. Saving persists the draft and preserves the last server-reported availability state until the next test.
 
 ## States and Safety
@@ -17,6 +19,10 @@ Show `Saving`, `Saved`, and `Unsaved changes`. Keep validation and server errors
 Use semantic surface, border, text, brand, and status tokens in both themes. Associate the visible label and validation message with the command input. The test result uses a label and icon or shape in addition to color. At mobile widths, keep the form within the focused column and retain the save and test controls without horizontal overflow.
 
 ## Changelog
+
+### 2026-09-16
+
+- Added the WeChat Official Account Playwright connection surface used by resumable Workflow publication nodes.
 
 ### 2026-08-29
 

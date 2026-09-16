@@ -10,7 +10,7 @@ This is the approved initial baseline. Target-state components may be introduced
 
 WorkLite is a single-user personal tool for creating and running AI agents and workflows. One local workspace manages model providers, agents, skills, MCP servers, workflows, runs, and artifacts.
 
-Standalone Agents are configured manually with their own prompts, model settings, Skills, and MCP access for Home chat, `@Agent` invocation, and independent execution. Workflows do not reference Agent or AgentVersion resources. Instead, each Workflow Agent node owns its public model id, system prompt, Skill selections, and MCP server selections inside the versioned workflow definition. A workflow can be edited with explicit add-node controls or through a natural-language AI assistant. Every AI change is recorded and reversible, similar to an AI-assisted code editor.
+Standalone Agents are configured manually with their own prompts, model settings, Skills, and MCP access for Home chat, `@Agent` invocation, and independent execution. Published Workflows are also available through the workspace chat `@` dispatcher: the dispatcher resolves a published Workflow by name, passes the remaining message text as the `worklite/input` value, creates a normal version-bound Workflow Run, and presents its status and Artifacts in the same transcript. Draft Workflows are not runnable from chat. Workflows do not reference Agent or AgentVersion resources. Instead, each Workflow Agent node owns its public model id, system prompt, Skill selections, and MCP server selections inside the versioned workflow definition. A workflow can be edited with explicit add-node controls or through a natural-language AI assistant. Every AI change is recorded and reversible, similar to an AI-assisted code editor.
 
 The workspace assistant can also inspect the workspace and create Provider, Skill, MCP server, Agent, and Workflow drafts through assigned Skill scripts. Every script request is explicit, executes automatically after server validation, and remains subject to the same validation, secret-handling, publication, and audit rules as manual configuration.
 
@@ -73,7 +73,7 @@ TanStack Router owns URL and navigation state. TanStack Query owns remote server
 
 The personal installation has no public sign-in, account creation, email verification, invitation, or password recovery flow. The root route opens Home directly and the API accepts requests without a session cookie. This is intentional for local use. Because the API includes unrestricted host command execution, it binds to `127.0.0.1` by default; listening on another interface requires an explicit `API_HOST` value and transfers responsibility for network access control to the operator.
 
-Local development serves the Vite web application on port `4536` and the NestJS API on port `4546`. The local deployment exposes only the built Web application on port `23390`; its same-origin `/api` requests are proxied internally to the loopback API on port `23391`. Portkey Gateway uses loopback port `23392` in deployment; none of these backend ports are external endpoints. Development defaults remain `4547` for the Gateway. Gateway lifecycle is API-owned and automatic: the sidecar starts with the API, is restarted after an unexpected exit, and has no user-facing start, stop, or restart controls. The Gateway port is configurable through `PORTKEY_GATEWAY_PORT`. The Vite development proxy forwards same-origin `/api` requests to the API port. Codex transport runs inside the Gateway process and has no separate listener.
+Local development serves the Vite web application on port `3390` and the NestJS API on port `3391`. The local deployment exposes only the built Web application on port `23390`; its same-origin `/api` requests are proxied internally to the loopback API on port `23391`. Portkey Gateway uses loopback port `23392` in deployment; none of these backend ports are external endpoints. The development default is `3392` for the Gateway. Gateway lifecycle is API-owned and automatic: the sidecar starts with the API, is restarted after an unexpected exit, and has no user-facing start, stop, or restart controls. The Gateway port is configurable through `PORTKEY_GATEWAY_PORT`. The Vite development proxy forwards same-origin `/api` requests to the API port. Codex transport runs inside the Gateway process and has no separate listener.
 
 Authenticated workspace routes do not include a locale segment. The web application resolves and persists a personal locale preference, falls back to English, and translates product-owned presentation content at the UI boundary. API contracts, persisted domain values, identifiers, logs, and externally supplied content remain language-neutral. `docs/internationalization/README.md` is the source of truth for internationalization requirements.
 
@@ -109,6 +109,8 @@ The Commands module owns all process spawning. It is an API runtime primitive ra
 - WorkLite owns a provider-neutral `model-gateway` package between agent execution and the default protected `gateway-provider` binding.
 - AI SDK is the initial provider integration layer. The gateway may use `@ai-sdk/deepseek`, `@ai-sdk/openai`, and other provider packages without exposing AI SDK types in domain contracts or persistence models.
 - The gateway resolves Provider configuration and secrets from its own persistent registry, creates model handles, streams normalized model output, and reports provider-neutral usage and failures to the agent runtime.
+- Multi-step Agent generation uses streaming as its primary transport. The gateway records upstream stream errors, surfaces the original failure when a stream emits no output, and retries only retryable failures before any output is emitted. If the AI SDK reports that no output was generated and the request was not aborted, the gateway makes one non-stream generation attempt so an upstream streaming-transport quirk does not mask a usable model response. Persisted failures expose a credential-safe provider status or empty-stream diagnosis rather than the AI SDK's generic no-output text.
+- Agent Requests sent to a Provider whose runtime operation is OpenAI Responses declare function tools in non-strict mode and disable AI SDK strict JSON-schema response constraints for that request. This keeps providers that implement Responses but not every OpenAI strict-schema option usable for Skills and MCP tools; Chat Completions and DeepSeek requests retain their existing behavior.
 - AI SDK does not own WorkLite tenancy, workflow persistence, queues, audit records, quotas, or sandbox policy. Provider credentials and Provider catalog persistence belong to Portkey Gateway; the WorkLite API only mediates the local administration surface.
 - DeepSeek Harness is not a core runtime dependency. A future adapter may use it for DeepSeek-native Agent execution, but the initial Agent Runtime and Workflow Engine depend only on the WorkLite gateway contract.
 
@@ -193,7 +195,7 @@ The Agent row is the mutable configuration draft. `agent_skills` and `agent_mcp_
 
 The singleton workspace owns one protected system Agent with the stable identifier `agt_system_helper_chat`. It represents the product's System Helper Chat and is created during startup bootstrap. It always appears before custom Agents, cannot be deleted, and exposes a nullable Model Provider binding plus a model selection for user configuration. Its name, responsibility, prompt, Skills, and MCP configuration are product-owned and read-only. Startup permanently assigns the protected `worklite-platform` Skill and repairs that assignment if local data is changed; the Skill cannot be assigned to a custom Agent. The binding and model can be changed only from the System Helper Chat entry in the Agent editor; provider pages and the Chat surface do not own configuration selectors. The selected model must belong to the selected provider's configured model catalog. Changing or deleting a provider clears the binding when necessary and resets an invalid model selection to an unconfigured state. When configured, System Helper Chat resolves the bound provider and selected model through the WorkLite model gateway. When unconfigured, ordinary System Helper submission is unavailable; the surface links to the protected Agent's configuration form unless a configured custom Agent keeps the composer available for structured `@` dispatch.
 
-Workflow nodes are generic typed execution units. Each node references a registered Node Type and contains versioned configuration, a persisted canvas position, and declared input and output ports. Workflow edges connect one output port to one named input port. The workflow runtime assembles each node request as an object keyed by its declared input ports after every upstream dependency has completed. A Node Type declares configuration, input, and output schemas and executes behind the Workflow Engine contract. The registered node catalog is also the source of truth for node capability metadata consumed by graph validation and the workspace platform snapshot.
+Workflow nodes are generic typed execution units. Each node references a registered Node Type and contains versioned configuration, a persisted canvas position, and declared input and output ports. Workflow edges connect one output port to one named input port. The workflow runtime assembles each node request as an object keyed by its declared input ports after every upstream dependency has completed. A Node Type declares configuration, input, and output schemas and executes behind the Workflow Engine contract. The registered node catalog is also the source of truth for node capability metadata consumed by graph validation and the workspace platform snapshot. The first-party `worklite/timer` Node Type is a source trigger with no inputs and one JSON output. Its versioned configuration contains `enabled` and `intervalSeconds`, with a minimum interval of 300 seconds, and a Workflow may contain at most one Timer node. The first-party `worklite/dashboard` Node Type is a required-input JSON pass-through with display metadata; its versioned configuration contains a `layout` with `header`, `main`, and `footer` element arrays, where each element is one of the generic element kinds `text` (static text), `count` (item total with a label), `metric` (a label, output field key, and `text`, `number`, `boolean`, or `datetime` type), or `list` (a `titleKey` plus display fields with unique non-empty `key`, non-empty `label`, and a supported `type`). A Workflow may contain at most one Dashboard node. The first-party `worklite/artifact` Node Type is the only Workflow graph unit that creates an Artifact: its required `data` input accepts JSON, its immutable configuration contains a non-empty `name` and an artifact `type` of `text`, `markdown`, or `json`, its execution persists that configured textual Artifact for the successful node run, and its output is an Artifact reference rather than the copied Artifact content. A Workflow may contain multiple Artifact nodes.
 
 Plugins are the extension and composition boundary. A trusted in-process plugin may register Node Types, runtime capabilities, typed lifecycle events, and optional browser metadata. The Workflow Engine does not import concrete plugin implementations; it resolves a Node Type from its registry and invokes its execution contract. Plugin registration is separate from node execution: a plugin may contribute capabilities without being a workflow node.
 
@@ -203,7 +205,7 @@ The `wechat-clawbot` capability is a server-owned iLink text transport. It keeps
 
 The Codex CLI plugin owns an editable executable command configuration, defaulting to `codex`, in the persisted Plugin row. The value contains one executable name or path followed by optional fixed leading arguments. The API parses that value into an argument vector without shell operators, expansion, or environment-variable substitution, uses the same vector for availability probing and execution, and appends its product-owned `exec --json` arguments afterward. It never reads a command override from an environment variable. The command is executed through the existing shell command boundary with each parsed value quoted independently, using the API process working directory and inherited process environment to match the existing Host Command Interface. The browser exposes Plugins as a first-level workspace resource alongside Agents, with a dedicated list and configuration page; saving and testing are server-owned operations. The same page owns WeChat QR login and connection controls for the transport capability. Skills, MCP servers, and Model Providers remain workspace resources presented with Agents through shared page-level resource tabs because Agents consume their versions and runtime settings. There is no user-uploaded plugin code, marketplace installation, or network authorization layer in this increment. Existing `codex` values remain valid without migration. Existing routes, Agent, Workflow, and execution records remain valid without migration; startup bootstrap adds or repairs the protected plugin rows and Agent row without removing user data.
 
-Agent is one Node Type rather than the Workflow Engine's universal primitive. The first-party `worklite/agent` adapter stores a public `<providerName>/<modelId>` model id, system prompt, Skill identifiers, and MCP server identifiers directly in its immutable WorkflowVersion configuration. Its `context` input defines one isolated invocation. The adapter returns text, structured data, and artifact references through the generic node result. It reuses shared Agent Runtime infrastructure without creating or referencing Agent or AgentVersion records.
+Agent is one Node Type rather than the Workflow Engine's universal primitive. The first-party `worklite/agent` adapter stores a public `<providerName>/<modelId>` model id, system prompt, Skill identifiers, and MCP server identifiers directly in its immutable WorkflowVersion configuration. Its configuration also owns `outputFormat` as `text` or `json`, with `text` as the default. JSON mode parses the final Agent response as JSON and accepts an optional fenced JSON block, but rejects surrounding prose; invalid JSON fails the Agent node. Its `context` input defines one isolated invocation. The adapter returns only text or parsed JSON through the generic node result without separate Workflow output persistence and does not create Artifacts. It reuses shared Agent Runtime infrastructure without creating or referencing Agent or AgentVersion records.
 
 Standalone Agent publications remain immutable and auditable. Workflow publications independently lock the complete embedded Agent node configuration, so later standalone Agent edits cannot alter workflows or historical runs.
 
@@ -298,22 +300,30 @@ Assigned MCP tools are resolved lazily when an Agent turn starts and are exposed
 
 ## Workflow Architecture
 
+### Research Workflow Seed
+
+WorkLite may provide repeatable seed scripts for concrete Workflow configurations that use existing first-party nodes and workspace resources. The GitHub Technology Trend Research Workflow is one such configuration: it uses Workflow Input, two embedded Agent nodes, and two Artifact nodes to separate research evidence from the final article. It does not introduce a new node type, standalone Agent resource, filesystem writer, or external credential.
+
+The seed resolves the existing workspace model provider and named Skills at creation time. It must not copy credentials from external agent configuration files. The research Agent may use the `github-current-popularity` and `zhihu-research` Skills; the writing Agent consumes the research Agent output and produces Markdown. Successful Runs persist a JSON Research Notes Artifact and a Markdown Article Artifact. The seed also fans the article out to the built-in WeChat Official Account publish node in direct-publish mode; therefore it creates or updates the draft and publishes a new immutable Workflow version. Direct publishing suspends at the persisted WeChat confirmation gate. The Workflow has no Timer or Dashboard node unless a later product decision explicitly adds those capabilities.
+
+This seed is an operational convenience, not a compatibility layer or a new built-in resource category.
+
 ### Workflow Graph Model
 
 A workflow is a directed acyclic dataflow graph of generic nodes and explicit port-to-port edges. Each node has a stable identifier, Node Type identifier and version, JSON configuration, persisted canvas coordinates, and an error policy limited to `stop` or `retry`. Each edge has a stable identifier, source node and port, and target node and port.
 
 The graph permits at most one incoming edge for each named input port and any number of outgoing edges from an output port. This supports fixed multi-input dependency assembly and data fan-out without defining conditions, loops, dynamic joins, or parallel execution. Cycles, self-connections, duplicate connections, and connections to unavailable or type-incompatible ports are invalid. A connected input receives its source node's committed output.
 
-The API validates the complete graph and the Workflow Engine derives a deterministic topological order, using definition order as the stable tie breaker. Before a node executes, the runtime gathers every connected predecessor output into an object keyed by target port. Ready nodes execute one at a time in that order. Every node executes at most once. The final workflow result is an object keyed by leaf node identifier so fan-out results remain explicit. Large values are represented by Artifact references rather than copied into every node record.
+The API validates the complete graph and the Workflow Engine derives a deterministic topological order, using definition order as the stable tie breaker. Before a node executes, the runtime gathers every connected predecessor output into an object keyed by target port. Ready nodes execute one at a time in that order. Every node executes at most once. The final workflow result is an object keyed by leaf node identifier so fan-out results remain explicit. Large values are represented by Artifact references rather than copied into every node record. Only successful `worklite/artifact` node execution creates an Artifact record.
 
 The first-party Node Types are discovered from the trusted registered node catalog at runtime. Capability metadata includes the public type and version, display name, purpose, input and output port metadata, and configuration schema. Only registered/trusted node types are executable or usable in a workflow; this first phase does not load arbitrary remote node code or frontend components. The current first-party Node Types are:
 
 - `worklite/input` exposes the WorkflowRun input through `output`.
-- `worklite/text` exposes configured text through `output` and is used for visible system prompts and other constants.
-- `worklite/skill-set` locks a configured list of workspace Skill identifiers and exposes typed Skill references through `output`.
-- `worklite/agent` owns its model, system prompt, Skill selections, and MCP server selections, accepts `context`, and exposes the isolated invocation result through `output`.
+- `worklite/agent` owns its model, system prompt, Skill selections, and MCP server selections, accepts an optional `context`, and exposes the isolated invocation result through `output`. It exposes text or parsed JSON only and does not create Artifacts.
+- `worklite/artifact` accepts a required `data` input, exposes an Artifact reference through `output`, and owns a non-empty `name` plus a `text`, `markdown`, or `json` artifact `type`.
+- `worklite/dashboard` accepts `data`, exposes the committed upstream value through `output`, and carries the immutable Home board layout. The board format is generic and compositional: `layout.header`, `layout.main`, and `layout.footer` each contain ordered elements of kind `text`, `count`, `metric`, or `list`. A `text` element carries static text; a `count` element carries a label and resolves to the output item total; a `metric` element carries a label plus a field key and type and reads that key from an object output; a `list` element carries a `titleKey` and display `{ key, label, type }` fields with `text`, `number`, `boolean`, `datetime`, or `url` types, and its items are the output array or the single object output. A `url` field is not rendered as a table column: when an item's value for it is an `http(s)` string, the row navigates to that value. The committed output must be a JSON object or an array of JSON objects. Home renders the board directly on its card; the first list element is the card's paginated table content. Unknown fields are ignored, missing fields display explicit empty values, and non-object list items render as bounded raw JSON. Rendering is tolerant: contract mismatches never fail the board or the node.
 
-Publication requires every Workflow Agent node to contain a valid public model id and to reference only Skills and MCP servers from the workspace. Context accepts arbitrary JSON-compatible values. Conditions, loops, dynamic joins, and concurrent branch scheduling require separate architecture decisions.
+Publication requires every Workflow Agent node to contain a valid public model id and to reference only Skills and MCP servers from the workspace. Agent `context` is optional; when no incoming edge exists, the Agent uses the Workflow Run input as its context. Context accepts arbitrary JSON-compatible values. Conditions, loops, dynamic joins, and concurrent branch scheduling require separate architecture decisions.
 
 Graph definitions use `schemaVersion: 4`. The multi-port increment intentionally provides no schema-version adapter or migration for version 1 or version 2 definitions. Earlier drafts and published versions are not editable, publishable, or executable after the change. The personal workspace contains no Workflow records when this increment is introduced, so no persisted workflow data is rewritten.
 
@@ -335,7 +345,7 @@ The persisted definition includes the schema version, an optional workflow-input
 
 Workflow draft operations are exposed through `POST /workflows/:workflowId/draft/operations` with a required `baseRevisionId`. The response returns the authoritative draft, revision identifier, and undo/redo availability. `POST /workflows/:workflowId/draft/undo` and `POST /workflows/:workflowId/draft/redo` move the server-owned draft pointer without mutating immutable revision snapshots. A stale base revision is rejected so concurrent browser tabs or assistant edits cannot silently overwrite one another.
 
-Workflow deletion is permanent. Deleting a Workflow removes its mutable draft, edit revisions, immutable published versions, schedules, dashboard dataset, run history, node runs, and run events in one workspace-scoped operation. Artifacts are retained and detached because their Workflow and Run references use `ON DELETE SET NULL`. There is no recycle bin, soft deletion, compatibility alias, or restoration path.
+Workflow deletion is permanent. Deleting a Workflow removes its mutable draft, edit revisions, immutable published versions, schedule, run history, node runs, and run events in one workspace-scoped operation. Artifacts are retained and detached because their Workflow and Run references use `ON DELETE SET NULL`. There is no recycle bin, soft deletion, compatibility alias, or restoration path.
 
 Workspace resource deletion follows one explicit lifecycle policy. Deleting a custom Agent permanently removes its versions, assignments, schedules, executions, sub-sessions, tool-call history, and execution events; the built-in System Helper Agent is protected. Skills and MCP servers may be deleted only when no standalone Agent assignment and no Workflow draft or immutable version references the resource. Provider deletion remains owned by the Gateway. Artifact deletion permanently removes the Artifact record and its WorkLite-managed object when one exists. Runs, immutable Agent and Workflow versions, audit logs, diagnostic logs, and built-in Plugins are not independently deletable.
 
@@ -349,39 +359,29 @@ Drafts can change. Published versions cannot. A publication copies the current d
 
 The graph increment does not rewrite existing drafts or published versions. Version 1 definitions remain stored but are rejected by graph reads, publication, and execution. New drafts and publications use version 2 without a compatibility adapter.
 
-## Workflow Automation and Home Dashboard
+### Human-Gated Browser Nodes
 
-WorkLite has two primary product services: Workflow automation and the customizable Home Dashboard. Workflows acquire, process, and produce data; Home consumes a stable WorkLite dashboard payload and renders user-selected boards and widgets. Source-specific integrations such as Meegle are workflow use cases rather than standalone products, API domains, routes, or navigation destinations.
+A trusted Workflow Node Type may suspend execution when an external browser operation requires a person. Suspension is a persisted runtime result, not a long-running in-memory promise. The Workflow Run and current Node Run enter `waiting_for_input`, retain the current node and all committed predecessor outputs, and reference one persisted pending action. Completing that action schedules the same Run for continuation from the suspended node. Cancelling the Run cancels its open action and active browser context.
 
-Published workflows may have one fixed-interval schedule. A schedule references the selected immutable WorkflowVersion, persists its next-run time, creates ordinary Workflow Runs through the asynchronous Runs boundary, prevents overlapping runs, and advances an overdue schedule once after restart. Scheduling belongs to Workflow rather than Dashboard. The initial schedule contract supports fixed intervals of at least five minutes; cron expressions, calendars, webhook triggers, catch-up replay, and compatibility adapters for scheduled Agent tasks are intentionally omitted.
+Pending actions have a stable type, status, credential-safe display payload, expiry, and optional external-operation reference. The first action types are `wechat_login` and `wechat_publish_confirmation`. QR images and expiry metadata may be returned to the browser, but authenticated browser state, cookies, tokens, and private platform responses never are. An expired QR action remains recoverable: refreshing it replaces the display payload without rerunning successful predecessor nodes or creating a duplicate external draft.
+
+The built-in `wechat-official-account` Plugin owns WeChat Official Account connection state, Playwright browser contexts, session health checks, and publication records. It is separate from the `codex-cli-chat` iLink message transport. It registers `wechat-official-account/publish@1`, which accepts a Markdown `article` input plus optional publication `metadata`, references one configured official account, and returns a publication reference. The node creates no Artifact. A Workflow may fan out the same Agent output to an Artifact node and the publication node.
+
+WeChat administration uses a dedicated Playwright session owned by the deployment profile. Authentication state is stored through the server secret-storage boundary and is never returned to Web. Browser automation uses the real `mp.weixin.qq.com` user interface for login, article editing, media upload, draft creation, publish initiation, and confirmation. Undocumented private HTTP request shapes are not a WorkLite contract. The API serializes operations per official account and uses the Workflow Run plus node identifier as the publication idempotency key. A resumed node reopens its existing draft or returns its existing published result rather than creating or sending another article.
+
+The initial node supports `draft` and `publish` modes. Draft mode succeeds after the platform confirms that the draft was saved. Publish mode suspends whenever login or final publish confirmation requires a QR scan and succeeds only after the platform confirms publication. Timer and publish mode may not coexist in the same Workflow version in the initial increment; scheduled draft creation remains supported.
+
+## Workflow Automation and Home
+
+WorkLite has two primary product services: Workflow automation and Home. Workflows acquire, process, and produce data. Home displays only boards published by Dashboard nodes and owns no global Workflow data source or platform widgets. Source-specific integrations such as Meegle are Workflow use cases rather than standalone products, API domains, routes, or navigation destinations.
+
+A Workflow's fixed-interval scheduling source of truth is its versioned `worklite/timer` node, not an independently editable schedule resource. Draft Timer changes do not affect active scheduling until Publish. Publishing a version with a Timer synchronizes the internal `workflow_schedules` runtime projection to that immutable WorkflowVersion; an enabled Timer schedules future runs, a disabled Timer retains disabled runtime status without future runs, and a version without a Timer removes the projection. The read-only `GET /workflows/:workflowId/schedule` endpoint exposes the active bound version, next-run time, and last-run status for the Timer inspector. There is no schedule mutation endpoint. Scheduled executions are ordinary Workflow Runs, cannot overlap for the same Workflow, and an overdue schedule advances by running once after restart. Cron expressions, calendars, webhook triggers, catch-up replay, and compatibility routes for removed schedule APIs are intentionally omitted.
 
 A workflow may invoke an embedded Workflow Agent node configured with instructions, a public model id, Skills, and MCP server access. Skill and MCP capabilities serve Agent execution. Plugins and Agents remain peer-level workspace capabilities: a Plugin may register runtime capabilities or Node Types, while an Agent performs model-driven work and may consume Skills and MCP servers. Workflow composes these capabilities without making a source-specific integration a first-class product surface.
 
-A workflow that feeds Home must return a versioned dashboard payload:
+A Workflow becomes eligible for Home only when its latest published version contains its single `worklite/dashboard` node. Home boards are self-contained cards with no separate board detail view; the Dashboard node owns only the layout, and its header region renders in the card title area. Draft Dashboard changes do not affect Home until Publish. Home does not own a global Workflow data source, dashboard dataset projection, or persisted Workflow-output snapshot. It discovers eligible boards from immutable WorkflowVersion definitions and reads the Dashboard node's committed output from the Workflow's latest successful Run of that published version through the normal Run contract. There are no platform-defined Workflow boards, Dashboard-level scheduling controls, or Run now controls. A Workflow without a published Dashboard node, and a Run without a successful Dashboard node output, is not eligible for Home display. Permanent Workflow deletion removes its versions and run history, so its Home board is removed automatically.
 
-```json
-{
-  "type": "worklite.dashboard",
-  "version": 1,
-  "source": { "kind": "meegle", "name": "Personal Todos" },
-  "updatedAt": "2026-09-10T00:00:00.000Z",
-  "items": [
-    {
-      "id": "task-123",
-      "title": "Review dashboard contract",
-      "status": "in_progress",
-      "priority": "high",
-      "dueAt": null,
-      "url": null,
-      "metadata": {}
-    }
-  ]
-}
-```
-
-`type` and `version` identify the contract. `source.kind` and `source.name` describe provenance without changing Home behavior. Every item requires a source-stable `id`, a `title`, and a non-empty `status`; `priority`, `dueAt`, `url`, and JSON-compatible `metadata` are optional. Home stores the latest successful payload for a configured dashboard and renders it through generic list or kanban widgets. The browser does not query an upstream service directly and does not interpret source-specific fields.
-
-The first generic dashboard data increment supports one workflow-backed dataset per dashboard, the latest successful snapshot, a manual Run now action, fixed-interval schedule configuration, and list or kanban presentation. Kanban columns are derived from the distinct item `status` values rather than a Meegle-specific status map. Arbitrary field mapping, combining multiple workflows into one dataset, historical dataset browsing, source-specific change notifications, direct upstream mutation, and additional payload types are deferred. Existing Meegle-specific tables and endpoints are removed without aliases or data migration; users rerun the workflow to populate the generic dashboard dataset.
+Eligible Dashboard-node boards are displayed by default in a built-in uncategorized presentation, not stored as a category record. The user may create, rename, and delete Home board categories and assign a board to at most one category. These organization references are database-backed workspace metadata; they never persist Workflow output, alter board eligibility, or create a global Workflow data source. Removing an assignment returns the board to Uncategorized, deleting a category returns its boards to Uncategorized, and deleting a Workflow removes its assignment.
 
 ## Runtime Architecture
 
@@ -398,20 +398,21 @@ Create run
   -> persist final output or failure
 ```
 
-The API returns a `runId` immediately. The browser loads run state through the API and subscribes to Server-Sent Events. Reconnecting with the same `runId` restores current state and continues event delivery. Because the local executor has no durable lease or resume mechanism, database startup changes persisted `queued` and `running` Workflow Runs and Node Runs to `failed` with a stable restart explanation.
+The API returns a `runId` immediately. The browser loads run state through the API and subscribes to Server-Sent Events. Reconnecting with the same `runId` restores current state and continues event delivery. Because the local executor has no durable lease for active model or command work, database startup changes persisted `queued` and `running` Workflow Runs and Node Runs to `failed` with a stable restart explanation. Persisted `waiting_for_input` Runs remain suspended. Their browser action is marked expired on restart and can be refreshed before the Run continues.
 
 ```text
 queued -> running -> succeeded
+                  -> waiting_for_input -> running
                   -> failed
                   -> cancelled
                   -> timed_out
 ```
 
-A `WorkflowRun` stores its workspace, workflow version, input, current node, timestamps, final result, and status. A `NodeRun` stores its Node Type identity, configuration snapshot, mapped input, committed output or Artifact references, status, duration, retry count, and plugin-specific execution references. Run progress uses generic node lifecycle events; plugin-specific events are namespaced and carry immutable data snapshots.
+A `WorkflowRun` stores its workspace, workflow version, input, current node, timestamps, final result, and status. A `NodeRun` stores its Node Type identity, configuration snapshot, mapped input, committed output or Artifact references, status, duration, retry count, and plugin-specific execution references. Run progress uses generic node lifecycle events; plugin-specific events are namespaced and carry immutable data snapshots. The detailed Run contract exposes ordered Node Runs as execution logs, including their status, timing, retry count, and credential-safe failure reason. It also reports whether the immutable WorkflowVersion contains an Artifact node so clients omit Artifact presentation entirely for versions that cannot produce Artifacts while retaining an empty Artifact state for eligible versions that produced none.
 
 Runtime requirements include node and workflow timeouts, cooperative cancellation, worker heartbeats or leases, persisted intermediate results, classified transient retries, idempotency for retryable external side effects, and per-workspace concurrency, duration, and model-usage quotas.
 
-Completed node runs are retained. The API-local executor resolves registered node types, persists each node transition, creates Artifact metadata for file outputs, and publishes replayable run events. Graph branches execute sequentially in the first increment. Resume from a failed node remains deferred. A durable queue such as BullMQ should only be introduced after requirements include multi-instance execution, long waits, human approval, concurrent branches, or stronger durable-execution semantics.
+Completed and suspended node runs are retained. The API-local executor resolves registered node types, persists each node transition, persists Artifacts during successful Artifact-node execution, and publishes replayable run events. Continuation reloads committed predecessor outputs from successful Node Runs and re-enters only the suspended node. Graph branches execute sequentially in the first increment. Resume from a failed node remains deferred. A durable queue such as BullMQ remains a later boundary for multi-instance execution, concurrent branches, or stronger leasing; the single-process runtime uses SQLite-backed suspension and continuation for human-gated nodes.
 
 Initial run endpoints are:
 
@@ -573,6 +574,114 @@ Workflows support a versioned portable JSON envelope for moving editable definit
 Import validates the envelope and workflow DAG, resolves every Agent and Skill reference against the destination workspace, and creates a new mutable draft. Missing or ambiguous references reject the entire import. Import never overwrites an existing workflow, publishes a version, or enables a schedule.
 
 ## Changelog
+### 2026-09-16 - Responses Agent Tool Compatibility
+
+- Fixed Agent system prompt delivery by replacing the unrecognized top-level `instructions` parameter with the AI SDK `system` parameter so both Chat Completions and Responses providers receive the prompt.
+
+
+- Kept `openai/responses` as the explicit Provider protocol for GLM while adding Agent Runtime compatibility for Responses providers that do not support OpenAI strict function-tool schemas.
+- Made Responses Agent function tools non-strict and disabled request-level AI SDK strict JSON Schema handling for those requests.
+- Allowed the repeatable research seed to select a GLM Provider using `openai/responses`; explicit `WORKLITE_MODEL` values continue to resolve through the public Provider/model namespace.
+- Changed no Provider protocol, Workflow immutable version, or public model namespace.
+
+### 2026-09-16 - Model Gateway Empty Stream Recovery
+
+- Captured original upstream errors from empty Agent model streams instead of replacing them with a generic no-output failure.
+- Kept bounded retry behavior before output and added one non-stream fallback only for an un-aborted AI SDK no-output result.
+- Updated the repeatable research seed to resolve a configured GLM model or an explicit public `WORKLITE_MODEL` instead of binding to MiniMax.
+
+### 2026-09-16 - Pending Workflow Authentication
+
+- Added persisted `waiting_for_input` Workflow and Node Run states with resumable pending actions.
+- Added the built-in WeChat Official Account Plugin and its Playwright-backed publish node, including login and final-publish QR confirmation.
+- Required account-scoped serialization and Run-plus-node idempotency so QR refresh and Run continuation cannot duplicate a draft or publication.
+- Kept scheduled draft creation available while rejecting Timer plus direct publish in the initial increment.
+- Updated the repeatable research seed to synchronize its draft and publish the immutable version that contains the direct-publish node.
+
+### 2026-09-15 - Chat Workflow Mentions
+
+- Approved invoking published Workflows from the workspace chat with `@Workflow` mentions.
+- Resolve the mention by workspace-scoped Workflow name, pass the remaining message text as the Workflow Input value, and create the existing immutable-version Workflow Run.
+- Keep Workflow execution separate from Agent sessions; show Run progress and resulting Artifacts in the chat transcript.
+- Exclude Draft Workflows from executable mentions and do not add compatibility aliases or a second execution engine.
+
+### 2026-09-15 - GitHub Technology Trend Research Workflow
+
+- Approved a repeatable Workflow seed that mirrors the existing think-agent research-then-writing process with existing Input, Agent, and Artifact nodes.
+- Kept research notes and the final article as separate successful-Run Artifacts instead of adding filesystem output behavior.
+- Required the seed to resolve workspace resources by name and never copy external provider credentials.
+- Intentionally did not add a new node type, standalone Agent dependency, Timer, Dashboard, compatibility alias, or credential migration.
+
+
+### 2026-09-15 - Run Execution Logs and Artifact Eligibility
+
+- Extended detailed Run responses with immutable-version Artifact-node eligibility while retaining ordered Node Run execution records and failure reasons.
+- Defined Workflow Run records as the presentation surface for node status, timing, retries, and credential-safe failure context.
+- Omitted Artifact presentation for Workflow versions without an Artifact node; eligible versions with no created Artifact retain an explicit empty state.
+
+### 2026-09-15 - Development Port Range
+
+- Changed the development Web, API, and Portkey Gateway defaults to `3390`, `3391`, and `3392` respectively.
+- Kept local deployment ports `23390`, `23391`, and `23392` unchanged and intentionally provided no compatibility listeners or redirects for the previous development ports.
+
+### 2026-09-15 - Explicit Artifact Nodes
+
+- Added the first-party `worklite/artifact` Node Type with required JSON `data`, configured `name` and `text`/`markdown`/`json` type, successful-run Artifact persistence, and Artifact-reference output.
+- Removed implicit Agent file-output and Agent-created Artifacts; Agent output is now text or parsed JSON only.
+- Intentionally provided no compatibility or migration for old Agent file-output configuration.
+- Allowed multiple Artifact nodes per Workflow.
+
+### 2026-09-15 - Workflow-Scoped Run History Access
+
+- Removed the standalone Run web routes and the `runs` System Helper navigation target.
+- Kept the run detail, event, and cancellation HTTP contracts because the Workflow List Run records dialog and Home board rendering consume them.
+- Made Workflow List the user-facing access point for each Workflow's Run history and intentionally omitted compatibility for removed Run routes and the removed navigation target.
+
+### 2026-09-14 - Simplified Workflow Node Model
+
+- Removed the first-party Text and Skill Set Node Types; system prompts and Skill selections are owned directly by the Workflow Agent node.
+- Made Workflow Agent `context` optional and defined missing upstream context as the Workflow Run input.
+- Intentionally provided no compatibility for existing definitions or published versions that contain the removed Node Types.
+
+### 2026-09-15 - Compositional Dashboard Layout
+
+- Removed the separate Home board detail view; eligible boards render as self-contained cards whose list content is a paginated up-to-three-column table.
+- Added the `url` list display-field type; `url` fields turn list rows into links to the item value instead of rendering text, and `metric` elements do not support them.
+- Replaced the Dashboard node's `title`, display fields, and `titleField` with a compositional layout of `header`, `main`, and `footer` element arrays.
+- Defined the generic element kinds `text`, `count`, `metric`, and `list`, where `list` owns its `titleKey` and display fields and Home derives card previews from list elements.
+- Removed the Dashboard node `description`; the node owns only the layout, the header region renders in the board card's former title area, and the board page title remains the Workflow name.
+- Intentionally provided no compatibility; previously published Dashboard configurations must be reconfigured and republished to appear on Home.
+
+### 2026-09-14 - Generic Board Output Format
+
+- Defined the version 1 Dashboard board format: configured display fields plus a `titleField`, with object or object-array Dashboard output rendered generically as cards.
+- Added `titleField` to Dashboard node configuration with publish validation against configured field keys.
+- Kept rendering tolerant; output that does not match the format degrades to explicit empty or raw-JSON states instead of failing the node or board.
+
+### 2026-09-14 - Structured Workflow Agent Output
+
+- Added `worklite/agent` output-format configuration for text or JSON responses.
+- Required JSON mode to parse the final model response into normal Workflow JSON output and fail invalid responses.
+- Preserved Dashboard-node board eligibility and Run-derived Home output semantics.
+
+### 2026-09-14 - Database-Backed Home Board Categories
+
+- Added user-managed Home board categories as database-backed organization metadata.
+- Kept Uncategorized as a presentation default for every eligible Dashboard-node board and enforced at most one category assignment per board.
+- Preserved Run-derived board output and intentionally kept category deletion, assignment removal, and Workflow deletion from deleting or snapshotting Workflow output.
+
+### 2026-09-14 - Dashboard Node Home Boards
+
+- Added the first-party `worklite/dashboard` Node Type as the only Workflow-owned eligibility contract for a Home board.
+- Limited each Workflow to one Dashboard node and defined immutable board title, description, and display-field metadata inside the WorkflowVersion.
+- Removed platform-defined Workflow boards and Home-owned Workflow data projections; Home now selects only published Dashboard-node Workflows and reads their latest successful Run through the normal Run contract.
+- Intentionally omitted compatibility behavior for existing Workflows and platform boards; they must be recreated or republished with a Dashboard node to appear on Home.
+
+### 2026-09-14 - Timer Node Scheduling
+
+- Removed the global Home Dashboard Workflow data source, fixed dashboard payload, and persisted dashboard dataset.
+- Made `worklite/timer` the versioned graph source of truth for fixed-interval Workflow scheduling, limited each Workflow to one Timer with a minimum 300-second interval, and made Publish synchronize the internal `workflow_schedules` runtime projection.
+- Removed independent schedule mutation and Dashboard-level schedule and Run now operations without compatibility routes; retained only read-only schedule runtime status and required future Workflow-output widgets to bind explicitly per widget.
 
 ### 2026-09-14 - Run-to-Artifact Traceability
 

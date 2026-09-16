@@ -18,11 +18,17 @@ Explain failures in user terms, preserve unaffected content, and provide recover
 
 Use a restrained persistent reconnecting bar. Explain whether edits are local, blocked or persisted. Resume run events without duplication. Streaming content preserves scroll position unless the user is following the end. Create the destination response region as soon as a turn starts, retain partial content on failure, and expose a non-color streaming, cancellation, or failure cue without announcing every token to assistive technology. Agent composer drafts remain editable during an active turn but are not queued; Send becomes Stop until the current turn completes or is cancelled.
 
+Human-gated execution is durable. A `Waiting for input` Run keeps its pending action visible across navigation and reload, exposes expiry and recovery controls, and resumes automatically when the server observes completion. QR expiry is a recoverable pending state rather than a failed Run.
+
 ## Long Content and Security
 
 Truncate only summaries and provide expand, copy, download or details access. Inline Agent Skill calls stay collapsed by default, retain status and exit context in their summary, and reveal height-bounded scrollable raw output only on request. Never reveal secrets in fields, logs, errors or audit metadata. Untrusted content is rendered without inline execution.
 
 ## Changelog
+
+### 2026-09-16
+
+- Added durable human-gated Workflow waiting, QR expiry, refresh, and automatic continuation states.
 
 ### 2026-09-14
 
