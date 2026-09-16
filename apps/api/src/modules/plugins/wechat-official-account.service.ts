@@ -402,6 +402,7 @@ const HEADING_LEVEL_STYLES: Record<number, string> = {
 const CODE_BLOCK_STYLE = 'margin:0 0 18px;padding:14px 16px;background:#f4f4f5;border-radius:6px;overflow-x:auto;';
 const CODE_TEXT_STYLE = "font-family:SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:13px;line-height:1.7;color:#27272a;white-space:pre;";
 const INLINE_CODE_STYLE = "padding:2px 5px;background:#f4f4f5;border-radius:4px;font-family:SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:14px;color:#18181b;";
+const CITATION_MARKER_STYLE = 'color:#2563eb;font-size:11px;line-height:1;';
 const BLOCKQUOTE_STYLE = 'margin:0 0 18px;padding:14px 16px;background:#f4f4f5;border-left:3px solid #a1a1aa;border-radius:4px;color:#52525b;';
 const REFERENCE_ENTRY_STYLE = 'margin:0 0 10px;';
 const REFERENCE_TITLE_STYLE = 'font-size:13px;line-height:1.55;color:#3f3f46;font-weight:600;';
@@ -411,12 +412,17 @@ function markdownToHtml(markdown: string): string {
   const { articleMarkdown, referenceHeading, referencesMarkdown } = splitReferences(markdown);
   const context = createCitationContext(parseReferenceEntries(referencesMarkdown));
   const articleHtml = renderTokens(Lexer.lex(articleMarkdown), context);
-  const referencesHtml = context.entries.length > 0 ? renderReferences(referenceHeading ?? generatedReferenceHeading(markdown), context.entries) : '';
+  const referencesHeading = containsChinese(articleMarkdown) ? '参考资料' : referenceHeading ?? generatedReferenceHeading(markdown);
+  const referencesHtml = context.entries.length > 0 ? renderReferences(referencesHeading, context.entries) : '';
   return `<section style="${ARTICLE_ROOT_STYLE}">${articleHtml}${referencesHtml}</section>`;
 }
 
 function generatedReferenceHeading(markdown: string): string {
-  return /[一-鿿]/.test(markdown) ? '参考资料' : 'References';
+  return containsChinese(markdown) ? '参考资料' : 'References';
+}
+
+function containsChinese(value: string): boolean {
+  return /[一-鿿]/.test(value);
 }
 
 function splitReferences(markdown: string): { articleMarkdown: string; referenceHeading: string | null; referencesMarkdown: string } {
@@ -578,7 +584,7 @@ function renderInlineToken(token: Token, context: CitationContext): string {
   switch (token.type) {
     case 'text':
     case 'escape':
-      return 'tokens' in token && token.tokens ? renderInlineTokens(token.tokens, context) : escapeHtml(token.text);
+      return 'tokens' in token && token.tokens ? renderInlineTokens(token.tokens, context) : renderTextWithCitations(token.text, context);
     case 'strong':
       return `<strong style="color:#18181b;font-weight:600;">${renderInlineTokens(token.tokens, context)}</strong>`;
     case 'em':
@@ -609,7 +615,23 @@ function renderLink(token: Tokens.Link, context: CitationContext): string {
   const plainText = plainInlineTokens(token.tokens).trim();
   const label = !plainText || token.autolink === true || plainText === url ? referenceSourceLabel(url) : plainText;
   const number = citationNumberFor(url, label, context);
-  return `<span style="color:#18181b;font-weight:600;">${escapeHtml(label)}</span><sup style="color:#2563eb;font-size:11px;line-height:1;">[${number}]</sup>`;
+  return `<span style="color:#18181b;font-weight:600;">${escapeHtml(label)}</span><sup style="${CITATION_MARKER_STYLE}">[${number}]</sup>`;
+}
+
+function renderTextWithCitations(value: string, context: CitationContext): string {
+  let result = '';
+  let lastIndex = 0;
+  for (const match of value.matchAll(/\[(\d+)\]/g)) {
+    const index = match.index ?? 0;
+    const marker = match[0];
+    const number = Number(match[1]);
+    result += escapeHtml(value.slice(lastIndex, index));
+    result += context.entries.some((entry) => entry.number === number)
+      ? `<sup style="${CITATION_MARKER_STYLE}">${escapeHtml(marker)}</sup>`
+      : escapeHtml(marker);
+    lastIndex = index + marker.length;
+  }
+  return result + escapeHtml(value.slice(lastIndex));
 }
 
 function plainInlineTokens(tokens: Token[]): string {
