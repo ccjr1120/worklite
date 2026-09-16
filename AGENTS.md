@@ -42,7 +42,7 @@ WorkLite’s primary product services are Workflow automation and Home. Home has
 
 Workflow deletion is permanent and removes its draft, edit revisions, published versions, schedule, and run history. Related Artifacts remain available with detached Workflow and Run references.
 
-WeChat Official Account automation must operate the real WeChat MP pages through Playwright. Do not substitute direct WeChat APIs or captured-session shortcuts for login, draft creation, publishing, or confirmation. Use a headed browser as the verification path unless the user explicitly requests headless mode.
+WeChat Official Account automation must operate the real WeChat MP pages through Playwright. Do not substitute direct WeChat APIs or captured-session shortcuts for login, draft creation, publishing, or confirmation. Use a headless browser by default; switch to a headed browser only when explicitly requested or needed to debug a confirmed issue.
 
 
 Whenever WorkLite product architecture, resource relationships, supported Workflow nodes, or platform operations change, update the built-in System Helper prompt and `worklite-platform` Skill knowledge, contracts, scripts, and platform snapshot capability metadata in the same change.
