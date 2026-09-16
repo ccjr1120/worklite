@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { deflateSync } from 'node:zlib';
+import { Lexer, type Token, type Tokens } from 'marked';
 import { and, eq, ne } from 'drizzle-orm';
 import { chromium, type Browser, type BrowserContext, type Page, type Response } from 'playwright';
 import type { NodeExecutionRequest, NodeExecutionResult, PendingNodeExecutionResult } from '@worklite/workflow-engine';
@@ -385,13 +386,289 @@ async function detectPublishedUrl(page: Page): Promise<string | null> {
   return await link.getAttribute('href').catch(() => null);
 }
 
+type ReferenceEntry = { number: number | null; label: string; url: string | null };
+type CitationContext = { entries: ReferenceEntry[]; numbersByUrl: Map<string, number>; nextNumber: number };
+
+const ARTICLE_ROOT_STYLE = "font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:16px;line-height:1.75;color:#3f3f46;letter-spacing:0.2px;word-break:break-word;";
+const PARAGRAPH_STYLE = 'margin:0 0 18px;padding:0;text-align:justify;';
+const HEADING_LEVEL_STYLES: Record<number, string> = {
+  1: 'margin:38px 0 16px;font-size:22px;line-height:1.45;color:#18181b;font-weight:600;',
+  2: 'margin:38px 0 16px;padding-left:10px;border-left:3px solid #2563eb;font-size:20px;line-height:1.45;color:#18181b;font-weight:600;',
+  3: 'margin:30px 0 12px;font-size:17px;line-height:1.5;color:#27272a;font-weight:600;',
+  4: 'margin:26px 0 10px;font-size:16px;line-height:1.5;color:#27272a;font-weight:600;',
+  5: 'margin:24px 0 10px;font-size:16px;line-height:1.5;color:#3f3f46;font-weight:600;',
+  6: 'margin:24px 0 10px;font-size:16px;line-height:1.5;color:#3f3f46;font-weight:600;',
+};
+const CODE_BLOCK_STYLE = 'margin:0 0 18px;padding:14px 16px;background:#f4f4f5;border-radius:6px;overflow-x:auto;';
+const CODE_TEXT_STYLE = "font-family:SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:13px;line-height:1.7;color:#27272a;white-space:pre;";
+const INLINE_CODE_STYLE = "padding:2px 5px;background:#f4f4f5;border-radius:4px;font-family:SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:14px;color:#18181b;";
+const BLOCKQUOTE_STYLE = 'margin:0 0 18px;padding:14px 16px;background:#f4f4f5;border-left:3px solid #a1a1aa;border-radius:4px;color:#52525b;';
+const REFERENCE_ENTRY_STYLE = 'margin:0 0 10px;';
+const REFERENCE_TITLE_STYLE = 'font-size:13px;line-height:1.55;color:#3f3f46;font-weight:600;';
+const REFERENCE_URL_STYLE = 'margin:2px 0 0;font-size:12px;line-height:1.55;color:#71717a;word-break:break-all;';
+
 function markdownToHtml(markdown: string): string {
-  return markdown.split(/\n{2,}/).map((block) => {
-    const line = block.trim();
-    const heading = line.match(/^(#{1,3})\s+(.+)$/s);
-    if (heading) return `<h${heading[1].length}>${escapeHtml(heading[2])}</h${heading[1].length}>`;
-    return `<p>${escapeHtml(line).replaceAll('\n', '<br>')}</p>`;
+  const { articleMarkdown, referenceHeading, referencesMarkdown } = splitReferences(markdown);
+  const context = createCitationContext(parseReferenceEntries(referencesMarkdown));
+  const articleHtml = renderTokens(Lexer.lex(articleMarkdown), context);
+  const referencesHtml = context.entries.length > 0 ? renderReferences(referenceHeading ?? generatedReferenceHeading(markdown), context.entries) : '';
+  return `<section style="${ARTICLE_ROOT_STYLE}">${articleHtml}${referencesHtml}</section>`;
+}
+
+function generatedReferenceHeading(markdown: string): string {
+  return /[一-鿿]/.test(markdown) ? '参考资料' : 'References';
+}
+
+function splitReferences(markdown: string): { articleMarkdown: string; referenceHeading: string | null; referencesMarkdown: string } {
+  const pattern = /\n?#{1,6}\s*(References|Reference List|Sources|参考资料|引用资料|参考链接)\s*(?=\n|$)/gi;
+  let match: RegExpExecArray | null;
+  let last: RegExpExecArray | null = null;
+  while ((match = pattern.exec(markdown)) !== null) last = match;
+  if (!last) return { articleMarkdown: markdown, referenceHeading: null, referencesMarkdown: '' };
+  const headingStart = last.index + (last[0].startsWith('\n') ? 1 : 0);
+  return {
+    articleMarkdown: markdown.slice(0, headingStart),
+    referenceHeading: last[1].trim(),
+    referencesMarkdown: markdown.slice(last.index + last[0].length),
+  };
+}
+
+function parseReferenceEntries(markdown: string): ReferenceEntry[] {
+  const entries: ReferenceEntry[] = [];
+  for (const originalLine of markdown.split(/\r?\n/)) {
+    const line = originalLine.trim();
+    if (!line) continue;
+    const explicitNumber = Number(line.match(/^\[?(\d+)[.)\]]\s*/)?.[1] ?? null);
+    const linkedSources = [...line.matchAll(/\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g)];
+    if (linkedSources.length > 0) {
+      linkedSources.forEach((source, index) => {
+        entries.push({ number: index === 0 ? explicitNumber : null, label: cleanReferenceLabel(source[1]), url: source[2] });
+      });
+      continue;
+    }
+    const urls = extractUrls(line);
+    if (urls.length > 0) {
+      urls.forEach((url, index) => {
+        entries.push({ number: index === 0 ? explicitNumber : null, label: cleanReferenceLabel(line, url), url });
+      });
+      continue;
+    }
+    entries.push({ number: explicitNumber, label: cleanReferenceLabel(line), url: null });
+  }
+  return deduplicateReferences(entries);
+}
+
+function extractUrls(value: string): string[] {
+  return [...value.matchAll(/https?:\/\/[^\s<>() [\]{}'"“”‘’]+/gi)].map((match) => {
+    let url = match[0];
+    while (/[.,;:!?）)\]}>]$/.test(url)) url = url.slice(0, -1);
+    return url;
+  });
+}
+
+function deduplicateReferences(entries: ReferenceEntry[]): ReferenceEntry[] {
+  const seen = new Set<string>();
+  const result: ReferenceEntry[] = [];
+  for (const entry of entries) {
+    const key = entry.url ?? entry.label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(entry);
+  }
+  return result;
+}
+
+function cleanReferenceLabel(value: string, url?: string): string {
+  let label = value
+    .replace(/\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/https?:\/\/[^\s<>() [\]{}'"“”‘’]+/gi, '')
+    .replace(/[*_`]+/g, '')
+    .replace(/^[-*+]\s*/, '')
+    .replace(/^\[?\d+[.)\]]\s*/, '');
+  if (url) label = label.split(url).join('');
+  label = label.replace(/^[\s:：\-–—|]+/, '').replace(/[\s:：\-–—|]+$/, '');
+  return label || '';
+}
+
+function createCitationContext(entries: ReferenceEntry[]): CitationContext {
+  const explicitNumbers = entries.map((entry) => entry.number).filter((number): number is number => number !== null);
+  let nextNumber = explicitNumbers.length > 0 ? Math.max(...explicitNumbers) + 1 : 1;
+  for (const entry of entries) {
+    if (entry.number === null) entry.number = nextNumber++;
+    if (entry.url && !entry.label) entry.label = referenceSourceLabel(entry.url);
+  }
+  const numbersByUrl = new Map<string, number>();
+  for (const entry of entries) {
+    if (entry.url) numbersByUrl.set(entry.url, entry.number);
+  }
+  return { entries, numbersByUrl, nextNumber };
+}
+
+function citationNumberFor(url: string, label: string, context: CitationContext): number {
+  const existing = context.numbersByUrl.get(url);
+  if (existing !== undefined) {
+    const entry = context.entries.find((item) => item.url === url);
+    if (entry && !entry.label) entry.label = label;
+    return existing;
+  }
+  const number = context.nextNumber++;
+  context.entries.push({ number, label: label || referenceSourceLabel(url), url });
+  context.numbersByUrl.set(url, number);
+  return number;
+}
+
+function renderTokens(tokens: Token[], context: CitationContext): string {
+  return tokens.map((token) => renderBlockToken(token, context)).join('');
+}
+
+function renderBlockToken(token: Token, context: CitationContext): string {
+  switch (token.type) {
+    case 'space':
+    case 'def':
+    case 'html':
+      return '';
+    case 'paragraph':
+      return `<p style="${PARAGRAPH_STYLE}">${renderInlineTokens(token.tokens, context)}</p>`;
+    case 'heading':
+      return renderHeading(token.depth, renderInlineTokens(token.tokens, context));
+    case 'code':
+      return `<section style="${CODE_BLOCK_STYLE}"><code style="${CODE_TEXT_STYLE}">${escapeHtml(token.text)}</code></section>`;
+    case 'blockquote':
+      return `<section style="${BLOCKQUOTE_STYLE}">${renderTokens(token.tokens, context)}</section>`;
+    case 'hr':
+      return '<section style="height:1px;margin:30px 0;background:#e4e4e7;font-size:0;line-height:0;">&nbsp;</section>';
+    case 'list':
+      return renderList(token, context);
+    case 'table':
+      return renderTable(token, context);
+    case 'text':
+      return token.tokens ? renderInlineTokens(token.tokens, context) : escapeHtml(token.text);
+    default:
+      return escapeHtml(token.raw);
+  }
+}
+
+function renderHeading(depth: number, html: string): string {
+  const level = Math.min(Math.max(depth, 1), 6);
+  return `<h${level} style="${HEADING_LEVEL_STYLES[level]}">${html}</h${level}>`;
+}
+
+function renderList(token: Tokens.List, context: CitationContext): string {
+  const tag = token.ordered ? 'ol' : 'ul';
+  const listStyle = token.ordered ? 'decimal' : 'disc';
+  const items = token.items.map((item) => `<li style="margin:0 0 8px;">${renderTokens(item.tokens, context)}</li>`).join('');
+  return `<${tag} style="margin:0 0 18px;padding-left:1.35em;list-style-type:${listStyle};">${items}</${tag}>`;
+}
+
+function renderTable(token: Tokens.Table, context: CitationContext): string {
+  const header = token.header.map((cell) => `<th style="${tableCellStyle(true, cell.align)}">${renderInlineTokens(cell.tokens, context)}</th>`).join('');
+  const rows = token.rows.map((row) => `<tr>${row.map((cell) => `<td style="${tableCellStyle(false, cell.align)}">${renderInlineTokens(cell.tokens, context)}</td>`).join('')}</tr>`).join('');
+  return `<section style="margin:0 0 18px;overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:14px;line-height:1.6;"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table></section>`;
+}
+
+function tableCellStyle(header: boolean, align: 'left' | 'center' | 'right' | null): string {
+  return `padding:9px 10px;border:1px solid #e4e4e7;text-align:${align ?? 'left'};${header ? 'background:#fafafa;color:#27272a;font-weight:600;' : 'color:#3f3f46;'}`;
+}
+
+function renderInlineTokens(tokens: Token[], context: CitationContext): string {
+  return tokens.map((token) => renderInlineToken(token, context)).join('');
+}
+
+function renderInlineToken(token: Token, context: CitationContext): string {
+  switch (token.type) {
+    case 'text':
+    case 'escape':
+      return 'tokens' in token && token.tokens ? renderInlineTokens(token.tokens, context) : escapeHtml(token.text);
+    case 'strong':
+      return `<strong style="color:#18181b;font-weight:600;">${renderInlineTokens(token.tokens, context)}</strong>`;
+    case 'em':
+      return `<em style="color:#18181b;">${renderInlineTokens(token.tokens, context)}</em>`;
+    case 'del':
+      return `<del style="color:#71717a;">${renderInlineTokens(token.tokens, context)}</del>`;
+    case 'codespan':
+      return `<code style="${INLINE_CODE_STYLE}">${escapeHtml(token.text)}</code>`;
+    case 'br':
+      return '<br>';
+    case 'link':
+      return renderLink(token, context);
+    case 'image':
+      return `<img src="${escapeHtml(token.href)}" alt="${escapeHtml(token.text)}" style="display:block;max-width:100%;margin:0 auto 18px;border-radius:4px;">`;
+    case 'html':
+      return '';
+    default:
+      return escapeHtml(token.raw);
+  }
+}
+
+function renderLink(token: Tokens.Link, context: CitationContext): string {
+  const url = normalizeHttpUrl(token.href);
+  if (!url) return renderInlineTokens(token.tokens, context);
+  if (isWechatArticleUrl(url)) {
+    return `<a href="${escapeHtml(url)}" style="color:#2563eb;text-decoration:none;border-bottom:1px solid rgba(37,99,235,0.35);">${renderInlineTokens(token.tokens, context)}</a>`;
+  }
+  const plainText = plainInlineTokens(token.tokens).trim();
+  const label = !plainText || token.autolink === true || plainText === url ? referenceSourceLabel(url) : plainText;
+  const number = citationNumberFor(url, label, context);
+  return `<span style="color:#18181b;font-weight:600;">${escapeHtml(label)}</span><sup style="color:#2563eb;font-size:11px;line-height:1;">[${number}]</sup>`;
+}
+
+function plainInlineTokens(tokens: Token[]): string {
+  return tokens.map((token) => {
+    switch (token.type) {
+      case 'text':
+      case 'escape':
+        return token.tokens ? plainInlineTokens(token.tokens) : token.text;
+      case 'strong':
+      case 'em':
+      case 'del':
+        return plainInlineTokens(token.tokens);
+      case 'codespan':
+        return token.text;
+      case 'br':
+        return ' ';
+      case 'link':
+        return plainInlineTokens(token.tokens);
+      case 'image':
+        return token.text;
+      default:
+        return '';
+    }
   }).join('');
+}
+
+function renderReferences(heading: string, entries: ReferenceEntry[]): string {
+  const items = entries.map((entry) => `<section style="${REFERENCE_ENTRY_STYLE}"><section style="${REFERENCE_TITLE_STYLE}">${entry.number}. ${escapeHtml(entry.label || (entry.url ? referenceSourceLabel(entry.url) : 'Source'))}</section>${entry.url ? `<section style="${REFERENCE_URL_STYLE}">${escapeHtml(entry.url)}</section>` : ''}</section>`).join('');
+  return `${renderHeading(2, escapeHtml(heading))}<section style="margin:0;padding:0;">${items}</section>`;
+}
+
+function normalizeHttpUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function isWechatArticleUrl(value: string): boolean {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return hostname === 'mp.weixin.qq.com' || hostname.endsWith('.mp.weixin.qq.com');
+  } catch {
+    return false;
+  }
+}
+
+function referenceSourceLabel(value: string): string {
+  try {
+    const url = new URL(value);
+    const segments = url.pathname.split('/').filter(Boolean);
+    if ((url.hostname.toLowerCase() === 'github.com' || url.hostname.toLowerCase() === 'www.github.com') && segments.length >= 2) return `${segments[0]}/${segments[1].replace(/\.git$/, '')}`;
+    const host = url.hostname.toLowerCase().replace(/^www\./, '');
+    return [host, ...segments.slice(0, 2)].join('/');
+  } catch {
+    return value;
+  }
 }
 
 function escapeHtml(value: string): string {
