@@ -250,7 +250,7 @@ export class WechatOfficialAccountService {
   }
 
   private async createSession(encryptedStorageState?: string): Promise<BrowserSession> {
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: false });
     const context = await browser.newContext(encryptedStorageState ? { storageState: JSON.parse(decryptSecret(encryptedStorageState)) } : undefined);
     const page = await context.newPage();
     return { browser, context, page };
