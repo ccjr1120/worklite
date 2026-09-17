@@ -32,6 +32,8 @@ When an out-of-scope concern is discovered, mention it briefly instead of expand
 
 Do not run tests, test scripts, diagnostic scripts, builds, development or start servers, browser checks, `curl` requests, `pnpm typecheck`, or other verification commands unless the user explicitly instructs you to run that specific command or check in the current request. Do not perform verification proactively.
 
+Do not start, stop, restart, replace, or reconfigure running WorkLite server processes during implementation or verification. Use services that are already running. If a required service is unavailable or requires a restart, report the blocker and ask the user to handle the server lifecycle.
+
 ## Durable Corrections
 
 The Memory One visual reference uses brand color sparingly. Keep WorkLite surfaces, default icons, headings, and ordinary hover states neutral; reserve the blue brand token for primary actions, selected or focused states, active execution, and a small number of meaningful links.
