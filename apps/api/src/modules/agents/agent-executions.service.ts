@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
@@ -18,6 +18,14 @@ const SYSTEM_HELPER_CHAT_ID = 'agt_system_helper_chat';
 const WORKLITE_PLATFORM_SKILL_ID = 'sk_worklite_platform';
 const MAX_HELPER_TOOL_ROUNDS = 24;
 const MAX_WORKFLOW_TOOL_ROUNDS = 8;
+const MAX_TOOL_CALLS_PER_STEP = 4;
+
+class TooManyToolCallsError extends Error {
+  constructor() {
+    super('The model requested too many tools in one step.');
+    this.name = 'TooManyToolCallsError';
+  }
+}
 
 const HELPER_BUILTIN_TOOLS = [
   {
@@ -38,6 +46,7 @@ const WORKLITE_NAVIGATION_ROUTES = {
 
 @Injectable()
 export class AgentExecutionsService {
+  private readonly logger = new Logger(AgentExecutionsService.name);
   private readonly activeModelRequests = new Map<string, AbortController>();
   private readonly activeMcpRequests = new Map<string, AbortController>();
   private readonly activePluginCommands = new Map<string, string>();
@@ -373,7 +382,7 @@ export class AgentExecutionsService {
       const result = await createModelGateway().generateAgentStep({ provider: runtime.provider, model: runtime.model, systemPrompt, messages: execution.modelMessages as GatewayAgentMessage[], skillScripts: availableSkillScripts, builtinTools: builtinToolDefinitions, mcpTools: availableMcpTools, maxToolRounds: MAX_HELPER_TOOL_ROUNDS, abortSignal: abortController.signal, onTextDelta: (delta) => this.persistEvent(executionId, { kind: 'message_delta', messageId: streamedMessageId, delta }) });
       const responseText = normalizeAssistantMessage(result.text);
       if (!responseText && result.toolCalls.length === 0) throw new Error('Empty Agent response');
-      if (result.toolCalls.length > 4) throw new Error('The Agent requested too many tools in one step.');
+      if (result.toolCalls.length > MAX_TOOL_CALLS_PER_STEP) throw new TooManyToolCallsError();
       const currentExecution = await this.loadExecution(workspace.id, execution.agentId, executionId);
       if (currentExecution.status !== 'running') return this.toView(currentExecution);
       const modelMessages = [...execution.modelMessages, ...result.responseMessages] as StoredAgentModelMessage[];
@@ -438,7 +447,9 @@ export class AgentExecutionsService {
         });
       }
     } catch (error) {
-      await this.markExecutionFailed(workspace.id, executionId, executionFailure(error));
+      const failure = executionFailure(error);
+      this.logger.warn(`Agent execution ${executionId} failed: phase=${failure.phase} code=${failure.code} source=${executionFailureSource(error)}.`);
+      await this.markExecutionFailed(workspace.id, executionId, failure);
     } finally {
       if (this.activeModelRequests.get(executionId) === abortController) this.activeModelRequests.delete(executionId);
     }
@@ -695,8 +706,13 @@ function executionFailure(error: unknown): ExecutionFailure {
     if (error.code === 'INVALID_PROVIDER') return { message: 'The Agent provider configuration is invalid. Check the provider settings and try again.', code: 'provider', phase: 'model' };
     if (error.code === 'INVALID_REQUEST') return { message: error.message, code: 'invalid_request', phase: 'model' };
   }
+  if (error instanceof TooManyToolCallsError) return { message: 'The model requested too many tools in one step. Retry so the Agent can continue with fewer tool calls.', code: 'too_many_tool_calls', phase: 'model' };
   if (error instanceof Error && error.message === 'Skill execution failed') return { message: 'The Agent Skill script could not be completed.', code: 'skill', phase: 'skill' };
-  return { message: 'The Agent could not complete this turn. Check its provider configuration and try again.', code: 'internal', phase: 'model' };
+  return { message: 'The Agent could not complete this turn because an internal execution error occurred. Retry the request.', code: 'internal', phase: 'model' };
+}
+
+function executionFailureSource(error: unknown): string {
+  return error instanceof Error && /^[A-Za-z0-9_.-]+$/.test(error.name) ? error.name : typeof error;
 }
 
 function toolCallOutput(call: typeof agentToolCalls.$inferSelect): GatewayToolResultOutput {

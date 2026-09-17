@@ -54,7 +54,7 @@ Completed resource scripts show their returned resource route as a normal link. 
 
 ## States
 
-Define unconfigured, empty, submitting, working, executing script, cancelling, cancelled, completed, failed, reconnecting, and long-content states. Status always includes a non-color cue. A failed turn shows its safe actionable reason inline in the transcript region, includes a retry action that continues the same persisted execution, and exposes the safe execution identifier for support. A cancelled turn shows an explicit neutral inline cue even when no Assistant text was produced. Meaningless residual output from a failed model tool request is omitted. Untrusted content is plain text or safe Markdown; script output is preformatted and never rendered as HTML. Reconnecting retries the persisted execution read with increasing delay and immediately refreshes when the browser becomes online or visible again; it never submits a duplicate user message.
+Define unconfigured, empty, submitting, working, executing script, cancelling, cancelled, completed, failed, reconnecting, and long-content states. Status always includes a non-color cue. A failed turn shows its safe actionable reason inline in the transcript region, includes a retry action that continues the same persisted execution, and exposes the safe execution identifier for support. A tool batch that exceeds the runtime boundary uses the server-owned `too_many_tool_calls` reason and retry action instead of Provider configuration guidance. A cancelled turn shows an explicit neutral inline cue even when no Assistant text was produced. Meaningless residual output from a failed model tool request is omitted. Untrusted content is plain text or safe Markdown; script output is preformatted and never rendered as HTML. Reconnecting retries the persisted execution read with increasing delay and immediately refreshes when the browser becomes online or visible again; it never submits a duplicate user message.
 
 ## Responsive Behavior
 
@@ -94,7 +94,12 @@ All icon-only controls require accessible names and tooltips, except the intenti
 
 ### 2026-09-09
 
-- Confirmed that the composer always uses the built-in System Helper Agent; removed Agent/plugin target switching and retained single custom-Agent dispatch through `@` mentions.
+- Confirmed that the composer always uses the built-in Agent target; removed Agent/plugin target switching and retained single custom-Agent dispatch through `@` mentions.
+
+### 2026-09-04
+
+- Added actionable inline failure guidance for model steps that request too many tools at once without changing the existing retry or diagnostics layout.
+
 
 ### 2026-09-03
 

@@ -165,6 +165,7 @@ export class AiSdkModelGateway implements ModelGateway {
       output: request.jsonOutput ? Output.json({ name: 'response' }) : undefined,
       messages: context.messages as ModelMessage[],
       tools: Object.keys(tools).length > 0 ? tools as never : undefined,
+      providerOptions: request.provider.adapter === 'openai' ? { openai: { parallelToolCalls: false } } : undefined,
       maxOutputTokens: request.maxOutputTokens,
       abortSignal: request.abortSignal,
       providerOptions: useResponses ? { openai: { strictJsonSchema: false } } : undefined,

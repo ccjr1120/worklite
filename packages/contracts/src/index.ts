@@ -145,6 +145,7 @@ export type AgentExecutionErrorCode =
   | 'invalid_request'
   | 'invalid_tool_request'
   | 'incomplete_tool_request'
+  | 'too_many_tool_calls'
   | 'skill'
   | 'mcp'
   | 'restarted'
