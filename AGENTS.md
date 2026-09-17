@@ -34,6 +34,8 @@ Do not run tests, test scripts, diagnostic scripts, builds, development or start
 
 Do not start, stop, restart, replace, or reconfigure running WorkLite server processes during implementation or verification. Use services that are already running. If a required service is unavailable or requires a restart, report the blocker and ask the user to handle the server lifecycle.
 
+Perform all troubleshooting, investigation, and verification exclusively against the development profile: Web port `3390`, API port `3391`, Portkey Gateway port `3392`, and development data under `.data/` excluding `.data/deployment/`. Do not inspect, query, call, modify, or otherwise interact with the local deployment profile, its ports `23390`–`23392`, or files under `.data/deployment/`. If the development profile is unavailable, report the blocker; never fall back to the deployment profile.
+
 ## Durable Corrections
 
 The Memory One visual reference uses brand color sparingly. Keep WorkLite surfaces, default icons, headings, and ordinary hover states neutral; reserve the blue brand token for primary actions, selected or focused states, active execution, and a small number of meaningful links.
