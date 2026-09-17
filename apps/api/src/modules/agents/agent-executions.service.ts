@@ -142,7 +142,7 @@ export class AgentExecutionsService {
     const mcpRuntimes = await this.resources.workflowMcpRuntimes(workspaceId, requestedMcpServerIds);
     const mcpTools = await this.mcpRuntime.discover(mcpRuntimes, signal);
     const contextText = typeof context === 'string' ? context : JSON.stringify(context);
-    const messages: GatewayAgentMessage[] = [{ role: 'user', content: contextText ?? '' }];
+    const messages: GatewayAgentMessage[] = [{ role: 'user', content: contextText?.trim() ? contextText : 'No workflow input was provided.' }];
 
     for (let round = 0; round <= MAX_WORKFLOW_TOOL_ROUNDS; round += 1) {
       signal.throwIfAborted();

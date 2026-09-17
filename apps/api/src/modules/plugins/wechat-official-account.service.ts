@@ -505,7 +505,7 @@ function createCitationContext(entries: ReferenceEntry[]): CitationContext {
   }
   const numbersByUrl = new Map<string, number>();
   for (const entry of entries) {
-    if (entry.url) numbersByUrl.set(entry.url, entry.number);
+    if (entry.url && entry.number !== null) numbersByUrl.set(entry.url, entry.number);
   }
   return { entries, numbersByUrl, nextNumber };
 }
@@ -534,19 +534,19 @@ function renderBlockToken(token: Token, context: CitationContext): string {
     case 'html':
       return '';
     case 'paragraph':
-      return `<p style="${PARAGRAPH_STYLE}">${renderInlineTokens(token.tokens, context)}</p>`;
+      return `<p style="${PARAGRAPH_STYLE}">${renderInlineTokens((token as Tokens.Paragraph).tokens, context)}</p>`;
     case 'heading':
-      return renderHeading(token.depth, renderInlineTokens(token.tokens, context));
+      return renderHeading(token.depth, renderInlineTokens((token as Tokens.Heading).tokens, context));
     case 'code':
       return `<section style="${CODE_BLOCK_STYLE}"><code style="${CODE_TEXT_STYLE}">${escapeHtml(token.text)}</code></section>`;
     case 'blockquote':
-      return `<section style="${BLOCKQUOTE_STYLE}">${renderTokens(token.tokens, context)}</section>`;
+      return `<section style="${BLOCKQUOTE_STYLE}">${renderTokens((token as Tokens.Blockquote).tokens, context)}</section>`;
     case 'hr':
       return '<section style="height:1px;margin:30px 0;background:#e4e4e7;font-size:0;line-height:0;">&nbsp;</section>';
     case 'list':
-      return renderList(token, context);
+      return renderList(token as Tokens.List, context);
     case 'table':
-      return renderTable(token, context);
+      return renderTable(token as Tokens.Table, context);
     case 'text':
       return token.tokens ? renderInlineTokens(token.tokens, context) : escapeHtml(token.text);
     default:
@@ -580,23 +580,34 @@ function renderInlineTokens(tokens: Token[], context: CitationContext): string {
   return tokens.map((token) => renderInlineToken(token, context)).join('');
 }
 
+function nestedTokens(token: Token): Token[] {
+  return 'tokens' in token && Array.isArray(token.tokens) ? token.tokens : [];
+}
+
+function asLinkToken(token: Token): Tokens.Link | null {
+  if (token.type !== 'link' || !('href' in token) || typeof token.href !== 'string' || !('tokens' in token) || !Array.isArray(token.tokens)) return null;
+  return token as Tokens.Link;
+}
+
 function renderInlineToken(token: Token, context: CitationContext): string {
   switch (token.type) {
     case 'text':
     case 'escape':
       return 'tokens' in token && token.tokens ? renderInlineTokens(token.tokens, context) : renderTextWithCitations(token.text, context);
     case 'strong':
-      return `<strong style="color:#18181b;font-weight:600;">${renderInlineTokens(token.tokens, context)}</strong>`;
+      return `<strong style="color:#18181b;font-weight:600;">${renderInlineTokens(nestedTokens(token), context)}</strong>`;
     case 'em':
-      return `<em style="color:#18181b;">${renderInlineTokens(token.tokens, context)}</em>`;
+      return `<em style="color:#18181b;">${renderInlineTokens(nestedTokens(token), context)}</em>`;
     case 'del':
-      return `<del style="color:#71717a;">${renderInlineTokens(token.tokens, context)}</del>`;
+      return `<del style="color:#71717a;">${renderInlineTokens(nestedTokens(token), context)}</del>`;
     case 'codespan':
       return `<code style="${INLINE_CODE_STYLE}">${escapeHtml(token.text)}</code>`;
     case 'br':
       return '<br>';
-    case 'link':
-      return renderLink(token, context);
+    case 'link': {
+      const link = asLinkToken(token);
+      return link ? renderLink(link, context) : escapeHtml(token.raw);
+    }
     case 'image':
       return `<img src="${escapeHtml(token.href)}" alt="${escapeHtml(token.text)}" style="display:block;max-width:100%;margin:0 auto 18px;border-radius:4px;">`;
     case 'html':
@@ -639,17 +650,19 @@ function plainInlineTokens(tokens: Token[]): string {
     switch (token.type) {
       case 'text':
       case 'escape':
-        return token.tokens ? plainInlineTokens(token.tokens) : token.text;
+        return nestedTokens(token).length > 0 ? plainInlineTokens(nestedTokens(token)) : token.text;
       case 'strong':
       case 'em':
       case 'del':
-        return plainInlineTokens(token.tokens);
+        return plainInlineTokens(nestedTokens(token));
       case 'codespan':
         return token.text;
       case 'br':
         return ' ';
-      case 'link':
-        return plainInlineTokens(token.tokens);
+      case 'link': {
+        const link = asLinkToken(token);
+        return link ? plainInlineTokens(link.tokens) : '';
+      }
       case 'image':
         return token.text;
       default:
