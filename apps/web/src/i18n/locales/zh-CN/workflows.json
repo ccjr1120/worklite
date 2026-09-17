@@ -214,7 +214,33 @@
     "newElementLabel": "新元素",
     "removeDashboardElement": "移除元素",
     "dashboardElementCount_one": "{{count}} 个元素",
-    "dashboardElementCount_other": "{{count}} 个元素"
+    "dashboardElementCount_other": "{{count}} 个元素",
+    "edgeMode": "路由模式",
+    "edgeModes": {
+      "always": "始终",
+      "condition": "条件",
+      "fallback": "兜底"
+    },
+    "edgeOutputPath": "输出路径",
+    "edgeOperator": "运算符",
+    "edgeComparisonValue": "JSON 比较值",
+    "edgeComparisonInvalid": "请输入有效的 JSON 比较值。",
+    "edgeFallbackHint": "仅当同一次节点执行没有匹配任何始终或条件路由时，才会执行此路由。",
+    "edgeMaxTraversals": "最大经过次数",
+    "edgeMaxTraversalsHint": "设置正整数可限制循环次数；留空表示该路由不限制次数。",
+    "edgeTraversalLabel": "最多 {{count}} 次",
+    "edgeOperators": {
+      "equals": "等于",
+      "notEquals": "不等于",
+      "truthy": "为真",
+      "falsy": "为假",
+      "exists": "存在",
+      "notExists": "不存在",
+      "greaterThan": "大于",
+      "greaterThanOrEqual": "大于或等于",
+      "lessThan": "小于",
+      "lessThanOrEqual": "小于或等于"
+    }
   },
   "versions": {
     "title": "版本",
@@ -225,10 +251,10 @@
     },
     "columns": {
       "version": "版本",
-          "published": "发布时间",
-          "publisher": "发布者",
-          "steps": "步骤数",
-          "recentRun": "最近运行"
+      "published": "发布时间",
+      "publisher": "发布者",
+      "steps": "步骤数",
+      "recentRun": "最近运行"
     }
   },
   "importJson": "导入 JSON",

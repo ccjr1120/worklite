@@ -13,9 +13,10 @@ import {
   workflows,
   type Database,
   type StoredWorkflowDefinition,
+  type StoredWorkflowExecutionState,
   type StoredWorkflowNode,
 } from '@worklite/db';
-import { collectNodeInputs, getLeafNodeIds, NodeTypeRegistry, resolveWorkflowNodeCapability, topologicallySortWorkflow, type NodeExecutionRequest, type PendingNodeExecutionResult } from '@worklite/workflow-engine';
+import { commitWorkflowInvocation, createWorkflowSchedulerState, NodeTypeRegistry, resolveWorkflowNodeCapability, takeNextWorkflowInvocation, workflowRunResult, type NodeExecutionRequest, type PendingNodeExecutionResult, type WorkflowSchedulerState } from '@worklite/workflow-engine';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from '../agents/agent-executions.service';
@@ -179,50 +180,91 @@ export class RunsService {
   }
 
   private async execute(runId: string): Promise<void> {
+    if (this.activeRuns.has(runId)) return;
     const abortController = new AbortController();
     this.activeRuns.set(runId, abortController);
     try {
-      const [run] = await this.db.select().from(workflowRuns).where(eq(workflowRuns.id, runId)).limit(1);
-      if (!run || run.status === 'cancelled') return;
-      const [version] = await this.db.select().from(workflowVersions).where(eq(workflowVersions.id, run.workflowVersionId)).limit(1);
+      const [pendingRun] = await this.db.select().from(workflowRuns).where(eq(workflowRuns.id, runId)).limit(1);
+      if (!pendingRun || (pendingRun.status !== 'queued' && pendingRun.status !== 'waiting_for_input')) return;
+      const [version] = await this.db.select().from(workflowVersions).where(eq(workflowVersions.id, pendingRun.workflowVersionId)).limit(1);
       if (!version) throw new Error('Workflow version not found');
       const definition = version.definition as StoredWorkflowDefinition | null;
       if (!definition || definition.schemaVersion !== 4 || !Array.isArray(definition.edges)) throw new Error('Workflow schema version 4 is required.');
-      const executionPlan = topologicallySortWorkflow(definition);
-      await this.db.update(workflowRuns).set({ status: 'running', updatedAt: new Date() }).where(and(eq(workflowRuns.id, runId), inArray(workflowRuns.status, ['queued', 'waiting_for_input'])));
+      let state: WorkflowSchedulerState;
+      if (pendingRun.executionState) {
+        state = structuredClone(pendingRun.executionState) as WorkflowSchedulerState;
+      } else {
+        const [existingNodeRun] = await this.db.select({ id: workflowNodeRuns.id }).from(workflowNodeRuns).where(eq(workflowNodeRuns.runId, runId)).limit(1);
+        if (existingNodeRun) throw new Error('Workflow run scheduler state is unavailable and cannot be reconstructed.');
+        state = createWorkflowSchedulerState(definition);
+      }
+      const [run] = await this.db.update(workflowRuns)
+        .set({ status: 'running', executionState: state as StoredWorkflowExecutionState, updatedAt: new Date() })
+        .where(and(eq(workflowRuns.id, runId), inArray(workflowRuns.status, ['queued', 'waiting_for_input'])))
+        .returning();
+      if (!run) return;
       await this.publish(runId, 'run.status', { status: 'running' });
-      const outputs = new Map<string, unknown>();
-      const existingNodeRuns = await this.db.select().from(workflowNodeRuns).where(eq(workflowNodeRuns.runId, runId)).orderBy(asc(workflowNodeRuns.position));
-      const nodeRunsByNodeId = new Map(existingNodeRuns.map((nodeRun) => [nodeRun.nodeId, nodeRun]));
-      for (const [executionIndex, node] of executionPlan.entries()) {
+
+      while (true) {
         await this.assertActive(runId, abortController.signal);
-        const existingNodeRun = nodeRunsByNodeId.get(node.id);
-        if (existingNodeRun?.status === 'succeeded') {
-          outputs.set(node.id, existingNodeRun.output);
-          continue;
+        const active = state.active;
+        const invocation = active ?? takeNextWorkflowInvocation(state);
+        if (!invocation) break;
+        const node = definition.nodes.find((candidate) => candidate.id === invocation.nodeId);
+        if (!node) throw new Error('Workflow scheduler references an unavailable node.');
+
+        const nodeRunId = active?.nodeRunId ?? `nrun_${randomUUID()}`;
+        const position = active?.position ?? state.nextPosition + 1;
+        let startedAt = new Date();
+        if (!active) {
+          state.nextPosition = position;
+          state.active = { ...invocation, nodeRunId, position };
+          await this.db.transaction((transaction) => {
+            transaction.insert(workflowNodeRuns).values({ id: nodeRunId, runId, workspaceId: run.workspaceId, nodeId: node.id, position, type: node.type, typeVersion: node.typeVersion, status: 'running', input: invocation.input, startedAt }).run();
+            const [updatedRun] = transaction.update(workflowRuns).set({ currentNodeId: node.id, executionState: state as StoredWorkflowExecutionState, updatedAt: startedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.status, 'running'))).returning().all();
+            if (!updatedRun) throw new RunCancelledError();
+          });
+        } else {
+          const [existingNodeRun] = await this.db.select().from(workflowNodeRuns).where(eq(workflowNodeRuns.id, nodeRunId)).limit(1);
+          if (!existingNodeRun) throw new Error('Workflow scheduler node run is unavailable.');
+          startedAt = existingNodeRun.startedAt ?? startedAt;
+          await this.db.transaction((transaction) => {
+            const [updatedNodeRun] = transaction.update(workflowNodeRuns).set({ status: 'running', input: invocation.input, error: null, finishedAt: null, startedAt }).where(and(eq(workflowNodeRuns.id, nodeRunId), inArray(workflowNodeRuns.status, ['queued', 'waiting_for_input']))).returning().all();
+            const [updatedRun] = transaction.update(workflowRuns).set({ currentNodeId: node.id, executionState: state as StoredWorkflowExecutionState, updatedAt: startedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.status, 'running'))).returning().all();
+            if (!updatedNodeRun || !updatedRun) throw new RunCancelledError();
+          });
         }
-        const input = collectNodeInputs(definition.edges, node.id, outputs);
-        const position = executionIndex + 1;
-        const nodeRunId = existingNodeRun?.id ?? `nrun_${randomUUID()}`;
-        if (!existingNodeRun) await this.db.insert(workflowNodeRuns).values({ id: nodeRunId, runId, workspaceId: run.workspaceId, nodeId: node.id, position, type: node.type, typeVersion: node.typeVersion, status: 'queued', input });
-        const startedAt = new Date();
-        await this.db.update(workflowNodeRuns).set({ status: 'running', input, error: null, finishedAt: null, startedAt: existingNodeRun?.startedAt ?? startedAt }).where(eq(workflowNodeRuns.id, nodeRunId));
-        await this.db.update(workflowRuns).set({ currentNodeId: node.id, updatedAt: startedAt }).where(eq(workflowRuns.id, runId));
         await this.publish(runId, 'node.started', { nodeId: node.id, nodeRunId, position, type: node.type });
+
         const attempts = node.errorPolicy === 'retry' ? 2 : 1;
         let output: unknown;
         let artifactIds: string[] = [];
         let failure: unknown;
         for (let attempt = 0; attempt < attempts; attempt += 1) {
           try {
+            await this.assertActive(runId, abortController.signal);
             if (attempt > 0) await this.db.update(workflowNodeRuns).set({ retryCount: attempt }).where(eq(workflowNodeRuns.id, nodeRunId));
-            const definition = this.registry.resolve(node.type, node.typeVersion);
-            const request: NodeExecutionRequest = { input, config: node.config, context: { workflowRunId: runId, workflowVersionId: run.workflowVersionId, nodeId: node.id, nodeRunId, pendingActionId: `pending_${randomUUID()}`, workspaceId: run.workspaceId, variables: { workflowInput: run.input } }, signal: abortController.signal };
-            const result = await definition.execute(request);
+            const nodeType = this.registry.resolve(node.type, node.typeVersion);
+            const request: NodeExecutionRequest = {
+              input: invocation.input,
+              config: node.config,
+              context: {
+                workflowRunId: runId,
+                workflowVersionId: run.workflowVersionId,
+                nodeId: node.id,
+                nodeRunId,
+                pendingActionId: `pending_${randomUUID()}`,
+                workspaceId: run.workspaceId,
+                variables: { workflowInput: run.input },
+              },
+              signal: abortController.signal,
+            };
+            const result = await nodeType.execute(request);
             if (result.status === 'waiting_for_input') {
               await this.suspendRun(run.workspaceId, runId, nodeRunId, node.id, result);
               return;
             }
+            await this.assertActive(runId, abortController.signal);
             const artifact = await this.createArtifactNode(run, node, result.output);
             output = artifact ? artifact.output : result.output;
             artifactIds = artifact ? [artifact.id] : [];
@@ -230,28 +272,46 @@ export class RunsService {
             break;
           } catch (error) {
             failure = error;
-            if (abortController.signal.aborted) throw new RunCancelledError();
+            if (error instanceof RunCancelledError || abortController.signal.aborted) throw new RunCancelledError();
           }
         }
         if (failure) {
           const message = failure instanceof Error ? failure.message : 'Workflow node failed.';
-          await this.db.update(workflowNodeRuns).set({ status: 'failed', error: message, finishedAt: new Date() }).where(eq(workflowNodeRuns.id, nodeRunId));
+          const [failedNodeRun] = await this.db.update(workflowNodeRuns).set({ status: 'failed', error: message, finishedAt: new Date() }).where(and(eq(workflowNodeRuns.id, nodeRunId), eq(workflowNodeRuns.status, 'running'))).returning();
+          if (!failedNodeRun) throw new RunCancelledError();
           await this.publish(runId, 'node.failed', { nodeId: node.id, nodeRunId, error: message });
           throw new Error(message);
         }
-        await this.db.update(workflowNodeRuns).set({ status: 'succeeded', output, artifactIds, finishedAt: new Date() }).where(eq(workflowNodeRuns.id, nodeRunId));
+
+        commitWorkflowInvocation(definition, state, node.id, output);
+        delete state.active;
+        const finishedAt = new Date();
+        await this.db.transaction((transaction) => {
+          const [updatedNodeRun] = transaction.update(workflowNodeRuns).set({ status: 'succeeded', output, artifactIds, finishedAt }).where(and(eq(workflowNodeRuns.id, nodeRunId), eq(workflowNodeRuns.status, 'running'))).returning().all();
+          const [updatedRun] = transaction.update(workflowRuns).set({ executionState: state as StoredWorkflowExecutionState, updatedAt: finishedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.status, 'running'))).returning().all();
+          if (!updatedNodeRun || !updatedRun) throw new RunCancelledError();
+        });
         await this.publish(runId, 'node.completed', { nodeId: node.id, nodeRunId, output, artifactIds });
-        outputs.set(node.id, output);
       }
-      const result = Object.fromEntries(getLeafNodeIds(definition).map((nodeId) => [nodeId, outputs.get(nodeId)]));
-      await this.db.update(workflowRuns).set({ status: 'succeeded', result, currentNodeId: null, updatedAt: new Date(), finishedAt: new Date() }).where(eq(workflowRuns.id, runId));
+
+      const result = workflowRunResult(state);
+      const finishedAt = new Date();
+      const [succeededRun] = await this.db.update(workflowRuns).set({ status: 'succeeded', result, executionState: state as StoredWorkflowExecutionState, currentNodeId: null, updatedAt: finishedAt, finishedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.status, 'running'))).returning();
+      if (!succeededRun) return;
       await this.publish(runId, 'run.status', { status: 'succeeded', result });
     } catch (error) {
       if (error instanceof RunCancelledError) return;
       const [current] = await this.db.select({ status: workflowRuns.status }).from(workflowRuns).where(eq(workflowRuns.id, runId)).limit(1);
       if (current?.status === 'cancelled') return;
       const message = error instanceof Error ? error.message : 'Workflow execution failed.';
-      await this.db.update(workflowRuns).set({ status: 'failed', result: { message }, updatedAt: new Date(), finishedAt: new Date() }).where(eq(workflowRuns.id, runId));
+      const failedAt = new Date();
+      const failedRun = await this.db.transaction((transaction) => {
+        const [updatedRun] = transaction.update(workflowRuns).set({ status: 'failed', result: { message }, currentNodeId: null, updatedAt: failedAt, finishedAt: failedAt }).where(and(eq(workflowRuns.id, runId), inArray(workflowRuns.status, ['queued', 'running', 'waiting_for_input']))).returning().all();
+        if (!updatedRun) return null;
+        transaction.update(workflowNodeRuns).set({ status: 'failed', error: message, finishedAt: failedAt }).where(and(eq(workflowNodeRuns.runId, runId), eq(workflowNodeRuns.status, 'running'))).run();
+        return updatedRun;
+      });
+      if (!failedRun) return;
       await this.publish(runId, 'run.status', { status: 'failed', error: message });
     } finally {
       if (this.activeRuns.get(runId) === abortController) this.activeRuns.delete(runId);
@@ -261,7 +321,7 @@ export class RunsService {
   private async assertActive(runId: string, signal: AbortSignal): Promise<void> {
     if (signal.aborted) throw new RunCancelledError();
     const [run] = await this.db.select({ status: workflowRuns.status }).from(workflowRuns).where(eq(workflowRuns.id, runId)).limit(1);
-    if (!run || run.status === 'cancelled') throw new RunCancelledError();
+    if (!run || run.status !== 'running') throw new RunCancelledError();
   }
 
   private async suspendRun(workspaceId: string, runId: string, nodeRunId: string, nodeId: string, result: PendingNodeExecutionResult): Promise<void> {
@@ -312,10 +372,17 @@ export class RunsService {
     if (!action) return false;
     if (action.status !== 'pending') return true;
     const now = new Date();
-    const [updated] = await this.db.update(workflowPendingActions).set({ status: 'completed', qrCode: null, updatedAt: now }).where(and(eq(workflowPendingActions.id, actionId), eq(workflowPendingActions.status, 'pending'))).returning();
-    if (!updated) return true;
-    await this.db.update(workflowNodeRuns).set({ status: 'queued' }).where(and(eq(workflowNodeRuns.id, action.nodeRunId), eq(workflowNodeRuns.status, 'waiting_for_input')));
-    await this.db.update(workflowRuns).set({ status: 'queued', updatedAt: now }).where(and(eq(workflowRuns.id, action.runId), eq(workflowRuns.status, 'waiting_for_input')));
+    try {
+      await this.db.transaction((transaction) => {
+        const [updatedNodeRun] = transaction.update(workflowNodeRuns).set({ status: 'queued' }).where(and(eq(workflowNodeRuns.id, action.nodeRunId), eq(workflowNodeRuns.status, 'waiting_for_input'))).returning().all();
+        const [updatedRun] = transaction.update(workflowRuns).set({ status: 'queued', updatedAt: now }).where(and(eq(workflowRuns.id, action.runId), eq(workflowRuns.status, 'waiting_for_input'))).returning().all();
+        const [updatedAction] = transaction.update(workflowPendingActions).set({ status: 'completed', qrCode: null, updatedAt: now }).where(and(eq(workflowPendingActions.id, actionId), eq(workflowPendingActions.status, 'pending'))).returning().all();
+        if (!updatedNodeRun || !updatedRun || !updatedAction) throw new RunCancelledError();
+      });
+    } catch (error) {
+      if (error instanceof RunCancelledError) return true;
+      throw error;
+    }
     await this.publish(action.runId, 'pending_action.updated', { actionId, status: 'completed' });
     this.schedule(action.runId);
     return true;

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import type { WorkflowDashboardElement, WorkflowDashboardField, WorkflowDashboardFieldType, WorkflowDashboardLayout, WorkflowDefinition, WorkflowEditOperation, WorkflowNodeDefinition } from '@worklite/contracts';
+import type { WorkflowDashboardElement, WorkflowDashboardField, WorkflowDashboardFieldType, WorkflowDashboardLayout, WorkflowDefinition, WorkflowEdgeCondition, WorkflowEdgePredicateOperator, WorkflowEditOperation, WorkflowNodeDefinition } from '@worklite/contracts';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { SaveIndicator } from '@/components/save-indicator';
 import { useLocale } from '@/components/locale-provider';
@@ -19,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { workflowNodeTypes, type WorkflowCanvasEdge, type WorkflowCanvasNode } from '@/components/workflow-canvas-nodes';
+import { workflowNodeTypes, type WorkflowCanvasEdge, type WorkflowCanvasEdgeData, type WorkflowCanvasNode } from '@/components/workflow-canvas-nodes';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { api } from '@/api/client';
 import { useMcpServersQuery, useModelProvidersQuery, runsQueryKey, useSkillsQuery, useWorkflowQuery, useWorkflowScheduleQuery, workflowScheduleQueryKey, workflowsQueryKey } from '@/api/queries';
@@ -69,17 +69,21 @@ function WorkflowEditorPage() {
   const [deleteError, setDeleteError] = useState('');
   const [runSubmitting, setRunSubmitting] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [edgeValueDrafts, setEdgeValueDrafts] = useState<Record<string, string>>({});
+  const [edgeValueErrors, setEdgeValueErrors] = useState<Record<string, boolean>>({});
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<WorkflowCanvasNode, WorkflowCanvasEdge> | null>(null);
   const canvasRef = useRef<HTMLElement>(null);
   const navigate = useNavigate();
 
   const hydrateDefinition = useCallback((definition: WorkflowDefinition, preferredNodeId?: string | null) => {
     const nextNodes = toFlowNodes(definition);
-    const nextEdges = toFlowEdges(definition);
+    const nextEdges = toFlowEdges(definition, t);
     const nextSelection = preferredNodeId && nextNodes.some((node) => node.id === preferredNodeId) ? preferredNodeId : null;
     setNodes(nextNodes.map((node) => ({ ...node, selected: node.id === nextSelection })));
     setEdges(nextEdges.map((edge) => ({ ...edge, selected: false })));
-  }, [setEdges, setNodes]);
+    setEdgeValueDrafts({});
+    setEdgeValueErrors({});
+  }, [setEdges, setNodes, t]);
 
   useEffect(() => {
     if (!existing) return;
@@ -122,7 +126,15 @@ function WorkflowEditorPage() {
       input: input ? { example: input } : {},
       defaults: { errorPolicy: executionPolicy },
       nodes: nodes.map(toDefinitionNode),
-      edges: edges.map((edge) => ({ id: edge.id, sourceNodeId: edge.source, sourcePort: edge.sourceHandle ?? 'output', targetNodeId: edge.target, targetPort: edge.targetHandle ?? 'input' })),
+      edges: edges.map((edge) => ({
+        id: edge.id,
+        sourceNodeId: edge.source,
+        sourcePort: edge.sourceHandle ?? 'output',
+        targetNodeId: edge.target,
+        targetPort: edge.targetHandle ?? 'input',
+        ...(edge.data?.condition ? { condition: edge.data.condition } : {}),
+        ...(edge.data?.maxTraversals !== undefined ? { maxTraversals: edge.data.maxTraversals } : {}),
+      })),
     };
   }
 
@@ -176,7 +188,9 @@ function WorkflowEditorPage() {
       toast.error(t('editor.invalidConnection'));
       return;
     }
-    setEdges((current) => addEdge({ ...connection, id: createId('edge'), type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed }, selected: false }, current.map((edge) => ({ ...edge, selected: false }))));
+    const data: WorkflowCanvasEdgeData = wouldCreateCycle(connection.source!, connection.target!, edges) ? { maxTraversals: 1 } : {};
+    const edge = applyEdgePresentation({ ...connection, id: createId('edge'), type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed }, selected: false, data } as WorkflowCanvasEdge, t);
+    setEdges((current) => addEdge(edge, current.map((item) => ({ ...item, selected: false }))));
     setSaveState('unsaved');
   }, [edges, nodes, setEdges, t]);
 
@@ -190,7 +204,14 @@ function WorkflowEditorPage() {
       toast.error(t('editor.invalidConnection'));
       return;
     }
-    setEdges(nextEdges.map((edge) => ({ ...edge, type: edge.type ?? 'smoothstep', markerEnd: edge.markerEnd ?? { type: MarkerType.ArrowClosed }, selected: false })));
+    const bounded = wouldCreateCycle(connection.source!, connection.target!, nextEdges.filter((edge) => edge.id !== oldEdge.id));
+    setEdges(nextEdges.map((edge) => applyEdgePresentation({
+      ...edge,
+      type: edge.type ?? 'smoothstep',
+      markerEnd: edge.markerEnd ?? { type: MarkerType.ArrowClosed },
+      selected: false,
+      data: edge.id === oldEdge.id && bounded && edge.data?.maxTraversals === undefined ? { ...edge.data, maxTraversals: 1 } : edge.data,
+    }, t)));
     setSaveState('unsaved');
   }, [edges, nodes, setEdges, t]);
 
@@ -281,6 +302,9 @@ function WorkflowEditorPage() {
   }
 
   function removeNode(nodeId: string) {
+    for (const edge of edges) {
+      if (edge.source === nodeId || edge.target === nodeId) clearEdgeValueState(edge.id);
+    }
     setNodes((current) => current.filter((node) => node.id !== nodeId));
     setEdges((current) => current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId));
     setSaveState('unsaved');
@@ -335,13 +359,59 @@ function WorkflowEditorPage() {
     updateDashboardRegion(nodeId, region, [...(nodes.find((node) => node.id === nodeId)?.data.dashboardLayout?.[region] ?? []), blank]);
   }
 
+  function clearEdgeValueState(edgeId: string) {
+    setEdgeValueDrafts((current) => {
+      if (!(edgeId in current)) return current;
+      const next = { ...current };
+      delete next[edgeId];
+      return next;
+    });
+    setEdgeValueErrors((current) => {
+      if (!(edgeId in current)) return current;
+      const next = { ...current };
+      delete next[edgeId];
+      return next;
+    });
+  }
+
   function removeEdge(edgeId: string) {
     setEdges((current) => current.filter((edge) => edge.id !== edgeId));
+    clearEdgeValueState(edgeId);
     setSaveState('unsaved');
+  }
+
+  function updateEdgeData(edgeId: string, data: WorkflowCanvasEdgeData) {
+    setEdges((current) => current.map((edge) => edge.id === edgeId ? applyEdgePresentation({ ...edge, data }, t) : edge));
+    setSaveState('unsaved');
+  }
+
+  function updateEdgeMode(edge: WorkflowCanvasEdge, mode: 'always' | 'condition' | 'fallback') {
+    const condition: WorkflowEdgeCondition | undefined = mode === 'always'
+      ? undefined
+      : mode === 'fallback'
+        ? { kind: 'fallback' }
+        : edge.data?.condition?.kind === 'predicate'
+          ? edge.data.condition
+          : { kind: 'predicate', path: '$', operator: 'truthy' };
+    clearEdgeValueState(edge.id);
+    updateEdgeData(edge.id, { ...edge.data, condition });
+  }
+
+  function updateEdgePredicate(edge: WorkflowCanvasEdge, patch: { path?: string; operator?: WorkflowEdgePredicateOperator; value?: unknown }, omitValue = false) {
+    const current = edge.data?.condition?.kind === 'predicate' ? edge.data.condition : { kind: 'predicate' as const, path: '$', operator: 'truthy' as const };
+    const base = { kind: 'predicate' as const, path: patch.path ?? current.path, operator: patch.operator ?? current.operator };
+    const condition: Extract<WorkflowEdgeCondition, { kind: 'predicate' }> = omitValue
+      ? base
+      : { ...base, ...('value' in patch ? { value: patch.value } : 'value' in current ? { value: current.value } : {}) };
+    updateEdgeData(edge.id, { ...edge.data, condition });
   }
 
   async function save() {
     if (saveState === 'saving') return;
+    if (Object.values(edgeValueErrors).some(Boolean)) {
+      setSaveError(t('editor.edgeComparisonInvalid'));
+      return;
+    }
     setSaveState('saving');
     setSaveError('');
     try {
@@ -532,7 +602,37 @@ function WorkflowEditorPage() {
       </div>
     </div>
   ) : selectedEdge ? (
-    <div className="flex min-h-0 w-full min-w-0 flex-col"><div className="flex items-start gap-2"><Button type="button" variant="ghost" size="icon-compact" aria-label={t('editor.nodePalette')} onClick={showNodePalette}><ArrowLeft className="size-4" /></Button><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">{t('editor.connection')}</p><h2 className="mt-1 text-sm font-semibold">{nodeLabel(nodes, selectedEdge.source)} → {nodeLabel(nodes, selectedEdge.target)}</h2></div></div><div className="mt-5 rounded-md border border-border bg-surface-subtle p-3 font-mono text-[12px] text-muted-foreground"><p>{selectedEdge.sourceHandle ?? 'output'}</p><p className="my-1">↓</p><p>{selectedEdge.targetHandle ?? 'input'}</p></div><Button type="button" variant="secondary" size="compact" className="mt-4" onClick={() => removeEdge(selectedEdge.id)}><Trash2 className="size-4" />{t('editor.remove')}</Button></div>
+    <div className="flex min-h-0 w-full min-w-0 flex-col">
+      <div className="flex items-start gap-2"><Button type="button" variant="ghost" size="icon-compact" aria-label={t('editor.nodePalette')} onClick={showNodePalette}><ArrowLeft className="size-4" /></Button><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">{t('editor.connection')}</p><h2 className="mt-1 text-sm font-semibold">{nodeLabel(nodes, selectedEdge.source)} → {nodeLabel(nodes, selectedEdge.target)}</h2></div></div>
+      <div className="mt-5 rounded-md border border-border bg-surface-subtle p-3 font-mono text-[12px] text-muted-foreground"><p>{selectedEdge.sourceHandle ?? 'output'}</p><p className="my-1">↓</p><p>{selectedEdge.targetHandle ?? 'input'}</p></div>
+      <div className="mt-4 space-y-4">
+        <Field label={t('editor.edgeMode')} htmlFor="edge-mode">
+          <Select value={selectedEdge.data?.condition?.kind === 'predicate' ? 'condition' : selectedEdge.data?.condition?.kind ?? 'always'} onValueChange={(value) => updateEdgeMode(selectedEdge, value as 'always' | 'condition' | 'fallback')}>
+            <SelectTrigger id="edge-mode"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="always">{t('editor.edgeModes.always')}</SelectItem><SelectItem value="condition">{t('editor.edgeModes.condition')}</SelectItem><SelectItem value="fallback">{t('editor.edgeModes.fallback')}</SelectItem></SelectContent>
+          </Select>
+        </Field>
+        {selectedEdge.data?.condition?.kind === 'predicate' ? <>
+          <Field label={t('editor.edgeOutputPath')} htmlFor="edge-output-path"><Input id="edge-output-path" value={selectedEdge.data.condition.path} onChange={(event) => updateEdgePredicate(selectedEdge, { path: event.target.value })} placeholder="$.status" /></Field>
+          <Field label={t('editor.edgeOperator')} htmlFor="edge-operator">
+            <Select value={selectedEdge.data.condition.operator} onValueChange={(value) => { const operator = value as WorkflowEdgePredicateOperator; const condition = selectedEdge.data?.condition; clearEdgeValueState(selectedEdge.id); updateEdgePredicate(selectedEdge, edgeOperatorRequiresValue(operator) ? { operator, value: condition?.kind === 'predicate' && 'value' in condition ? condition.value : null } : { operator }, !edgeOperatorRequiresValue(operator)); }}>
+              <SelectTrigger id="edge-operator"><SelectValue /></SelectTrigger>
+              <SelectContent>{(['equals', 'notEquals', 'truthy', 'falsy', 'exists', 'notExists', 'greaterThan', 'greaterThanOrEqual', 'lessThan', 'lessThanOrEqual'] as WorkflowEdgePredicateOperator[]).map((operator) => <SelectItem key={operator} value={operator}>{t(`editor.edgeOperators.${operator}`)}</SelectItem>)}</SelectContent>
+            </Select>
+          </Field>
+          {edgeOperatorRequiresValue(selectedEdge.data.condition.operator) ? <Field label={t('editor.edgeComparisonValue')} htmlFor="edge-comparison-value">
+            <Textarea id="edge-comparison-value" className="min-h-20 font-mono text-[12px]" aria-invalid={edgeValueErrors[selectedEdge.id] || undefined} value={edgeValueDrafts[selectedEdge.id] ?? JSON.stringify(selectedEdge.data.condition.value ?? null, null, 2)} onChange={(event) => { const draft = event.target.value; setSaveState('unsaved'); setEdgeValueDrafts((current) => ({ ...current, [selectedEdge.id]: draft })); try { const value = JSON.parse(draft); setEdgeValueErrors((current) => ({ ...current, [selectedEdge.id]: false })); updateEdgePredicate(selectedEdge, { value }); } catch { setEdgeValueErrors((current) => ({ ...current, [selectedEdge.id]: true })); } }} />
+            {edgeValueErrors[selectedEdge.id] ? <p className="mt-1 text-[12px] text-danger">{t('editor.edgeComparisonInvalid')}</p> : null}
+          </Field> : null}
+        </> : null}
+        {selectedEdge.data?.condition?.kind === 'fallback' ? <p className="text-[12px] text-muted-foreground">{t('editor.edgeFallbackHint')}</p> : null}
+        <Field label={t('editor.edgeMaxTraversals')} htmlFor="edge-max-traversals">
+          <Input id="edge-max-traversals" type="number" min={1} step={1} value={selectedEdge.data?.maxTraversals ?? ''} onChange={(event) => { const value = event.target.value; if (!value) { updateEdgeData(selectedEdge.id, { ...selectedEdge.data, maxTraversals: undefined }); return; } const parsed = Number(value); if (Number.isFinite(parsed)) updateEdgeData(selectedEdge.id, { ...selectedEdge.data, maxTraversals: Math.max(1, Math.floor(parsed)) }); }} />
+          <p className="mt-1 text-[12px] text-muted-foreground">{t('editor.edgeMaxTraversalsHint')}</p>
+        </Field>
+      </div>
+      <Button type="button" variant="secondary" size="compact" className="mt-4" onClick={() => removeEdge(selectedEdge.id)}><Trash2 className="size-4" />{t('editor.remove')}</Button>
+    </div>
   ) : <div className="flex h-full min-h-32 items-center justify-center text-center text-[13px] text-muted-foreground">{t('editor.selectCanvasItem')}</div>;
 
   const contextPanel = selectedNode || selectedEdge ? inspector : palette;
@@ -557,7 +657,7 @@ function WorkflowEditorPage() {
             colorMode={resolvedTheme}
             onInit={setFlowInstance}
             onNodesChange={(changes) => { onNodesChange(changes); if (changes.some((change) => change.type === 'position' && change.dragging === false)) setSaveState('unsaved'); }}
-            onEdgesChange={(changes) => { onEdgesChange(changes); if (changes.some((change) => change.type === 'remove')) setSaveState('unsaved'); }}
+            onEdgesChange={(changes) => { onEdgesChange(changes); for (const change of changes) { if (change.type === 'remove') clearEdgeValueState(change.id); } if (changes.some((change) => change.type === 'remove')) setSaveState('unsaved'); }}
             isValidConnection={(connection) => canConnect(connection, nodes, edges)}
             onConnect={handleConnect}
             onConnectEnd={handleConnectEnd}
@@ -566,7 +666,7 @@ function WorkflowEditorPage() {
             onEdgeClick={(_, edge) => selectOnlyEdge(edge.id)}
             onPaneClick={showNodePalette}
             onSelectionChange={({ nodes: selectedNodes, edges: selectedEdges }) => { if (selectedNodes.length + selectedEdges.length > 0 && !window.matchMedia('(min-width: 1024px)').matches) setContextPanelOpen(true); }}
-            onNodesDelete={(deleted) => { if (deleted.length > 0) { const deletedIds = new Set(deleted.map((node) => node.id)); setEdges((current) => current.filter((edge) => !deletedIds.has(edge.source) && !deletedIds.has(edge.target))); setSaveState('unsaved'); } }}
+            onNodesDelete={(deleted) => { if (deleted.length > 0) { const deletedIds = new Set(deleted.map((node) => node.id)); for (const edge of edges) { if (deletedIds.has(edge.source) || deletedIds.has(edge.target)) clearEdgeValueState(edge.id); } setEdges((current) => current.filter((edge) => !deletedIds.has(edge.source) && !deletedIds.has(edge.target))); setSaveState('unsaved'); } }}
             onEdgesDelete={(deleted) => { if (deleted.length > 0) setSaveState('unsaved'); }}
             deleteKeyCode={['Backspace', 'Delete']}
             multiSelectionKeyCode={null}
@@ -650,8 +750,41 @@ function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
   });
 }
 
-function toFlowEdges(definition: WorkflowDefinition): WorkflowCanvasEdge[] {
-  return definition.edges.map((edge) => ({ id: edge.id, source: edge.sourceNodeId, sourceHandle: edge.sourcePort, target: edge.targetNodeId, targetHandle: edge.targetPort, type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed } }));
+function toFlowEdges(definition: WorkflowDefinition, t: TFunction): WorkflowCanvasEdge[] {
+  return definition.edges.map((edge) => applyEdgePresentation({
+    id: edge.id,
+    source: edge.sourceNodeId,
+    sourceHandle: edge.sourcePort,
+    target: edge.targetNodeId,
+    targetHandle: edge.targetPort,
+    type: 'smoothstep',
+    markerEnd: { type: MarkerType.ArrowClosed },
+    data: { condition: edge.condition, maxTraversals: edge.maxTraversals },
+  }, t));
+}
+
+function applyEdgePresentation(edge: WorkflowCanvasEdge, t: TFunction): WorkflowCanvasEdge {
+  const condition = edge.data?.condition;
+  const labels: string[] = [];
+  if (condition?.kind === 'fallback') labels.push(t('editor.edgeModes.fallback'));
+  if (condition?.kind === 'predicate') {
+    const value = edgeOperatorRequiresValue(condition.operator) ? ` ${JSON.stringify(condition.value)}` : '';
+    labels.push(`${condition.path} ${t(`editor.edgeOperators.${condition.operator}`)}${value}`);
+  }
+  if (edge.data?.maxTraversals !== undefined) labels.push(t('editor.edgeTraversalLabel', { count: edge.data.maxTraversals }));
+  return {
+    ...edge,
+    label: labels.join(' · ') || undefined,
+    labelStyle: { fill: 'currentColor', fontSize: 11 },
+    labelBgStyle: { fill: 'var(--surface-raised)', fillOpacity: 0.92 },
+    labelBgPadding: [4, 2],
+    labelBgBorderRadius: 3,
+    style: edge.data?.maxTraversals !== undefined ? { ...edge.style, strokeDasharray: '6 4' } : { ...edge.style, strokeDasharray: undefined },
+  };
+}
+
+function edgeOperatorRequiresValue(operator: WorkflowEdgePredicateOperator): boolean {
+  return operator === 'equals' || operator === 'notEquals' || operator === 'greaterThan' || operator === 'greaterThanOrEqual' || operator === 'lessThan' || operator === 'lessThanOrEqual';
 }
 
 function canConnect(connection: { source: string | null; sourceHandle?: string | null; target: string | null; targetHandle?: string | null }, nodes: WorkflowCanvasNode[], edges: WorkflowCanvasEdge[]): boolean {
@@ -660,7 +793,7 @@ function canConnect(connection: { source: string | null; sourceHandle?: string |
   const sourceNode = nodes.find((node) => node.id === source);
   const targetNode = nodes.find((node) => node.id === target);
   if (!sourceNode || !targetNode) return false;
-    const sourcePort = sourceHandle ?? 'output';
+  const sourcePort = sourceHandle ?? 'output';
   if (sourcePort !== 'output') return false;
   if (targetNode.data.nodeType === 'dashboard' || targetNode.data.nodeType === 'artifact') {
     if (targetHandle !== 'data') return false;
@@ -671,7 +804,7 @@ function canConnect(connection: { source: string | null; sourceHandle?: string |
   }
   if (edges.some((edge) => edge.source === source && edge.target === target && (edge.sourceHandle ?? 'output') === sourcePort && (edge.targetHandle ?? 'input') === targetHandle)) return false;
   if (edges.some((edge) => edge.target === target && (edge.targetHandle ?? 'input') === targetHandle)) return false;
-  return !wouldCreateCycle(source, target, edges);
+  return true;
 }
 
 function wouldCreateCycle(source: string, target: string, edges: WorkflowCanvasEdge[]): boolean {
@@ -682,7 +815,7 @@ function wouldCreateCycle(source: string, target: string, edges: WorkflowCanvasE
     if (!current || visited.has(current)) continue;
     if (current === source) return true;
     visited.add(current);
-    for (const edge of edges) if (edge.source === current) pending.push(edge.target);
+    for (const edge of edges) if (edge.source === current && edge.data?.maxTraversals === undefined) pending.push(edge.target);
   }
   return false;
 }

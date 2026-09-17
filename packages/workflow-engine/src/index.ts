@@ -234,50 +234,226 @@ export class NodeTypeRegistry {
   }
 }
 
-export function topologicallySortWorkflow(definition: WorkflowDefinition): WorkflowNodeDefinition[] {
-  const order = new Map(definition.nodes.map((node, index) => [node.id, index]));
-  const nodesById = new Map(definition.nodes.map((node) => [node.id, node]));
+export type WorkflowScheduledInvocation = {
+  nodeId: string;
+  input: Record<string, unknown>;
+};
+
+export type WorkflowActiveInvocation = WorkflowScheduledInvocation & {
+  nodeRunId: string;
+  position: number;
+};
+
+export type WorkflowSchedulerState = {
+  ready: WorkflowScheduledInvocation[];
+  pendingInputs: Record<string, Record<string, unknown[]>>;
+  edgeTraversals: Record<string, number>;
+  latestOutputs: Record<string, unknown>;
+  terminalOutputs: Record<string, unknown>;
+  nextPosition: number;
+  active?: WorkflowActiveInvocation;
+};
+
+const VALUE_COMPARISON_OPERATORS = new Set([
+  'equals',
+  'notEquals',
+  'greaterThan',
+  'greaterThanOrEqual',
+  'lessThan',
+  'lessThanOrEqual',
+]);
+
+function deepEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) && Array.isArray(right)) return left.length === right.length && left.every((value, index) => deepEqual(value, right[index]));
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object' || Array.isArray(left) || Array.isArray(right)) return false;
+  const leftEntries = Object.entries(left);
+  const rightRecord = right as Record<string, unknown>;
+  return leftEntries.length === Object.keys(rightRecord).length && leftEntries.every(([key, value]) => Object.hasOwn(rightRecord, key) && deepEqual(value, rightRecord[key]));
+}
+
+type WorkflowOrderedComparisonOperator = 'greaterThan' | 'greaterThanOrEqual' | 'lessThan' | 'lessThanOrEqual';
+
+function compareWorkflowOrderedValues(left: unknown, right: unknown, operator: WorkflowOrderedComparisonOperator): boolean {
+  if (typeof left === 'number' && typeof right === 'number') {
+    if (operator === 'greaterThan') return left > right;
+    if (operator === 'greaterThanOrEqual') return left >= right;
+    if (operator === 'lessThan') return left < right;
+    return left <= right;
+  }
+  if (typeof left === 'string' && typeof right === 'string') {
+    if (operator === 'greaterThan') return left > right;
+    if (operator === 'greaterThanOrEqual') return left >= right;
+    if (operator === 'lessThan') return left < right;
+    return left <= right;
+  }
+  return false;
+}
+
+export function readWorkflowOutputPath(output: unknown, path: string): { exists: boolean; value: unknown } {
+  const normalized = path.trim().replace(/^\$\.?/, '');
+  if (!normalized) return { exists: true, value: output };
+  let current = output;
+  for (const segment of normalized.split('.')) {
+    if (Array.isArray(current) && /^\d+$/.test(segment)) {
+      const index = Number(segment);
+      if (index >= current.length) return { exists: false, value: undefined };
+      current = current[index];
+      continue;
+    }
+    if (!current || typeof current !== 'object' || !Object.hasOwn(current, segment)) return { exists: false, value: undefined };
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return { exists: true, value: current };
+}
+
+export function evaluateWorkflowEdgeCondition(edge: WorkflowEdgeDefinition, output: unknown): boolean {
+  if (!edge.condition) return true;
+  if (edge.condition.kind === 'fallback') return false;
+  const resolved = readWorkflowOutputPath(output, edge.condition.path);
+  switch (edge.condition.operator) {
+    case 'exists':
+      return resolved.exists;
+    case 'notExists':
+      return !resolved.exists;
+    case 'truthy':
+      return Boolean(resolved.value);
+    case 'falsy':
+      return !resolved.value;
+    case 'equals':
+      return deepEqual(resolved.value, edge.condition.value);
+    case 'notEquals':
+      return !deepEqual(resolved.value, edge.condition.value);
+    case 'greaterThan':
+      return compareWorkflowOrderedValues(resolved.value, edge.condition.value, 'greaterThan');
+    case 'greaterThanOrEqual':
+      return compareWorkflowOrderedValues(resolved.value, edge.condition.value, 'greaterThanOrEqual');
+    case 'lessThan':
+      return compareWorkflowOrderedValues(resolved.value, edge.condition.value, 'lessThan');
+    case 'lessThanOrEqual':
+      return compareWorkflowOrderedValues(resolved.value, edge.condition.value, 'lessThanOrEqual');
+  }
+}
+
+export function validateWorkflowControlFlow(definition: WorkflowDefinition): void {
+  const nodesById = new Set(definition.nodes.map((node) => node.id));
   const incoming = new Map(definition.nodes.map((node) => [node.id, 0]));
   const outgoing = new Map(definition.nodes.map((node) => [node.id, [] as string[]]));
 
   for (const edge of definition.edges) {
     if (!nodesById.has(edge.sourceNodeId) || !nodesById.has(edge.targetNodeId)) throw new Error('Workflow edge references an unavailable node.');
+    if (edge.maxTraversals !== undefined) continue;
     incoming.set(edge.targetNodeId, (incoming.get(edge.targetNodeId) ?? 0) + 1);
     outgoing.get(edge.sourceNodeId)?.push(edge.targetNodeId);
   }
 
-  const ready = definition.nodes.filter((node) => incoming.get(node.id) === 0);
-  const result: WorkflowNodeDefinition[] = [];
+  const ready = definition.nodes.filter((node) => incoming.get(node.id) === 0).map((node) => node.id);
+  let visited = 0;
   while (ready.length > 0) {
-    ready.sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0));
-    const node = ready.shift();
-    if (!node) break;
-    result.push(node);
-    for (const targetId of outgoing.get(node.id) ?? []) {
+    const nodeId = ready.shift();
+    if (!nodeId) break;
+    visited += 1;
+    for (const targetId of outgoing.get(nodeId) ?? []) {
       const remaining = (incoming.get(targetId) ?? 0) - 1;
       incoming.set(targetId, remaining);
-      if (remaining === 0) {
-        const target = nodesById.get(targetId);
-        if (target) ready.push(target);
-      }
+      if (remaining === 0) ready.push(targetId);
     }
   }
 
-  if (result.length !== definition.nodes.length) throw new Error('Workflow graph must not contain a cycle.');
-  return result;
+  if (visited !== definition.nodes.length) throw new Error('Every workflow cycle must cross an edge with a maximum traversal count.');
 }
 
-export function collectNodeInputs(edges: WorkflowEdgeDefinition[], nodeId: string, outputs: ReadonlyMap<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(
-    edges
-      .filter((edge) => edge.targetNodeId === nodeId)
-      .map((edge) => [edge.targetPort, outputs.get(edge.sourceNodeId)]),
-  );
+function connectedInputPorts(definition: WorkflowDefinition, nodeId: string): Set<string> {
+  return new Set(definition.edges.filter((edge) => edge.targetNodeId === nodeId).map((edge) => edge.targetPort));
 }
 
-export function getLeafNodeIds(definition: WorkflowDefinition): string[] {
-  const sourceIds = new Set(definition.edges.map((edge) => edge.sourceNodeId));
-  return definition.nodes.filter((node) => !sourceIds.has(node.id)).map((node) => node.id);
+function takeReadyInput(definition: WorkflowDefinition, state: WorkflowSchedulerState, nodeId: string): Record<string, unknown> | undefined {
+  const node = definition.nodes.find((candidate) => candidate.id === nodeId);
+  if (!node) return undefined;
+  const capability = resolveWorkflowNodeCapability(node.type, node.typeVersion);
+  if (!capability) throw new Error(`Node Type is not registered: ${node.type}@${node.typeVersion}`);
+  const connected = connectedInputPorts(definition, nodeId);
+  const pending = state.pendingInputs[nodeId] ?? {};
+  const connectedPorts = capability.inputs.filter((port) => connected.has(port.name));
+  const requiredPorts = connectedPorts.filter((port) => port.required);
+  if (requiredPorts.some((port) => (pending[port.name]?.length ?? 0) === 0)) return undefined;
+  if (connectedPorts.length > 0 && requiredPorts.length === 0 && connectedPorts.every((port) => (pending[port.name]?.length ?? 0) === 0)) return undefined;
+
+  const input: Record<string, unknown> = {};
+  for (const port of connectedPorts) {
+    const values = pending[port.name] ?? [];
+    if (values.length === 0) continue;
+    input[port.name] = port.multiple ? values.splice(0) : values.shift();
+  }
+  return input;
+}
+
+function enqueueReadyInvocations(definition: WorkflowDefinition, state: WorkflowSchedulerState, candidateNodeIds: ReadonlySet<string>): void {
+  for (const node of definition.nodes) {
+    if (!candidateNodeIds.has(node.id)) continue;
+    while (true) {
+      const input = takeReadyInput(definition, state, node.id);
+      if (!input) break;
+      state.ready.push({ nodeId: node.id, input });
+    }
+  }
+}
+
+export function createWorkflowSchedulerState(definition: WorkflowDefinition): WorkflowSchedulerState {
+  const nodesWithUnboundedIncomingEdges = new Set(definition.edges.filter((edge) => edge.maxTraversals === undefined).map((edge) => edge.targetNodeId));
+  const nodesWithConnectedRequiredInputs = new Set(definition.nodes.flatMap((node) => {
+    const capability = resolveWorkflowNodeCapability(node.type, node.typeVersion);
+    if (!capability) throw new Error(`Node Type is not registered: ${node.type}@${node.typeVersion}`);
+    const connected = connectedInputPorts(definition, node.id);
+    return capability.inputs.some((port) => port.required && connected.has(port.name)) ? [node.id] : [];
+  }));
+  return {
+    ready: definition.nodes.filter((node) => !nodesWithUnboundedIncomingEdges.has(node.id) && !nodesWithConnectedRequiredInputs.has(node.id)).map((node) => ({ nodeId: node.id, input: {} })),
+    pendingInputs: {},
+    edgeTraversals: {},
+    latestOutputs: {},
+    terminalOutputs: {},
+    nextPosition: 0,
+  };
+}
+
+export function takeNextWorkflowInvocation(state: WorkflowSchedulerState): WorkflowScheduledInvocation | undefined {
+  return state.ready.shift();
+}
+
+export function selectWorkflowEdges(definition: WorkflowDefinition, state: WorkflowSchedulerState, nodeId: string, output: unknown): WorkflowEdgeDefinition[] {
+  const available = definition.edges.filter((edge) => edge.sourceNodeId === nodeId && (edge.maxTraversals === undefined || (state.edgeTraversals[edge.id] ?? 0) < edge.maxTraversals));
+  const matched = available.filter((edge) => edge.condition?.kind !== 'fallback' && evaluateWorkflowEdgeCondition(edge, output));
+  return matched.length > 0 ? matched : available.filter((edge) => edge.condition?.kind === 'fallback');
+}
+
+export function commitWorkflowInvocation(definition: WorkflowDefinition, state: WorkflowSchedulerState, nodeId: string, output: unknown): WorkflowEdgeDefinition[] {
+  const normalizedOutput = output === undefined ? null : output;
+  const traversedEdges = selectWorkflowEdges(definition, state, nodeId, normalizedOutput);
+  state.latestOutputs[nodeId] = normalizedOutput;
+  if (traversedEdges.length === 0) state.terminalOutputs[nodeId] = normalizedOutput;
+  else delete state.terminalOutputs[nodeId];
+
+  const candidateNodeIds = new Set<string>();
+  for (const edge of traversedEdges) {
+    state.edgeTraversals[edge.id] = (state.edgeTraversals[edge.id] ?? 0) + 1;
+    const nodeInputs = state.pendingInputs[edge.targetNodeId] ?? {};
+    const values = nodeInputs[edge.targetPort] ?? [];
+    values.push(normalizedOutput);
+    nodeInputs[edge.targetPort] = values;
+    state.pendingInputs[edge.targetNodeId] = nodeInputs;
+    candidateNodeIds.add(edge.targetNodeId);
+  }
+  enqueueReadyInvocations(definition, state, candidateNodeIds);
+  return traversedEdges;
+}
+
+export function workflowRunResult(state: WorkflowSchedulerState): Record<string, unknown> {
+  return { ...state.terminalOutputs };
+}
+
+export function workflowEdgeRequiresComparisonValue(operator: string): boolean {
+  return VALUE_COMPARISON_OPERATORS.has(operator);
 }
 
 export type GenericAgentNodeConfig = {

@@ -1,7 +1,7 @@
 import { Handle, Position, type Edge, type Node, type NodeProps } from '@xyflow/react';
 import { Bot, Braces, FileText, LayoutDashboard, Send, Timer } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { WorkflowDashboardLayout } from '@worklite/contracts';
+import type { WorkflowDashboardLayout, WorkflowEdgeCondition } from '@worklite/contracts';
 import { cn } from '@/lib/utils';
 
 export type WorkflowCanvasNodeType = 'input' | 'timer' | 'agent' | 'dashboard' | 'artifact' | 'wechatPublish';
@@ -28,7 +28,12 @@ export type WorkflowCanvasNodeData = {
 
 export type WorkflowCanvasNode = Node<WorkflowCanvasNodeData, WorkflowCanvasNodeType>;
 
-export type WorkflowCanvasEdge = Edge;
+export type WorkflowCanvasEdgeData = {
+  condition?: WorkflowEdgeCondition;
+  maxTraversals?: number;
+};
+
+export type WorkflowCanvasEdge = Edge<WorkflowCanvasEdgeData>;
 
 const nodeClass = 'relative min-w-[220px] rounded-md border bg-surface-raised text-foreground shadow-sm';
 const headerClass = 'flex items-center gap-2 border-b border-border px-3 py-2 text-[13px] font-semibold';

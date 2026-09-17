@@ -68,12 +68,55 @@ export type StoredWorkflowNode = {
   errorPolicy: 'stop' | 'retry';
 };
 
+export type StoredWorkflowEdgePredicateOperator =
+  | 'equals'
+  | 'notEquals'
+  | 'truthy'
+  | 'falsy'
+  | 'exists'
+  | 'notExists'
+  | 'greaterThan'
+  | 'greaterThanOrEqual'
+  | 'lessThan'
+  | 'lessThanOrEqual';
+
+export type StoredWorkflowEdgeCondition =
+  | {
+      kind: 'predicate';
+      path: string;
+      operator: StoredWorkflowEdgePredicateOperator;
+      value?: unknown;
+    }
+  | { kind: 'fallback' };
+
 export type StoredWorkflowEdge = {
   id: string;
   sourceNodeId: string;
   sourcePort: string;
   targetNodeId: string;
   targetPort: string;
+  condition?: StoredWorkflowEdgeCondition;
+  maxTraversals?: number;
+};
+
+export type StoredWorkflowScheduledInvocation = {
+  nodeId: string;
+  input: Record<string, unknown>;
+};
+
+export type StoredWorkflowActiveInvocation = StoredWorkflowScheduledInvocation & {
+  nodeRunId: string;
+  position: number;
+};
+
+export type StoredWorkflowExecutionState = {
+  ready: StoredWorkflowScheduledInvocation[];
+  pendingInputs: Record<string, Record<string, unknown[]>>;
+  edgeTraversals: Record<string, number>;
+  latestOutputs: Record<string, unknown>;
+  terminalOutputs: Record<string, unknown>;
+  nextPosition: number;
+  active?: StoredWorkflowActiveInvocation;
 };
 
 export type StoredWorkflowDefinition = {
@@ -146,7 +189,7 @@ export const homeBoardAssignments = sqliteTable('home_board_assignments', {
 
 export const workflowRuns = sqliteTable('workflow_runs', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), workflowId: text('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }), workflowVersionId: text('workflow_version_id').notNull().references(() => workflowVersions.id, { onDelete: 'restrict' }),
-  status: text('status').$type<'queued' | 'running' | 'waiting_for_input' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out'>().notNull().default('queued'), input: text('input', { mode: 'json' }).$type<unknown>().notNull(), result: text('result', { mode: 'json' }).$type<unknown>(), currentNodeId: text('current_node_id'),
+  status: text('status').$type<'queued' | 'running' | 'waiting_for_input' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out'>().notNull().default('queued'), input: text('input', { mode: 'json' }).$type<unknown>().notNull(), result: text('result', { mode: 'json' }).$type<unknown>(), executionState: text('execution_state', { mode: 'json' }).$type<StoredWorkflowExecutionState>(), currentNodeId: text('current_node_id'),
   createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'), finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
 });
 

@@ -32,7 +32,7 @@ import {
   type StoredWorkflowDefinition,
   type StoredWorkflowEditOperation,
 } from '@worklite/db';
-import { listWorkflowNodeCapabilities, topologicallySortWorkflow, type WorkflowNodeCapability, type WorkflowPortDefinition } from '@worklite/workflow-engine';
+import { listWorkflowNodeCapabilities, validateWorkflowControlFlow, workflowEdgeRequiresComparisonValue, type WorkflowNodeCapability, type WorkflowPortDefinition } from '@worklite/workflow-engine';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { WorkflowSchedulesService } from './workflow-schedules.service';
@@ -354,7 +354,15 @@ function buildPlanOperations(current: StoredWorkflowDefinition, plan: WorkflowPl
     const sourcePort = edge.sourcePort ?? sourceCapability?.outputs[0]?.name;
     const targetPort = edge.targetPort ?? targetCapability?.inputs.find((port) => port.required)?.name ?? targetCapability?.inputs[0]?.name;
     if (!sourcePort || !targetPort) throw new BadRequestException('The Workflow Plan edge must connect declared ports.');
-    return { id: `we_${randomUUID()}`, sourceNodeId, sourcePort, targetNodeId, targetPort };
+    return {
+      id: `we_${randomUUID()}`,
+      sourceNodeId,
+      sourcePort,
+      targetNodeId,
+      targetPort,
+      ...(edge.condition ? { condition: structuredClone(edge.condition) } : {}),
+      ...(edge.maxTraversals !== undefined ? { maxTraversals: edge.maxTraversals } : {}),
+    };
   });
   return [
     ...current.edges.map((edge) => ({ type: 'removeEdge' as const, edgeId: edge.id })),
@@ -447,6 +455,7 @@ function validateDefinition(definition: StoredWorkflowDefinition, requireComplet
     if (!portsCompatible(sourcePort, targetPort)) throw new BadRequestException('The workflow edge connects incompatible ports.');
     if (!targetPort.multiple && inputs.has(inputKey)) throw new BadRequestException('A workflow input port accepts only one edge.');
     if (definition.edges.some((candidate) => candidate.id !== edge.id && candidate.sourceNodeId === edge.sourceNodeId && candidate.sourcePort === edge.sourcePort && candidate.targetNodeId === edge.targetNodeId && candidate.targetPort === edge.targetPort)) throw new BadRequestException('The workflow contains a duplicate connection.');
+    validateEdgeControlFlow(edge);
     edgeIds.add(edge.id);
     inputs.add(inputKey);
   }
@@ -461,10 +470,39 @@ function validateDefinition(definition: StoredWorkflowDefinition, requireComplet
   }
 
   try {
-    topologicallySortWorkflow(definition);
+    validateWorkflowControlFlow(definition);
   } catch (error) {
     throw new BadRequestException(error instanceof Error ? error.message : 'The workflow graph is invalid.');
   }
+}
+
+
+const WORKFLOW_EDGE_OPERATORS = new Set([
+  'equals',
+  'notEquals',
+  'truthy',
+  'falsy',
+  'exists',
+  'notExists',
+  'greaterThan',
+  'greaterThanOrEqual',
+  'lessThan',
+  'lessThanOrEqual',
+]);
+
+function validateEdgeControlFlow(edge: StoredWorkflowDefinition['edges'][number]): void {
+  if (edge.maxTraversals !== undefined && (!Number.isInteger(edge.maxTraversals) || edge.maxTraversals < 1)) throw new BadRequestException('Workflow edge maximum traversals must be a positive integer.');
+  if (edge.condition === undefined) return;
+  if (!isRecord(edge.condition) || (edge.condition.kind !== 'predicate' && edge.condition.kind !== 'fallback')) throw new BadRequestException('Workflow edge condition kind must be predicate or fallback.');
+  if (edge.condition.kind === 'fallback') {
+    if ('path' in edge.condition || 'operator' in edge.condition || 'value' in edge.condition) throw new BadRequestException('Fallback workflow edges cannot define predicate fields.');
+    return;
+  }
+  if (typeof edge.condition.path !== 'string' || !/^(?:\$|\$\.[^.\s]+(?:\.[^.\s]+)*|(?!\$)[^.\s]+(?:\.[^.\s]+)*)$/.test(edge.condition.path.trim())) throw new BadRequestException('Workflow edge predicate path must be a dot-delimited output path.');
+  if (typeof edge.condition.operator !== 'string' || !WORKFLOW_EDGE_OPERATORS.has(edge.condition.operator)) throw new BadRequestException('Workflow edge predicate operator is not supported.');
+  const requiresValue = workflowEdgeRequiresComparisonValue(edge.condition.operator);
+  if (requiresValue && !('value' in edge.condition)) throw new BadRequestException('The workflow edge predicate operator requires a comparison value.');
+  if (!requiresValue && 'value' in edge.condition) throw new BadRequestException('The workflow edge predicate operator cannot define a comparison value.');
 }
 
 function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, type: string, requireCompleteAgents: boolean): void {

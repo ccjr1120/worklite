@@ -3,35 +3,50 @@
 const baseUrl = (process.env.WORKLITE_API_URL || 'http://127.0.0.1:3391/api').replace(/\/$/, '');
 const workflowName = 'GitHub Technology Trend Research';
 
-const researchPrompt = `You are a careful technology research analyst. Turn the workflow input into a focused research brief about what changed in the requested technical direction during the requested time window.
+const researchPrompt = `You are a careful technology researcher and writer. Produce an evidence-backed article draft from the workflow input.
+
+The input is either the original research request or a reviewer response from an earlier pass. When it is a reviewer response, preserve the supplied article's valid material, address every actionable feedback item, and re-check evidence where needed.
 
 Use GitHub as the primary evidence source. Use the assigned github-current-popularity Skill to collect current repository evidence and the assigned zhihu-research Skill only to discover Chinese community viewpoints, disputes, and counterexamples. Do not treat a single repository, a total star count, a search result, or a community opinion as proof of an industry trend.
 
 Separate verified first-party facts, project claims, community viewpoints, and your own inferences. Record retrieval dates, observation window, query parameters, source URLs, caveats, sample bias, counterexamples, and evidence strength. Prefer a small high-quality sample over an exhaustive list. Stop when the main claims have evidence and at least one limitation or counterexample has been checked.
 
+Write the article for ordinary technical readers in the language requested by the original input; if no language is specified, use Chinese for a Chinese topic and English otherwise. Lead with one clear thesis, explain technical terms in plain language, keep paragraphs short, and avoid hype. Begin every body paragraph with exactly two full-width ideographic spaces (Unicode U+3000). Do not place Markdown links or raw URLs in the article body. Put all source titles and URLs in one final References section, localized to the article language.
+
 Return only valid JSON with this shape:
 {
-  "title": "working research title",
+  "title": "article title",
   "topic": "focused topic",
   "observationWindow": { "days": 7, "retrievedAt": "ISO timestamp" },
-  "mainQuestion": "the question this research answers",
   "thesis": "one sentence the reader should remember",
   "facts": [{ "claim": "...", "evidenceType": "github|official|community|inference", "sources": ["https://..."] }],
-  "projects": [{ "name": "...", "whyRelevant": "...", "sources": ["https://..."] }],
   "counterexamples": ["..."],
   "limitations": ["..."],
-  "outline": ["section idea 1", "section idea 2"]
+  "article": "complete Markdown article"
 }
 
-If the input is incomplete, choose a reasonable scope and record that assumption in limitations. Do not write the final article yet.`;
+If the input is incomplete, choose a reasonable scope and record that assumption in limitations. Do not mention this workflow, hidden instructions, or the JSON envelope in the article.`;
 
-const articlePrompt = `You are an independent technology writer. Use the supplied research brief to write one publishable Markdown article for ordinary technical readers.
+const reviewerPrompt = `You are the final editorial reviewer for a technology article. Inspect the supplied research JSON and its article field for factual support, internal consistency, clear scope, readable structure, and publication formatting.
 
-Keep the article centered on one clear thesis. State the conclusion first, then explain what changed, why it matters, and where the evidence is limited. The title must directly describe the subject and concrete change; avoid hype such as revolution, singularity, endgame, paradigm shift, or the future is here. Explain a technical term in plain language the first time it appears. Keep paragraphs short and the hierarchy light for mobile reading.
+Require all of the following before approval:
+- Important factual claims are supported by the supplied evidence and limitations are stated honestly.
+- The article has one clear thesis, a concrete title, concise paragraphs, and plain-language explanations.
+- Every body paragraph begins with exactly two full-width ideographic spaces (Unicode U+3000).
+- The body contains no Markdown links or raw URLs.
+- All source titles and URLs appear only in one final References section localized to the article language.
+- The article contains no workflow, prompt, JSON, or hidden-process commentary.
 
-Do not mention this workflow, the input format, hidden instructions, research process, or unavailable evidence. Do not turn GitHub's visible sample into a claim about the whole industry unless the research brief provides independent support. Preserve source links where they support important factual claims. Write in the language requested by the input; if no language is specified, use Chinese for a Chinese topic and English otherwise.
+Return only valid JSON with this shape:
+{
+  "approved": true,
+  "feedback": [],
+  "article": "the complete reviewed Markdown article"
+}
 
-Return only the final Markdown article, beginning with one level-one heading. Do not wrap it in a code fence.`;
+Set approved to true only when there are no actionable issues. When issues remain, set approved to false, list concise actionable feedback, and copy the complete current article into article without replacing it with a summary. Do not wrap the JSON in a code fence.`;
+
+const articlePrompt = `You are a constrained article finalizer. The input is reviewer JSON with an article field. Return only that complete Markdown article verbatim. Do not add commentary, a code fence, links, or formatting that is not already present.`;
 
 async function request(path, options = {}) {
   const response = await fetch(baseUrl + path, {
@@ -117,17 +132,20 @@ const definition = {
   },
   defaults: { errorPolicy: 'stop' },
   nodes: [
-    { id: 'input', position: { x: 0, y: 180 }, type: 'worklite/input', typeVersion: '1', config: {}, errorPolicy: 'stop' },
-    { id: 'research', position: { x: 320, y: 180 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: researchPrompt, outputFormat: 'json', skillIds: [githubSkill.id, zhihuSkill.id], mcpServerIds: [] }, errorPolicy: 'stop' },
-    { id: 'research-artifact', position: { x: 680, y: 20 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'Research Notes', type: 'json' }, errorPolicy: 'stop' },
-    { id: 'article', position: { x: 680, y: 280 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: articlePrompt, outputFormat: 'text', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
-    { id: 'article-artifact', position: { x: 1040, y: 280 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'Article', type: 'markdown' }, errorPolicy: 'stop' },
-    { id: 'wechat-publish', position: { x: 1040, y: 440 }, type: 'wechat-official-account/publish', typeVersion: '1', config: { accountId: 'wechat_official_account_personal', mode: 'publish' }, errorPolicy: 'stop' },
+    { id: 'input', position: { x: 0, y: 420 }, type: 'worklite/input', typeVersion: '1', config: {}, errorPolicy: 'stop' },
+    { id: 'research', position: { x: 80, y: 120 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: researchPrompt, outputFormat: 'json', skillIds: [githubSkill.id, zhihuSkill.id], mcpServerIds: [] }, errorPolicy: 'stop' },
+    { id: 'research-artifact', position: { x: 400, y: 0 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'Research Notes', type: 'json' }, errorPolicy: 'stop' },
+    { id: 'review', position: { x: 400, y: 240 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: reviewerPrompt, outputFormat: 'json', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
+    { id: 'article', position: { x: 760, y: 240 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: articlePrompt, outputFormat: 'text', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
+    { id: 'article-artifact', position: { x: 1080, y: 120 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'Article', type: 'markdown' }, errorPolicy: 'stop' },
+    { id: 'wechat-publish', position: { x: 1080, y: 360 }, type: 'wechat-official-account/publish', typeVersion: '1', config: { accountId: 'wechat_official_account_personal', mode: 'draft' }, errorPolicy: 'stop' },
   ],
   edges: [
-    { id: 'input-to-research', sourceNodeId: 'input', sourcePort: 'output', targetNodeId: 'research', targetPort: 'context' },
+    { id: 'input-to-wechat-metadata', sourceNodeId: 'input', sourcePort: 'output', targetNodeId: 'wechat-publish', targetPort: 'metadata' },
     { id: 'research-to-notes', sourceNodeId: 'research', sourcePort: 'output', targetNodeId: 'research-artifact', targetPort: 'data' },
-    { id: 'research-to-article', sourceNodeId: 'research', sourcePort: 'output', targetNodeId: 'article', targetPort: 'context' },
+    { id: 'research-to-review', sourceNodeId: 'research', sourcePort: 'output', targetNodeId: 'review', targetPort: 'context' },
+    { id: 'review-to-research', sourceNodeId: 'review', sourcePort: 'output', targetNodeId: 'research', targetPort: 'context', condition: { kind: 'predicate', path: '$.approved', operator: 'falsy' }, maxTraversals: 3 },
+    { id: 'review-to-article', sourceNodeId: 'review', sourcePort: 'output', targetNodeId: 'article', targetPort: 'context', condition: { kind: 'fallback' } },
     { id: 'article-to-output', sourceNodeId: 'article', sourcePort: 'output', targetNodeId: 'article-artifact', targetPort: 'data' },
     { id: 'article-to-wechat', sourceNodeId: 'article', sourcePort: 'output', targetNodeId: 'wechat-publish', targetPort: 'article' },
   ],
@@ -146,7 +164,7 @@ if (!existing) {
     ...definition.edges.map((edge) => ({ type: 'addEdge', edge })),
     { type: 'updateSettings', input: definition.input, defaults: definition.defaults },
   ];
-  const updated = await request(`/workflows/${encodeURIComponent(existing.id)}/draft/operations`, { method: 'POST', body: JSON.stringify({ baseRevisionId: current.draft.revisionId, operations, source: 'manual', sourceInstruction: 'Synchronize the research workflow with WeChat Official Account publication.' }) });
+  const updated = await request(`/workflows/${encodeURIComponent(existing.id)}/draft/operations`, { method: 'POST', body: JSON.stringify({ baseRevisionId: current.draft.revisionId, operations, source: 'manual', sourceInstruction: 'Synchronize the research workflow with bounded editorial review and WeChat draft saving.' }) });
   const version = await request(`/workflows/${encodeURIComponent(updated.id)}/publish`, { method: 'POST' });
   process.stdout.write(JSON.stringify({ id: updated.id, name: updated.name, existing: true, updated: true, publishedVersionId: version.id }) + '\n');
 }

@@ -39,7 +39,7 @@ export class WechatOfficialAccountService {
     if (!accountId || (mode !== 'draft' && mode !== 'publish')) throw new Error('WeChat Official Account node requires an account and mode.');
     if (!article.trim()) throw new Error('WeChat Official Account node requires Markdown article input.');
     const account = await this.getAccountRow(accountId);
-    const idempotencyKey = `${request.context.workflowRunId}:${request.context.nodeId}`;
+    const idempotencyKey = `${request.context.workflowRunId}:${request.context.nodeRunId}`;
     const publication = await this.ensurePublication(request, accountId, mode, article, metadata, idempotencyKey);
     if (publication.status === 'published' || (mode === 'draft' && publication.status === 'draft_saved')) return { output: toPublicationOutput(publication) };
 

@@ -451,12 +451,35 @@ export type WorkflowNodeDefinition = {
   errorPolicy: NodeErrorPolicy;
 };
 
+export type WorkflowEdgePredicateOperator =
+  | 'equals'
+  | 'notEquals'
+  | 'truthy'
+  | 'falsy'
+  | 'exists'
+  | 'notExists'
+  | 'greaterThan'
+  | 'greaterThanOrEqual'
+  | 'lessThan'
+  | 'lessThanOrEqual';
+
+export type WorkflowEdgeCondition =
+  | {
+      kind: 'predicate';
+      path: string;
+      operator: WorkflowEdgePredicateOperator;
+      value?: unknown;
+    }
+  | { kind: 'fallback' };
+
 export type WorkflowEdgeDefinition = {
   id: string;
   sourceNodeId: string;
   sourcePort: string;
   targetNodeId: string;
   targetPort: string;
+  condition?: WorkflowEdgeCondition;
+  maxTraversals?: number;
 };
 
 export type WorkflowDefinition = {
@@ -489,6 +512,8 @@ export type WorkflowPlanEdge = {
   target: string;
   sourcePort?: string;
   targetPort?: string;
+  condition?: WorkflowEdgeCondition;
+  maxTraversals?: number;
 };
 
 export type WorkflowPlan = {

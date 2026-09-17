@@ -214,7 +214,33 @@
     "newElementLabel": "New element",
     "removeDashboardElement": "Remove element",
     "dashboardElementCount_one": "{{count}} element",
-    "dashboardElementCount_other": "{{count}} elements"
+    "dashboardElementCount_other": "{{count}} elements",
+    "edgeMode": "Route mode",
+    "edgeModes": {
+      "always": "Always",
+      "condition": "Condition",
+      "fallback": "Fallback"
+    },
+    "edgeOutputPath": "Output path",
+    "edgeOperator": "Operator",
+    "edgeComparisonValue": "JSON comparison value",
+    "edgeComparisonInvalid": "Enter a valid JSON comparison value.",
+    "edgeFallbackHint": "This route runs only when no always or conditional route from the same node invocation matches.",
+    "edgeMaxTraversals": "Maximum traversals",
+    "edgeMaxTraversalsHint": "Set a positive limit to bound a loop. Leave blank for an unbounded route.",
+    "edgeTraversalLabel": "max {{count}}",
+    "edgeOperators": {
+      "equals": "equals",
+      "notEquals": "does not equal",
+      "truthy": "is truthy",
+      "falsy": "is falsy",
+      "exists": "exists",
+      "notExists": "does not exist",
+      "greaterThan": "is greater than",
+      "greaterThanOrEqual": "is greater than or equal to",
+      "lessThan": "is less than",
+      "lessThanOrEqual": "is less than or equal to"
+    }
   },
   "versions": {
     "title": "Versions",
@@ -225,10 +251,10 @@
     },
     "columns": {
       "version": "Version",
-          "published": "Published",
-          "publisher": "Publisher",
-          "steps": "Steps",
-          "recentRun": "Recent run"
+      "published": "Published",
+      "publisher": "Publisher",
+      "steps": "Steps",
+      "recentRun": "Recent run"
     }
   },
   "importJson": "Import JSON",

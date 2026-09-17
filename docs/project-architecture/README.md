@@ -20,7 +20,7 @@ The workspace assistant can also inspect the workspace and create Provider, Skil
 2. Keep applications and shared packages in a TypeScript monorepo.
 3. Use one installation-owned workspace as the resource-isolation boundary.
 4. Keep published versions immutable and bind runs to explicit versions.
-5. Model workflows as versioned directed acyclic dataflow graphs with explicit nodes, ports, edges, and persisted canvas layout.
+5. Model workflows as versioned directed control-flow dataflow graphs with explicit nodes, ports, conditional edges, bounded loop edges, and persisted canvas layout.
 6. Execute workflow runs asynchronously without blocking HTTP requests; the initial local runtime may execute them inside the API process.
 7. Treat uploaded skills and MCP responses as untrusted.
 8. Keep domain logic independent from controllers and queue processors.
@@ -302,19 +302,23 @@ Assigned MCP tools are resolved lazily when an Agent turn starts and are exposed
 
 ### Research Workflow Seed
 
-WorkLite may provide repeatable seed scripts for concrete Workflow configurations that use existing first-party nodes and workspace resources. The GitHub Technology Trend Research Workflow is one such configuration: it uses Workflow Input, two embedded Agent nodes, and two Artifact nodes to separate research evidence from the final article. It does not introduce a new node type, standalone Agent resource, filesystem writer, or external credential.
+WorkLite may provide repeatable seed scripts for concrete Workflow configurations that use existing first-party nodes and workspace resources. The GitHub Technology Trend Research Workflow is one such configuration: it uses Workflow Input, three embedded Agent nodes, and two Artifact nodes to separate iterative research evidence, editorial review, and the final article. It does not introduce a new node type, standalone Agent resource, filesystem writer, or external credential.
 
-The seed resolves the existing workspace model provider and named Skills at creation time. It must not copy credentials from external agent configuration files. The research Agent may use the `github-current-popularity` and `zhihu-research` Skills; the writing Agent consumes the research Agent output and produces Markdown. Successful Runs persist a JSON Research Notes Artifact and a Markdown Article Artifact. The seed also fans the article out to the built-in WeChat Official Account publish node in direct-publish mode; therefore it creates or updates the draft and publishes a new immutable Workflow version. Direct publishing suspends at the persisted WeChat confirmation gate. The Workflow has no Timer or Dashboard node unless a later product decision explicitly adds those capabilities.
+The seed resolves the existing workspace model provider and named Skills at creation time. It must not copy credentials from external agent configuration files. The research-and-writing Agent may use the `github-current-popularity` and `zhihu-research` Skills and returns structured evidence plus a complete Markdown draft. The reviewer Agent returns structured approval, actionable feedback, and the complete reviewed article. A rejected review follows a bounded edge back to the research-and-writing Agent at most three times; approval, or exhaustion of that bound, follows the fallback edge to a constrained article-finalizer Agent. Each research or revision pass persists a JSON Research Notes Artifact, and the finalizer produces the Markdown Article Artifact. The article also fans out to the built-in WeChat Official Account node in draft mode, so the Workflow saves a WeChat draft without a final publication confirmation. The seed creates or updates the editable draft and publishes a new immutable WorkLite Workflow version. The Workflow has no Timer or Dashboard node unless a later product decision explicitly adds those capabilities.
 
 This seed is an operational convenience, not a compatibility layer or a new built-in resource category.
 
 ### Workflow Graph Model
 
-A workflow is a directed acyclic dataflow graph of generic nodes and explicit port-to-port edges. Each node has a stable identifier, Node Type identifier and version, JSON configuration, persisted canvas coordinates, and an error policy limited to `stop` or `retry`. Each edge has a stable identifier, source node and port, and target node and port.
+A workflow is a directed control-flow dataflow graph of generic nodes and explicit port-to-port edges. Each node has a stable identifier, Node Type identifier and version, JSON configuration, persisted canvas coordinates, and an error policy limited to `stop` or `retry`. Each edge has a stable identifier, source node and port, target node and port, an optional structured condition, and an optional positive `maxTraversals` bound.
 
-The graph permits at most one incoming edge for each named input port and any number of outgoing edges from an output port. This supports fixed multi-input dependency assembly and data fan-out without defining conditions, loops, dynamic joins, or parallel execution. Cycles, self-connections, duplicate connections, and connections to unavailable or type-incompatible ports are invalid. A connected input receives its source node's committed output.
+The graph permits at most one incoming edge for each named input port and any number of outgoing edges from an output port. An edge without a condition always matches. A predicate condition reads a dot-delimited path from the source node's committed output and compares it with a JSON value through one of the supported operators: `equals`, `notEquals`, `truthy`, `falsy`, `exists`, `notExists`, `greaterThan`, `greaterThanOrEqual`, `lessThan`, or `lessThanOrEqual`. A fallback condition matches only when no unconditional or predicate edge from the same source execution matches. Conditions are data, not executable JavaScript, and never use `eval` or user-supplied code.
 
-The API validates the complete graph and the Workflow Engine derives a deterministic topological order, using definition order as the stable tie breaker. Before a node executes, the runtime gathers every connected predecessor output into an object keyed by target port. Ready nodes execute one at a time in that order. Every node executes at most once. The final workflow result is an object keyed by leaf node identifier so fan-out results remain explicit. Large values are represented by Artifact references rather than copied into every node record. Only successful `worklite/artifact` node execution creates an Artifact record.
+Cycles are valid only when every possible cycle crosses at least one edge with a finite `maxTraversals` value. Validation removes all bounded edges and requires the remaining graph to be acyclic, which guarantees that an execution cannot remain inside an unbounded cycle. Self-connections, duplicate connections, connections to unavailable or type-incompatible ports, non-positive traversal bounds, and multiple incoming edges to a single-value input port remain invalid. Existing edges with no condition or traversal bound remain ordinary unconditional forward edges.
+
+The API validates the complete graph and the Workflow Engine executes it through a deterministic sequential token scheduler. Nodes with no unbounded incoming edges and no connected required inputs seed the ready queue in definition order, so an Agent whose only incoming context edge is bounded still receives an initial invocation from Workflow input without prematurely starting required-input nodes. A matching edge sends the source output to its named target port. A node becomes ready when every connected required input port has one token; executing it consumes one token from each connected input used for that invocation. Optional connected inputs are consumed when available, while an Agent `context` with no unbounded incoming edge uses the Workflow Run input for its initial invocation and consumes bounded-loop tokens on later invocations. Definition order is the stable tie breaker whenever multiple nodes become ready. A node may execute multiple times in one Run, and every invocation creates a distinct ordered NodeRun.
+
+The scheduler persists its ready queue, pending input tokens, edge traversal counts, latest outputs, terminal outputs, and next execution position in the WorkflowRun. Human-gated nodes suspend without discarding this state and resume the same invocation after input completes. A Run succeeds when the ready queue is empty and no node can become ready. Its final result is keyed by nodes whose latest successful invocation did not traverse an outgoing edge. Large values are represented by Artifact references rather than copied into every node record. Only successful `worklite/artifact` node execution creates an Artifact record.
 
 The first-party Node Types are discovered from the trusted registered node catalog at runtime. Capability metadata includes the public type and version, display name, purpose, input and output port metadata, and configuration schema. Only registered/trusted node types are executable or usable in a workflow; this first phase does not load arbitrary remote node code or frontend components. The current first-party Node Types are:
 
@@ -323,7 +327,7 @@ The first-party Node Types are discovered from the trusted registered node catal
 - `worklite/artifact` accepts a required `data` input, exposes an Artifact reference through `output`, and owns a non-empty `name` plus a `text`, `markdown`, or `json` artifact `type`.
 - `worklite/dashboard` accepts `data`, exposes the committed upstream value through `output`, and carries the immutable Home board layout. The board format is generic and compositional: `layout.header`, `layout.main`, and `layout.footer` each contain ordered elements of kind `text`, `count`, `metric`, or `list`. A `text` element carries static text; a `count` element carries a label and resolves to the output item total; a `metric` element carries a label plus a field key and type and reads that key from an object output; a `list` element carries a `titleKey` and display `{ key, label, type }` fields with `text`, `number`, `boolean`, `datetime`, or `url` types, and its items are the output array or the single object output. A `url` field is not rendered as a table column: when an item's value for it is an `http(s)` string, the row navigates to that value. The committed output must be a JSON object or an array of JSON objects. Home renders the board directly on its card; the first list element is the card's paginated table content. Unknown fields are ignored, missing fields display explicit empty values, and non-object list items render as bounded raw JSON. Rendering is tolerant: contract mismatches never fail the board or the node.
 
-Publication requires every Workflow Agent node to contain a valid public model id and to reference only Skills and MCP servers from the workspace. Agent `context` is optional; when no incoming edge exists, the Agent uses the Workflow Run input as its context. Context accepts arbitrary JSON-compatible values. Conditions, loops, dynamic joins, and concurrent branch scheduling require separate architecture decisions.
+Publication requires every Workflow Agent node to contain a valid public model id and to reference only Skills and MCP servers from the workspace. Agent `context` is optional; when no unbounded incoming edge exists, the Agent uses the Workflow Run input for its initial invocation. A later bounded-loop traversal supplies its committed source output as the next context value. Context accepts arbitrary JSON-compatible values. Dynamic joins and concurrent branch scheduling require separate architecture decisions.
 
 Graph definitions use `schemaVersion: 4`. The multi-port increment intentionally provides no schema-version adapter or migration for version 1 or version 2 definitions. Earlier drafts and published versions are not editable, publishable, or executable after the change. The personal workspace contains no Workflow records when this increment is introduced, so no persisted workflow data is rewritten.
 
@@ -331,7 +335,7 @@ Graph definitions use `schemaVersion: 4`. The multi-port increment intentionally
 
 The editor uses `@xyflow/react` with node dragging, edge creation and reconnection, panning, zooming, and fit-to-view. Users add nodes from a palette and configure node-owned fields directly through React-rendered nodes or the contextual inspector. The inspector remains the complete keyboard-accessible path for reviewing configuration and removing graph state. A side-panel AI assistant may modify the workflow from natural-language instructions. Before proposing a graph, System Helper reads the current platform snapshot and chooses only the dynamically reported node capabilities and workspace resources. The assistant produces a logical Workflow Plan keyed by model-chosen node keys; it does not generate durable node IDs, canvas positions, or direct database state.
 
-The server normalizes each logical plan into generated node identifiers, deterministic canvas positions, formal edges, and validated node configuration. It validates registered node types, configuration schemas, port existence and compatibility, workspace Skill/MCP references, and DAG constraints before converting the plan into the existing structured operations.
+The server normalizes each logical plan into generated node identifiers, deterministic canvas positions, formal edges, and validated node configuration. It validates registered node types, configuration schemas, port existence and compatibility, structured edge conditions, bounded-cycle constraints, workspace Skill/MCP references, and graph constraints before converting the plan into the existing structured operations.
 
 AI edits are validated structured operations: add, delete, update, or move a node; add or delete an edge; or update workflow settings. The AI cannot write arbitrary workflow state directly. The server validates and atomically applies operations.
 
@@ -389,13 +393,15 @@ Runs are asynchronous because they may take minutes or longer. The initial local
 
 ```text
 Create run
-  -> persist WorkflowRun
+  -> persist WorkflowRun and scheduler state
   -> schedule in-process job
-  -> validate the DAG and derive a deterministic topological order
-  -> resolve and execute nodes through the Node Type registry
-  -> persist NodeRun and events
+  -> validate edge conditions and bounded-cycle constraints
+  -> dequeue one ready node invocation
+  -> resolve and execute it through the Node Type registry
+  -> evaluate outgoing edges and enqueue newly ready invocations
+  -> persist scheduler state, NodeRun, and events
   -> publish progress
-  -> persist final output or failure
+  -> persist final output or failure when the queue is empty
 ```
 
 The API returns a `runId` immediately. The browser loads run state through the API and subscribes to Server-Sent Events. Reconnecting with the same `runId` restores current state and continues event delivery. Because the local executor has no durable lease for active model or command work, database startup changes persisted `queued` and `running` Workflow Runs and Node Runs to `failed` with a stable restart explanation. Persisted `waiting_for_input` Runs remain suspended. Their browser action is marked expired on restart and can be refreshed before the Run continues.
@@ -408,11 +414,11 @@ queued -> running -> succeeded
                   -> timed_out
 ```
 
-A `WorkflowRun` stores its workspace, workflow version, input, current node, timestamps, final result, and status. A `NodeRun` stores its Node Type identity, configuration snapshot, mapped input, committed output or Artifact references, status, duration, retry count, and plugin-specific execution references. Run progress uses generic node lifecycle events; plugin-specific events are namespaced and carry immutable data snapshots. The detailed Run contract exposes ordered Node Runs as execution logs, including their status, timing, retry count, and credential-safe failure reason. It also reports whether the immutable WorkflowVersion contains an Artifact node so clients omit Artifact presentation entirely for versions that cannot produce Artifacts while retaining an empty Artifact state for eligible versions that produced none.
+A `WorkflowRun` stores its workspace, workflow version, input, current node, timestamps, final result, status, and internal scheduler state. A `NodeRun` stores one node invocation's Node Type identity, mapped input, committed output or Artifact references, status, duration, retry count, and plugin-specific execution references. Repeated loop invocations therefore produce separate NodeRun rows for the same workflow node identifier. Run progress uses generic node lifecycle events; plugin-specific events are namespaced and carry immutable data snapshots. The detailed Run contract exposes ordered Node Runs as execution logs, including their status, timing, retry count, and credential-safe failure reason. It also reports whether the immutable WorkflowVersion contains an Artifact node so clients omit Artifact presentation entirely for versions that cannot produce Artifacts while retaining an empty Artifact state for eligible versions that produced none.
 
 Runtime requirements include node and workflow timeouts, cooperative cancellation, worker heartbeats or leases, persisted intermediate results, classified transient retries, idempotency for retryable external side effects, and per-workspace concurrency, duration, and model-usage quotas.
 
-Completed and suspended node runs are retained. The API-local executor resolves registered node types, persists each node transition, persists Artifacts during successful Artifact-node execution, and publishes replayable run events. Continuation reloads committed predecessor outputs from successful Node Runs and re-enters only the suspended node. Graph branches execute sequentially in the first increment. Resume from a failed node remains deferred. A durable queue such as BullMQ remains a later boundary for multi-instance execution, concurrent branches, or stronger leasing; the single-process runtime uses SQLite-backed suspension and continuation for human-gated nodes.
+Completed and suspended node runs are retained. The API-local executor resolves registered node types, persists each node transition, persists Artifacts during successful Artifact-node execution, and publishes replayable run events. Continuation reloads the persisted scheduler state and re-enters only the suspended invocation. A pre-scheduler Run that already contains Node Runs but has no scheduler state fails explicitly instead of reconstructing tokens or rerunning predecessors; no compatibility adapter or in-flight Run migration is provided. Conditional branches and loop iterations execute sequentially; concurrent branch execution remains deferred. Resume from a failed node remains deferred. A durable queue such as BullMQ remains a later boundary for multi-instance execution, concurrent branches, or stronger leasing; the single-process runtime uses SQLite-backed suspension and continuation for human-gated nodes.
 
 Initial run endpoints are:
 
@@ -554,7 +560,7 @@ The MCP client, skill SDK, and observability code may begin inside applications 
 
 ## Deferred Capabilities
 
-- Conditional branches, joins, and loops.
+- Dynamic joins that merge an unknown number of runtime branches.
 - Concurrent branch execution.
 - Dynamic script-authored workflow orchestration as the primary Workflow model.
 - A third-party plugin marketplace or untrusted plugin execution.
@@ -571,9 +577,18 @@ Adding a deferred capability requires an approved architecture change.
 
 Workflows support a versioned portable JSON envelope for moving editable definitions between WorkLite workspaces. Export reads the current draft and emits `format: "worklite.workflow"`, `version: 1`, the workflow name, and its graph definition. Database identifiers, workspace identifiers, run history, schedules, credentials, and secrets are excluded. Workflow Agent public model ids and system prompts remain embedded. Skill and MCP server identifiers in Agent node configuration are replaced by workspace-portable references using resource names. Import resolves those names in the current workspace, rejects missing references, creates a draft, and never publishes or enables schedules.
 
-Import validates the envelope and workflow DAG, resolves every Agent and Skill reference against the destination workspace, and creates a new mutable draft. Missing or ambiguous references reject the entire import. Import never overwrites an existing workflow, publishes a version, or enables a schedule.
+Import validates the envelope, structured edge conditions, and bounded-cycle constraints, resolves every Skill and MCP server reference against the destination workspace, and creates a new mutable draft. Missing or ambiguous references reject the entire import. Import never overwrites an existing workflow, publishes a version, or enables a schedule.
 
 ## Changelog
+### 2026-09-16 - Conditional Edges and Bounded Loops
+
+- Extended Workflow edges with structured output predicates, fallback routing, and optional positive traversal bounds without introducing executable expressions.
+- Replaced one-pass topological execution with a deterministic sequential token scheduler whose queue, pending inputs, traversal counters, and terminal outputs are persisted in each WorkflowRun.
+- Allowed repeated node invocations with one ordered NodeRun per invocation, seeded nodes with no unbounded incoming edges and no connected required inputs for their initial invocation, required every cycle to cross at least one bounded edge, and intentionally rejected resumptions that contain legacy Node Runs without persisted scheduler state.
+- Kept existing unconditional acyclic edges valid, retained one incoming connection per single-value port, and continued to defer dynamic joins and concurrent branch execution.
+- Added edge-inspector configuration and condition or loop labels to the existing React Flow editor instead of adding a second orchestration surface or LangGraph runtime.
+- Updated the repeatable research seed with up to three bounded editorial feedback traversals, constrained article finalization, reference-only article links, and WeChat draft saving.
+
 ### 2026-09-16 - Responses Agent Tool Compatibility
 
 - Fixed Agent system prompt delivery by replacing the unrecognized top-level `instructions` parameter with the AI SDK `system` parameter so both Chat Completions and Responses providers receive the prompt.

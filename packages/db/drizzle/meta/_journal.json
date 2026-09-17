@@ -85,6 +85,13 @@
       "when": 1789516800000,
       "tag": "0012_pending_workflow_wechat",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1789545600000,
+      "tag": "0013_workflow_control_flow",
+      "breakpoints": true
     }
   ]
 }
