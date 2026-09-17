@@ -1,5 +1,6 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
 import { deflateSync } from 'node:zlib';
 import { Lexer, type Token, type Tokens } from 'marked';
 import { and, eq, ne } from 'drizzle-orm';
@@ -329,25 +330,92 @@ async function fillArticle(page: Page, title: string, article: string): Promise<
   await setCoverImage(page);
 }
 
-async function saveDraft(page: Page): Promise<string | null> {
-  const responsePromise = page.waitForResponse(
-    (response) => response.url().includes('operate_appmsg') && response.request().method() === 'POST',
-    { timeout: 30_000 },
-  );
-  await clickByText(page, ['Save as draft', 'Save', '\u4fdd\u5b58\u4e3a\u8349\u7a3f', '\u4fdd\u5b58']);
-  const response = await responsePromise;
-  const body = await response.json().catch(() => null);
-  await page.waitForURL((url) => url.searchParams.has('appmsgid'), { timeout: 30_000 }).catch(() => undefined);
-  await page.waitForTimeout(2_000);
-  const draftId = findString(body, ['appMsgId', 'appmsgid', 'appmsgId']);
-  return draftId ?? new URL(page.url()).searchParams.get('appmsgid');
+async function saveDraft(page: Page): Promise<string> {
+  const matchingResponses: Response[] = [];
+  const captures: unknown[] = [];
+  const onResponse = (response: Response): void => {
+    if (response.url().includes('operate_appmsg') && response.request().method() === 'POST') matchingResponses.push(response);
+  };
+  page.on('response', onResponse);
+  try {
+    await clickByText(page, ['Save as draft', 'Save', '\u4fdd\u5b58\u4e3a\u8349\u7a3f', '\u4fdd\u5b58'], { force: true });
+    await confirmContentStructureWarning(page);
+
+    const deadline = Date.now() + 45_000;
+    while (Date.now() < deadline) {
+      const response = matchingResponses.shift();
+      if (!response) {
+        await delay(250);
+        continue;
+      }
+      const responseText = await response.text().catch(() => '');
+      let body: unknown = null;
+      try {
+        body = JSON.parse(responseText);
+      } catch {
+        body = null;
+      }
+      captures.push({
+        url: response.url(),
+        status: response.status(),
+        postData: response.request().postData(),
+        body: body ?? responseText,
+      });
+      const draftId = findString(body, ['appMsgId', 'appmsgid', 'appmsgId']) ?? findDraftIdInText(responseText);
+      if (draftId) {
+        await page.waitForURL((url) => url.searchParams.has('appmsgid'), { timeout: 30_000 }).catch(() => undefined);
+        await page.waitForTimeout(2_000);
+        return draftId;
+      }
+    }
+    throw new Error('WeChat did not return a draft id.');
+  } catch (error) {
+    await page.screenshot({ path: '/tmp/worklite-save-draft-timeout.png', fullPage: true }).catch(() => undefined);
+    await writeFile('/tmp/worklite-save-draft-responses.json', JSON.stringify(captures, null, 2), 'utf8').catch(() => undefined);
+    throw error;
+  } finally {
+    page.off('response', onResponse);
+  }
 }
 
-async function clickByText(page: Page, labels: string[]): Promise<void> {
+function findDraftIdInText(value: string): string | null {
+  return value.match(/"(?:appMsgId|appmsgid|appmsgId)"\s*:\s*"?([A-Za-z0-9_-]+)/i)?.[1] ?? null;
+}
+
+async function confirmContentStructureWarning(page: Page): Promise<void> {
+  const warningVisible = await page
+    .waitForFunction(
+      `Array.from(document.querySelectorAll('.weui-desktop-dialog__wrp, .weui-desktop-dialog')).some((dialog) => /Content structure|\u5185\u5bb9\u7ed3\u6784\u68c0\u6d4b/.test(dialog.textContent ?? ''))`,
+      undefined,
+      { timeout: 2_000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  if (!warningVisible) return;
+
+  const clicked = await page.evaluate<boolean>(`(() => {
+    for (const dialog of document.querySelectorAll('.weui-desktop-dialog__wrp, .weui-desktop-dialog')) {
+      if (!/Content structure|\u5185\u5bb9\u7ed3\u6784\u68c0\u6d4b/.test(dialog.textContent ?? '')) continue;
+      for (const button of dialog.querySelectorAll('button')) {
+        if (/^(Continue|Continue saving|Continue inserting|\u7ee7\u7eed|\u7ee7\u7eed\u4fdd\u5b58|\u7ee7\u7eed\u63d2\u5165)$/.test(button.textContent?.trim() ?? '')) {
+          button.click();
+          return true;
+        }
+      }
+    }
+    return false;
+  })()`);
+  if (!clicked) {
+    await page.screenshot({ path: '/tmp/worklite-content-structure-confirm-timeout.png', fullPage: true }).catch(() => undefined);
+    throw new Error('WeChat content structure warning confirmation is unavailable.');
+  }
+}
+
+async function clickByText(page: Page, labels: string[], options?: { force?: boolean }): Promise<void> {
   for (const label of labels) {
     const target = page.getByText(label, { exact: true }).last();
     if (await target.isVisible().catch(() => false)) {
-      await target.click();
+      await target.click(options);
       return;
     }
   }
@@ -402,7 +470,6 @@ const HEADING_LEVEL_STYLES: Record<number, string> = {
 const CODE_BLOCK_STYLE = 'margin:0 0 18px;padding:14px 16px;background:#f4f4f5;border-radius:6px;overflow-x:auto;';
 const CODE_TEXT_STYLE = "font-family:SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:13px;line-height:1.7;color:#27272a;white-space:pre;";
 const INLINE_CODE_STYLE = "padding:2px 5px;background:#f4f4f5;border-radius:4px;font-family:SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:14px;color:#18181b;";
-const CITATION_MARKER_STYLE = 'color:#2563eb;font-size:11px;line-height:1;';
 const BLOCKQUOTE_STYLE = 'margin:0 0 18px;padding:14px 16px;background:#f4f4f5;border-left:3px solid #a1a1aa;border-radius:4px;color:#52525b;';
 const REFERENCE_ENTRY_STYLE = 'margin:0 0 10px;';
 const REFERENCE_TITLE_STYLE = 'font-size:13px;line-height:1.55;color:#3f3f46;font-weight:600;';
@@ -412,13 +479,13 @@ function markdownToHtml(markdown: string): string {
   const { articleMarkdown, referenceHeading, referencesMarkdown } = splitReferences(markdown);
   const context = createCitationContext(parseReferenceEntries(referencesMarkdown));
   const articleHtml = renderTokens(Lexer.lex(articleMarkdown), context);
-  const referencesHeading = containsChinese(articleMarkdown) ? '参考资料' : referenceHeading ?? generatedReferenceHeading(markdown);
+  const referencesHeading = containsChinese(markdown) ? '相关链接' : referenceHeading ?? generatedReferenceHeading(markdown);
   const referencesHtml = context.entries.length > 0 ? renderReferences(referencesHeading, context.entries) : '';
   return `<section style="${ARTICLE_ROOT_STYLE}">${articleHtml}${referencesHtml}</section>`;
 }
 
 function generatedReferenceHeading(markdown: string): string {
-  return containsChinese(markdown) ? '参考资料' : 'References';
+  return containsChinese(markdown) ? '相关链接' : 'Related Links';
 }
 
 function containsChinese(value: string): boolean {
@@ -426,7 +493,7 @@ function containsChinese(value: string): boolean {
 }
 
 function splitReferences(markdown: string): { articleMarkdown: string; referenceHeading: string | null; referencesMarkdown: string } {
-  const pattern = /\n?#{1,6}\s*(References|Reference List|Sources|参考资料|引用资料|参考链接)\s*(?=\n|$)/gi;
+  const pattern = /\n?#{1,6}\s*(References|Reference List|Sources|Related Links|参考资料|引用资料|参考链接|相关链接)\s*(?=\n|$)/gi;
   let match: RegExpExecArray | null;
   let last: RegExpExecArray | null = null;
   while ((match = pattern.exec(markdown)) !== null) last = match;
@@ -625,8 +692,8 @@ function renderLink(token: Tokens.Link, context: CitationContext): string {
   }
   const plainText = plainInlineTokens(token.tokens).trim();
   const label = !plainText || token.autolink === true || plainText === url ? referenceSourceLabel(url) : plainText;
-  const number = citationNumberFor(url, label, context);
-  return `<span style="color:#18181b;font-weight:600;">${escapeHtml(label)}</span><sup style="${CITATION_MARKER_STYLE}">[${number}]</sup>`;
+  citationNumberFor(url, label, context);
+  return `<span style="color:#18181b;font-weight:600;">${escapeHtml(label)}</span>`;
 }
 
 function renderTextWithCitations(value: string, context: CitationContext): string {
@@ -637,9 +704,7 @@ function renderTextWithCitations(value: string, context: CitationContext): strin
     const marker = match[0];
     const number = Number(match[1]);
     result += escapeHtml(value.slice(lastIndex, index));
-    result += context.entries.some((entry) => entry.number === number)
-      ? `<sup style="${CITATION_MARKER_STYLE}">${escapeHtml(marker)}</sup>`
-      : escapeHtml(marker);
+    if (!context.entries.some((entry) => entry.number === number)) result += escapeHtml(marker);
     lastIndex = index + marker.length;
   }
   return result + escapeHtml(value.slice(lastIndex));

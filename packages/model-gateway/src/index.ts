@@ -159,16 +159,19 @@ export class AiSdkModelGateway implements ModelGateway {
       });
     }
     const context = trimAgentMessages(request.systemPrompt, request.messages, request.maxContextTokens ?? 12_000);
+    const openaiProviderOptions = {
+      ...(request.provider.adapter === 'openai' ? { parallelToolCalls: false as const } : {}),
+      ...(useResponses ? { strictJsonSchema: false as const } : {}),
+    };
     const modelRequest = {
       model,
       system: request.systemPrompt,
       output: request.jsonOutput ? Output.json({ name: 'response' }) : undefined,
       messages: context.messages as ModelMessage[],
       tools: Object.keys(tools).length > 0 ? tools as never : undefined,
-      providerOptions: request.provider.adapter === 'openai' ? { openai: { parallelToolCalls: false } } : undefined,
+      providerOptions: Object.keys(openaiProviderOptions).length > 0 ? { openai: openaiProviderOptions } : undefined,
       maxOutputTokens: request.maxOutputTokens,
       abortSignal: request.abortSignal,
-      providerOptions: useResponses ? { openai: { strictJsonSchema: false } } : undefined,
     };
 
     let result: Awaited<ReturnType<typeof generateText>>;
