@@ -1,4 +1,4 @@
-import type { WorkflowDefinition, WorkflowEdgeDefinition, WorkflowNodeDefinition } from '@worklite/contracts';
+import type { WorkflowDefinition, WorkflowEdgeDefinition } from '@worklite/contracts';
 
 export type JsonSchema = Readonly<Record<string, unknown>>;
 

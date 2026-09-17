@@ -750,7 +750,7 @@ function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
   });
 }
 
-function toFlowEdges(definition: WorkflowDefinition, t: TFunction): WorkflowCanvasEdge[] {
+function toFlowEdges(definition: WorkflowDefinition, t: TFunction<'workflows'>): WorkflowCanvasEdge[] {
   return definition.edges.map((edge) => applyEdgePresentation({
     id: edge.id,
     source: edge.sourceNodeId,
@@ -763,7 +763,7 @@ function toFlowEdges(definition: WorkflowDefinition, t: TFunction): WorkflowCanv
   }, t));
 }
 
-function applyEdgePresentation(edge: WorkflowCanvasEdge, t: TFunction): WorkflowCanvasEdge {
+function applyEdgePresentation(edge: WorkflowCanvasEdge, t: TFunction<'workflows'>): WorkflowCanvasEdge {
   const condition = edge.data?.condition;
   const labels: string[] = [];
   if (condition?.kind === 'fallback') labels.push(t('editor.edgeModes.fallback'));
