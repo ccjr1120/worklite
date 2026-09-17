@@ -267,5 +267,7 @@
     "deleting": "Deleting...",
     "success": "Workflow deleted",
     "failed": "Unable to delete workflow."
-  }
+  },
+  "loading": "Loading workflows...",
+  "loadFailed": "Unable to load workflows."
 }

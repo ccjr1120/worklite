@@ -185,10 +185,6 @@
   color: var(--muted-foreground) !important;
 }
 
-.bg-brand-subtle.text-brand:has(svg) {
-  background: var(--surface-subtle) !important;
-  color: var(--foreground) !important;
-}
 
 @media (prefers-reduced-motion: reduce) {
   *,

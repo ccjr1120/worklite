@@ -23,13 +23,13 @@ If a request contains architecture and ordinary implementation work, this workfl
 
 Use this workflow for any user-interface change, including pages, components, layouts, visual styling, design tokens, colors, typography, icons, motion, responsive behavior, themes, user-facing copy, interaction feedback, and workflow-editor presentation.
 
-`docs/ui-design-system/README.md` is the source of truth for UI design principles and visual language. `docs/ui-implementation/README.md` is the source of truth for page structure, shared UI architecture, implementation sequencing, and page-level acceptance criteria.
+`docs/ui-design-system/README.md` is the source of truth for UI design principles and visual language. `ui-ux-design/README.md` is the source of truth for page structure, shared UI architecture, implementation sequencing, and page-level acceptance criteria.
 
-1. Read `docs/ui-design-system/README.md` and `docs/ui-implementation/README.md` in full before proposing or implementing a UI change. Then follow the implementation index and read every shared and page-specific document applicable to the requested surface.
+1. Read `docs/ui-design-system/README.md` and `ui-ux-design/README.md` in full before proposing or implementing a UI change. Then follow the design index and read every shared document and applicable `DESIGN.md` for the requested surface.
 2. Compare the requested change with the documented principles, tokens, shared patterns, page rules, interaction patterns, and product-specific guidance.
 3. Explain the proposed visual result, affected surfaces, relevant tradeoffs, and any required design-system changes to the user.
 4. Do not modify UI files or implement the change until the user explicitly confirms the proposed approach.
-5. If the proposal introduces or changes a design decision, update every affected UI source-of-truth document and its `Changelog` before changing implementation files. New pages require a page specification before implementation.
+5. If the proposal introduces or changes a design decision, update the affected `DESIGN.md`, applicable shared specification, and `ui-ux-design/README.md` index before changing implementation files. New pages require a page `DESIGN.md` before implementation.
 6. Implement only the confirmed approach. Use shared semantic design tokens and reusable components; do not introduce page-level hard-coded styles that duplicate or bypass the design system.
 7. Design and implement light and dark modes together. Neither mode may be treated as a fallback or simple color inversion.
 8. Preserve accessibility, including sufficient contrast, visible keyboard focus, non-color status cues, reduced-motion support, and accessible names for icon-only controls.

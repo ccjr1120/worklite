@@ -86,5 +86,7 @@
     "deleting": "正在删除...",
     "success": "技能已删除",
     "failed": "无法删除技能。"
-  }
+  },
+  "loading": "正在加载技能...",
+  "loadFailed": "无法加载技能。"
 }

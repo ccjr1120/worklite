@@ -190,7 +190,9 @@
       "unavailable": "不可用",
       "windowRange": "时间范围："
     },
-    "deleteFailed": "无法删除模型提供商。"
+    "deleteFailed": "无法删除模型提供商。",
+    "loading": "正在加载提供商...",
+    "loadFailed": "无法加载提供商。"
   },
   "usage": {
     "title": "用量",
@@ -203,7 +205,9 @@
       "runs": "运行次数",
       "cost": "预估费用",
       "empty": ""
-    }
+    },
+    "loading": "正在加载用量...",
+    "loadFailed": "无法加载用量。"
   },
   "audit": {
     "title": "审计日志",
@@ -219,35 +223,48 @@
       "action": "操作",
       "resource": "资源",
       "metadata": "元数据"
-    }
+    },
+    "loading": "正在加载审计日志...",
+    "loadFailed": "无法加载审计日志。"
   },
   "logs": {
-    "title": "Diagnostic logs",
-    "description": "Detailed local traces for Provider and Gateway operations.",
-    "search": "Filter by trace, Provider, stage, or message",
-    "traceFilter": "Trace: {{id}}",
-    "clearTrace": "Clear trace",
-    "loading": "Loading diagnostic logs...",
-    "error": "Unable to load diagnostic logs.",
-    "retry": "Retry",
-    "emptyTitle": "No diagnostic events",
-    "emptyDescription": "Provider connection tests and Gateway diagnostics will appear here.",
-    "noMatchesTitle": "No matching events",
-    "noMatchesDescription": "No diagnostic events match the current filters.",
+    "title": "诊断日志",
+    "description": "Provider 和 Gateway 操作的详细本地追踪记录。",
+    "search": "按追踪 ID、Provider、阶段或消息筛选",
+    "traceFilter": "追踪 ID：{{id}}",
+    "clearTrace": "清除追踪条件",
+    "loading": "正在加载诊断日志...",
+    "error": "无法加载诊断日志。",
+    "retry": "重试",
+    "emptyTitle": "暂无诊断事件",
+    "emptyDescription": "Provider 连接测试和 Gateway 诊断会显示在这里。",
+    "noMatchesTitle": "没有匹配的事件",
+    "noMatchesDescription": "当前筛选条件下没有匹配的诊断事件。",
     "columns": {
-      "time": "Time",
-      "level": "Level",
-      "trace": "Trace",
+      "time": "时间",
+      "level": "级别",
+      "trace": "追踪 ID",
       "provider": "Provider",
-      "stage": "Stage",
-      "status": "Status",
-      "message": "Message"
+      "stage": "阶段",
+      "status": "状态",
+      "message": "消息"
     },
-    "details": "Event details",
-    "metadata": "Metadata",
-    "duration": "Duration: {{ms}} ms",
-    "copyTrace": "Copy trace ID",
-    "copied": "Copied"
+    "details": "事件详情",
+    "metadata": "元数据",
+    "duration": "时长：{{ms}} ms",
+    "copyTrace": "复制追踪 ID",
+    "copied": "已复制",
+    "filters": {
+      "allLevels": "全部级别",
+      "allStages": "全部阶段"
+    },
+    "levels": {
+      "debug": "调试",
+      "info": "信息",
+      "warn": "警告",
+      "error": "错误"
+    },
+    "providerCount_other": "结果中有 {{count}} 个 Provider"
   },
   "appearance": {
     "title": "外观",

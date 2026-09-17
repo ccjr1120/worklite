@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Kbd } from '@/components/ui/kbd';
 import { cn } from '@/lib/utils';
 import { APP_VERSION_LABEL } from '@/app-version';
+import { commandShortcutKeys } from '@/lib/platform';
 
 function UserMenu({ collapsed }: { collapsed: boolean }) {
   const { t } = useTranslation('workspace');
@@ -69,8 +70,9 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
             <li className="flex items-center justify-between">
               <span>{t('userMenu.commandMenu')}</span>
               <span className="flex gap-1">
-                <Kbd>⌘</Kbd>
-                <Kbd>K</Kbd>
+                {commandShortcutKeys().map((key) => (
+                  <Kbd key={key}>{key}</Kbd>
+                ))}
               </span>
             </li>
           </ul>

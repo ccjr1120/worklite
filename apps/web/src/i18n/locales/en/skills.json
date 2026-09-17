@@ -86,5 +86,7 @@
     "deleting": "Deleting...",
     "success": "Skill deleted",
     "failed": "Unable to delete skill."
-  }
+  },
+  "loading": "Loading Skills...",
+  "loadFailed": "Unable to load Skills."
 }

@@ -39,7 +39,7 @@ const STATUS_CONFIG: Record<
   failed: { variant: 'danger', icon: XCircle },
   cancelled: { variant: 'neutral', icon: Ban },
   idle: { variant: 'neutral', icon: CircleDashed },
-  draft: { variant: 'warning', icon: CircleDashed },
+  draft: { variant: 'neutral', icon: CircleDashed },
   published: { variant: 'success', icon: CheckCircle2 },
   connected: { variant: 'success', icon: CheckCircle2 },
   disabled: { variant: 'neutral', icon: Ban },

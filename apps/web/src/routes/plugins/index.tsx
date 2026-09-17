@@ -5,7 +5,9 @@ import { useTranslation } from 'react-i18next';
 import { usePluginsQuery } from '@/api/queries';
 import { CollectionToolbar } from '@/components/collection-toolbar';
 import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/collection-table';
+import { CollectionLoading } from '@/components/collection-loading';
 import { EmptyState } from '@/components/empty-state';
+import { ErrorState } from '@/components/error-state';
 import { PageHeading } from '@/components/page-heading';
 import { StatusBadge } from '@/components/status-badge';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
@@ -21,7 +23,7 @@ function PluginListPage() {
   const { t: tCommon } = useTranslation('common');
   const { locale } = useLocale();
   const [search, setSearch] = useState('');
-  const { data: plugins = [], isLoading, isError } = usePluginsQuery();
+  const { data: plugins = [], isLoading, isError, refetch } = usePluginsQuery();
   const items = useMemo(() => plugins.filter((plugin) => `${plugin.name} ${plugin.description} ${plugin.command}`.toLowerCase().includes(search.toLowerCase())), [plugins, search]);
 
   return (
@@ -30,7 +32,7 @@ function PluginListPage() {
       <PageHeading title={tPlugins('title')} description={tPlugins('description')} />
       <CollectionToolbar className="mt-6" search={search} onSearchChange={setSearch} placeholder={tPlugins('search')} />
       <div className="mt-4">
-        {isLoading ? <p className="text-sm text-muted-foreground">{tPlugins('loading')}</p> : isError ? <p className="text-sm text-danger" role="alert">{tPlugins('loadFailed')}</p> : plugins.length === 0 ? (
+        {isLoading ? <CollectionLoading label={tPlugins('loading')} columns={[tPlugins('columns.plugin'), tPlugins('columns.command'), tPlugins('columns.availability'), tPlugins('columns.updated')]} headerClassName="grid-cols-[2fr_2fr_1fr_1fr]" rowClassName="grid-cols-1 md:grid-cols-[2fr_2fr_1fr_1fr]" /> : isError ? <ErrorState title={tPlugins('title')} description={tPlugins('loadFailed')} onAction={() => void refetch()} /> : plugins.length === 0 ? (
           <EmptyState title={tPlugins('empty.title')} description={tPlugins('empty.description')} />
         ) : items.length === 0 ? (
           <EmptyState title={tPlugins('noMatches.title')} description={tPlugins('noMatches.description', { search })} actionLabel={tCommon('actions.clearFilters')} onAction={() => setSearch('')} />

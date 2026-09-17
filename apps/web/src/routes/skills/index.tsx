@@ -8,7 +8,9 @@ import { ConfirmDialog } from '@/components/confirm-dialog';
 import { AgentResourceNav } from '@/components/agent-resource-nav';
 import { CollectionToolbar } from '@/components/collection-toolbar';
 import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/collection-table';
+import { CollectionLoading } from '@/components/collection-loading';
 import { EmptyState } from '@/components/empty-state';
+import { ErrorState } from '@/components/error-state';
 import { PageHeading } from '@/components/page-heading';
 import { Button } from '@/components/ui/button';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
@@ -33,7 +35,7 @@ function SkillListPage() {
   const [deleteTarget, setDeleteTarget] = useState<(typeof all)[number] | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState('');
-  const { data: all = [], isLoading, isError } = useSkillsQuery(workspaceSlug);
+  const { data: all = [], isLoading, isError, refetch } = useSkillsQuery(workspaceSlug);
   const importSkill = useMutation({
     mutationFn: (input: { name: string; files: Array<{ path: string; content: string }> }) => api.importSkill(workspaceSlug, input),
     onSuccess: async (skill) => { await queryClient.invalidateQueries({ queryKey: skillsQueryKey(workspaceSlug) }); void navigate({ to: '/skills/$skillId', params: { skillId: skill.id } }); },
@@ -102,7 +104,7 @@ function SkillListPage() {
       />
       {importError ? <p role="alert" className="mt-3 text-sm text-danger">{importError}</p> : null}
       <div className="mt-4">
-        {isLoading ? <p className="text-sm text-muted-foreground">Loading skills...</p> : isError ? <p className="text-sm text-danger">Unable to load skills.</p> : all.length === 0 ? (
+        {isLoading ? <CollectionLoading label={t('loading')} columns={[t('columns.skill'), t('columns.source'), t('columns.version'), t('columns.updated'), t('columns.actions')]} headerClassName="min-w-[760px] grid-cols-[2fr_1fr_1fr_1fr_40px]" rowClassName="min-w-[760px] whitespace-nowrap grid-cols-[2fr_1fr_1fr_1fr_40px]" /> : isError ? <ErrorState title={t('title')} description={t('loadFailed')} onAction={() => void refetch()} /> : all.length === 0 ? (
           <EmptyState title={t('empty.title')} description={t('empty.description')} />
         ) : items.length === 0 ? (
           <EmptyState title={t('noMatches.title')} description={t('noMatches.description', { search })} actionLabel={t('common:actions.clearFilters')} onAction={() => setSearch('')} />

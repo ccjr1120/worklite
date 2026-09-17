@@ -36,6 +36,11 @@ Do not start, stop, restart, replace, or reconfigure running WorkLite server pro
 
 Perform all troubleshooting, investigation, and verification exclusively against the development profile: Web port `3390`, API port `3391`, Portkey Gateway port `3392`, and development data under `.data/` excluding `.data/deployment/`. Do not inspect, query, call, modify, or otherwise interact with the local deployment profile, its ports `23390`–`23392`, or files under `.data/deployment/`. If the development profile is unavailable, report the blocker; never fall back to the deployment profile.
 
+## UI/UX Documentation
+
+`ui-ux-design/README.md` is the source of truth for page structure, shared UI architecture, implementation sequencing, and page-level acceptance criteria. Store route specifications as `ui-ux-design/pages/<area>/<page>/DESIGN.md`, multi-page flows as `ui-ux-design/flows/<flow>/DESIGN.md`, and non-route surfaces as `ui-ux-design/surfaces/<domain>/<surface>/DESIGN.md`. Do not recreate a parallel page-specification directory.
+
+
 ## Durable Corrections
 
 The Memory One visual reference uses brand color sparingly. Keep WorkLite surfaces, default icons, headings, and ordinary hover states neutral; reserve the blue brand token for primary actions, selected or focused states, active execution, and a small number of meaningful links.

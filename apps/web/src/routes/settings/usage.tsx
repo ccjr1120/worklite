@@ -1,6 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/collection-table';
+import { ErrorState } from '@/components/error-state';
+import { Skeleton } from '@/components/ui/skeleton';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
 import { formatCurrency, formatNumber } from '@/i18n/format';
@@ -14,7 +16,7 @@ function UsageSettingsPage() {
   const { t } = useTranslation('settings');
   const { locale } = useLocale();
   const workspaceSlug = "personal";
-  const { data: usageRows = [], isLoading, isError } = useUsageQuery(workspaceSlug);
+  const { data: usageRows = [], isLoading, isError, refetch } = useUsageQuery(workspaceSlug);
   const max = Math.max(1, ...usageRows.map((row) => row.tokens));
 
   return (
@@ -22,7 +24,7 @@ function UsageSettingsPage() {
       <WorkspaceChrome crumbs={[{ label: t('nav.title') }, { label: t('nav.usage') }]} />
       <h1 className="text-2xl font-semibold tracking-tight">{t('usage.title')}</h1>
       <p className="mt-2 text-[13px] text-muted-foreground">{t('usage.description')}</p>
-      {isLoading ? <p className="mt-6 text-sm text-muted-foreground">Loading usage...</p> : isError ? <p className="mt-6 text-sm text-danger">Unable to load usage.</p> : <div className="mt-6 space-y-3" role="img" aria-label={t('usage.chartLabel')}>
+      {isLoading ? <div className="mt-6 space-y-4" role="status" aria-busy="true" aria-live="polite"><span className="sr-only">{t('usage.loading')}</span>{Array.from({ length: 3 }, (_, index) => <div key={index}><div className="mb-1 flex justify-between gap-4"><Skeleton className="h-4 w-32" /><Skeleton className="h-4 w-20" /></div><Skeleton className="h-2 w-full rounded-full" /></div>)}</div> : isError ? <div className="mt-6"><ErrorState title={t('usage.title')} description={t('usage.loadFailed')} onAction={() => void refetch()} /></div> : <div className="mt-6 space-y-3" role="img" aria-label={t('usage.chartLabel')}>
         {usageRows.map((row) => {
           const width = `${Math.round((row.tokens / max) * 100)}%`;
           return (

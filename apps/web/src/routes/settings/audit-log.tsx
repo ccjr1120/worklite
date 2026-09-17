@@ -3,7 +3,9 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CollectionToolbar } from '@/components/collection-toolbar';
 import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/collection-table';
+import { CollectionLoading } from '@/components/collection-loading';
 import { EmptyState } from '@/components/empty-state';
+import { ErrorState } from '@/components/error-state';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
@@ -18,7 +20,7 @@ function AuditLogPage() {
   const { locale } = useLocale();
   const workspaceSlug = "personal";
   const [search, setSearch] = useState('');
-  const { data: auditEvents = [], isLoading, isError } = useAuditLogsQuery(workspaceSlug);
+  const { data: auditEvents = [], isLoading, isError, refetch } = useAuditLogsQuery(workspaceSlug);
   const items = useMemo(
     () => auditEvents.filter((item) => `${item.actor} ${item.action} ${item.resource}`.toLowerCase().includes(search.toLowerCase())),
     [auditEvents, search],
@@ -31,7 +33,7 @@ function AuditLogPage() {
       <p className="mt-2 text-[13px] text-muted-foreground">{t('audit.description')}</p>
       <CollectionToolbar className="mt-6" search={search} onSearchChange={setSearch} placeholder={t('audit.search')} />
       <div className="mt-4">
-        {isLoading ? <p className="text-sm text-muted-foreground">Loading audit log...</p> : isError ? <p className="text-sm text-danger">Unable to load audit log.</p> : items.length === 0 ? (
+        {isLoading ? <CollectionLoading label={t('audit.loading')} columns={[t('audit.columns.time'), t('audit.columns.actor'), t('audit.columns.action'), t('audit.columns.resource'), t('audit.columns.metadata')]} /> : isError ? <ErrorState title={t('audit.title')} description={t('audit.loadFailed')} onAction={() => void refetch()} /> : items.length === 0 ? (
           <EmptyState title={t('audit.noMatches.title')} description={t('audit.noMatches.description')} actionLabel={t('common:actions.clearFilters')} onAction={() => setSearch('')} />
         ) : (
           <CollectionTable>

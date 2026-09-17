@@ -7,13 +7,16 @@ import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitWindow, 
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { CollectionTable, CollectionHeader, CollectionRow } from '@/components/collection-table';
 import { CollectionToolbar } from '@/components/collection-toolbar';
+import { CollectionLoading } from '@/components/collection-loading';
 import { EmptyState } from '@/components/empty-state';
+import { ErrorState } from '@/components/error-state';
 import { PageHeading } from '@/components/page-heading';
 import { Field } from '@/components/ui/field';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { PasswordInput } from '@/components/password-input';
@@ -193,7 +196,7 @@ function ModelProvidersPage() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const [statsWindow, setStatsWindow] = useState<'24h' | '7d' | '30d'>('24h');
-  const { data: modelProviders = [], isLoading, isError } = useModelProvidersQuery(workspaceSlug);
+  const { data: modelProviders = [], isLoading, isError, refetch } = useModelProvidersQuery(workspaceSlug);
   const gatewayQuery = usePortkeyGatewayQuery();
   const codexAuthQuery = useCodexAuthQuery();
   const codexUsageQuery = useCodexAccountUsagesQuery(view === 'codex');
@@ -460,7 +463,7 @@ function ModelProvidersPage() {
           }
         />
         <div className="mt-4">
-          {isLoading ? <p className="text-sm text-muted-foreground">Loading providers...</p> : isError ? <p className="text-sm text-danger">Unable to load providers.</p> : modelProviders.length === 0 ? (
+          {isLoading ? <CollectionLoading label={t('providers.loading')} rows={4} columns={[t('providers.columns.provider'), t('providers.columns.status'), t('providers.columns.models'), t('providers.columns.credential'), t('providers.columns.actions')]} headerClassName="min-w-[900px] [&>span]:whitespace-nowrap" rowClassName="min-w-[900px] [&>span]:whitespace-nowrap" /> : isError ? <ErrorState title={t('providers.title')} description={t('providers.loadFailed')} onAction={() => void refetch()} /> : modelProviders.length === 0 ? (
             <EmptyState title={t('providers.empty.title')} description={t('providers.empty.description')} actionLabel={t('providers.create')} onAction={openCreate} />
           ) : items.length === 0 ? (
             <EmptyState title={t('providers.noMatches.title')} description={t('providers.noMatches.description')} actionLabel={t('common:actions.clearFilters')} onAction={() => setSearch('')} />
@@ -501,7 +504,7 @@ function ModelProvidersPage() {
           <CodexAccountPool auth={codexAuthQuery.data} usage={codexUsageQuery.data} usageLoading={codexUsageQuery.isLoading} usageError={codexUsageQuery.isError} authBusy={codexAuthBusy} onLogin={() => void startCodexAuth()} importRef={codexImportRef} onImport={(file) => void importCodexAccounts(file)} onToggleAccount={(accountId, enabled) => void setCodexAccountEnabled(accountId, enabled)} onRefreshAccount={(accountId) => void refreshCodexAccount(accountId)} onDeleteAccount={(accountId) => void deleteCodexAccount(accountId)} onRefreshAll={() => void refreshCodexUsages()} locale={locale} t={(key) => t(key as never)} />
         </TabsContent>
         <TabsContent value="statistics">
-          <GatewayStatistics stats={statsQuery.data} isLoading={statsQuery.isLoading} isError={statsQuery.isError} window={statsWindow} onWindowChange={setStatsWindow} locale={locale} t={(key) => t(key as never)} />
+          <GatewayStatistics stats={statsQuery.data} isLoading={statsQuery.isLoading} isError={statsQuery.isError} onRetry={() => void statsQuery.refetch()} window={statsWindow} onWindowChange={setStatsWindow} locale={locale} t={(key) => t(key as never)} />
         </TabsContent>
       </Tabs>
 
@@ -716,7 +719,7 @@ function maskAccountId(value: string): string {
   return `${value.slice(0, 4)}…${value.slice(-4)}`;
 }
 
-function GatewayStatistics({ stats, isLoading, isError, window, onWindowChange, locale, t }: { stats?: PortkeyGatewayStats; isLoading: boolean; isError: boolean; window: '24h' | '7d' | '30d'; onWindowChange: (value: '24h' | '7d' | '30d') => void; locale: AppLocale; t: (key: string) => string }) {
+function GatewayStatistics({ stats, isLoading, isError, onRetry, window, onWindowChange, locale, t }: { stats?: PortkeyGatewayStats; isLoading: boolean; isError: boolean; onRetry: () => void; window: '24h' | '7d' | '30d'; onWindowChange: (value: '24h' | '7d' | '30d') => void; locale: AppLocale; t: (key: string) => string }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const summary = stats?.summary;
   const metricValue = (value: number | null, suffix = '') => value === null ? t('providers.statistics.unavailable') : `${formatNumber(value, locale)}${suffix}`;
@@ -729,7 +732,7 @@ function GatewayStatistics({ stats, isLoading, isError, window, onWindowChange, 
           <SelectContent><SelectItem value="24h">{t('providers.statistics.last24h')}</SelectItem><SelectItem value="7d">{t('providers.statistics.last7d')}</SelectItem><SelectItem value="30d">{t('providers.statistics.last30d')}</SelectItem></SelectContent>
         </Select>
       </div>
-      {isLoading ? <p className="text-sm text-muted-foreground">{t('providers.statistics.loading')}</p> : isError ? <p className="text-sm text-danger" role="alert">{t('providers.statistics.error')}</p> : !stats || stats.summary.requests === 0 ? <EmptyState title={t('providers.statistics.emptyTitle')} description={t('providers.statistics.emptyDescription')} /> : (
+      {isLoading ? <div className="space-y-3" role="status" aria-busy="true" aria-live="polite"><span className="sr-only">{t('providers.statistics.loading')}</span><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-[70px]" />)}</div><Skeleton className="h-72 w-full" /></div> : isError ? <ErrorState title={t('providers.statistics.title')} description={t('providers.statistics.error')} onAction={onRetry} /> : !stats || stats.summary.requests === 0 ? <EmptyState title={t('providers.statistics.emptyTitle')} description={t('providers.statistics.emptyDescription')} /> : (
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Metric label={t('providers.statistics.requests')} value={formatNumber(summary?.requests ?? 0, locale)} />

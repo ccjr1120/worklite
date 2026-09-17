@@ -3,6 +3,7 @@ import { Menu, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
+import { commandShortcutLabel } from '@/lib/platform';
 import { cn } from '@/lib/utils';
 
 type ContextBarProps = {
@@ -47,7 +48,7 @@ function ContextBar({
         <Button variant="secondary" size="compact" onClick={onOpenCommand} aria-label={t('command.open')} className="hidden sm:inline-flex">
           <Search className="size-3.5" />
           {t('command.search')}
-          <Kbd className="ml-1">⌘K</Kbd>
+          <Kbd className="ml-1">{commandShortcutLabel()}</Kbd>
         </Button>
         {status}
         {secondaryActions}

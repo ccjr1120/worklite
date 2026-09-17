@@ -14,6 +14,7 @@ import {
   useSkillsQuery,
 } from '@/api/queries';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { ErrorState } from '@/components/error-state';
 import { SaveIndicator } from '@/components/save-indicator';
 import { StatusBadge } from '@/components/status-badge';
 import { StreamingMarkdown } from '@/components/ai/streaming-markdown';
@@ -22,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -169,9 +171,9 @@ function AgentEditorPage() {
       await queryClient.invalidateQueries({ queryKey: ['agent-versions', agentId] });
       await queryClient.invalidateQueries({ queryKey: ['agent', agentId] });
       await queryClient.invalidateQueries({ queryKey: agentsQueryKey() });
-      toast.success('Agent version created.');
+      toast.success(t('editor.versions.created'));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unable to create AgentVersion.');
+      toast.error(error instanceof Error ? error.message : t('editor.versions.createFailed'));
     } finally {
       setVersionBusy(false);
     }
@@ -228,6 +230,7 @@ function AgentEditorPage() {
 
   const editorLoading = !isNew && agentQuery.isLoading;
   const editorFailed = !isNew && agentQuery.isError;
+  const retryAgent = () => void agentQuery.refetch();
   const configurationProps = {
     isSystem,
     modelSelection,
@@ -278,44 +281,73 @@ function AgentEditorPage() {
             <Button size="compact" type="button" onClick={() => void save()} disabled={saveState === 'saving' || editorLoading || editorFailed}>
               {t('common:actions.save')}
             </Button>
-            {!isNew && !isSystem ? <Button variant="secondary" size="compact" type="button" onClick={() => void createVersion()} disabled={saveState !== 'saved' || versionBusy || editorLoading || editorFailed}>{versionBusy ? 'Creating...' : 'Create version'}</Button> : null}
+            {!isNew && !isSystem ? <Button variant="secondary" size="compact" type="button" onClick={() => void createVersion()} disabled={saveState !== 'saved' || versionBusy || editorLoading || editorFailed}>{versionBusy ? t('editor.versions.creating') : t('editor.versions.create')}</Button> : null}
           </div>
         }
       />
       <div className="min-w-0 flex-1 overflow-auto px-6 py-6">
         <div className="mx-auto flex max-w-3xl flex-col gap-4">
-          {editorLoading ? <ResourceMessage loading>{t('loading')}</ResourceMessage> : null}
-          {editorFailed ? <ResourceMessage error>{t('editor.loadFailed')}</ResourceMessage> : null}
-          <Field label={t('editor.name')} htmlFor="name" error={nameError}>
-            <Input id="name" value={name} readOnly={isSystem} disabled={editorLoading || editorFailed} aria-invalid={Boolean(nameError)} onChange={(event) => { setName(event.target.value); setNameError(''); markUnsaved(); }} />
-          </Field>
-          <Field label={t('editor.responsibility')} htmlFor="responsibility">
-            <Input id="responsibility" value={responsibility} readOnly={isSystem} disabled={editorLoading || editorFailed} onChange={(event) => { setResponsibility(event.target.value); markUnsaved(); }} />
-          </Field>
-          <Field label={t('editor.instructions')} htmlFor="instructions" hint={t('editor.instructionsHint')}>
-            <Textarea
-              id="instructions"
-              className="min-h-64 font-mono text-[13px]"
-              value={systemPrompt}
-              readOnly={isSystem}
-              disabled={editorLoading || editorFailed}
-              onChange={(event) => { setSystemPrompt(event.target.value); markUnsaved(); }}
+          {editorLoading ? (
+            <>
+              <span role="status" aria-busy="true" aria-live="polite" className="sr-only">{t('loading')}</span>
+              <Field label={t('editor.name')} htmlFor="name-skeleton">
+                <Skeleton className="h-9" />
+              </Field>
+              <Field label={t('editor.responsibility')} htmlFor="responsibility-skeleton">
+                <Skeleton className="h-9" />
+              </Field>
+              <Field label={t('editor.instructions')} htmlFor="instructions-skeleton" hint={t('editor.instructionsHint')}>
+                <Skeleton className="min-h-64" />
+              </Field>
+            </>
+          ) : editorFailed ? (
+            <ErrorState
+              title={t('title')}
+              description={t('editor.loadFailed')}
+              onAction={retryAgent}
             />
-          </Field>
+          ) : (
+            <>
+              <Field label={t('editor.name')} htmlFor="name" error={nameError}>
+                <Input id="name" value={name} readOnly={isSystem} disabled={editorLoading || editorFailed} aria-invalid={Boolean(nameError)} onChange={(event) => { setName(event.target.value); setNameError(''); markUnsaved(); }} />
+              </Field>
+              <Field label={t('editor.responsibility')} htmlFor="responsibility">
+                <Input id="responsibility" value={responsibility} readOnly={isSystem} disabled={editorLoading || editorFailed} onChange={(event) => { setResponsibility(event.target.value); markUnsaved(); }} />
+              </Field>
+              <Field label={t('editor.instructions')} htmlFor="instructions" hint={t('editor.instructionsHint')}>
+                <Textarea
+                  id="instructions"
+                  className="min-h-64 font-mono text-[13px]"
+                  value={systemPrompt}
+                  readOnly={isSystem}
+                  disabled={editorLoading || editorFailed}
+                  onChange={(event) => { setSystemPrompt(event.target.value); markUnsaved(); }}
+                />
+              </Field>
+            </>
+          )}
           {saveError ? <ResourceMessage error>{saveError}</ResourceMessage> : null}
           {!isNew && !isSystem ? (
             <section className="border-t border-border pt-5" aria-labelledby="agent-versions-title">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h2 id="agent-versions-title" className="text-sm font-semibold">Agent versions</h2>
-                  <p className="mt-1 text-[13px] text-muted-foreground">Immutable snapshots used by published workflows.</p>
+                  <h2 id="agent-versions-title" className="text-sm font-semibold">{t('editor.versions.title')}</h2>
+                  <p className="mt-1 text-[13px] text-muted-foreground">{t('editor.versions.description')}</p>
                 </div>
-                {existing?.latestVersion ? <span className="text-xs text-muted-foreground">Latest v{existing.latestVersion}</span> : null}
+                {existing?.latestVersion ? <span className="text-xs text-muted-foreground">{t('editor.versions.latest', { version: existing.latestVersion })}</span> : null}
               </div>
               <div className="mt-3 space-y-2">
-                {versionsQuery.isLoading ? <p className="text-[13px] text-muted-foreground">Loading versions...</p> : null}
-                {!versionsQuery.isLoading && (versionsQuery.data ?? []).length === 0 ? <p className="text-[13px] text-muted-foreground">No immutable versions yet.</p> : null}
-                {(versionsQuery.data ?? []).map((version) => (
+                {versionsQuery.isLoading ? (
+                  <div className="space-y-2" role="status" aria-busy="true" aria-live="polite">
+                    <span className="sr-only">{t('editor.versions.loading')}</span>
+                    {Array.from({ length: 3 }, (_, index) => <Skeleton key={index} className="h-10" />)}
+                  </div>
+                ) : versionsQuery.isError ? (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <ResourceMessage error>{t('editor.versions.loadFailed')}</ResourceMessage>
+                    <Button type="button" variant="secondary" size="compact" onClick={() => void versionsQuery.refetch()}>{t('common:actions.tryAgain')}</Button>
+                  </div>
+                ) : (versionsQuery.data ?? []).length === 0 ? <p className="text-[13px] text-muted-foreground">{t('editor.versions.empty')}</p> : (versionsQuery.data ?? []).map((version) => (
                   <div key={version.id} className="flex items-center justify-between rounded-md border border-border bg-surface-subtle px-3 py-2 text-[13px]">
                     <span className="font-medium">v{version.version}</span>
                     <span className="text-muted-foreground">{version.model}</span>

@@ -58,7 +58,19 @@
     "deleted": "Agent 已删除",
     "nameRequired": "请先输入 Agent 名称再保存。",
     "loadFailed": "无法加载此 Agent。",
-    "saveFailed": "无法保存 Agent 更改。请检查配置后重试。"
+    "saveFailed": "无法保存 Agent 更改。请检查配置后重试。",
+    "versions": {
+      "title": "Agent 版本",
+      "description": "由已发布工作流使用的不可变快照。",
+      "latest": "最新 v{{version}}",
+      "loading": "正在加载 Agent 版本...",
+      "loadFailed": "无法加载 Agent 版本。",
+      "empty": "还没有不可变版本。",
+      "create": "创建版本",
+      "creating": "正在创建...",
+      "created": "Agent 版本已创建。",
+      "createFailed": "无法创建 Agent 版本。"
+    }
   },
   "execution": {
     "title": "运行 Agent",

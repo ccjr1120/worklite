@@ -5,7 +5,9 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { CollectionToolbar } from '@/components/collection-toolbar';
 import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/collection-table';
+import { CollectionLoading } from '@/components/collection-loading';
 import { EmptyState } from '@/components/empty-state';
+import { ErrorState } from '@/components/error-state';
 import { PageHeading } from '@/components/page-heading';
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
@@ -33,12 +35,13 @@ type RunHistoryTarget = {
 function WorkflowListPage() {
   const { t } = useTranslation(['workflows', 'common']);
   const { locale } = useLocale();
+  const navigate = Route.useNavigate();
   const workspaceSlug = "personal";
   const [search, setSearch] = useState('');
   const [importing, setImporting] = useState(false);
   const [runHistoryWorkflow, setRunHistoryWorkflow] = useState<RunHistoryTarget | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
-  const { data: all = [], isLoading, isError } = useWorkflowsQuery(workspaceSlug);
+  const { data: all = [], isLoading, isError, refetch } = useWorkflowsQuery(workspaceSlug);
   async function importWorkflow(file: File | undefined) {
     if (!file) return;
     setImporting(true);
@@ -46,7 +49,7 @@ function WorkflowListPage() {
       const document = JSON.parse(await file.text()) as Parameters<typeof api.importWorkflow>[1];
       const workflow = await api.importWorkflow(workspaceSlug, document);
       await queryClient.invalidateQueries({ queryKey: workflowsQueryKey() });
-      window.location.assign(`/workflows/${encodeURIComponent(workflow.id)}`);
+      void navigate({ to: '/workflows/$workflowId', params: { workflowId: workflow.id } });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('importFailed'));
     } finally {
@@ -83,7 +86,7 @@ function WorkflowListPage() {
       <PageHeading title={t('title')} description={t('description')} />
       <CollectionToolbar className="mt-6" search={search} onSearchChange={setSearch} placeholder={t('search')} />
       <div className="mt-4">
-        {isLoading ? <p className="text-sm text-muted-foreground">Loading workflows...</p> : isError ? <p className="text-sm text-danger">Unable to load workflows.</p> : all.length === 0 ? (
+        {isLoading ? <CollectionLoading label={t('loading')} columns={[t('columns.workflow'), t('columns.state'), t('columns.lastRun'), t('columns.updated'), t('columns.actions')]} headerClassName="min-w-[880px] md:grid-cols-[minmax(190px,1.7fr)_minmax(104px,0.8fr)_minmax(140px,1fr)_minmax(144px,0.9fr)_40px]" rowClassName="min-w-[880px] whitespace-nowrap md:grid-cols-[minmax(190px,1.7fr)_minmax(104px,0.8fr)_minmax(140px,1fr)_minmax(144px,0.9fr)_40px]" /> : isError ? <ErrorState title={t('title')} description={t('loadFailed')} onAction={() => void refetch()} /> : all.length === 0 ? (
           <EmptyState title={t('empty.title')} description={t('empty.description')} />
         ) : items.length === 0 ? (
           <EmptyState title={t('noMatches.title')} description={t('noMatches.description', { search })} actionLabel={t('common:actions.clearFilters')} onAction={() => setSearch('')} />

@@ -49,5 +49,7 @@
     "deleting": "正在删除...",
     "success": "MCP 服务器已删除",
     "failed": "无法删除MCP 服务器。"
-  }
+  },
+  "loading": "正在加载 MCP 服务器...",
+  "loadFailed": "无法加载 MCP 服务器。"
 }

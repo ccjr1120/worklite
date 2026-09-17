@@ -190,7 +190,9 @@
       "unavailable": "Unavailable",
       "windowRange": "Window:"
     },
-    "deleteFailed": "Unable to delete provider."
+    "deleteFailed": "Unable to delete provider.",
+    "loading": "Loading providers...",
+    "loadFailed": "Unable to load providers."
   },
   "usage": {
     "title": "Usage",
@@ -203,7 +205,9 @@
       "runs": "Runs",
       "cost": "Estimated cost",
       "empty": ""
-    }
+    },
+    "loading": "Loading usage...",
+    "loadFailed": "Unable to load usage."
   },
   "audit": {
     "title": "Audit log",
@@ -219,7 +223,9 @@
       "action": "Action",
       "resource": "Resource",
       "metadata": "Metadata"
-    }
+    },
+    "loading": "Loading audit log...",
+    "loadFailed": "Unable to load audit log."
   },
   "logs": {
     "title": "Diagnostic logs",
@@ -247,7 +253,19 @@
     "metadata": "Metadata",
     "duration": "Duration: {{ms}} ms",
     "copyTrace": "Copy trace ID",
-    "copied": "Copied"
+    "copied": "Copied",
+    "filters": {
+      "allLevels": "All levels",
+      "allStages": "All stages"
+    },
+    "levels": {
+      "debug": "Debug",
+      "info": "Info",
+      "warn": "Warn",
+      "error": "Error"
+    },
+    "providerCount_one": "{{count}} Provider in result",
+    "providerCount_other": "{{count}} Providers in result"
   },
   "appearance": {
     "title": "Appearance",

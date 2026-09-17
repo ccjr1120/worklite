@@ -1,6 +1,6 @@
 # WorkLite UI Design System
 
-This document is the source of truth for WorkLite user-interface principles and visual language. `docs/ui-implementation/README.md` defines page structure, shared UI architecture, implementation sequencing, and page-level acceptance criteria. Every UI proposal and implementation must follow both documents through the UI Change Workflow in `AGENTS_WORKFLOW.md`.
+This document is the source of truth for WorkLite user-interface principles and visual language. `ui-ux-design/README.md` defines page structure, shared UI architecture, implementation sequencing, and page-level acceptance criteria. Every UI proposal and implementation must follow both documents through the UI Change Workflow in `AGENTS_WORKFLOW.md`.
 
 ## Product Character
 

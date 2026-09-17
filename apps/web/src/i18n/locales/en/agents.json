@@ -58,7 +58,19 @@
     "deleted": "Agent deleted",
     "nameRequired": "Enter an Agent name before saving.",
     "loadFailed": "Unable to load this Agent.",
-    "saveFailed": "Agent changes could not be saved. Review the configuration and try again."
+    "saveFailed": "Agent changes could not be saved. Review the configuration and try again.",
+    "versions": {
+      "title": "Agent versions",
+      "description": "Immutable snapshots used by published workflows.",
+      "latest": "Latest v{{version}}",
+      "loading": "Loading Agent versions...",
+      "loadFailed": "Unable to load Agent versions.",
+      "empty": "No immutable versions yet.",
+      "create": "Create version",
+      "creating": "Creating...",
+      "created": "Agent version created.",
+      "createFailed": "Unable to create Agent version."
+    }
   },
   "execution": {
     "title": "Run Agent",

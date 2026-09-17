@@ -49,5 +49,7 @@
     "deleting": "Deleting...",
     "success": "MCP server deleted",
     "failed": "Unable to delete mcp server."
-  }
+  },
+  "loading": "Loading MCP servers...",
+  "loadFailed": "Unable to load MCP servers."
 }

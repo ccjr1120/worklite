@@ -7,7 +7,9 @@ import { AgentMark } from '@/components/agent-mark';
 import { AgentResourceNav } from '@/components/agent-resource-nav';
 import { CollectionToolbar } from '@/components/collection-toolbar';
 import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/collection-table';
+import { CollectionLoading } from '@/components/collection-loading';
 import { EmptyState } from '@/components/empty-state';
+import { ErrorState } from '@/components/error-state';
 import { PageHeading } from '@/components/page-heading';
 import { Button } from '@/components/ui/button';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
@@ -31,7 +33,7 @@ function AgentListPage() {
   const [deleteTarget, setDeleteTarget] = useState<(typeof all)[number] | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState('');
-  const { data: all = [], isLoading, isError } = useAgentsQuery(workspaceSlug);
+  const { data: all = [], isLoading, isError, refetch } = useAgentsQuery(workspaceSlug);
   const items = useMemo(() => {
     return all.filter((item) => item.kind === 'custom').filter((item) =>
       `${item.name} ${item.responsibility} ${item.model} ${item.providerName ?? ''} ${item.skills.map((skill) => skill.name).join(' ')} ${item.mcpServers.map((server) => server.name).join(' ')}`.toLowerCase().includes(search.toLowerCase()),
@@ -76,7 +78,7 @@ function AgentListPage() {
         }
       />
       <div className="mt-4">
-        {isLoading ? <p className="text-sm text-muted-foreground">{t('loading')}</p> : isError ? <p className="text-sm text-danger">{t('loadFailed')}</p> : all.length === 0 ? (
+        {isLoading ? <CollectionLoading label={t('loading')} columns={[t('columns.agent'), t('columns.model'), t('columns.resources'), t('columns.updated'), t('columns.actions')]} headerClassName="min-w-[940px] grid-cols-[2fr_1.25fr_1.5fr_1fr_40px]" rowClassName="min-w-[940px] whitespace-nowrap grid-cols-[2fr_1.25fr_1.5fr_1fr_40px]" /> : isError ? <ErrorState title={t('title')} description={t('loadFailed')} onAction={() => void refetch()} /> : all.length === 0 ? (
           <EmptyState title={t('empty.title')} description={t('empty.description')} actionLabel={t('create')} onAction={() => void navigate({ to: '/agents/$agentId', params: { agentId: 'new' } })} />
         ) : items.length === 0 ? (
           <EmptyState title={t('noMatches.title')} description={t('noMatches.description', { search })} actionLabel={t('common:actions.clearFilters')} onAction={() => setSearch('')} />
