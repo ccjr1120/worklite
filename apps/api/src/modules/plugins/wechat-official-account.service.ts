@@ -53,6 +53,14 @@ export class WechatOfficialAccountService {
       return { status: 'waiting_for_input', pendingAction: pending };
     }
 
+    if (publication.draftId) {
+      if (mode === 'draft') {
+        await this.db.update(wechatPublications).set({ status: 'draft_saved', lastError: null, updatedAt: new Date() }).where(eq(wechatPublications.id, publication.id));
+        return { output: toPublicationOutput({ ...publication, status: 'draft_saved' }) };
+      }
+      return { status: 'waiting_for_input', pendingAction: await this.openDraftForConfirmation(request.context.pendingActionId, publication, account.encryptedStorageState) };
+    }
+
     if (!coverImage) return this.compose(request.context.pendingActionId, publication, account.encryptedStorageState, request.signal);
     const coverPath = join(tmpdir(), `worklite-wechat-cover-${randomUUID()}.png`);
     await writeFile(coverPath, Buffer.from(coverImage.b64Json, 'base64'));
@@ -377,18 +385,23 @@ async function fillArticle(page: Page, title: string, article: string, coverPath
 async function saveDraft(page: Page): Promise<string> {
   const matchingResponses: Response[] = [];
   const captures: unknown[] = [];
+  const observed: string[] = [];
   const onResponse = (response: Response): void => {
-    if (response.url().includes('operate_appmsg') && response.request().method() === 'POST') matchingResponses.push(response);
+    if (!response.url().includes('operate_appmsg') || response.request().method() !== 'POST') return;
+    observed.push(response.url());
+    if (isDraftSaveRequest(response)) matchingResponses.push(response);
   };
   page.on('response', onResponse);
   try {
-    await clickByText(page, ['Save as draft', 'Save', '\u4fdd\u5b58\u4e3a\u8349\u7a3f', '\u4fdd\u5b58'], { force: true });
+    await clickByText(page, ['Save as draft', 'Save', '\u4fdd\u5b58\u4e3a\u8349\u7a3f', '\u4fdd\u5b58']);
     await confirmContentStructureWarning(page);
 
     const deadline = Date.now() + 45_000;
+    let acceptedWithoutId = false;
     while (Date.now() < deadline) {
       const response = matchingResponses.shift();
       if (!response) {
+        if (acceptedWithoutId) break;
         await delay(250);
         continue;
       }
@@ -407,15 +420,28 @@ async function saveDraft(page: Page): Promise<string> {
       });
       const draftId = findString(body, ['appMsgId', 'appmsgid', 'appmsgId']) ?? findDraftIdInText(responseText);
       if (draftId) {
-        await page.waitForURL((url) => url.searchParams.has('appmsgid'), { timeout: 30_000 }).catch(() => undefined);
+        await waitForDraftIdInUrl(page);
         await page.waitForTimeout(2_000);
         return draftId;
       }
+      const rejection = platformRejection(body, responseText);
+      if (rejection) throw new Error(`WeChat rejected the draft: ${rejection}`);
+      if (platformAcceptedSave(body)) acceptedWithoutId = true;
     }
-    throw new Error('WeChat did not return a draft id.');
+    if (acceptedWithoutId) {
+      const urlDraftId = await waitForDraftIdInUrl(page);
+      if (urlDraftId) {
+        await page.waitForTimeout(2_000);
+        return urlDraftId;
+      }
+      throw new Error('WeChat accepted the draft but never exposed its draft id.');
+    }
+    const blockingDialog = await blockingDialogText(page);
+    if (blockingDialog) throw new Error(`WeChat blocked the draft with a dialog: ${blockingDialog}`);
+    throw new Error('WeChat never answered the draft save request after the editor action was clicked.');
   } catch (error) {
     await page.screenshot({ path: '/tmp/worklite-save-draft-timeout.png', fullPage: true }).catch(() => undefined);
-    await writeFile('/tmp/worklite-save-draft-responses.json', JSON.stringify(captures, null, 2), 'utf8').catch(() => undefined);
+    await writeFile('/tmp/worklite-save-draft-responses.json', JSON.stringify({ pageUrl: page.url(), observedOperateAppmsgUrls: observed, saveResponses: captures }, null, 2), 'utf8').catch(() => undefined);
     throw error;
   } finally {
     page.off('response', onResponse);
@@ -424,6 +450,65 @@ async function saveDraft(page: Page): Promise<string> {
 
 function findDraftIdInText(value: string): string | null {
   return value.match(/"(?:appMsgId|appmsgid|appmsgId)"\s*:\s*"?([A-Za-z0-9_-]+)/i)?.[1] ?? null;
+}
+
+function platformAcceptedSave(body: unknown): boolean {
+  const code = findString(body, ['ret', 'errcode', 'err_code']);
+  const message = findString(body, ['err_msg', 'errmsg', 'msg']);
+  return code === '0' || (code === null && message === 'ok');
+}
+
+function platformRejection(body: unknown, responseText: string): string | null {
+  if (platformAcceptedSave(body)) return null;
+  const message = findString(body, ['err_msg', 'errmsg', 'msg']);
+  const code = findString(body, ['ret', 'errcode', 'err_code']);
+  if (message && code) return `${message} (${code})`;
+  if (message) return message;
+  if (code) return `status ${code}`;
+  return body === null && responseText.trim() ? responseText.trim().slice(0, 300) : null;
+}
+
+const DRAFT_SAVE_SUB_ACTIONS = new Set(['save', 'create', 'update', 'copy']);
+
+function isDraftSaveRequest(response: Response): boolean {
+  const url = response.url();
+  if (!url.includes('operate_appmsg')) return false;
+  const sub = draftSaveSubAction(url) ?? draftSaveSubAction(`?${response.request().postData() ?? ''}`);
+  return sub !== null && DRAFT_SAVE_SUB_ACTIONS.has(sub);
+}
+
+function draftSaveSubAction(value: string): string | null {
+  try {
+    const query = value.startsWith('?') ? new URLSearchParams(value.slice(1)) : new URL(value).searchParams;
+    return query.get('sub');
+  } catch {
+    return null;
+  }
+}
+
+async function waitForDraftIdInUrl(page: Page): Promise<string | null> {
+  await page.waitForURL((url) => Boolean(draftIdFromUrl(url.toString())), { timeout: 30_000 }).catch(() => undefined);
+  return draftIdFromUrl(page.url());
+}
+
+function draftIdFromUrl(value: string): string | null {
+  try {
+    const id = new URL(value).searchParams.get('appmsgid');
+    return id && /^[A-Za-z0-9_-]+$/.test(id) && !/^0+$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+async function blockingDialogText(page: Page): Promise<string | null> {
+  return page.evaluate<string | null>(`(() => {
+    for (const dialog of document.querySelectorAll('.weui-desktop-dialog__wrp, .weui-desktop-dialog')) {
+      if (!(dialog instanceof HTMLElement) || dialog.getBoundingClientRect().width < 100) continue;
+      const text = (dialog.textContent ?? '').replace(/\\s+/g, ' ').trim();
+      if (text) return text.slice(0, 300);
+    }
+    return null;
+  })()`).catch(() => null);
 }
 
 async function confirmContentStructureWarning(page: Page): Promise<void> {
@@ -455,15 +540,34 @@ async function confirmContentStructureWarning(page: Page): Promise<void> {
   }
 }
 
-async function clickByText(page: Page, labels: string[], options?: { force?: boolean }): Promise<void> {
+async function clickByText(page: Page, labels: string[]): Promise<void> {
   for (const label of labels) {
     const target = page.getByText(label, { exact: true }).last();
-    if (await target.isVisible().catch(() => false)) {
-      await target.click(options);
-      return;
-    }
+    if (!await target.isVisible().catch(() => false)) continue;
+    if (await clickActionElement(page, label)) return;
   }
   throw new Error(`WeChat editor action is unavailable: ${labels[0]}`);
+}
+
+// WeChat renders editor actions as a text span inside the real control, so a
+// Playwright click on the matched text can hang on hit-target checks. Dispatch
+// the click on the nearest clickable ancestor instead.
+async function clickActionElement(page: Page, label: string): Promise<boolean> {
+  return page.evaluate<boolean>(`(() => {
+    const wanted = ${JSON.stringify(label)}.replace(/\\s+/g, '');
+    const candidates = Array.from(document.querySelectorAll('button, a, [role="button"], .weui-desktop-btn, .js_save, #js_submit'));
+    const matches = candidates.filter((element) => {
+      const rect = element.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return false;
+      if (element.hasAttribute('disabled') || element.classList.contains('weui-desktop-btn_disabled')) return false;
+      return (element.textContent ?? '').replace(/\\s+/g, '') === wanted;
+    });
+    const target = matches[matches.length - 1];
+    if (!target) return false;
+    target.scrollIntoView({ block: 'center' });
+    target.click();
+    return true;
+  })()`);
 }
 
 function isLoginPage(page: Page): boolean {
@@ -851,14 +955,24 @@ async function setCoverImage(page: Page, generatedCoverPath?: string): Promise<v
   const coverPath = generatedCoverPath ?? await createCoverImage();
   const fileInput = imageDialog.locator('.js_upload_btn_container input[type="file"]').last();
   const imageGrid = imageDialog.locator('.weui-desktop-img-picker__item');
-  const uploadedImage = imageGrid.filter({ hasText: basename(coverPath) }).last();
+  // The material library truncates long file names, so every
+  // worklite-wechat-cover-<uuid>.png upload can match the same text filter.
+  // Select the item the upload adds instead of matching its displayed name.
+  const existingCount = await imageGrid.count();
   await fileInput.setInputFiles(coverPath);
-  try {
-    await uploadedImage.waitFor({ state: 'visible', timeout: 30_000 });
-  } catch (error) {
-    await page.screenshot({ path: '/tmp/worklite-cover-upload-timeout.png', fullPage: true });
-    throw error;
+  const uploadDeadline = Date.now() + 30_000;
+  let grewBy = 0;
+  while (Date.now() < uploadDeadline) {
+    grewBy = await imageGrid.count() - existingCount;
+    if (grewBy > 0) break;
+    await delay(500);
   }
+  if (grewBy <= 0) {
+    await page.screenshot({ path: '/tmp/worklite-cover-upload-timeout.png', fullPage: true }).catch(() => undefined);
+    throw new Error('WeChat did not add the uploaded cover image to the material library.');
+  }
+  const uploadedImage = imageGrid.first();
+  await uploadedImage.waitFor({ state: 'visible', timeout: 10_000 });
   await delay(1_000);
   await uploadedImage.click();
   await delay(1_000);
@@ -955,7 +1069,10 @@ function crc32(value: Buffer): number {
 }
 
 function extractTitle(article: string): string {
-  return article.match(/^#\s+(.+)$/m)?.[1]?.trim() || article.trim().split('\n')[0]?.slice(0, 64) || 'Untitled article';
+  const heading = article.match(/^#\s+(.+)$/m)?.[1]?.trim();
+  if (heading) return heading;
+  const firstLine = article.trim().split('\n')[0]?.trim();
+  return firstLine ? firstLine.replace(/^#{1,6}\s+/, '').slice(0, 64) : 'Untitled article';
 }
 
 function findString(value: unknown, keys: string[]): string | null {
