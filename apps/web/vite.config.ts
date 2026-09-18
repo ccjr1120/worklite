@@ -11,6 +11,12 @@ const packageVersion = JSON.parse(
   readFileSync(new URL('./package.json', import.meta.url), 'utf8'),
 ).version as string;
 
+function buildTag(): string {
+  const now = new Date();
+  const pad = (value: number, length = 2) => String(value).padStart(length, '0');
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+}
+
 export default defineConfig({
   plugins: [
     tanstackRouter({
@@ -22,6 +28,7 @@ export default defineConfig({
   ],
   define: {
     __WORKLITE_VERSION__: JSON.stringify(packageVersion),
+    __WORKLITE_BUILD_TAG__: JSON.stringify(buildTag()),
   },
   resolve: {
     alias: {
