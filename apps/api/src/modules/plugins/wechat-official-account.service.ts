@@ -210,12 +210,12 @@ export class WechatOfficialAccountService {
   private async monitorLogin(actionId: string, accountId: string, session: BrowserSession, expiresAt: Date, waitForPendingAction: boolean): Promise<void> {
     while (this.sessions.get(actionId) === session) {
       await delay(1_000);
+      if (Date.now() >= expiresAt.getTime()) break;
       if (waitForPendingAction) {
         const actionStatus = await this.getPendingActionStatus(actionId);
         if (!actionStatus || actionStatus === 'expired') continue;
         if (actionStatus !== 'pending') return;
       }
-      if (Date.now() >= expiresAt.getTime()) break;
       if (await isLoginConfirmed(session.context)) {
         const storageState = await session.context.storageState();
         await this.db.update(wechatOfficialAccounts).set({ status: 'connected', encryptedStorageState: encryptSecret(JSON.stringify(storageState)), qrCode: null, qrExpiresAt: null, lastVerifiedAt: new Date(), lastError: null, updatedAt: new Date() }).where(eq(wechatOfficialAccounts.id, accountId));
@@ -230,10 +230,10 @@ export class WechatOfficialAccountService {
   private async monitorPublish(actionId: string, publicationId: string, session: BrowserSession, expiresAt: Date): Promise<void> {
     while (this.sessions.get(actionId) === session) {
       await delay(1_000);
+      if (Date.now() >= expiresAt.getTime()) break;
       const actionStatus = await this.getPendingActionStatus(actionId);
       if (!actionStatus || actionStatus === 'expired') continue;
       if (actionStatus !== 'pending') return;
-      if (Date.now() >= expiresAt.getTime()) break;
       const publishedUrl = await detectPublishedUrl(session.page);
       if (publishedUrl) {
         await this.db.update(wechatPublications).set({ status: 'published', publishedUrl, lastError: null, updatedAt: new Date() }).where(eq(wechatPublications.id, publicationId));
@@ -448,13 +448,8 @@ function findAuthenticatedPage(context: BrowserContext): Page | null {
   }) ?? null;
 }
 
-async function hasAuthenticatedCookies(context: BrowserContext): Promise<boolean> {
-  const cookieNames = new Set((await context.cookies()).map((cookie) => cookie.name));
-  return ['slave_sid', 'slave_user'].every((name) => cookieNames.has(name));
-}
-
-async function isLoginConfirmed(context: BrowserContext): Promise<boolean> {
-  return findAuthenticatedPage(context) !== null || await hasAuthenticatedCookies(context);
+function isLoginConfirmed(context: BrowserContext): boolean {
+  return findAuthenticatedPage(context) !== null;
 }
 
 async function detectPublishedUrl(page: Page): Promise<string | null> {
