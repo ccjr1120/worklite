@@ -21,6 +21,7 @@ import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from '../agents/agent-executions.service';
 import { WechatOfficialAccountService } from '../plugins/wechat-official-account.service';
+import { PortkeyGatewayService } from '../model-providers/portkey-gateway.service';
 
 type RunListener = (event: RunProgressEvent) => void;
 
@@ -45,10 +46,11 @@ export class RunsService {
     private readonly workspaces: WorkspaceService,
     private readonly agentExecutions: AgentExecutionsService,
     private readonly wechatOfficialAccount: WechatOfficialAccountService,
+    private readonly gateway: PortkeyGatewayService,
   ) {
-    const capability = (id: string) => {
-      const value = resolveWorkflowNodeCapability(id, '1');
-      if (!value) throw new Error(`Workflow node capability is unavailable: ${id}@1`);
+    const capability = (id: string, version = '1') => {
+      const value = resolveWorkflowNodeCapability(id, version);
+      if (!value) throw new Error(`Workflow node capability is unavailable: ${id}@${version}`);
       return value;
     };
     this.registry.register({
@@ -82,8 +84,36 @@ export class RunsService {
       },
     });
     this.registry.register({
-      ...capability('wechat-official-account/publish'),
-      execute: (request) => this.wechatOfficialAccount.execute(request),
+      ...capability('worklite/image'),
+      execute: async (request) => {
+        const config = asRecord(request.config);
+        const input = asRecord(request.input);
+        const prompt = typeof input?.prompt === 'string' ? input.prompt : '';
+        if (!config || config.model !== 'codex/gpt-image-2') throw new Error('Image node requires the codex/gpt-image-2 model.');
+        if (!prompt.trim()) throw new Error('Image node requires a prompt.');
+        if (typeof config.n !== 'number' || !Number.isInteger(config.n) || config.n < 1) throw new Error('Image node image count must be a positive integer.');
+        if (config.background !== 'opaque' && config.background !== 'transparent') throw new Error('Image node background is invalid.');
+        if (config.quality !== 'low' && config.quality !== 'medium' && config.quality !== 'high') throw new Error('Image node quality is invalid.');
+        if (config.size !== '1024x1024' && config.size !== '1536x1024' && config.size !== '1024x1536') throw new Error('Image node size is invalid.');
+        const output = await this.gateway.generateImage({
+          prompt,
+          model: config.model,
+          n: config.n,
+          background: config.background,
+          quality: config.quality,
+          size: config.size,
+          signal: request.signal,
+        });
+        return { output };
+      },
+    });
+    this.registry.register({
+      ...capability('wechat-official-account/publish', '1'),
+      execute: (request) => this.wechatOfficialAccount.execute(request, '1'),
+    });
+    this.registry.register({
+      ...capability('wechat-official-account/publish', '2'),
+      execute: (request) => this.wechatOfficialAccount.execute(request, '2'),
     });
     this.wechatOfficialAccount.subscribe((actionId) => this.queueCompletedAction(actionId));
   }
@@ -115,7 +145,7 @@ export class RunsService {
     const [run] = await this.db.select({ id: workflowRuns.id }).from(workflowRuns).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id))).limit(1);
     if (!run) throw new NotFoundException('Run not found');
     const rows = await this.db.select().from(workflowRunEvents).where(and(eq(workflowRunEvents.runId, runId), gt(workflowRunEvents.sequence, afterSequence))).orderBy(asc(workflowRunEvents.sequence));
-    return rows.map((row) => ({ runId: row.runId, sequence: row.sequence, type: row.type, payload: row.payload, occurredAt: row.createdAt.toISOString() }));
+    return rows.map((row) => ({ runId: row.runId, sequence: row.sequence, type: row.type, payload: sanitizeWorkflowImages(row.payload), occurredAt: row.createdAt.toISOString() }));
   }
 
   subscribe(listener: RunListener): () => void {
@@ -135,7 +165,7 @@ export class RunsService {
 
   async createScheduledRun(workspaceId: string, workflowId: string, workflowVersionId: string, input: unknown): Promise<{ runId: string }> {
     const runId = `run_${randomUUID()}`;
-    await this.db.insert(workflowRuns).values({ id: runId, workspaceId, workflowId, workflowVersionId, input: input ?? null, status: 'queued' });
+    await this.db.insert(workflowRuns).values({ id: runId, workspaceId, workflowId, workflowVersionId, input: sanitizeWorkflowImages(input ?? null), status: 'queued' });
     await this.publish(runId, 'run.status', { status: 'queued' });
     this.schedule(runId);
     return { runId };
@@ -220,7 +250,7 @@ export class RunsService {
           state.nextPosition = position;
           state.active = { ...invocation, nodeRunId, position };
           await this.db.transaction((transaction) => {
-            transaction.insert(workflowNodeRuns).values({ id: nodeRunId, runId, workspaceId: run.workspaceId, nodeId: node.id, position, type: node.type, typeVersion: node.typeVersion, status: 'running', input: invocation.input, startedAt }).run();
+            transaction.insert(workflowNodeRuns).values({ id: nodeRunId, runId, workspaceId: run.workspaceId, nodeId: node.id, position, type: node.type, typeVersion: node.typeVersion, status: 'running', input: sanitizeWorkflowImages(invocation.input), startedAt }).run();
             const [updatedRun] = transaction.update(workflowRuns).set({ currentNodeId: node.id, executionState: state as StoredWorkflowExecutionState, updatedAt: startedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.status, 'running'))).returning().all();
             if (!updatedRun) throw new RunCancelledError();
           });
@@ -229,7 +259,7 @@ export class RunsService {
           if (!existingNodeRun) throw new Error('Workflow scheduler node run is unavailable.');
           startedAt = existingNodeRun.startedAt ?? startedAt;
           await this.db.transaction((transaction) => {
-            const [updatedNodeRun] = transaction.update(workflowNodeRuns).set({ status: 'running', input: invocation.input, error: null, finishedAt: null, startedAt }).where(and(eq(workflowNodeRuns.id, nodeRunId), inArray(workflowNodeRuns.status, ['queued', 'waiting_for_input']))).returning().all();
+            const [updatedNodeRun] = transaction.update(workflowNodeRuns).set({ status: 'running', input: sanitizeWorkflowImages(invocation.input), error: null, finishedAt: null, startedAt }).where(and(eq(workflowNodeRuns.id, nodeRunId), inArray(workflowNodeRuns.status, ['queued', 'waiting_for_input']))).returning().all();
             const [updatedRun] = transaction.update(workflowRuns).set({ currentNodeId: node.id, executionState: state as StoredWorkflowExecutionState, updatedAt: startedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.status, 'running'))).returning().all();
             if (!updatedNodeRun || !updatedRun) throw new RunCancelledError();
           });
@@ -287,18 +317,19 @@ export class RunsService {
         delete state.active;
         const finishedAt = new Date();
         await this.db.transaction((transaction) => {
-          const [updatedNodeRun] = transaction.update(workflowNodeRuns).set({ status: 'succeeded', output, artifactIds, finishedAt }).where(and(eq(workflowNodeRuns.id, nodeRunId), eq(workflowNodeRuns.status, 'running'))).returning().all();
+          const [updatedNodeRun] = transaction.update(workflowNodeRuns).set({ status: 'succeeded', output: sanitizeWorkflowImages(output), artifactIds, finishedAt }).where(and(eq(workflowNodeRuns.id, nodeRunId), eq(workflowNodeRuns.status, 'running'))).returning().all();
           const [updatedRun] = transaction.update(workflowRuns).set({ executionState: state as StoredWorkflowExecutionState, updatedAt: finishedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.status, 'running'))).returning().all();
           if (!updatedNodeRun || !updatedRun) throw new RunCancelledError();
         });
-        await this.publish(runId, 'node.completed', { nodeId: node.id, nodeRunId, output, artifactIds });
+        await this.publish(runId, 'node.completed', { nodeId: node.id, nodeRunId, output: sanitizeWorkflowImages(output), artifactIds });
       }
 
       const result = workflowRunResult(state);
+      const sanitizedResult = sanitizeWorkflowImages(result);
       const finishedAt = new Date();
-      const [succeededRun] = await this.db.update(workflowRuns).set({ status: 'succeeded', result, executionState: state as StoredWorkflowExecutionState, currentNodeId: null, updatedAt: finishedAt, finishedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.status, 'running'))).returning();
+      const [succeededRun] = await this.db.update(workflowRuns).set({ status: 'succeeded', result: sanitizedResult, executionState: state as StoredWorkflowExecutionState, currentNodeId: null, updatedAt: finishedAt, finishedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.status, 'running'))).returning();
       if (!succeededRun) return;
-      await this.publish(runId, 'run.status', { status: 'succeeded', result });
+      await this.publish(runId, 'run.status', { status: 'succeeded', result: sanitizedResult });
     } catch (error) {
       if (error instanceof RunCancelledError) return;
       const [current] = await this.db.select({ status: workflowRuns.status }).from(workflowRuns).where(eq(workflowRuns.id, runId)).limit(1);
@@ -406,7 +437,7 @@ export class RunsService {
     const end = run.finishedAt?.getTime() ?? (run.status === 'queued' ? null : Date.now());
     const definition = version.definition as StoredWorkflowDefinition | null;
     const hasArtifactNode = Boolean(definition?.nodes.some((node) => node.type === 'worklite/artifact'));
-    const view: RunView = { id: run.id, workspaceSlug, workflowId: workflow.id, workflowName: workflow.name, version: `v${version.version}`, status: run.status, currentStep: run.currentNodeId, startedAt: run.createdAt.toISOString(), durationSeconds: end === null ? null : Math.max(0, Math.round((end - run.createdAt.getTime()) / 1000)), initiator, input: run.input, result: run.result, hasArtifactNode };
+    const view: RunView = { id: run.id, workspaceSlug, workflowId: workflow.id, workflowName: workflow.name, version: `v${version.version}`, status: run.status, currentStep: run.currentNodeId, startedAt: run.createdAt.toISOString(), durationSeconds: end === null ? null : Math.max(0, Math.round((end - run.createdAt.getTime()) / 1000)), initiator, input: sanitizeWorkflowImages(run.input), result: sanitizeWorkflowImages(run.result), hasArtifactNode };
     if (!details) return view;
     const nodeRows = await this.db.select().from(workflowNodeRuns).where(eq(workflowNodeRuns.runId, run.id)).orderBy(asc(workflowNodeRuns.position));
     const artifactRows = await this.db.select().from(artifacts).where(eq(artifacts.runId, run.id)).orderBy(asc(artifacts.createdAt));
@@ -420,9 +451,9 @@ export class RunsService {
   private async publish(runId: string, type: RunProgressEvent['type'], payload: unknown): Promise<void> {
     const previous = this.eventQueues.get(runId) ?? Promise.resolve();
     const next = previous.then(async () => {
-      const [row] = await this.db.insert(workflowRunEvents).values({ runId, sequence: sql<number>`coalesce((select max(sequence) from workflow_run_events where run_id = ${runId}), 0) + 1`, type, payload }).returning();
+      const [row] = await this.db.insert(workflowRunEvents).values({ runId, sequence: sql<number>`coalesce((select max(sequence) from workflow_run_events where run_id = ${runId}), 0) + 1`, type, payload: sanitizeWorkflowImages(payload) }).returning();
       if (!row) return;
-      const event: RunProgressEvent = { runId: row.runId, sequence: row.sequence, type: row.type, payload: row.payload, occurredAt: row.createdAt.toISOString() };
+      const event: RunProgressEvent = { runId: row.runId, sequence: row.sequence, type: row.type, payload: sanitizeWorkflowImages(row.payload), occurredAt: row.createdAt.toISOString() };
       for (const listener of this.listeners) listener(event);
     });
     this.eventQueues.set(runId, next);
@@ -449,8 +480,43 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
+type GeneratedWorkflowImage = {
+  type: 'workflow_image';
+  model: string;
+  mediaType: 'image/png';
+  data: Array<{ b64Json: string }>;
+};
+
+function isGeneratedWorkflowImage(value: unknown): value is GeneratedWorkflowImage {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.type === 'workflow_image'
+    && typeof record.model === 'string'
+    && record.mediaType === 'image/png'
+    && Array.isArray(record.data)
+    && record.data.length > 0
+    && record.data.every((item) => Boolean(item)
+      && typeof item === 'object'
+      && !Array.isArray(item)
+      && typeof (item as Record<string, unknown>).b64Json === 'string');
+}
+
+function sanitizeWorkflowImages<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((item) => sanitizeWorkflowImages(item)) as T;
+  if (isGeneratedWorkflowImage(value)) return {
+    type: 'workflow_image_summary',
+    model: value.model,
+    mediaType: value.mediaType,
+    imageCount: value.data.length,
+  } as T;
+  if (!value || typeof value !== 'object') return value;
+  const output: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) output[key] = sanitizeWorkflowImages(item);
+  return output as T;
+}
+
 function toNodeRunView(row: typeof workflowNodeRuns.$inferSelect): WorkflowNodeRunView {
-  return { id: row.id, runId: row.runId, nodeId: row.nodeId, position: row.position, type: row.type, typeVersion: row.typeVersion, status: row.status, input: row.input, output: row.output, artifactIds: row.artifactIds ?? [], error: row.error, retryCount: row.retryCount, startedAt: row.startedAt?.toISOString() ?? null, finishedAt: row.finishedAt?.toISOString() ?? null };
+  return { id: row.id, runId: row.runId, nodeId: row.nodeId, position: row.position, type: row.type, typeVersion: row.typeVersion, status: row.status, input: sanitizeWorkflowImages(row.input), output: sanitizeWorkflowImages(row.output), artifactIds: row.artifactIds ?? [], error: row.error, retryCount: row.retryCount, startedAt: row.startedAt?.toISOString() ?? null, finishedAt: row.finishedAt?.toISOString() ?? null };
 }
 
 function toArtifactView(row: typeof artifacts.$inferSelect, workspaceSlug: string, workflowName: string): ArtifactView {

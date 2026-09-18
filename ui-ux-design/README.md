@@ -73,6 +73,8 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 ## Changelog
 
 ### 2026-09-17
+- Documented the Workflow Image node, constrained generation inspector, and required generated-cover connection for the WeChat Official Account node.
+- Documented explicit Workflow Input-to-Agent context edges that may coexist with one bounded feedback edge.
 
 - Replaced `docs/ui-implementation/` with the root-level `ui-ux-design/` structure required by the project documentation convention.
 - Moved every page and surface specification into a directory-specific `DESIGN.md`, added route/source/implementation/coverage metadata, and retained shared specifications under `ui-ux-design/shared/`.

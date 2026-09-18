@@ -501,6 +501,18 @@ export class WorkspaceResourcesService {
       workspace: { id: workspace.id, slug: workspace.slug, name: workspace.name },
       capabilities: {
         supportedResourceOperations: ['inspect workspace resources', 'inspect Workflow capabilities', 'navigate to known WorkLite pages', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server draft', 'create Agent draft', 'create Workflow draft', 'edit Workflow draft from a logical plan', 'change appearance', 'change language'],
+        modelProviderProxy: {
+          imageGeneration: {
+            route: '/api/portkey-gateway/v1/images/generations',
+            codexModel: 'codex/gpt-image-2',
+            supportedRequestFields: ['prompt', 'model', 'n', 'background', 'quality', 'size'],
+            responseContent: 'data[].b64_json',
+            workflowNode: true,
+            workflowNodeType: 'worklite/image',
+            workflowNodeVersion: '1',
+            imageEdits: false,
+          },
+        },
         workflow: {
           primaryService: true,
           standaloneAgentsAreIndependent: true,
@@ -517,7 +529,7 @@ export class WorkspaceResourcesService {
             configSchema: capability.configSchema,
           })),
           unsupportedFeatures: ['standalone Agent references', 'Agent version references', 'template selection', 'dynamic joins', 'parallel execution', 'webhook triggers', 'API triggers', 'notification nodes'],
-          controlFlow: { edgeModes: ['always', 'predicate', 'fallback'], predicatePaths: 'dot_delimited_output_path', boundedLoops: true, traversalLimitField: 'maxTraversals', cycleRule: 'every_cycle_crosses_a_bounded_edge', initialSourceRule: 'no_unbounded_incoming_edges_and_no_connected_required_inputs', execution: 'deterministic_sequential_token_scheduler' },
+          controlFlow: { edgeModes: ['always', 'predicate', 'fallback'], predicatePaths: 'dot_delimited_output_path', boundedLoops: true, traversalLimitField: 'maxTraversals', cycleRule: 'every_cycle_crosses_a_bounded_edge', initialSourceRule: 'no_unbounded_incoming_edges_and_no_connected_required_inputs', explicitInitialInputEdges: { available: true, source: 'worklite/input.output', target: 'worklite/agent.context', mustBeUnconditionalAndUnbounded: true, mayCombineWithOneBoundedFeedbackEdge: true }, execution: 'deterministic_sequential_token_scheduler' },
           graphMutationAvailable: true,
           graphMutationNote: 'Use edit-workflow.mjs with a logical Workflow Plan. Edges may declare structured conditions and positive maxTraversals bounds. The server generates node IDs and positions, validates capabilities, ports, resources, conditions, and bounded-cycle constraints, then records an assistant revision.',
           scheduling: { available: true, owner: 'timer_node', nodeType: 'worklite/timer', minimumIntervalSeconds: 300, maximumPerWorkflow: 1, activatesOnPublish: true, preventsOverlap: true },

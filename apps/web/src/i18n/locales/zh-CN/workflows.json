@@ -162,8 +162,27 @@
       "markdown": "Markdown",
       "json": "JSON"
     },
+    "imageNode": "图片生成",
+    "imageNodeDescription": "根据文本提示词生成 PNG 图片",
+    "imagePromptPort": "图片提示词",
+    "imageModel": "模型",
+    "imageCount": "图片数量",
+    "imageBackground": "背景",
+    "imageBackgrounds": {
+      "opaque": "不透明",
+      "transparent": "透明"
+    },
+    "imageQuality": "质量",
+    "imageQualities": {
+      "low": "低",
+      "medium": "中",
+      "high": "高"
+    },
+    "imageSize": "尺寸",
+    "imageSummary": "{{count}} 张图片 · {{background}} · {{quality}} · {{size}}",
+    "imageConnectionHint": "生成图片只能连接到微信 v2 封面输入。",
     "wechatNode": "微信公众号",
-    "wechatNodeDescription": "通过扫码确认保存或发布 Markdown 文章",
+    "wechatNodeDescription": "通过扫码确认保存或发布带生成封面的 Markdown 文章",
     "wechatAccount": "公众号账号",
     "wechatPersonalAccount": "个人公众号账号",
     "wechatMode": "投递模式",
@@ -173,6 +192,8 @@
     },
     "wechatArticlePort": "Markdown 文章",
     "wechatMetadataPort": "元数据",
+    "wechatCoverPort": "生成封面",
+    "wechatCoverHint": "封面输入只接受来自图片节点的生成 PNG。",
     "wechatDraftHint": "工作流可能等待账号登录，随后保存草稿，不需要最终发布确认。",
     "wechatPublishPendingHint": "工作流会在登录或最终发布确认时等待，扫码后自动恢复。",
     "dataPort": "数据输入",

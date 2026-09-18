@@ -8,6 +8,7 @@ const CodexConfig: ProviderConfigs = {
   requestHandlers: {
     proxy: codexRequestHandler,
     createModelResponse: codexRequestHandler,
+    imageGenerate: codexRequestHandler,
   },
   responseTransforms: {},
 };

@@ -162,8 +162,27 @@
       "markdown": "Markdown",
       "json": "JSON"
     },
+    "imageNode": "Image Generation",
+    "imageNodeDescription": "Generate a PNG from a text prompt",
+    "imagePromptPort": "Image prompt",
+    "imageModel": "Model",
+    "imageCount": "Image count",
+    "imageBackground": "Background",
+    "imageBackgrounds": {
+      "opaque": "Opaque",
+      "transparent": "Transparent"
+    },
+    "imageQuality": "Quality",
+    "imageQualities": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High"
+    },
+    "imageSize": "Size",
+    "imageSummary": "{{count}} image · {{background}} · {{quality}} · {{size}}",
+    "imageConnectionHint": "Generated images can connect only to a WeChat v2 cover input.",
     "wechatNode": "WeChat Official Account",
-    "wechatNodeDescription": "Save or publish a Markdown article with QR confirmation",
+    "wechatNodeDescription": "Save or publish a Markdown article with a generated cover and QR confirmation",
     "wechatAccount": "Official Account",
     "wechatPersonalAccount": "Personal Official Account",
     "wechatMode": "Delivery mode",
@@ -173,6 +192,8 @@
     },
     "wechatArticlePort": "Markdown article",
     "wechatMetadataPort": "Metadata",
+    "wechatCoverPort": "Generated cover",
+    "wechatCoverHint": "The cover input accepts only a generated PNG from an Image node.",
     "wechatDraftHint": "The Workflow may pause for account login, then saves a draft without final publication confirmation.",
     "wechatPublishPendingHint": "The Workflow pauses for login or final publication confirmation and resumes after the QR scan.",
     "dataPort": "Data input",

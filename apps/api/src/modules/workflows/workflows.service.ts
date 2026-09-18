@@ -439,7 +439,7 @@ function validateDefinition(definition: StoredWorkflowDefinition, requireComplet
   });
 
   const edgeIds = new Set<string>();
-  const inputs = new Set<string>();
+  const incomingEdges = new Map<string, StoredWorkflowDefinition['edges']>();
   for (const edge of definition.edges) {
     const source = definition.nodes.find((node) => node.id === edge.sourceNodeId);
     const target = definition.nodes.find((node) => node.id === edge.targetNodeId);
@@ -453,12 +453,15 @@ function validateDefinition(definition: StoredWorkflowDefinition, requireComplet
     if (source.id === target.id) throw new BadRequestException('A workflow node cannot connect to itself.');
     if (!sourcePort || !targetPort) throw new BadRequestException('The workflow edge references an unavailable port.');
     if (!portsCompatible(sourcePort, targetPort)) throw new BadRequestException('The workflow edge connects incompatible ports.');
-    if (!targetPort.multiple && inputs.has(inputKey)) throw new BadRequestException('A workflow input port accepts only one edge.');
+    if (!isGeneratedImageConnectionAllowed(source, target, edge.sourcePort, edge.targetPort)) throw new BadRequestException('Generated image output may connect only to the WeChat v2 coverImage input.');
     if (definition.edges.some((candidate) => candidate.id !== edge.id && candidate.sourceNodeId === edge.sourceNodeId && candidate.sourcePort === edge.sourcePort && candidate.targetNodeId === edge.targetNodeId && candidate.targetPort === edge.targetPort)) throw new BadRequestException('The workflow contains a duplicate connection.');
     validateEdgeControlFlow(edge);
     edgeIds.add(edge.id);
-    inputs.add(inputKey);
+    const portEdges = incomingEdges.get(inputKey) ?? [];
+    portEdges.push(edge);
+    incomingEdges.set(inputKey, portEdges);
   }
+  validateIncomingEdges(definition, capabilities, incomingEdges);
 
   if (requireCompleteAgents) {
     for (const node of definition.nodes) {
@@ -489,6 +492,35 @@ const WORKFLOW_EDGE_OPERATORS = new Set([
   'lessThan',
   'lessThanOrEqual',
 ]);
+
+function validateIncomingEdges(
+  definition: StoredWorkflowDefinition,
+  capabilities: Map<string, WorkflowNodeCapability>,
+  incomingEdges: Map<string, StoredWorkflowDefinition['edges']>,
+): void {
+  for (const [inputKey, edges] of incomingEdges) {
+    const [targetNodeId, targetPortName] = inputKey.split(':');
+    const target = definition.nodes.find((node) => node.id === targetNodeId);
+    const capability = target ? capabilities.get(`${target.type}@${target.typeVersion}`) : undefined;
+    const targetPort = capability?.inputs.find((port) => port.name === targetPortName);
+    if (!target || !targetPort || targetPort.multiple) continue;
+
+    const inputEdges = edges.filter((edge) => definition.nodes.some((node) => node.id === edge.sourceNodeId && node.type === 'worklite/input'));
+    const isAgentContext = target.type === 'worklite/agent' && targetPortName === 'context';
+    if (edges.length === 1 && (!isAgentContext || inputEdges.length === 0)) continue;
+
+    if (!isAgentContext || inputEdges.length === 0) throw new BadRequestException('A workflow input port accepts only one edge.');
+    if (inputEdges.length > 1) throw new BadRequestException('Agent context accepts only one Workflow Input edge.');
+    const inputEdge = inputEdges[0];
+    if (inputEdge.condition !== undefined || inputEdge.maxTraversals !== undefined) throw new BadRequestException('A Workflow Input edge must be unconditional and unbounded.');
+    const feedbackEdges = edges.filter((edge) => edge.id !== inputEdge.id);
+    if (feedbackEdges.length === 0) continue;
+    const feedbackIsBounded = feedbackEdges.length === 1 && feedbackEdges.every((edge) => edge.maxTraversals !== undefined);
+    if (!feedbackIsBounded || feedbackEdges.some((edge) => definition.nodes.some((node) => node.id === edge.sourceNodeId && node.type === 'worklite/input'))) {
+      throw new BadRequestException('Agent context may combine Workflow Input only with one bounded feedback edge.');
+    }
+  }
+}
 
 function validateEdgeControlFlow(edge: StoredWorkflowDefinition['edges'][number]): void {
   if (edge.maxTraversals !== undefined && (!Number.isInteger(edge.maxTraversals) || edge.maxTraversals < 1)) throw new BadRequestException('Workflow edge maximum traversals must be a positive integer.');
@@ -526,6 +558,13 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
   if (type === 'worklite/artifact') {
     if (typeof value.name !== 'string' || !value.name.trim()) throw new BadRequestException('Artifact node name must be a non-empty string.');
     if (value.type !== 'text' && value.type !== 'markdown' && value.type !== 'json') throw new BadRequestException('Artifact node type must be text, markdown, or json.');
+  }
+  if (type === 'worklite/image') {
+    if (value.model !== 'codex/gpt-image-2') throw new BadRequestException('Image node model must be codex/gpt-image-2.');
+    if (typeof value.n !== 'number' || !Number.isInteger(value.n) || value.n < 1) throw new BadRequestException('Image node image count must be a positive integer.');
+    if (value.background !== 'opaque' && value.background !== 'transparent') throw new BadRequestException('Image node background must be opaque or transparent.');
+    if (value.quality !== 'low' && value.quality !== 'medium' && value.quality !== 'high') throw new BadRequestException('Image node quality must be low, medium, or high.');
+    if (value.size !== '1024x1024' && value.size !== '1536x1024' && value.size !== '1024x1536') throw new BadRequestException('Image node size is not supported.');
   }
   if (type === 'worklite/timer') {
     if (typeof value.enabled !== 'boolean') throw new BadRequestException('Timer node enabled must be a boolean.');
@@ -587,6 +626,17 @@ function validateSchemaValue(value: unknown, schema: unknown, label: string): vo
 
 function portsCompatible(source: WorkflowPortDefinition, target: WorkflowPortDefinition): boolean {
   return source.dataType === target.dataType || source.dataType === 'json' || target.dataType === 'json';
+}
+
+function isGeneratedImageConnectionAllowed(
+  source: StoredWorkflowDefinition['nodes'][number],
+  target: StoredWorkflowDefinition['nodes'][number],
+  sourcePort: string,
+  targetPort: string,
+): boolean {
+  const isImageOutput = source.type === 'worklite/image' && source.typeVersion === '1' && sourcePort === 'output';
+  const isWeChatCoverInput = target.type === 'wechat-official-account/publish' && target.typeVersion === '2' && targetPort === 'coverImage';
+  return isImageOutput === isWeChatCoverInput;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

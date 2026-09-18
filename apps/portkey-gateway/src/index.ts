@@ -211,7 +211,7 @@ app.all('/worklite/proxy/*', async (c) => {
   const provider = providerId ? await getProvider(providerId) : undefined;
   if (!provider) return c.json({ error: { message: 'Model provider not found.' } }, 404);
   const operation = c.req.path.slice('/worklite/proxy/'.length);
-  if (operation !== 'models' && operation !== 'chat/completions' && operation !== 'responses') return c.json({ error: { message: 'Unsupported Gateway operation.' } }, 400);
+  if (operation !== 'models' && operation !== 'chat/completions' && operation !== 'responses' && operation !== 'images/generations') return c.json({ error: { message: 'Unsupported Gateway operation.' } }, 400);
   const adapter = provider.protocol === 'codex/responses' ? 'codex' : provider.protocol.startsWith('deepseek/') ? 'deepseek' : 'openai';
   const config = { provider: adapter, api_key: provider.apiKey, custom_host: provider.baseURL, ...(Object.keys(provider.headers ?? {}).length > 0 ? { forward_headers: Object.keys(provider.headers ?? {}) } : {}) };
   const headers = new Headers(c.req.raw.headers);

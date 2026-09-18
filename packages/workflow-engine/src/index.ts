@@ -162,6 +162,27 @@ const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     },
   },
   {
+    id: 'worklite/image',
+    version: '1',
+    name: 'Image Generation',
+    purpose: 'Generate PNG images from a text prompt.',
+    inputs: [{ name: 'prompt', required: true, dataType: 'string', multiple: false }],
+    outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
+    inputSchema: { type: 'object', required: ['prompt'], properties: { prompt: { type: 'string' } } },
+    outputSchema: { type: 'object' },
+    configSchema: {
+      type: 'object',
+      required: ['model', 'n', 'background', 'quality', 'size'],
+      properties: {
+        model: { type: 'string', enum: ['codex/gpt-image-2'] },
+        n: { type: 'integer', minimum: 1 },
+        background: { type: 'string', enum: ['opaque', 'transparent'] },
+        quality: { type: 'string', enum: ['low', 'medium', 'high'] },
+        size: { type: 'string', enum: ['1024x1024', '1536x1024', '1024x1536'] },
+      },
+    },
+  },
+  {
     id: 'wechat-official-account/publish',
     version: '1',
     name: 'WeChat Official Account',
@@ -172,6 +193,32 @@ const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     ],
     outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
     inputSchema: { type: 'object', required: ['article'], properties: { article: { type: 'string' }, metadata: { type: 'object' } } },
+    outputSchema: { type: 'object' },
+    configSchema: {
+      type: 'object',
+      required: ['accountId', 'mode'],
+      properties: {
+        accountId: { type: 'string', minLength: 1 },
+        mode: { type: 'string', enum: ['draft', 'publish'] },
+      },
+    },
+  },
+  {
+    id: 'wechat-official-account/publish',
+    version: '2',
+    name: 'WeChat Official Account',
+    purpose: 'Save a Markdown article with a generated PNG cover as a WeChat Official Account draft or publish it with human QR confirmation.',
+    inputs: [
+      { name: 'article', required: true, dataType: 'string', multiple: false },
+      { name: 'metadata', required: false, dataType: 'json', multiple: false },
+      { name: 'coverImage', required: true, dataType: 'json', multiple: false },
+    ],
+    outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
+    inputSchema: {
+      type: 'object',
+      required: ['article', 'coverImage'],
+      properties: { article: { type: 'string' }, metadata: { type: 'object' }, coverImage: { type: 'object' } },
+    },
     outputSchema: { type: 'object' },
     configSchema: {
       type: 'object',

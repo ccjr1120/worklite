@@ -25,6 +25,8 @@ const HOP_BY_HOP_HEADERS = new Set([
   'upgrade',
 ]);
 
+type GatewayProxyOperation = 'models' | 'chat/completions' | 'responses' | 'images/generations';
+
 function forwardedHeaders(headers: IncomingMessage['headers']): Record<string, string> {
   return Object.fromEntries(
     Object.entries(headers).flatMap(([name, value]) => {
@@ -81,6 +83,17 @@ function discoveredModelIds(payload: unknown): string[] {
     }
     return [];
   }).filter(Boolean))];
+}
+
+function gatewayErrorMessage(body: unknown): string {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return 'Portkey Gateway request failed.';
+  const record = body as Record<string, unknown>;
+  if (typeof record.message === 'string') return record.message;
+  const error = record.error;
+  if (error && typeof error === 'object' && !Array.isArray(error) && typeof (error as Record<string, unknown>).message === 'string') {
+    return (error as Record<string, unknown>).message as string;
+  }
+  return 'Portkey Gateway request failed.';
 }
 
 @Injectable()
@@ -246,7 +259,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     await this.shutdown();
   }
 
-  async proxy(request: Request, response: Response, providerId: string, operation: 'models' | 'chat/completions' | 'responses', selectedModel?: string): Promise<void> {
+  async proxy(request: Request, response: Response, providerId: string, operation: GatewayProxyOperation, selectedModel?: string): Promise<void> {
     this.ensureGateway();
     const provider = (await this.providers()).find((candidate) => candidate.id === providerId);
     if (!provider) throw new BadRequestException('Model provider not found.');
@@ -255,7 +268,8 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     if (selectedModel && !provider.models.includes(model)) throw new BadRequestException('The selected model is not configured for this provider.');
     const configuredProtocol = provider.protocol;
     const { operation: configuredOperation } = protocolParts(configuredProtocol);
-    if (operation !== 'models' && operation !== configuredOperation) throw new BadRequestException(`Provider protocol ${configuredProtocol} does not support ${operation}.`);
+    const operationSupported = operation === 'models' || operation === configuredOperation || (configuredProtocol === 'codex/responses' && operation === 'images/generations');
+    if (!operationSupported) throw new BadRequestException(`Provider protocol ${configuredProtocol} does not support ${operation}.`);
     const bodyValue = selectedModel && request.body && typeof request.body === 'object' && !Array.isArray(request.body)
       ? { ...request.body, model }
       : request.body;
@@ -294,7 +308,47 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async proxyUnified(request: Request, response: Response, operation: 'chat/completions' | 'responses'): Promise<void> {
+  async generateImage(input: {
+    prompt: string;
+    model: string;
+    n?: number;
+    background?: string;
+    quality?: string;
+    size?: string;
+    signal?: AbortSignal;
+  }): Promise<{ type: 'workflow_image'; model: string; mediaType: 'image/png'; data: Array<{ b64Json: string }> }> {
+    await this.ensureGatewayForDiscovery();
+    const prompt = input.prompt.trim();
+    const model = input.model.trim();
+    const separator = model.indexOf('/');
+    const providerName = separator > 0 ? model.slice(0, separator) : '';
+    const modelId = separator > 0 ? model.slice(separator + 1) : '';
+    if (!prompt) throw new BadRequestException('Image node requires a prompt.');
+    if (model !== 'codex/gpt-image-2' || !providerName || !modelId) throw new BadRequestException('Image node requires the codex/gpt-image-2 model.');
+    const provider = (await this.providers()).find((candidate) => candidate.name === providerName);
+    if (!provider) throw new BadRequestException('Model provider not found.');
+    if (provider.protocol !== 'codex/responses' || !provider.models.includes(modelId)) throw new BadRequestException('The Codex Provider does not support this image model.');
+
+    const payload = await this.gatewayJson<{ data?: unknown }>(
+      '/worklite/proxy/images/generations',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-worklite-provider-id': provider.id },
+        body: JSON.stringify({ prompt, model: modelId, n: input.n, background: input.background, quality: input.quality, size: input.size }),
+        signal: input.signal,
+      },
+    );
+    const rows = Array.isArray(payload.data) ? payload.data : [];
+    const images = rows.flatMap((row): Array<{ b64Json: string }> => {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) return [];
+      const value = (row as Record<string, unknown>).b64_json;
+      return typeof value === 'string' && value.trim() ? [{ b64Json: value.trim() }] : [];
+    });
+    if (images.length === 0) throw new ServiceUnavailableException('The image provider returned no generated PNG data.');
+    return { type: 'workflow_image', model, mediaType: 'image/png', data: images };
+  }
+
+  async proxyUnified(request: Request, response: Response, operation: Exclude<GatewayProxyOperation, 'models'>): Promise<void> {
     const model = request.body && typeof request.body === 'object' && !Array.isArray(request.body) && 'model' in request.body
       ? request.body.model
       : undefined;
@@ -364,7 +418,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     let body: unknown = undefined;
     try { body = text ? JSON.parse(text) : undefined; } catch { body = undefined; }
     if (!response.ok) {
-      const message = body && typeof body === 'object' && !Array.isArray(body) && 'message' in body && typeof body.message === 'string' ? body.message : 'Portkey Gateway request failed.';
+      const message = gatewayErrorMessage(body);
       throw new BadRequestException(message);
     }
     return body as T;

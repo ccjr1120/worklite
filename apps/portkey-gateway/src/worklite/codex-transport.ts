@@ -53,7 +53,7 @@ function upstreamHeaders(requestHeaders: Record<string, string>, accessToken: st
 
 function copyResponseHeaders(upstream: Response): Headers {
   const headers = new Headers();
-  for (const name of ['content-type', 'cache-control', 'x-request-id', 'x-ratelimit-limit-requests', 'x-ratelimit-remaining-requests', 'x-ratelimit-reset-requests']) {
+  for (const name of ['content-type', 'cache-control', 'x-request-id', 'x-codex-imagegen-request-id', 'x-ratelimit-limit-requests', 'x-ratelimit-remaining-requests', 'x-ratelimit-reset-requests']) {
     const value = upstream.headers.get(name);
     if (value) headers.set(name, value);
   }
@@ -169,9 +169,47 @@ export async function codexModels(request: Request): Promise<Response> {
   } catch { return json({ error: { message: 'Codex model discovery failed.', type: 'upstream_error' } }, 502); }
   finally { lease.release(); }
 }
+function codexImageGenerationBody(body: unknown): Record<string, unknown> {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return {};
+  const source = body as Record<string, unknown>;
+  const forwarded: Record<string, unknown> = {};
+  for (const field of ['prompt', 'model', 'n', 'background', 'quality', 'size'] as const) {
+    if (field in source) forwarded[field] = source[field];
+  }
+  if (typeof forwarded.model === 'string') {
+    forwarded.model = forwarded.model.split('/').slice(1).join('/') || forwarded.model;
+  }
+  return forwarded;
+}
+
+async function imageGenerations(request: Request, requestHeaders: Record<string, string>, body: unknown): Promise<Response> {
+  const forwardedBody = codexImageGenerationBody(body);
+  let lease;
+  try { lease = await acquireCodexAccount(); } catch { return unavailable(); }
+  try {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const headers = upstreamHeaders(requestHeaders, lease.accessToken, lease.accountId, 'application/json');
+      headers.set('content-type', 'application/json');
+      headers.set('x-codex-image-turn-id', randomUUID());
+      headers.delete('openai-beta');
+      const upstream = await fetch(upstreamURL('/images/generations'), {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(forwardedBody),
+        signal: request.signal,
+      });
+      if (upstream.status !== 401 || attempt === 1) return new Response(upstream.body, { status: upstream.status, headers: copyResponseHeaders(upstream) });
+      lease.accessToken = await lease.refresh();
+    }
+    return unavailable();
+  } catch {
+    return json({ error: { message: 'Codex image generation request failed.', type: 'upstream_error' } }, 502);
+  } finally { lease.release(); }
+}
+
 async function responses(request: Request, requestHeaders: Record<string, string>, body: unknown, compact: boolean): Promise<Response> {
   const forwardedBody = body && typeof body === 'object' && !Array.isArray(body)
-    ? (() => { const value = { ...(body as Record<string, unknown>), store: false, ...(typeof (body as Record<string, unknown>).model === 'string' ? { model: String((body as Record<string, unknown>).model).split('/').slice(1).join('/') || (body as Record<string, unknown>).model } : {}) }; delete value.max_output_tokens; return value; })()
+    ? (() => { const value: Record<string, unknown> = { ...(body as Record<string, unknown>), store: false, ...(typeof (body as Record<string, unknown>).model === 'string' ? { model: String((body as Record<string, unknown>).model).split('/').slice(1).join('/') || (body as Record<string, unknown>).model } : {}) }; delete value.max_output_tokens; return value; })()
     : body;
   let lease;
   try { lease = await acquireCodexAccount(); } catch { return unavailable(); }
@@ -191,6 +229,7 @@ export function codexRequestHandler({ c, requestURL, requestHeaders, requestBody
   const request = c.req.raw;
   const pathname = new URL(requestURL).pathname;
   if (pathname.endsWith('/models')) return codexModels(request);
+  if (pathname.endsWith('/images/generations')) return imageGenerations(request, requestHeaders, requestBody);
   if (pathname.endsWith('/responses/compact')) return responses(request, requestHeaders, requestBody, true);
   return responses(request, requestHeaders, requestBody, false);
 }

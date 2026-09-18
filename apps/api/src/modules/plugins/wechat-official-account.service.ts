@@ -1,6 +1,8 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
+import { rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { Lexer, type Token, type Tokens } from 'marked';
 import { and, eq, ne } from 'drizzle-orm';
@@ -30,7 +32,7 @@ export class WechatOfficialAccountService {
     return () => this.listeners.delete(listener);
   }
 
-  async execute(request: NodeExecutionRequest): Promise<NodeExecutionResult> {
+  async execute(request: NodeExecutionRequest, version: '1' | '2'): Promise<NodeExecutionResult> {
     const config = asRecord(request.config);
     const input = asRecord(request.input);
     const accountId = typeof config?.accountId === 'string' ? config.accountId : '';
@@ -39,6 +41,7 @@ export class WechatOfficialAccountService {
     const metadata = asRecord(input?.metadata) ?? {};
     if (!accountId || (mode !== 'draft' && mode !== 'publish')) throw new Error('WeChat Official Account node requires an account and mode.');
     if (!article.trim()) throw new Error('WeChat Official Account node requires Markdown article input.');
+    const coverImage = version === '2' ? validateGeneratedCover(input?.coverImage) : null;
     const account = await this.getAccountRow(accountId);
     const idempotencyKey = `${request.context.workflowRunId}:${request.context.nodeRunId}`;
     const publication = await this.ensurePublication(request, accountId, mode, article, metadata, idempotencyKey);
@@ -49,7 +52,14 @@ export class WechatOfficialAccountService {
       return { status: 'waiting_for_input', pendingAction: pending };
     }
 
-    return this.compose(request.context.pendingActionId, publication, account.encryptedStorageState, request.signal);
+    if (!coverImage) return this.compose(request.context.pendingActionId, publication, account.encryptedStorageState, request.signal);
+    const coverPath = join(tmpdir(), `worklite-wechat-cover-${randomUUID()}.png`);
+    await writeFile(coverPath, Buffer.from(coverImage.b64Json, 'base64'));
+    try {
+      return await this.compose(request.context.pendingActionId, publication, account.encryptedStorageState, request.signal, coverPath);
+    } finally {
+      await rm(coverPath, { force: true }).catch(() => undefined);
+    }
   }
 
   async refresh(actionId: string): Promise<PendingNodeExecutionResult['pendingAction']> {
@@ -118,7 +128,7 @@ export class WechatOfficialAccountService {
     }
   }
 
-  private async compose(actionId: string, publication: typeof wechatPublications.$inferSelect, encryptedStorageState: string, signal: AbortSignal): Promise<NodeExecutionResult> {
+  private async compose(actionId: string, publication: typeof wechatPublications.$inferSelect, encryptedStorageState: string, signal: AbortSignal, coverPath?: string): Promise<NodeExecutionResult> {
     this.assertAccountAvailable(actionId);
     const session = await this.createSession(encryptedStorageState);
     this.sessions.set(actionId, session);
@@ -133,7 +143,7 @@ export class WechatOfficialAccountService {
       const token = new URL(session.page.url()).searchParams.get('token');
       if (!token) throw new Error('WeChat Official Account session did not provide an editor token.');
       await session.page.goto(`https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&type=10&token=${encodeURIComponent(token)}&lang=en_US`, { waitUntil: 'domcontentloaded' });
-      await fillArticle(session.page, publication.title, publication.article);
+      await fillArticle(session.page, publication.title, publication.article, coverPath);
       if (signal.aborted) throw new Error('Workflow run cancelled.');
       const draftId = await saveDraft(session.page);
       await this.db.update(wechatPublications).set({ status: 'draft_saved', draftId, lastError: null, updatedAt: new Date() }).where(eq(wechatPublications.id, publication.id));
@@ -308,7 +318,7 @@ async function showScanLogin(page: Page): Promise<void> {
   await qr.waitFor({ state: 'visible', timeout: 20_000 });
 }
 
-async function fillArticle(page: Page, title: string, article: string): Promise<void> {
+async function fillArticle(page: Page, title: string, article: string, coverPath?: string): Promise<void> {
   const titleEditor = page.locator('.ProseMirror').first();
   await titleEditor.waitFor({ state: 'visible', timeout: 20_000 });
   await titleEditor.click();
@@ -327,7 +337,7 @@ async function fillArticle(page: Page, title: string, article: string): Promise<
     Object.defineProperty(paste, 'clipboardData', { value: data });
     element.dispatchEvent(paste);
   }, html);
-  await setCoverImage(page);
+  await setCoverImage(page, coverPath);
 }
 
 async function saveDraft(page: Page): Promise<string> {
@@ -775,7 +785,7 @@ function escapeHtml(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 }
 
-async function setCoverImage(page: Page): Promise<void> {
+async function setCoverImage(page: Page, generatedCoverPath?: string): Promise<void> {
   const cover = page.locator('#js_cover_area');
   await cover.waitFor({ state: 'visible', timeout: 20_000 });
   await cover.scrollIntoViewIfNeeded();
@@ -789,21 +799,19 @@ async function setCoverImage(page: Page): Promise<void> {
 
   const imageDialog = page.locator('.weui-desktop-dialog_img-picker').last();
   await imageDialog.waitFor({ state: 'visible', timeout: 20_000 });
-  const coverPath = await createCoverImage();
+  const coverPath = generatedCoverPath ?? await createCoverImage();
   const fileInput = imageDialog.locator('.js_upload_btn_container input[type="file"]').last();
-  const existingImageCount = await imageDialog.locator('.weui-desktop-img-picker__item').count();
-  await fileInput.setInputFiles(coverPath);
   const imageGrid = imageDialog.locator('.weui-desktop-img-picker__item');
-  const uploadStartedAt = Date.now();
-  while ((await imageGrid.count()) <= existingImageCount) {
-    if (Date.now() - uploadStartedAt > 30_000) {
-      await page.screenshot({ path: '/tmp/worklite-cover-upload-timeout.png', fullPage: true });
-      throw new Error('Uploaded cover image did not appear.');
-    }
-    await delay(250);
+  const uploadedImage = imageGrid.filter({ hasText: basename(coverPath) }).last();
+  await fileInput.setInputFiles(coverPath);
+  try {
+    await uploadedImage.waitFor({ state: 'visible', timeout: 30_000 });
+  } catch (error) {
+    await page.screenshot({ path: '/tmp/worklite-cover-upload-timeout.png', fullPage: true });
+    throw error;
   }
   await delay(1_000);
-  await imageGrid.first().click();
+  await uploadedImage.click();
   await delay(1_000);
 
   const nextButton = imageDialog.getByRole('button', { name: '下一步' }).last();
@@ -813,11 +821,11 @@ async function setCoverImage(page: Page): Promise<void> {
     return handle ? await handle.evaluate((element) => element.classList.contains('weui-desktop-btn_disabled')) : true;
   };
   if (await isNextDisabled()) {
-    await imageGrid.first().click({ force: true });
+    await uploadedImage.click({ force: true });
     await delay(1_000);
   }
   if (await isNextDisabled()) {
-    await imageGrid.first().dispatchEvent('click');
+    await uploadedImage.dispatchEvent('click');
     await delay(1_000);
   }
   try {
@@ -839,6 +847,15 @@ async function setCoverImage(page: Page): Promise<void> {
     await page.screenshot({ path: '/tmp/worklite-cover-confirm-timeout.png', fullPage: true });
     throw error;
   }
+}
+
+function validateGeneratedCover(value: unknown): { b64Json: string } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('WeChat Official Account v2 requires a generated cover image.');
+  const cover = value as Record<string, unknown>;
+  if (cover.type !== 'workflow_image' || cover.mediaType !== 'image/png' || !Array.isArray(cover.data) || cover.data.length === 0) throw new Error('WeChat Official Account v2 requires a generated PNG cover image.');
+  const first = cover.data[0];
+  if (!first || typeof first !== 'object' || Array.isArray(first) || typeof (first as Record<string, unknown>).b64Json !== 'string' || !(first as Record<string, unknown>).b64Json) throw new Error('WeChat Official Account v2 requires generated PNG image data.');
+  return first as { b64Json: string };
 }
 
 async function createCoverImage(): Promise<string> {

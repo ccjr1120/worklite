@@ -73,6 +73,7 @@ const GATEWAY_PROVIDER_ID = 'gateway-provider';
 const CODEX_PROVIDER_ID = 'codex-provider';
 const CODEX_PROVIDER_NAME = 'codex';
 const CODEX_PROVIDER_BASE_URL = 'https://chatgpt.com/backend-api/codex';
+const CODEX_IMAGE_MODEL_ID = 'gpt-image-2';
 let database: BetterSqlite3.Database | null = null;
 let codexSyncPromise: Promise<void> | null = null;
 let codexSyncedAt = 0;
@@ -257,7 +258,7 @@ async function syncCodexProvider(): Promise<void> {
       codexSyncedAt = Date.now();
       return;
     }
-    let models = current?.models ?? [];
+    let models = [...new Set([...current?.models ?? [], CODEX_IMAGE_MODEL_ID])];
     try {
       const response = await codexModels(new Request('http://127.0.0.1/v1/models'));
       if (response.ok) {
@@ -268,6 +269,7 @@ async function syncCodexProvider(): Promise<void> {
             const id = (item as Record<string, unknown>).id;
             return typeof id === 'string' && id.trim() ? [id.trim()] : [];
           }))];
+          models = [...new Set([...models, CODEX_IMAGE_MODEL_ID])];
         }
       }
     } catch {
