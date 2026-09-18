@@ -73,6 +73,7 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 ## Changelog
 
 ### 2026-09-18
+- Added per-node retry to expanded Workflow Run records: the server marks the single retryable failed node entry, its neutral control reports progress locally, failure reasons persist until execution continues, and no Run-level rerun action is introduced.
 - Updated the Workflow Editor specification for the read-only Artifact Query node, historical title/description field controls, and conditional initial Agent context alongside bounded feedback. The existing shared patterns and design tokens remain authoritative.
 
 ### 2026-09-17

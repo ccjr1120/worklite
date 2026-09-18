@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import type { Request } from 'express';
@@ -235,6 +235,29 @@ export class RunsService {
     return this.get(request, workspaceSlug, runId);
   }
 
+  async retryNode(request: Request, workspaceSlug: string, runId: string, nodeRunId: string): Promise<RunView> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const [run] = await this.db.select().from(workflowRuns).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id))).limit(1);
+    if (!run) throw new NotFoundException('Run not found');
+    if (retryableNodeRunIdOf(run) !== nodeRunId) throw new BadRequestException('This node run cannot be retried.');
+    const now = new Date();
+    const retried = await this.db.transaction((transaction) => {
+      const [updatedNodeRun] = transaction.update(workflowNodeRuns)
+        .set({ status: 'queued', error: null, finishedAt: null, retryCount: sql`${workflowNodeRuns.retryCount} + 1` })
+        .where(and(eq(workflowNodeRuns.id, nodeRunId), eq(workflowNodeRuns.runId, runId), eq(workflowNodeRuns.status, 'failed')))
+        .returning().all();
+      const [updatedRun] = transaction.update(workflowRuns)
+        .set({ status: 'queued', result: null, currentNodeId: updatedNodeRun?.nodeId ?? null, finishedAt: null, updatedAt: now })
+        .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.status, 'failed')))
+        .returning().all();
+      return updatedNodeRun && updatedRun ? updatedNodeRun : null;
+    });
+    if (!retried) throw new BadRequestException('This node run cannot be retried.');
+    await this.publish(runId, 'run.status', { status: 'queued' });
+    this.schedule(runId);
+    return this.get(request, workspaceSlug, runId);
+  }
+
   private schedule(runId: string): void {
     setTimeout(() => { void this.execute(runId); }, 0);
   }
@@ -303,7 +326,7 @@ export class RunsService {
         for (let attempt = 0; attempt < attempts; attempt += 1) {
           try {
             await this.assertActive(runId, abortController.signal);
-            if (attempt > 0) await this.db.update(workflowNodeRuns).set({ retryCount: attempt }).where(eq(workflowNodeRuns.id, nodeRunId));
+            if (attempt > 0) await this.db.update(workflowNodeRuns).set({ retryCount: sql`${workflowNodeRuns.retryCount} + 1` }).where(eq(workflowNodeRuns.id, nodeRunId));
             const nodeType = this.registry.resolve(node.type, node.typeVersion);
             const request: NodeExecutionRequest = {
               input: invocation.input,
@@ -471,7 +494,8 @@ export class RunsService {
     if (!details) return view;
     const nodeRows = await this.db.select().from(workflowNodeRuns).where(eq(workflowNodeRuns.runId, run.id)).orderBy(asc(workflowNodeRuns.position));
     const artifactRows = await this.db.select().from(artifacts).where(eq(artifacts.runId, run.id)).orderBy(asc(artifacts.createdAt));
-    view.nodeRuns = nodeRows.map(toNodeRunView);
+    const retryableNodeRunId = retryableNodeRunIdOf(run);
+    view.nodeRuns = nodeRows.map((row) => toNodeRunView(row, row.id === retryableNodeRunId));
     view.artifacts = artifactRows.map((artifact) => toArtifactView(artifact, workspaceSlug, workflow.name));
     const [pendingAction] = await this.db.select().from(workflowPendingActions).where(and(eq(workflowPendingActions.runId, run.id), inArray(workflowPendingActions.status, ['pending', 'expired']))).orderBy(desc(workflowPendingActions.createdAt)).limit(1);
     view.pendingAction = pendingAction ? toPendingActionView(pendingAction) : null;
@@ -545,8 +569,12 @@ function sanitizeWorkflowImages<T>(value: T): T {
   return output as T;
 }
 
-function toNodeRunView(row: typeof workflowNodeRuns.$inferSelect): WorkflowNodeRunView {
-  return { id: row.id, runId: row.runId, nodeId: row.nodeId, position: row.position, type: row.type, typeVersion: row.typeVersion, status: row.status, input: sanitizeWorkflowImages(row.input), output: sanitizeWorkflowImages(row.output), artifactIds: row.artifactIds ?? [], error: row.error, retryCount: row.retryCount, startedAt: row.startedAt?.toISOString() ?? null, finishedAt: row.finishedAt?.toISOString() ?? null };
+function toNodeRunView(row: typeof workflowNodeRuns.$inferSelect, retryable: boolean): WorkflowNodeRunView {
+  return { id: row.id, runId: row.runId, nodeId: row.nodeId, position: row.position, type: row.type, typeVersion: row.typeVersion, status: row.status, input: sanitizeWorkflowImages(row.input), output: sanitizeWorkflowImages(row.output), artifactIds: row.artifactIds ?? [], error: row.error, retryCount: row.retryCount, retryable, startedAt: row.startedAt?.toISOString() ?? null, finishedAt: row.finishedAt?.toISOString() ?? null };
+}
+
+function retryableNodeRunIdOf(run: typeof workflowRuns.$inferSelect): string | null {
+  return run.status === 'failed' ? run.executionState?.active?.nodeRunId ?? null : null;
 }
 
 function toArtifactView(row: typeof artifacts.$inferSelect, workspaceSlug: string, workflowName: string): ArtifactView {

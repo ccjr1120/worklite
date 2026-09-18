@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { AlertCircle, ChevronDown, FileStack, LoaderCircle, QrCode, RefreshCw, ScrollText, X } from 'lucide-react';
+import { AlertCircle, ChevronDown, FileStack, LoaderCircle, QrCode, RefreshCw, RotateCcw, ScrollText, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ArtifactView, RunProgressEvent, RunView, WorkflowNodeRunView } from '@worklite/contracts';
@@ -222,7 +222,7 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
                   <p className="mt-2 text-[13px] text-muted-foreground">{t('runs:noLogs')}</p>
                 ) : (
                   <ol className="mt-2 grid gap-2">
-                    {nodeRuns.map((nodeRun) => <NodeRunLogRow key={nodeRun.id} nodeRun={nodeRun} locale={locale} />)}
+                    {nodeRuns.map((nodeRun) => <NodeRunLogRow key={nodeRun.id} nodeRun={nodeRun} locale={locale} runId={run.id} />)}
                   </ol>
                 )}
               </section>
@@ -259,12 +259,29 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
 type NodeRunLogRowProps = {
   nodeRun: WorkflowNodeRunView;
   locale: AppLocale;
+  runId: string;
 };
 
-function NodeRunLogRow({ nodeRun, locale }: NodeRunLogRowProps) {
+function NodeRunLogRow({ nodeRun, locale, runId }: NodeRunLogRowProps) {
   const { t } = useTranslation(['runs', 'common']);
   const durationSeconds = getNodeRunDurationSeconds(nodeRun);
   const duration = durationSeconds == null ? null : durationParts(durationSeconds);
+  const [retryBusy, setRetryBusy] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
+  async function retryNode() {
+    setRetryBusy(true);
+    setRetryError(null);
+    try {
+      const next = await api.retryRunNode('personal', runId, nodeRun.id);
+      queryClient.setQueryData(['run', runId], next);
+      void queryClient.invalidateQueries({ queryKey: ['runs'] }).catch(() => undefined);
+    } catch (error) {
+      setRetryError(error instanceof Error ? error.message : t('runs:nodeRetry.failed'));
+    } finally {
+      setRetryBusy(false);
+    }
+  }
 
   return (
     <li className="rounded-md border border-border bg-surface-subtle px-3 py-2">
@@ -279,6 +296,15 @@ function NodeRunLogRow({ nodeRun, locale }: NodeRunLogRowProps) {
         {nodeRun.retryCount > 0 ? <span>{t('runs:retryCount', { count: nodeRun.retryCount })}</span> : null}
       </div>
       {nodeRun.error ? <p className="mt-2 border-l-2 border-danger pl-2 text-[13px] text-danger" role="alert">{nodeRun.error}</p> : null}
+      {retryError ? <p className="mt-2 border-l-2 border-danger pl-2 text-[13px] text-danger" role="alert">{retryError}</p> : null}
+      {nodeRun.retryable ? (
+        <div className="mt-2">
+          <Button type="button" size="compact" variant="secondary" onClick={() => void retryNode()} disabled={retryBusy}>
+            {retryBusy ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <RotateCcw aria-hidden="true" />}
+            {t('runs:nodeRetry.action')}
+          </Button>
+        </div>
+      ) : null}
     </li>
   );
 }

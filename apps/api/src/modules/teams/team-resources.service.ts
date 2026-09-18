@@ -535,6 +535,7 @@ export class WorkspaceResourcesService {
           graphMutationNote: 'Use edit-workflow.mjs with a logical Workflow Plan. Edges may declare structured conditions and positive maxTraversals bounds. The server generates node IDs and positions, validates capabilities, ports, resources, conditions, and bounded-cycle constraints, then records an assistant revision.',
           scheduling: { available: true, owner: 'timer_node', nodeType: 'worklite/timer', minimumIntervalSeconds: 300, maximumPerWorkflow: 1, activatesOnPublish: true, preventsOverlap: true },
           runHistory: { location: 'workflow_list_dialog', nodeExecutionLogs: true, failureReasons: true, artifactEligibilitySource: 'immutable_workflow_version' },
+          failedNodeRetry: { available: true, scope: 'active_failed_node_run', endpoint: 'POST /runs/:runId/nodes/:nodeRunId/retry', eligibilitySource: 'node_run_retryable', rerunsPredecessors: false, earlierSuccessfulNodes: false },
           humanGatedExecution: { durable: true, runStatus: 'waiting_for_input', resumesSameNode: true, qrPayloadOnly: true, supportedActions: ['wechat_login', 'wechat_publish_confirmation'] },
           wechatOfficialAccounts: officialAccountRows,
           chatInvocation: { available: true, syntax: '@Workflow', publishedOnly: true, inputSource: 'remaining_message_text', execution: 'latest_published_version_run', presentsArtifacts: true },

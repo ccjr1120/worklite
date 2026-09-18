@@ -26,11 +26,17 @@ Each row's Run records icon opens a centered dialog scoped to that Workflow. Whe
 
 Expanded waiting Runs place their active pending action before the ordered logs. Login and publish-confirmation actions show a QR image, expiry, a refresh action, and neutral Run cancellation. The dialog listens to normal Run events so a successful scan replaces the pending panel with continued execution automatically.
 
+A failed Run may be retried from the node that failed. The detail response marks at most one node log entry as retryable, and only that entry shows a neutral secondary `Retry node` control beside its failure reason. The control reports its own busy state, leaves the rest of the log list and the failure text in place, and relies on the same Run event stream to show continued execution; a rejected retry keeps the original failure reason and adds the rejection reason in the same entry. Retry is never offered at the Run level, on other failed entries, or on cancelled and successful entries. The dialog exposes no rerun-from-scratch action.
+
 Define first-use guidance, filtered results, validation attention, loading, permission and long-name states.
 
 The table does not expose Workflow deletion; users must open the Workflow editor and use its destructive Delete action. The last-run timestamp is available only as hover context while its status remains visible. Desktop table values remain on one line; the name truncates with its full value available as a tooltip, and narrow layouts scroll horizontally instead of wrapping status, date, or action cells.
 
 ## Changelog
+
+### 2026-09-18
+
+- Added a server-marked per-node retry control to the single retryable failed node log entry in expanded Run records, with a control-local busy state, preserved failure text, and no Run-level rerun action.
 
 ### 2026-09-16
 

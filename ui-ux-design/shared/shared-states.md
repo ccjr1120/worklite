@@ -20,11 +20,17 @@ Use a restrained persistent reconnecting bar. Explain whether edits are local, b
 
 Human-gated execution is durable. A `Waiting for input` Run keeps its pending action visible across navigation and reload, exposes expiry and recovery controls, and resumes automatically when the server observes completion. QR expiry is a recoverable pending state rather than a failed Run.
 
+A failed Run is recoverable at the node the server marks as retryable. Retry is a neutral execution control local to that node entry, not a destructive action and not a Run-level rerun. It reports progress on the control itself, preserves the existing failure reason until execution continues, and surfaces a rejected retry beside that reason rather than replacing it.
+
 ## Long Content and Security
 
 Truncate only summaries and provide expand, copy, download or details access. Inline Agent Skill calls stay collapsed by default, retain status and exit context in their summary, and reveal height-bounded scrollable raw output only on request. Never reveal secrets in fields, logs, errors or audit metadata. Untrusted content is rendered without inline execution.
 
 ## Changelog
+
+### 2026-09-18
+
+- Added node-scoped failed-Run recovery: a neutral retry control on the server-marked retryable node entry, with control-local progress and preserved failure reasons.
 
 ### 2026-09-16
 

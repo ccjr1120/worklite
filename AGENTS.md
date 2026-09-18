@@ -51,7 +51,15 @@ WorkLite’s primary product services are Workflow automation and Home. Home has
 
 Workflow deletion is permanent and removes its draft, edit revisions, published versions, schedule, and run history. Related Artifacts remain available with detached Workflow and Run references.
 
+A failed Workflow Run is retryable at exactly one node: the persisted active invocation, exposed as the `retryable` Node Run flag and `POST /runs/:runId/nodes/:nodeRunId/retry`. Retry re-enters that same Node Run through the existing scheduler-resume path, so successful predecessors are never rerun. Retrying an earlier successful node stays deferred because it would require rolling back committed tokens, edge traversal counts, and downstream Artifacts. This manual command is independent of the per-node `retry` error policy that governs automatic in-run attempts.
+
 WeChat Official Account automation must operate the real WeChat MP pages through Playwright. Do not substitute direct WeChat APIs or captured-session shortcuts for login, draft creation, publishing, or confirmation. Use a headless browser by default; switch to a headed browser only when explicitly requested or needed to debug a confirmed issue.
+
+Classify a WeChat platform response as success or failure before extracting any text from it. `ret: 0`, `errcode: 0`, and `err_msg: "ok"` are success, so treating a present message or code as evidence of failure reports successful operations as rejections. Only after a response is classified as a failure may its `err_msg`, `errmsg`, or status code become user-facing error text.
+
+A missing platform identifier is not the same condition as a platform rejection, and the two must produce different messages. WeChat confirms a saved draft through the editor URL gaining an `appmsgid` query parameter, not only through the save response body, so read the identifier from both and treat the URL as authoritative when the accepted response omits it.
+
+A WeChat draft-mode failure must report the platform's own reason when the browser session exposes one: the failed draft-save response status text, or the text of a blocking editor dialog other than the known content-structure warning. A bare missing-draft-identifier message is the last resort, not the default, because remote runs are otherwise undiagnosable. A publication record that already holds a draft id reopens that draft even while its status is `failed`, so a node retry cannot leave a second draft in the official account.
 
 Headless QR login against the real WeChat MP site is verified working, including the `cgi-bin/home?token=` transition. Do not attribute a login failure to headless mode or add user-agent, locale, or other fingerprint overrides without first reproducing the failure and ruling out automation-side causes. WeChat sets the `slave_sid` and `slave_user` cookies about one second before the token page appears, so login confirmation must require the token page; cookie presence alone captures a storage state that has no editor token.
 

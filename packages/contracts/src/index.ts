@@ -737,6 +737,7 @@ export type WorkflowNodeRunView = {
   artifactIds: string[];
   error: string | null;
   retryCount: number;
+  retryable: boolean;
   startedAt: string | null;
   finishedAt: string | null;
 };

@@ -210,6 +210,7 @@ export const api = {
   createRun: (workflowVersionId: string, input: CreateRunRequest) => apiPost<{ runId: string }>(`/api/workflow-versions/${encodeURIComponent(workflowVersionId)}/runs`, input),
   cancelRun: (_workspace: string | undefined, runId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/cancel`),
   refreshRunPendingAction: (_workspace: string | undefined, runId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/pending-action/refresh`),
+  retryRunNode: (_workspace: string | undefined, runId: string, nodeRunId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeRunId)}/retry`),
 };
 
 export function parseCommandEvent(value: string): CommandExecutionEvent {

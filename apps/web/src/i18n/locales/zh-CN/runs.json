@@ -12,6 +12,10 @@
   "failureReason": "失败原因",
   "retryCount_one": "已重试 {{count}} 次",
   "retryCount_other": "已重试 {{count}} 次",
+  "nodeRetry": {
+    "action": "重试该节点",
+    "failed": "无法重试该节点。"
+  },
   "artifacts": "产物",
   "artifactsLoading": "正在加载产物...",
   "artifactsFailed": "无法加载产物。",

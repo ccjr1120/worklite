@@ -6,15 +6,19 @@ At `1024px` and above, expand the sidebar, allow side-by-side inspectors, and re
 
 ## Compact Desktop and Tablet
 
-From `768px` to `1023px`, use the `56px` grouped icon rail, hide low-priority columns, and let inspectors overlay or reduce content according to task importance. The workflow contextual Sheet yields to its fixed right-side panel as soon as that panel's desktop breakpoint becomes active. Agent resource tabs remain horizontally scrollable within their collection pages, and the Workflow Run records dialog keeps expanded artifact rows readable within its scrolling surface. Keep the Home composer visible and use the draggable lower-right Chat icon on other pages; constrain the expanded Agent Chat panel within `16px` to `24px` outer space, and keep expanded Skill arguments, execution states, and bounded results inside the transcript column.
+From `768px` to `1023px`, use the `56px` grouped icon rail, hide low-priority columns, and let inspectors overlay or reduce content according to task importance. The workflow contextual Sheet yields to its fixed right-side panel as soon as that panel's desktop breakpoint becomes active. Agent resource tabs remain horizontally scrollable within their collection pages, and the Workflow Run records dialog keeps expanded artifact rows readable and its per-node retry control reachable within its scrolling surface. Keep the Home composer visible and use the draggable lower-right Chat icon on other pages; constrain the expanded Agent Chat panel within `16px` to `24px` outer space, and keep expanded Skill arguments, execution states, and bounded results inside the transcript column.
 
 ## Mobile
 
 Below `768px`, use a navigation drawer, retain page identity, state and primary action in the context bar, convert the workflow editor's combined palette and inspector to one full-screen or bottom sheet, keep the workflow canvas full-bleed within its editor region, replace wide tables with object rows, and show detailed logs full-screen or in a resizable sheet. Canvas zoom, fit-to-view, selection, and deletion controls remain reachable with `40px` to `44px` touch targets. The drawer preserves the six grouped desktop destinations, including Agents and Plugins; Agent resource collection tabs remain reachable through horizontal scrolling, and the Workflow Run records dialog exposes Artifacts through in-place expansion. Home keeps its composer visible; other pages use a draggable lower-right Chat icon with `12px` safe-area margins until opened. Agent Chat uses at most about `70vh`; it does not become full-screen. Its single-line composer remains reachable above browser controls, and Chat and Proposed changes use internal views.
 
-Responsive layouts must not remove status, recovery, or cancellation controls. The Agent composer retains a stable Send-or-Stop target, editable input, and keyboard-accessible `@` Agent and published Workflow mention menu at every breakpoint; working feedback remains in the scrollable transcript rather than consuming composer space. Onboarding uses a centered column with `20px` horizontal padding and no decorative side panel.
+Responsive layouts must not remove status, recovery, or cancellation controls, including the per-node retry control on a retryable failed node entry. The Agent composer retains a stable Send-or-Stop target, editable input, and keyboard-accessible `@` Agent and published Workflow mention menu at every breakpoint; working feedback remains in the scrollable transcript rather than consuming composer space. Onboarding uses a centered column with `20px` horizontal padding and no decorative side panel.
 
 ## Changelog
+
+### 2026-09-18
+
+- Kept the per-node retry control on a retryable failed node entry reachable at every breakpoint alongside existing status, recovery, and cancellation controls.
 
 ### 2026-09-15
 

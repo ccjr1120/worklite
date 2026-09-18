@@ -206,6 +206,8 @@ A Run waiting on a human-gated browser action presents a compact amber pending-a
 
 Show the current step and continuing progress for long operations. Expanded Workflow Run records present ordered node execution logs with node identity, status, timing, duration, and retry context. Failed Runs surface the credential-safe failure reason before the log list and repeat it on the failed node entry. Append logs without forcing disruptive scrolling. Use monospace text for identifiers and raw output, and allow users to distinguish timestamps, severity, source, and content. Successful completion should be clear but restrained; failure must include context and a next step where possible. Artifact disclosure is absent when the immutable Workflow version has no Artifact node; an empty Artifact state is reserved for eligible versions that produced none.
 
+Failure is the one node log state that carries a recovery action. When the server reports a failed node entry as retryable, that entry offers a single neutral secondary `Retry node` control beside its failure reason. Retry is an ordinary execution control, not a destructive or primary action, so it uses neutral styling with an icon and text label rather than brand fill or red. Only the retryable entry exposes it; other failed, cancelled, and successful entries show none, and the control never appears at the Run level where it could be mistaken for rerunning the whole Workflow. Activating it shows a local busy state on that control alone, leaves the surrounding log list in place, and keeps any failure text visible until the Run event stream replaces it with continued execution. A retry that the server rejects preserves the original failure reason and explains the rejection in the same entry.
+
 ## Motion
 
 - Hover feedback: approximately `120ms`.
@@ -253,6 +255,11 @@ Before confirming a UI proposal, verify that it:
 - Introduces a documented design-system decision before implementation when no existing rule applies.
 
 ## Changelog
+
+### 2026-09-18
+
+- Added a neutral per-node `Retry node` recovery control to retryable failed node log entries, scoped to the single retryable entry rather than the Run level.
+- Kept retry non-destructive and non-primary: neutral styling with icon and text cues, a control-local busy state, and preserved failure text until execution continues.
 
 ### 2026-09-16
 

@@ -12,6 +12,10 @@
   "failureReason": "Failure reason",
   "retryCount_one": "Retried {{count}} time",
   "retryCount_other": "Retried {{count}} times",
+  "nodeRetry": {
+    "action": "Retry node",
+    "failed": "Unable to retry this node."
+  },
   "artifacts": "Artifacts",
   "artifactsLoading": "Loading artifacts...",
   "artifactsFailed": "Unable to load artifacts.",
