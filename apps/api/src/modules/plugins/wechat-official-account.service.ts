@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -21,6 +21,7 @@ const QR_LIFETIME_MS = 120_000;
 
 @Injectable()
 export class WechatOfficialAccountService {
+  private readonly logger = new Logger(WechatOfficialAccountService.name);
   private readonly listeners = new Set<ActionListener>();
   private readonly sessions = new Map<string, BrowserSession>();
   private activeActionId: string | null = null;
@@ -116,7 +117,7 @@ export class WechatOfficialAccountService {
     try {
       await session.page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
       await showScanLogin(session.page);
-      const qrCode = await captureQrCode(session.page);
+      const qrCode = await captureLoginQrCode(session.page);
       const expiresAt = new Date(Date.now() + QR_LIFETIME_MS);
       await this.db.update(wechatOfficialAccounts).set({ status: 'qr_pending', qrCode, qrExpiresAt: expiresAt, lastError: null, updatedAt: new Date() }).where(eq(wechatOfficialAccounts.id, accountId));
       void this.monitorLogin(actionId, accountId, session, expiresAt, waitForPendingAction);
@@ -208,6 +209,8 @@ export class WechatOfficialAccountService {
   }
 
   private async monitorLogin(actionId: string, accountId: string, session: BrowserSession, expiresAt: Date, waitForPendingAction: boolean): Promise<void> {
+    let lastQrSource = await loginQrCode(session.page).getAttribute('src', { timeout: 1_000 }).catch(() => null);
+    let lastDiagnostics = '';
     while (this.sessions.get(actionId) === session) {
       await delay(1_000);
       if (Date.now() >= expiresAt.getTime()) break;
@@ -222,6 +225,20 @@ export class WechatOfficialAccountService {
         await this.closeSession(actionId);
         this.complete(actionId);
         return;
+      }
+      const diagnostics = await loginDiagnostics(session);
+      if (diagnostics !== lastDiagnostics) {
+        lastDiagnostics = diagnostics;
+        this.logger.debug(`WeChat login ${actionId}: ${diagnostics}`);
+      }
+      const currentQrSource = await loginQrCode(session.page).getAttribute('src', { timeout: 1_000 }).catch(() => null);
+      if (currentQrSource && currentQrSource !== lastQrSource) {
+        lastQrSource = currentQrSource;
+        const refreshedQrCode = await captureLoginQrCode(session.page).catch(() => null);
+        if (refreshedQrCode) {
+          await this.db.update(wechatOfficialAccounts).set({ qrCode: refreshedQrCode, updatedAt: new Date() }).where(eq(wechatOfficialAccounts.id, accountId));
+          await this.db.update(workflowPendingActions).set({ qrCode: refreshedQrCode, updatedAt: new Date() }).where(and(eq(workflowPendingActions.id, actionId), eq(workflowPendingActions.status, 'pending')));
+        }
       }
     }
     if (this.sessions.get(actionId) === session) await this.expire(actionId, accountId);
@@ -311,11 +328,28 @@ async function captureQrCode(page: Page): Promise<string> {
   return `data:image/png;base64,${(await qr.screenshot()).toString('base64')}`;
 }
 
+async function captureLoginQrCode(page: Page): Promise<string> {
+  const qr = loginQrCode(page);
+  try {
+    await qr.waitFor({ state: 'visible', timeout: 20_000 });
+  } catch (error) {
+    await page.screenshot({ path: '/tmp/worklite-login-qr-timeout.png', fullPage: true }).catch(() => undefined);
+    throw error;
+  }
+  return `data:image/png;base64,${(await qr.screenshot()).toString('base64')}`;
+}
+
 async function showScanLogin(page: Page): Promise<void> {
-  const qr = page.locator('img.login__type__container__scan__qrcode').first();
-  if (await qr.isVisible().catch(() => false)) return;
-  await page.locator('a.login__type__container__link_text').first().click();
+  const qr = loginQrCode(page);
+  const toggle = page.locator('a.login__type__container__link_text').first();
+  await qr.or(toggle).first().waitFor({ state: 'visible', timeout: 20_000 });
+  if (await qr.waitFor({ state: 'visible', timeout: 3_000 }).then(() => true).catch(() => false)) return;
+  await toggle.click();
   await qr.waitFor({ state: 'visible', timeout: 20_000 });
+}
+
+function loginQrCode(page: Page) {
+  return page.locator('img.login__type__container__scan__qrcode').first();
 }
 
 async function fillArticle(page: Page, title: string, article: string, coverPath?: string): Promise<void> {
@@ -450,6 +484,26 @@ function findAuthenticatedPage(context: BrowserContext): Page | null {
 
 function isLoginConfirmed(context: BrowserContext): boolean {
   return findAuthenticatedPage(context) !== null;
+}
+
+async function loginDiagnostics(session: BrowserSession): Promise<string> {
+  const cookieNames = new Set((await session.context.cookies().catch(() => [])).map((cookie) => cookie.name));
+  const relevant = ['slave_sid', 'slave_user', 'bizuin', 'data_bizuin'].filter((name) => cookieNames.has(name));
+  const pages = session.context.pages().map((page) => {
+    try {
+      const url = new URL(page.url());
+      return `${url.hostname}${url.pathname}${url.searchParams.has('token') ? '?token=<present>' : ''}`;
+    } catch {
+      return page.url() || 'about:blank';
+    }
+  });
+  const mode = await session.page.evaluate<string>(`(() => {
+    const qr = document.querySelector('img.login__type__container__scan__qrcode');
+    const visible = qr instanceof HTMLElement && qr.getBoundingClientRect().width > 10;
+    const account = document.querySelector('input[name="account"], .login__type__container__account');
+    return [qr ? (visible ? 'qr:visible' : 'qr:hidden') : 'qr:absent', account ? 'account:present' : 'account:absent'].join(' ');
+  })()`).catch(() => 'mode:unavailable');
+  return `pages=[${pages.join(' | ')}] cookies=[${relevant.join(',') || 'none'}] total=${cookieNames.size} ${mode}`;
 }
 
 async function detectPublishedUrl(page: Page): Promise<string | null> {
