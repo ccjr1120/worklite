@@ -101,6 +101,7 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
   const failureReason = failedNode?.error ?? getRunFailureReason(runDetail);
   const duration = run.durationSeconds == null ? null : durationParts(run.durationSeconds);
   const [pendingActionBusy, setPendingActionBusy] = useState(false);
+  const [expiryTick, setExpiryTick] = useState(0);
 
   useEffect(() => {
     if (!expanded) return;
@@ -127,6 +128,25 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
       setPendingActionBusy(false);
     }
   }
+
+  const pendingAction = runDetail?.pendingAction ?? null;
+  const pendingActionStale = useMemo(
+    () => pendingAction !== null && (pendingAction.status === 'expired' || (pendingAction.expiresAt !== null && Date.parse(pendingAction.expiresAt) <= Date.now())),
+    [pendingAction, expiryTick],
+  );
+
+  useEffect(() => {
+    if (!expanded || !pendingActionStale || pendingActionBusy) return;
+    void refreshPendingAction().catch(() => undefined);
+  }, [expanded, pendingActionStale]);
+
+  useEffect(() => {
+    if (!expanded || pendingAction?.expiresAt == null) return;
+    const remaining = Date.parse(pendingAction.expiresAt) - Date.now();
+    if (remaining <= 0) return;
+    const timer = setTimeout(() => setExpiryTick((value) => value + 1), remaining + 250);
+    return () => clearTimeout(timer);
+  }, [expanded, pendingAction?.expiresAt]);
 
   async function cancelRun() {
     setPendingActionBusy(true);
@@ -162,18 +182,18 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
         <div id={`workflow-run-${run.id}-details`} hidden={!expanded} className="border-t border-border px-4 py-3">
           {expanded ? (
             <div className="grid gap-4">
-              {runDetail?.pendingAction ? (
+              {pendingAction ? (
                 <section className="rounded-lg border border-border bg-surface-subtle p-4" aria-labelledby={`workflow-run-${run.id}-pending-title`}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h4 id={`workflow-run-${run.id}-pending-title`} className="flex items-center gap-2 text-sm font-semibold"><QrCode className="size-4 text-muted-foreground" aria-hidden="true" />{runDetail.pendingAction.title}</h4>
-                      <p className="mt-1 text-[13px] text-muted-foreground">{runDetail.pendingAction.description}</p>
+                      <h4 id={`workflow-run-${run.id}-pending-title`} className="flex items-center gap-2 text-sm font-semibold"><QrCode className="size-4 text-muted-foreground" aria-hidden="true" />{pendingAction.title}</h4>
+                      <p className="mt-1 text-[13px] text-muted-foreground">{pendingAction.description}</p>
                     </div>
                     <StatusBadge status="waiting_for_input" />
                   </div>
-                  {runDetail.pendingAction.qrCode ? <img src={runDetail.pendingAction.qrCode} alt={t('runs:pendingAction.qrAlt')} className="mt-4 size-48 rounded-md border border-border bg-white object-contain p-2" /> : null}
-                  {runDetail.pendingAction.expiresAt ? <p className="mt-2 text-xs tabular-nums text-muted-foreground">{t('runs:pendingAction.expiresAt', { value: formatDateTime(runDetail.pendingAction.expiresAt, locale) })}</p> : null}
-                  {runDetail.pendingAction.status === 'expired' ? <p className="mt-2 text-[13px] text-muted-foreground">{t('runs:pendingAction.expired')}</p> : null}
+                  {pendingAction.qrCode ? <img src={pendingAction.qrCode} alt={t('runs:pendingAction.qrAlt')} className={cn('mt-4 size-48 rounded-md border border-border bg-white object-contain p-2 transition-opacity', (pendingActionStale || pendingActionBusy) && 'opacity-40')} /> : null}
+                  {pendingAction.expiresAt ? <p className="mt-2 text-xs tabular-nums text-muted-foreground">{t('runs:pendingAction.expiresAt', { value: formatDateTime(pendingAction.expiresAt, locale) })}</p> : null}
+                  {pendingActionStale ? <p className="mt-2 flex items-center gap-1.5 text-[13px] text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />{t('runs:pendingAction.expired')}</p> : null}
                   <div className="mt-4 flex flex-wrap gap-2">
                     <Button type="button" size="compact" variant="secondary" onClick={() => void refreshPendingAction()} disabled={pendingActionBusy}><RefreshCw aria-hidden="true" />{t('runs:pendingAction.refresh')}</Button>
                     <Button type="button" size="compact" variant="ghost" onClick={() => void cancelRun()} disabled={pendingActionBusy}><X aria-hidden="true" />{t('runs:pendingAction.cancel')}</Button>
