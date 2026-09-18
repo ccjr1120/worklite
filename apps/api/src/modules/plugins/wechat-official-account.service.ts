@@ -2,11 +2,10 @@ import { BadRequestException, Inject, Injectable, Logger, NotFoundException } fr
 import { randomUUID } from 'node:crypto';
 import { rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
-import { deflateSync } from 'node:zlib';
+import { join } from 'node:path';
 import { Lexer, type Token, type Tokens } from 'marked';
 import { and, eq, ne } from 'drizzle-orm';
-import { chromium, type Browser, type BrowserContext, type Page, type Response } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Locator, type Page, type Response } from 'playwright';
 import type { NodeExecutionRequest, NodeExecutionResult, PendingNodeExecutionResult } from '@worklite/workflow-engine';
 import { wechatOfficialAccounts, wechatPublications, workflowPendingActions, type Database } from '@worklite/db';
 import type { WechatOfficialAccountView } from '@worklite/contracts';
@@ -286,7 +285,7 @@ export class WechatOfficialAccountService {
   }
 
   private async createSession(encryptedStorageState?: string): Promise<BrowserSession> {
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: process.env.WECHAT_HEADED !== '1' });
     const context = await browser.newContext(encryptedStorageState ? { storageState: JSON.parse(decryptSecret(encryptedStorageState)) } : undefined);
     const page = await context.newPage();
     return { browser, context, page };
@@ -379,7 +378,9 @@ async function fillArticle(page: Page, title: string, article: string, coverPath
     Object.defineProperty(paste, 'clipboardData', { value: data });
     element.dispatchEvent(paste);
   }, html);
-  await setCoverImage(page, coverPath);
+  // Version 1 nodes have no cover input. Leave the cover unset rather than
+  // uploading a substitute image the author never asked for.
+  if (coverPath) await setCoverImage(page, coverPath);
 }
 
 async function saveDraft(page: Page): Promise<string> {
@@ -938,7 +939,7 @@ function escapeHtml(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 }
 
-async function setCoverImage(page: Page, generatedCoverPath?: string): Promise<void> {
+async function setCoverImage(page: Page, coverPath: string): Promise<void> {
   const cover = page.locator('#js_cover_area');
   await cover.waitFor({ state: 'visible', timeout: 20_000 });
   await cover.scrollIntoViewIfNeeded();
@@ -952,26 +953,35 @@ async function setCoverImage(page: Page, generatedCoverPath?: string): Promise<v
 
   const imageDialog = page.locator('.weui-desktop-dialog_img-picker').last();
   await imageDialog.waitFor({ state: 'visible', timeout: 20_000 });
-  const coverPath = generatedCoverPath ?? await createCoverImage();
   const fileInput = imageDialog.locator('.js_upload_btn_container input[type="file"]').last();
-  const imageGrid = imageDialog.locator('.weui-desktop-img-picker__item');
-  // The material library truncates long file names, so every
-  // worklite-wechat-cover-<uuid>.png upload can match the same text filter.
-  // Select the item the upload adds instead of matching its displayed name.
-  const existingCount = await imageGrid.count();
+  const items = imageDialog.locator('.weui-desktop-img-picker__item');
+  // The library truncates long file names and does not order the new item
+  // first, so identify the upload by the picker items present beforehand.
+  // Items render thumbnails through background-image rather than <img>, so
+  // compare each item's own rendered identity.
+  const before = await pickerItemIdentities(items);
+  const beforeKeys = new Set(before.map(thumbnailIdentity));
   await fileInput.setInputFiles(coverPath);
   const uploadDeadline = Date.now() + 30_000;
-  let grewBy = 0;
+  let addedIndex = -1;
+  let after: string[] = before;
   while (Date.now() < uploadDeadline) {
-    grewBy = await imageGrid.count() - existingCount;
-    if (grewBy > 0) break;
+    after = await pickerItemIdentities(items);
+    // A new material shifts every following item, so positional comparison
+    // picks a pre-existing thumbnail. Match on identity instead of index.
+    addedIndex = after.findIndex((identity) => {
+      const key = thumbnailIdentity(identity);
+      return key.length >= 32 && !beforeKeys.has(key);
+    });
+    if (addedIndex >= 0) break;
     await delay(500);
   }
-  if (grewBy <= 0) {
+  if (addedIndex < 0) {
     await page.screenshot({ path: '/tmp/worklite-cover-upload-timeout.png', fullPage: true }).catch(() => undefined);
-    throw new Error('WeChat did not add the uploaded cover image to the material library.');
+    await writeFile('/tmp/worklite-cover-upload-dom.json', JSON.stringify({ before, after }, null, 2), 'utf8').catch(() => undefined);
+    throw new Error(`WeChat did not add the uploaded cover image to the material library. The picker held ${before.length} items before the upload and ${after.length} after.`);
   }
-  const uploadedImage = imageGrid.first();
+  const uploadedImage = items.nth(addedIndex);
   await uploadedImage.waitFor({ state: 'visible', timeout: 10_000 });
   await delay(1_000);
   await uploadedImage.click();
@@ -999,16 +1009,172 @@ async function setCoverImage(page: Page, generatedCoverPath?: string): Promise<v
   }
   await nextButton.click();
 
-  const confirmButton = page
-    .locator('button.weui-desktop-btn_primary:visible')
-    .filter({ hasText: /^(确认|完成|确定)$/ })
-    .last();
+  // The picker keeps every step's buttons in one dialog and hides the inactive
+  // ones at zero size, so a text match can lock onto the picker's own hidden
+  // confirmation instead of the crop step's. The crop step appears only after
+  // its image loads, so poll every visible dialog for a confirmation that has
+  // real layout rather than pre-selecting a dialog.
+  const confirmLabels = ['确认', '完成', '确定', '确认并保存', '保存', '使用', 'OK'];
+  const visibleDialogs = page.locator('.weui-desktop-dialog:visible');
+  const confirmDeadline = Date.now() + 60_000;
+  let confirmation: DialogButtonAttempt = { clicked: false, rejected: [] };
+  while (!confirmation.clicked && Date.now() < confirmDeadline) {
+    await confirmContentStructureWarning(page);
+    const count = await visibleDialogs.count().catch(() => 0);
+    for (let index = 0; index < count && !confirmation.clicked; index += 1) {
+      confirmation = await clickDialogButton(visibleDialogs.nth(index), confirmLabels).catch(() => ({ clicked: false, rejected: [] }));
+    }
+    if (!confirmation.clicked) await delay(500);
+  }
+  if (!confirmation.clicked) {
+    await page.screenshot({ path: '/tmp/worklite-cover-confirm-timeout.png', fullPage: true }).catch(() => undefined);
+    const available = await visibleDialogButtons(page);
+    await writeFile('/tmp/worklite-cover-confirm-dom.json', JSON.stringify({ rejected: confirmation.rejected, dialogs: available }, null, 2), 'utf8').catch(() => undefined);
+    await writeFile('/tmp/worklite-cover-crop-dialog.json', JSON.stringify(await describeDialogControls(visibleDialogs.last()), null, 2), 'utf8').catch(() => undefined);
+    const why = confirmation.rejected.map((entry) => `${entry.text}(${entry.width}x${entry.height}${entry.disabled ? ',disabled' : ''})`).join(' ') || 'no label matched';
+    throw new Error(`WeChat did not expose a usable cover crop confirmation control. Rejected candidates: ${why}. Visible dialogs: ${available.map((entry) => `[${entry.buttons.join('|')}]`).join(' ') || 'none'}.`);
+  }
+
+  await assertCoverImageApplied(page);
+}
+
+type ClickableElement = {
+  textContent: string | null;
+  getBoundingClientRect(): { width: number; height: number };
+  hasAttribute(name: string): boolean;
+  classList: { contains(token: string): boolean };
+  click(): void;
+};
+
+// Reports the visible dialogs and their button labels so a missing control is
+// diagnosable from one failed run instead of another guess at the markup.
+async function visibleDialogButtons(page: Page): Promise<Array<{ dialog: string; buttons: string[] }>> {
+  return page.evaluate<Array<{ dialog: string; buttons: string[] }>>(`(() => {
+    return Array.from(document.querySelectorAll('.weui-desktop-dialog, .weui-desktop-dialog__wrp, [role="dialog"]'))
+      .filter((dialog) => dialog.getBoundingClientRect().width > 50)
+      .map((dialog) => ({
+        dialog: (dialog.className || dialog.tagName).toString().slice(0, 90),
+        buttons: Array.from(dialog.querySelectorAll('button, [role="button"], a.weui-desktop-btn'))
+          .map((button) => (button.textContent ?? '').replace(/\\s+/g, ''))
+          .filter(Boolean)
+          .slice(0, 20),
+      }));
+  })()`);
+}
+
+type DialogButtonAttempt = { clicked: boolean; rejected: Array<{ text: string; width: number; height: number; disabled: boolean }> };
+
+// Records every control in the dialog with its own box and its ancestors', so a
+// zero-size label can be told apart from a genuinely hidden control.
+async function describeDialogControls(dialog: Locator): Promise<unknown> {
+  return dialog.evaluate((element: {
+    getBoundingClientRect(): { width: number; height: number };
+    querySelectorAll(selector: string): ArrayLike<{
+      textContent: string | null;
+      tagName: string;
+      className: unknown;
+      getBoundingClientRect(): { width: number; height: number };
+      parentElement: { tagName: string; className: unknown; getBoundingClientRect(): { width: number; height: number } } | null;
+    }>;
+  }) => ({
+    dialogBox: element.getBoundingClientRect(),
+    controls: Array.from(element.querySelectorAll('button, [role="button"], a, input[type="submit"], .weui-desktop-btn, .weui-desktop-btn_wrp')).map((node) => ({
+      tag: node.tagName,
+      text: (node.textContent ?? '').replace(/\s+/g, '').slice(0, 20),
+      className: String(node.className).slice(0, 80),
+      box: node.getBoundingClientRect(),
+      parent: node.parentElement ? { tag: node.parentElement.tagName, className: String(node.parentElement.className).slice(0, 80), box: node.parentElement.getBoundingClientRect() } : null,
+    })),
+  }));
+}
+
+
+
+async function clickDialogButton(dialog: Locator, labels: string[]): Promise<DialogButtonAttempt> {
+  return dialog.evaluate((element: { querySelectorAll(selector: string): ArrayLike<ClickableElement> }, wanted: string[]) => {
+    const rejected: Array<{ text: string; width: number; height: number; disabled: boolean }> = [];
+    for (const button of Array.from(element.querySelectorAll('button, [role="button"], a'))) {
+      const text = (button.textContent ?? '').replace(/\s+/g, '');
+      if (!wanted.includes(text)) continue;
+      const rect = button.getBoundingClientRect();
+      const disabled = button.hasAttribute('disabled') || button.classList.contains('weui-desktop-btn_disabled');
+      if (rect.width > 0 && rect.height > 0 && !disabled) {
+        button.click();
+        return { clicked: true, rejected };
+      }
+      rejected.push({ text, width: Math.round(rect.width), height: Math.round(rect.height), disabled });
+    }
+    return { clicked: false, rejected };
+  }, labels);
+}
+
+// WeChat renders material thumbnails as CSS background images on <i> and <div>
+// elements rather than <img>, both in the picker grid and in the cover preview.
+// Collect every material reference a subtree exposes, whichever form it uses.
+async function materialReferences(root: Locator): Promise<string[]> {
+  return root.evaluateAll((elements) => elements.flatMap((element) => {
+    const view = element.ownerDocument.defaultView;
+    const found: string[] = [];
+    for (const node of [element, ...Array.from(element.querySelectorAll('*'))]) {
+      const source = node.getAttribute('src') ?? node.getAttribute('data-src') ?? '';
+      if (source) found.push(source);
+      const background = view?.getComputedStyle(node).backgroundImage ?? '';
+      if (background && background !== 'none') found.push(background);
+    }
+    return found;
+  }));
+}
+
+// One picker item's identity, used to tell a newly uploaded material apart.
+async function pickerItemIdentities(items: Locator): Promise<string[]> {
+  return items.evaluateAll((elements) => elements.map((element) => {
+    const view = element.ownerDocument.defaultView;
+    for (const node of [element, ...Array.from(element.querySelectorAll('*'))]) {
+      const source = node.getAttribute('src') ?? node.getAttribute('data-src') ?? '';
+      if (source) return source;
+      const background = view?.getComputedStyle(node).backgroundImage ?? '';
+      if (background && background !== 'none') return background;
+    }
+    return (element.textContent ?? '').trim();
+  }));
+}
+
+// A wrong material selection is a failure, not something to publish silently,
+// so confirm the cover area now renders the image that was just uploaded.
+// Confirms the cover area left its empty state and now renders an uploaded
+// material. WeChat re-keys a material between the upload preview, the library
+// entry and the applied cover, so the specific id cannot be matched across
+// those stages; what is verifiable is that a real material replaced the
+// add-cover placeholder, which renders as an inline SVG icon.
+async function assertCoverImageApplied(page: Page): Promise<void> {
+  const deadline = Date.now() + 20_000;
+  let rendered: string[] = [];
+  while (Date.now() < deadline) {
+    rendered = await materialReferences(page.locator('#js_cover_area'));
+    if (rendered.some(isUploadedMaterialReference)) return;
+    await delay(500);
+  }
+  await page.screenshot({ path: '/tmp/worklite-cover-mismatch.png', fullPage: true }).catch(() => undefined);
+  await writeFile('/tmp/worklite-cover-mismatch.json', JSON.stringify({ coverArea: rendered }, null, 2), 'utf8').catch(() => undefined);
+  throw new Error(`WeChat left the cover unset. The cover area shows ${rendered.length ? rendered.map(thumbnailIdentity).join(', ') : 'no image'}.`);
+}
+
+function isUploadedMaterialReference(value: string): boolean {
+  if (/^data:|svg\+xml/i.test(value)) return false;
+  if (/\/mpres\//.test(value)) return false;
+  return /mmbiz/.test(value);
+}
+
+// The picker and the cover area serve the same material from different CDN
+// prefixes (/mmbiz_png/ versus /sz_mmbiz_png/) and with different query
+// strings, so compare the material id segment rather than the whole path.
+function thumbnailIdentity(value: string): string {
+  const url = value.match(/url\(["']?(.*?)["']?\)/)?.[1] ?? value;
   try {
-    await confirmButton.waitFor({ state: 'visible', timeout: 20_000 });
-    await confirmButton.click({ force: true });
-  } catch (error) {
-    await page.screenshot({ path: '/tmp/worklite-cover-confirm-timeout.png', fullPage: true });
-    throw error;
+    const segments = new URL(url, 'https://mp.weixin.qq.com').pathname.split('/').filter(Boolean);
+    return segments.find((segment) => segment.length >= 32) ?? segments.join('/');
+  } catch {
+    return url;
   }
 }
 
@@ -1021,52 +1187,6 @@ function validateGeneratedCover(value: unknown): { b64Json: string } | null {
   return first as { b64Json: string };
 }
 
-async function createCoverImage(): Promise<string> {
-  const width = 900;
-  const height = 383;
-  const raw = Buffer.alloc(height * (1 + width * 3));
-  for (let y = 0; y < height; y += 1) {
-    const row = y * (1 + width * 3);
-    raw[row] = 0;
-    for (let x = 0; x < width; x += 1) {
-      const offset = row + 1 + x * 3;
-      raw[offset] = 245;
-      raw[offset + 1] = 246;
-      raw[offset + 2] = 248;
-    }
-  }
-  const chunk = (type: string, data: Buffer): Buffer => {
-    const typeBuffer = Buffer.from(type, 'ascii');
-    const prefix = Buffer.alloc(4);
-    const checksum = Buffer.alloc(4);
-    prefix.writeUInt32BE(data.length, 0);
-    checksum.writeUInt32BE(crc32(Buffer.concat([typeBuffer, data])), 0);
-    return Buffer.concat([prefix, typeBuffer, data, checksum]);
-  };
-  const header = Buffer.alloc(13);
-  header.writeUInt32BE(width, 0);
-  header.writeUInt32BE(height, 4);
-  header[8] = 8;
-  header[9] = 2;
-  const png = Buffer.concat([
-    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
-    chunk('IHDR', header),
-    chunk('IDAT', deflateSync(raw)),
-    chunk('IEND', Buffer.alloc(0)),
-  ]);
-  const path = `/tmp/worklite-wechat-cover-${randomUUID()}.png`;
-  await import('node:fs/promises').then((fs) => fs.writeFile(path, png));
-  return path;
-}
-
-function crc32(value: Buffer): number {
-  let crc = 0xffffffff;
-  for (const byte of value) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
 
 function extractTitle(article: string): string {
   const heading = article.match(/^#\s+(.+)$/m)?.[1]?.trim();
