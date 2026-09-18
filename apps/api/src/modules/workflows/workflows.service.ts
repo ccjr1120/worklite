@@ -507,17 +507,13 @@ function validateIncomingEdges(
 
     const inputEdges = edges.filter((edge) => definition.nodes.some((node) => node.id === edge.sourceNodeId && node.type === 'worklite/input'));
     const isAgentContext = target.type === 'worklite/agent' && targetPortName === 'context';
-    if (edges.length === 1 && (!isAgentContext || inputEdges.length === 0)) continue;
-
-    if (!isAgentContext || inputEdges.length === 0) throw new BadRequestException('A workflow input port accepts only one edge.');
-    if (inputEdges.length > 1) throw new BadRequestException('Agent context accepts only one Workflow Input edge.');
-    const inputEdge = inputEdges[0];
-    if (inputEdge.condition !== undefined || inputEdge.maxTraversals !== undefined) throw new BadRequestException('A Workflow Input edge must be unconditional and unbounded.');
-    const feedbackEdges = edges.filter((edge) => edge.id !== inputEdge.id);
-    if (feedbackEdges.length === 0) continue;
-    const feedbackIsBounded = feedbackEdges.length === 1 && feedbackEdges.every((edge) => edge.maxTraversals !== undefined);
-    if (!feedbackIsBounded || feedbackEdges.some((edge) => definition.nodes.some((node) => node.id === edge.sourceNodeId && node.type === 'worklite/input'))) {
-      throw new BadRequestException('Agent context may combine Workflow Input only with one bounded feedback edge.');
+    if (isAgentContext && inputEdges.some((edge) => edge.condition !== undefined || edge.maxTraversals !== undefined)) throw new BadRequestException('A Workflow Input edge must be unconditional and unbounded.');
+    if (edges.length === 1 && (!isAgentContext || inputEdges.length <= 1)) continue;
+    if (!isAgentContext) throw new BadRequestException('A workflow input port accepts only one edge.');
+    const initialEdges = edges.filter((edge) => edge.maxTraversals === undefined);
+    const feedbackEdges = edges.filter((edge) => edge.maxTraversals !== undefined);
+    if (edges.length !== 2 || initialEdges.length !== 1 || feedbackEdges.length !== 1 || inputEdges.length > 1) {
+      throw new BadRequestException('Agent context may combine one initial edge with one bounded feedback edge.');
     }
   }
 }
@@ -558,6 +554,11 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
   if (type === 'worklite/artifact') {
     if (typeof value.name !== 'string' || !value.name.trim()) throw new BadRequestException('Artifact node name must be a non-empty string.');
     if (value.type !== 'text' && value.type !== 'markdown' && value.type !== 'json') throw new BadRequestException('Artifact node type must be text, markdown, or json.');
+  }
+  if (type === 'worklite/artifact-query') {
+    if (typeof value.name !== 'string' || !value.name.trim()) throw new BadRequestException('Artifact Query name must be a non-empty string.');
+    if (typeof value.titleField !== 'string' || !value.titleField.trim()) throw new BadRequestException('Artifact Query title field must be a non-empty string.');
+    if (!Array.isArray(value.descriptionFields) || value.descriptionFields.length === 0 || value.descriptionFields.some((field) => typeof field !== 'string' || !field.trim())) throw new BadRequestException('Artifact Query description fields must be non-empty strings.');
   }
   if (type === 'worklite/image') {
     if (value.model !== 'codex/gpt-image-2') throw new BadRequestException('Image node model must be codex/gpt-image-2.');

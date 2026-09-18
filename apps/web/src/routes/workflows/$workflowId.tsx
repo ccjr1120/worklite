@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { addEdge, Background, BackgroundVariant, Controls, MarkerType, PanOnScrollMode, ReactFlow, reconnectEdge, useEdgesState, useNodesState, type OnConnect, type OnConnectEnd, type OnReconnect, type ReactFlowInstance } from '@xyflow/react';
-import { ArrowLeft, Bot, Braces, Check, Copy, Download, FilePlus2, FileText, Image as ImageIcon, LayoutDashboard, PanelRight, Plus, Redo2, Search, Send, SlidersHorizontal, Timer, Trash2, Undo2, Workflow } from 'lucide-react';
+import { ArrowLeft, Bot, Braces, Check, Copy, Download, FilePlus2, FileSearch, FileText, Image as ImageIcon, LayoutDashboard, PanelRight, Plus, Redo2, Search, Send, SlidersHorizontal, Timer, Trash2, Undo2, Workflow } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
@@ -118,6 +118,7 @@ function WorkflowEditorPage() {
   const filteredAgentVisible = !paletteQuery.trim() || `${t('editor.agentNode')} ${t('editor.agentNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredDashboardVisible = !paletteQuery.trim() || `${t('editor.dashboardNode')} ${t('editor.dashboardNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredArtifactVisible = !paletteQuery.trim() || `${t('editor.artifactNode')} ${t('editor.artifactNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
+  const filteredArtifactQueryVisible = !paletteQuery.trim() || `${t('editor.artifactQueryNode')} ${t('editor.artifactQueryNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredImageVisible = !paletteQuery.trim() || `${t('editor.imageNode')} ${t('editor.imageNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredWechatVisible = !paletteQuery.trim() || `${t('editor.wechatNode')} ${t('editor.wechatNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
 
@@ -282,6 +283,11 @@ function WorkflowEditorPage() {
       data: { nodeType: 'artifact', label: t('editor.artifactNode'), artifactName: '', artifactType: 'text', errorPolicy: executionPolicy },
     };
     addNode(node);
+  }
+
+  function addArtifactQueryNode() {
+    const id = createId('artifact-query');
+    addNode({ id, type: 'artifactQuery', position: nextPosition(), selected: true, data: { nodeType: 'artifactQuery', label: t('editor.artifactQueryNode'), queryName: '', queryTitleField: 'title', queryDescriptionFields: ['description'], errorPolicy: executionPolicy } });
   }
 
   function addImageNode() {
@@ -545,6 +551,7 @@ function WorkflowEditorPage() {
         {filteredAgentVisible ? <PaletteButton icon={<Bot className="size-5 text-info" />} title={t('editor.agentNode')} description={t('editor.agentNodeDescription')} onClick={addAgentNode} /> : null}
         {filteredDashboardVisible ? <PaletteButton icon={<LayoutDashboard className="size-5 text-foreground" />} title={t('editor.dashboardNode')} description={t('editor.dashboardNodeDescription')} onClick={addDashboardNode} /> : null}
         {filteredArtifactVisible ? <PaletteButton icon={<FileText className="size-5 text-foreground" />} title={t('editor.artifactNode')} description={t('editor.artifactNodeDescription')} onClick={addArtifactNode} /> : null}
+        {filteredArtifactQueryVisible ? <PaletteButton icon={<FileSearch className="size-5 text-foreground" />} title={t('editor.artifactQueryNode')} description={t('editor.artifactQueryNodeDescription')} onClick={addArtifactQueryNode} /> : null}
         {filteredImageVisible ? <PaletteButton icon={<ImageIcon className="size-5 text-foreground" />} title={t('editor.imageNode')} description={t('editor.imageNodeDescription')} onClick={addImageNode} /> : null}
         {filteredWechatVisible ? <PaletteButton icon={<Send className="size-5 text-foreground" />} title={t('editor.wechatNode')} description={t('editor.wechatNodeDescription')} onClick={addWechatPublishNode} /> : null}
       </div>
@@ -597,6 +604,12 @@ function WorkflowEditorPage() {
           <Field label={t('editor.artifactName')} htmlFor="artifact-name"><Input id="artifact-name" value={selectedNode.data.artifactName ?? ''} onChange={(event) => { const artifactName = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, artifactName } } : node)); setSaveState('unsaved'); }} /></Field>
           <Field label={t('editor.artifactType')} htmlFor="artifact-type"><Select value={selectedNode.data.artifactType ?? 'text'} onValueChange={(value) => { const artifactType = value as 'text' | 'markdown' | 'json'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, artifactType } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="artifact-type"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">{t('editor.artifactTypes.text')}</SelectItem><SelectItem value="markdown">{t('editor.artifactTypes.markdown')}</SelectItem><SelectItem value="json">{t('editor.artifactTypes.json')}</SelectItem></SelectContent></Select></Field>
           <p className="text-[12px] text-muted-foreground">{t('editor.artifactCreationDescription')}</p>
+        </> : null}
+        {selectedNode.data.nodeType === 'artifactQuery' ? <>
+          <Field label={t('editor.queryName')} htmlFor="query-name"><Input id="query-name" value={selectedNode.data.queryName ?? ''} onChange={(event) => { const queryName = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, queryName } } : node)); setSaveState('unsaved'); }} /></Field>
+          <Field label={t('editor.queryTitleField')} htmlFor="query-title-field"><Input id="query-title-field" value={selectedNode.data.queryTitleField ?? ''} onChange={(event) => { const queryTitleField = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, queryTitleField } } : node)); setSaveState('unsaved'); }} /></Field>
+          <Field label={t('editor.queryDescriptionFields')} htmlFor="query-description-fields"><Input id="query-description-fields" value={(selectedNode.data.queryDescriptionFields ?? []).join(', ')} onChange={(event) => { const queryDescriptionFields = event.target.value.split(',').map((field) => field.trim()).filter(Boolean); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, queryDescriptionFields } } : node)); setSaveState('unsaved'); }} /></Field>
+          <p className="text-[12px] text-muted-foreground">{t('editor.queryDescription')}</p>
         </> : null}
         {selectedNode.data.nodeType === 'image' ? <>
           <Field label={t('editor.imageModel')} htmlFor="image-model"><Input id="image-model" value="codex/gpt-image-2" readOnly /></Field>
@@ -744,8 +757,8 @@ function WorkflowEditorPage() {
 function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
   return definition.nodes.map((node) => {
     const config = asRecord(node.config);
-    const nodeType = node.type === 'worklite/input' ? 'input' : node.type === 'worklite/timer' ? 'timer' : node.type === 'worklite/dashboard' ? 'dashboard' : node.type === 'worklite/artifact' ? 'artifact' : node.type === 'worklite/image' ? 'image' : node.type === 'wechat-official-account/publish' ? 'wechatPublish' : 'agent';
-    const label = typeof config.label === 'string' ? config.label : nodeType === 'input' ? 'Workflow Input' : nodeType === 'timer' ? 'Timer' : nodeType === 'dashboard' ? 'Dashboard' : nodeType === 'artifact' ? 'Artifact' : nodeType === 'image' ? 'Image Generation' : nodeType === 'wechatPublish' ? 'WeChat Official Account' : 'Agent';
+    const nodeType = node.type === 'worklite/input' ? 'input' : node.type === 'worklite/timer' ? 'timer' : node.type === 'worklite/dashboard' ? 'dashboard' : node.type === 'worklite/artifact' ? 'artifact' : node.type === 'worklite/artifact-query' ? 'artifactQuery' : node.type === 'worklite/image' ? 'image' : node.type === 'wechat-official-account/publish' ? 'wechatPublish' : 'agent';
+    const label = typeof config.label === 'string' ? config.label : nodeType === 'input' ? 'Workflow Input' : nodeType === 'timer' ? 'Timer' : nodeType === 'dashboard' ? 'Dashboard' : nodeType === 'artifact' ? 'Artifact' : nodeType === 'artifactQuery' ? 'Artifact Query' : nodeType === 'image' ? 'Image Generation' : nodeType === 'wechatPublish' ? 'WeChat Official Account' : 'Agent';
     return {
       id: node.id,
       type: nodeType,
@@ -765,6 +778,9 @@ function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
         dashboardLayout: readDashboardLayout(config.layout),
         artifactName: typeof config.name === 'string' ? config.name : undefined,
         artifactType: config.type === 'json' || config.type === 'text' || config.type === 'markdown' ? config.type : undefined,
+        queryName: typeof config.name === 'string' ? config.name : undefined,
+        queryTitleField: typeof config.titleField === 'string' ? config.titleField : undefined,
+        queryDescriptionFields: Array.isArray(config.descriptionFields) ? config.descriptionFields.filter((value): value is string => typeof value === 'string') : undefined,
         wechatAccountId: typeof config.accountId === 'string' ? config.accountId : undefined,
         wechatMode: config.mode === 'draft' || config.mode === 'publish' ? config.mode : undefined,
         wechatNodeVersion: node.typeVersion === '1' || node.typeVersion === '2' ? node.typeVersion : undefined,
@@ -830,6 +846,8 @@ function canConnect(connection: { source: string | null; sourceHandle?: string |
   if (!imageConnectionAllowed) return false;
   if (targetNode.data.nodeType === 'dashboard' || targetNode.data.nodeType === 'artifact') {
     if (targetHandle !== 'data') return false;
+  } else if (targetNode.data.nodeType === 'artifactQuery') {
+    if (targetHandle !== 'request') return false;
   } else if (targetNode.data.nodeType === 'image') {
     if (targetHandle !== 'prompt') return false;
   } else if (targetNode.data.nodeType === 'wechatPublish') {
@@ -846,12 +864,11 @@ function canConnect(connection: { source: string | null; sourceHandle?: string |
   if (incomingEdges.length === 0) return true;
   if (targetNode.data.nodeType !== 'agent' || targetHandle !== 'context') return false;
 
-  const hasInputEdge = incomingEdges.some((edge) => nodes.some((node) => node.id === edge.source && node.data.nodeType === 'input'));
-  if (sourceNode.data.nodeType === 'input') {
-    return !hasInputEdge && incomingEdges.every((edge) => edge.data?.maxTraversals !== undefined);
-  }
-  if (!hasInputEdge) return false;
-  return wouldCreateCycle(source, target, edges) && incomingEdges.length === 1 && incomingEdges.every((edge) => edge.data?.maxTraversals !== undefined);
+  if (incomingEdges.length !== 1) return false;
+  const existingIsBounded = incomingEdges[0].data?.maxTraversals !== undefined;
+  const createsCycle = wouldCreateCycle(source, target, edges);
+  if (sourceNode.data.nodeType === 'input') return existingIsBounded && !createsCycle;
+  return existingIsBounded ? !createsCycle : createsCycle;
 }
 
 function wouldCreateCycle(source: string, target: string, edges: WorkflowCanvasEdge[]): boolean {
@@ -882,6 +899,9 @@ function toDefinitionNode(node: WorkflowCanvasNode): WorkflowNodeDefinition {
   } else if (node.data.nodeType === 'artifact') {
     type = 'worklite/artifact';
     config = { ...base, name: node.data.artifactName ?? '', type: node.data.artifactType ?? 'text' };
+  } else if (node.data.nodeType === 'artifactQuery') {
+    type = 'worklite/artifact-query';
+    config = { ...base, name: node.data.queryName ?? '', titleField: node.data.queryTitleField ?? '', descriptionFields: node.data.queryDescriptionFields ?? [] };
   } else if (node.data.nodeType === 'image') {
     type = 'worklite/image';
     config = {
@@ -1062,6 +1082,7 @@ function nodeTypeLabel(nodeType: WorkflowCanvasNode['data']['nodeType'], t: TFun
   if (nodeType === 'timer') return t('editor.timerNode');
   if (nodeType === 'dashboard') return t('editor.dashboardNode');
   if (nodeType === 'artifact') return t('editor.artifactNode');
+  if (nodeType === 'artifactQuery') return t('editor.artifactQueryNode');
   if (nodeType === 'image') return t('editor.imageNode');
   if (nodeType === 'wechatPublish') return t('editor.wechatNode');
   return t('editor.agentNode');

@@ -3,9 +3,32 @@
 const baseUrl = (process.env.WORKLITE_API_URL || 'http://127.0.0.1:3391/api').replace(/\/$/, '');
 const workflowName = 'GitHub Technology Trend Research';
 
+const topicPrompt = `You plan one focused technology article from the workflow input. Propose a specific title and short description for the article before any research or writing. Do not write the article, cite sources, or claim that current evidence has already been verified.
+
+Return only valid JSON with this shape:
+{
+  "request": { "original": "the complete original workflow input, preserving its value and structure" },
+  "proposal": { "title": "proposed article title", "description": "brief scope and central idea" }
+}
+
+Preserve the complete workflow input in request.original as its original JSON value, whether text or an object, including any structure or constraints; do not replace it with a summary. Do not wrap the JSON in a code fence.`;
+
+const duplicatePrompt = `You screen a proposed article against historical Research Notes. The input contains request (the topic planner JSON with request.original and proposal) and candidates (each with artifactId, title, and description). Compare the proposal's title and description to all candidate titles and descriptions. A substantially overlapping core topic and thesis is a duplicate even if the wording differs. Do not treat a broad shared technology area alone as a duplicate. Historical candidates are drafts and may not represent published articles; evaluate them as potential prior work.
+
+Return only valid JSON with this shape:
+{
+  "duplicate": false,
+  "reason": "brief explanation of the decision",
+  "matchedArtifactIds": [],
+  "request": { "original": "the complete original workflow input, preserving its value and structure" },
+  "proposal": { "title": "proposed article title", "description": "brief scope and central idea" }
+}
+
+Copy request.request and request.proposal into the top-level output request and proposal exactly; list only matching artifactIds. Set duplicate to true if the proposed article would substantially repeat any historical candidate, otherwise false. Do not write the article or wrap the JSON in a code fence.`;
+
 const researchPrompt = `You are a careful technology researcher and writer. Produce an evidence-backed article draft from the workflow input.
 
-The input is either the original research request or a reviewer response from an earlier pass. When it is a reviewer response, preserve the supplied article's valid material, address every actionable feedback item, and re-check evidence where needed.
+The input is either a duplicate-screening response with duplicate false, the original request and a proposed title and description, or a reviewer response from an earlier pass. For the first pass, follow the original request and use the proposal as a starting scope, not as verified evidence. When it is a reviewer response, preserve the supplied article's valid material, address every actionable feedback item, and re-check evidence where needed.
 
 Use GitHub as the primary evidence source. Use the assigned github-current-popularity Skill to collect current repository evidence and the assigned zhihu-research Skill only to discover Chinese community viewpoints, disputes, and counterexamples. Do not treat a single repository, a total star count, a search result, or a community opinion as proof of an industry trend.
 
@@ -150,17 +173,23 @@ const definition = {
   defaults: { errorPolicy: 'stop' },
   nodes: [
     { id: 'input', position: { x: 0, y: 620 }, type: 'worklite/input', typeVersion: '1', config: {}, errorPolicy: 'stop' },
-    { id: 'research', position: { x: 100, y: 120 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: researchPrompt, outputFormat: 'json', skillIds: [githubSkill.id, zhihuSkill.id], mcpServerIds: [] }, errorPolicy: 'stop' },
-    { id: 'research-artifact', position: { x: 420, y: 0 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'Research Notes', type: 'json' }, errorPolicy: 'stop' },
-    { id: 'review', position: { x: 420, y: 260 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: reviewerPrompt, outputFormat: 'json', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
-    { id: 'article', position: { x: 740, y: 260 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: articlePrompt, outputFormat: 'text', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
-    { id: 'article-artifact', position: { x: 1020, y: 120 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'Article', type: 'markdown' }, errorPolicy: 'stop' },
-    { id: 'cover-prompt', position: { x: 1020, y: 420 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: coverPromptPrompt, outputFormat: 'text', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
-    { id: 'cover-image', position: { x: 1300, y: 420 }, type: 'worklite/image', typeVersion: '1', config: { model: imageModel, n: 1, background: 'opaque', quality: 'medium', size: '1024x1024' }, errorPolicy: 'stop' },
-    { id: 'wechat-publish', position: { x: 1580, y: 260 }, type: 'wechat-official-account/publish', typeVersion: '2', config: { accountId: 'wechat_official_account_personal', mode: 'draft' }, errorPolicy: 'stop' },
+    { id: 'topic', position: { x: 260, y: 620 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: topicPrompt, outputFormat: 'json', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
+    { id: 'history', position: { x: 540, y: 620 }, type: 'worklite/artifact-query', typeVersion: '1', config: { name: 'Research Notes', titleField: 'title', descriptionFields: ['topic', 'thesis'] }, errorPolicy: 'stop' },
+    { id: 'duplicate', position: { x: 820, y: 620 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: duplicatePrompt, outputFormat: 'json', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
+    { id: 'research', position: { x: 1100, y: 120 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: researchPrompt, outputFormat: 'json', skillIds: [githubSkill.id, zhihuSkill.id], mcpServerIds: [] }, errorPolicy: 'stop' },
+    { id: 'research-artifact', position: { x: 1420, y: 0 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'Research Notes', type: 'json' }, errorPolicy: 'stop' },
+    { id: 'review', position: { x: 1420, y: 260 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: reviewerPrompt, outputFormat: 'json', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
+    { id: 'article', position: { x: 1740, y: 260 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: articlePrompt, outputFormat: 'text', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
+    { id: 'article-artifact', position: { x: 2020, y: 120 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'Article', type: 'markdown' }, errorPolicy: 'stop' },
+    { id: 'cover-prompt', position: { x: 2020, y: 420 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: coverPromptPrompt, outputFormat: 'text', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
+    { id: 'cover-image', position: { x: 2300, y: 420 }, type: 'worklite/image', typeVersion: '1', config: { model: imageModel, n: 1, background: 'opaque', quality: 'medium', size: '1024x1024' }, errorPolicy: 'stop' },
+    { id: 'wechat-publish', position: { x: 2580, y: 260 }, type: 'wechat-official-account/publish', typeVersion: '2', config: { accountId: 'wechat_official_account_personal', mode: 'draft' }, errorPolicy: 'stop' },
   ],
   edges: [
-    { id: 'input-to-research', sourceNodeId: 'input', sourcePort: 'output', targetNodeId: 'research', targetPort: 'context' },
+    { id: 'input-to-topic', sourceNodeId: 'input', sourcePort: 'output', targetNodeId: 'topic', targetPort: 'context' },
+    { id: 'topic-to-history', sourceNodeId: 'topic', sourcePort: 'output', targetNodeId: 'history', targetPort: 'request' },
+    { id: 'history-to-duplicate', sourceNodeId: 'history', sourcePort: 'output', targetNodeId: 'duplicate', targetPort: 'context' },
+    { id: 'duplicate-to-research', sourceNodeId: 'duplicate', sourcePort: 'output', targetNodeId: 'research', targetPort: 'context', condition: { kind: 'predicate', path: '$.duplicate', operator: 'equals', value: false } },
     { id: 'input-to-wechat-metadata', sourceNodeId: 'input', sourcePort: 'output', targetNodeId: 'wechat-publish', targetPort: 'metadata' },
     { id: 'research-to-notes', sourceNodeId: 'research', sourcePort: 'output', targetNodeId: 'research-artifact', targetPort: 'data' },
     { id: 'research-to-review', sourceNodeId: 'research', sourcePort: 'output', targetNodeId: 'review', targetPort: 'context' },
@@ -187,7 +216,7 @@ if (!existing) {
     ...definition.edges.map((edge) => ({ type: 'addEdge', edge })),
     { type: 'updateSettings', input: definition.input, defaults: definition.defaults },
   ];
-  const updated = await request(`/workflows/${encodeURIComponent(existing.id)}/draft/operations`, { method: 'POST', body: JSON.stringify({ baseRevisionId: current.draft.revisionId, operations, source: 'manual', sourceInstruction: 'Synchronize the research workflow with bounded Chinese editorial review, generated cover creation, and WeChat draft saving.' }) });
+  const updated = await request(`/workflows/${encodeURIComponent(existing.id)}/draft/operations`, { method: 'POST', body: JSON.stringify({ baseRevisionId: current.draft.revisionId, operations, source: 'manual', sourceInstruction: 'Synchronize the research workflow with historical Artifact screening before research, bounded editorial review, generated cover creation, and WeChat draft saving.' }) });
   const version = await request(`/workflows/${encodeURIComponent(updated.id)}/publish`, { method: 'POST' });
   process.stdout.write(JSON.stringify({ id: updated.id, name: updated.name, existing: true, updated: true, publishedVersionId: version.id }) + '\n');
 }

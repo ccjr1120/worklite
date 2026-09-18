@@ -70,6 +70,36 @@ export class RunsService {
       execute: async ({ input }) => ({ output: (input as { data?: unknown } | null | undefined)?.data ?? null }),
     });
     this.registry.register({
+      ...capability('worklite/artifact-query'),
+      execute: async ({ input, config, context }) => {
+        const settings = asRecord(config);
+        const name = settings?.name as string;
+        const titleField = settings?.titleField as string;
+        const descriptionFields = settings?.descriptionFields as string[];
+        const rows = await this.db.select({ id: artifacts.id, content: artifacts.content, createdAt: artifacts.createdAt })
+          .from(artifacts)
+          .where(and(eq(artifacts.workspaceId, context.workspaceId), eq(artifacts.name, name), eq(artifacts.type, 'json')))
+          .orderBy(desc(artifacts.createdAt), desc(artifacts.id));
+        const candidates: Array<{ artifactId: string; title: string; description: string; createdAt: string | null }> = [];
+        for (const row of rows) {
+          let record: Record<string, unknown> | null;
+          try {
+            record = asRecord(JSON.parse(row.content));
+          } catch {
+            continue;
+          }
+          const titleValue = record?.[titleField];
+          const title = typeof titleValue === 'string' ? titleValue.trim() : '';
+          const description = descriptionFields.map((field) => {
+            const value = record?.[field];
+            return typeof value === 'string' ? value.trim() : '';
+          }).filter(Boolean).join(' ');
+          if (title && description) candidates.push({ artifactId: row.id, title, description, createdAt: row.createdAt?.toISOString() ?? null });
+        }
+        return { output: { request: asRecord(input)?.request, candidates } };
+      },
+    });
+    this.registry.register({
       ...capability('worklite/agent'),
       execute: async (request) => {
         const config = asRecord(request.config);
@@ -520,9 +550,9 @@ function toNodeRunView(row: typeof workflowNodeRuns.$inferSelect): WorkflowNodeR
 }
 
 function toArtifactView(row: typeof artifacts.$inferSelect, workspaceSlug: string, workflowName: string): ArtifactView {
-  return { id: row.id, workspaceSlug, name: row.name, type: row.type, workflowName, runId: row.runId ?? '', size: row.size, createdAt: row.createdAt.toISOString(), content: row.content };
+  return { id: row.id, workspaceSlug, name: row.name, type: row.type, workflowName, runId: row.runId ?? '', size: row.size, createdAt: row.createdAt?.toISOString() ?? null, content: row.content };
 }
 
 function toPendingActionView(row: typeof workflowPendingActions.$inferSelect): WorkflowPendingActionView {
-  return { id: row.id, runId: row.runId, nodeRunId: row.nodeRunId, type: row.type, status: row.status, title: row.title, description: row.description, qrCode: row.qrCode, expiresAt: row.expiresAt?.toISOString() ?? null, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
+  return { id: row.id, runId: row.runId, nodeRunId: row.nodeRunId, type: row.type, status: row.status, title: row.title, description: row.description, qrCode: row.qrCode, expiresAt: row.expiresAt?.toISOString() ?? null, createdAt: row.createdAt?.toISOString() ?? null, updatedAt: row.updatedAt.toISOString() };
 }

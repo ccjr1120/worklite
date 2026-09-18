@@ -72,6 +72,9 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-09-18
+- Updated the Workflow Editor specification for the read-only Artifact Query node, historical title/description field controls, and conditional initial Agent context alongside bounded feedback. The existing shared patterns and design tokens remain authoritative.
+
 ### 2026-09-17
 - Documented the Workflow Image node, constrained generation inspector, and required generated-cover connection for the WeChat Official Account node.
 - Documented explicit Workflow Input-to-Agent context edges that may coexist with one bounded feedback edge.

@@ -1,10 +1,10 @@
 import { Handle, Position, type Edge, type Node, type NodeProps } from '@xyflow/react';
-import { Bot, Braces, FileText, Image as ImageIcon, LayoutDashboard, Send, Timer } from 'lucide-react';
+import { Bot, Braces, FileSearch, FileText, Image as ImageIcon, LayoutDashboard, Send, Timer } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { WorkflowDashboardLayout, WorkflowEdgeCondition } from '@worklite/contracts';
 import { cn } from '@/lib/utils';
 
-export type WorkflowCanvasNodeType = 'input' | 'timer' | 'agent' | 'dashboard' | 'artifact' | 'wechatPublish' | 'image';
+export type WorkflowCanvasNodeType = 'input' | 'timer' | 'agent' | 'dashboard' | 'artifact' | 'artifactQuery' | 'wechatPublish' | 'image';
 
 export type WorkflowCanvasNodeData = {
   nodeType: WorkflowCanvasNodeType;
@@ -21,6 +21,9 @@ export type WorkflowCanvasNodeData = {
   dashboardLayout?: WorkflowDashboardLayout;
   artifactName?: string;
   artifactType?: 'text' | 'markdown' | 'json';
+  queryName?: string;
+  queryTitleField?: string;
+  queryDescriptionFields?: string[];
   wechatAccountId?: string;
   wechatMode?: 'draft' | 'publish';
   wechatNodeVersion?: '1' | '2';
@@ -97,6 +100,18 @@ function ArtifactNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   </div>;
 }
 
+function ArtifactQueryNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
+  const { t } = useTranslation('workflows');
+  return <div className={nodeClassName(selected)}>
+    <NodeHeader icon={<FileSearch className="size-4 text-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
+    <div className="mt-3 border-t border-border py-1">
+      <PortRow label={t('editor.queryRequestPort')}><Handle type="target" position={Position.Left} id="request" className={handleClass} aria-label={t('editor.queryRequestPort')} /></PortRow>
+      <div className="relative flex h-7 items-center justify-end px-3 text-[11px] font-medium"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
+    </div>
+    <div className="px-3 pb-3 text-[11px] text-muted-foreground">{data.queryName || t('editor.artifactUnnamed')}</div>
+  </div>;
+}
+
 function AgentNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   const { t } = useTranslation('workflows');
   return <div className={cn(nodeClassName(selected), 'w-[300px]')}>
@@ -148,6 +163,7 @@ export const workflowNodeTypes = {
   agent: AgentNode,
   dashboard: DashboardNode,
   artifact: ArtifactNode,
+  artifactQuery: ArtifactQueryNode,
   wechatPublish: WechatPublishNode,
   image: ImageNode,
 };

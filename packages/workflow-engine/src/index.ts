@@ -162,6 +162,25 @@ const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     },
   },
   {
+    id: 'worklite/artifact-query',
+    version: '1',
+    name: 'Artifact Query',
+    purpose: 'Read historical JSON Artifact titles and descriptions from the workspace.',
+    inputs: [{ name: 'request', required: true, dataType: 'json', multiple: false }],
+    outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
+    inputSchema: { type: 'object', required: ['request'], properties: { request: {} } },
+    outputSchema: { type: 'object', required: ['request', 'candidates'] },
+    configSchema: {
+      type: 'object',
+      required: ['name', 'titleField', 'descriptionFields'],
+      properties: {
+        name: { type: 'string', minLength: 1 },
+        titleField: { type: 'string', minLength: 1 },
+        descriptionFields: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } },
+      },
+    },
+  },
+  {
     id: 'worklite/image',
     version: '1',
     name: 'Image Generation',
