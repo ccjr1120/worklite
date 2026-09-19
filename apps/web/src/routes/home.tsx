@@ -143,7 +143,7 @@ function HomePage() {
           {firstUseStateReady && !systemHelperConfigured ? <FirstUseGuide providerConfigured={providerConfigured} /> : null}
 
           <div className="mt-8">
-            <PageHeading title={t('home:boards.title')} description={t('home:boards.description')} />
+            <PageHeading title={t('home:boards.title')} />
 
             <div className="mt-5 flex justify-end">
               <Button type="button" size="compact" disabled={categoriesBusy} onClick={() => setCreateCategoryOpen(true)}>

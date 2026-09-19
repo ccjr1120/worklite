@@ -163,7 +163,6 @@
     "title": "Agent 配置",
     "description": "选择此工作区中已配置的模型。",
     "model": "提供商和模型",
-    "hint": "更改会自动保存。",
     "placeholder": "选择已配置的模型",
     "saving": "保存中...",
     "mcpServers": "MCP 服务器",

@@ -1,6 +1,5 @@
 {
   "title": "Plugins",
-  "description": "Configure trusted workspace plugins and their execution commands.",
   "search": "Search plugins",
   "noMatches": {
     "title": "No matching plugins",
@@ -25,19 +24,17 @@
     "command": "Executable command",
     "commandPlaceholder": "codex",
     "commandHint": "Enter the executable name or path followed by optional arguments. Shell syntax and environment-variable overrides are not used.",
-    "test": "Test command",
-    "testing": "Testing...",
     "testFailed": "The plugin command could not be started.",
     "testMissing": "The configured command was not found.",
     "testUnavailable": "The configured command exited unsuccessfully.",
     "saved": "Plugin configuration saved",
-    "saveFailed": "The plugin configuration could not be saved."
+    "saveFailed": "The plugin configuration could not be saved.",
+    "verifying": "Verifying..."
   },
   "wechat": {
     "title": "WeChat ClawBot",
     "description": "Connect this Codex plugin to WeChat through the iLink bot transport.",
     "login": "Start login",
-    "refresh": "Refresh QR",
     "disconnect": "Disconnect",
     "loginFailed": "WeChat login could not be started.",
     "disconnectFailed": "The WeChat connection could not be disconnected.",
@@ -52,7 +49,6 @@
     "title": "Official Account session",
     "description": "Connect the account used by Workflow publishing. Browser storage stays encrypted on the API host.",
     "login": "Start login",
-    "refresh": "Refresh QR",
     "disconnect": "Disconnect",
     "loginFailed": "Official Account login could not be started.",
     "disconnectFailed": "The Official Account session could not be disconnected.",

@@ -1,6 +1,5 @@
 {
   "title": "工作流",
-  "description": "包含内嵌 Agent 配置的有向工作流图。",
   "create": "创建工作流",
   "search": "搜索工作流",
   "empty": {
@@ -241,7 +240,6 @@
     "elementListTitleKey": "标题字段",
     "newElementLabel": "新元素",
     "removeDashboardElement": "移除元素",
-    "dashboardElementCount_one": "{{count}} 个元素",
     "dashboardElementCount_other": "{{count}} 个元素",
     "edgeMode": "路由模式",
     "edgeModes": {
@@ -277,12 +275,14 @@
       "title": "没有已发布版本",
       "description": "发布工作流以锁定完整定义并启用运行。"
     },
+    "loading": "正在加载版本...",
+    "loadFailed": "无法加载已发布版本。",
     "columns": {
       "version": "版本",
       "published": "发布时间",
       "publisher": "发布者",
       "steps": "步骤数",
-      "recentRun": "最近运行"
+      "actions": "操作"
     }
   },
   "importJson": "导入 JSON",

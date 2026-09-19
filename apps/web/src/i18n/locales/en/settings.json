@@ -117,8 +117,6 @@
         "refresh": "Refresh token",
         "refreshFailed": "Codex token refresh failed.",
         "refreshed": "Codex token refreshed",
-        "quotasRefreshed": "Codex quotas refreshed",
-        "quotasRefreshFailed": "Codex quota refresh failed.",
         "rateLimitsLoading": "Loading rate limits...",
         "rateLimitsUnavailable": "Rate limits are unavailable.",
         "rateLimitsEmpty": "No rate-limit windows were reported.",
@@ -148,7 +146,6 @@
     "codexPool": {
       "title": "Codex account pool",
       "description": "Manage Codex accounts and review the remaining quota for each account. Usage refreshes automatically every minute.",
-      "refreshAll": "Refresh all quotas",
       "primary": "Primary quota",
       "secondary": "Secondary quota",
       "remaining": "remaining",
@@ -196,15 +193,13 @@
   },
   "usage": {
     "title": "Usage",
-    "description": "Model consumption for this workspace. Totals are decision-oriented, not decorative analytics.",
     "chartLabel": "Token usage by model",
     "tokens": "{{count}} tokens",
     "columns": {
       "model": "Model",
       "tokens": "Tokens",
       "runs": "Runs",
-      "cost": "Estimated cost",
-      "empty": ""
+      "cost": "Estimated cost"
     },
     "loading": "Loading usage...",
     "loadFailed": "Unable to load usage."
@@ -250,7 +245,6 @@
       "message": "Message"
     },
     "details": "Event details",
-    "metadata": "Metadata",
     "duration": "Duration: {{ms}} ms",
     "copyTrace": "Copy trace ID",
     "copied": "Copied",
@@ -269,7 +263,6 @@
   },
   "appearance": {
     "title": "Appearance",
-    "description": "These preferences are personal. The current resolved theme is {{theme}}.",
     "saveFailed": "The preference could not be saved.",
     "theme": {
       "title": "Theme",
@@ -281,8 +274,7 @@
       "darkDescription": "Focused blue-gray surfaces."
     },
     "language": {
-      "title": "Language",
-      "description": "Choose the language used across the product interface."
+      "title": "Language"
     }
   }
 }

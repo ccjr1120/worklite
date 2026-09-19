@@ -1,6 +1,5 @@
 {
   "title": "Workflows",
-  "description": "Directed workflow graphs with embedded Agent configurations.",
   "create": "Create workflow",
   "search": "Search workflows",
   "empty": {
@@ -277,12 +276,14 @@
       "title": "No published versions",
       "description": "Publish the workflow to lock its complete definition and enable runs."
     },
+    "loading": "Loading versions...",
+    "loadFailed": "Unable to load published versions.",
     "columns": {
       "version": "Version",
       "published": "Published",
       "publisher": "Publisher",
       "steps": "Steps",
-      "recentRun": "Recent run"
+      "actions": "Actions"
     }
   },
   "importJson": "Import JSON",

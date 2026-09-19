@@ -6,7 +6,6 @@
   },
   "boards": {
     "title": "Workflow boards",
-    "description": "Boards published by Workflow Dashboard nodes.",
     "version": "v{{version}}",
     "loading": "Loading boards...",
     "unavailable": "Unable to load Workflow boards.",

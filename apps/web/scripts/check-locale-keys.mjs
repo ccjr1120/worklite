@@ -23,6 +23,23 @@ function compareKeys(left, right) {
   };
 }
 
+const PLURAL_SUFFIXES = ['zero', 'one', 'two', 'few', 'many', 'other'];
+
+function pluralCategories(locale) {
+  return new Set(new Intl.PluralRules(locale).resolvedOptions().pluralCategories);
+}
+
+// A key like `count_one` exists only in locales whose plural rules use the `one`
+// category. Chinese resolves every count to `other`, so requiring `_one` there
+// would add a string i18next never selects.
+function expectedKeysForLocale(referenceKeys, locale) {
+  const categories = pluralCategories(locale);
+  return referenceKeys.filter((key) => {
+    const suffix = PLURAL_SUFFIXES.find((candidate) => key.endsWith(`_${candidate}`));
+    return suffix === undefined || categories.has(suffix);
+  });
+}
+
 const localeDirs = (await readdir(localesRoot, { withFileTypes: true }))
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name)
@@ -77,7 +94,7 @@ for (const namespace of namespaces) {
       continue;
     }
 
-    const { missing, extra } = compareKeys(referenceKeys, flatten(catalog));
+    const { missing, extra } = compareKeys(expectedKeysForLocale(referenceKeys, locale), flatten(catalog));
     if (missing.length || extra.length) {
       failed = true;
       console.error(`${locale}/${namespace}.json key mismatch.`);

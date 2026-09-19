@@ -1,6 +1,5 @@
 {
   "title": "MCP servers",
-  "description": "Remote Streamable HTTP connections, discovered tools, and published versions.",
   "create": "Connect MCP server",
   "search": "Search MCP servers",
   "empty": {
@@ -28,11 +27,8 @@
     "endpoint": "Endpoint",
     "authentication": "Authentication",
     "tokenPlaceholder": "Bearer token",
-    "testing": "Testing...",
-    "test": "Test connection",
     "allowedTools": "Allowed tools",
-    "noTools": "Save and test the connection to discover tools.",
-    "saveHint": "Saving updates this draft and its allowed-tool set. Discovered descriptions are untrusted content.",
+    "noTools": "Save the connection to discover its tools.",
     "saved": "MCP server saved",
     "saveFailed": "The MCP server could not be saved.",
     "testErrors": {
@@ -40,7 +36,12 @@
       "unreachable": "The MCP endpoint could not be reached.",
       "unsupported_protocol": "The server does not support the required MCP protocol.",
       "malformed_response": "The server returned an invalid MCP response."
-    }
+    },
+    "loading": "Loading MCP server...",
+    "loadFailed": "Unable to load this MCP server.",
+    "connecting": "Connecting...",
+    "noToolsExposed": "This server exposes no tools.",
+    "toolsRestored": "Saved selection. Save the connection to rediscover its tools."
   },
   "delete": {
     "title": "Delete {{name}}?",

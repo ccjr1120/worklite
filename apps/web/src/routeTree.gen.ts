@@ -12,16 +12,12 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as HomeRouteImport } from './routes/home'
 import { Route as ModelProvidersRouteImport } from './routes/model-providers'
-import { Route as OnboardingRouteRouteImport } from './routes/onboarding/route'
 import { Route as SettingsRouteRouteImport } from './routes/settings/route'
 import { Route as AgentsIndexRouteImport } from './routes/agents/index'
 import { Route as AgentsAgentIdRouteImport } from './routes/agents/$agentId'
 import { Route as ArtifactsArtifactIdRouteImport } from './routes/artifacts/$artifactId'
 import { Route as McpServersIndexRouteImport } from './routes/mcp-servers/index'
 import { Route as McpServersServerIdRouteImport } from './routes/mcp-servers/$serverId'
-import { Route as OnboardingIndexRouteImport } from './routes/onboarding/index'
-import { Route as OnboardingFirstAgentRouteImport } from './routes/onboarding/first-agent'
-import { Route as OnboardingProviderRouteImport } from './routes/onboarding/provider'
 import { Route as PluginsIndexRouteImport } from './routes/plugins/index'
 import { Route as PluginsPluginIdRouteImport } from './routes/plugins/$pluginId'
 import { Route as SettingsIndexRouteImport } from './routes/settings/index'
@@ -48,11 +44,6 @@ const HomeRoute = HomeRouteImport.update({
 const ModelProvidersRoute = ModelProvidersRouteImport.update({
   id: '/model-providers',
   path: '/model-providers',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OnboardingRouteRoute = OnboardingRouteRouteImport.update({
-  id: '/onboarding',
-  path: '/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRouteRoute = SettingsRouteRouteImport.update({
@@ -84,21 +75,6 @@ const McpServersServerIdRoute = McpServersServerIdRouteImport.update({
   id: '/mcp-servers/$serverId',
   path: '/mcp-servers/$serverId',
   getParentRoute: () => rootRouteImport,
-} as any)
-const OnboardingIndexRoute = OnboardingIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => OnboardingRouteRoute,
-} as any)
-const OnboardingFirstAgentRoute = OnboardingFirstAgentRouteImport.update({
-  id: '/first-agent',
-  path: '/first-agent',
-  getParentRoute: () => OnboardingRouteRoute,
-} as any)
-const OnboardingProviderRoute = OnboardingProviderRouteImport.update({
-  id: '/provider',
-  path: '/provider',
-  getParentRoute: () => OnboardingRouteRoute,
 } as any)
 const PluginsIndexRoute = PluginsIndexRouteImport.update({
   id: '/plugins/',
@@ -164,15 +140,12 @@ const WorkflowsWorkflowIdVersionsRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/onboarding': typeof OnboardingRouteRouteWithChildren
   '/settings': typeof SettingsRouteRouteWithChildren
   '/home': typeof HomeRoute
   '/model-providers': typeof ModelProvidersRoute
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
-  '/onboarding/first-agent': typeof OnboardingFirstAgentRoute
-  '/onboarding/provider': typeof OnboardingProviderRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/audit-log': typeof SettingsAuditLogRoute
@@ -182,7 +155,6 @@ export interface FileRoutesByFullPath {
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
   '/agents/': typeof AgentsIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
-  '/onboarding/': typeof OnboardingIndexRoute
   '/plugins/': typeof PluginsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/skills/': typeof SkillsIndexRoute
@@ -196,8 +168,6 @@ export interface FileRoutesByTo {
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
-  '/onboarding/first-agent': typeof OnboardingFirstAgentRoute
-  '/onboarding/provider': typeof OnboardingProviderRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/audit-log': typeof SettingsAuditLogRoute
@@ -207,7 +177,6 @@ export interface FileRoutesByTo {
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
   '/agents': typeof AgentsIndexRoute
   '/mcp-servers': typeof McpServersIndexRoute
-  '/onboarding': typeof OnboardingIndexRoute
   '/plugins': typeof PluginsIndexRoute
   '/settings': typeof SettingsIndexRoute
   '/skills': typeof SkillsIndexRoute
@@ -217,15 +186,12 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/onboarding': typeof OnboardingRouteRouteWithChildren
   '/settings': typeof SettingsRouteRouteWithChildren
   '/home': typeof HomeRoute
   '/model-providers': typeof ModelProvidersRoute
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
-  '/onboarding/first-agent': typeof OnboardingFirstAgentRoute
-  '/onboarding/provider': typeof OnboardingProviderRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/audit-log': typeof SettingsAuditLogRoute
@@ -235,7 +201,6 @@ export interface FileRoutesById {
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
   '/agents/': typeof AgentsIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
-  '/onboarding/': typeof OnboardingIndexRoute
   '/plugins/': typeof PluginsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/skills/': typeof SkillsIndexRoute
@@ -246,15 +211,12 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/onboarding'
     | '/settings'
     | '/home'
     | '/model-providers'
     | '/agents/$agentId'
     | '/artifacts/$artifactId'
     | '/mcp-servers/$serverId'
-    | '/onboarding/first-agent'
-    | '/onboarding/provider'
     | '/plugins/$pluginId'
     | '/settings/appearance'
     | '/settings/audit-log'
@@ -264,7 +226,6 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId'
     | '/agents/'
     | '/mcp-servers/'
-    | '/onboarding/'
     | '/plugins/'
     | '/settings/'
     | '/skills/'
@@ -278,8 +239,6 @@ export interface FileRouteTypes {
     | '/agents/$agentId'
     | '/artifacts/$artifactId'
     | '/mcp-servers/$serverId'
-    | '/onboarding/first-agent'
-    | '/onboarding/provider'
     | '/plugins/$pluginId'
     | '/settings/appearance'
     | '/settings/audit-log'
@@ -289,7 +248,6 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId'
     | '/agents'
     | '/mcp-servers'
-    | '/onboarding'
     | '/plugins'
     | '/settings'
     | '/skills'
@@ -298,15 +256,12 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
-    | '/onboarding'
     | '/settings'
     | '/home'
     | '/model-providers'
     | '/agents/$agentId'
     | '/artifacts/$artifactId'
     | '/mcp-servers/$serverId'
-    | '/onboarding/first-agent'
-    | '/onboarding/provider'
     | '/plugins/$pluginId'
     | '/settings/appearance'
     | '/settings/audit-log'
@@ -316,7 +271,6 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId'
     | '/agents/'
     | '/mcp-servers/'
-    | '/onboarding/'
     | '/plugins/'
     | '/settings/'
     | '/skills/'
@@ -326,7 +280,6 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  OnboardingRouteRoute: typeof OnboardingRouteRouteWithChildren
   SettingsRouteRoute: typeof SettingsRouteRouteWithChildren
   HomeRoute: typeof HomeRoute
   ModelProvidersRoute: typeof ModelProvidersRoute
@@ -364,13 +317,6 @@ declare module '@tanstack/react-router' {
       path: '/model-providers'
       fullPath: '/model-providers'
       preLoaderRoute: typeof ModelProvidersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/onboarding': {
-      id: '/onboarding'
-      path: '/onboarding'
-      fullPath: '/onboarding'
-      preLoaderRoute: typeof OnboardingRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -414,27 +360,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/mcp-servers/$serverId'
       preLoaderRoute: typeof McpServersServerIdRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/onboarding/': {
-      id: '/onboarding/'
-      path: '/'
-      fullPath: '/onboarding/'
-      preLoaderRoute: typeof OnboardingIndexRouteImport
-      parentRoute: typeof OnboardingRouteRoute
-    }
-    '/onboarding/first-agent': {
-      id: '/onboarding/first-agent'
-      path: '/first-agent'
-      fullPath: '/onboarding/first-agent'
-      preLoaderRoute: typeof OnboardingFirstAgentRouteImport
-      parentRoute: typeof OnboardingRouteRoute
-    }
-    '/onboarding/provider': {
-      id: '/onboarding/provider'
-      path: '/provider'
-      fullPath: '/onboarding/provider'
-      preLoaderRoute: typeof OnboardingProviderRouteImport
-      parentRoute: typeof OnboardingRouteRoute
     }
     '/plugins/': {
       id: '/plugins/'
@@ -523,22 +448,6 @@ declare module '@tanstack/react-router' {
   }
 }
 
-interface OnboardingRouteRouteChildren {
-  OnboardingFirstAgentRoute: typeof OnboardingFirstAgentRoute
-  OnboardingProviderRoute: typeof OnboardingProviderRoute
-  OnboardingIndexRoute: typeof OnboardingIndexRoute
-}
-
-const OnboardingRouteRouteChildren: OnboardingRouteRouteChildren = {
-  OnboardingFirstAgentRoute: OnboardingFirstAgentRoute,
-  OnboardingProviderRoute: OnboardingProviderRoute,
-  OnboardingIndexRoute: OnboardingIndexRoute,
-}
-
-const OnboardingRouteRouteWithChildren = OnboardingRouteRoute._addFileChildren(
-  OnboardingRouteRouteChildren,
-)
-
 interface SettingsRouteRouteChildren {
   SettingsAppearanceRoute: typeof SettingsAppearanceRoute
   SettingsAuditLogRoute: typeof SettingsAuditLogRoute
@@ -572,7 +481,6 @@ const WorkflowsWorkflowIdRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  OnboardingRouteRoute: OnboardingRouteRouteWithChildren,
   SettingsRouteRoute: SettingsRouteRouteWithChildren,
   HomeRoute: HomeRoute,
   ModelProvidersRoute: ModelProvidersRoute,

@@ -6,7 +6,6 @@
   },
   "boards": {
     "title": "工作流看板",
-    "description": "由工作流看板节点发布的看板。",
     "version": "v{{version}}",
     "loading": "正在加载看板……",
     "unavailable": "无法加载工作流看板。",

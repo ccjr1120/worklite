@@ -117,8 +117,6 @@
         "refresh": "刷新令牌",
         "refreshFailed": "Codex 令牌刷新失败。",
         "refreshed": "Codex 令牌已刷新",
-        "quotasRefreshed": "Codex 余量已刷新",
-        "quotasRefreshFailed": "Codex 余量刷新失败。",
         "rateLimitsLoading": "Loading rate limits...",
         "rateLimitsUnavailable": "Rate limits are unavailable.",
         "rateLimitsEmpty": "No rate-limit windows were reported.",
@@ -148,7 +146,6 @@
     "codexPool": {
       "title": "Codex 账号池",
       "description": "管理 Codex 账号并查看每个账号的剩余余量。用量每分钟自动刷新。",
-      "refreshAll": "刷新全部余量",
       "primary": "主要余量",
       "secondary": "次要余量",
       "remaining": "剩余",
@@ -196,15 +193,13 @@
   },
   "usage": {
     "title": "用量",
-    "description": "此工作区的模型消耗。总量用于决策，而不是装饰性分析。",
     "chartLabel": "按模型统计的 token 用量",
     "tokens": "{{count}} tokens",
     "columns": {
       "model": "模型",
       "tokens": "Tokens",
       "runs": "运行次数",
-      "cost": "预估费用",
-      "empty": ""
+      "cost": "预估费用"
     },
     "loading": "正在加载用量...",
     "loadFailed": "无法加载用量。"
@@ -250,7 +245,6 @@
       "message": "消息"
     },
     "details": "事件详情",
-    "metadata": "元数据",
     "duration": "时长：{{ms}} ms",
     "copyTrace": "复制追踪 ID",
     "copied": "已复制",
@@ -268,7 +262,6 @@
   },
   "appearance": {
     "title": "外观",
-    "description": "这些偏好是个人设置。当前解析后的主题是 {{theme}}。",
     "saveFailed": "无法保存该偏好设置。",
     "theme": {
       "title": "主题",
@@ -280,8 +273,7 @@
       "darkDescription": "专注的蓝灰色表面。"
     },
     "language": {
-      "title": "语言",
-      "description": "选择产品界面使用的语言。"
+      "title": "语言"
     }
   }
 }

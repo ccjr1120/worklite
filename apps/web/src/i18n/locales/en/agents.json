@@ -1,6 +1,5 @@
 {
   "title": "Agents",
-  "description": "Configurable work units with a model, instructions, skills, and tools.",
   "create": "Create agent",
   "search": "Search agents",
   "builtIn": "Built-in",

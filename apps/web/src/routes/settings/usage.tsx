@@ -23,7 +23,6 @@ function UsageSettingsPage() {
     <div className="mx-auto w-full max-w-[840px] px-6 py-6">
       <WorkspaceChrome crumbs={[{ label: t('nav.title') }, { label: t('nav.usage') }]} />
       <h1 className="text-2xl font-semibold tracking-tight">{t('usage.title')}</h1>
-      <p className="mt-2 text-[13px] text-muted-foreground">{t('usage.description')}</p>
       {isLoading ? <div className="mt-6 space-y-4" role="status" aria-busy="true" aria-live="polite"><span className="sr-only">{t('usage.loading')}</span>{Array.from({ length: 3 }, (_, index) => <div key={index}><div className="mb-1 flex justify-between gap-4"><Skeleton className="h-4 w-32" /><Skeleton className="h-4 w-20" /></div><Skeleton className="h-2 w-full rounded-full" /></div>)}</div> : isError ? <div className="mt-6"><ErrorState title={t('usage.title')} description={t('usage.loadFailed')} onAction={() => void refetch()} /></div> : <div className="mt-6 space-y-3" role="img" aria-label={t('usage.chartLabel')}>
         {usageRows.map((row) => {
           const width = `${Math.round((row.tokens / max) * 100)}%`;
@@ -42,14 +41,13 @@ function UsageSettingsPage() {
       </div>}
       <div className="mt-8">
         <CollectionTable>
-          <CollectionHeader columns={[t('usage.columns.model'), t('usage.columns.tokens'), t('usage.columns.runs'), t('usage.columns.cost'), t('usage.columns.empty')]} />
+          <CollectionHeader columns={[t('usage.columns.model'), t('usage.columns.tokens'), t('usage.columns.runs'), t('usage.columns.cost')]} />
           {usageRows.map((row) => (
             <CollectionRow key={row.model}>
               <span className="font-mono text-[13px]">{row.model}</span>
               <span className="tabular-nums text-[13px]">{formatNumber(row.tokens, locale)}</span>
               <span className="tabular-nums text-[13px]">{formatNumber(row.runs, locale)}</span>
               <span className="tabular-nums text-[13px]">{formatCurrency(row.cost, locale)}</span>
-              <span />
             </CollectionRow>
           ))}
         </CollectionTable>

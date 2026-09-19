@@ -44,7 +44,6 @@
     "title": "Agent configuration",
     "description": "Select a model already configured in this workspace.",
     "model": "Provider and model",
-    "hint": "Changes are saved automatically.",
     "placeholder": "Choose a configured model",
     "saving": "Saving...",
     "mcpServers": "MCP servers",

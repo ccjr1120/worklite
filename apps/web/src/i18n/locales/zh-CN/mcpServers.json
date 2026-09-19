@@ -1,6 +1,5 @@
 {
   "title": "MCP 服务器",
-  "description": "远程 Streamable HTTP 连接、已发现的工具，以及已发布版本。",
   "create": "连接 MCP 服务器",
   "search": "搜索 MCP 服务器",
   "empty": {
@@ -28,11 +27,8 @@
     "endpoint": "端点",
     "authentication": "认证",
     "tokenPlaceholder": "Bearer token",
-    "testing": "正在测试...",
-    "test": "测试连接",
     "allowedTools": "允许的工具",
-    "noTools": "保存并测试连接以发现工具。",
-    "saveHint": "保存会更新此草稿及其允许的工具集。发现到的描述属于不可信内容。",
+    "noTools": "保存连接以发现其工具。",
     "saved": "MCP 服务器已保存",
     "saveFailed": "无法保存 MCP 服务器。",
     "testErrors": {
@@ -40,7 +36,12 @@
       "unreachable": "无法访问 MCP 端点。",
       "unsupported_protocol": "服务器不支持所需的 MCP 协议。",
       "malformed_response": "服务器返回了无效的 MCP 响应。"
-    }
+    },
+    "loading": "正在加载 MCP 服务器...",
+    "loadFailed": "无法加载此 MCP 服务器。",
+    "connecting": "正在连接...",
+    "noToolsExposed": "此服务器未提供任何工具。",
+    "toolsRestored": "已保存的选择。保存连接以重新发现其工具。"
   },
   "delete": {
     "title": "删除 {{name}}？",

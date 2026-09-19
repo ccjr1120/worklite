@@ -1,6 +1,5 @@
 {
   "title": "插件",
-  "description": "配置受信任的工作区插件及其执行命令。",
   "search": "搜索插件",
   "noMatches": {
     "title": "没有匹配的插件",
@@ -25,19 +24,17 @@
     "command": "可执行命令",
     "commandPlaceholder": "codex",
     "commandHint": "输入可执行文件名或路径，后面可以附加参数。不会使用 Shell 语法或环境变量覆盖。",
-    "test": "测试命令",
-    "testing": "正在测试...",
     "testFailed": "无法启动插件命令。",
     "testMissing": "找不到配置的命令。",
     "testUnavailable": "配置的命令执行失败。",
     "saved": "插件配置已保存",
-    "saveFailed": "无法保存插件配置。"
+    "saveFailed": "无法保存插件配置。",
+    "verifying": "正在验证..."
   },
   "wechat": {
     "title": "微信 ClawBot",
     "description": "通过 iLink Bot 传输将此 Codex 插件连接到微信。",
     "login": "开始登录",
-    "refresh": "刷新二维码",
     "disconnect": "断开连接",
     "loginFailed": "无法开始微信登录。",
     "disconnectFailed": "无法断开微信连接。",
@@ -52,7 +49,6 @@
     "title": "公众号会话",
     "description": "连接工作流发布文章使用的账号。浏览器存储状态仅加密保存在 API 主机。",
     "login": "开始登录",
-    "refresh": "刷新二维码",
     "disconnect": "断开连接",
     "loginFailed": "无法开始公众号登录。",
     "disconnectFailed": "无法断开公众号会话。",

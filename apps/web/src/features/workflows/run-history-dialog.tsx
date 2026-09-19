@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router';
-import { AlertCircle, ChevronDown, FileStack, LoaderCircle, QrCode, RefreshCw, RotateCcw, ScrollText, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { AlertCircle, ChevronDown, FileStack, LoaderCircle, QrCode, RotateCcw, ScrollText, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ArtifactView, RunProgressEvent, RunView, WorkflowNodeRunView } from '@worklite/contracts';
 import { StatusBadge } from '@/components/status-badge';
@@ -100,7 +100,8 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
   const failedNode = nodeRuns.find((nodeRun) => nodeRun.status === 'failed');
   const failureReason = failedNode?.error ?? getRunFailureReason(runDetail);
   const duration = run.durationSeconds == null ? null : durationParts(run.durationSeconds);
-  const [pendingActionBusy, setPendingActionBusy] = useState(false);
+  const [qrReplacing, setQrReplacing] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
   const [expiryTick, setExpiryTick] = useState(0);
 
   useEffect(() => {
@@ -119,43 +120,54 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
     return () => source.close();
   }, [expanded, run.id]);
 
-  async function refreshPendingAction() {
-    setPendingActionBusy(true);
-    try {
-      const next = await api.refreshRunPendingAction('personal', run.id);
-      queryClient.setQueryData(['run', run.id], next);
-    } finally {
-      setPendingActionBusy(false);
-    }
-  }
-
   const pendingAction = runDetail?.pendingAction ?? null;
-  const pendingActionStale = useMemo(
-    () => pendingAction !== null && (pendingAction.status === 'expired' || (pendingAction.expiresAt !== null && Date.parse(pendingAction.expiresAt) <= Date.now())),
-    [pendingAction, expiryTick],
-  );
+  const hasPendingAction = pendingAction !== null;
+  const pendingStatus = pendingAction?.status ?? null;
+  const pendingExpiresAt = pendingAction?.expiresAt ?? null;
+
+  // An expired code is replaced automatically: the server can observe the staleness,
+  // so the panel never asks the user to refresh it. Each distinct expiry marker is
+  // attempted once, so a server that returns an equally stale code cannot spin.
+  const replacedExpiryRef = useRef('');
 
   useEffect(() => {
-    if (!expanded || !pendingActionStale || pendingActionBusy) return;
-    void refreshPendingAction().catch(() => undefined);
-  }, [expanded, pendingActionStale]);
+    if (!expanded || !hasPendingAction) return;
+    const expired = pendingStatus === 'expired' || (pendingExpiresAt !== null && Date.parse(pendingExpiresAt) <= Date.now());
+    const marker = `${pendingStatus ?? ''}:${pendingExpiresAt ?? ''}`;
+    if (!expired || replacedExpiryRef.current === marker) return;
+    replacedExpiryRef.current = marker;
+    let cancelled = false;
+    setQrReplacing(true);
+    void api
+      .refreshRunPendingAction('personal', run.id)
+      .then((next) => {
+        if (!cancelled) queryClient.setQueryData(['run', run.id], next);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setQrReplacing(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, hasPendingAction, pendingStatus, pendingExpiresAt, expiryTick, run.id]);
 
   useEffect(() => {
-    if (!expanded || pendingAction?.expiresAt == null) return;
-    const remaining = Date.parse(pendingAction.expiresAt) - Date.now();
+    if (!expanded || pendingExpiresAt === null) return;
+    const remaining = Date.parse(pendingExpiresAt) - Date.now();
     if (remaining <= 0) return;
     const timer = setTimeout(() => setExpiryTick((value) => value + 1), remaining + 250);
     return () => clearTimeout(timer);
-  }, [expanded, pendingAction?.expiresAt]);
+  }, [expanded, pendingExpiresAt]);
 
   async function cancelRun() {
-    setPendingActionBusy(true);
+    setCancelBusy(true);
     try {
       const next = await api.cancelRun('personal', run.id);
       queryClient.setQueryData(['run', run.id], next);
       void queryClient.invalidateQueries({ queryKey: ['runs'] }).catch(() => undefined);
     } finally {
-      setPendingActionBusy(false);
+      setCancelBusy(false);
     }
   }
 
@@ -191,12 +203,15 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
                     </div>
                     <StatusBadge status="waiting_for_input" />
                   </div>
-                  {pendingAction.qrCode ? <img src={pendingAction.qrCode} alt={t('runs:pendingAction.qrAlt')} className={cn('mt-4 size-48 rounded-md border border-border bg-white object-contain p-2 transition-opacity', (pendingActionStale || pendingActionBusy) && 'opacity-40')} /> : null}
-                  {pendingAction.expiresAt ? <p className="mt-2 text-xs tabular-nums text-muted-foreground">{t('runs:pendingAction.expiresAt', { value: formatDateTime(pendingAction.expiresAt, locale) })}</p> : null}
-                  {pendingActionStale ? <p className="mt-2 flex items-center gap-1.5 text-[13px] text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />{t('runs:pendingAction.expired')}</p> : null}
+                  {pendingAction.qrCode ? <img src={pendingAction.qrCode} alt={t('runs:pendingAction.qrAlt')} className={cn('mt-4 size-48 rounded-md border border-border bg-white object-contain p-2 transition-opacity', qrReplacing && 'opacity-40')} /> : null}
+                  {qrReplacing ? (
+                    <p className="mt-2 flex items-center gap-1.5 text-[13px] text-muted-foreground" role="status">
+                      <LoaderCircle className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
+                      {t('runs:pendingAction.replacing')}
+                    </p>
+                  ) : null}
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <Button type="button" size="compact" variant="secondary" onClick={() => void refreshPendingAction()} disabled={pendingActionBusy}><RefreshCw aria-hidden="true" />{t('runs:pendingAction.refresh')}</Button>
-                    <Button type="button" size="compact" variant="ghost" onClick={() => void cancelRun()} disabled={pendingActionBusy}><X aria-hidden="true" />{t('runs:pendingAction.cancel')}</Button>
+                    <Button type="button" size="compact" variant="ghost" onClick={() => void cancelRun()} disabled={cancelBusy}>{cancelBusy ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <X aria-hidden="true" />}{t('runs:pendingAction.cancel')}</Button>
                   </div>
                 </section>
               ) : null}

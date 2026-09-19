@@ -45,5 +45,10 @@
     "message": "Reconnecting. Local edits stay on this device until the connection returns."
   },
   "breadcrumbs": "Breadcrumbs",
-  "openNavigation": "Open navigation"
+  "openNavigation": "Open navigation",
+  "route": {
+    "loading": "Loading page...",
+    "errorTitle": "This page could not be loaded",
+    "errorDescription": "Something went wrong while rendering this page. Try again, or return to another destination."
+  }
 }

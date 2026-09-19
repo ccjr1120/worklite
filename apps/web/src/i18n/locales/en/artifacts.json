@@ -1,6 +1,5 @@
 {
   "title": "Artifacts",
-  "description": "Outputs produced by workflow runs.",
   "search": "Search artifacts",
   "empty": {
     "title": "No artifacts yet",
@@ -20,12 +19,15 @@
     "actions": "Actions"
   },
   "details": {
+    "loading": "Loading artifact...",
+    "loadFailedTitle": "Artifact",
+    "loadFailed": "Unable to load this Artifact.",
     "unavailableTitle": "Artifact unavailable",
     "unavailableDescription": "This artifact is missing, expired, or you do not have access.",
-    "downloadStarted": "Download started",
+    "emptyContent": "This run produced no content for this Artifact.",
     "noRun": "Unlinked run",
-    "unsupported": "This content cannot be previewed inline. Download the file instead.",
-    "run": "Run"
+    "unsupported": "This content cannot be previewed inline.",
+    "run": "Run {{value}}"
   },
   "delete": {
     "title": "Delete {{name}}?",

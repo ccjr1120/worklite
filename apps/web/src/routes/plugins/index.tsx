@@ -29,7 +29,7 @@ function PluginListPage() {
   return (
     <div className="mx-auto w-full max-w-[1440px] px-6 py-6">
       <WorkspaceChrome crumbs={[{ label: tPlugins('title') }]} />
-      <PageHeading title={tPlugins('title')} description={tPlugins('description')} />
+      <PageHeading title={tPlugins('title')} />
       <CollectionToolbar className="mt-6" search={search} onSearchChange={setSearch} placeholder={tPlugins('search')} />
       <div className="mt-4">
         {isLoading ? <CollectionLoading label={tPlugins('loading')} columns={[tPlugins('columns.plugin'), tPlugins('columns.command'), tPlugins('columns.availability'), tPlugins('columns.updated')]} headerClassName="grid-cols-[2fr_2fr_1fr_1fr]" rowClassName="grid-cols-1 md:grid-cols-[2fr_2fr_1fr_1fr]" /> : isError ? <ErrorState title={tPlugins('title')} description={tPlugins('loadFailed')} onAction={() => void refetch()} /> : plugins.length === 0 ? (

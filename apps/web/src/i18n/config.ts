@@ -7,7 +7,6 @@ import enArtifacts from './locales/en/artifacts.json';
 import enCommon from './locales/en/common.json';
 import enHome from './locales/en/home.json';
 import enMcpServers from './locales/en/mcpServers.json';
-import enOnboarding from './locales/en/onboarding.json';
 import enPlugins from './locales/en/plugins.json';
 import enRuns from './locales/en/runs.json';
 import enSettings from './locales/en/settings.json';
@@ -20,7 +19,6 @@ import zhArtifacts from './locales/zh-CN/artifacts.json';
 import zhCommon from './locales/zh-CN/common.json';
 import zhHome from './locales/zh-CN/home.json';
 import zhMcpServers from './locales/zh-CN/mcpServers.json';
-import zhOnboarding from './locales/zh-CN/onboarding.json';
 import zhPlugins from './locales/zh-CN/plugins.json';
 import zhRuns from './locales/zh-CN/runs.json';
 import zhSettings from './locales/zh-CN/settings.json';
@@ -32,7 +30,6 @@ export const NAMESPACES = [
   'common',
   'workspace',
   'home',
-  'onboarding',
   'agents',
   'assistant',
   'workflows',
@@ -49,7 +46,6 @@ const resources = {
     common: enCommon,
     workspace: enWorkspace,
     home: enHome,
-    onboarding: enOnboarding,
     agents: enAgents,
     assistant: enAssistant,
     workflows: enWorkflows,
@@ -64,7 +60,6 @@ const resources = {
     common: zhCommon,
     workspace: zhWorkspace,
     home: zhHome,
-    onboarding: zhOnboarding,
     agents: zhAgents,
     assistant: zhAssistant,
     workflows: zhWorkflows,

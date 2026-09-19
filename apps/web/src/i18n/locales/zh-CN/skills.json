@@ -1,6 +1,5 @@
 {
   "title": "技能",
-  "description": "包含指令、脚本和参考资料的版本化包。",
   "create": "创建技能",
   "search": "搜索技能",
   "empty": {

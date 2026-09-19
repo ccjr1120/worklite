@@ -1,6 +1,5 @@
 {
   "title": "Skills",
-  "description": "Versioned packages of instructions, scripts, and references.",
   "create": "Create skill",
   "search": "Search skills",
   "empty": {

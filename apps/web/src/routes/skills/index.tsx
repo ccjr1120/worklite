@@ -79,7 +79,7 @@ function SkillListPage() {
       <WorkspaceChrome
         crumbs={[{ label: t('title') }]}
       />
-      <PageHeading title={t('title')} description={t('description')} />
+      <PageHeading title={t('title')} />
       <AgentResourceNav active="skills" />
       <CollectionToolbar
         className="mt-6"

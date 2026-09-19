@@ -22,9 +22,7 @@
   "noArtifacts": "No artifacts",
   "pendingAction": {
     "qrAlt": "WeChat confirmation QR code",
-    "expiresAt": "QR code expires at {{value}}",
-    "expired": "This QR code expired. Refresh it to continue the same Workflow run.",
-    "refresh": "Refresh QR code",
-    "cancel": "Cancel run"
+    "cancel": "Cancel run",
+    "replacing": "A new code is on its way."
   }
 }

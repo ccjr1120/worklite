@@ -45,5 +45,10 @@
     "message": "正在重新连接。本地编辑会保留在此设备上，直到连接恢复。"
   },
   "breadcrumbs": "面包屑导航",
-  "openNavigation": "打开导航"
+  "openNavigation": "打开导航",
+  "route": {
+    "loading": "正在加载页面...",
+    "errorTitle": "无法加载此页面",
+    "errorDescription": "渲染此页面时出现问题。请重试，或前往其他目标页。"
+  }
 }

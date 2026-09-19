@@ -53,7 +53,7 @@ function McpListPage() {
       <WorkspaceChrome
         crumbs={[{ label: t('title') }]}
       />
-      <PageHeading title={t('title')} description={t('description')} />
+      <PageHeading title={t('title')} />
       <AgentResourceNav active="mcp-servers" />
       <CollectionToolbar
         className="mt-6"

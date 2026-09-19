@@ -272,12 +272,6 @@ function ModelProvidersPage() {
     finally { setCodexAuthBusy(false); }
   }
 
-  async function refreshCodexUsages() {
-    setCodexAuthBusy(true);
-    try { await codexUsageQuery.refetch(); toast.success(t('providers.gateway.codex.quotasRefreshed')); }
-    catch (error) { toast.error(error instanceof Error ? error.message : t('providers.gateway.codex.quotasRefreshFailed')); }
-    finally { setCodexAuthBusy(false); }
-  }
 
   useEffect(() => {
     if (testDialog?.status !== 'loading') return;
@@ -403,10 +397,22 @@ function ModelProvidersPage() {
     }
   }
 
+  // Testing is one goal with one activation point. When the product can resolve the
+  // model on its own — a remembered choice that is still configured, or a single
+  // configured model — the test starts immediately. The selection step appears only
+  // when neither holds, because then the model is a value we cannot resolve.
   function openProviderTest(provider: ModelProviderView) {
     const remembered = window.localStorage.getItem(`${PROVIDER_TEST_MODEL_KEY}${provider.id}`);
-    const model = remembered && provider.models.includes(remembered) ? remembered : provider.models[0] ?? '';
-    setTestDialog({ provider, model, status: 'idle' });
+    const resolved = remembered && provider.models.includes(remembered)
+      ? remembered
+      : provider.models.length === 1
+        ? provider.models[0]
+        : '';
+    if (resolved) {
+      startProviderTest(provider, resolved);
+      return;
+    }
+    setTestDialog({ provider, model: provider.models[0] ?? '', status: 'idle' });
   }
 
   function selectTestModel(model: string) {
@@ -414,9 +420,7 @@ function ModelProvidersPage() {
     if (testDialog) window.localStorage.setItem(`${PROVIDER_TEST_MODEL_KEY}${testDialog.provider.id}`, model);
   }
 
-  function runProviderTest() {
-    if (!testDialog || !testDialog.model || testDialog.status === 'loading') return;
-    const { provider, model } = testDialog;
+  function startProviderTest(provider: ModelProviderView, model: string) {
     window.localStorage.setItem(`${PROVIDER_TEST_MODEL_KEY}${provider.id}`, model);
     const startedAt = currentTime();
     setTestDialog({ provider, model, status: 'loading', startedAt, elapsedSeconds: 0 });
@@ -427,6 +431,11 @@ function ModelProvidersPage() {
       const traceId = error instanceof Error && 'traceId' in error && typeof error.traceId === 'string' ? error.traceId : undefined;
       setTestDialog((current) => current?.provider.id === provider.id ? { provider, model, status: 'error', message, traceId, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1_000) } : current);
     });
+  }
+
+  function runProviderTest() {
+    if (!testDialog || !testDialog.model || testDialog.status === 'loading') return;
+    startProviderTest(testDialog.provider, testDialog.model);
   }
 
   return (
@@ -501,7 +510,7 @@ function ModelProvidersPage() {
       </section>
         </TabsContent>
         <TabsContent value="codex">
-          <CodexAccountPool auth={codexAuthQuery.data} usage={codexUsageQuery.data} usageLoading={codexUsageQuery.isLoading} usageError={codexUsageQuery.isError} authBusy={codexAuthBusy} onLogin={() => void startCodexAuth()} importRef={codexImportRef} onImport={(file) => void importCodexAccounts(file)} onToggleAccount={(accountId, enabled) => void setCodexAccountEnabled(accountId, enabled)} onRefreshAccount={(accountId) => void refreshCodexAccount(accountId)} onDeleteAccount={(accountId) => void deleteCodexAccount(accountId)} onRefreshAll={() => void refreshCodexUsages()} locale={locale} t={(key) => t(key as never)} />
+          <CodexAccountPool auth={codexAuthQuery.data} usage={codexUsageQuery.data} usageLoading={codexUsageQuery.isLoading} usageError={codexUsageQuery.isError} authBusy={codexAuthBusy} onLogin={() => void startCodexAuth()} importRef={codexImportRef} onImport={(file) => void importCodexAccounts(file)} onToggleAccount={(accountId, enabled) => void setCodexAccountEnabled(accountId, enabled)} onRefreshAccount={(accountId) => void refreshCodexAccount(accountId)} onDeleteAccount={(accountId) => void deleteCodexAccount(accountId)} locale={locale} t={(key) => t(key as never)} />
         </TabsContent>
         <TabsContent value="statistics">
           <GatewayStatistics stats={statsQuery.data} isLoading={statsQuery.isLoading} isError={statsQuery.isError} onRetry={() => void statsQuery.refetch()} window={statsWindow} onWindowChange={setStatsWindow} locale={locale} t={(key) => t(key as never)} />
@@ -642,12 +651,11 @@ type CodexAccountPoolProps = {
   onToggleAccount: (accountId: string, enabled: boolean) => void;
   onRefreshAccount: (accountId: string) => void;
   onDeleteAccount: (accountId: string) => void;
-  onRefreshAll: () => void;
   locale: AppLocale;
   t: (key: string) => string;
 };
 
-function CodexAccountPool({ auth, usage, usageLoading, usageError, authBusy, onLogin, importRef, onImport, onToggleAccount, onRefreshAccount, onDeleteAccount, onRefreshAll, locale, t }: CodexAccountPoolProps) {
+function CodexAccountPool({ auth, usage, usageLoading, usageError, authBusy, onLogin, importRef, onImport, onToggleAccount, onRefreshAccount, onDeleteAccount, locale, t }: CodexAccountPoolProps) {
   const usageByAccountId = new Map((usage?.accounts ?? []).map((item) => [item.accountId, item]));
   const accounts = auth?.accounts ?? [];
   return <section className="space-y-5" aria-labelledby="codex-account-pool-title">
@@ -657,7 +665,6 @@ function CodexAccountPool({ auth, usage, usageLoading, usageError, authBusy, onL
         <Button size="compact" onClick={onLogin} disabled={authBusy}><LogIn className="size-4" />{auth?.status === 'login_pending' ? t('providers.gateway.codex.loginPending') : t('providers.gateway.codex.addAccount')}</Button>
         <input ref={importRef} className="sr-only" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) onImport(file); }} />
         <Button variant="secondary" size="compact" onClick={() => importRef.current?.click()} disabled={authBusy}><Upload className="size-4" />{t('providers.gateway.codex.import')}</Button>
-        <Button variant="secondary" size="compact" onClick={onRefreshAll} disabled={authBusy || usageLoading || accounts.length === 0}><RefreshCw className="size-4" />{t('providers.codexPool.refreshAll')}</Button>
       </div>
     </div>
     {auth?.error ? <p className="text-[13px] text-danger" role="alert">{auth.error}</p> : null}

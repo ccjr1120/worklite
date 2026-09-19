@@ -10,7 +10,6 @@
   "logsFailed": "无法加载执行日志。",
   "noLogs": "暂时没有节点执行日志。",
   "failureReason": "失败原因",
-  "retryCount_one": "已重试 {{count}} 次",
   "retryCount_other": "已重试 {{count}} 次",
   "nodeRetry": {
     "action": "重试该节点",
@@ -22,9 +21,7 @@
   "noArtifacts": "暂无产物",
   "pendingAction": {
     "qrAlt": "微信确认二维码",
-    "expiresAt": "二维码有效期至 {{value}}",
-    "expired": "二维码已过期，刷新后可继续同一次工作流运行。",
-    "refresh": "刷新二维码",
-    "cancel": "取消运行"
+    "cancel": "取消运行",
+    "replacing": "正在获取新的二维码。"
   }
 }

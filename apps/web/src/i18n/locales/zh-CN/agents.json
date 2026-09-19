@@ -1,6 +1,5 @@
 {
   "title": "Agent",
-  "description": "可配置的工作单元，包含模型、指令、技能和工具。",
   "create": "创建 Agent",
   "search": "搜索 Agent",
   "builtIn": "内置",

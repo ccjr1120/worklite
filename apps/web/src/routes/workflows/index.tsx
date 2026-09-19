@@ -83,7 +83,7 @@ function WorkflowListPage() {
           </div>
         }
       />
-      <PageHeading title={t('title')} description={t('description')} />
+      <PageHeading title={t('title')} />
       <CollectionToolbar className="mt-6" search={search} onSearchChange={setSearch} placeholder={t('search')} />
       <div className="mt-4">
         {isLoading ? <CollectionLoading label={t('loading')} columns={[t('columns.workflow'), t('columns.state'), t('columns.lastRun'), t('columns.updated'), t('columns.actions')]} headerClassName="min-w-[880px] md:grid-cols-[minmax(190px,1.7fr)_minmax(104px,0.8fr)_minmax(140px,1fr)_minmax(144px,0.9fr)_40px]" rowClassName="min-w-[880px] whitespace-nowrap md:grid-cols-[minmax(190px,1.7fr)_minmax(104px,0.8fr)_minmax(140px,1fr)_minmax(144px,0.9fr)_40px]" /> : isError ? <ErrorState title={t('title')} description={t('loadFailed')} onAction={() => void refetch()} /> : all.length === 0 ? (
