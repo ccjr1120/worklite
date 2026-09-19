@@ -26,6 +26,8 @@ The WorkLite brand mark is the orange robot outline in `apps/web/public/brand/wo
 4. **Progressive disclosure.** Common actions remain immediate while advanced configuration stays available without overwhelming the primary flow.
 5. **Consistent semantics.** The same color, component, and motion meaning applies throughout the product.
 6. **Accessible interaction.** Keyboard access, visible focus, sufficient contrast, and non-color cues are baseline requirements.
+7. **One action per goal.** A goal has a single activation point. The product does not ask for a step it can take itself, and it recovers from staleness it can observe rather than offering a refresh control. `ui-ux-design/shared/interaction-contract.md` governs the details.
+8. **Text earns its place.** Every string is an action, a state, a constraint, or a recovery. Text that restates a heading, repeats what a component already shows, or explains automation the user cannot act on is removed. `ui-ux-design/shared/copy-standards.md` governs the details.
 
 ## Color System
 
@@ -89,7 +91,7 @@ Use `Inter`, `Geist`, or a compatible modern system sans-serif stack. Use a mono
 | Label | `12px` | `500` |
 | Code and data | `12px` to `13px` | `400` or `500` |
 
-Use concise, direct source copy and preserve the same meaning and tone in every supported locale. Avoid promotional language inside the application. Labels must describe actions or content without relying on placeholder text. Follow `docs/internationalization/README.md` for translation ownership, locale-aware formatting, text expansion, and accessible localized content.
+Use concise, direct source copy and preserve the same meaning and tone in every supported locale. Avoid promotional language inside the application. Labels must describe actions or content without relying on placeholder text. Every string must qualify as an action, a state, a constraint, or a recovery under `ui-ux-design/shared/copy-standards.md`; section and page descriptions are optional and exist only to state a constraint or bound a scope. Follow `docs/internationalization/README.md` for translation ownership, locale-aware formatting, text expansion, and accessible localized content.
 
 ## Spacing and Layout
 
@@ -134,7 +136,9 @@ Keep navigation neutral and grouped by task. Keep the first-level menu concise a
 - **Ghost:** toolbars, inline actions, and low-emphasis controls.
 - **Destructive:** red and reserved for genuinely destructive actions.
 
-Prefer one primary action per visible region. Loading actions must respond immediately and preserve enough label context to explain what is happening.
+Prefer one primary action per visible region. Loading actions must respond immediately and preserve enough label context to explain what is happening. Progress belongs on the activated control, not on the region around it.
+
+Do not pair a preparation control with a commit control for one goal. When a step is always required before committing, the commit performs it. A manual refresh control is permitted only when the product cannot observe that the value is stale.
 
 ### Forms
 
@@ -202,7 +206,7 @@ Persimmon progression through the graph is a distinctive WorkLite motif. It comm
 
 Workflow List exposes Run records through a per-Workflow dialog. Use the following canonical run labels: `Queued`, `Running`, `Waiting for input`, `Completed`, `Failed`, and `Cancelled`.
 
-A Run waiting on a human-gated browser action presents a compact amber pending-action panel before its node logs. The panel names the required action, shows the QR image and expiry when available, and retains `Refresh QR` and `Cancel run` controls. Authentication state is communicated with text and icon cues; the QR is not the only explanation. Completion updates through the existing Run event stream and does not require a separate “I scanned it” control.
+A Run waiting on a human-gated browser action presents a compact amber pending-action panel before its node logs. The panel names the required action and shows the QR image. An expired code is replaced automatically, so the panel shows neither an expiry time nor an instruction to refresh: during replacement the current image dims and a status line reports that a new code is arriving. `Cancel run` remains, because abandoning the Run is a separate intent rather than a recovery from staleness. Authentication state is communicated with text and icon cues; the QR is not the only explanation. Completion updates through the existing Run event stream and does not require a separate “I scanned it” control.
 
 Show the current step and continuing progress for long operations. Expanded Workflow Run records present ordered node execution logs with node identity, status, timing, duration, and retry context. Failed Runs surface the credential-safe failure reason before the log list and repeat it on the failed node entry. Append logs without forcing disruptive scrolling. Use monospace text for identifiers and raw output, and allow users to distinguish timestamps, severity, source, and content. Successful completion should be clear but restrained; failure must include context and a next step where possible. Artifact disclosure is absent when the immutable Workflow version has no Artifact node; an empty Artifact state is reserved for eligible versions that produced none.
 
@@ -255,6 +259,20 @@ Before confirming a UI proposal, verify that it:
 - Introduces a documented design-system decision before implementation when no existing rule applies.
 
 ## Changelog
+
+### 2026-09-19 - Implementation
+
+- Applied the single-action rule to the surfaces that violated it: the Run pending-action QR and the WeChat Official Account QR now replace themselves, provider testing starts without a second confirmation when the model is resolvable, MCP `Save` absorbs its connection handshake, and the duplicated Codex quota refresh is gone.
+- Recorded two documented exceptions where staleness is not observable: the WeChat ClawBot connection exposes no expiry, and per-account Codex refresh forces an OAuth token refresh rather than re-reading a polled snapshot.
+- Applied the copy standards across both locales, removing restated headings, component-duplicating hints, and the strings that only supported the manual paths now automated.
+
+### 2026-09-19
+
+- Added the One action per goal and Text earns its place principles, governed in detail by `ui-ux-design/shared/interaction-contract.md` and `ui-ux-design/shared/copy-standards.md`.
+- Prohibited preparation-plus-commit control pairs for a single goal and restricted manual refresh controls to values whose staleness the product cannot observe.
+- Required action progress to appear on the activated control rather than on the surrounding region.
+- Replaced the pending-action panel's QR expiry time and manual refresh with automatic replacement and a status line, keeping `Cancel run` as a separate intent.
+- Required page and section descriptions to justify themselves as a constraint or a scope bound rather than existing by default.
 
 ### 2026-09-18
 

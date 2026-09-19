@@ -11,19 +11,24 @@ Interface specifications follow the page structure rather than a flat filename l
 - Non-route surfaces use `surfaces/<domain>/<surface>/DESIGN.md`.
 - Shared patterns use `shared/<topic>.md`.
 
-Every `DESIGN.md` must record its route or surface scope, design source, implementation locations, coverage status, and layout or interaction decisions. New or changed interfaces must update the affected `DESIGN.md` and this index. Do not maintain a parallel page-specification document system.
+Every `DESIGN.md` follows [TEMPLATE.md](TEMPLATE.md) and keeps its sections in that order. A specification records its route or surface scope, design source, implementation locations, purpose, primary task with a declared action budget, layout, per-action interaction contract, per-state behavior, copy inventory, accessibility, and coverage status. New or changed interfaces must update the affected `DESIGN.md` and this index. Do not maintain a parallel page-specification document system.
+
+A page's Coverage Status is a verification result, not a placeholder. It states the date the document was checked against its implementation and lists the differences found.
+
+The router supplies the shell-level pending and error boundaries through `apps/web/src/components/route-boundaries.tsx`, so a page that has not yet resolved shows a content-shaped skeleton and a page that throws shows a recoverable failure instead of an empty region. A page's own `DESIGN.md` states only what it adds beyond those defaults.
 
 ## Shared Specifications
 
 - [Workspace shell](shared/workspace-shell.md)
 - [Page patterns](shared/page-patterns.md)
 - [Shared states](shared/shared-states.md)
+- [Interaction contract](shared/interaction-contract.md)
+- [Copy standards](shared/copy-standards.md)
 - [Responsive behavior](shared/responsive-behavior.md)
 
 ## Page and Surface Specifications
 
-- First-use flow: [Onboarding](flows/onboarding/DESIGN.md)
-- [Home](pages/home/DESIGN.md)
+- [Home](pages/home/DESIGN.md), including the server-derived first-use sequence
 - [Workspace System Helper Chat](surfaces/workspace/system-helper-chat/DESIGN.md)
 - Agents: [List](pages/agents/list/DESIGN.md), [Editor](pages/agents/editor/DESIGN.md)
 - Providers: [Model providers and Portkey Gateway](pages/model-providers/DESIGN.md), including the dedicated Codex Account Pool and Gateway request statistics
@@ -47,16 +52,17 @@ Every `DESIGN.md` must record its route or surface scope, design source, impleme
 /plugins/:pluginId
 /artifacts/:artifactId
 /settings/{usage,audit-log,logs,appearance}
-/onboarding{/provider,/first-agent}
 ```
 
 The root route opens Home. `/settings/` opens Appearance. Route layouts and redirects are governed by the shared Workspace shell rather than separate page specifications.
+
+There is no `/onboarding` route family. First use is a server-derived sequence inside Home, so a separate browser-state onboarding flow would duplicate it with a less reliable completion signal.
 
 The `/model-providers` page is the top-level Providers destination. It uses page-level tabs for Model Providers, the dedicated Codex Account Pool, and Gateway Statistics; the Gateway summary remains on the Model Providers view.
 
 ## Shared Component Inventory
 
-Theme provider and appearance selector; application shell; sidebar; context bar; personal preferences menu; command menu; shell-level System Helper Chat with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; React Flow workflow graph canvas; workflow run history dialog; run timeline; plugin configuration; viewers for diagnostic logs, run output and artifacts; skeletons, errors, offline banner.
+Theme provider and appearance selector; application shell; router pending and error boundaries; sidebar; context bar; personal preferences menu; command menu; shell-level System Helper Chat with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; React Flow workflow graph canvas; workflow run history dialog; run timeline; plugin configuration; viewers for diagnostic logs, run output and artifacts; skeletons, errors, offline banner.
 
 Domain-neutral reusable components belong in the shared UI package. Feature composition remains near its feature. Abstract only demonstrated repeated patterns.
 
@@ -71,6 +77,19 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-09-19 - State completeness
+
+- Added shell-level router pending and error boundaries so an unresolved or failed route shows a content-shaped skeleton or a recoverable failure rather than an empty region.
+- Resolved the state gaps recorded for Artifact details, Workflow versions, MCP server configuration, and Appearance: detail routes now separate loading, not-found, and load failure; placeholder columns and false success feedback are gone.
+- Removed the `/onboarding` implementation together with its routes, locale namespace, browser-state store, and mock resource fixtures.
+
+### 2026-09-19
+
+- Added the [interaction contract](shared/interaction-contract.md): one activation point per goal, server-observable staleness recovered without a manual control, declared per-page action budgets, control-local feedback, and silently reapplied remembered input.
+- Added [copy standards](shared/copy-standards.md): text must be an action, a state, a constraint, or a recovery, and text made obsolete by automation is removed in the same change.
+- Added [TEMPLATE.md](TEMPLATE.md) and rewrote every page and surface specification against it, replacing the uniform unaudited Coverage Status placeholder with dated verification results and concrete difference lists.
+- Removed the `/onboarding` route family and its specification. Home already derives first-use completion from persisted server resources, so the browser-state flow was an unreachable duplicate with a weaker completion signal.
 
 ### 2026-09-18
 - Added per-node retry to expanded Workflow Run records: the server marks the single retryable failed node entry, its neutral control reports progress locally, failure reasons persist until execution continues, and no Run-level rerun action is introduced.

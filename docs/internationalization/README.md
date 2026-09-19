@@ -124,7 +124,7 @@ When the server produces user-visible content outside the web application, such 
 A product change is incomplete if it adds user-facing product copy outside the localization system or updates only one supported locale. As part of normal development:
 
 1. Add or update semantic keys in every supported locale.
-2. Keep interpolation variables, plural rules, and markup structurally compatible across locales.
+2. Keep interpolation variables, plural rules, and markup structurally compatible across locales. A plural-suffixed key belongs only to locales whose CLDR plural rules use that category: `zh-CN` resolves every count to `other`, so it carries `_other` alone, and adding `_one` there creates a string i18next never selects. `apps/web/scripts/check-locale-keys.mjs` enforces this per locale.
 3. Use locale-aware formatting for newly displayed dates, times, numbers, percentages, and lists.
 4. Localize validation, feedback, tooltips, accessible names, and screen-reader-only content, not only visible body copy.
 5. Check the affected UI with long localized content, responsive behavior, keyboard navigation, and both themes.
@@ -153,6 +153,12 @@ Adding a supported locale is a product decision, not only a translation-file cha
 Do not expose partially translated locales in the production language selector.
 
 ## Changelog
+
+### 2026-09-19 - Locale-Aware Plural Key Parity
+
+- Scoped plural-suffixed key parity to each locale's CLDR plural categories, so `zh-CN` is no longer required to carry an `_one` form that i18next never selects.
+- Removed the unreachable `zh-CN` `_one` entries the previous strict comparison had invited, each of which duplicated its `_other` text verbatim.
+- Removed the `onboarding` namespace from both locales together with the route family it served.
 
 ### 2026-09-14 - Browser-First Locale Startup
 

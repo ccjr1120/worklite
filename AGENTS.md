@@ -40,8 +40,14 @@ By default, perform troubleshooting, investigation, and verification exclusively
 
 `ui-ux-design/README.md` is the source of truth for page structure, shared UI architecture, implementation sequencing, and page-level acceptance criteria. Store route specifications as `ui-ux-design/pages/<area>/<page>/DESIGN.md`, multi-page flows as `ui-ux-design/flows/<flow>/DESIGN.md`, and non-route surfaces as `ui-ux-design/surfaces/<domain>/<surface>/DESIGN.md`. Do not recreate a parallel page-specification directory.
 
+Every `DESIGN.md` follows `ui-ux-design/TEMPLATE.md` in its section order and records a declared action budget, a per-state table, a copy inventory, and a dated Coverage Status listing the differences found against the implementation. Coverage Status is a verification result; do not restore a uniform unaudited placeholder.
+
+`ui-ux-design/shared/interaction-contract.md` governs how many actions a task may cost: one activation point per goal, no preparation control paired with a commit control, no manual refresh for staleness the server can observe, control-local progress, and remembered input reapplied silently. `ui-ux-design/shared/copy-standards.md` governs which strings may exist: every string is an action, a state, a constraint, or a recovery, and text made obsolete by automation is deleted in the same change, in every locale.
+
 
 ## Durable Corrections
+
+WorkLite has no first-use onboarding route family. Home derives first-use completion from persisted server resources, so a browser-state onboarding flow duplicates it with a weaker completion signal. Do not reintroduce `/onboarding` routes, an `onboardingStep` preference, or mock resource fixtures for a guided setup sequence.
 
 The Memory One visual reference uses brand color sparingly. Keep WorkLite surfaces, default icons, headings, and ordinary hover states neutral; reserve the blue brand token for primary actions, selected or focused states, active execution, and a small number of meaningful links.
 

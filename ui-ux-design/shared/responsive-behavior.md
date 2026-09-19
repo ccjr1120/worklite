@@ -12,9 +12,13 @@ From `768px` to `1023px`, use the `56px` grouped icon rail, hide low-priority co
 
 Below `768px`, use a navigation drawer, retain page identity, state and primary action in the context bar, convert the workflow editor's combined palette and inspector to one full-screen or bottom sheet, keep the workflow canvas full-bleed within its editor region, replace wide tables with object rows, and show detailed logs full-screen or in a resizable sheet. Canvas zoom, fit-to-view, selection, and deletion controls remain reachable with `40px` to `44px` touch targets. The drawer preserves the six grouped desktop destinations, including Agents and Plugins; Agent resource collection tabs remain reachable through horizontal scrolling, and the Workflow Run records dialog exposes Artifacts through in-place expansion. Home keeps its composer visible; other pages use a draggable lower-right Chat icon with `12px` safe-area margins until opened. Agent Chat uses at most about `70vh`; it does not become full-screen. Its single-line composer remains reachable above browser controls, and Chat and Proposed changes use internal views.
 
-Responsive layouts must not remove status, recovery, or cancellation controls, including the per-node retry control on a retryable failed node entry. The Agent composer retains a stable Send-or-Stop target, editable input, and keyboard-accessible `@` Agent and published Workflow mention menu at every breakpoint; working feedback remains in the scrollable transcript rather than consuming composer space. Onboarding uses a centered column with `20px` horizontal padding and no decorative side panel.
+Responsive layouts must not remove status, recovery, or cancellation controls, including the per-node retry control on a retryable failed node entry. The Agent composer retains a stable Send-or-Stop target, editable input, and keyboard-accessible `@` Agent and published Workflow mention menu at every breakpoint; working feedback remains in the scrollable transcript rather than consuming composer space.
 
 ## Changelog
+
+### 2026-09-19
+
+- Removed the onboarding column rule after the `/onboarding` route family was removed; first use is a server-derived sequence inside Home.
 
 ### 2026-09-18
 

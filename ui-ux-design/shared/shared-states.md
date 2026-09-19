@@ -4,11 +4,23 @@
 
 Keep the shell stable. Use content-shaped skeletons instead of ordinary full-page spinners. Show progress locally for local mutations and prevent duplicate submissions without hiding context.
 
+A skeleton stands in for the content it replaces. Do not render the frame of absent content beside it: a table header above no rows, or a detail heading above no fields, reports structure the surface cannot yet fill.
+
+The router owns the shell-level pending and error boundaries. A route that has not resolved shows a content-shaped skeleton inside the stable shell, and a route that throws shows a recoverable failure with a retry that invalidates the router. A page defines only the states it adds beyond those defaults.
+
+Every state on this page is reachable in every route context. A detail route resolves loading, not-found, and load failure as three distinct states; presenting a pending fetch as a missing object misreports it.
+
+Local mutations apply optimistically where the change is reversible. A failure restores the previous value and explains itself beside the control that failed. `interaction-contract.md` governs which actions must behave this way.
+
 Use one destructive confirmation pattern for permanent removal: name the object, state the consequence, keep Cancel as the lower-emphasis action, use destructive styling only for the confirmed action, prevent duplicate submission, and retain the failure in the dialog until recovery or dismissal. Cancellation of work is not destructive: present it as a neutral secondary execution control with a text or icon cue and a distinct busy state.
 
 ## Empty and No Results
 
 An empty collection explains the object and provides one authorized next action. No-results state names the active filtering and offers `Clear filters`. Do not use large generic AI illustrations.
+
+These are two states, not one. A collection with nothing in it must not be described as having no matches, and must not offer to clear filters that are not set. Branch on whether the unfiltered collection is empty, not on whether the filtered result is.
+
+A placeholder value such as an em-dash is acceptable for a genuinely absent field. It is not acceptable as the permanent content of a column that has no data source; remove the column instead.
 
 ## Error and Permission
 
@@ -22,11 +34,23 @@ Human-gated execution is durable. A `Waiting for input` Run keeps its pending ac
 
 A failed Run is recoverable at the node the server marks as retryable. Retry is a neutral execution control local to that node entry, not a destructive action and not a Run-level rerun. It reports progress on the control itself, preserves the existing failure reason until execution continues, and surfaces a rejected retry beside that reason rather than replacing it.
 
+## Truthful Feedback
+
+Success feedback reports an outcome that occurred. A control must not confirm work it did not perform, and a toast must not substitute for the action itself. When a capability is unavailable for the current object, the control is absent rather than present and inert.
+
 ## Long Content and Security
 
 Truncate only summaries and provide expand, copy, download or details access. Inline Agent Skill calls stay collapsed by default, retain status and exit context in their summary, and reveal height-bounded scrollable raw output only on request. Never reveal secrets in fields, logs, errors or audit metadata. Untrusted content is rendered without inline execution.
 
 ## Changelog
+
+### 2026-09-19
+
+- Assigned the shell-level pending and error boundaries to the router so every route inherits a content-shaped skeleton and a recoverable failure.
+- Required detail routes to distinguish loading, not-found, and load failure instead of presenting a pending fetch as a missing object.
+- Prohibited rendering the frame of absent content beside a skeleton, and required optimistic application with rollback for reversible local mutations.
+- Required empty and no-results to branch on the unfiltered collection, and prohibited permanent placeholder columns with no data source.
+- Added Truthful Feedback: success confirms work that occurred, and an unavailable capability omits its control rather than presenting it inert.
 
 ### 2026-09-18
 

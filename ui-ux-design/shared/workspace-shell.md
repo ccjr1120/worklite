@@ -24,11 +24,22 @@ Place the System Helper Chat interaction surface at the bottom of the content re
 
 The bottom panel defaults to about `240px`, resizes, and collapses to a status strip. Closing hides but never cancels a run. Logs distinguish timestamp, severity, source and content, and auto-follow only while the user is at the stream end.
 
+## Route Boundaries
+
+The root route owns the pending and error boundaries for every page. An unresolved route renders a content-shaped skeleton inside the stable shell rather than an empty content region; a route that throws renders a recoverable failure whose retry invalidates the router. The sidebar, context bar, and Chat surface remain mounted through both states, so a slow or failed page never collapses the workspace.
+
+There is no separate first-use route family. Home derives first-use completion from persisted server resources, so the shell has no onboarding layout branch and no browser-state onboarding step.
+
 ## Command and User Menus
 
 `Command+K` or `Control+K` opens grouped search, recent destinations, navigation and safe creation commands. Destructive actions are excluded. Opening System Helper through the command menu changes the shell-owned conversation state through typed route search and must not rely on an ignored URL flag. The user menu contains the personal workspace identity, Appearance, Keyboard shortcuts, and the application version. Appearance includes the personal theme and language preferences.
 
 ## Changelog
+
+### 2026-09-19
+
+- Gave the root route the pending and error boundaries for every page, keeping the sidebar, context bar, and Chat surface mounted through both states.
+- Removed the onboarding layout branch; first use is a server-derived sequence inside Home.
 
 ### 2026-09-15
 

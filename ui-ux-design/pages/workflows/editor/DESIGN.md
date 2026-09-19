@@ -12,41 +12,182 @@
 ## Implementation
 
 - `apps/web/src/routes/workflows/$workflowId.tsx`
+- `apps/web/src/components/workflow-canvas-nodes.tsx`
 
-## Coverage Status
+## Purpose
 
-Migrated from the former indexed page specification. This change moved and indexed the specification; it did not audit implementation coverage.
+Build and configure a Workflow graph, then publish it as an immutable version that can run.
 
+## Primary Task
+
+Change the graph and persist the change. Action budget: two — edit the graph, then `Save`.
+
+The budget is above one because the graph is a composite draft rather than a single field: a node addition, a connection, and an inspector change accumulate into one revision, and the user decides when that revision is coherent enough to persist. Autosaving a half-connected graph would produce invalid intermediate revisions in the undo history. The editor compensates by showing `Saving`, `Saved`, and `Unsaved changes` continuously, so the unsaved state is never ambiguous.
+
+`Publish` is a separate, irreversible goal and keeps its own confirmation step.
 
 ## Model
 
-The workflow editor presents a directed control-flow dataflow graph with structured conditional edges and bounded loop edges. The palette includes Timer, Workflow Input, Dashboard, Agent, Artifact, Artifact Query, Image, and the trusted WeChat Official Account Publish node when its built-in Plugin is available. Timer is a source trigger with no inputs, one JSON output, an enabled control, and a fixed interval of at least five minutes; each Workflow may contain at most one Timer. Dashboard has one required JSON `data` input, one JSON `output` port, and at most one instance per Workflow. Workflow Input exposes the run input and may connect explicitly to Agent `context` as the initial token. Agent owns its immutable embedded configuration and has one optional `context` input plus one output; when `context` has no explicit Workflow Input edge and no unbounded incoming edge, the initial Agent invocation uses the Workflow Run input, while later bounded-loop traversals supply the next context value. Its inspector selects `Text` or `JSON` output format. Artifact has one required JSON `data` input, one output, and permits multiple instances; it configures a non-empty display name and a `Text`, `Markdown`, or `JSON` artifact type. Artifact Query has one required JSON `request` input and one JSON output; its inspector selects a JSON Artifact name, a top-level title field, and one or more top-level description fields. It reads matching workspace history, including detached Artifacts, and emits the request with compact title-and-description candidates without creating Artifacts. Image has one required string `prompt` input and one JSON output. Its inspector fixes `codex/gpt-image-2` and exposes only the supported image count, background, quality, and size choices. The node displays an image summary after execution and never renders or inspects base64 data. The WeChat node accepts required Markdown `article` and generated cover-image inputs plus optional JSON `metadata` and outputs a publication reference. One output may fan out to multiple downstream nodes. Each named input accepts at most one edge, except Agent `context`, which may combine one unbounded initial upstream edge with one bounded feedback edge. An initial Workflow Input edge must remain unconditional. Edges may be unconditional, predicate-based, or fallback routes. A loop-closing edge must define a positive maximum traversal count, and every possible cycle must cross at least one bounded edge. Dynamic joins and parallel execution remain unavailable.
+The workflow editor presents a directed control-flow dataflow graph with structured conditional edges and bounded loop edges.
 
-## Layout and Interaction
+The palette includes Timer, Workflow Input, Dashboard, Agent, Artifact, Artifact Query, Image, and the trusted WeChat Official Account Publish node when its built-in Plugin is available.
 
-The context bar contains breadcrumb, saved state, revision history, Run where valid, and Publish. The editor workspace has a central `@xyflow/react` canvas and one right-side contextual panel. React Flow selection is authoritative and synchronizes the selected node or edge with the panel. With no selection, the panel shows the searchable node palette. Selecting a node or edge replaces the palette with its inspector; clicking the canvas background or using the inspector's back action clears all graph selection and restores the palette. Palette and inspector content always use the panel's full available width. The canvas supports node dragging, handle-to-handle connection, edge selection and deletion, pointer-drag panning, free horizontal and vertical trackpad or wheel panning, pinch zoom, zoom controls, and fit-to-view. Ordinary wheel input pans instead of zooming. It intentionally does not render a minimap or a canvas-wide selection outline; selected nodes use a persimmon node border, selected edges use a persimmon stroke, and keyboard focus remains visible on the focused node, edge, or control. React Flow primitives follow the resolved light or dark application theme. On smaller breakpoints the combined contextual panel becomes one drawer or sheet, opens automatically for a canvas selection, and closes when the fixed desktop panel becomes available. An optional AI assistant panel accepts instructions and presents reviewable structured operations. A bottom panel shows test output, logs and artifacts.
+- **Timer** is a source trigger with no inputs, one JSON output, an enabled control, and a fixed interval of at least five minutes; each Workflow may contain at most one Timer.
+- **Dashboard** has one required JSON `data` input, one JSON `output` port, and at most one instance per Workflow.
+- **Workflow Input** exposes the run input and may connect explicitly to Agent `context` as the initial token.
+- **Agent** owns its immutable embedded configuration and has one optional `context` input plus one output. When `context` has no explicit Workflow Input edge and no unbounded incoming edge, the initial Agent invocation uses the Workflow Run input, while later bounded-loop traversals supply the next context value. Its inspector selects `Text` or `JSON` output format.
+- **Artifact** has one required JSON `data` input, one output, and permits multiple instances; it configures a non-empty display name and a `Text`, `Markdown`, or `JSON` artifact type.
+- **Artifact Query** has one required JSON `request` input and one JSON output; its inspector selects a JSON Artifact name, a top-level title field, and one or more top-level description fields. It reads matching workspace history, including detached Artifacts, and emits the request with compact title-and-description candidates without creating Artifacts.
+- **Image** has one required string `prompt` input and one JSON output. Its inspector fixes `codex/gpt-image-2` and exposes only the supported image count, background, quality, and size choices. The node displays an image summary after execution and never renders or inspects base64 data.
+- **WeChat Official Account Publish** accepts required Markdown `article` and generated cover-image inputs plus optional JSON `metadata`, and outputs a publication reference.
 
-The creation flow offers a blank workflow or a starter template, then collects the workflow name and initial input. The node palette adds a node at the center of the visible canvas viewport. Each node shows its type, embedded Agent configuration context when applicable, named handles, error policy, validation and execution state. Agent nodes show the optional `context` input and output so composition remains clear at normal zoom. Selection reveals duplicate and remove commands in the inspector. Edge selection reveals endpoints, routing mode, structured predicate controls, maximum traversals, and a remove command. Predicate controls include a dot-delimited source-output path, a supported comparison operator, and a JSON comparison value when the operator requires one. Fallback routes explain that they run only when no unconditional or predicate edge from the same source invocation matches. Conditional edges show a concise condition label on the canvas; bounded edges use a dashed line and a traversal-limit label. Pointer dragging is not required to review, configure, or remove graph objects.
+One output may fan out to multiple downstream nodes. Each named input accepts at most one edge, except Agent `context`, which may combine one unbounded initial upstream edge with one bounded feedback edge. An initial Workflow Input edge must remain unconditional. Edges may be unconditional, predicate-based, or fallback routes. A loop-closing edge must define a positive maximum traversal count, and every possible cycle must cross at least one bounded edge. Dynamic joins and parallel execution remain unavailable.
 
-Dashboard nodes expose only a `header`, `main`, and `footer` layout editor. Each region holds an ordered list of elements added from the generic kinds `text`, `count`, `metric`, and `list`. `text` edits static text, `count` and `metric` edit a visible label (`metric` also binds a field key and a text, number, boolean, or datetime type), and `list` edits a title-key binding plus its own display fields, each with a unique non-empty key, visible label, and supported type (`text`, `number`, `boolean`, `datetime`, or `url`; `url` fields become row links instead of rendered text). The inspector explains that the node becomes the Home board only after Publish, that Home reads its output from a successful Run, and that the board title is the Workflow name. Agent nodes are created without selecting a standalone Agent. Their inspector directly exposes a public model selector, system prompt, Skill multi-selection, MCP server multi-selection, and error policy. Skill and MCP choices come only from real workspace resources. Run targets the latest published version, is unavailable while the draft has unsaved changes, and labels that version boundary explicitly. The output panel contains only persisted output from a selected run; it does not show seeded logs. AI editing controls appear only when a server-backed proposal operation exists and never simulate an applied edit.
+## Layout
 
-Artifact nodes expose name and artifact-type controls and explain that a successful Run creates the Artifact while the node output carries its reference. Artifact Query nodes expose the JSON Artifact name, title field, and description fields as labeled controls. The inspector explains that the query reads all matching workspace history, including detached Artifacts and unfinished Research Notes, without editing them; the output carries the original request and candidate metadata. An empty result is an empty candidate list, not an error. The node and controls reuse neutral surfaces, theme-aware semantic tokens, non-color execution cues, visible keyboard focus, and the existing responsive contextual sheet. Agent nodes are created without selecting a standalone Agent.
+The context bar contains breadcrumb, saved state, revision history, Workflow settings, Versions, `Export JSON`, the destructive delete action, `Save`, `Run` where valid, and `Publish`.
 
-The Image inspector presents the fixed model and compact count, background, quality, and size controls. The WeChat Official Account Publish inspector selects the configured official account and `Save draft` or `Publish` mode. The required cover input is reserved for a Workflow Image output; the inspector explains that the generated PNG is uploaded through the real MP cover picker and never offers a placeholder fallback. Metadata may provide a title override, author, and digest; otherwise the node reads the first Markdown heading as the title. The inspector explains that Publish may pause the Run for login or final confirmation. Workflows containing both an enabled Timer and a Publish-mode WeChat node are invalid in the initial increment.
+The editor workspace has a central `@xyflow/react` canvas and one right-side contextual panel. React Flow selection is authoritative and synchronizes the selected node or edge with the panel. With no selection the panel shows the searchable node palette; selecting a node or edge replaces the palette with its inspector; clicking the canvas background or using the inspector's back action clears all graph selection and restores the palette. Palette and inspector content always use the panel's full available width.
 
-Workflow-level settings are grouped into General, Inputs, Execution, and Versioning sections. General contains the workflow name and publication metadata; Inputs contains the input editor and examples; Execution contains default error policy and runtime defaults; Versioning contains draft, revision and publication context. Keep advanced settings collapsed until requested. Scheduling is configured only through the Timer node, not through Workflow settings.
+The canvas supports node dragging, handle-to-handle connection, edge selection and deletion, pointer-drag panning, free horizontal and vertical trackpad or wheel panning, pinch zoom, zoom controls, and fit-to-view. Ordinary wheel input pans instead of zooming. It intentionally renders no minimap and no canvas-wide selection outline: selected nodes use a persimmon node border, selected edges use a persimmon stroke, and keyboard focus remains visible on the focused node, edge, or control. React Flow primitives follow the resolved light or dark application theme.
 
-Selecting a Timer opens contextual inspector controls for `enabled` and the interval in minutes, with a five-minute minimum. The inspector explains that draft Timer changes become active only after Publish. For a published Workflow, the inspector also shows read-only runtime status when available: the bound published version, next-run time, and last-run status. Timer surfaces, default icons, and ordinary hover states remain neutral; selected, focused, or actively executing states may use the brand token. Controls require accessible labels and non-color status cues in both themes.
+On smaller breakpoints the combined contextual panel becomes one drawer or sheet, opens automatically for a canvas selection, and closes when the fixed desktop panel becomes available. A bottom panel shows test output, logs, and artifacts.
 
-Connect nodes with quiet directional edges. Persimmon indicates selection and current execution; semantic markers indicate completion and failure. Port labels and accessible names identify context and output semantics without relying on color. While connecting, compatible and incompatible targets have distinct visual states. Invalid or type-incompatible connection attempts leave graph state unchanged and present concise feedback. Run artifact rows link to Artifact details; Artifact node outputs carry references. AI edits show instruction, operations, resulting revision and undo. Publication validates bounded-cycle constraints, port rules, public model ids, image generation settings, required WeChat cover connectivity, and selected Skill and MCP availability.
+Workflow-level settings are grouped into General, Inputs, Execution, and Versioning. General contains the workflow name and publication metadata; Inputs contains the input editor and examples; Execution contains default error policy and runtime defaults; Versioning contains draft, revision, and publication context. Advanced settings stay collapsed until requested. Scheduling is configured only through the Timer node, never through Workflow settings.
 
-## Portable JSON
+## Interaction Contract
 
-The editor header provides a secondary `Export JSON` action for saved workflows. It downloads the current draft in the portable WorkLite workflow format. Unsaved new workflows must be saved before export. The action is neutral in light and dark modes and does not compete with primary save, run, or publish actions.
+**Add a node.** The searchable palette inserts the node at the center of the visible canvas viewport, selects it, and marks the draft unsaved. Insertion never requires pointer dragging.
 
-The editor header also provides a destructive Delete action for saved workflows. It opens a confirmation dialog that names the Workflow and explains permanent removal of its drafts, published versions, schedules, and run history. Successful deletion closes the dialog, presents a success toast, and returns to the Workflow list; failed deletion keeps the dialog open with visible feedback.
+**Connect nodes.** Handle-to-handle connection validates against the port rules above. While connecting, compatible and incompatible targets have distinct visual states. An invalid or type-incompatible attempt leaves graph state unchanged and reports concisely. A connection that would close a cycle receives a bounded traversal limit rather than being rejected.
+
+**Configure a selection.** Selecting a node or edge opens its inspector. Node inspectors expose node-owned parameters directly. Edge selection reveals endpoints, routing mode, structured predicate controls, maximum traversals, and a remove command. Predicate controls take a dot-delimited source-output path, a supported comparison operator, and a JSON comparison value when the operator requires one. Fallback routes explain that they run only when no unconditional or predicate edge from the same source invocation matches. Conditional edges show a concise condition label on the canvas; bounded edges use a dashed line and a traversal-limit label. Pointer dragging is never required to review, configure, or remove graph objects.
+
+**Save.** Persists the accumulated revision. The save state reports `Saving` and settles on `Saved`. A failure returns the state to `Unsaved changes` and keeps the reason visible in the canvas region rather than only in a toast. An invalid edge comparison value blocks the save and names that specific problem.
+
+**Undo and redo.** Server-backed revision movement, reported through the same save state. Both controls disable while a save is in flight.
+
+**Run.** Targets the latest published version, is unavailable while the draft has unsaved changes, and labels that version boundary explicitly. The control reports busy on itself and the editor stays in place; Run history remains in the Workflow List dialog.
+
+**Publish.** Opens a confirmation explaining that publishing locks the embedded Agent configuration and that later standalone Agent edits do not change this Workflow or its historical runs. Publication validates bounded-cycle constraints, port rules, public model ids, image generation settings, required WeChat cover connectivity, and selected Skill and MCP availability. Validation failures navigate directly to the affected content.
+
+**Export JSON.** Downloads the current draft in the portable WorkLite format. Unsaved new Workflows must be saved first. The action stays neutral in both themes and does not compete with save, run, or publish.
+
+**Delete.** Opens a confirmation naming the Workflow and explaining permanent removal of its drafts, published versions, schedules, and run history. Success closes the dialog, reports the outcome, and returns to the Workflow list; failure keeps the dialog open with visible feedback.
+
+The Timer inspector's read-only runtime status is the one self-healing value here: it follows the workflow schedule query rather than a manual refresh. Everything else on this surface is draft state the user owns directly.
+
+## Node Inspectors
+
+**Dashboard** nodes expose only a `header`, `main`, and `footer` layout editor. Each region holds an ordered list of elements added from the generic kinds `text`, `count`, `metric`, and `list`. `text` edits static text; `count` and `metric` edit a visible label, and `metric` also binds a field key and a text, number, boolean, or datetime type; `list` edits a title-key binding plus its own display fields, each with a unique non-empty key, visible label, and supported type (`text`, `number`, `boolean`, `datetime`, or `url`, where `url` fields become row links instead of rendered text). The inspector explains that the node becomes the Home board only after Publish, that Home reads its output from a successful Run, and that the board title is the Workflow name.
+
+**Agent** nodes are created without selecting a standalone Agent. Their inspector directly exposes a public model selector, system prompt, Skill multi-selection, MCP server multi-selection, output format, and error policy. Skill and MCP choices come only from real workspace resources.
+
+**Artifact** nodes expose name and artifact-type controls and explain that a successful Run creates the Artifact while the node output carries its reference.
+
+**Artifact Query** nodes expose the JSON Artifact name, title field, and description fields as labeled controls. The inspector explains that the query reads all matching workspace history, including detached Artifacts and unfinished Research Notes, without editing them, and that the output carries the original request and candidate metadata. An empty result is an empty candidate list, not an error.
+
+**Image** inspectors present the fixed model and compact count, background, quality, and size controls.
+
+**WeChat Official Account Publish** inspectors select the configured official account and `Save draft` or `Publish` mode. The required cover input is reserved for a Workflow Image output; the inspector explains that the generated PNG is uploaded through the real MP cover picker and never offers a placeholder fallback. Metadata may provide a title override, author, and digest; otherwise the node reads the first Markdown heading as the title. The inspector explains that Publish may pause the Run for login or final confirmation. Workflows containing both an enabled Timer and a Publish-mode WeChat node are invalid in the initial increment.
+
+**Timer** inspectors expose `enabled` and the interval in minutes with a five-minute minimum, and explain that draft Timer changes become active only after Publish. For a published Workflow the inspector also shows read-only runtime status when available: the bound published version, next-run time, and last-run status.
+
+Node surfaces, default icons, and ordinary hover states remain neutral; selected, focused, or actively executing states may use the brand token. Every control requires an accessible label and a non-color status cue in both themes.
+
+## States
+
+| State | Behavior |
+| --- | --- |
+| Loading | An existing Workflow's draft loads into a content-shaped canvas and panel rather than an empty graph. A new Workflow starts empty by definition, not by absence of data. |
+| Empty | An empty canvas states that nodes are added from the palette. |
+| No results | A palette search with no match names the query. |
+| Error | Save, publish, run, export, and delete failures stay visible next to their action or affected content. The Timer schedule region reports its own unavailability without affecting the rest of the inspector. |
+| Busy | Save reports through the save state; run, publish, export, and delete report on their own controls. Undo and redo disable only while a save is in flight. |
+| Offline | Inherits `shared-states.md`. Draft edits are local until saved, and the offline bar states that. |
+| Long content | The canvas pans and zooms rather than growing the page. The contextual panel scrolls internally. The output panel shows only persisted output from a selected run and never seeded logs. |
+
+The output panel contains only persisted output from a selected run. AI editing controls appear only when a server-backed proposal operation exists and never simulate an applied edit.
+
+## Copy Inventory
+
+| Key | Category |
+| --- | --- |
+| `workflows:editor.new` / `editor.fallback` / `editor.untitled` | State |
+| `workflows:editor.name` / `editor.input` / `editor.nodeName` | State |
+| `workflows:editor.nodePalette` / `editor.paletteHint` / `editor.searchNodes` | Action |
+| `workflows:editor.canvas` / `editor.emptyCanvas` | State |
+| `workflows:editor.zoomIn` / `editor.zoomOut` / `editor.fitView` | Action |
+| `workflows:editor.nodeCount` / `editor.edgeCount` | State |
+| `workflows:editor.contextPort` / `editor.inputPort` / `editor.outputPort` / `editor.dataPort` | State |
+| `workflows:editor.connections` / `editor.incomingConnections` / `editor.outgoingConnections` / `editor.connection` | State |
+| `workflows:editor.selectCanvasItem` | Recovery |
+| `workflows:editor.invalidConnection` | Recovery |
+| `workflows:editor.timer*` / `editor.schedule*` | State, plus `editor.timerActivatesOnPublish` as Constraint |
+| `workflows:editor.timerLimit` / `editor.dashboardLimit` | Constraint |
+| `workflows:editor.agentNode*` / `editor.model` / `editor.selectModel` / `editor.systemPrompt` / `editor.skills` / `editor.mcpServers` | State |
+| `workflows:editor.outputFormat` / `editor.outputFormats.*` | State |
+| `workflows:editor.outputFormatDescription` | Constraint |
+| `workflows:editor.artifactNode*` / `editor.artifactName` / `editor.artifactType` / `editor.artifactTypes.*` | State |
+| `workflows:editor.artifactCreationDescription` | Constraint |
+| `workflows:editor.artifactQueryNode*` / `editor.query*` | State, plus `editor.queryDescription` as Constraint |
+| `workflows:editor.imageNode*` / `editor.image*` | State |
+| `workflows:editor.imageConnectionHint` | Constraint |
+| `workflows:editor.wechatNode*` / `editor.wechat*` | State |
+| `workflows:editor.wechatCoverHint` / `editor.wechatDraftHint` / `editor.wechatPublishPendingHint` | Constraint |
+| `workflows:editor.dashboardNode*` / `editor.dashboardRegion.*` / `editor.elementKinds.*` / `editor.element*` / `editor.field*` | State |
+| `workflows:editor.dashboardActivation` | Constraint |
+| `workflows:editor.edgeMode` / `editor.edgeModes.*` / `editor.edgeOperators.*` / `editor.edgeOutputPath` / `editor.edgeOperator` / `editor.edgeComparisonValue` / `editor.edgeMaxTraversals` / `editor.edgeTraversalLabel` | State |
+| `workflows:editor.edgeFallbackHint` / `editor.edgeMaxTraversalsHint` | Constraint |
+| `workflows:editor.edgeComparisonInvalid` | Recovery |
+| `workflows:editor.run` / `editor.runVersion` / `editor.running` | Action, State |
+| `workflows:editor.runStarted` | State |
+| `workflows:editor.saveBeforeRun` / `editor.saveBeforePublish` / `editor.publishBeforeRun` / `editor.saveBeforeExport` | Recovery |
+| `workflows:editor.runFailed` / `editor.saveFailed` / `editor.publishFailed` / `editor.exportFailed` | Recovery |
+| `workflows:editor.publishTitle` | State |
+| `workflows:editor.publishDescription` | Constraint |
+| `workflows:editor.published` / `editor.exported` | State |
+| `workflows:editor.exportJson` / `editor.versions` / `editor.workflowSettings` | Action |
+| `workflows:editor.general` / `editor.inputs` / `editor.execution` / `editor.versioning` / `editor.defaultErrorPolicy` | State |
+| `workflows:editor.versioningHint` | Constraint |
+| `workflows:editor.duplicate` / `editor.remove` | Action |
+| `workflows:delete.*` | Action, Constraint, State, Recovery |
+| `common:actions.save` / `actions.publish` / `actions.cancel` | Action |
+| `common:saveState.*` | State |
+
+`workflows:editor.workflowSettingsDescription` is removed: it restates the settings heading and adds only an assurance about not leaving the editor.
+
+The following keys are removed as orphans from features this editor no longer has. They belong to the ordered-step model, the simulated AI assistant, and the Text node, all of which earlier changelog entries removed, and none is referenced by any source file:
+
+`editor.sequence`, `editor.stepCount`, `editor.step`, `editor.agentPalette`, `editor.searchAgents`, `editor.agentFallback`, `editor.insertFirst`, `editor.insertAt`, `editor.addStep`, `editor.addStepStart`, `editor.addStepAfter`, `editor.moveUp`, `editor.moveDown`, `editor.selectStep`, `editor.inputMapping`, `editor.mappingLiteralOutput`, `editor.mappingInputOutput`, `editor.mappingPreviousOutput`, `editor.textNode`, `editor.textType`, `editor.literalTextInput`, `editor.aiEdit`, `editor.assistant`, `editor.assistantHint`, `editor.assistantPlaceholder`, `editor.propose`, `editor.pendingOperation`, `editor.pendingDescription`, `editor.apply`, `editor.applied`, `editor.runOutput`, `editor.overridesHint`, `editor.previewStarted`, `editor.dailyTemplatePrompt`.
+
+## Accessibility
+
+The graph is fully operable without pointer dragging: the palette adds nodes, and the inspector reviews, configures, and removes both nodes and edges. Selection stays synchronized between the canvas and the panel so keyboard focus and inspector content never disagree.
+
+Port labels and accessible names identify context and output semantics without relying on color. Persimmon marks selection and current execution only; completion and failure use semantic markers alongside text. Every icon-only control in the context bar and canvas carries an accessible name, and the zoom, fit-view, and deletion controls keep `40px` to `44px` touch targets at mobile widths. Save failures use `role="alert"`.
+
+## Coverage Status
+
+Verified 2026-09-19. Differences found against `apps/web/src/routes/workflows/$workflowId.tsx`:
+
+- No loading state for an existing Workflow. `useWorkflowQuery` destructures only `data`, so a pending load renders an empty canvas that is indistinguishable from an empty graph; the name field shows `editor.untitled` until the draft arrives.
+- No load-failure state. A failed Workflow query leaves the editor on an empty canvas with no explanation, and unsaved work could be attempted against a draft that never loaded.
+- `Publish` has no validation feedback path in the UI beyond a toast: `publishWorkflow` reports failure through `toast.error` only, so a validation failure does not navigate to the affected content as this specification requires.
+- Run, publish, export, and import failures are toast-only. `shared-states.md` requires durable errors to remain in the page; only `save` writes to the persistent `saveError` region.
+- `editor.saveBeforeRun` is reused as the publish precondition message when `isNew`, so publishing a brand-new Workflow tells the user to save before *running* it.
+- 34 locale keys under `workflows:editor.*` are orphaned, enumerated in the Copy Inventory above.
+- `editor.emptyCanvas` is defined and referenced once but the canvas renders no empty-state text region, so an empty graph shows a bare grid.
+- Delete sets `setDeleteBusy(true)` and only resets it inside the `catch`, relying on navigation to unmount the component on success; the busy flag is never cleared on the success path.
 
 ## Changelog
+
+### 2026-09-19
+
+- Rewrote this specification against `TEMPLATE.md`, adding the declared action budget with its composite-draft reason, the per-state table, the copy inventory, and verified coverage findings.
+- Reorganized the node contracts, inspector rules, and layout guidance under the new headings without changing any graph rule.
+- Recorded 34 orphaned `workflows:editor.*` locale keys left behind by the ordered-step, AI-assistant, and Text-node removals, and removed `editor.workflowSettingsDescription` as a restated heading.
+- Required durable in-page errors for run, publish, export, and import instead of toast-only feedback.
 
 ### 2026-09-18
 

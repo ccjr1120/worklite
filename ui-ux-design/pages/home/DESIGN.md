@@ -14,44 +14,149 @@
 - `apps/web/src/routes/home.tsx`
 - `apps/web/src/components/workspace/agent-chat.tsx`
 
-## Coverage Status
-
-Migrated from the former indexed page specification. This change moved and indexed the specification; it did not audit implementation coverage.
-
-
 ## Purpose
 
-Home shows self-contained Workflow boards owned by published Workflow Dashboard nodes, renders each board's latest successful Run output on its card, and provides System Helper Chat without requiring a separate destination.
+Read the current output of every published Workflow Dashboard board, and reach System Helper Chat without leaving the page.
 
-## Workflow Board Library
+## Primary Task
 
-Show self-contained Workflow board cards grouped by user-managed categories, with custom categories first and Uncategorized last. Derive eligibility from the latest published WorkflowVersion: only a Workflow whose immutable version contains its single `worklite/dashboard` node is listed. Every eligible board belongs to Uncategorized until it is assigned to exactly one custom category. Render the layout header region in the card title area and display the latest published version and latest Run status or time. Board cards do not open a separate detail view.
+Read a board's latest output. Action budget: zero — every eligible board renders its own content on arrival, and no board opens a detail view.
 
-Category organization is database-backed through Home board-category APIs. Provide a compact create-category control that opens a dialog with a labeled name field, a primary create action, a cancel action, and local busy and failure states, per-category rename and delete controls, and a per-category add control that opens a dialog listing eligible boards as selectable cards. Selecting a card assigns that board to the category; selecting an already-assigned card returns the board to Uncategorized. Board cards do not embed category selectors. Delete-category confirmation follows the shared permanent-removal pattern and states that its boards return to Uncategorized. Keep organization controls neutral and quiet; category loading, mutation, and failure states remain local and do not remove unaffected boards.
+Two secondary intents cost one action each: opening an item in a new tab by activating its row, and opening System Helper Chat by focusing the composer. Organizing boards into categories is deliberate configuration work rather than the page's primary task; its dialogs are budgeted separately below.
 
-Each card loads its Workflow's latest successful Run for that published version through the normal Run query and locates the successful Dashboard node output. The card title area resolves configured `header` elements such as a `count`. The card content area resolves the first configured `list` element as a compact table using up to its up to first three non-url fields, beginning with the `titleKey` field; a `url` field does not render as a column but makes the item row open the item value in a new browser tab, with the title cell remaining the accessible link. The content area paginates five rows at a time with quiet previous and next controls and a current-page indicator. Unknown fields are ignored, missing fields display an explicit empty value, and non-object list rows display their raw JSON value in a bounded monospace region. Keep run loading, empty, unavailable, and failure states local to the card.
+## Layout
 
-A Workflow is not listed while it is draft, its latest version has no Dashboard node, or it has no matching successful Run with a committed Dashboard node output. Home has no platform-defined Workflow boards, global Workflow data source, Workflow output snapshot, Dashboard editor, scheduling control, or Run now control. Category records reference Workspace and Workflow organization only and never store Workflow output. Workflow creation and Dashboard configuration remain in the Workflow editor.
+Centered content up to `1200px`. The board library fills the content region, grouped into category sections with custom categories first and Uncategorized last. Boards render two per row on desktop and one per row below `md`.
 
-Library board cards are static board surfaces, not full-card selection controls. The card header area shows the icon followed immediately by the configured header elements (such as a `count`) resolved against the latest successful Run Dashboard output, with the version, run time, and status metadata aligned to the right. The content area uses the first `list` element in the board layout (searched in main, header, then footer order) and renders it as an up-to-three-column paginated table. When the element has a `url` field and the item's value for it is an `http(s)` string, the row opens the item value in a new browser tab. Table titles use that element's `titleKey` and fall back to its first display field. The card renders no extra actions or count text; Dashboard icons, headings, ordinary hover states, and pagination controls remain neutral. Status uses the shared status badge and a non-color cue.
+A persistent single-line System Helper Chat composer sits at the bottom center of the content region. Board content reserves enough bottom space that the composer never obscures its final rows. The expanded conversation panel rises above the composer, capped at `1200px` by approximately `680px` with at least `24px` desktop outer space; the board list stays mounted beneath it with its scroll position preserved.
 
-## Embedded System Helper Chat
+## Interaction Contract
 
-Keep the self-contained board list mounted as the Home content. Place a persistent, labeled, single-line System Helper Chat composer at the bottom center of the Home content region. The board content reserves enough bottom space that the composer does not obscure its final content.
+### Board library
 
-Focusing the composer expands a raised conversation panel above it without waiting for message submission. The panel occupies most, but not all, of the workspace content region, up to `1200px` by approximately `680px` with at least `24px` desktop outer space. Keep the board mounted beneath the panel and preserve its scroll position. The panel contains the persisted Agent transcript and inline Skill-script approvals defined in `../../surfaces/workspace/system-helper-chat/DESIGN.md`.
+Boards are derived, not configured here. Eligibility comes from the latest published WorkflowVersion: only a Workflow whose immutable version contains its single `worklite/dashboard` node is listed. Each card loads that Workflow's latest successful Run for the published version through the normal Run query and locates the successful Dashboard node output.
 
-Clicking outside, pressing `Escape`, using the icon-only minimize control, or navigating to another page closes the panel without cancelling work or clearing the conversation. The minimized dock retains the composer and, after the first request, a compact status summary such as preparing, tool calls in progress, needs review, completed, or failed. The summary includes a non-color cue and reopens the current conversation. Completion does not automatically minimize the conversation.
+A Workflow is not listed while it is draft, while its latest version has no Dashboard node, or while it has no matching successful Run with a committed Dashboard node output. Home has no platform-defined boards, global Workflow data source, output snapshot, Dashboard editor, scheduling control, or Run now control. Workflow creation and Dashboard configuration remain in the Workflow editor.
 
-Command search may open or focus System Helper Chat through the same Home state, but System Helper Chat is not a separate sidebar item.
+Board cards are static surfaces, not full-card selection controls. The header area shows the icon followed immediately by the configured `header` elements — `text`, `count`, and `metric` — resolved against the latest successful Run output, with version, run time, and status metadata aligned right. The content area uses the first `list` element found in main, then header, then footer order, and renders it as a table of up to three columns drawn from its non-`url` fields beginning with the `titleKey` field, falling back to its first display field. Unknown fields are ignored, missing fields display an explicit empty value, and non-object rows display their raw JSON in a bounded monospace region.
 
-## First Use
+A `url` field never renders as a column. When its value is an `http(s)` string, activating the row opens that value in a new browser tab, and the title cell remains the accessible link. The content area paginates five rows at a time with quiet previous and next controls and a current-page indicator.
 
-Show a two-step guided sequence: configure at least one Model Provider, then bind a Provider and model to the protected System Helper Chat Agent. The current step owns the primary action; completed steps remain visible but quiet while the sequence is incomplete.
+Board output is not self-healing. It loads per visit through the Run query; a newer successful Run appears on the next load. Cards carry no refresh control, because the board reflects a completed Run rather than a live value.
 
-Derive completion from persisted server resources rather than browser preferences. Do not show the guide until both Provider and System Helper Chat queries have resolved successfully. Remove the complete guide as soon as both steps are complete. Creating a custom Agent, creating a Workflow, and running or inspecting a Workflow are not first-use steps.
+### Category organization
+
+Category organization is database-backed through the Home board-category APIs. A compact create control opens a dialog with a labeled name field, a primary create action, a cancel action, and local busy and failure states. Each category exposes rename and delete controls, plus an add control that opens a dialog listing eligible boards as selectable cards.
+
+Selecting a board card in the add dialog assigns that board to the category; selecting an already-assigned card returns the board to Uncategorized. Assignment is a single action with no confirmation, because it is reversible by selecting the card again. Board cards never embed category selectors.
+
+Creating a category costs two actions — name it, then create — because the name is a value the product cannot resolve. Delete-category confirmation follows the shared permanent-removal pattern and states that its boards return to Uncategorized.
+
+Category loading, mutation, and failure states stay local and never remove unaffected boards. Organization controls remain neutral and quiet.
+
+### Embedded System Helper Chat
+
+Focusing the composer expands the conversation panel without waiting for a submission. Clicking outside, pressing `Escape`, using the icon-only minimize control, or navigating to another page closes the panel without cancelling work or clearing the conversation.
+
+The minimized dock retains the composer and, after the first request, a compact status summary such as preparing, tool calls in progress, needs review, completed, or failed. The summary carries a non-color cue and reopens the current conversation. Completion does not automatically minimize the panel.
+
+Command search may open or focus System Helper Chat through the same Home state. System Helper Chat is not a separate sidebar item. Transcript, Skill-call, and session behavior are specified in `../../surfaces/workspace/system-helper-chat/DESIGN.md`.
+
+### First use
+
+The first-use sequence is optional and resumable, with visible progress and one primary outcome per step. It shows two steps: configure at least one Model Provider, then bind a Provider and model to the protected System Helper Chat Agent. The current step owns the primary action; completed steps remain visible but quiet while the sequence is incomplete.
+
+Completion derives from persisted server resources rather than browser preferences. The guide does not appear until both the Provider and System Helper Chat queries have resolved successfully, and it disappears as soon as both steps are complete. There is no account or team setup step, and creating a custom Agent, creating a Workflow, or running and inspecting a Workflow are not first-use steps.
+
+## States
+
+| State | Behavior |
+| --- | --- |
+| Loading | While Workflows, Runs, or categories load, the library region shows a single bounded notice. Each card loads its own Run output independently and shows a local notice inside the card until it resolves. |
+| Empty | No eligible board: explain that no Workflow has a published Dashboard node with a successful run. An empty category shows its own dashed placeholder without hiding other categories. |
+| No results | Not applicable; the library has no filter or search. |
+| Error | A failed Workflow, Run, or category query shows a danger-toned notice in place of the library. Category mutation failures show an inline `role="alert"` message local to the affected control or dialog and leave unaffected boards mounted. |
+| Busy | Category mutations report on the activated control; the create dialog marks itself `aria-busy` and prevents duplicate submission. |
+| Offline | Inherits `shared-states.md`. |
+| Long content | Board tables paginate at five rows; cells truncate and non-object rows use a bounded monospace scroller. Long category and board names truncate rather than wrapping the header. |
+
+Card-level Run loading, empty, unavailable, and failure states stay inside the card that owns them.
+
+## Copy Inventory
+
+| Key | Category |
+| --- | --- |
+| `home:boards.title` | State |
+| `home:boards.version` | State |
+| `home:boards.loading` | State |
+| `home:boards.unavailable` | Recovery |
+| `home:boards.empty` | Recovery |
+| `home:boards.previousPage` | Action |
+| `home:boards.nextPage` | Action |
+| `home:boards.pageIndicator` | State |
+| `home:boards.emptyValue` | State |
+| `home:boards.trueValue` | State |
+| `home:boards.falseValue` | State |
+| `home:boards.emptyOutput` | State |
+| `home:categories.uncategorized` | State |
+| `home:categories.nameLabel` | Action |
+| `home:categories.namePlaceholder` | Action |
+| `home:categories.createTitle` | Action |
+| `home:categories.createDescription` | Constraint |
+| `home:categories.create` | Action |
+| `home:categories.rename` | Action |
+| `home:categories.delete` | Action |
+| `home:categories.deleteTitle` | Action |
+| `home:categories.deleteDescription` | Constraint |
+| `home:categories.addBoards` | Action |
+| `home:categories.addTitle` | Action |
+| `home:categories.addDescription` | Constraint |
+| `home:categories.added` | State |
+| `home:categories.addEmpty` | State |
+| `home:categories.deleting` | State |
+| `home:categories.empty` | State |
+| `home:categories.unavailable` | Recovery |
+| `home:firstUse.intro` | State |
+| `home:firstUse.configureProvider` | Action |
+| `home:firstUse.configureSystemHelper` | Action |
+
+`home:boards.description` is removed: "Boards published by Workflow Dashboard nodes" restates the `Workflow boards` heading and tells the reader nothing they act on.
+
+`assistant:configuration.hint` ("Changes are saved automatically.") is removed under `shared/copy-standards.md`: the configuration view already shows its saving state, so the sentence describes what a visible component communicates.
+
+`home:categories.createDescription`, `deleteDescription`, and `addDescription` are retained as Constraints because each states a rule the interface does not otherwise show: one category per board, boards returning to Uncategorized on delete, and re-selection unassigning a board.
+
+## Accessibility
+
+Each category is a `section` labelled by its heading, and Uncategorized uses the same structure. Category action buttons are icon-only with accessible names that include the category name. The create dialog binds its label to the name input and autofocuses it.
+
+Board cards are `article` elements. The decorative Dashboard icon is `aria-hidden`. Board tables use `th scope="col"` headers. A row with a resolvable URL keeps its title cell as a real anchor so keyboard users reach the link without depending on the row click, and the anchor stops propagation so the row handler does not double-open it. Pagination is a `nav` labelled by the current page indicator, and its icon-only controls carry accessible names.
+
+Run status uses the shared status badge with a non-color cue. First-use step markers are `aria-hidden` because each step's state is also present as text: either the completed label or the continue action.
+
+## Coverage Status
+
+Verified 2026-09-19. Differences found against `apps/web/src/routes/home.tsx`:
+
+- The category-level error banner is driven by one combined `categoryError` flag covering the categories query and all four mutations, so a failed assignment inside the add dialog also paints the page-level banner while the dialog shows its own copy of the same message.
+- Board-card Run loading uses `runDetailQuery.isPending`, which is also true when the query is disabled or idle, so a card can sit in its loading notice rather than reaching a resolved state.
+- The card content branch collapses four distinct conditions — no list element, query error, absent output, and zero items — into a single `boards.emptyOutput` message, so a failed Run query is presented as an empty board rather than as a failure with recovery.
+- `listTableFields(listElement)[0]` is recomputed inside the cell loop and compared by reference to decide which cell is the link, which works only because the helper returns a stable field object from the same element; the coupling is undocumented.
+- Category rename has no error surface of its own: a failed rename leaves the inline form open with the page-level banner as its only feedback.
+- The board-card pagination `nav` uses the page indicator string as its accessible name, which names the current state rather than the control group.
 
 ## Changelog
+
+### 2026-09-19 - Copy cleanup
+
+- Removed `home:boards.description` from both locales as a restatement of the Workflow boards heading.
+
+### 2026-09-19
+
+- Rewrote this specification against `TEMPLATE.md`, adding the action budget, the per-state table, the copy inventory, the accessibility section, and verified coverage findings.
+- Folded the former Onboarding flow specification into First Use: the sequence is optional, resumable, server-derived, and has no account or team setup step. `flows/onboarding/DESIGN.md` is removed.
+- Recorded board output and category organization as non-self-healing with no refresh control, and budgeted category creation at two actions because the name cannot be resolved by the product.
+- Removed `home:boards.description` as a restated heading and `assistant:configuration.hint` as text duplicating the visible saving state.
 
 ### 2026-09-15
 

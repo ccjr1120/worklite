@@ -13,76 +13,189 @@
 
 - `apps/web/src/components/workspace/agent-chat.tsx`
 
-## Coverage Status
-
-Migrated from the former indexed page specification. This change moved and indexed the specification; it did not audit implementation coverage.
-
-
 ## Purpose
 
-System Helper Chat helps a person configure a model provider and create Skills, connect MCP servers, and create Agents through a guided conversation. It is a task-oriented assistant owned by the workspace shell, presented as the same full-width expandable panel on Home and other pages. It is not the default representation of the rest of the product.
+Configure WorkLite through a guided conversation: create providers, Skills, MCP servers, and Agents, and dispatch work to other Agents or published Workflows.
 
-The canonical route is `/home`. System Helper Chat appears in command search but not as a separate primary navigation destination. The shell surface always uses the built-in System Helper Agent. Other configured custom Agents and published Workflows are invoked per message through an `@` mention; there is no composer-side target picker. Agent mentions create Agent turns, while Workflow mentions create version-bound Workflow Runs. The remaining message text becomes the Workflow Input value, and Draft Workflows are not offered as runnable mentions.
+## Primary Task
+
+Send a request and read its result. Action budget: one — submit the composer. Focusing the composer expands the panel, so opening the surface costs nothing beyond reaching the input.
+
+Dispatching to another Agent or a published Workflow costs two actions — select the mention, then submit — because the target is a value the product cannot resolve and only one mention is permitted per task.
 
 ## Layout
 
-The expanded conversation panel includes `Chat` and `Configuration` views in that order. Configuration belongs to the panel rather than the Agent collection and lets users select an existing workspace Provider/model pair and multiple workspace MCP servers for System Helper. Selection autosaves to the protected system Agent; an unconfigured helper opens on Configuration by default. Follow the earlier Memory One panel pattern: lightweight top tabs and unframed configuration fields inside the conversation surface. Both views share the same fixed panel height so switching tabs does not resize the surface.
+The expanded conversation panel is centered and capped at `1200px` wide by approximately `680px` high, constrained by `24px` desktop outer space. It contains `Chat` and `Configuration` views in that order, sharing one fixed panel height so switching tabs never resizes the surface.
 
-Keep the workspace shell stable. Home shows a single-line composer by default; other pages show a draggable lower-right Chat icon by default. Clicking the icon opens a centered conversation panel above the current page and focuses the composer. Composer focus also opens the panel. The icon remains keyboard accessible and stays within the viewport safe area. Navigating closes the panel while preserving the current server execution identifier.
+Configuration belongs to the panel rather than the Agent collection. It selects an existing workspace Provider and model pair and multiple workspace MCP servers for System Helper. Selection autosaves to the protected system Agent, and an unconfigured helper opens on Configuration by default. Follow the Memory One panel pattern: lightweight top tabs and unframed configuration fields inside the conversation surface.
 
-The expanded header identifies System Helper Chat, shows the current Agent execution status, and provides an icon-only minimize control. When an execution is reconnecting, show that state separately from the server-owned execution status. A compact diagnostics disclosure may show the safe execution identifier and last-updated time without exposing provider or host secrets. Before the first message, compact task starters may populate requests for Provider, Skill, MCP server, or Agent creation without fabricating a proposal. When no provider or model is bound and no configured custom Agent is available, replace the composer with one keyboard-accessible setup link to `/agents/agt_system_helper_chat`. If a configured custom Agent is available, keep the composer for structured `@` dispatch while ordinary System Helper submission remains disabled. The composer does not provide an Agent or plugin target switcher. System Helper remains the only built-in target and handles ordinary messages. Other configured custom Agents are selected with `@` in the composer; plugin execution is not exposed as a composer target.
+Home shows a single-line composer by default. Other pages show only a draggable lower-right Chat icon until it is opened; clicking it opens the same centered panel above the current page and focuses the composer. The icon stays inside the viewport safe area.
 
-The conversation is one unframed column. Workflow Run entries use the same transcript surface: show the user input, a compact queued/running state, completion or failure feedback, and successful Artifact cards with direct detail actions. Do not merge Workflow Run state into Agent execution state or expose a second execution control.
+The conversation is one unframed column. User messages are right-aligned compact neutral bubbles. Agent responses are left-aligned and use the shared Markdown renderer. When child sessions exist, a compact unframed `Sub Agents` band sits between the transcript and the composer.
 
-The conversation is one unframed column. User messages are right-aligned compact neutral bubbles. Agent responses are left-aligned and use the shared Markdown renderer. Immediately after submitting a user message, append an unframed Agent placeholder with a restrained loader and `Working` label in the message region. Keep it after inline Skill calls while the model resumes, and replace it with final content, a localized inline failure with a non-color error cue, or a localized non-color cancelled cue when the turn ends. Failure copy comes from a credential-safe server error and remains visible after reload; raw SDK errors, malformed tool input, provider responses, stack traces, and credentials are never shown. Skill calls appear inline between messages as compact collapsed rows showing the Skill name, script name, automatic execution status, and exit code when available. A disclosure control reveals the exact script path, JSON argument list, working directory, host-permission warning, and output. Details never open automatically for failures, and output uses a height-bounded internal scroller. Skill calls do not expose permission, `Run`, or `Reject` actions. Do not add a proposal inspector or browser-owned operation cards.
+## Interaction Contract
 
-When child sessions exist, place a compact unframed `Sub Agents` band between the transcript and composer. Its horizontally scrollable items show Agent identity, execution status, and unread state without relying on color. Selecting an item replaces the transcript with that child's persisted conversation and changes the composer target. The active child view provides an explicit icon action to return to System Helper and an icon action to close and delete the child session.
+### Opening and closing
 
-## Session Ownership And Model Calls
+Composer focus opens the panel without waiting for a submission. Clicking outside, pressing `Escape`, using the icon-only minimize control, or navigating to another page closes it while preserving the current server execution identifier. Chat-owned popup menus remain interactive while the panel is open. Navigating closes the visible panel without cancelling work.
 
-System Helper Chat uses the normal server-owned Agent execution endpoints. The browser stores the active execution identifier and optional archived identifiers for `/new` and `/resume`; messages, tool requests, automatic execution states, outputs, and errors come from the server execution. A browser reload fetches the current execution rather than reconstructing it from model text or local proposal state.
+### Submission and cancellation
 
-Only one turn or Skill call may be active. The composer input remains editable while the execution is `running`, but its draft is not submitted or queued. The icon-only Send action becomes an icon-only Stop action while running; Stop calls the server cancellation endpoint and preserves the current draft. Pressing `Enter` in the single-line composer while running does not submit or stop the turn. After a completed or cancelled turn, submitting another message continues the same execution. `/new` ends the current conversation boundary by archiving its active identifier and starts a new execution on the next message. `/resume` selects a previously archived execution identifier. `/log` downloads only the active execution and never combines archived executions.
+Only one turn or Skill call may be active. Submitting appends an unframed Agent placeholder with a restrained loader and `Working` label immediately, before any server response. The composer input stays editable while the execution is `running`, but its draft is not submitted or queued.
 
-Each child session owns one normal custom-Agent execution and persists independently from the System Helper execution. Creating a child sends the selected Agent identifier and task through the sub-session API, then renders the linked execution. Follow-up messages use the existing continuation endpoint and Stop uses the existing cancellation endpoint. Child work does not block the main composer, never appears in the main transcript or model context, and survives browser reload. The selected child identifier is restored when available. The server owns terminal unread transitions; opening a child clears its unread marker, while completion, failure, or restart recovery marks it unread when another transcript is selected. `/new`, `/resume`, and `/log` continue to operate only on the main conversation. A server restart may replace an unrecoverable running state with its persisted safe failure reason. Plugin conversations use the same execution boundary and history commands, but their selected target is restored separately and their transcript responses are labeled with the active plugin.
+The icon-only Send target becomes an icon-only Stop target while running; Stop calls the server cancellation endpoint and preserves the current draft. Pressing `Enter` while running neither submits nor stops. After a completed or cancelled turn, submitting another message continues the same execution.
 
-## Skill Execution
+### Self-healing execution state
 
-System Helper Chat permanently owns the platform-operation capability. It is an internal Chat capability, not a persisted or assignable Skill resource. The model can request only its server-discovered shebang-bearing scripts through `skill_script`. Every valid request executes immediately on the server. The browser never authorizes the request, calls resource mutation APIs on behalf of a model response, or infers operations from message text, script names, or stdout.
+Execution state is self-healing and exposes no manual refresh. The surface reads the persisted execution and subscribes to its event stream; a dropped stream sets a `reconnecting` state, retries the persisted read with increasing delay, and refreshes immediately when the browser becomes online or visible again. It never submits a duplicate user message.
+
+A failed turn is the one state with a manual recovery action: `Retry last request` continues the same persisted execution. Retry is a recovery from a server-reported failure rather than from observable staleness, so it is a justified exception to the self-healing rule.
+
+### Mentions
+
+Typing `@` opens a searchable menu of configured custom Agents and published Workflows above the composer. It filters from the text after the active `@`, supports pointer selection plus `ArrowUp`, `ArrowDown`, `Enter`, and `Escape`, and stays within the panel width. Protected Agents and custom Agents without both a Provider and model are excluded. Draft Workflows are not offered as runnable mentions. Slash-command and mention menus are mutually exclusive.
+
+Selecting a target removes the active `@` query and inserts one removable mention token before the editable task inside the same bordered composer input surface. The textarea has no separate border or background in this state, and focus is shown around the shared mention-and-text surface. The token and task text wrap within that surface rather than becoming adjacent input regions. Only one mention is allowed.
+
+Agent mentions create Agent turns; Workflow mentions create version-bound Workflow Runs and the remaining message text becomes the Workflow Input value. Submitting with an Agent mention creates a child session from the remaining task verbatim, clears the mention and task on success, and immediately switches to the child transcript. Once a child is selected, its composer accepts ordinary follow-up text and offers no nested `@` dispatch.
+
+### Slash commands
+
+The composer accepts local slash commands before ordinary message handling. Typing `/` opens a raised command menu above the composer with `/log`, `/new`, and `/resume` and concise descriptions. It filters as the user types and supports pointer selection, `ArrowUp`, `ArrowDown`, `Enter`, and `Escape` without taking focus away from the composer.
+
+`/log` downloads one readable Markdown document for the active conversation. It preserves server message order rather than re-sorting messages and Skill calls into one ambiguous timeline, keeps user content literal so its Markdown cannot change the document structure, and places a compact Skill activity summary after the transcript with script identity, localized status, and exit code. Raw arguments, output, stack traces, temporary paths, workspace snapshots, and provider responses are excluded from the default document. It includes the conversation status and localized export time, marks a running export as incomplete, and includes a localized safe failure or cancellation reason when present. With no active conversation it shows durable inline feedback instead of downloading an empty document. It never appends to the conversation, calls the model, creates a server record, or includes archived executions.
+
+`/new` archives the active execution identifier and opens a blank conversation while leaving all workspace resources unchanged. An archived execution that is still running remains a visible server-owned background execution and is not silently cancelled. `/resume` opens the execution history selector. Commands are trimmed and case-insensitive, and the panel stays open after execution.
+
+### Session ownership and model calls
+
+System Helper Chat uses the normal server-owned Agent execution endpoints. The browser stores the active execution identifier and optional archived identifiers for `/new` and `/resume`; messages, tool requests, automatic execution states, outputs, and errors all come from the server execution. A browser reload fetches the current execution rather than reconstructing it from model text or local proposal state.
+
+The shell surface always uses the built-in System Helper Agent. The composer has no Agent or plugin target switcher. Plugin conversations use the same execution boundary and history commands, but their selected target is restored separately and their transcript responses are labeled with the active plugin.
+
+Each child session owns one normal custom-Agent execution and persists independently. Creating a child sends the selected Agent identifier and task through the sub-session API, then renders the linked execution. Follow-up messages use the existing continuation endpoint and Stop uses the existing cancellation endpoint. Child work does not block the main composer, never appears in the main transcript or model context, and survives browser reload. The selected child identifier is restored when available.
+
+The server owns terminal unread transitions: opening a child clears its unread marker, while completion, failure, or restart recovery marks it unread when another transcript is selected. Selecting a running child shows Stop for that child only. Closing a child cancels active work, deletes its persisted session and linked execution, and returns to System Helper when the closed child was active. `/new`, `/resume`, and `/log` operate only on the main conversation. A server restart may replace an unrecoverable running state with its persisted safe failure reason.
+
+### Skill execution
+
+System Helper Chat permanently owns the platform-operation capability. It is an internal Chat capability, not a persisted or assignable Skill resource. The model can request only its server-discovered shebang-bearing scripts through `skill_script`, and every valid request executes immediately on the server. The browser never authorizes the request, calls resource mutation APIs on behalf of a model response, or infers operations from message text, script names, or stdout.
+
+Skill calls appear inline between messages as compact collapsed rows showing the Skill name, script name, automatic execution status, and exit code when available. A disclosure control reveals the exact script path, JSON argument list, working directory, host-permission warning, and output. Details never open automatically for failures, and output uses a height-bounded internal scroller. Skill calls expose no permission, `Run`, or `Reject` actions, and there is no proposal inspector or browser-owned operation card.
 
 Completed resource scripts show their returned resource route as a normal link. Provider results lead to the secure Provider form because credentials cannot be passed through Chat. A completed navigation script may include a server-validated client action; Web applies only that typed route. Appearance and language results come from persisted server settings and are applied after the settings query refreshes.
 
+### Unconfigured entry
+
+When no provider or model is bound and no configured custom Agent is available, the composer is replaced with one keyboard-accessible setup link to `/agents/agt_system_helper_chat`. When a configured custom Agent is available, the composer remains for structured `@` dispatch while ordinary System Helper submission stays disabled.
+
+Before the first message, compact task starters may populate requests for Provider, Skill, MCP server, or Agent creation without fabricating a proposal. The expanded header identifies System Helper Chat, shows the current Agent execution status, and provides an icon-only minimize control. A reconnecting execution shows that state separately from the server-owned execution status. A compact diagnostics disclosure may show the safe execution identifier and last-updated time without exposing provider or host secrets.
+
+Workflow Run entries use the same transcript surface: the user input, a compact queued or running state, completion or failure feedback, and successful Artifact cards with direct detail actions. Workflow Run state is never merged into Agent execution state and never exposes a second execution control.
+
 ## States
 
-Define unconfigured, empty, submitting, working, executing script, cancelling, cancelled, completed, failed, reconnecting, and long-content states. Status always includes a non-color cue. A failed turn shows its safe actionable reason inline in the transcript region, includes a retry action that continues the same persisted execution, and exposes the safe execution identifier for support. A tool batch that exceeds the runtime boundary uses the server-owned `too_many_tool_calls` reason and retry action instead of Provider configuration guidance. A cancelled turn shows an explicit neutral inline cue even when no Assistant text was produced. Meaningless residual output from a failed model tool request is omitted. Untrusted content is plain text or safe Markdown; script output is preformatted and never rendered as HTML. Reconnecting retries the persisted execution read with increasing delay and immediately refreshes when the browser becomes online or visible again; it never submits a duplicate user message.
+| State | Behavior |
+| --- | --- |
+| Loading | Loading the persisted execution shows a polite centered status line in the transcript region. The composer shows its own loading line while the System Helper configuration resolves. |
+| Empty | Before the first message, show the welcome line and compact task starters. |
+| No results | The mention and slash menus each show an explicit no-match line rather than collapsing. |
+| Error | A failed turn renders its credential-safe reason inline in the transcript with a non-color error cue, a retry action, and a diagnostics disclosure. Sub-session and cancellation failures render as inline alerts. Raw SDK errors, malformed tool input, provider responses, stack traces, and credentials are never shown. |
+| Busy | The Send target becomes Stop while running; the transcript owns the working placeholder so the composer never loses its editable draft. |
+| Offline | Inherits `shared-states.md`. Reconnecting is shown separately from execution status and retries with increasing delay. |
+| Long content | Skill arguments and output scroll within their own stable regions. The transcript follows the end only while the reader is already at the end. |
 
-## Responsive Behavior
+Also define unconfigured, submitting, working, executing script, cancelling, cancelled, and completed states. Status always carries a non-color cue. A cancelled turn shows an explicit neutral inline cue even when no Assistant text was produced. Meaningless residual output from a failed model tool request is omitted. A tool batch that exceeds the runtime boundary uses the server-owned `too_many_tool_calls` reason and retry action instead of Provider configuration guidance. Untrusted content is plain text or safe Markdown; script output is preformatted and never rendered as HTML.
 
-Use the same constrained panel on Home and other pages. Below `768px`, use the available width minus `12px` outer margins and at most about `70vh`; never make the conversation full-screen. Script arguments and output scroll within their own stable regions, and active execution status remains visible above mobile browser controls.
+## Copy Inventory
 
-## Sub-Agent Mentions And Sessions
+| Key | Category |
+| --- | --- |
+| `assistant:title` | State |
+| `assistant:open` | Action |
+| `assistant:composer.label` | Action |
+| `assistant:composer.placeholder` | Action |
+| `assistant:composer.followUpPlaceholder` | Action |
+| `assistant:composer.answerPlaceholder` | Action |
+| `assistant:composer.send` / `composer.stop` | Action |
+| `assistant:composer.loading` | State |
+| `assistant:composer.configure` | Recovery |
+| `assistant:panelTabs.*` | Action |
+| `assistant:configuration.title` | State |
+| `assistant:configuration.description` | Constraint |
+| `assistant:configuration.model` / `configuration.placeholder` | Action |
+| `assistant:configuration.saving` | State |
+| `assistant:configuration.mcpServers` | Action |
+| `assistant:configuration.mcpServersHint` | Constraint |
+| `assistant:starters.title` | State |
+| `assistant:starters.*.title` | Action |
+| `assistant:starters.*.description` | Constraint |
+| `assistant:starters.*.prompt` | Action |
+| `assistant:minimized.minimize` | Action |
+| `assistant:commands.menuLabel` | State |
+| `assistant:commands.logDescription` / `newDescription` / `resumeDescription` | Constraint |
+| `assistant:messages.welcome` | Recovery |
+| `assistant:speaker.you` / `speaker.assistant` | State |
+| `assistant:status.*` | State |
+| `assistant:execution.loading` / `working` / `cancelled` | State |
+| `assistant:execution.loadFailed` / `requestFailed` / `providerRequestFailed` / `skillFailed` / `incompleteSkillRequest` / `invalidSkillRequest` / `cancelFailed` / `answerFailed` / `restarted` | Recovery |
+| `assistant:execution.retry` | Action |
+| `assistant:execution.diagnostics` | Action |
+| `assistant:execution.id` / `phase` / `errorCode` / `updated` / `none` | State |
+| `assistant:mentions.menuLabel` | State |
+| `assistant:mentions.empty` | State |
+| `assistant:mentions.remove` / `removeWorkflow` | Action |
+| `assistant:mentions.workflow` | State |
+| `assistant:subAgents.label` / `unread` | State |
+| `assistant:subAgents.return` / `close` | Action |
+| `assistant:subAgents.createFailed` / `requestFailed` / `closeFailed` | Recovery |
+| `assistant:history.title` | State |
+| `assistant:history.description` | Constraint |
+| `assistant:history.empty` / `untitled` | State |
+| `assistant:history.remove` | Action |
+| `assistant:tool.*` | State, except `tool.expand` / `tool.collapse` / `tool.openSecureProvider` / `tool.openResource` which are Action and `tool.warning` which is Constraint |
+| `assistant:log.*` | State, except `log.noActive` which is Recovery |
+| `assistant:workflowRun.requestFailed` / `cancelFailed` | Recovery |
+| `assistant:workflowRun.emptyInput` / `currentStep` / `waitingForConfirmation` | State |
+| `assistant:workflowRun.openRunHistory` | Recovery |
 
-Typing `@` in the main composer opens a searchable menu of configured custom Agents above the composer. The menu filters from the text after the active `@`, supports pointer selection plus `ArrowUp`, `ArrowDown`, `Enter`, and `Escape`, and remains within the panel width. Protected Agents and custom Agents without both a Provider and model are excluded. Slash-command and Agent menus are mutually exclusive.
+Removed keys:
 
-Selecting an Agent removes the active `@` query and inserts one removable mention token before the editable task inside the same bordered composer input surface. The textarea has no separate border or background in this state, and focus is shown around the shared mention-and-text surface. The token and task text wrap within that surface rather than becoming adjacent input regions. Only one mention is allowed. Submitting with a mention creates a child session from the remaining task verbatim, clears the mention and task after success, and immediately switches to the child transcript. Submitting without a mention retains the normal System Helper behavior. Once a child is selected, its composer accepts ordinary follow-up text and does not offer nested `@` dispatch.
+- `assistant:description` ("Configure WorkLite through persisted Agent executions."): it restates the surface title and describes the persistence mechanism rather than anything the reader acts on.
+- `assistant:configuration.hint` ("Changes are saved automatically."): the configuration view already shows `configuration.saving`, so the sentence duplicates what a visible component communicates.
 
-The main composer remains available while any child runs. Selecting a running child shows Stop for that child only. Closing a child cancels active work, deletes its persisted session and linked execution, and returns to System Helper when the closed child was active. Opening a child clears its unread marker; completion or failure while another transcript is selected marks it unread.
+## Accessibility
 
-## Slash Commands
+The composer's visible label is provided as screen-reader-only text bound to the input. The input is a `combobox` with `aria-expanded` reflecting whether the slash or mention menu is open; both menus are `listbox` regions whose items are `option` elements with `aria-selected`.
 
-The composer accepts local slash commands before ordinary message handling. Typing `/` opens a raised command menu above the composer with `/log`, `/new`, and `/resume`, including concise descriptions. The menu filters as the user types and supports pointer selection, `ArrowUp`, `ArrowDown`, `Enter`, and `Escape` without taking focus away from the composer. It uses semantic surfaces, borders, text, selection, and focus tokens in both themes and remains within the System Helper Chat width on mobile.
+Send and Stop share one stable target with the same dimensions and distinct localized accessible names. Panel tabs are a `tablist` with roving `tabIndex` and arrow-key movement. The collapsed panel is marked `aria-hidden` and `inert` so its controls leave the tab order entirely.
 
-`/log` downloads one readable Markdown document for the active conversation. Preserve server message order in the transcript instead of re-sorting messages and Skill calls into one ambiguous timeline. Keep user content literal and prevent its Markdown from changing the document structure. Place a compact Skill activity summary after the transcript with script identity, localized status, and exit code; exclude raw arguments, output, stack traces, temporary paths, workspace snapshots, and provider responses from the default document. Include the conversation status and localized export time, mark a running export as incomplete, and include a localized safe failure reason or cancellation reason when present. When there is no active conversation, show durable inline feedback instead of downloading an empty document. The command does not append content to the conversation, call the model, create a server record, or include archived executions.
+All icon-only controls carry accessible names and tooltips, except the intentionally unobtrusive cross-page floating Chat entry, which keeps an accessible name without a visible tooltip and exposes the current execution status as screen-reader-only text. Sub-session items expose their status as screen-reader-only text alongside the icon and carry `aria-current` when active. Skill-call rows are buttons with `aria-expanded` and an accessible name that states whether activating them shows or hides details.
 
-`/new` archives the active execution identifier and opens a blank conversation while leaving all workspace resources unchanged. If the archived execution is still running, it remains a visible server-owned background execution and is not silently cancelled by the boundary command. Its command description must make that conversation boundary explicit. `/resume` opens the execution history selector. Commands are trimmed and case-insensitive, and the panel remains open after execution.
+Working, cancelled, clarification, and Workflow Run regions are `role="status"`; failures are `role="alert"`. Conversation and Skill-call status changes use restrained live-region announcements without announcing every token. Keyboard focus remains in the editable composer after cancellation, history selection, and automatic execution updates. Reduced-motion mode replaces spinner motion with the same static working cue. Messages use neutral surface contrast and speaker labels rather than color alone.
 
-## Accessibility And Themes
+## Coverage Status
 
-Use semantic surface, border, text, brand, and status tokens in both light and dark modes. Persimmon indicates the primary action, current selection, or active execution only. Messages use neutral surface contrast and speaker labels rather than color alone.
+Verified 2026-09-19. Differences found against `apps/web/src/components/workspace/agent-chat.tsx`:
 
-All icon-only controls require accessible names and tooltips, except the intentionally unobtrusive cross-page floating Chat entry, which keeps an accessible name without a visible Tooltip. Send and Stop retain the same stable target dimensions and expose distinct localized accessible names. Clicking outside an expanded Chat surface closes it; Chat-owned popup menus remain interactive. Conversation and Skill-call status changes use restrained live-region announcements. Keyboard focus remains in the editable composer after cancellation, history selection, and automatic execution updates. Reduced-motion mode replaces spinner motion with the same static working cue.
+- The transcript does not expose an `aria-live` region for streaming updates. Working, cancelled, and failure blocks use `role="status"` and `role="alert"`, which announce on mount, but the incremental assistant response itself is not announced, so the restrained live-region requirement in this specification is unmet.
+- The panel is rendered whenever `isHome || open` and collapsed with `h-0` plus `aria-hidden`/`inert`. On Home the collapsed panel therefore stays mounted and its queries stay active, which is intended for session continuity but is not documented as a mount contract.
+- Archived executions are capped by `HISTORY_LIMIT` in browser storage with no user-facing indication that older entries are dropped, so `/resume` can silently stop offering a conversation the user remembers.
+- `error` is one component-level string shared by main-conversation, sub-session, and cancellation failures, so a sub-session failure renders in the same single region as a main-turn failure rather than local to the affected transcript.
+- The floating Chat entry exposes status as `sr-only` text inside the button, making the accessible name and the status concatenate for screen readers rather than remaining distinct.
+- Mobile height uses `max-md:h-[min(70vh,680px)]`, matching the `70vh` cap, but the `12px` outer-margin requirement from `shared/responsive-behavior.md` is applied by the parent container rather than this surface, so the constraint is not verifiable from this component alone.
 
 ## Changelog
+
+### 2026-09-19 - Copy cleanup
+
+- Removed `assistant:configuration.hint` from both locales: the save indicator already reports that configuration is saved, and the string was rendered twice in the same panel.
+
+### 2026-09-19
+
+- Rewrote this specification against `TEMPLATE.md`, adding the action budget, the per-state table, the copy inventory, a consolidated accessibility section, and verified coverage findings.
+- Recorded execution state as self-healing through the event stream and persisted read, and documented failed-turn retry as a justified manual exception because it recovers a server-reported failure rather than observable staleness.
+- Removed `assistant:description` as a restated heading and `assistant:configuration.hint` as text duplicating the visible saving state.
 
 ### 2026-09-15
 
@@ -99,7 +212,6 @@ All icon-only controls require accessible names and tooltips, except the intenti
 ### 2026-09-04
 
 - Added actionable inline failure guidance for model steps that request too many tools at once without changing the existing retry or diagnostics layout.
-
 
 ### 2026-09-03
 
