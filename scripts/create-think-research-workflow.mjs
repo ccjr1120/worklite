@@ -3,7 +3,38 @@
 const baseUrl = (process.env.WORKLITE_API_URL || 'http://127.0.0.1:3391/api').replace(/\/$/, '');
 const workflowName = 'GitHub Technology Trend Research';
 
+const titleRules = `Title rules. The title must be one concrete Chinese sentence stating a specific finding or judgement that a reader understands without the article. It must name at least one concrete anchor: a project, an organization, a mechanism, or a number.
+
+Reject every one of these title shapes:
+- A quoted metaphor or a colon followed by a subtitle.
+- A trailing survey label such as an observation, a snapshot, a review, a study, a panorama, a decoding, or a window of N days.
+- The words 观察, 思考, 浅析, 深度解析, 全景, 启示, 范式, 重塑, 赋能, 揭秘, 复盘, 洞察, or 图景.
+- A rhetorical question, an ellipsis, an exclamation mark, or a superlative.
+
+Keep the title within 26 Chinese characters.`;
+
+const proseRules = `Writing rules for the article body. Write for a working engineer who reads on a phone and stops at the first paragraph that sounds machine-generated.
+
+- Open with the finding or a concrete fact. Do not open with background, scope framing, or a statement about what the article will do.
+- Never refer to the article or yourself. Do not write 本文, 笔者, 我们认为, 综上所述, 值得注意的是, 需要指出的是, 首先/其次/最后, or 可以说.
+- Do not turn the research fields into section headings. There must be no section named after a conclusion summary, a method or sampling statement, a counterexample list, a limitation list, or an inference. State a caveat or a sampling limit in one or two sentences inside the paragraph that depends on it, and state it once in the whole article.
+- Use three to five section headings. Each heading is a short informative phrase carrying real content, not a label.
+- Vary sentence and paragraph length. Place at least one short sentence under fifteen characters in the article. Do not let every paragraph run to the same size.
+- Interpret numbers instead of listing them. Give at most two or three data points in one paragraph, and say what each one means for the reader. Do not enumerate repositories with their star counts in sequence.
+- Carry uncertainty in the claim itself, not in a disclaimer after it. Write 仓库自述说它降低了开销 rather than asserting the reduction and then adding that this comes from the project's own description. Never end a paragraph with a sentence whose only job is to qualify the paragraph above it.
+- Name the retrieval window once, in plain Chinese, where search evidence first appears, so a reader can judge a window-dependent claim. Do not repeat it and do not give it its own section.
+- Keep at least one paragraph under 120 characters and every paragraph under 250. Keep sentences under 60 characters, and use at most one parenthetical aside per paragraph.
+- Let the sections build on each other rather than partition the subject into parallel categories. Reject an outline whose sections could be reordered without loss.
+- No emoji, no decorative bold, and none of 闭环, 抓手, 生态位, 护城河, 赛道, 范式转移, 降维打击.
+- Keep the references section to the sources the body actually uses, at most ten entries.`;
+
+const publicationRules = `Publication format. Begin the article with exactly one level-one Markdown heading ("# ") holding the article title, matching the title field, appearing exactly once. Use level-two or deeper headings for every section inside the body. Begin every body paragraph with exactly two full-width ideographic spaces (Unicode U+3000). Place no Markdown links and no raw URLs in the body. Put all source titles and URLs in one final Chinese-language References section; localized source titles and URLs may stay untranslated, but every explanatory paragraph and heading must be Chinese.`;
+
 const topicPrompt = `You plan one focused technology article from the workflow input. Propose a specific title and short description for the article before any research or writing. Do not write the article, cite sources, or claim that current evidence has already been verified.
+
+${titleRules}
+
+The description states the narrow question the article answers and the judgement it expects to reach, in two sentences at most.
 
 Return only valid JSON with this shape:
 {
@@ -13,64 +44,142 @@ Return only valid JSON with this shape:
 
 Preserve the complete workflow input in request.original as its original JSON value, whether text or an object, including any structure or constraints; do not replace it with a summary. Do not wrap the JSON in a code fence.`;
 
-const duplicatePrompt = `You screen a proposed article against historical Research Notes. The input contains request (the topic planner JSON with request.original and proposal) and candidates (each with artifactId, title, and description). Compare the proposal's title and description to all candidate titles and descriptions. A substantially overlapping core topic and thesis is a duplicate even if the wording differs. Do not treat a broad shared technology area alone as a duplicate. Historical candidates are drafts and may not represent published articles; evaluate them as potential prior work.
+const collectPrompt = `You are a technology research collector. You gather and select evidence. You do not write the article, and no part of your output is published.
+
+The input is an Artifact Query result containing request and candidates. The planning output is nested one level deeper: the original instruction is at request.request.original and the approved proposal is at request.proposal, holding title and description. Treat request.proposal as the assigned subject and collect evidence for it. Do not substitute a subject you find more interesting. Copy the candidates array verbatim into your output.
+
+Your retrieval budget is fixed and you must respect it:
+- At most two github-current-popularity calls. Decide your search terms before the first call. If the first result is thin, the second call may use different terms, and then you stop searching whatever the outcome.
+- At most two zhihu-research calls, used only for Chinese community viewpoints, disputes, and counterexamples.
+- Never repeat a call with the same arguments, and never re-run a call to confirm a result you already have.
+
+Exceeding this budget fails the whole Workflow, and a thin evidence set is a recoverable outcome while an exhausted budget is not. When a call returns argumentNotes, read it: your arguments were corrected, and repeating the call will not improve the result. If you cannot find strong evidence, record that in gaps and stop.
+
+The GitHub Skill returns two layers. Search listings give the landscape. The studiedRepositories entries carry README prose, in-window commit subjects, release notes, and the most-discussed issues and pull requests, and they are the only layer that supports a real claim. A repository description is a self-applied label: it says what a project wants to be called, never how it works, what it changed, or whether its users agree. Evidence built from descriptions and star counts produces an article that says nothing, which is the failure this node exists to prevent.
+
+Select rather than forward. For each project you keep, extract three to five findings that a reader would find worth knowing, each quoting or closely paraphrasing its source passage. Prefer, in this order: a concrete mechanism and what it costs; a change made inside the window; a dispute, defect, or unresolved tradeoff from discussion; two projects solving one problem differently. Drop a finding you cannot attribute to a README passage, commit subject, release note, or discussion thread. Three well-sourced findings beat ten thin ones, and you must not pad the list.
+
+Separate what is verified, what a project claims about itself, what the community says, and what you infer. Name what you could not establish in gaps; the writer will treat a gap as unavailable rather than guessing.
 
 Return only valid JSON with this shape:
 {
-  "duplicate": false,
-  "reason": "brief explanation of the decision",
-  "matchedArtifactIds": [],
-  "request": { "original": "the complete original workflow input, preserving its value and structure" },
-  "proposal": { "title": "proposed article title", "description": "brief scope and central idea" }
+  "title": "the assigned proposal title, copied from request.proposal.title",
+  "topic": "the assigned subject, restated in one sentence",
+  "thesis": "the single judgement your collected evidence supports, in one sentence",
+  "observationWindow": { "days": 7, "windowStart": "YYYY-MM-DD", "retrievedAt": "ISO timestamp" },
+  "queries": ["each search term you actually used"],
+  "findings": [{
+    "projectOrSource": "repository full name, organization, or publication",
+    "finding": "what a reader would find worth knowing, stated concretely",
+    "evidenceType": "readme|commit|release|discussion|official|community|inference",
+    "sourceQuote": "the passage, commit subject, or thread title behind it",
+    "url": "https://..."
+  }],
+  "contrasts": [{ "question": "the shared problem", "positions": ["project A's approach and its cost", "project B's approach and its cost"] }],
+  "disputes": [{ "what": "the disagreement, defect, or unresolved tradeoff", "source": "thread title or community source", "url": "https://..." }],
+  "gaps": ["what you could not establish, and why"],
+  "candidates": [{ "artifactId": "...", "title": "...", "description": "...", "createdAt": "ISO timestamp or null" }]
 }
 
-Copy request.request and request.proposal into the top-level output request and proposal exactly; list only matching artifactIds. Set duplicate to true if the proposed article would substantially repeat any historical candidate, otherwise false. Do not write the article or wrap the JSON in a code fence.`;
+The title, topic, and thesis fields are required: this output is persisted as the Research Notes Artifact, and later Runs screen new proposals for duplication against exactly those three fields. Omitting them makes this Run invisible to that check.
 
-const researchPrompt = `You are a careful technology researcher and writer. Produce an evidence-backed article draft from the workflow input.
+Do not write article prose and do not wrap the JSON in a code fence.`;
 
-The input is either a duplicate-screening response with duplicate false, the original request and a proposed title and description, or a reviewer response from an earlier pass. For the first pass, follow the original request and use the proposal as a starting scope, not as verified evidence. When it is a reviewer response, preserve the supplied article's valid material, address every actionable feedback item, and re-check evidence where needed.
+const writePrompt = `You are a Chinese technology writer. You write one article from an evidence package that is already collected. You have no research tools, and you must not invent a fact that is not in the package.
 
-Use GitHub as the primary evidence source. Use the assigned github-current-popularity Skill to collect current repository evidence and the assigned zhihu-research Skill only to discover Chinese community viewpoints, disputes, and counterexamples. Do not treat a single repository, a total star count, a search result, or a community opinion as proof of an industry trend.
+The input is either the collector's evidence package, or a reviewer response from an earlier pass containing feedback, article, and the same evidence. On a reviewer response, keep what is valid, address every feedback item, and change nothing else. In every pass, copy the candidates array verbatim into your output.
 
-Separate verified first-party facts, project claims, community viewpoints, and your own inferences. Record retrieval dates, observation window, query parameters, source URLs, caveats, sample bias, counterexamples, and evidence strength. Prefer a small high-quality sample over an exhaustive list. Stop when the main claims have evidence and at least one limitation or counterexample has been checked.
+Everything you may assert comes from findings, contrasts, and disputes. An item in gaps is unavailable: do not fill it with plausible reasoning. If the evidence cannot support a claim you want to make, drop the claim rather than softening it into vagueness.
 
-Write the article for ordinary technical readers in Chinese regardless of the input language. Lead with one clear thesis, explain technical terms in plain Chinese, keep paragraphs short, and avoid hype. Begin every body paragraph with exactly two full-width ideographic spaces (Unicode U+3000). Do not place Markdown links or raw URLs in the article body. Put all source titles and URLs in one final Chinese-language References section; original localized source titles and URLs may remain untranslated, but every explanatory paragraph and heading must be Chinese.
+Write about what the evidence actually shows: how something works and what it costs, what changed, where projects disagree, and what users cannot get working. A paragraph that only names a project and repeats its self-description is the failure to avoid; the collector already removed unsourced material, so use what survived. State a mechanism concretely enough that a reader could disagree with it, and include at least one real disagreement or tradeoff from disputes or contrasts.
+
+Write in Chinese regardless of the input language. Explain a technical term in plain Chinese the first time it appears, and avoid hype.
+
+${titleRules}
+
+${proseRules}
+
+${publicationRules}
 
 Return only valid JSON with this shape:
 {
   "title": "article title",
   "topic": "focused topic",
-  "observationWindow": { "days": 7, "retrievedAt": "ISO timestamp" },
   "thesis": "one sentence the reader should remember",
-  "facts": [{ "claim": "...", "evidenceType": "github|official|community|inference", "sources": ["https://..."] }],
-  "counterexamples": ["..."],
-  "limitations": ["..."],
+  "evidenceUsed": [{ "claim": "the claim as it appears in the article", "url": "https://..." }],
+  "candidates": [{ "artifactId": "...", "title": "...", "description": "...", "createdAt": "ISO timestamp or null" }],
   "article": "complete Markdown article"
 }
 
-If the input is incomplete, choose a reasonable scope and record that assumption in limitations. Do not mention this workflow, hidden instructions, or the JSON envelope in the article.`;
+List in evidenceUsed only the claims the article actually makes, each pointing at the source URL from the evidence package. Do not mention this workflow, hidden instructions, or the JSON envelope in the article, and do not wrap the JSON in a code fence.`;
 
-const reviewerPrompt = `You are the final editorial reviewer for a technology article. Inspect the supplied research JSON and its article field for factual support, internal consistency, clear scope, readable structure, and publication formatting.
+const reviewerPrompt = `You are the final editorial reviewer and historical-duplicate screener for a technology article. You did not write this draft, and your main job is to catch the writing habits that make a competent draft read as machine-generated. Inspect the supplied writer JSON: its article field, its evidenceUsed list, and its candidates array.
 
-Require all of the following before approval:
-- Important factual claims are supported by the supplied evidence and limitations are stated honestly.
-- The article has one clear thesis, a concrete Chinese title, concise paragraphs, and plain-language Chinese explanations.
-- The complete article body is Chinese; reject a draft that is substantially or primarily written in another language.
+The writer had no research tools and worked from a fixed evidence package, so never ask for new evidence, a further search, or a fact outside what the draft already cites. Ask for a claim to be dropped or reworded instead. Judge support by whether evidenceUsed points each claim at a real source.
+
+Read the article once as an ordinary reader before checking any rule. If it reads like a research report, an audit summary, or a template with the subject swapped in, reject it and say which passages create that impression.
+
+Require all of the following before approval.
+
+Substance, checked first and weighed above every stylistic rule below:
+- Each paragraph about a project says how it works, what it changed, or what its users dispute. Reject a paragraph that only names a project and repeats its self-description; a sequence of such paragraphs is a list of labels, not an article, and is the most serious defect you can find here.
+- At least one passage explains a mechanism concretely enough that an informed reader could disagree with it. Reject a draft that only names features.
+- At least one passage reports a real disagreement, defect, or tradeoff, not only the projects' own claims about themselves.
+- Reject a draft whose paragraphs are interchangeable in order, since that indicates summary rather than argument.
+
+Evidence and scope:
+- Every substantive claim appears in evidenceUsed with a source URL. Reject an unsupported claim by asking for its removal, never by asking for more research.
+- Uncertainty is carried by the wording of the claim itself rather than appended as a separate disclaimer sentence. Reject a paragraph that states something firmly and then adds a sentence taking it back; require the qualification to move into the claim.
+- The article names its retrieval window once, in plain Chinese, where it first uses search evidence. Reject a draft that cites window-dependent facts without ever telling the reader the window.
+- The article's title, topic, and thesis stay inside the subject the evidence package was collected for; reject a draft that silently changed to a different subject.
+- The article does not mirror the evidence package's structure as its own sections, and has no section devoted to method, sampling, or limitations.
+
+Title:
+- The title is one concrete Chinese sentence stating a specific finding or judgement, understandable on its own, naming at least one concrete anchor such as a project, an organization, a mechanism, or a number.
+- Reject a quoted metaphor, a colon-plus-subtitle construction, a trailing survey label such as an observation or a window of N days, the words 观察, 思考, 浅析, 深度解析, 全景, 启示, 范式, 重塑, 赋能, 揭秘, 复盘, 洞察, or 图景, a rhetorical question, an ellipsis, an exclamation mark, or a superlative.
+- Reject a title longer than 26 Chinese characters.
+
+Prose:
+- The opening states the finding or a concrete fact, not background or a statement of what the article will do.
+- No self-reference: reject 本文, 笔者, 我们认为, 综上所述, 值得注意的是, 需要指出的是, 首先/其次/最后 as a sequence, or 可以说.
+- Three to five section headings, each an informative phrase rather than a label.
+- Sentence and paragraph length varies: at least one sentence under fifteen characters, at least one paragraph under 120 characters, no paragraph over 250, no sentence over 60, and at most one parenthetical aside per paragraph.
+- Numbers are interpreted rather than enumerated: at most two or three data points in a paragraph, and no sequential listing of repositories with star counts.
+- Sections build on each other; reject an outline whose sections are parallel categories that could be reordered without loss.
+- No emoji, no decorative bold, and none of 闭环, 抓手, 生态位, 护城河, 赛道, 范式转移, 降维打击.
+- The references section lists only sources the body uses, at most ten entries.
+
+Publication format:
+- The complete article body is Chinese; reject a draft substantially or primarily written in another language.
+- The article begins with exactly one level-one Markdown heading ("# ") that holds the article title and matches the title field, and every section heading inside the body is level two or deeper.
 - Every body paragraph begins with exactly two full-width ideographic spaces (Unicode U+3000).
 - The body contains no Markdown links or raw URLs.
 - All source titles and URLs appear only in one final Chinese-language References section; localized source titles and URLs may remain untranslated.
 - The article contains no workflow, prompt, JSON, or hidden-process commentary.
 
+Duplicates:
+- The current title, topic, thesis, and article substance do not substantially repeat a historical candidate. A duplicate means the core subject and central thesis overlap, not merely that two articles belong to the same broad technology area. Historical candidates may be intermediate drafts; evaluate them as potential prior work.
+
 Return only valid JSON with this shape:
 {
   "approved": true,
+  "duplicate": false,
+  "matchedArtifactIds": [],
   "feedback": [],
+  "evidenceUsed": [{ "claim": "...", "url": "https://..." }],
+  "candidates": [{ "artifactId": "...", "title": "...", "description": "...", "createdAt": "ISO timestamp or null" }],
   "article": "the complete reviewed Markdown article"
 }
 
-Set approved to true only when there are no actionable issues. When issues remain, set approved to false, list concise actionable feedback, and copy the complete current article into article without replacing it with a summary. Do not wrap the JSON in a code fence.`;
+Copy evidenceUsed and candidates verbatim from the writer's output in every response. A rejected draft returns to the writer, which has no research tools, so this list is the only record of what each claim rests on. Dropping it strands the next pass.
 
-const articlePrompt = `You are a constrained article finalizer. The input is reviewer JSON with an article field. Return only that complete Markdown article verbatim. Do not add commentary, a code fence, links, or formatting that is not already present.`;
+Set approved to true only when there are no actionable quality issues and duplicate is false. Set approved to false for quality issues or a duplicate; when a candidate matches, include its artifactId in matchedArtifactIds and include concise actionable feedback explaining how to choose a materially different subject or thesis.
+
+Return at most three feedback items, ordered by severity, and spend them on what matters: a factual claim the evidence does not support, a paragraph with no substance behind it, and a passage that reads as machine-generated, in that order. Write each item as a specific instruction naming the passage and the concrete change, not as a restatement of a rule. Ask for a rewritten sentence or paragraph rather than a rebuilt section, because a wholesale rewrite tends to introduce new unsupported claims. Do not repeat a feedback item the writer already addressed in a previous pass.
+
+Copy candidates verbatim in every response. When issues remain, copy the complete current article into article without replacing it with a summary. Do not wrap the JSON in a code fence.`;
+
+const articlePrompt = `You are a constrained article finalizer. The input is reviewer JSON with an article field. Return only that complete Markdown article verbatim. Do not add commentary, a code fence, links, or formatting that is not already present. Preserve the article's leading level-one Markdown heading exactly as supplied; it carries the published title and must not be removed, renamed, or demoted.`;
 
 const coverPromptPrompt = `You are a concise visual director for a Chinese technology article. The input is the final reviewed Markdown article and its title. Read the topic and themes, then return only one concise English image-generation prompt for a WeChat Official Account cover.
 
@@ -107,41 +216,41 @@ function requirePublicModel(providers, model) {
   return model;
 }
 
-function resolvePublicModel(providers) {
-  const requested = process.env.WORKLITE_MODEL?.trim();
-  if (requested) {
-    const separator = requested.indexOf('/');
-    if (separator <= 0 || separator === requested.length - 1) {
-      throw new Error('WORKLITE_MODEL must use the public <providerName>/<modelId> format.');
-    }
-    const providerName = requested.slice(0, separator);
-    const modelId = requested.slice(separator + 1);
-    const provider = providers.find((item) => item.name === providerName);
-    if (!Array.isArray(provider?.models) || !provider.models.includes(modelId)) {
-      throw new Error(`The configured model "${requested}" is not available in the model providers.`);
-    }
-    return { model: requested, protocol: provider.protocol };
-  }
+const AGENT_PROTOCOLS = new Set(['openai/chat', 'openai/responses']);
 
-  const glmCandidates = providers.flatMap((provider) => Array.isArray(provider.models)
-    ? provider.models
-      .filter((modelId) => /glm/i.test(`${provider.name}/${modelId}`))
-      .map((modelId) => ({ model: `${provider.name}/${modelId}`, protocol: provider.protocol }))
-    : []);
-  const glmModels = glmCandidates
-    .filter((candidate) => candidate.protocol === 'openai/chat' || candidate.protocol === 'openai/responses')
-    .map((candidate) => candidate.model);
-  const uniqueModels = [...new Set(glmModels)].sort();
-  if (uniqueModels.length === 0) {
-    const configured = glmCandidates.map((candidate) => `${candidate.model} (${candidate.protocol || 'unknown protocol'})`).join(', ');
-    throw new Error(`No GLM model is configured with the required OpenAI-compatible protocol. Configured GLM models: ${configured || 'none'}.`);
-  }
-  if (uniqueModels.length > 1) {
-    throw new Error(`Multiple GLM models are configured. Set WORKLITE_MODEL to one of: ${uniqueModels.join(', ')}.`);
-  }
-  const providerName = uniqueModels[0].slice(0, uniqueModels[0].indexOf('/'));
+// Each Agent role names its own candidates in preference order. Planning and cover direction take a
+// fast model, research and finalization take the strongest verified writing model, and review takes a
+// different provider family so it does not share the writing model's stylistic habits.
+const roleModels = {
+  planning: { env: 'WORKLITE_PLANNING_MODEL', candidates: ['GLM/glm-5.3-flash', 'GLM/glm-5.3'] },
+  writing: { env: 'WORKLITE_WRITING_MODEL', candidates: ['GLM/glm-5.3'] },
+  review: { env: 'WORKLITE_REVIEW_MODEL', candidates: ['pp-api/gpt-5.6-sol', 'pp-api/gpt-6-astra', 'GLM/glm-5.3'] },
+};
+
+function findPublicModel(providers, model) {
+  const separator = model.indexOf('/');
+  if (separator <= 0 || separator === model.length - 1) return null;
+  const providerName = model.slice(0, separator);
+  const modelId = model.slice(separator + 1);
   const provider = providers.find((item) => item.name === providerName);
-  return { model: uniqueModels[0], protocol: provider?.protocol };
+  if (!provider || !Array.isArray(provider.models) || !provider.models.includes(modelId)) return null;
+  return { model, protocol: provider.protocol, providerName };
+}
+
+function resolveRoleModel(providers, role) {
+  const { env, candidates } = roleModels[role];
+  const requested = process.env[env]?.trim();
+  if (requested) {
+    const resolved = findPublicModel(providers, requested);
+    if (!resolved) throw new Error(`${env} model "${requested}" is not available in the model providers.`);
+    if (!AGENT_PROTOCOLS.has(resolved.protocol)) throw new Error(`${env} model "${requested}" uses protocol ${resolved.protocol || 'unknown'}, which Agent nodes do not support.`);
+    return resolved;
+  }
+  for (const candidate of candidates) {
+    const resolved = findPublicModel(providers, candidate);
+    if (resolved && AGENT_PROTOCOLS.has(resolved.protocol)) return resolved;
+  }
+  throw new Error(`No ${role} model is available. Configure one of ${candidates.join(', ')} with an OpenAI-compatible protocol, or set ${env}.`);
 }
 
 const [skills, providers, workflows] = await Promise.all([
@@ -154,12 +263,14 @@ const existing = workflows.find((workflow) => workflow.name === workflowName);
 
 const githubSkill = resourceByName(skills, 'github-current-popularity', 'Skill');
 const zhihuSkill = resourceByName(skills, 'zhihu-research', 'Skill');
-const selectedModel = resolvePublicModel(providers);
-if (selectedModel.protocol !== 'openai/chat' && selectedModel.protocol !== 'openai/responses') {
-  throw new Error(`The selected GLM provider must use an OpenAI-compatible protocol. Current protocol: ${selectedModel.protocol || 'unknown'}.`);
-}
-const model = selectedModel.model;
+const planningModel = resolveRoleModel(providers, 'planning').model;
+const writingModel = resolveRoleModel(providers, 'writing').model;
+const reviewModel = resolveRoleModel(providers, 'review').model;
+// The cross-family review provider is less reliable than the writing provider, so this one node
+// retries in run instead of failing the article on a transient upstream error.
+const reviewErrorPolicy = reviewModel === writingModel ? 'stop' : 'retry';
 const imageModel = requirePublicModel(providers, 'codex/gpt-image-2');
+const models = { planning: planningModel, writing: writingModel, review: reviewModel, reviewErrorPolicy, image: imageModel };
 const definition = {
   schemaVersion: 4,
   input: {
@@ -173,27 +284,27 @@ const definition = {
   defaults: { errorPolicy: 'stop' },
   nodes: [
     { id: 'input', position: { x: 0, y: 620 }, type: 'worklite/input', typeVersion: '1', config: {}, errorPolicy: 'stop' },
-    { id: 'topic', position: { x: 260, y: 620 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: topicPrompt, outputFormat: 'json', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
+    { id: 'topic', position: { x: 260, y: 620 }, type: 'worklite/agent', typeVersion: '1', config: { model: planningModel, systemPrompt: topicPrompt, outputFormat: 'json', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
     { id: 'history', position: { x: 540, y: 620 }, type: 'worklite/artifact-query', typeVersion: '1', config: { name: 'Research Notes', titleField: 'title', descriptionFields: ['topic', 'thesis'] }, errorPolicy: 'stop' },
-    { id: 'duplicate', position: { x: 820, y: 620 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: duplicatePrompt, outputFormat: 'json', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
-    { id: 'research', position: { x: 1100, y: 120 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: researchPrompt, outputFormat: 'json', skillIds: [githubSkill.id, zhihuSkill.id], mcpServerIds: [] }, errorPolicy: 'stop' },
-    { id: 'research-artifact', position: { x: 1420, y: 0 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'Research Notes', type: 'json' }, errorPolicy: 'stop' },
-    { id: 'review', position: { x: 1420, y: 260 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: reviewerPrompt, outputFormat: 'json', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
-    { id: 'article', position: { x: 1740, y: 260 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: articlePrompt, outputFormat: 'text', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
-    { id: 'article-artifact', position: { x: 2020, y: 120 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'Article', type: 'markdown' }, errorPolicy: 'stop' },
-    { id: 'cover-prompt', position: { x: 2020, y: 420 }, type: 'worklite/agent', typeVersion: '1', config: { model, systemPrompt: coverPromptPrompt, outputFormat: 'text', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
-    { id: 'cover-image', position: { x: 2300, y: 420 }, type: 'worklite/image', typeVersion: '1', config: { model: imageModel, n: 1, background: 'opaque', quality: 'medium', size: '1024x1024' }, errorPolicy: 'stop' },
-    { id: 'wechat-publish', position: { x: 2580, y: 260 }, type: 'wechat-official-account/publish', typeVersion: '2', config: { accountId: 'wechat_official_account_personal', mode: 'draft' }, errorPolicy: 'stop' },
+    { id: 'collect', position: { x: 820, y: 620 }, type: 'worklite/agent', typeVersion: '1', config: { model: writingModel, systemPrompt: collectPrompt, outputFormat: 'json', skillIds: [githubSkill.id, zhihuSkill.id], mcpServerIds: [] }, errorPolicy: 'stop' },
+    { id: 'evidence-artifact', position: { x: 1100, y: 620 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'Research Notes', type: 'json' }, errorPolicy: 'stop' },
+    { id: 'write', position: { x: 100, y: 120 }, type: 'worklite/agent', typeVersion: '1', config: { model: writingModel, systemPrompt: writePrompt, outputFormat: 'json', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
+    { id: 'review', position: { x: 420, y: 260 }, type: 'worklite/agent', typeVersion: '1', config: { model: reviewModel, systemPrompt: reviewerPrompt, outputFormat: 'json', skillIds: [], mcpServerIds: [] }, errorPolicy: reviewErrorPolicy },
+    { id: 'article', position: { x: 740, y: 260 }, type: 'worklite/agent', typeVersion: '1', config: { model: writingModel, systemPrompt: articlePrompt, outputFormat: 'text', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
+    { id: 'article-artifact', position: { x: 1020, y: 120 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'Article', type: 'markdown' }, errorPolicy: 'stop' },
+    { id: 'cover-prompt', position: { x: 1020, y: 420 }, type: 'worklite/agent', typeVersion: '1', config: { model: planningModel, systemPrompt: coverPromptPrompt, outputFormat: 'text', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
+    { id: 'cover-image', position: { x: 1300, y: 420 }, type: 'worklite/image', typeVersion: '1', config: { model: imageModel, n: 1, background: 'opaque', quality: 'medium', size: '1024x1024' }, errorPolicy: 'stop' },
+    { id: 'wechat-publish', position: { x: 1580, y: 260 }, type: 'wechat-official-account/publish', typeVersion: '2', config: { accountId: 'wechat_official_account_personal', mode: 'draft' }, errorPolicy: 'stop' },
   ],
   edges: [
     { id: 'input-to-topic', sourceNodeId: 'input', sourcePort: 'output', targetNodeId: 'topic', targetPort: 'context' },
     { id: 'topic-to-history', sourceNodeId: 'topic', sourcePort: 'output', targetNodeId: 'history', targetPort: 'request' },
-    { id: 'history-to-duplicate', sourceNodeId: 'history', sourcePort: 'output', targetNodeId: 'duplicate', targetPort: 'context' },
-    { id: 'duplicate-to-research', sourceNodeId: 'duplicate', sourcePort: 'output', targetNodeId: 'research', targetPort: 'context', condition: { kind: 'predicate', path: '$.duplicate', operator: 'equals', value: false } },
+    { id: 'history-to-collect', sourceNodeId: 'history', sourcePort: 'output', targetNodeId: 'collect', targetPort: 'context' },
+    { id: 'collect-to-evidence', sourceNodeId: 'collect', sourcePort: 'output', targetNodeId: 'evidence-artifact', targetPort: 'data' },
+    { id: 'collect-to-write', sourceNodeId: 'collect', sourcePort: 'output', targetNodeId: 'write', targetPort: 'context' },
     { id: 'input-to-wechat-metadata', sourceNodeId: 'input', sourcePort: 'output', targetNodeId: 'wechat-publish', targetPort: 'metadata' },
-    { id: 'research-to-notes', sourceNodeId: 'research', sourcePort: 'output', targetNodeId: 'research-artifact', targetPort: 'data' },
-    { id: 'research-to-review', sourceNodeId: 'research', sourcePort: 'output', targetNodeId: 'review', targetPort: 'context' },
-    { id: 'review-to-research', sourceNodeId: 'review', sourcePort: 'output', targetNodeId: 'research', targetPort: 'context', condition: { kind: 'predicate', path: '$.approved', operator: 'falsy' }, maxTraversals: 3 },
+    { id: 'write-to-review', sourceNodeId: 'write', sourcePort: 'output', targetNodeId: 'review', targetPort: 'context' },
+    { id: 'review-to-write', sourceNodeId: 'review', sourcePort: 'output', targetNodeId: 'write', targetPort: 'context', condition: { kind: 'predicate', path: '$.approved', operator: 'falsy' }, maxTraversals: 3 },
     { id: 'review-to-article', sourceNodeId: 'review', sourcePort: 'output', targetNodeId: 'article', targetPort: 'context', condition: { kind: 'fallback' } },
     { id: 'article-to-output', sourceNodeId: 'article', sourcePort: 'output', targetNodeId: 'article-artifact', targetPort: 'data' },
     { id: 'article-to-cover-prompt', sourceNodeId: 'article', sourcePort: 'output', targetNodeId: 'cover-prompt', targetPort: 'context' },
@@ -206,7 +317,7 @@ const definition = {
 if (!existing) {
   const created = await request('/workflows', { method: 'POST', body: JSON.stringify({ name: workflowName, definition }) });
   const version = await request(`/workflows/${encodeURIComponent(created.id)}/publish`, { method: 'POST' });
-  process.stdout.write(JSON.stringify({ id: created.id, name: created.name, existing: false, publishedVersionId: version.id }) + '\n');
+  process.stdout.write(JSON.stringify({ id: created.id, name: created.name, existing: false, publishedVersionId: version.id, models }) + '\n');
 } else {
   const current = await request(`/workflows/${encodeURIComponent(existing.id)}`);
   const operations = [
@@ -216,7 +327,7 @@ if (!existing) {
     ...definition.edges.map((edge) => ({ type: 'addEdge', edge })),
     { type: 'updateSettings', input: definition.input, defaults: definition.defaults },
   ];
-  const updated = await request(`/workflows/${encodeURIComponent(existing.id)}/draft/operations`, { method: 'POST', body: JSON.stringify({ baseRevisionId: current.draft.revisionId, operations, source: 'manual', sourceInstruction: 'Synchronize the research workflow with historical Artifact screening before research, bounded editorial review, generated cover creation, and WeChat draft saving.' }) });
+  const updated = await request(`/workflows/${encodeURIComponent(existing.id)}/draft/operations`, { method: 'POST', body: JSON.stringify({ baseRevisionId: current.draft.revisionId, operations, source: 'manual', sourceInstruction: 'Assign research workflow Agent models per role, move duplicate screening into the editorial reviewer, and enforce reader-facing title and prose quality.' }) });
   const version = await request(`/workflows/${encodeURIComponent(updated.id)}/publish`, { method: 'POST' });
-  process.stdout.write(JSON.stringify({ id: updated.id, name: updated.name, existing: true, updated: true, publishedVersionId: version.id }) + '\n');
+  process.stdout.write(JSON.stringify({ id: updated.id, name: updated.name, existing: true, updated: true, publishedVersionId: version.id, models }) + '\n');
 }
