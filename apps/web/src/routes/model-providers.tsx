@@ -1,9 +1,9 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { BarChart3, Bot, ChevronDown, Copy, KeyRound, LoaderCircle, LogIn, Pencil, Plus, RefreshCw, Trash2, Upload, X } from 'lucide-react';
+import { BarChart3, Bot, ChevronDown, Clipboard, Copy, KeyRound, LoaderCircle, LogIn, Pencil, Plus, RefreshCw, ScrollText, Trash2, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitWindow, DiscoverModelProviderRequest, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayStats, PortkeyGatewayStatus } from '@worklite/contracts';
+import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitWindow, DiscoverModelProviderRequest, GatewayRequestLogList, GatewayRequestLogListItem, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayStats, PortkeyGatewayStatus } from '@worklite/contracts';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { CollectionTable, CollectionHeader, CollectionRow } from '@/components/collection-table';
 import { CollectionToolbar } from '@/components/collection-toolbar';
@@ -24,7 +24,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useCodexAccountUsagesQuery, useCodexAuthQuery, useModelProvidersQuery, usePortkeyGatewayQuery } from '@/api/queries';
-import { usePortkeyGatewayStatsQuery } from '@/api/queries';
+import { useGatewayRequestLogQuery, useGatewayRequestLogsQuery, usePortkeyGatewayStatsQuery } from '@/api/queries';
 import { api } from '@/api/client';
 import { queryClient } from '@/lib/query-client';
 import { formatDateTime, formatList, formatNumber } from '@/i18n/format';
@@ -32,17 +32,35 @@ import { useLocale } from '@/components/locale-provider';
 import type { AppLocale } from '@/i18n/locale';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-const MODEL_PROVIDER_TABS = ['providers', 'codex', 'statistics'] as const;
+const MODEL_PROVIDER_TABS = ['providers', 'codex', 'statistics', 'request-logs'] as const;
 type ModelProviderTab = (typeof MODEL_PROVIDER_TABS)[number];
-type ModelProvidersSearch = { tab: ModelProviderTab };
+const REQUEST_LOG_STATUS_CLASSES = ['success', 'client_error', 'server_error'] as const;
+type RequestLogStatusClass = (typeof REQUEST_LOG_STATUS_CLASSES)[number];
+type ModelProvidersSearch = {
+  tab: ModelProviderTab;
+  provider?: string;
+  model?: string;
+  statusClass?: RequestLogStatusClass;
+  workflowRunId?: string;
+  requestLogId?: string;
+};
 
 function isModelProviderTab(value: unknown): value is ModelProviderTab {
   return typeof value === 'string' && MODEL_PROVIDER_TABS.includes(value as ModelProviderTab);
 }
 
+function optionalSearchText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
 export const Route = createFileRoute('/model-providers')({
   validateSearch: (search: Record<string, unknown>): ModelProvidersSearch => ({
     tab: isModelProviderTab(search.tab) ? search.tab : 'providers',
+    provider: optionalSearchText(search.provider),
+    model: optionalSearchText(search.model),
+    statusClass: REQUEST_LOG_STATUS_CLASSES.includes(search.statusClass as RequestLogStatusClass) ? search.statusClass as RequestLogStatusClass : undefined,
+    workflowRunId: optionalSearchText(search.workflowRunId),
+    requestLogId: optionalSearchText(search.requestLogId),
   }),
   component: ModelProvidersPage,
 });
@@ -55,7 +73,7 @@ type ProviderTestDialog =
   | { provider: ModelProviderView; model: string; status: 'idle' }
   | { provider: ModelProviderView; model: string; status: 'loading'; startedAt: number; elapsedSeconds: number }
   | { provider: ModelProviderView; model: string; status: 'success'; result: ModelProviderTestResult; elapsedSeconds: number }
-  | { provider: ModelProviderView; model: string; status: 'error'; message: string; traceId?: string; elapsedSeconds: number };
+  | { provider: ModelProviderView; model: string; status: 'error'; message: string; requestLogId?: string; elapsedSeconds: number };
 
 const PROVIDER_TEST_PROMPT = '\u4f60\u597d';
 const PROVIDER_TEST_MODEL_KEY = 'worklite.provider-test-model.';
@@ -176,7 +194,7 @@ function ModelProvidersPage() {
   const { t } = useTranslation(['settings', 'common']);
   const { locale } = useLocale();
   const workspaceSlug = 'personal';
-  const { tab: view } = Route.useSearch();
+  const { tab: view, ...requestLogFilters } = Route.useSearch();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [testDialog, setTestDialog] = useState<ProviderTestDialog | null>(null);
@@ -184,7 +202,7 @@ function ModelProvidersPage() {
   const [deleteProvider, setDeleteProvider] = useState<ModelProviderView | null>(null);
   const [name, setName] = useState('');
   const [apiKey, setApiKey] = useState('');
-  const [protocol, setProtocol] = useState<ModelProviderProtocol>('openai/chat');
+  const [protocol, setProtocol] = useState<ModelProviderProtocol | ''>('');
   const [baseURL, setBaseURL] = useState('');
   const [modelIds, setModelIds] = useState<string[]>([]);
   const [modelsBusy, setModelsBusy] = useState(false);
@@ -193,6 +211,7 @@ function ModelProvidersPage() {
   const [headersError, setHeadersError] = useState('');
   const [providerBusy, setProviderBusy] = useState(false);
   const [providerError, setProviderError] = useState('');
+  const [protocolError, setProtocolError] = useState('');
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const [statsWindow, setStatsWindow] = useState<'24h' | '7d' | '30d'>('24h');
@@ -212,7 +231,21 @@ function ModelProvidersPage() {
 
   function changeView(value: string) {
     if (!isModelProviderTab(value)) return;
-    void navigate({ to: '/model-providers', search: { tab: value } });
+    void navigate({ to: '/model-providers', search: (current) => ({ ...current, tab: value }) });
+  }
+
+  function changeRequestLogFilters(next: RequestLogFilters) {
+    void navigate({
+      to: '/model-providers',
+      search: (current) => ({
+        ...current,
+        tab: 'request-logs' as const,
+        provider: next.provider,
+        model: next.model,
+        statusClass: next.statusClass,
+        workflowRunId: next.workflowRunId,
+      }),
+    });
   }
 
   useEffect(() => {
@@ -284,13 +317,14 @@ function ModelProvidersPage() {
   function openCreate() {
     setName('');
     setApiKey('');
-    setProtocol('openai/chat');
+    setProtocol('');
     setBaseURL('');
     setModelIds([]);
     setModelsError('');
     setHeadersText('');
     setHeadersError('');
     setProviderError('');
+    setProtocolError('');
     setDialog({ mode: 'create' });
   }
 
@@ -304,6 +338,7 @@ function ModelProvidersPage() {
     setHeadersText('');
     setHeadersError('');
     setProviderError('');
+    setProtocolError('');
     setDialog({ mode: 'edit', provider });
   }
 
@@ -313,10 +348,16 @@ function ModelProvidersPage() {
     setModelsError('');
     setHeadersError('');
     setProviderError('');
+    setProtocolError('');
   }
 
   async function saveProvider() {
     if (!dialog || (dialog.mode === 'create' && !name.trim())) return;
+    const selectedProtocol = protocol;
+    if (!selectedProtocol) {
+      setProtocolError(t('providers.protocolRequired'));
+      return;
+    }
     if (!baseURL.trim()) {
       setProviderError(t('providers.baseURLRequired'));
       return;
@@ -333,9 +374,9 @@ function ModelProvidersPage() {
     setProviderError('');
     try {
       if (dialog.mode === 'create') {
-        await api.saveModelProvider(workspaceSlug, { name: name.trim(), protocol, apiKey: apiKey.trim() || undefined, baseURL: baseURL.trim() || undefined, models: modelIds, ...(headers !== undefined ? { headers } : {}) });
+        await api.saveModelProvider(workspaceSlug, { name: name.trim(), protocol: selectedProtocol, apiKey: apiKey.trim() || undefined, baseURL: baseURL.trim() || undefined, models: modelIds, ...(headers !== undefined ? { headers } : {}) });
       } else {
-        await api.updateModelProvider(workspaceSlug, dialog.provider.id, { name: name.trim(), protocol, apiKey: apiKey.trim() || undefined, baseURL: baseURL.trim() || undefined, models: modelIds, ...(headers !== undefined ? { headers } : {}) });
+        await api.updateModelProvider(workspaceSlug, dialog.provider.id, { name: name.trim(), protocol: selectedProtocol, apiKey: apiKey.trim() || undefined, baseURL: baseURL.trim() || undefined, models: modelIds, ...(headers !== undefined ? { headers } : {}) });
       }
       closeProviderDialog();
       toast.success(t(mode === 'create' ? 'providers.created' : 'providers.saved'));
@@ -348,7 +389,12 @@ function ModelProvidersPage() {
   }
 
   async function discoverModels() {
-    if (protocol !== 'codex/responses' && !apiKey.trim()) {
+    const selectedProtocol = protocol;
+    if (!selectedProtocol) {
+      setProtocolError(t('providers.protocolRequired'));
+      return;
+    }
+    if (selectedProtocol !== 'codex/responses' && !apiKey.trim()) {
       setModelsError(t('providers.modelsApiKeyRequired'));
       return;
     }
@@ -366,7 +412,7 @@ function ModelProvidersPage() {
     setModelsBusy(true);
     setModelsError('');
     try {
-      const input: DiscoverModelProviderRequest = { protocol, apiKey: apiKey.trim(), baseURL: baseURL.trim() || undefined, ...(headers !== undefined ? { headers } : {}) };
+      const input: DiscoverModelProviderRequest = { protocol: selectedProtocol, apiKey: apiKey.trim(), baseURL: baseURL.trim() || undefined, ...(headers !== undefined ? { headers } : {}) };
       const result = await api.discoverModelProviderModels(input);
       setModelIds((current) => [...new Set([...current, ...result.models])]);
       toast.success(t('providers.modelsFetched', { count: result.models.length }));
@@ -387,7 +433,6 @@ function ModelProvidersPage() {
       toast.success(t('providers.deleted'));
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: ['model-providers'] }),
-        queryClient.invalidateQueries({ queryKey: ['agents'] }),
         queryClient.invalidateQueries({ queryKey: ['agent', 'agt_system_helper_chat'] }),
       ]).catch(() => undefined);
     } catch (error: unknown) {
@@ -428,8 +473,8 @@ function ModelProvidersPage() {
       setTestDialog((current) => current?.provider.id === provider.id ? { provider, model, status: 'success', result, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1_000) } : current);
     }).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : t('providers.testFailed');
-      const traceId = error instanceof Error && 'traceId' in error && typeof error.traceId === 'string' ? error.traceId : undefined;
-      setTestDialog((current) => current?.provider.id === provider.id ? { provider, model, status: 'error', message, traceId, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1_000) } : current);
+      const requestLogId = error instanceof Error && 'requestLogId' in error && typeof error.requestLogId === 'string' ? error.requestLogId : undefined;
+      setTestDialog((current) => current?.provider.id === provider.id ? { provider, model, status: 'error', message, requestLogId, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1_000) } : current);
     });
   }
 
@@ -447,6 +492,7 @@ function ModelProvidersPage() {
           <TabsTrigger value="providers">{t('providers.views.providers')}</TabsTrigger>
           <TabsTrigger value="codex">{t('providers.views.codex')}</TabsTrigger>
           <TabsTrigger value="statistics"><BarChart3 className="size-4" />{t('providers.views.statistics')}</TabsTrigger>
+          <TabsTrigger value="request-logs"><ScrollText className="size-4" />{t('providers.views.requestLogs')}</TabsTrigger>
         </TabsList>
         <TabsContent value="providers">
       <GatewayPanel
@@ -515,6 +561,14 @@ function ModelProvidersPage() {
         <TabsContent value="statistics">
           <GatewayStatistics stats={statsQuery.data} isLoading={statsQuery.isLoading} isError={statsQuery.isError} onRetry={() => void statsQuery.refetch()} window={statsWindow} onWindowChange={setStatsWindow} locale={locale} t={(key) => t(key as never)} />
         </TabsContent>
+        <TabsContent value="request-logs">
+          <GatewayRequestLogs
+            providers={modelProviders}
+            filters={{ provider: requestLogFilters.provider, model: requestLogFilters.model, statusClass: requestLogFilters.statusClass, workflowRunId: requestLogFilters.workflowRunId }}
+            onFiltersChange={changeRequestLogFilters}
+            locale={locale}
+          />
+        </TabsContent>
       </Tabs>
 
       <Dialog open={Boolean(dialog)} onOpenChange={(open) => !open && closeProviderDialog()}>
@@ -526,14 +580,14 @@ function ModelProvidersPage() {
           {providerError ? <p className="text-[13px] text-danger" role="alert">{providerError}</p> : null}
           <Field label={t('providers.name')} htmlFor="provider-name"><Input id="provider-name" placeholder={t('providers.namePlaceholder')} value={name} onChange={(event) => setName(event.target.value)} disabled={providerBusy} /></Field>
           <Field label={t('providers.baseURL')} htmlFor="provider-base-url" hint={t('providers.baseURLHint')}><Input id="provider-base-url" placeholder={t('providers.baseURLPlaceholder')} value={baseURL} onChange={(event) => setBaseURL(event.target.value)} /></Field>
-          <Field label={t('providers.protocol')} htmlFor="provider-protocol">
-            <Select value={protocol} onValueChange={(value) => setProtocol(value as ModelProviderProtocol)}>
-              <SelectTrigger id="provider-protocol"><SelectValue /></SelectTrigger>
+          <Field label={t('providers.protocol')} htmlFor="provider-protocol" error={protocolError}>
+            <Select value={protocol || undefined} onValueChange={(value) => { setProtocol(value as ModelProviderProtocol); setProtocolError(''); }}>
+              <SelectTrigger id="provider-protocol" aria-invalid={Boolean(protocolError)}><SelectValue placeholder={t('providers.protocolPlaceholder')} /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="openai/chat">openai/chat</SelectItem>
                 <SelectItem value="openai/responses">openai/responses</SelectItem>
+                <SelectItem value="anthropic/messages">anthropic/messages</SelectItem>
                 {dialog?.mode === 'edit' && protocol === 'codex/responses' ? <SelectItem value="codex/responses">codex/responses</SelectItem> : null}
-                <SelectItem value="deepseek/chat">deepseek/chat</SelectItem>
               </SelectContent>
             </Select>
           </Field>
@@ -590,7 +644,7 @@ function ModelProvidersPage() {
                 ) : testDialog?.status === 'success' ? (
                   <div aria-live="polite"><p className="whitespace-pre-wrap break-words">{testDialog.result.response}</p><p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></div>
                 ) : testDialog?.status === 'error' ? (
-                  <><p role="alert" className="break-words text-danger">{testDialog.message}</p>{testDialog.traceId ? <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2"><span className="font-mono text-xs text-muted-foreground">{t('providers.traceId', { id: testDialog.traceId })}</span><Button type="button" variant="ghost" size="compact" onClick={() => window.location.assign(`/settings/logs?traceId=${encodeURIComponent(testDialog.traceId ?? '')}`)}>{t('providers.viewLogs')}</Button></div> : null}<p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></>
+                  <><p role="alert" className="break-words text-danger">{testDialog.message}</p>{testDialog.requestLogId ? <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2"><Button type="button" variant="ghost" size="compact" onClick={() => { const provider = testDialog.provider.name; setTestDialog(null); void navigate({ to: '/model-providers', search: { tab: 'request-logs', provider } }); }}>{t('providers.viewRequestLog')}</Button></div> : null}<p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></>
                 ) : null}
               </div>
             </div>
@@ -773,4 +827,223 @@ function Detail({ label, value }: { label: string; value: string }) {
 
 function currentTime(): number {
   return Date.now();
+}
+
+type RequestLogFilters = {
+  provider?: string;
+  model?: string;
+  statusClass?: RequestLogStatusClass;
+  workflowRunId?: string;
+};
+
+function capturedBodyText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function CapturedBody({ label, body, copyLabel }: { label: string; body: string; copyLabel: string }) {
+  const { t } = useTranslation('settings');
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(body);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+        <Button type="button" variant="ghost" size="compact" onClick={() => void copy()} aria-label={copyLabel}>
+          <Clipboard aria-hidden="true" />
+          {copied ? t('providers.requestLogs.copied') : t('common:actions.copy' as never)}
+        </Button>
+      </div>
+      {/* A bounded scroll container must be reachable without a pointer, so it takes focus
+          while keeping its non-interactive group role. */}
+      <div
+        role="group"
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+        tabIndex={0}
+        aria-label={label}
+        className="mt-1 max-h-72 overflow-auto rounded-md border border-border bg-surface px-2 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45"
+      >
+        <pre className="font-mono text-xs whitespace-pre-wrap break-words">{body}</pre>
+      </div>
+    </div>
+  );
+}
+
+function RequestLogRow({ item, expanded, onToggle, locale }: { item: GatewayRequestLogListItem; expanded: boolean; onToggle: () => void; locale: AppLocale }) {
+  const { t } = useTranslation(['settings', 'common']);
+  const detailQuery = useGatewayRequestLogQuery(expanded ? item.id : undefined);
+  const detail = detailQuery.data;
+
+  return (
+    <li className="rounded-md border border-border bg-surface-subtle">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        aria-label={t('providers.requestLogs.rowLabel', { provider: item.provider, model: item.model, time: formatDateTime(item.occurredAt, locale) })}
+        className="grid w-full grid-cols-1 gap-2 px-3 py-2 text-left hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45 md:grid-cols-[0.9fr_0.8fr_1fr_1fr_0.5fr_0.5fr] md:items-center md:gap-3"
+      >
+        <span className="text-[13px] tabular-nums text-muted-foreground">{formatDateTime(item.occurredAt, locale)}</span>
+        <span className="truncate font-medium">{item.provider}</span>
+        <span className="truncate font-mono text-xs text-muted-foreground">{item.model}</span>
+        <span className="truncate font-mono text-xs text-muted-foreground">{item.endpoint}</span>
+        <span className="flex items-center gap-1.5"><StatusBadge status={requestLogStatusBadge(item.status)} /><span className="tabular-nums text-xs text-muted-foreground">{item.status}</span></span>
+        <span className="flex items-center justify-end gap-1 text-xs tabular-nums text-muted-foreground">
+          {item.durationMs} ms
+          <ChevronDown className={`ml-1 inline size-4 transition-transform ${expanded ? 'rotate-180' : ''}`} aria-hidden="true" />
+        </span>
+      </button>
+      {expanded ? (
+        <div className="border-t border-border px-3 py-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            {item.streaming ? <span>{t('providers.requestLogs.streaming')}</span> : null}
+            {item.source ? <span className="font-mono">{item.source}</span> : null}
+            {item.workflowRunId ? <span className="font-mono">{t('providers.requestLogs.correlatedRun', { id: item.workflowRunId })}</span> : null}
+            {item.totalTokens !== null ? <span className="tabular-nums">{t('providers.statistics.total')}: {item.totalTokens}</span> : null}
+          </div>
+          {detailQuery.isLoading ? (
+            <div role="status" aria-busy="true" className="mt-2 grid gap-2">
+              <Skeleton className="h-24 w-full rounded-md" />
+              <Skeleton className="h-24 w-full rounded-md" />
+            </div>
+          ) : detailQuery.isError || !detail ? (
+            <p className="mt-2 text-[13px] text-danger" role="alert">{t('providers.requestLogs.detailError')}</p>
+          ) : (
+            <div className="mt-2 grid gap-3">
+              <CapturedBody label={t('providers.requestLogs.request')} body={capturedBodyText(detail.request)} copyLabel={t('providers.requestLogs.copyRequest')} />
+              {detail.response.kind === 'unavailable' ? (
+                <p className="text-[13px] text-muted-foreground">{t('providers.requestLogs.responseUnavailable', { reason: detail.response.reason })}</p>
+              ) : (
+                <CapturedBody
+                  label={detail.response.kind === 'stream' ? t('providers.requestLogs.streamEvents') : t('providers.requestLogs.response')}
+                  body={detail.response.kind === 'stream' ? capturedBodyText(detail.response.events) : capturedBodyText(detail.response.body)}
+                  copyLabel={t('providers.requestLogs.copyResponse')}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+function requestLogStatusBadge(status: number): 'completed' | 'failed' {
+  return status >= 200 && status < 400 ? 'completed' : 'failed';
+}
+
+function GatewayRequestLogs({ providers, filters, onFiltersChange, locale }: { providers: ModelProviderView[]; filters: RequestLogFilters; onFiltersChange: (next: RequestLogFilters) => void; locale: AppLocale }) {
+  const { t } = useTranslation(['settings', 'common']);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [pages, setPages] = useState<GatewayRequestLogList[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const logsQuery = useGatewayRequestLogsQuery(filters);
+  const hasFilters = Boolean(filters.provider || filters.model || filters.statusClass || filters.workflowRunId);
+
+  useEffect(() => {
+    setPages([]);
+    setExpandedId(null);
+  }, [filters.provider, filters.model, filters.statusClass, filters.workflowRunId]);
+
+  const items = useMemo(() => [...(logsQuery.data?.items ?? []), ...pages.flatMap((page) => page.items)], [logsQuery.data, pages]);
+  const nextCursor = pages.at(-1)?.nextCursor ?? logsQuery.data?.nextCursor ?? null;
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await api.gatewayRequestLogs({ ...filters, cursor: nextCursor });
+      setPages((current) => [...current, page]);
+    } catch {
+      // The Load more control stays available so the reader can retry.
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  return (
+    <section className="mt-6" aria-labelledby="gateway-request-logs-title">
+      <div>
+        <h2 id="gateway-request-logs-title" className="text-base font-semibold">{t('providers.requestLogs.title')}</h2>
+        <p className="mt-1 text-[13px] text-muted-foreground">{t('providers.requestLogs.retention')}</p>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Select value={filters.provider ?? 'all'} onValueChange={(value) => onFiltersChange({ ...filters, provider: value === 'all' ? undefined : value })}>
+          <SelectTrigger className="w-[190px]" aria-label={t('providers.requestLogs.filters.provider')}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t('providers.requestLogs.filters.provider')}</SelectItem>
+            {providers.map((provider) => <SelectItem key={provider.id} value={provider.name}>{provider.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={filters.statusClass ?? 'all'} onValueChange={(value) => onFiltersChange({ ...filters, statusClass: value === 'all' ? undefined : value as RequestLogStatusClass })}>
+          <SelectTrigger className="w-[190px]" aria-label={t('providers.requestLogs.filters.statusClass')}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t('providers.requestLogs.statusClass.all')}</SelectItem>
+            <SelectItem value="success">{t('providers.requestLogs.statusClass.success')}</SelectItem>
+            <SelectItem value="client_error">{t('providers.requestLogs.statusClass.clientError')}</SelectItem>
+            <SelectItem value="server_error">{t('providers.requestLogs.statusClass.serverError')}</SelectItem>
+          </SelectContent>
+        </Select>
+        {filters.workflowRunId ? (
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-subtle px-2 py-1 font-mono text-xs">
+            {t('providers.requestLogs.correlatedRun', { id: filters.workflowRunId })}
+          </span>
+        ) : null}
+        {hasFilters ? (
+          <Button type="button" variant="ghost" size="compact" onClick={() => onFiltersChange({})}>{t('common:actions.clearFilters')}</Button>
+        ) : null}
+      </div>
+
+      <div className="mt-4">
+        {logsQuery.isLoading ? (
+          <div role="status" aria-busy="true" aria-live="polite" className="grid gap-2">
+            <span className="sr-only">{t('providers.requestLogs.title')}</span>
+            {Array.from({ length: 5 }, (_, index) => <Skeleton key={index} className="h-12 w-full rounded-md" />)}
+          </div>
+        ) : logsQuery.isError ? (
+          <ErrorState title={t('providers.requestLogs.title')} description={t('providers.requestLogs.error')} onAction={() => void logsQuery.refetch()} />
+        ) : items.length === 0 ? (
+          hasFilters
+            ? <EmptyState title={t('providers.requestLogs.noMatches.title')} description={t('providers.requestLogs.noMatches.description')} actionLabel={t('common:actions.clearFilters')} onAction={() => onFiltersChange({})} />
+            : <EmptyState title={t('providers.requestLogs.emptyTitle')} description={t('providers.requestLogs.emptyDescription')} />
+        ) : (
+          <>
+            <ul className="grid gap-2">
+              {items.map((item) => (
+                <RequestLogRow
+                  key={item.id}
+                  item={item}
+                  expanded={expandedId === item.id}
+                  onToggle={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                  locale={locale}
+                />
+              ))}
+            </ul>
+            {nextCursor ? (
+              <div className="mt-3">
+                <Button type="button" variant="secondary" size="compact" onClick={() => void loadMore()} disabled={loadingMore}>
+                  {loadingMore ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : null}
+                  {t('providers.requestLogs.loadMore')}
+                </Button>
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
+    </section>
+  );
 }

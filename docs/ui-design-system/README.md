@@ -164,7 +164,7 @@ Use Lucide icons consistently, normally at `16px` and at `18px` in primary navig
 
 ### Chat Workflow Mentions
 
-The embedded chat mention menu supports both configured Agents and published Workflows. Use distinct neutral icons and labels so users understand that an Agent mention opens an Agent turn while a Workflow mention creates a Workflow Run. Keep the selected target chip compact and removable. Workflow progress uses the existing queued, running, completed, failed, and cancelled status semantics, with text and icon cues in addition to color. Successful Workflow Artifacts appear as restrained transcript cards with a direct details action. Draft Workflows are not listed as runnable mentions.
+The embedded Chat Bot mention menu supports published Workflows only. Keep the selected Workflow chip compact and removable so users understand that the mention creates a Workflow Run. Workflow progress uses the existing queued, running, completed, failed, and cancelled status semantics, with text and icon cues in addition to color. Successful Workflow Artifacts appear as restrained transcript cards with a direct details action. Draft Workflows are not listed as runnable mentions.
 
 ### Agents
 
@@ -176,13 +176,11 @@ Use one shared streaming Markdown renderer for model-generated text across Syste
 
 In conversational layouts, user messages align to the right in compact neutral bubbles and remain plain text. Agent responses align to the left with a wider, unframed reading column so structured output remains scannable. Alignment, accessible labels, and optional identity marks distinguish speakers without relying on color. Streaming updates follow the end only when the reader was already at the end.
 
-Create an Agent response placeholder in the transcript as soon as a turn starts. Show restrained inline progress there instead of replacing or disabling the composer. While a turn is running, keep the draft input editable and replace the send control with a familiar square Stop icon; stopping is a neutral execution control rather than a destructive action. Preserve the draft after completion or cancellation, and use text plus icon cues for working and cancelled states.
+Create a Chat Bot response placeholder in the transcript as soon as a turn starts. Show restrained inline progress there instead of replacing or disabling the composer. While a turn is running, keep the draft input editable and replace the send control with a familiar square Stop icon; stopping is a neutral execution control rather than a destructive action. Preserve the draft after completion or cancellation, and use text plus icon cues for working and cancelled states.
 
 Present inline Skill calls as compact disclosure rows by default. The collapsed row keeps the Skill identity, script name, execution status, and exit code visible without allowing arguments, host details, or raw output to dominate the transcript. A keyboard-accessible disclosure control reveals the complete metadata, warning, and a height-bounded internally scrollable output region. Failed calls remain collapsed unless the user opens them.
 
-Treat `@` selection in a conversation composer as structured dispatch, not decorated message text. Opening `@` presents a searchable keyboard-accessible custom-Agent menu with pointer selection, arrow navigation, `Enter`, and `Escape`. A selection becomes one removable mention token before the task text inside the same bordered input surface; it must not appear as a separate adjacent field or region. Only one Agent may be selected for a task, and its identity remains visible until dispatch or removal. The token and task text may wrap together within that shared surface on narrow screens.
-
-Present persistent child Agent sessions in a compact unframed status band between the transcript and composer. Each item shows Agent identity and a text or icon status cue, with unread state communicated by more than color. Selecting an item switches the transcript and composer to that child conversation. Provide explicit return-to-System-Helper and close actions, use familiar Lucide icons with accessible names and tooltips, and keep the band compact and horizontally scrollable on narrow screens.
+Treat `@` selection in the Chat Bot composer as structured dispatch, not decorated message text. Opening `@` presents a searchable keyboard-accessible published Workflow menu with pointer selection, arrow navigation, `Enter`, and `Escape`. A selection becomes one removable mention token before the task text inside the same bordered input surface; it must not appear as a separate adjacent field or region. Only one Workflow may be selected for a task, and its identity remains visible until dispatch or removal. The token and task text may wrap together within that shared surface on narrow screens. Chat Bot does not expose Agent mentions or child sessions.
 
 ### Workflow Editor
 

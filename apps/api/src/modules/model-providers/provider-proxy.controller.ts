@@ -27,6 +27,11 @@ export class ProviderProxyController {
     return this.proxyService.proxyUnified(request, response, 'responses');
   }
 
+  @Post('v1/messages')
+  unifiedMessages(@Req() request: Request, @Res() response: Response) {
+    return this.proxyService.proxyUnified(request, response, 'messages');
+  }
+
   @Post('v1/images/generations')
   unifiedImageGenerations(@Req() request: Request, @Res() response: Response) {
     return this.proxyService.proxyUnified(request, response, 'images/generations');

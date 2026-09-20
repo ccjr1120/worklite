@@ -1,10 +1,10 @@
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
-import { ArrowLeft, ArrowUp, Ban, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleX, Download, FileCode2, History, LoaderCircle, MessageSquareText, Play, Plus, RefreshCw, ShieldAlert, Square, X } from 'lucide-react';
+import { ArrowUp, Bot, ChevronDown, ChevronRight, Download, FileCode2, History, LoaderCircle, MessageSquareText, Play, Plus, RefreshCw, ShieldAlert, Square, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AgentExecutionView, AgentSubSessionView, AgentToolCallView, AgentView, McpServerView, RunView, WorkflowView } from '@worklite/contracts';
+import type { AgentExecutionView, AgentToolCallView, McpServerView, RunView, WorkflowView } from '@worklite/contracts';
 import { ApiError, api, parseAgentExecutionEvent } from '@/api/client';
-import { agentSubSessionsQueryKey, useAgentQuery, useAgentsQuery, useAgentSubSessionsQuery, useMcpServersQuery, useModelProvidersQuery, useWorkflowsQuery } from '@/api/queries';
+import { useAgentQuery, useMcpServersQuery, useModelProvidersQuery, useWorkflowsQuery } from '@/api/queries';
 import { Conversation, ConversationContent } from '@/components/ai-elements/conversation';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import { PromptInput, PromptInputSubmit, PromptInputTextarea } from '@/components/ai-elements/prompt-input';
@@ -25,15 +25,15 @@ const SYSTEM_HELPER_CHAT_ID = 'agt_system_helper_chat';
 const HISTORY_LIMIT = 20;
 const INCOMPLETE_SKILL_REQUEST = 'The model returned an incomplete Skill request. Its JSON ended before the request was complete.';
 const INVALID_SKILL_REQUEST = 'The model returned an invalid Skill request. Its arguments could not be parsed or did not match the required structure.';
-const GENERIC_AGENT_ERROR = 'The Agent could not complete this turn. Check its provider configuration and try again.';
-const AGENT_TURN_ERROR = 'The Agent could not complete this turn.';
-const SKILL_EXECUTION_ERROR = 'The Agent Skill script could not be completed.';
-const RESTARTED_AGENT_ERROR = 'The API restarted before this Agent turn completed.';
+const GENERIC_AGENT_ERROR = 'Chat Bot could not complete this turn. Check its provider configuration and try again.';
+const AGENT_TURN_ERROR = 'Chat Bot could not complete this turn.';
+const SKILL_EXECUTION_ERROR = 'The Skill script could not be completed.';
+const RESTARTED_AGENT_ERROR = 'The API restarted before this Chat Bot turn completed.';
 
 type ArchivedExecution = { id: string; label: string; archivedAt: string };
-type StoredExecutionState = { activeId: string | null; activeSubSessionId: string | null; archived: ArchivedExecution[] };
+type StoredExecutionState = { activeId: string | null; archived: ArchivedExecution[] };
 type SlashCommand = '/log' | '/new' | '/resume';
-type MentionItem = { kind: 'agent'; value: AgentView } | { kind: 'workflow'; value: WorkflowView };
+type MentionItem = { kind: 'workflow'; value: WorkflowView };
 type ActiveWorkflowRun = { workflow: WorkflowView; run: RunView; input: string };
 
 const SLASH_COMMANDS: Array<{ value: SlashCommand; icon: typeof Download; descriptionKey: 'commands.logDescription' | 'commands.newDescription' | 'commands.resumeDescription' }> = [
@@ -43,16 +43,15 @@ const SLASH_COMMANDS: Array<{ value: SlashCommand; icon: typeof Download; descri
 ];
 
 function storageKey(workspaceSlug: string) {
-  return `worklite.system-helper.executions.${workspaceSlug}`;
+  return `worklite.chat-bot.executions.${workspaceSlug}`;
 }
 
 function readStoredState(workspaceSlug: string): StoredExecutionState {
   try {
     const value = JSON.parse(window.localStorage.getItem(storageKey(workspaceSlug)) ?? 'null') as unknown;
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return { activeId: null, activeSubSessionId: null, archived: [] };
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return { activeId: null, archived: [] };
     const record = value as Record<string, unknown>;
     const activeId = typeof record.activeId === 'string' ? record.activeId : null;
-    const activeSubSessionId = typeof record.activeSubSessionId === 'string' ? record.activeSubSessionId : null;
     const archived = Array.isArray(record.archived)
       ? record.archived.flatMap((item) => {
           if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
@@ -62,13 +61,13 @@ function readStoredState(workspaceSlug: string): StoredExecutionState {
             : [];
         }).slice(0, HISTORY_LIMIT)
       : [];
-    return { activeId, activeSubSessionId, archived };
+    return { activeId, archived };
   } catch {
-    return { activeId: null, activeSubSessionId: null, archived: [] };
+    return { activeId: null, archived: [] };
   }
 }
 
-function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
+function ChatBot({ workspaceSlug }: { workspaceSlug: string }) {
   const { t } = useTranslation(['assistant', 'common']);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const locationSearch = useRouterState({ select: (state) => state.location.search as Record<string, unknown> });
@@ -76,18 +75,13 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const agentQuery = useAgentQuery(workspaceSlug, SYSTEM_HELPER_CHAT_ID);
   const providersQuery = useModelProvidersQuery(workspaceSlug);
   const mcpServersQuery = useMcpServersQuery(workspaceSlug);
-  const agentsQuery = useAgentsQuery(workspaceSlug);
   const workflowsQuery = useWorkflowsQuery(workspaceSlug);
-  const subSessionsQuery = useAgentSubSessionsQuery(workspaceSlug);
   const { applyAppearancePreference } = useTheme();
   const { applyLocalePreference, locale } = useLocale();
   const initialState = useMemo(() => readStoredState(workspaceSlug), [workspaceSlug]);
   const [targetIds, setTargetIds] = useState({ 'system-helper': initialState.activeId });
   const [archived, setArchived] = useState<ArchivedExecution[]>(initialState.archived);
   const [execution, setExecution] = useState<AgentExecutionView | null>(null);
-  const [activeSubSessionId, setActiveSubSessionId] = useState<string | null>(initialState.activeSubSessionId);
-  const [subExecution, setSubExecution] = useState<AgentExecutionView | null>(null);
-  const [selectedAgent, setSelectedAgent] = useState<AgentView | null>(null);
   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowView | null>(null);
   const [workflowRun, setWorkflowRun] = useState<ActiveWorkflowRun | null>(null);
   const [draft, setDraft] = useState('');
@@ -99,14 +93,12 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loadingExecution, setLoadingExecution] = useState(Boolean(initialState.activeId));
-  const [loadingSubExecution, setLoadingSubExecution] = useState(false);
   const [error, setError] = useState('');
   const [slashDismissed, setSlashDismissed] = useState(false);
   const [activeCommandIndex, setActiveCommandIndex] = useState(0);
   const [mentionDismissed, setMentionDismissed] = useState(false);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [mainConnectionState, setMainConnectionState] = useState<'connected' | 'reconnecting'>('connected');
-  const [subConnectionState, setSubConnectionState] = useState<'connected' | 'reconnecting'>('connected');
   const [floatingPosition, setFloatingPosition] = useState({ right: 24, bottom: 24 });
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatSurfaceRef = useRef<HTMLDivElement>(null);
@@ -117,7 +109,6 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const currentPathRef = useRef(pathname);
   const appliedResultIdsRef = useRef(new Set<string>());
   const mainRequestGenerationRef = useRef(0);
-  const subRequestGenerationRef = useRef(0);
   const isConfigured = Boolean(agentQuery.data?.providerId && agentQuery.data?.model);
   useEffect(() => {
     if (!agentQuery.data) return;
@@ -139,28 +130,24 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   const activeId = targetIds['system-helper'] ?? null;
   const executionAgentId = SYSTEM_HELPER_CHAT_ID;
   const setActiveId = (id: string | null) => setTargetIds((current) => ({ ...current, 'system-helper': id }));
-  const subSessions = subSessionsQuery.data ?? [];
-  const activeSubSession = subSessions.find((session) => session.id === activeSubSessionId) ?? null;
-  const visibleExecution = activeSubSession ? subExecution : execution;
-  const connectionState = activeSubSession ? subConnectionState : mainConnectionState;
+  const visibleExecution = execution;
+  const connectionState = mainConnectionState;
   const running = visibleExecution?.status === 'running';
   const isHome = pathname === '/home';
   const waitingForInput = visibleExecution?.status === 'waiting_for_input';
   const mainRunning = execution?.status === 'running';
   const workflowRunning = workflowRun?.run.status === 'queued' || workflowRun?.run.status === 'running' || workflowRun?.run.status === 'waiting_for_input';
-  const eligibleAgents = useMemo(() => (agentsQuery.data ?? []).filter((agent) => agent.kind === 'custom' && agent.providerId && agent.model), [agentsQuery.data]);
-  const mentionMatch = !activeSubSession && !selectedAgent && !selectedWorkflow && !workflowRunning ? /(?:^|\s)@([^\s@]*)$/.exec(draft) : null;
+  const mentionMatch = !selectedWorkflow && !workflowRunning ? /(?:^|\s)@([^\s@]*)$/.exec(draft) : null;
   const mentionQuery = mentionMatch?.[1]?.toLocaleLowerCase() ?? '';
   const eligibleWorkflows = useMemo(() => (workflowsQuery.data ?? []).filter((workflow) => workflow.state === 'published' && workflow.latestVersionId), [workflowsQuery.data]);
   const mentionMatches: MentionItem[] = mentionMatch && !mentionDismissed
     ? [
-      ...eligibleAgents.filter((agent) => `${agent.name} ${agent.responsibility}`.toLocaleLowerCase().includes(mentionQuery)).map((value) => ({ kind: 'agent' as const, value })),
       ...eligibleWorkflows.filter((workflow) => workflow.name.toLocaleLowerCase().includes(mentionQuery)).map((value) => ({ kind: 'workflow' as const, value })),
     ]
     : [];
   const mentionMenuOpen = Boolean(mentionMatch && !mentionDismissed);
   const slashQuery = draft.trimStart().toLowerCase();
-  const commandMatches = !activeSubSession && !selectedAgent && !selectedWorkflow && !mentionMenuOpen && !mainRunning && !workflowRunning && slashQuery.startsWith('/') && !slashDismissed ? SLASH_COMMANDS.filter((command) => command.value.startsWith(slashQuery)) : [];
+  const commandMatches = !selectedWorkflow && !mentionMenuOpen && !mainRunning && !workflowRunning && slashQuery.startsWith('/') && !slashDismissed ? SLASH_COMMANDS.filter((command) => command.value.startsWith(slashQuery)) : [];
   const executionError = visibleExecution?.errorCode === 'incomplete_tool_request' || visibleExecution?.error === INCOMPLETE_SKILL_REQUEST
     ? t('assistant:execution.incompleteSkillRequest')
     : visibleExecution?.errorCode === 'invalid_tool_request' || visibleExecution?.error === INVALID_SKILL_REQUEST
@@ -202,8 +189,8 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   }, [applyCompletedResult]);
 
   useEffect(() => {
-    window.localStorage.setItem(storageKey(workspaceSlug), JSON.stringify({ activeId, activeSubSessionId, archived } satisfies StoredExecutionState));
-  }, [activeId, activeSubSessionId, archived, workspaceSlug]);
+    window.localStorage.setItem(storageKey(workspaceSlug), JSON.stringify({ activeId, archived } satisfies StoredExecutionState));
+  }, [activeId, archived, workspaceSlug]);
 
   useEffect(() => {
     if (currentPathRef.current !== pathname) {
@@ -282,84 +269,6 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
   }, [activeId, applyCompletedResults, execution?.status, executionAgentId]);
 
   useEffect(() => {
-    let cancelled = false;
-    const generation = ++subRequestGenerationRef.current;
-    let retryTimer: number | undefined;
-    if (!activeSubSessionId) {
-      setSubExecution(null);
-      setLoadingSubExecution(false);
-      setSubConnectionState('connected');
-      return;
-    }
-    if (!activeSubSession) {
-      if (!subSessionsQuery.isLoading) setActiveSubSessionId(null);
-      return;
-    }
-    setLoadingSubExecution(true);
-    let delay = 1_500;
-    const load = async () => {
-      if (cancelled || generation !== subRequestGenerationRef.current) return;
-      try {
-        const next = await api.agentExecution(workspaceSlug, activeSubSession.agentId, activeSubSession.executionId);
-        if (cancelled || generation !== subRequestGenerationRef.current) return;
-        setSubConnectionState('connected');
-        setError('');
-        setSubExecution(next);
-      } catch (loadError) {
-        if (cancelled || generation !== subRequestGenerationRef.current) return;
-        if (loadError instanceof ApiError && loadError.status < 500) {
-          setSubConnectionState('connected');
-          setError(apiErrorMessage(loadError, t('assistant:execution.loadFailed')));
-          return;
-        }
-        setSubConnectionState('reconnecting');
-        retryTimer = window.setTimeout(load, delay);
-        delay = Math.min(delay * 2, 12_000);
-      } finally {
-        if (!cancelled) setLoadingSubExecution(false);
-      }
-    };
-    void load();
-    return () => { cancelled = true; if (retryTimer !== undefined) window.clearTimeout(retryTimer); };
-  }, [activeSubSession, activeSubSessionId, subSessionsQuery.isLoading, t, workspaceSlug]);
-
-  useEffect(() => {
-    if (!activeSubSession || (subExecution?.status !== 'running' && subExecution?.status !== 'waiting_for_input')) return;
-    const source = new EventSource(api.agentExecutionEventsUrl(activeSubSession.agentId, activeSubSession.executionId), { withCredentials: true });
-    source.onopen = () => setSubConnectionState('connected');
-    source.onerror = () => setSubConnectionState('reconnecting');
-    source.onmessage = (message) => {
-      try {
-        const event = parseAgentExecutionEvent(message.data);
-        const data = event.data;
-        if (data.kind === 'snapshot') {
-          setSubExecution(data.execution);
-          if (data.execution.status !== 'running') void queryClient.invalidateQueries({ queryKey: agentSubSessionsQueryKey() });
-        } else if (data.kind === 'message_delta') {
-          setSubExecution((current) => {
-            if (!current) return current;
-            const existing = current.messages.find((item) => item.id === data.messageId);
-            const messages = existing
-              ? current.messages.map((item) => item.id === data.messageId ? { ...item, content: item.content + data.delta } : item)
-              : [...current.messages, { id: data.messageId, role: 'assistant' as const, content: data.delta, createdAt: event.createdAt }];
-            return { ...current, messages };
-          });
-        }
-      } catch {
-        setSubConnectionState('reconnecting');
-      }
-    };
-    return () => source.close();
-  }, [activeSubSession, subExecution?.status]);
-
-  useEffect(() => {
-    if (!activeSubSession || !activeSubSession.unread || subExecution?.status === 'running') return;
-    void api.updateAgentSubSession(workspaceSlug, activeSubSession.id, false).then((updated) => {
-      queryClient.setQueryData<AgentSubSessionView[]>(agentSubSessionsQueryKey(), (current = []) => current.map((item) => item.id === updated.id ? updated : item));
-    }).catch(() => undefined);
-  }, [activeSubSession, subExecution?.status, workspaceSlug]);
-
-  useEffect(() => {
     if (!workflowRun || !workflowRunning) return;
     let cancelled = false;
     const poll = async () => {
@@ -412,7 +321,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
     const trimmedMessage = draft.trim();
     if (busy || (!trimmedMessage && !selectedWorkflow)) return;
     const command = trimmedMessage.toLowerCase();
-    if (!activeSubSession && !selectedAgent && (command === '/log' || command === '/new' || command === '/resume')) {
+    if (command === '/log' || command === '/new' || command === '/resume') {
       runCommand(command);
       return;
     }
@@ -435,31 +344,12 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
       }
       return;
     }
-    if (selectedAgent) {
-      setBusy(true);
-      setError('');
-      try {
-        const session = await api.createAgentSubSession(workspaceSlug, { agentId: selectedAgent.id, message: draft });
-        queryClient.setQueryData<AgentSubSessionView[]>(agentSubSessionsQueryKey(), (current = []) => [session, ...current.filter((item) => item.id !== session.id)]);
-        setSelectedAgent(null);
-        setDraft('');
-        setHistoryOpen(false);
-        setActiveSubSessionId(session.id);
-        setOpen(true);
-      } catch (createError) {
-        setError(apiErrorMessage(createError, t('assistant:subAgents.createFailed')));
-      } finally {
-        setBusy(false);
-      }
-      return;
-    }
     if (waitingForInput && visibleExecution?.pendingQuestion) {
       setBusy(true);
       setError('');
       try {
-        const next = await api.answerAgentQuestion(workspaceSlug, activeSubSession?.agentId ?? SYSTEM_HELPER_CHAT_ID, visibleExecution.id, { questionId: visibleExecution.pendingQuestion.id, answer: trimmedMessage });
-        if (activeSubSession) setSubExecution(next);
-        else setExecution(next);
+        const next = await api.answerAgentQuestion(workspaceSlug, SYSTEM_HELPER_CHAT_ID, visibleExecution.id, { questionId: visibleExecution.pendingQuestion.id, answer: trimmedMessage });
+        setExecution(next);
         setDraft('');
         setOpen(true);
       } catch (answerError) {
@@ -469,27 +359,21 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
       }
       return;
     }
-    if (running || (!activeSubSession && !isConfigured)) return;
+    if (running || !isConfigured) return;
     setBusy(true);
     setError('');
     try {
-      if (activeSubSession) {
-        const next = await api.continueAgentExecution(workspaceSlug, activeSubSession.agentId, activeSubSession.executionId, trimmedMessage);
-        setSubExecution(next);
-        void queryClient.invalidateQueries({ queryKey: agentSubSessionsQueryKey() });
-      } else {
-        const next = activeId
-          ? await api.continueAgentExecution(workspaceSlug, executionAgentId, activeId, trimmedMessage)
-          : await api.createAgentExecution(workspaceSlug, executionAgentId, trimmedMessage);
-        setActiveId(next.id);
-        setExecution(next);
-        void applyCompletedResults(next);
-      }
+      const next = activeId
+        ? await api.continueAgentExecution(workspaceSlug, executionAgentId, activeId, trimmedMessage)
+        : await api.createAgentExecution(workspaceSlug, executionAgentId, trimmedMessage);
+      setActiveId(next.id);
+      setExecution(next);
+      void applyCompletedResults(next);
       setDraft('');
       setHistoryOpen(false);
       setOpen(true);
     } catch (requestError) {
-      setError(apiErrorMessage(requestError, t(activeSubSession ? 'assistant:subAgents.requestFailed' : 'assistant:execution.requestFailed')));
+      setError(apiErrorMessage(requestError, t('assistant:execution.requestFailed')));
     } finally {
       setBusy(false);
     }
@@ -513,12 +397,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
     setBusy(true);
     setError('');
     try {
-      if (activeSubSession) {
-        setSubExecution(await api.cancelAgentExecution(workspaceSlug, activeSubSession.agentId, activeSubSession.executionId));
-        void queryClient.invalidateQueries({ queryKey: agentSubSessionsQueryKey() });
-      } else {
-        setExecution(await api.cancelAgentExecution(workspaceSlug, executionAgentId, visibleExecution.id));
-      }
+      setExecution(await api.cancelAgentExecution(workspaceSlug, executionAgentId, visibleExecution.id));
     } catch (cancelError) {
       setError(apiErrorMessage(cancelError, t('assistant:execution.cancelFailed')));
     } finally {
@@ -531,17 +410,11 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
     setBusy(true);
     setError('');
     try {
-      if (activeSubSession) {
-        setSubExecution(await api.retryAgentExecution(workspaceSlug, activeSubSession.agentId, activeSubSession.executionId));
-        void queryClient.invalidateQueries({ queryKey: agentSubSessionsQueryKey() });
-      } else {
-        setExecution(await api.retryAgentExecution(workspaceSlug, executionAgentId, visibleExecution.id));
-      }
-      if (activeSubSession) setSubConnectionState('connected');
-      else setMainConnectionState('connected');
+      setExecution(await api.retryAgentExecution(workspaceSlug, executionAgentId, visibleExecution.id));
+      setMainConnectionState('connected');
       setOpen(true);
     } catch (retryError) {
-      setError(apiErrorMessage(retryError, t(activeSubSession ? 'assistant:subAgents.requestFailed' : 'assistant:execution.requestFailed')));
+      setError(apiErrorMessage(retryError, t('assistant:execution.requestFailed')));
     } finally {
       setBusy(false);
     }
@@ -551,42 +424,9 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
     if (!mentionMatch) return;
     const atIndex = draft.lastIndexOf('@');
     setDraft(atIndex >= 0 ? draft.slice(0, atIndex) : draft);
-    setSelectedAgent(item.kind === 'agent' ? item.value : null);
     setSelectedWorkflow(item.kind === 'workflow' ? item.value : null);
     setMentionDismissed(true);
     setActiveMentionIndex(0);
-  }
-
-  function openSubSession(session: AgentSubSessionView) {
-    setActiveSubSessionId(session.id);
-    setSubConnectionState('connected');
-    setHistoryOpen(false);
-    setSelectedAgent(null);
-    setError('');
-    setOpen(true);
-    if (!session.unread) return;
-    void api.updateAgentSubSession(workspaceSlug, session.id, false).then((updated) => {
-      queryClient.setQueryData<AgentSubSessionView[]>(agentSubSessionsQueryKey(), (current = []) => current.map((item) => item.id === updated.id ? updated : item));
-    }).catch(() => undefined);
-  }
-
-  async function closeSubSession(session: AgentSubSessionView) {
-    if (busy) return;
-    setBusy(true);
-    setError('');
-    try {
-      await api.deleteAgentSubSession(workspaceSlug, session.id);
-      queryClient.setQueryData<AgentSubSessionView[]>(agentSubSessionsQueryKey(), (current = []) => current.filter((item) => item.id !== session.id));
-      if (activeSubSessionId === session.id) {
-        setActiveSubSessionId(null);
-        setSubExecution(null);
-        setMainConnectionState('connected');
-      }
-    } catch (closeError) {
-      setError(apiErrorMessage(closeError, t('assistant:subAgents.closeFailed')));
-    } finally {
-      setBusy(false);
-    }
   }
 
   function archiveCurrent() {
@@ -673,12 +513,11 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
       }
       return;
     }
-    if ((selectedAgent || selectedWorkflow) && !draft && event.key === 'Backspace') {
-      setSelectedAgent(null);
+    if (selectedWorkflow && !draft && event.key === 'Backspace') {
       setSelectedWorkflow(null);
       return;
     }
-    if (running && !selectedAgent && event.key === 'Enter') {
+    if (running && event.key === 'Enter') {
       event.preventDefault();
       return;
     }
@@ -771,10 +610,10 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
         : visibleExecution?.status === 'completed' ? t('assistant:status.completed')
     : visibleExecution?.status === 'waiting_for_input' ? t('assistant:status.waiting_for_input')
       : visibleExecution?.status === 'running' ? t('assistant:status.running') : '';
-  const composerAvailable = Boolean(activeSubSession || isConfigured || eligibleAgents.length > 0 || eligibleWorkflows.length > 0);
-  const composerLoading = agentQuery.isLoading || agentsQuery.isLoading || workflowsQuery.isLoading || subSessionsQuery.isLoading || mcpServersQuery.isLoading;
-  const activeExecutionRunning = (running && !selectedAgent && !selectedWorkflow) || workflowRunning;
-  const submitDisabled = activeExecutionRunning ? busy : busy || (!draft.trim() && !selectedWorkflow) || (!activeSubSession && !selectedAgent && !selectedWorkflow && !isConfigured);
+  const composerAvailable = Boolean(isConfigured || eligibleWorkflows.length > 0);
+  const composerLoading = agentQuery.isLoading || workflowsQuery.isLoading || mcpServersQuery.isLoading;
+  const activeExecutionRunning = (running && !selectedWorkflow) || workflowRunning;
+  const submitDisabled = activeExecutionRunning ? busy : busy || (!draft.trim() && !selectedWorkflow) || (!selectedWorkflow && !isConfigured);
 
   return (
     <div ref={floatingContainerRef} className={cn('pointer-events-none absolute z-30', isHome || open ? 'inset-x-3 bottom-3 sm:inset-x-6 sm:bottom-6' : 'inset-0')}>
@@ -787,14 +626,12 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
             <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-surface px-4 py-3">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h2 id="assistant-panel-title" className="text-base font-semibold">{activeSubSession?.agentName ?? t('assistant:title')}</h2>
+                  <h2 id="assistant-panel-title" className="text-base font-semibold">{t('assistant:title')}</h2>
                   {status ? <Badge variant={visibleExecution?.status === 'failed' ? 'danger' : 'neutral'}>{status}</Badge> : null}
                 </div>
-                <p className="mt-0.5 truncate text-[13px] text-muted-foreground">{activeSubSession?.title ?? t('assistant:description')}</p>
+                <p className="mt-0.5 truncate text-[13px] text-muted-foreground">{t('assistant:description')}</p>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                {activeSubSession ? <Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size="icon-compact" aria-label={t('assistant:subAgents.return')} onClick={() => { setActiveSubSessionId(null); setSubExecution(null); setError(''); }}><ArrowLeft className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('assistant:subAgents.return')}</TooltipContent></Tooltip> : null}
-                {activeSubSession ? <Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size="icon-compact" aria-label={t('assistant:subAgents.close')} disabled={busy} onClick={() => void closeSubSession(activeSubSession)}><X className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('assistant:subAgents.close')}</TooltipContent></Tooltip> : null}
                 <Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size="icon-compact" aria-label={t('assistant:minimized.minimize')} onClick={() => setOpen(false)}><ChevronDown className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('assistant:minimized.minimize')}</TooltipContent></Tooltip>
               </div>
             </header>
@@ -808,7 +645,7 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
               <form className="agent-config-form" onSubmit={(event) => event.preventDefault()}>
                 <div className="agent-config-scroll">
                   <section className="agent-config-section">
-                    <div className="agent-config-heading"><span className="font-mono text-[10px] uppercase tracking-[0.1em] text-info">Agent</span><h3>{t('assistant:configuration.title')}</h3><p>{t('assistant:configuration.description')}</p></div>
+                    <div className="agent-config-heading"><span className="font-mono text-[10px] uppercase tracking-[0.1em] text-info">Chat Bot</span><h3>{t('assistant:configuration.title')}</h3><p>{t('assistant:configuration.description')}</p></div>
                     <div className="agent-config-fields"><label className="config-field" htmlFor="assistant-model-selection"><span>{t('assistant:configuration.model')}</span><Select value={configSelection} onValueChange={(value) => { setConfigSelection(value); const separator = value.indexOf('::'); if (separator >= 0) void saveConfiguration(value); }}>
                     <SelectTrigger id="assistant-model-selection"><SelectValue placeholder={t('assistant:configuration.placeholder')} /></SelectTrigger>
                     <SelectContent>{(providersQuery.data ?? []).flatMap((provider) => (provider.models ?? []).map((model) => <SelectItem key={`${provider.id}::${model}`} value={`${provider.id}::${model}`}>{provider.name} / {model}</SelectItem>))}</SelectContent>
@@ -829,9 +666,9 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
                 }}
               >
                 <ConversationContent>
-                  {events.length === 0 && !workflowRun && !loadingExecution && !loadingSubExecution && !activeSubSession ? <StarterPane onSelect={(prompt) => { setDraft(prompt); setOpen(true); }} /> : null}
-                  {(activeSubSession ? loadingSubExecution : loadingExecution) ? <p className="m-auto flex items-center gap-2 text-sm text-muted-foreground" role="status"><LoaderCircle className="size-4 motion-safe:animate-spin" />{t('assistant:execution.loading')}</p> : null}
-                  {events.map((event) => event.kind === 'message' ? <MessageRow key={event.item.id} message={event.item} assistantName={activeSubSession?.agentName} /> : <ToolCallPanel key={event.item.id} call={event.item} />)}
+                  {events.length === 0 && !workflowRun && !loadingExecution ? <StarterPane onSelect={(prompt) => { setDraft(prompt); setOpen(true); }} /> : null}
+                  {(loadingExecution) ? <p className="m-auto flex items-center gap-2 text-sm text-muted-foreground" role="status"><LoaderCircle className="size-4 motion-safe:animate-spin" />{t('assistant:execution.loading')}</p> : null}
+                  {events.map((event) => event.kind === 'message' ? <MessageRow key={event.item.id} message={event.item} assistantName={undefined} /> : <ToolCallPanel key={event.item.id} call={event.item} />)}
           {running ? <WorkingRow /> : null}
                   {waitingForInput && visibleExecution?.pendingQuestion ? <QuestionRow question={visibleExecution.pendingQuestion} /> : null}
                   {visibleExecution?.status === 'cancelled' ? <CancelledRow /> : null}
@@ -841,73 +678,13 @@ function AgentChat({ workspaceSlug }: { workspaceSlug: string }) {
                 </ConversationContent>
               </Conversation>
             )}
-            {subSessions.length > 0 ? <SubAgentBand sessions={subSessions} activeId={activeSubSessionId} onSelect={openSubSession} /> : null}
-          </section>
-        </div>
-
-        {!open && status ? <button type="button" className={cn('flex min-h-8 items-center gap-2 border-b border-border px-3 text-left text-[13px] text-muted-foreground hover:bg-surface-subtle hover:text-foreground', surfaceInteraction, focusRingInset)} onClick={() => setOpen(true)}><MessageSquareText className="size-4 shrink-0 text-brand" /><span className="min-w-0 flex-1 truncate">{status}</span><ChevronRight className="size-4" /></button> : null}
-
-        {panelView === 'configuration' ? <div className="min-h-12 border-t border-border bg-surface" aria-hidden="true" /> : composerLoading ? (
-          <div className="flex min-h-12 items-center gap-2 px-3 text-[13px] text-muted-foreground" role="status"><LoaderCircle className="size-4 motion-safe:animate-spin" />{t('assistant:composer.loading')}</div>
-        ) : composerAvailable ? (
-          <PromptInput onSubmit={submit}>
-            <label htmlFor="assistant-message" className="sr-only">{t('assistant:composer.label')}</label>
-            <Popover open={commandMatches.length > 0 || mentionMenuOpen} onOpenChange={(next) => { if (next) return; setSlashDismissed(true); setMentionDismissed(true); }}>
-              <PopoverAnchor asChild><div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 rounded-md border border-border bg-surface px-2 focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
-                {selectedWorkflow ? <span className="inline-flex h-7 max-w-[min(14rem,45%)] shrink-0 items-center gap-1.5 rounded-md border border-brand/30 bg-brand-subtle px-2 text-[13px] font-medium text-foreground"><Play className="size-3.5 shrink-0 text-brand" /><span className="truncate">{selectedWorkflow.name}</span><Tooltip><TooltipTrigger asChild><button type="button" className={cn('rounded-sm text-muted-foreground hover:text-foreground', focusRingInset)} aria-label={t('assistant:mentions.removeWorkflow')} onClick={() => setSelectedWorkflow(null)}><X className="size-3.5" /></button></TooltipTrigger><TooltipContent>{t('assistant:mentions.removeWorkflow')}</TooltipContent></Tooltip></span> : null}{selectedAgent ? <span className="inline-flex h-7 max-w-[min(12rem,45%)] shrink-0 items-center gap-1.5 rounded-md border border-brand/30 bg-brand-subtle px-2 text-[13px] font-medium text-foreground"><Bot className="size-3.5 shrink-0 text-brand" /><span className="truncate">{selectedAgent.name}</span><Tooltip><TooltipTrigger asChild><button type="button" className={cn('rounded-sm text-muted-foreground hover:text-foreground', focusRingInset)} aria-label={t('assistant:mentions.remove')} onClick={() => setSelectedAgent(null)}><X className="size-3.5" /></button></TooltipTrigger><TooltipContent>{t('assistant:mentions.remove')}</TooltipContent></Tooltip></span> : null}
-                <PromptInputTextarea className="min-w-32 basis-40 border-0 bg-transparent px-1 focus:border-transparent focus:ring-0" id="assistant-message" name="system-helper-message" autoComplete="off" value={draft} onValueChange={(value) => { setDraft(value); setSlashDismissed(false); setMentionDismissed(false); setActiveCommandIndex(0); setActiveMentionIndex(0); }} onFocus={() => setOpen(true)} onKeyDown={handleComposerKeyDown} placeholder={waitingForInput ? t('assistant:composer.answerPlaceholder') : activeSubSession ? t('assistant:composer.followUpPlaceholder', { agent: activeSubSession.agentName }) : t('assistant:composer.placeholder')} role="combobox" aria-expanded={commandMatches.length > 0 || mentionMenuOpen} rows={1} />
-              </div></PopoverAnchor>
-              <PopoverContent side="top" align="start" className="w-[min(420px,calc(100vw-24px))] p-1" onOpenAutoFocus={(event) => event.preventDefault()} onCloseAutoFocus={(event) => event.preventDefault()}>
-                {mentionMenuOpen ? <AgentMentionMenu items={mentionMatches} activeIndex={activeMentionIndex} onActiveIndex={setActiveMentionIndex} onSelect={selectMention} /> : <div role="listbox" aria-label={t('assistant:commands.menuLabel')}>{commandMatches.map((command, index) => { const Icon = command.icon; return <button key={command.value} type="button" role="option" aria-selected={index === activeCommandIndex} className={cn('flex w-full items-start gap-3 rounded-md px-3 py-2 text-left', surfaceInteraction, focusRingInset, index === activeCommandIndex ? 'bg-brand-subtle' : 'hover:bg-surface-subtle')} onPointerDown={(event) => event.preventDefault()} onPointerMove={() => setActiveCommandIndex(index)} onClick={() => runCommand(command.value)}><Icon className="mt-0.5 size-4 shrink-0 text-brand" /><span><span className="block font-mono text-[13px] font-medium">{command.value}</span><span className="mt-0.5 block text-xs text-muted-foreground">{t(`assistant:${command.descriptionKey}`)}</span></span></button>; })}</div>}
-              </PopoverContent>
-            </Popover>
-            <Tooltip><TooltipTrigger asChild><PromptInputSubmit className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md bg-brand text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50" status={activeExecutionRunning ? 'streaming' : busy ? 'submitted' : 'idle'} aria-label={activeExecutionRunning ? t('assistant:composer.stop') : t('assistant:composer.send')} disabled={submitDisabled} onStop={() => void cancelExecution()}>{activeExecutionRunning ? <Square className="size-3.5 fill-current" /> : busy ? <LoaderCircle className="size-4 motion-safe:animate-spin" /> : <ArrowUp className="size-4" />}</PromptInputSubmit></TooltipTrigger><TooltipContent>{activeExecutionRunning ? t('assistant:composer.stop') : t('assistant:composer.send')}</TooltipContent></Tooltip>
-          </PromptInput>
-        ) : (
-          <Link to="/agents/$agentId" params={{ agentId: SYSTEM_HELPER_CHAT_ID }} className={cn('flex min-h-12 items-center gap-2 px-3 text-[13px] font-medium hover:bg-surface-subtle', surfaceInteraction, focusRingInset)}><ShieldAlert className="size-4 shrink-0 text-brand" /><span className="min-w-0 flex-1">{t('assistant:composer.configure')}</span><ChevronRight className="size-4 text-muted-foreground" /></Link>
-        )}
-      </div> : null}
     </div>
   );
 }
 
-function SubAgentBand({ sessions, activeId, onSelect }: { sessions: AgentSubSessionView[]; activeId: string | null; onSelect: (session: AgentSubSessionView) => void }) {
-  const { t } = useTranslation('assistant');
-  return <div className="flex shrink-0 items-center gap-2 border-t border-border bg-surface px-3 py-2" aria-label={t('subAgents.label')}>
-    <span className="shrink-0 text-xs font-semibold text-muted-foreground">{t('subAgents.label')}</span>
-    <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
-      {sessions.map((session) => {
-        const StatusIcon = session.status === 'running' ? LoaderCircle : session.status === 'completed' ? CheckCircle2 : session.status === 'cancelled' ? Ban : CircleX;
-        return <button key={session.id} type="button" className={cn('flex h-8 max-w-64 shrink-0 items-center gap-2 rounded-md border px-2 text-left text-[13px]', surfaceInteraction, focusRingInset, activeId === session.id ? 'border-brand bg-brand-subtle' : 'border-border bg-surface hover:bg-surface-subtle')} aria-current={activeId === session.id ? 'true' : undefined} onClick={() => onSelect(session)}>
-          <span className="flex size-5 shrink-0 items-center justify-center rounded-sm border border-border bg-background text-[10px] font-semibold">{session.agentInitials}</span>
-          <span className="min-w-0 truncate font-medium">{session.agentName}</span>
-          <StatusIcon className={cn('size-3.5 shrink-0', session.status === 'running' && 'motion-safe:animate-spin', session.status === 'failed' && 'text-danger')} aria-hidden="true" />
-          <span className="sr-only">{t(`status.${session.status}`)}</span>
-          {session.unread ? <Badge variant="brand" className="shrink-0 px-1.5">{t('subAgents.unread')}</Badge> : null}
-        </button>;
-      })}
-    </div>
-  </div>;
-}
-
-function AgentMentionMenu({ items, activeIndex, onActiveIndex, onSelect }: { items: MentionItem[]; activeIndex: number; onActiveIndex: (index: number) => void; onSelect: (item: MentionItem) => void }) {
-  const { t } = useTranslation('assistant');
-  return <div role="listbox" aria-label={t('mentions.menuLabel')}>
-    {items.length === 0 ? <p className="px-3 py-2 text-[13px] text-muted-foreground">{t('mentions.empty')}</p> : items.map((item, index) => {
-      const name = item.value.name;
-      const description = item.kind === 'workflow' ? t('mentions.workflow') : item.value.responsibility;
-      const identity = item.kind === 'workflow' ? <Play className="size-3.5 text-brand" /> : item.value.initials;
-      return <button key={`${item.kind}:${item.value.id}`} type="button" role="option" aria-selected={index === activeIndex} className={cn('flex w-full items-center gap-3 rounded-md px-3 py-2 text-left', surfaceInteraction, focusRingInset, index === activeIndex ? 'bg-brand-subtle' : 'hover:bg-surface-subtle')} onPointerDown={(event) => event.preventDefault()} onPointerMove={() => onActiveIndex(index)} onClick={() => onSelect(item)}>
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-xs font-semibold">{identity}</span>
-        <span className="min-w-0"><span className="block truncate text-sm font-medium">{name}</span><span className="mt-0.5 block truncate text-xs text-muted-foreground">{description}</span></span>
-      </button>;
-    })}
-  </div>;
-}
-
 function StarterPane({ onSelect }: { onSelect: (prompt: string) => void }) {
   const { t } = useTranslation('assistant');
-  const starters = ['provider', 'skill', 'mcp', 'agent'] as const;
+  const starters = ['provider', 'skill', 'mcp', 'workflow'] as const;
   return <div className="my-auto py-6"><div className="mb-5 flex items-center gap-3"><span className="flex size-9 items-center justify-center rounded-md border border-border bg-surface"><MessageSquareText className="size-[18px] text-brand" /></span><div><p className="text-sm font-semibold">{t('starters.title')}</p><p className="mt-0.5 text-[13px] text-muted-foreground">{t('messages.welcome')}</p></div></div><div className="grid gap-2 sm:grid-cols-2">{starters.map((starter) => <button key={starter} type="button" className={cn('min-h-[72px] rounded-md border border-border bg-surface p-3 text-left hover:border-foreground/20 hover:bg-surface-subtle', surfaceInteraction, focusRing)} onClick={() => onSelect(t(`starters.${starter}.prompt`))}><span className="block text-sm font-medium">{t(`starters.${starter}.title`)}</span><span className="mt-1 block text-[13px] leading-5 text-muted-foreground">{t(`starters.${starter}.description`)}</span></button>)}</div></div>;
 }
 
@@ -1080,11 +857,11 @@ function downloadExecutionLog(execution: AgentExecutionView, labels: ExecutionLo
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `worklite-system-helper-${generatedAt.toISOString().replaceAll(':', '-')}.md`;
+  link.download = `worklite-chat-bot-${generatedAt.toISOString().replaceAll(':', '-')}.md`;
   document.body.append(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
 }
 
-export { AgentChat };
+export { ChatBot };

@@ -543,7 +543,7 @@ function FirstUseGuide({ providerConfigured }: { providerConfigured: boolean }) 
           <span className="min-w-0 flex-1 text-sm font-medium">{t('home:firstUse.configureSystemHelper')}</span>
           {providerConfigured ? (
             <Button size="compact" asChild>
-              <Link to="/agents/$agentId" params={{ agentId: SYSTEM_HELPER_CHAT_ID }}>{t('common:actions.continue')}<ChevronRight /></Link>
+              <Link to="/home" search={{ assistant: 'open' }}>{t('common:actions.continue')}<ChevronRight /></Link>
             </Button>
           ) : null}
         </li>

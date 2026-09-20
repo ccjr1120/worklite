@@ -1,4 +1,4 @@
-import { BadRequestException, HttpException, Inject, Injectable, NotFoundException, RequestTimeoutException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { Request } from 'express';
@@ -15,7 +15,6 @@ import type {
   McpServerTestResult,
   McpServerView,
   ModelProviderView,
-  ModelProviderTestResult,
   ModelProviderProtocol,
   SkillView,
   UpdateModelProviderRequest,
@@ -44,13 +43,12 @@ import {
   workspaceSettings,
   type Database,
 } from '@worklite/db';
-import { createModelGateway, type ModelProviderConfig } from '@worklite/model-gateway';
+import type { ModelProviderConfig } from '@worklite/model-gateway';
 import { listWorkflowNodeCapabilities } from '@worklite/workflow-engine';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from './teams.service';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
 import { McpClientService } from '../mcp-servers/mcp-client.service';
-import { DiagnosticsService } from '../diagnostics/diagnostics.service';
 
 function maskSecret(value: string): string {
   return value.length > 4 ? `****${value.slice(-4)}` : '****';
@@ -137,8 +135,7 @@ const MAX_SKILL_PACKAGE_BYTES = 1 * 1_024 * 1_024;
 
 const WORKLITE_NAVIGATION_ROUTES = {
   home: '/home',
-  agents: '/agents',
-  'system-helper-chat': '/agents/agt_system_helper_chat',
+  'system-helper-chat': '/home',
   skills: '/skills',
   'mcp-servers': '/mcp-servers',
   'model-providers': '/model-providers',
@@ -204,26 +201,13 @@ function providerHeaders(value: string | null): Record<string, string> | undefin
 
 function providerConfig(row: typeof modelProviders.$inferSelect, apiKey: string): ModelProviderConfig {
   const common = { id: row.id, apiKey, baseURL: row.baseURL ?? undefined, headers: providerHeaders(row.headers) };
-  if (row.protocol.startsWith('deepseek/')) return { ...common, adapter: 'deepseek' };
+  if (row.protocol === 'anthropic/messages') return { ...common, adapter: 'anthropic', operation: 'messages' };
   if (row.protocol === 'codex/responses') return { ...common, adapter: 'codex', operation: 'responses' };
-  return { ...common, adapter: 'openai', operation: row.protocol === 'openai/responses' ? 'responses' : 'chat/completions' };
+  if (row.protocol === 'openai/responses') return { ...common, adapter: 'openai', operation: 'responses' };
+  if (row.protocol === 'openai/chat') return { ...common, adapter: 'openai', operation: 'chat/completions' };
+  throw new BadRequestException('Unsupported model provider protocol.');
 }
 
-function errorDetails(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    const details: Record<string, unknown> = { name: error.name, message: error.message, stack: error.stack ?? null, cause: error.cause instanceof Error ? error.cause.message : error.cause ?? null };
-    for (const key of Object.getOwnPropertyNames(error)) {
-      if (key in details) continue;
-      const value = (error as unknown as Record<string, unknown>)[key];
-      try { JSON.stringify(value); details[key] = value; } catch { details[key] = String(value); }
-    }
-    return details;
-  }
-  return { value: String(error) };
-}
-
-// Fixed multilingual smoke-test prompt requested by the product.
-const PROVIDER_TEST_PROMPT = '\u4f60\u597d';
 const SYSTEM_HELPER_PLATFORM_SKILL_ID = 'sk_worklite_platform';
 
 @Injectable()
@@ -233,7 +217,6 @@ export class WorkspaceResourcesService {
     private readonly workspaces: WorkspaceService,
     private readonly skillScripts: SkillScriptRunnerService,
     private readonly mcpClient: McpClientService,
-    private readonly diagnostics: DiagnosticsService,
   ) {}
 
   async skills(request: Request, workspaceSlug: string): Promise<SkillView[]> {
@@ -481,16 +464,13 @@ export class WorkspaceResourcesService {
 
   async platformSnapshot(request: Request, workspaceSlug: string) {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [providerRows, skillRows, mcpRows, agentRows, workflowRows, scheduleRows, settingsRows, agentSkillRows, agentMcpRows, officialAccountRows] = await Promise.all([
+    const [providerRows, skillRows, mcpRows, workflowRows, scheduleRows, settingsRows, officialAccountRows] = await Promise.all([
       this.providers(request, workspaceSlug),
       this.db.select().from(skills).where(and(eq(skills.workspaceId, workspace.id), ne(skills.id, SYSTEM_HELPER_PLATFORM_SKILL_ID))).orderBy(skills.name),
       this.db.select().from(mcpServers).where(eq(mcpServers.workspaceId, workspace.id)).orderBy(mcpServers.name),
-      this.db.select().from(agents).where(eq(agents.workspaceId, workspace.id)).orderBy(agents.name),
       this.db.select().from(workflows).where(eq(workflows.workspaceId, workspace.id)).orderBy(workflows.name),
       this.db.select().from(workflowSchedules).where(eq(workflowSchedules.workspaceId, workspace.id)),
       this.db.select().from(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspace.id)).limit(1),
-      this.db.select({ agentId: agentSkills.agentId, skillId: agentSkills.skillId }).from(agentSkills).innerJoin(agents, eq(agentSkills.agentId, agents.id)).where(eq(agents.workspaceId, workspace.id)),
-      this.db.select({ agentId: agentMcpServers.agentId, mcpServerId: agentMcpServers.mcpServerId }).from(agentMcpServers).innerJoin(agents, eq(agentMcpServers.agentId, agents.id)).where(eq(agents.workspaceId, workspace.id)),
       this.db.select({ id: wechatOfficialAccounts.id, displayName: wechatOfficialAccounts.displayName, status: wechatOfficialAccounts.status }).from(wechatOfficialAccounts).where(eq(wechatOfficialAccounts.workspaceId, workspace.id)),
     ]);
     const providerNames = new Map(providerRows.map((provider) => [provider.id, provider.name]));
@@ -500,8 +480,10 @@ export class WorkspaceResourcesService {
     return {
       workspace: { id: workspace.id, slug: workspace.slug, name: workspace.name },
       capabilities: {
-        supportedResourceOperations: ['inspect workspace resources', 'inspect Workflow capabilities', 'navigate to known WorkLite pages', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server draft', 'create Agent draft', 'create Workflow draft', 'edit Workflow draft from a logical plan', 'change appearance', 'change language'],
+        supportedResourceOperations: ['inspect workspace resources', 'inspect Workflow capabilities', 'navigate to known WorkLite pages', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server draft', 'create Workflow draft', 'edit Workflow draft from a logical plan', 'change appearance', 'change language'],
         modelProviderProxy: {
+          protocols: ['openai/chat', 'openai/responses', 'anthropic/messages', 'codex/responses'],
+          requiresExplicitProtocol: true,
           imageGeneration: {
             route: '/api/portkey-gateway/v1/images/generations',
             codexModel: 'codex/gpt-image-2',
@@ -515,7 +497,7 @@ export class WorkspaceResourcesService {
         },
         workflow: {
           primaryService: true,
-          standaloneAgentsAreIndependent: true,
+          agentNodesAreSelfContained: true,
           creation: 'blank draft opened directly in the editor',
           supportedNodeTypes: listWorkflowNodeCapabilities().map((capability) => ({
             type: capability.id,
@@ -528,7 +510,7 @@ export class WorkspaceResourcesService {
             outputSchema: capability.outputSchema,
             configSchema: capability.configSchema,
           })),
-          unsupportedFeatures: ['standalone Agent references', 'Agent version references', 'template selection', 'dynamic joins', 'parallel execution', 'webhook triggers', 'API triggers', 'notification nodes'],
+          unsupportedFeatures: ['standalone Agent resources', 'Agent version references', 'template selection', 'dynamic joins', 'parallel execution', 'webhook triggers', 'API triggers', 'notification nodes'],
           controlFlow: { edgeModes: ['always', 'predicate', 'fallback'], predicatePaths: 'dot_delimited_output_path', boundedLoops: true, traversalLimitField: 'maxTraversals', cycleRule: 'every_cycle_crosses_a_bounded_edge', initialSourceRule: 'no_unbounded_incoming_edges_and_no_connected_required_inputs', agentContext: { maximumInitialEdges: 1, initialEdgeUnbounded: true, maximumBoundedFeedbackEdges: 1, workflowInputEdgeMustBeUnconditionalAndUnbounded: true }, explicitInitialInputEdges: { available: true, source: 'worklite/input.output', target: 'worklite/agent.context', mustBeUnconditionalAndUnbounded: true, mayCombineWithOneBoundedFeedbackEdge: true }, execution: 'deterministic_sequential_token_scheduler' },
           artifactHistoryQuery: { nodeType: 'worklite/artifact-query', version: '1', scope: 'workspace_json_artifact_history_including_detached', requestPassthrough: true, emptyCandidatesAllowed: true, readOnly: true },
           graphMutationAvailable: true,
@@ -566,17 +548,6 @@ export class WorkspaceResourcesService {
         transport: server.transport,
         allowedToolCount: server.allowedTools,
         version: server.version,
-      })),
-      agents: agentRows.map((agent) => ({
-        id: agent.id,
-        kind: agent.kind,
-        name: agent.name,
-        responsibility: agent.responsibility,
-        providerId: agent.providerId,
-        providerName: agent.providerId ? providerNames.get(agent.providerId) ?? null : null,
-        model: agent.model,
-        skills: agentSkillRows.filter((assignment) => assignment.agentId === agent.id).map((assignment) => ({ id: assignment.skillId, name: skillNames.get(assignment.skillId) ?? assignment.skillId })),
-        mcpServers: agentMcpRows.filter((assignment) => assignment.agentId === agent.id).map((assignment) => ({ id: assignment.mcpServerId, name: mcpNames.get(assignment.mcpServerId) ?? assignment.mcpServerId })),
       })),
       workflows: workflowRows.map((workflow) => {
         const schedule = scheduleRows.find((candidate) => candidate.workflowId === workflow.id);
@@ -626,8 +597,8 @@ export class WorkspaceResourcesService {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const name = input.name.trim();
     if (!name) throw new BadRequestException('Provider name is required.');
-    const protocol = input.protocol ?? 'openai/chat';
-    const validProtocols: ModelProviderProtocol[] = ['openai/chat', 'openai/responses', 'codex/responses', 'deepseek/chat'];
+    const protocol = input.protocol;
+    const validProtocols: ModelProviderProtocol[] = ['openai/chat', 'openai/responses', 'anthropic/messages', 'codex/responses'];
     if (!validProtocols.includes(protocol)) throw new BadRequestException('Unsupported model provider protocol.');
     const headers = normalizeHeaders(input.headers);
     const serializedHeaders = headers === undefined ? undefined : encryptSecret(JSON.stringify(headers));
@@ -660,7 +631,7 @@ export class WorkspaceResourcesService {
     const name = input.name === undefined ? existing.name : input.name.trim();
     if (!name) throw new BadRequestException('Provider name is required.');
     const protocol = input.protocol ?? existing.protocol;
-    const validProtocols: ModelProviderProtocol[] = ['openai/chat', 'openai/responses', 'codex/responses', 'deepseek/chat'];
+    const validProtocols: ModelProviderProtocol[] = ['openai/chat', 'openai/responses', 'anthropic/messages', 'codex/responses'];
     if (!validProtocols.includes(protocol)) throw new BadRequestException('Unsupported model provider protocol.');
     const baseURL = input.baseURL === undefined ? existing.baseURL : input.baseURL.trim() || null;
     if (!baseURL) throw new BadRequestException('Base URL is required.');
@@ -689,58 +660,6 @@ export class WorkspaceResourcesService {
     return providerView(row);
   }
 
-  async testProvider(request: Request, workspaceSlug: string, providerId: string): Promise<ModelProviderTestResult> {
-    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const traceId = this.diagnostics.start(workspace.id, providerId, 'provider_test', 'request', 'Provider connection test started.', { prompt: PROVIDER_TEST_PROMPT });
-    const startedAt = Date.now();
-    let runtime: Awaited<ReturnType<WorkspaceResourcesService['providerRuntime']>>;
-    try {
-      runtime = await this.providerRuntime(request, workspaceSlug, providerId);
-      this.diagnostics.write(workspace.id, { traceId, providerId, operation: 'provider_test', stage: 'provider_resolution', level: 'info', status: 'succeeded', message: 'Provider configuration resolved.', metadata: { model: runtime.model, protocol: runtime.protocol, baseURL: runtime.provider.baseURL ?? null }, durationMs: Date.now() - startedAt });
-    } catch (error: unknown) {
-      this.diagnostics.write(workspace.id, { traceId, providerId, operation: 'provider_test', stage: 'provider_resolution', level: 'error', status: 'failed', message: error instanceof Error ? error.message : String(error), metadata: errorDetails(error), durationMs: Date.now() - startedAt });
-      throw new HttpException({ message: error instanceof Error ? error.message : String(error), traceId }, error instanceof HttpException ? error.getStatus() : 500);
-    }
-
-    const abortController = new AbortController();
-    const timeout = setTimeout(() => abortController.abort(), 30_000);
-    const gatewayStartedAt = Date.now();
-    const gatewayPort = GATEWAY_PORT;
-    const gatewayOperation = runtime.protocol === 'openai/responses' || runtime.protocol === 'codex/responses' ? 'responses' : 'chat/completions';
-    this.diagnostics.write(workspace.id, { traceId, providerId, operation: 'provider_test', stage: 'gateway_request', level: 'info', status: 'started', message: 'Sending the smoke-test request through the Portkey Gateway.', metadata: { model: runtime.model, protocol: runtime.protocol, request: { method: 'POST', path: `/v1/${gatewayOperation}` }, gateway: { host: '127.0.0.1', port: gatewayPort } } });
-    let stage = 'gateway_request';
-    try {
-      const result = createModelGateway().streamText({
-        provider: runtime.provider,
-        model: runtime.model,
-        messages: [{ role: 'user', content: PROVIDER_TEST_PROMPT }],
-        temperature: 0,
-        maxOutputTokens: 256,
-        abortSignal: abortController.signal,
-      });
-      const response = (await result.result).text.trim();
-      this.diagnostics.write(workspace.id, { traceId, providerId, operation: 'provider_test', stage: 'gateway_response', level: 'info', status: 'succeeded', message: 'Gateway returned a model response.', metadata: { statusCode: 200, responseLength: response.length, responseBody: response }, durationMs: Date.now() - gatewayStartedAt });
-      stage = 'response_parse';
-      if (!response) throw new Error('Empty model response');
-      this.diagnostics.write(workspace.id, { traceId, providerId, operation: 'provider_test', stage: 'response_parse', level: 'info', status: 'succeeded', message: 'Model response parsed successfully.', metadata: { model: runtime.model }, durationMs: Date.now() - gatewayStartedAt });
-      return { prompt: PROVIDER_TEST_PROMPT, model: runtime.model, response, traceId };
-    } catch (error: unknown) {
-      const details = errorDetails(error);
-      const message = abortController.signal.aborted ? 'Model provider test timed out after 30 seconds.' : 'Model provider test failed.';
-      this.diagnostics.write(workspace.id, { traceId, providerId, operation: 'provider_test', stage: abortController.signal.aborted ? 'timeout' : stage, level: 'error', status: 'failed', message, metadata: { ...details, traceId }, durationMs: Date.now() - gatewayStartedAt });
-      throw abortController.signal.aborted
-        ? new RequestTimeoutException({ message, traceId })
-        : new ServiceUnavailableException({ message, traceId });
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  async diagnosticLogs(request: Request, workspaceSlug: string, traceId?: string) {
-    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    return this.diagnostics.list(workspace.id, traceId);
-  }
-
   async providerRuntime(
     request: Request,
     workspaceSlug: string,
@@ -760,11 +679,15 @@ export class WorkspaceResourcesService {
     const model = (selectedModel?.trim() || configuredModels[0]);
     if (!model) throw new BadRequestException('Add at least one model id before using this provider.');
     if (selectedModel && !configuredModels.includes(model)) throw new BadRequestException('The selected model is not configured for this provider.');
-    const provider = gatewayProvider.protocol.startsWith('deepseek/')
-      ? { id: GATEWAY_PROVIDER_ID, adapter: 'deepseek' as const, apiKey: 'worklite-gateway', gatewayProviderName: gatewayProvider.name, operation: 'chat/completions' as const }
+    const provider = gatewayProvider.protocol === 'anthropic/messages'
+      ? { id: GATEWAY_PROVIDER_ID, adapter: 'anthropic' as const, apiKey: 'worklite-gateway', gatewayProviderName: gatewayProvider.name, operation: 'messages' as const }
       : gatewayProvider.protocol === 'codex/responses'
       ? { id: GATEWAY_PROVIDER_ID, adapter: 'codex' as const, apiKey: 'worklite-gateway', gatewayProviderName: gatewayProvider.name, operation: 'responses' as const }
-      : { id: GATEWAY_PROVIDER_ID, adapter: 'openai' as const, apiKey: 'worklite-gateway', gatewayProviderName: gatewayProvider.name, operation: gatewayProvider.protocol === 'openai/responses' ? 'responses' as const : 'chat/completions' as const };
+      : gatewayProvider.protocol === 'openai/responses'
+      ? { id: GATEWAY_PROVIDER_ID, adapter: 'openai' as const, apiKey: 'worklite-gateway', gatewayProviderName: gatewayProvider.name, operation: 'responses' as const }
+      : gatewayProvider.protocol === 'openai/chat'
+      ? { id: GATEWAY_PROVIDER_ID, adapter: 'openai' as const, apiKey: 'worklite-gateway', gatewayProviderName: gatewayProvider.name, operation: 'chat/completions' as const }
+      : (() => { throw new BadRequestException('Unsupported model provider protocol.'); })();
     return { provider, model, protocol: gatewayProvider.protocol };
   }
 

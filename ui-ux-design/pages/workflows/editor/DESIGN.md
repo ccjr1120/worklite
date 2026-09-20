@@ -69,7 +69,7 @@ Workflow-level settings are grouped into General, Inputs, Execution, and Version
 
 **Run.** Targets the latest published version, is unavailable while the draft has unsaved changes, and labels that version boundary explicitly. The control reports busy on itself and the editor stays in place; Run history remains in the Workflow List dialog.
 
-**Publish.** Opens a confirmation explaining that publishing locks the embedded Agent configuration and that later standalone Agent edits do not change this Workflow or its historical runs. Publication validates bounded-cycle constraints, port rules, public model ids, image generation settings, required WeChat cover connectivity, and selected Skill and MCP availability. Validation failures navigate directly to the affected content.
+**Publish.** Opens a confirmation explaining that publishing locks the embedded Agent configuration and that later draft edits do not change this Workflow or its historical runs. Publication validates bounded-cycle constraints, port rules, public model ids, image generation settings, required WeChat cover connectivity, and selected Skill and MCP availability. Validation failures navigate directly to the affected content.
 
 **Export JSON.** Downloads the current draft in the portable WorkLite format. Unsaved new Workflows must be saved first. The action stays neutral in both themes and does not compete with save, run, or publish.
 

@@ -12,6 +12,7 @@
 ## Implementation
 
 - `apps/web/src/features/workflows/run-history-dialog.tsx`
+- `apps/web/src/routes/runs.$runId.tsx`
 - `apps/web/src/components/workspace/agent-chat.tsx`
 
 ## Purpose
@@ -24,7 +25,7 @@ Open the Artifact a Run created. Action budget: one — activate the Artifact ro
 
 ## Structure
 
-There is no standalone Artifact collection route or execution tab. Successful `worklite/artifact` node execution is the only source of Run-created Artifacts. They appear in two places: the expanded Run row inside the Workflow List Run records dialog, and the Workflow Run entry in the System Helper Chat transcript.
+There is no standalone Artifact collection route or execution tab. Successful `worklite/artifact` node execution is the only source of Run-created Artifacts. They appear in three places: the expanded Run row inside the Workflow List Run records dialog, the Run detail route, and the Workflow Run entry in the Chat Bot transcript. The Run detail route is a log-reading destination for one Run rather than a restored Artifact collection, and it applies the same version-eligibility rule as the dialog.
 
 A Run-card Artifact row emphasizes name, type, useful size metadata, and creation time, with provenance available from its surrounding Run context. The name is the row's accessible link target.
 
@@ -79,6 +80,10 @@ Verified 2026-09-19. Differences found against the implementation:
 - `ArtifactRow` in the dialog uses a bespoke `focus-visible:ring-brand/40` treatment rather than the shared `focusRing` token from `components/ui/interaction.ts`.
 
 ## Changelog
+
+### 2026-09-21
+
+- Added the Run detail route as a third host, keeping the version-eligibility rule and recording that it is a per-Run log destination rather than a restored Artifact collection.
 
 ### 2026-09-19
 

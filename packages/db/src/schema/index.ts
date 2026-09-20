@@ -247,7 +247,7 @@ export const wechatPublications = sqliteTable('wechat_publications', {
 });
 
 export const workflowRunEvents = sqliteTable('workflow_run_events', {
-  runId: text('run_id').notNull().references(() => workflowRuns.id, { onDelete: 'cascade' }), sequence: integer('sequence').notNull(), type: text('type').$type<'run.status' | 'node.started' | 'node.delta' | 'node.waiting' | 'node.completed' | 'node.failed' | 'pending_action.updated' | 'artifact.created'>().notNull(), payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(), createdAt: timestamp('created_at'),
+  runId: text('run_id').notNull().references(() => workflowRuns.id, { onDelete: 'cascade' }), sequence: integer('sequence').notNull(), type: text('type').$type<'run.status' | 'node.started' | 'node.delta' | 'node.waiting' | 'node.completed' | 'node.failed' | 'node.activity' | 'pending_action.updated' | 'artifact.created'>().notNull(), payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(), createdAt: timestamp('created_at'),
 }, (table) => [primaryKey({ columns: [table.runId, table.sequence] })]);
 
 export const commandExecutions = sqliteTable('command_executions', {
@@ -356,7 +356,7 @@ export const agentMcpServers = sqliteTable('agent_mcp_servers', {
 }, (table) => [primaryKey({ columns: [table.agentId, table.mcpServerId] })]);
 
 export const modelProviders = sqliteTable('model_providers', {
-  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), baseURL: text('base_url'), protocol: text('protocol').$type<'openai/chat' | 'openai/responses' | 'codex/responses' | 'deepseek/chat'>().notNull().default('openai/chat'), status: text('status').$type<'connected' | 'unconfigured' | 'invalid'>().notNull().default('unconfigured'), maskedKey: text('masked_key').notNull().default(''), models: text('models', { mode: 'json' }).$type<string[]>().notNull().default([]), apiKey: text('api_key'), headers: text('headers'), updatedAt: timestamp('updated_at'),
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), baseURL: text('base_url'), protocol: text('protocol').$type<'openai/chat' | 'openai/responses' | 'anthropic/messages' | 'codex/responses'>().notNull().default('openai/chat'), status: text('status').$type<'connected' | 'unconfigured' | 'invalid'>().notNull().default('unconfigured'), maskedKey: text('masked_key').notNull().default(''), models: text('models', { mode: 'json' }).$type<string[]>().notNull().default([]), apiKey: text('api_key'), headers: text('headers'), updatedAt: timestamp('updated_at'),
 });
 
 export const artifacts = sqliteTable('artifacts', {
@@ -365,10 +365,6 @@ export const artifacts = sqliteTable('artifacts', {
 
 export const auditLogs = sqliteTable('audit_logs', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), actorId: text('actor_id'), action: text('action').notNull(), resource: text('resource').notNull(), metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}), createdAt: timestamp('created_at'),
-});
-
-export const diagnosticLogs = sqliteTable('diagnostic_logs', {
-  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), traceId: text('trace_id').notNull(), providerId: text('provider_id'), operation: text('operation').notNull(), stage: text('stage').notNull(), level: text('level').$type<'debug' | 'info' | 'warn' | 'error'>().notNull(), status: text('status').$type<'started' | 'succeeded' | 'failed'>().notNull(), message: text('message').notNull(), durationMs: integer('duration_ms'), metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}), createdAt: timestamp('created_at'),
 });
 
 export type Workspace = typeof workspaces.$inferSelect;
@@ -396,4 +392,3 @@ export type McpServer = typeof mcpServers.$inferSelect;
 export type ModelProvider = typeof modelProviders.$inferSelect;
 export type Artifact = typeof artifacts.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;
-export type DiagnosticLog = typeof diagnosticLogs.$inferSelect;

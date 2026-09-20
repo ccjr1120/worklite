@@ -1,6 +1,6 @@
 {
-  "title": "System Helper Chat",
-  "description": "通过持久化的 Agent 执行配置 WorkLite。",
+  "title": "Chat Bot",
+  "description": "通过受保护的 Chat Bot 配置 WorkLite。",
   "starters": {
     "title": "开始任务",
     "provider": {
@@ -17,24 +17,19 @@
       "title": "连接 MCP 服务器",
       "description": "创建远程 MCP 服务器草稿。",
       "prompt": "为客户数据工具创建一个远程 MCP 服务器草稿，不要包含认证密钥。"
-    },
-    "agent": {
-      "title": "创建 Agent",
-      "description": "指定模型、Skills 和 MCP 服务器。",
-      "prompt": "先检查工作区，再使用已有资源创建一个客户支持协调 Agent。"
     }
   },
   "composer": {
-    "label": "向 System Helper Chat 发送消息",
-    "placeholder": "Ask WorkLite or type @ to run an Agent or Workflow...",
-    "followUpPlaceholder": "向 {{agent}} 发送消息...",
+    "label": "向 Chat Bot 发送消息",
+    "placeholder": "询问 WorkLite，或输入 @ 运行已发布的 Workflow…",
+    "followUpPlaceholder": "向 Chat Bot 发送消息…",
     "send": "发送消息",
     "stop": "中断当前回复",
     "answerPlaceholder": "回答澄清问题...",
-    "loading": "正在加载 System Helper Chat 配置",
-    "configure": "绑定模型提供商和模型后使用 System Helper Chat"
+    "loading": "正在加载 Chat Bot 配置",
+    "configure": "绑定模型提供商和模型后使用 Chat Bot"
   },
-  "open": "打开 System Helper Chat",
+  "open": "打开 Chat Bot",
   "minimized": {
     "minimize": "最小化对话"
   },
@@ -49,7 +44,7 @@
   },
   "speaker": {
     "you": "你",
-    "assistant": "System Helper Chat"
+    "assistant": "Chat Bot"
   },
   "status": {
     "running": "执行中",
@@ -65,14 +60,14 @@
     "working": "正在处理...",
     "cancelled": "当前回复已中断。",
     "loadFailed": "无法加载已保存的执行。",
-    "requestFailed": "System Helper Chat 无法完成此请求。",
-    "providerRequestFailed": "System Helper Chat 无法完成当前轮次，请检查模型提供商配置后重试。",
-    "skillFailed": "Agent Skill 脚本未能完成执行。",
+    "requestFailed": "Chat Bot 无法完成此请求。",
+    "providerRequestFailed": "Chat Bot 无法完成当前轮次，请检查模型提供商配置后重试。",
+    "skillFailed": "Skill 脚本未能完成。",
     "incompleteSkillRequest": "模型返回了不完整的 Skill 请求，JSON 在请求完成前提前结束。",
     "invalidSkillRequest": "模型返回了无效的 Skill 请求，参数无法解析或不符合所需结构。",
     "cancelFailed": "无法中断当前回复。",
     "answerFailed": "无法提交澄清回答。",
-    "restarted": "API 在当前 Agent 任务完成前重启了。你可以发送后续消息继续。",
+    "restarted": "Chat Bot 本轮完成前 API 已重启。请发送后续消息继续。",
     "retry": "重试上一条请求",
     "diagnostics": "诊断信息",
     "id": "执行 ID",
@@ -82,20 +77,11 @@
     "none": "无"
   },
   "mentions": {
-    "menuLabel": "Available Agents and Workflows",
-    "empty": "No matching configured Agents or published Workflows.",
-    "remove": "移除 Agent 提及",
+    "menuLabel": "可用的已发布 Workflow",
+    "empty": "No matching published Workflows.",
+    "remove": "移除 Workflow 提及",
     "removeWorkflow": "Remove Workflow mention",
     "workflow": "Published Workflow"
-  },
-  "subAgents": {
-    "label": "子 Agent",
-    "unread": "新消息",
-    "return": "返回 System Helper Chat",
-    "close": "关闭并删除此子 Agent 会话",
-    "createFailed": "无法创建子 Agent 会话。",
-    "requestFailed": "子 Agent 无法完成此请求。",
-    "closeFailed": "无法关闭子 Agent 会话。"
   },
   "history": {
     "title": "执行历史",
@@ -130,7 +116,7 @@
     }
   },
   "log": {
-    "title": "System Helper Chat 对话",
+    "title": "Chat Bot 对话",
     "generated": "生成时间",
     "executionId": "执行 ID",
     "phase": "阶段",
@@ -143,7 +129,7 @@
     "transcript": "对话记录",
     "noMessages": "当前对话中没有可用消息。",
     "user": "你",
-    "assistant": "System Helper Chat",
+    "assistant": "Chat Bot",
     "activity": "Skill 活动",
     "noActivity": "当前对话中没有 Skill 活动。",
     "skill": "Skill",
@@ -160,16 +146,16 @@
     }
   },
   "configuration": {
-    "title": "Agent 配置",
+    "title": "Chat Bot 配置",
     "description": "选择此工作区中已配置的模型。",
     "model": "提供商和模型",
     "placeholder": "选择已配置的模型",
     "saving": "保存中...",
     "mcpServers": "MCP 服务器",
-    "mcpServersHint": "选择 System Helper 可使用的 MCP 服务器。"
+    "mcpServersHint": "选择 Chat Bot 可使用的 MCP 服务器。"
   },
   "panelTabs": {
-    "label": "Agent 工作区视图",
+    "label": "Chat Bot 视图",
     "chat": "对话",
     "configuration": "配置"
   },

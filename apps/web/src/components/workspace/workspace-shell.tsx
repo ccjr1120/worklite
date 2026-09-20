@@ -8,7 +8,7 @@ import { OfflineBanner } from '@/components/workspace/offline-banner';
 import { workspaceSlots } from '@/components/workspace/workspace-chrome';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useMediaQuery } from '@/hooks/use-media-query';
-import { AgentChat } from '@/components/workspace/agent-chat';
+import { ChatBot } from '@/components/workspace/agent-chat';
 
 function WorkspaceShell() {
   const { t } = useTranslation('workspace');
@@ -59,7 +59,7 @@ function WorkspaceShell() {
             <main className="h-full overflow-auto">
               <Outlet />
             </main>
-            <AgentChat workspaceSlug="personal" />
+            <ChatBot workspaceSlug="personal" />
           </div>
         </div>
       </div>

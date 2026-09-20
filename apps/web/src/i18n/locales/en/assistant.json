@@ -1,6 +1,6 @@
 {
-  "title": "System Helper Chat",
-  "description": "Configure WorkLite through persisted Agent executions.",
+  "title": "Chat Bot",
+  "description": "Configure WorkLite through the protected Chat Bot.",
   "starters": {
     "title": "Start a task",
     "provider": {
@@ -17,37 +17,32 @@
       "title": "Connect MCP server",
       "description": "Create a remote MCP server draft.",
       "prompt": "Create a remote MCP server draft for customer data tools without authentication secrets."
-    },
-    "agent": {
-      "title": "Create Agent",
-      "description": "Assign a model, Skills, and MCP servers.",
-      "prompt": "Inspect the workspace, then create a support coordinator Agent using available resources."
     }
   },
   "composer": {
-    "label": "Message System Helper Chat",
-    "placeholder": "Ask WorkLite or type @ to run an Agent or Workflow...",
-    "followUpPlaceholder": "Message {{agent}}...",
+    "label": "Message Chat Bot",
+    "placeholder": "Ask WorkLite or type @ to run a published Workflow...",
+    "followUpPlaceholder": "Message Chat Bot...",
     "send": "Send message",
     "stop": "Stop current response",
     "answerPlaceholder": "Answer the clarification question...",
-    "loading": "Loading System Helper Chat configuration",
-    "configure": "Bind a model provider and model to use System Helper Chat"
+    "loading": "Loading Chat Bot configuration",
+    "configure": "Bind a model provider and model to use Chat Bot"
   },
-  "open": "Open System Helper Chat",
+  "open": "Open Chat Bot",
   "panelTabs": {
-    "label": "Agent workspace views",
+    "label": "Chat Bot views",
     "chat": "Chat",
     "configuration": "Configuration"
   },
   "configuration": {
-    "title": "Agent configuration",
+    "title": "Chat Bot configuration",
     "description": "Select a model already configured in this workspace.",
     "model": "Provider and model",
     "placeholder": "Choose a configured model",
     "saving": "Saving...",
     "mcpServers": "MCP servers",
-    "mcpServersHint": "Select the MCP servers available to System Helper."
+    "mcpServersHint": "Select the MCP servers available to Chat Bot."
   },
   "minimized": {
     "minimize": "Minimize conversation"
@@ -63,7 +58,7 @@
   },
   "speaker": {
     "you": "You",
-    "assistant": "System Helper Chat"
+    "assistant": "Chat Bot"
   },
   "status": {
     "running": "Running",
@@ -79,14 +74,14 @@
     "working": "Working...",
     "cancelled": "This response was stopped.",
     "loadFailed": "The saved execution could not be loaded.",
-    "requestFailed": "System Helper Chat could not complete this request.",
-    "providerRequestFailed": "System Helper Chat could not complete this turn. Check the model provider configuration and try again.",
-    "skillFailed": "The Agent Skill script could not be completed.",
+    "requestFailed": "Chat Bot could not complete this request.",
+    "providerRequestFailed": "Chat Bot could not complete this turn. Check the model provider configuration and try again.",
+    "skillFailed": "The Skill script could not be completed.",
     "incompleteSkillRequest": "The model returned an incomplete Skill request. Its JSON ended before the request was complete.",
     "invalidSkillRequest": "The model returned an invalid Skill request. Its arguments could not be parsed or did not match the required structure.",
     "cancelFailed": "The current response could not be stopped.",
     "answerFailed": "The clarification answer could not be submitted.",
-    "restarted": "The API restarted before this Agent turn completed. Send a follow-up to continue.",
+    "restarted": "The API restarted before this Chat Bot turn completed. Send a follow-up to continue.",
     "retry": "Retry last request",
     "diagnostics": "Diagnostics",
     "id": "Execution ID",
@@ -96,20 +91,11 @@
     "none": "none"
   },
   "mentions": {
-    "menuLabel": "Available Agents and Workflows",
-    "empty": "No matching configured Agents or published Workflows.",
-    "remove": "Remove Agent mention",
+    "menuLabel": "Available published Workflows",
+    "empty": "No matching published Workflows.",
+    "remove": "Remove Workflow mention",
     "removeWorkflow": "Remove Workflow mention",
     "workflow": "Published Workflow"
-  },
-  "subAgents": {
-    "label": "Sub Agents",
-    "unread": "New",
-    "return": "Return to System Helper Chat",
-    "close": "Close and delete this sub-Agent session",
-    "createFailed": "The sub-Agent session could not be created.",
-    "requestFailed": "The sub-Agent could not complete this request.",
-    "closeFailed": "The sub-Agent session could not be closed."
   },
   "history": {
     "title": "Execution history",
@@ -144,7 +130,7 @@
     }
   },
   "log": {
-    "title": "System Helper Chat conversation",
+    "title": "Chat Bot conversation",
     "generated": "Generated",
     "executionId": "Execution ID",
     "phase": "Phase",
@@ -157,7 +143,7 @@
     "transcript": "Conversation",
     "noMessages": "No messages are available in this conversation.",
     "user": "You",
-    "assistant": "System Helper Chat",
+    "assistant": "Chat Bot",
     "activity": "Skill activity",
     "noActivity": "No Skill activity in this conversation.",
     "skill": "Skill",

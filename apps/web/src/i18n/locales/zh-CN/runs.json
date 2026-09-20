@@ -23,5 +23,52 @@
     "qrAlt": "微信确认二维码",
     "cancel": "取消运行",
     "replacing": "正在获取新的二维码。"
+  },
+  "detail": {
+    "title": "运行",
+    "open": "打开运行详情",
+    "notFound": "该运行不可用",
+    "notFoundDescription": "它可能已随工作流一起被删除。打开“工作流”以查找其他运行。",
+    "loadFailed": "无法加载该运行。",
+    "noNodeRuns": "执行尚未到达任何节点。"
+  },
+  "nodeLog": {
+    "input": "输入",
+    "output": "输出",
+    "streamedOutput": "模型流式输出",
+    "activity": "运行过程",
+    "noActivity": "该节点未记录运行过程。",
+    "copy": "复制",
+    "copied": "已复制",
+    "copyInput": "复制输入",
+    "copyOutput": "复制输出",
+    "copyStreamedOutput": "复制模型流式输出",
+    "viewRequestLogs": "查看该运行的模型请求",
+    "requestLogRetention": "已捕获的模型请求保留三天。",
+    "commandExecution": "命令执行 {{id}}",
+    "contextDropped": "为适配上下文已丢弃 {{count}} 条较早消息",
+    "finishReasonUnknown": "未知",
+    "exitCodeUnknown": "未知",
+    "attempt": "第 {{attempt}} 次尝试，共 {{attempts}} 次",
+    "automaticRetry": "自动重试，第 {{attempt}} 次尝试，共 {{attempts}} 次",
+    "modelRound": "第 {{round}} 轮，模型 {{model}}，结束原因 {{finishReason}}",
+    "skillScript": "技能 {{skill}} 执行了 {{path}}，退出码 {{exitCode}}",
+    "mcpCall": "MCP 工具 {{tool}} {{status}}",
+    "edgeDecision": "已评估出向连线",
+    "edgeTerminal": "没有匹配的出向连线，该节点结束了此分支",
+    "edgeTraversed": "前往 {{target}}.{{port}}",
+    "edgeSkipped": "已跳过 {{target}}.{{port}}",
+    "edgeTraversals": "已经过 {{count}} 次，上限 {{max}} 次",
+    "phaseLabel": {
+      "node.setup": "准备",
+      "node.attempt": "尝试",
+      "model.round": "模型",
+      "skill.script": "技能",
+      "mcp.call": "MCP",
+      "edge.decision": "路由"
+    },
+    "phase": {
+      "setup": "{{type}}@{{version}}，错误策略 {{policy}}"
+    }
   }
 }

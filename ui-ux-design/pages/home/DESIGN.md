@@ -16,19 +16,19 @@
 
 ## Purpose
 
-Read the current output of every published Workflow Dashboard board, and reach System Helper Chat without leaving the page.
+Read the current output of every published Workflow Dashboard board, and reach Chat Bot without leaving the page.
 
 ## Primary Task
 
 Read a board's latest output. Action budget: zero — every eligible board renders its own content on arrival, and no board opens a detail view.
 
-Two secondary intents cost one action each: opening an item in a new tab by activating its row, and opening System Helper Chat by focusing the composer. Organizing boards into categories is deliberate configuration work rather than the page's primary task; its dialogs are budgeted separately below.
+Two secondary intents cost one action each: opening an item in a new tab by activating its row, and opening Chat Bot by focusing the composer. Organizing boards into categories is deliberate configuration work rather than the page's primary task; its dialogs are budgeted separately below.
 
 ## Layout
 
 Centered content up to `1200px`. The board library fills the content region, grouped into category sections with custom categories first and Uncategorized last. Boards render two per row on desktop and one per row below `md`.
 
-A persistent single-line System Helper Chat composer sits at the bottom center of the content region. Board content reserves enough bottom space that the composer never obscures its final rows. The expanded conversation panel rises above the composer, capped at `1200px` by approximately `680px` with at least `24px` desktop outer space; the board list stays mounted beneath it with its scroll position preserved.
+A persistent single-line Chat Bot composer sits at the bottom center of the content region. Board content reserves enough bottom space that the composer never obscures its final rows. The expanded conversation panel rises above the composer, capped at `1200px` by approximately `680px` with at least `24px` desktop outer space; the board list stays mounted beneath it with its scroll position preserved.
 
 ## Interaction Contract
 
@@ -54,19 +54,19 @@ Creating a category costs two actions — name it, then create — because the n
 
 Category loading, mutation, and failure states stay local and never remove unaffected boards. Organization controls remain neutral and quiet.
 
-### Embedded System Helper Chat
+### Embedded Chat Bot
 
 Focusing the composer expands the conversation panel without waiting for a submission. Clicking outside, pressing `Escape`, using the icon-only minimize control, or navigating to another page closes the panel without cancelling work or clearing the conversation.
 
 The minimized dock retains the composer and, after the first request, a compact status summary such as preparing, tool calls in progress, needs review, completed, or failed. The summary carries a non-color cue and reopens the current conversation. Completion does not automatically minimize the panel.
 
-Command search may open or focus System Helper Chat through the same Home state. System Helper Chat is not a separate sidebar item. Transcript, Skill-call, and session behavior are specified in `../../surfaces/workspace/system-helper-chat/DESIGN.md`.
+Command search may open or focus Chat Bot through the same Home state. Chat Bot is not a separate sidebar item. Transcript, Skill-call, and session behavior are specified in `../../surfaces/workspace/system-helper-chat/DESIGN.md`.
 
 ### First use
 
-The first-use sequence is optional and resumable, with visible progress and one primary outcome per step. It shows two steps: configure at least one Model Provider, then bind a Provider and model to the protected System Helper Chat Agent. The current step owns the primary action; completed steps remain visible but quiet while the sequence is incomplete.
+The first-use sequence is optional and resumable, with visible progress and one primary outcome per step. It shows two steps: configure at least one Model Provider, then bind a Provider and model to the protected Chat Bot Agent. The current step owns the primary action; completed steps remain visible but quiet while the sequence is incomplete.
 
-Completion derives from persisted server resources rather than browser preferences. The guide does not appear until both the Provider and System Helper Chat queries have resolved successfully, and it disappears as soon as both steps are complete. There is no account or team setup step, and creating a custom Agent, creating a Workflow, or running and inspecting a Workflow are not first-use steps.
+Completion derives from persisted server resources rather than browser preferences. The guide does not appear until both the Provider and Chat Bot queries have resolved successfully, and it disappears as soon as both steps are complete. There is no account or team setup step, and creating a Workflow Agent node, creating a Workflow, or running and inspecting a Workflow are not first-use steps.
 
 ## States
 
@@ -192,8 +192,8 @@ Verified 2026-09-19. Differences found against `apps/web/src/routes/home.tsx`:
 
 ### 2026-08-27
 
-- Reduced first use to Provider configuration and System Helper Chat Provider-and-model binding, made completion server-derived, and removed the guide after both steps complete.
-- Replaced structured proposal review with the persisted System Helper Agent transcript and inline Skill-script approvals.
+- Reduced first use to Provider configuration and Chat Bot Provider-and-model binding, made completion server-derived, and removed the guide after both steps complete.
+- Replaced structured proposal review with the persisted Chat Bot transcript and inline Skill-script approvals.
 
 ### 2026-08-25
 

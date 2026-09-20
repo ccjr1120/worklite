@@ -232,51 +232,6 @@ export type AnswerAgentQuestionRequest = {
   answer: string;
 };
 
-export type CreateScheduledAgentTaskRequest = {
-  agentId: string;
-  prompt: string;
-  intervalSeconds: number;
-  label?: string;
-};
-
-export type ScheduledAgentTaskView = {
-  id: string;
-  agentId: string;
-  agentName: string;
-  label: string;
-  prompt: string;
-  intervalSeconds: number;
-  nextRunAt: string;
-  lastRunAt: string | null;
-  lastStatus: AgentExecutionStatus | null;
-  unread: boolean;
-  running: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type CreateAgentSubSessionRequest = {
-  agentId: string;
-  message: string;
-};
-
-export type UpdateAgentSubSessionRequest = {
-  unread: boolean;
-};
-
-export type AgentSubSessionView = {
-  id: string;
-  agentId: string;
-  agentName: string;
-  agentInitials: string;
-  executionId: string;
-  title: string;
-  unread: boolean;
-  status: AgentExecutionStatus;
-  createdAt: string;
-  updatedAt: string;
-};
-
 export type CreateAgentRequest = {
   name: string;
   responsibility: string;
@@ -295,7 +250,6 @@ export type UpdateAgentRequest = Partial<CreateAgentRequest> & {
 
 export type WorkliteNavigationTarget =
   | 'home'
-  | 'agents'
   | 'system-helper-chat'
   | 'skills'
   | 'mcp-servers'
@@ -433,7 +387,7 @@ export type PortkeyGatewayModelList = {
 };
 
 export type WorkliteScriptResult =
-  | { type: 'resource'; resourceType: 'provider' | 'agent' | 'skill' | 'mcp-server' | 'workflow'; id: string; route: string }
+  | { type: 'resource'; resourceType: 'provider' | 'skill' | 'mcp-server' | 'workflow'; id: string; route: string }
   | { type: 'navigation'; target: WorkliteNavigationTarget; route: string }
   | { type: 'settings'; appearance: WorkspaceSettingsView['appearance']; locale: WorkspaceSettingsView['locale'] }
   | { type: 'snapshot' };
@@ -740,13 +694,53 @@ export type WorkflowNodeRunView = {
   retryable: boolean;
   startedAt: string | null;
   finishedAt: string | null;
+  streamedOutput: string | null;
+  activity: WorkflowNodeActivityView[];
 };
 
 export type RunProgressEvent = {
   runId: string;
   sequence: number;
-  type: 'run.status' | 'node.started' | 'node.delta' | 'node.waiting' | 'node.completed' | 'node.failed' | 'pending_action.updated' | 'artifact.created';
+  type: 'run.status' | 'node.started' | 'node.delta' | 'node.waiting' | 'node.completed' | 'node.failed' | 'node.activity' | 'pending_action.updated' | 'artifact.created';
   payload: unknown;
+  occurredAt: string;
+};
+
+export type WorkflowNodeActivityPhase =
+  | 'node.setup'
+  | 'node.attempt'
+  | 'model.round'
+  | 'skill.script'
+  | 'mcp.call'
+  | 'edge.decision';
+
+export type WorkflowNodeActivityEdgeDecision = {
+  edgeId: string;
+  targetNodeId: string;
+  targetPort: string;
+  traversed: boolean;
+  condition: string;
+  traversals: number;
+  maxTraversals: number | null;
+};
+
+export type WorkflowNodeActivityDetail =
+  | { phase: 'node.setup'; type: string; typeVersion: string; errorPolicy: 'stop' | 'retry'; config: unknown; inputPorts: string[] }
+  | { phase: 'node.attempt'; attempt: number; attempts: number; automaticRetry: boolean }
+  | { phase: 'model.round'; round: number; model: string; finishReason: string | null; toolCalls: number; contextDropped: number }
+  | { phase: 'skill.script'; skillId: string; skillName: string; scriptPath: string; arguments: string[]; commandExecutionId: string; exitCode: number | null; status: 'succeeded' | 'failed' }
+  | { phase: 'mcp.call'; serverId: string; toolName: string; input: unknown; result: string; status: 'succeeded' | 'failed' }
+  | { phase: 'edge.decision'; decisions: WorkflowNodeActivityEdgeDecision[]; terminal: boolean };
+
+export type WorkflowNodeActivityEventPayload = {
+  nodeId: string;
+  nodeRunId: string;
+  phase: WorkflowNodeActivityPhase;
+  detail: WorkflowNodeActivityDetail;
+};
+
+export type WorkflowNodeActivityView = WorkflowNodeActivityEventPayload & {
+  sequence: number;
   occurredAt: string;
 };
 
@@ -777,7 +771,7 @@ export type McpServerView = {
   updatedAt: string;
 };
 
-export type ModelProviderProtocol = 'openai/chat' | 'openai/responses' | 'codex/responses' | 'deepseek/chat';
+export type ModelProviderProtocol = 'openai/chat' | 'openai/responses' | 'anthropic/messages' | 'codex/responses';
 
 export type ModelProviderView = {
   id: string;
@@ -801,21 +795,51 @@ export type TestModelProviderRequest = {
   model: string;
 };
 
-export type DiagnosticLogLevel = 'debug' | 'info' | 'warn' | 'error';
-export type DiagnosticLogStatus = 'started' | 'succeeded' | 'failed';
+export type GatewayRequestLogSource = 'agent' | 'workflow' | 'provider_test' | 'proxy';
 
-export type DiagnosticLogView = {
+export type GatewayRequestLogStatusClass = 'success' | 'client_error' | 'server_error';
+
+export type GatewayRequestLogListItem = {
   id: string;
-  traceId: string;
-  providerId: string | null;
-  operation: string;
-  stage: string;
-  level: DiagnosticLogLevel;
-  status: DiagnosticLogStatus;
-  message: string;
-  durationMs: number | null;
-  metadata: Record<string, unknown>;
-  timestamp: string;
+  occurredAt: string;
+  provider: string;
+  model: string;
+  endpoint: string;
+  status: number;
+  durationMs: number;
+  streaming: boolean;
+  source: GatewayRequestLogSource | null;
+  workflowRunId: string | null;
+  nodeRunId: string | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+};
+
+export type GatewayRequestLogResponseCapture =
+  | { kind: 'json'; body: unknown }
+  | { kind: 'text'; body: string }
+  | { kind: 'stream'; events: unknown[] }
+  | { kind: 'unavailable'; reason: string };
+
+export type GatewayRequestLogDetail = GatewayRequestLogListItem & {
+  request: unknown;
+  response: GatewayRequestLogResponseCapture;
+};
+
+export type GatewayRequestLogQuery = {
+  provider?: string;
+  model?: string;
+  statusClass?: GatewayRequestLogStatusClass;
+  workflowRunId?: string;
+  limit?: number;
+  cursor?: string;
+};
+
+export type GatewayRequestLogList = {
+  items: GatewayRequestLogListItem[];
+  nextCursor: string | null;
+  retentionDays: number;
 };
 
 export type ArtifactView = {
@@ -848,7 +872,7 @@ export type UsageRow = {
 
 export type CreateModelProviderRequest = {
   name: string;
-  protocol?: ModelProviderView['protocol'];
+  protocol: ModelProviderView['protocol'];
   apiKey?: string;
   baseURL?: string;
   models?: string[];
@@ -865,7 +889,7 @@ export type UpdateModelProviderRequest = {
 };
 
 export type DiscoverModelProviderRequest = {
-  protocol?: CreateModelProviderRequest['protocol'];
+  protocol: CreateModelProviderRequest['protocol'];
   apiKey?: string;
   baseURL?: string;
   headers?: Record<string, string>;

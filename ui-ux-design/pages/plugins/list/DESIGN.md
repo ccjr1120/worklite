@@ -118,7 +118,7 @@ The mobile object-row requirement is met: this is the one collection whose rows 
 
 ### 2026-08-30
 
-- Promoted Plugins from the Agents resource tabs to first-level workspace navigation.
+- Promoted Plugins from the capability resource tabs to first-level workspace navigation.
 
 ### 2026-08-29
 

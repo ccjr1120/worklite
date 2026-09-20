@@ -245,7 +245,7 @@ export class AgentsService {
         : Promise.resolve([]),
     ]);
     if (skillIds && skillRows.length !== skillIds.length) throw new BadRequestException('One or more selected Skills are not available in this workspace.');
-    if (skillRows.some((skill) => skill.id === WORKLITE_PLATFORM_SKILL_ID)) throw new BadRequestException('The worklite-platform Skill is reserved for System Helper Chat.');
+    if (skillRows.some((skill) => skill.id === WORKLITE_PLATFORM_SKILL_ID)) throw new BadRequestException('The worklite-platform Skill is reserved for Chat Bot.');
     if (mcpServerIds && mcpRows.length !== mcpServerIds.length) throw new BadRequestException('One or more selected MCP servers are not available in this workspace.');
     return { skillIds, mcpServerIds };
   }

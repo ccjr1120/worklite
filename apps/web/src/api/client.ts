@@ -1,13 +1,7 @@
 import type {
   AgentView,
-  AgentVersionView,
   AgentExecutionView,
   AnswerAgentQuestionRequest,
-  AgentSubSessionView,
-  ScheduledAgentTaskView,
-  CreateScheduledAgentTaskRequest,
-  CreateAgentSubSessionRequest,
-  CreateAgentRequest,
   CreateRunRequest,
   CreateWorkflowRequest,
   CreateHomeBoardCategoryRequest,
@@ -20,7 +14,9 @@ import type {
   UpdateAgentRequest,
   ArtifactView,
   AuditEventView,
-  DiagnosticLogView,
+  GatewayRequestLogDetail,
+  GatewayRequestLogList,
+  GatewayRequestLogQuery,
   CreateMcpServerRequest,
   UpdateMcpServerRequest,
   CreateModelProviderRequest,
@@ -61,7 +57,7 @@ import type {
 } from '@worklite/contracts';
 
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string, public readonly traceId?: string) {
+  constructor(public readonly status: number, message: string, public readonly requestLogId?: string) {
     super(message);
     this.name = 'ApiError';
   }
@@ -78,15 +74,15 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   });
   if (!response.ok) {
     let message = `Request failed: ${response.status}`;
-    let traceId: string | undefined;
+    let requestLogId: string | undefined;
     try {
-      const body = (await response.json()) as { message?: string | string[]; traceId?: string };
+      const body = (await response.json()) as { message?: string | string[]; requestLogId?: string };
       if (body.message) message = Array.isArray(body.message) ? body.message.join(', ') : body.message;
-      traceId = body.traceId;
+      requestLogId = body.requestLogId;
     } catch {
       // Keep the status-based error when the server does not return JSON.
     }
-    throw new ApiError(response.status, message, traceId);
+    throw new ApiError(response.status, message, requestLogId);
   }
   if (response.status === 204 || response.headers.get('content-length') === '0') return undefined as T;
   const text = await response.text();
@@ -126,21 +122,8 @@ export const api = {
   command: (commandId: string) => apiGet<CommandExecutionView>(`/api/commands/${encodeURIComponent(commandId)}`),
   cancelCommand: (commandId: string) => apiPost<CommandExecutionView>(`/api/commands/${encodeURIComponent(commandId)}/cancel`),
   commandEventsUrl: (commandId: string) => `/api/commands/${encodeURIComponent(commandId)}/events`,
-  agents: (_workspace?: string) => apiGet<AgentView[]>('/api/agents'),
   agent: (_workspace: string | undefined, agentId: string) => apiGet<AgentView>(`/api/agents/${encodeURIComponent(agentId)}`),
-  agentVersions: (_workspace: string | undefined, agentId: string) => apiGet<AgentVersionView[]>(`/api/agents/${encodeURIComponent(agentId)}/versions`),
-  agentVersion: (_workspace: string | undefined, versionId: string) => apiGet<AgentVersionView>(`/api/agent-versions/${encodeURIComponent(versionId)}`),
-  createAgentVersion: (_workspace: string | undefined, agentId: string) => apiPost<AgentVersionView>(`/api/agents/${encodeURIComponent(agentId)}/versions`),
-  createAgent: (_workspace: string | undefined, input: CreateAgentRequest) => apiPost<AgentView>('/api/agents', input),
   updateAgent: (_workspace: string | undefined, agentId: string, input: UpdateAgentRequest) => apiPatch<AgentView>(`/api/agents/${encodeURIComponent(agentId)}`, input),
-  deleteAgent: (_workspace: string | undefined, agentId: string) => apiDelete(`/api/agents/${encodeURIComponent(agentId)}`),
-  agentSubSessions: (_workspace?: string) => apiGet<AgentSubSessionView[]>('/api/agent-sub-sessions'),
-  createAgentSubSession: (_workspace: string | undefined, input: CreateAgentSubSessionRequest) => apiPost<AgentSubSessionView>('/api/agent-sub-sessions', input),
-  updateAgentSubSession: (_workspace: string | undefined, sessionId: string, unread: boolean) => apiPatch<AgentSubSessionView>(`/api/agent-sub-sessions/${encodeURIComponent(sessionId)}`, { unread }),
-  deleteAgentSubSession: (_workspace: string | undefined, sessionId: string) => apiDelete(`/api/agent-sub-sessions/${encodeURIComponent(sessionId)}`),
-  agentScheduledTasks: (_workspace?: string) => apiGet<ScheduledAgentTaskView[]>('/api/agent-scheduled-tasks'),
-  createAgentScheduledTask: (_workspace: string | undefined, input: CreateScheduledAgentTaskRequest) => apiPost<ScheduledAgentTaskView>('/api/agent-scheduled-tasks', input),
-  deleteAgentScheduledTask: (_workspace: string | undefined, taskId: string) => apiDelete(`/api/agent-scheduled-tasks/${encodeURIComponent(taskId)}`),
   createAgentExecution: (_workspace: string | undefined, agentId: string, message: string) => apiPost<AgentExecutionView>(`/api/agents/${encodeURIComponent(agentId)}/executions`, { message }),
   agentExecution: (_workspace: string | undefined, agentId: string, executionId: string) => apiGet<AgentExecutionView>(`/api/agents/${encodeURIComponent(agentId)}/executions/${encodeURIComponent(executionId)}`),
   agentExecutionEventsUrl: (agentId: string, executionId: string) => `/api/agents/${encodeURIComponent(agentId)}/executions/${encodeURIComponent(executionId)}/events`,
@@ -203,7 +186,18 @@ export const api = {
   deleteArtifact: (_workspace: string | undefined, artifactId: string) => apiDelete(`/api/artifacts/${encodeURIComponent(artifactId)}`),
   usage: (_workspace?: string) => apiGet<UsageRow[]>('/api/usage'),
   auditLogs: (_workspace?: string) => apiGet<AuditEventView[]>('/api/audit-logs'),
-  diagnosticLogs: (_workspace?: string, traceId?: string) => apiGet<DiagnosticLogView[]>(`/api/diagnostic-logs${traceId ? `?traceId=${encodeURIComponent(traceId)}` : ''}`),
+  gatewayRequestLogs: (query: GatewayRequestLogQuery = {}) => {
+    const search = new URLSearchParams();
+    if (query.provider?.trim()) search.set('provider', query.provider.trim());
+    if (query.model?.trim()) search.set('model', query.model.trim());
+    if (query.statusClass) search.set('statusClass', query.statusClass);
+    if (query.workflowRunId?.trim()) search.set('workflowRunId', query.workflowRunId.trim());
+    if (query.limit) search.set('limit', String(query.limit));
+    if (query.cursor?.trim()) search.set('cursor', query.cursor.trim());
+    const suffix = search.size > 0 ? `?${search.toString()}` : '';
+    return apiGet<GatewayRequestLogList>(`/api/portkey-gateway/request-logs${suffix}`);
+  },
+  gatewayRequestLog: (requestLogId: string) => apiGet<GatewayRequestLogDetail>(`/api/portkey-gateway/request-logs/${encodeURIComponent(requestLogId)}`),
   runs: (_workspace?: string) => apiGet<RunView[]>('/api/runs'),
   run: (_workspace: string | undefined, runId: string) => apiGet<RunView>(`/api/runs/${encodeURIComponent(runId)}`),
   runEventsUrl: (runId: string) => `/api/runs/${encodeURIComponent(runId)}/events`,

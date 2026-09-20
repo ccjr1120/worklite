@@ -2,7 +2,7 @@
   "firstUse": {
     "intro": "Your workspace is ready to set up. Complete the sequence below.",
     "configureProvider": "Configure a provider",
-    "configureSystemHelper": "Choose a provider and model for System Helper Chat"
+    "configureSystemHelper": "Choose a provider and model for Chat Bot"
   },
   "boards": {
     "title": "Workflow boards",

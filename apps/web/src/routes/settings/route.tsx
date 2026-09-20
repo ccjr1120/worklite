@@ -12,7 +12,6 @@ function SettingsLayout() {
   const items = [
     { id: 'usage', label: t('nav.usage'), to: '/settings/usage' },
     { id: 'audit-log', label: t('nav.auditLog'), to: '/settings/audit-log' },
-    { id: 'logs', label: t('nav.logs'), to: '/settings/logs' },
     { id: 'appearance', label: t('nav.appearance'), to: '/settings/appearance' },
   ] as const;
 

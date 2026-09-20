@@ -23,11 +23,11 @@ Open the Skill being looked for. Action budget: one — activate the row, which 
 
 ## Layout
 
-Fluid collection width up to `1440px`. A page heading sits above the shared Agents resource tab strip; Skills is the second tab. A toolbar carries the filter on the left and `Import Skill` plus `Create skill` on the right, directly above the table. Columns are Skill, Source, Version, Updated, and a fixed-width Actions column.
+Fluid collection width up to `1440px`. A page heading sits above the shared resource navigation; Skills is the second tab. A toolbar carries the filter on the left and `Import Skill` plus `Create skill` on the right, directly above the table. Columns are Skill, Source, Version, Updated, and a fixed-width Actions column.
 
 Rows show name, source type, current version, and update time. Do not show validation or publication state until those operations are real.
 
-Protected built-in Skills appear in the same collection with a non-color `Built-in` source label. The platform-operation capability is owned by System Helper Chat and is not a Skill resource in this collection.
+Protected built-in Skills appear in the same collection with a non-color `Built-in` source label. The platform-operation capability is owned by Chat Bot and is not a Skill resource in this collection.
 
 ## Interaction Contract
 
@@ -37,7 +37,7 @@ Activating a row navigates to `/skills/:skillId`. Activating `Create skill` navi
 
 Typing in the filter narrows the list on each keystroke against the Skill name. The no-results state offers `Clear filters`.
 
-Deleting a Skill is the one action that costs a second deliberate step, because it is permanent. The row's destructive icon control opens a named confirmation. Confirming reports progress on the confirm control, closes the dialog on success, shows a toast, and refetches the list. Deletion is blocked with visible dependency feedback when an Agent or Workflow references the Skill; that feedback stays in the dialog rather than replacing the list.
+Deleting a Skill is the one action that costs a second deliberate step, because it is permanent. The row's destructive icon control opens a named confirmation. Confirming reports progress on the confirm control, closes the dialog on success, shows a toast, and refetches the list. Deletion is blocked with visible dependency feedback when a Workflow draft or version references the Skill; that feedback stays in the dialog rather than replacing the list.
 
 A failed load offers `Try again`, which refetches in place.
 
@@ -154,7 +154,7 @@ Verified 2026-09-19. Differences found against `apps/web/src/routes/skills/index
 
 ### 2026-08-26
 
-- Added the protected `worklite-platform` Skill with a non-color System Helper Chat-only label.
+- Added the protected `worklite-platform` Skill with a non-color Chat Bot-only label.
 
 ### 2026-08-26
 

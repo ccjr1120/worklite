@@ -636,8 +636,9 @@ const CODE_TEXT_STYLE = "font-family:SFMono-Regular,Consolas,'Liberation Mono',M
 const INLINE_CODE_STYLE = "padding:2px 5px;background:#f4f4f5;border-radius:4px;font-family:SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:14px;color:#18181b;";
 const BLOCKQUOTE_STYLE = 'margin:0 0 18px;padding:14px 16px;background:#f4f4f5;border-left:3px solid #a1a1aa;border-radius:4px;color:#52525b;';
 const REFERENCE_ENTRY_STYLE = 'margin:0 0 10px;';
+const REFERENCE_MARKER_STYLE = 'margin-right:4px;font-size:13px;line-height:1.55;color:#3f3f46;font-weight:600;';
 const REFERENCE_TITLE_STYLE = 'font-size:13px;line-height:1.55;color:#3f3f46;font-weight:600;';
-const REFERENCE_URL_STYLE = 'margin-left:6px;font-size:12px;line-height:1.55;color:#71717a;word-break:break-all;';
+const REFERENCE_URL_STYLE = 'font-size:12px;line-height:1.55;color:#71717a;word-break:break-all;';
 
 function markdownToHtml(markdown: string): string {
   const { articleMarkdown, referenceHeading, referencesMarkdown } = splitReferences(markdown);
@@ -723,7 +724,9 @@ function cleanReferenceLabel(value: string, url?: string): string {
     .replace(/^[-*+]\s*/, '')
     .replace(/^\[?\d+[.)\]]\s*/, '');
   if (url) label = label.split(url).join('');
-  label = label.replace(/^[\s:：\-–—|]+/, '').replace(/[\s:：\-–—|]+$/, '');
+  // Trailing Chinese commas are stripped too: a source line commonly separates its title from the URL
+  // with one, and the rendered entry appends its own separator after the label.
+  label = label.replace(/^[\s:：\-–—|]+/, '').replace(/[\s:：，,、;；\-–—|]+$/, '');
   return label || '';
 }
 
@@ -900,8 +903,15 @@ function plainInlineTokens(tokens: Token[]): string {
   }).join('');
 }
 
+// Entries read as `[n] label: url` so a reference matches the `[n]` marker the body already uses.
+// The url stays plain text because WeChat strips an off-site anchor from published article bodies.
 function renderReferences(heading: string, entries: ReferenceEntry[]): string {
-  const items = entries.map((entry) => `<section style="${REFERENCE_ENTRY_STYLE}"><span style="${REFERENCE_TITLE_STYLE}">${entry.number}. ${escapeHtml(entry.label || (entry.url ? referenceSourceLabel(entry.url) : 'Source'))}</span>${entry.url ? `<span style="${REFERENCE_URL_STYLE}">${escapeHtml(entry.url)}</span>` : ''}</section>`).join('');
+  const items = entries.map((entry) => {
+    const label = escapeHtml(entry.label || (entry.url ? referenceSourceLabel(entry.url) : 'Source'));
+    const marker = `<span style="${REFERENCE_MARKER_STYLE}">[${entry.number}]</span>`;
+    const url = entry.url ? `<span style="${REFERENCE_URL_STYLE}">${escapeHtml(entry.url)}</span>` : '';
+    return `<section style="${REFERENCE_ENTRY_STYLE}">${marker}<span style="${REFERENCE_TITLE_STYLE}">${label}${entry.url ? '：' : ''}</span>${url}</section>`;
+  }).join('');
   return `${renderHeading(2, escapeHtml(heading))}<section style="margin:0;padding:0;">${items}</section>`;
 }
 

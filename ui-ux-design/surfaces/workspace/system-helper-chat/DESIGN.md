@@ -1,4 +1,4 @@
-# Workspace System Helper Chat
+# Workspace Chat Bot
 
 ## Route
 
@@ -15,23 +15,23 @@
 
 ## Purpose
 
-Configure WorkLite through a guided conversation: create providers, Skills, MCP servers, and Agents, and dispatch work to other Agents or published Workflows.
+Configure WorkLite through a guided conversation: create providers, Skills, MCP servers, and Workflow drafts, and dispatch work to published Workflows.
 
 ## Primary Task
 
 Send a request and read its result. Action budget: one — submit the composer. Focusing the composer expands the panel, so opening the surface costs nothing beyond reaching the input.
 
-Dispatching to another Agent or a published Workflow costs two actions — select the mention, then submit — because the target is a value the product cannot resolve and only one mention is permitted per task.
+Dispatching to a published Workflow costs two actions — select the mention, then submit — because the target is a value the product cannot resolve and only one mention is permitted per task.
 
 ## Layout
 
 The expanded conversation panel is centered and capped at `1200px` wide by approximately `680px` high, constrained by `24px` desktop outer space. It contains `Chat` and `Configuration` views in that order, sharing one fixed panel height so switching tabs never resizes the surface.
 
-Configuration belongs to the panel rather than the Agent collection. It selects an existing workspace Provider and model pair and multiple workspace MCP servers for System Helper. Selection autosaves to the protected system Agent, and an unconfigured helper opens on Configuration by default. Follow the Memory One panel pattern: lightweight top tabs and unframed configuration fields inside the conversation surface.
+Configuration belongs to the Chat Bot panel rather than a resource collection. It selects an existing workspace Provider and model pair and multiple workspace MCP servers for Chat Bot. Selection autosaves to the protected Chat Bot configuration, and an unconfigured Chat Bot opens on Configuration by default. Follow the Memory One panel pattern: lightweight top tabs and unframed configuration fields inside the conversation surface.
 
 Home shows a single-line composer by default. Other pages show only a draggable lower-right Chat icon until it is opened; clicking it opens the same centered panel above the current page and focuses the composer. The icon stays inside the viewport safe area.
 
-The conversation is one unframed column. User messages are right-aligned compact neutral bubbles. Agent responses are left-aligned and use the shared Markdown renderer. When child sessions exist, a compact unframed `Sub Agents` band sits between the transcript and the composer.
+The conversation is one unframed column. User messages are right-aligned compact neutral bubbles. Chat Bot responses are left-aligned and use the shared Markdown renderer.
 
 ## Interaction Contract
 
@@ -53,11 +53,11 @@ A failed turn is the one state with a manual recovery action: `Retry last reques
 
 ### Mentions
 
-Typing `@` opens a searchable menu of configured custom Agents and published Workflows above the composer. It filters from the text after the active `@`, supports pointer selection plus `ArrowUp`, `ArrowDown`, `Enter`, and `Escape`, and stays within the panel width. Protected Agents and custom Agents without both a Provider and model are excluded. Draft Workflows are not offered as runnable mentions. Slash-command and mention menus are mutually exclusive.
+Typing `@` opens a searchable menu of configured published Workflows and published Workflows above the composer. It filters from the text after the active `@`, supports pointer selection plus `ArrowUp`, `ArrowDown`, `Enter`, and `Escape`, and stays within the panel width. Published Workflows without a runnable published version are excluded. Draft Workflows are not offered as runnable mentions. Slash-command and mention menus are mutually exclusive.
 
 Selecting a target removes the active `@` query and inserts one removable mention token before the editable task inside the same bordered composer input surface. The textarea has no separate border or background in this state, and focus is shown around the shared mention-and-text surface. The token and task text wrap within that surface rather than becoming adjacent input regions. Only one mention is allowed.
 
-Agent mentions create Agent turns; Workflow mentions create version-bound Workflow Runs and the remaining message text becomes the Workflow Input value. Submitting with an Agent mention creates a child session from the remaining task verbatim, clears the mention and task on success, and immediately switches to the child transcript. Once a child is selected, its composer accepts ordinary follow-up text and offers no nested `@` dispatch.
+`@` mentions show only published Workflows. Selecting a Workflow creates a version-bound Workflow Run from the remaining message text as its Workflow Input value, then clears the mention and task after the Run is created. Chat Bot does not expose Agent mentions or child sessions.
 
 ### Slash commands
 
@@ -69,17 +69,11 @@ The composer accepts local slash commands before ordinary message handling. Typi
 
 ### Session ownership and model calls
 
-System Helper Chat uses the normal server-owned Agent execution endpoints. The browser stores the active execution identifier and optional archived identifiers for `/new` and `/resume`; messages, tool requests, automatic execution states, outputs, and errors all come from the server execution. A browser reload fetches the current execution rather than reconstructing it from model text or local proposal state.
-
-The shell surface always uses the built-in System Helper Agent. The composer has no Agent or plugin target switcher. Plugin conversations use the same execution boundary and history commands, but their selected target is restored separately and their transcript responses are labeled with the active plugin.
-
-Each child session owns one normal custom-Agent execution and persists independently. Creating a child sends the selected Agent identifier and task through the sub-session API, then renders the linked execution. Follow-up messages use the existing continuation endpoint and Stop uses the existing cancellation endpoint. Child work does not block the main composer, never appears in the main transcript or model context, and survives browser reload. The selected child identifier is restored when available.
-
-The server owns terminal unread transitions: opening a child clears its unread marker, while completion, failure, or restart recovery marks it unread when another transcript is selected. Selecting a running child shows Stop for that child only. Closing a child cancels active work, deletes its persisted session and linked execution, and returns to System Helper when the closed child was active. `/new`, `/resume`, and `/log` operate only on the main conversation. A server restart may replace an unrecoverable running state with its persisted safe failure reason.
+Chat Bot owns one protected conversation. Messages use the protected Chat Bot execution and never dispatch to user-managed Agents or child sessions. `@` mentions invoke published Workflows only; the remaining message text is passed as Workflow input and the resulting Run is rendered as a separate transcript entry.
 
 ### Skill execution
 
-System Helper Chat permanently owns the platform-operation capability. It is an internal Chat capability, not a persisted or assignable Skill resource. The model can request only its server-discovered shebang-bearing scripts through `skill_script`, and every valid request executes immediately on the server. The browser never authorizes the request, calls resource mutation APIs on behalf of a model response, or infers operations from message text, script names, or stdout.
+Chat Bot permanently owns the platform-operation capability. It is an internal Chat capability, not a persisted or assignable Skill resource. The model can request only its server-discovered shebang-bearing scripts through `skill_script`, and every valid request executes immediately on the server. The browser never authorizes the request, calls resource mutation APIs on behalf of a model response, or infers operations from message text, script names, or stdout.
 
 Skill calls appear inline between messages as compact collapsed rows showing the Skill name, script name, automatic execution status, and exit code when available. A disclosure control reveals the exact script path, JSON argument list, working directory, host-permission warning, and output. Details never open automatically for failures, and output uses a height-bounded internal scroller. Skill calls expose no permission, `Run`, or `Reject` actions, and there is no proposal inspector or browser-owned operation card.
 
@@ -87,9 +81,9 @@ Completed resource scripts show their returned resource route as a normal link. 
 
 ### Unconfigured entry
 
-When no provider or model is bound and no configured custom Agent is available, the composer is replaced with one keyboard-accessible setup link to `/agents/agt_system_helper_chat`. When a configured custom Agent is available, the composer remains for structured `@` dispatch while ordinary System Helper submission stays disabled.
+When no provider or model is bound, the composer is replaced with one keyboard-accessible inline configuration panel. Once configured, the composer supports ordinary Chat Bot messages and `@` mentions for published Workflows only.
 
-Before the first message, compact task starters may populate requests for Provider, Skill, MCP server, or Agent creation without fabricating a proposal. The expanded header identifies System Helper Chat, shows the current Agent execution status, and provides an icon-only minimize control. A reconnecting execution shows that state separately from the server-owned execution status. A compact diagnostics disclosure may show the safe execution identifier and last-updated time without exposing provider or host secrets.
+Before the first message, compact task starters may populate requests for Provider, Skill, MCP server, or Workflow creation without fabricating a proposal. The expanded header identifies Chat Bot, shows the current Agent execution status, and provides an icon-only minimize control. A reconnecting execution shows that state separately from the server-owned execution status. A compact diagnostics disclosure may show the safe execution identifier and last-updated time without exposing provider or host secrets.
 
 Workflow Run entries use the same transcript surface: the user input, a compact queued or running state, completion or failure feedback, and successful Artifact cards with direct detail actions. Workflow Run state is never merged into Agent execution state and never exposes a second execution control.
 
@@ -97,10 +91,10 @@ Workflow Run entries use the same transcript surface: the user input, a compact 
 
 | State | Behavior |
 | --- | --- |
-| Loading | Loading the persisted execution shows a polite centered status line in the transcript region. The composer shows its own loading line while the System Helper configuration resolves. |
+| Loading | Loading the persisted execution shows a polite centered status line in the transcript region. The composer shows its own loading line while the Chat Bot configuration resolves. |
 | Empty | Before the first message, show the welcome line and compact task starters. |
 | No results | The mention and slash menus each show an explicit no-match line rather than collapsing. |
-| Error | A failed turn renders its credential-safe reason inline in the transcript with a non-color error cue, a retry action, and a diagnostics disclosure. Sub-session and cancellation failures render as inline alerts. Raw SDK errors, malformed tool input, provider responses, stack traces, and credentials are never shown. |
+| Error | A failed turn renders its credential-safe reason inline in the transcript with a non-color error cue, a retry action, and a diagnostics disclosure. Cancellation failures render as inline alerts. Raw SDK errors, malformed tool input, provider responses, stack traces, and credentials are never shown. |
 | Busy | The Send target becomes Stop while running; the transcript owns the working placeholder so the composer never loses its editable draft. |
 | Offline | Inherits `shared-states.md`. Reconnecting is shown separately from execution status and retries with increasing delay. |
 | Long content | Skill arguments and output scroll within their own stable regions. The transcript follows the end only while the reader is already at the end. |
@@ -146,9 +140,6 @@ Also define unconfigured, submitting, working, executing script, cancelling, can
 | `assistant:mentions.empty` | State |
 | `assistant:mentions.remove` / `removeWorkflow` | Action |
 | `assistant:mentions.workflow` | State |
-| `assistant:subAgents.label` / `unread` | State |
-| `assistant:subAgents.return` / `close` | Action |
-| `assistant:subAgents.createFailed` / `requestFailed` / `closeFailed` | Recovery |
 | `assistant:history.title` | State |
 | `assistant:history.description` | Constraint |
 | `assistant:history.empty` / `untitled` | State |
@@ -170,7 +161,7 @@ The composer's visible label is provided as screen-reader-only text bound to the
 
 Send and Stop share one stable target with the same dimensions and distinct localized accessible names. Panel tabs are a `tablist` with roving `tabIndex` and arrow-key movement. The collapsed panel is marked `aria-hidden` and `inert` so its controls leave the tab order entirely.
 
-All icon-only controls carry accessible names and tooltips, except the intentionally unobtrusive cross-page floating Chat entry, which keeps an accessible name without a visible tooltip and exposes the current execution status as screen-reader-only text. Sub-session items expose their status as screen-reader-only text alongside the icon and carry `aria-current` when active. Skill-call rows are buttons with `aria-expanded` and an accessible name that states whether activating them shows or hides details.
+All icon-only controls carry accessible names and tooltips, except the intentionally unobtrusive cross-page floating Chat entry, which keeps an accessible name without a visible tooltip and exposes the current execution status as screen-reader-only text. Skill-call rows are buttons with `aria-expanded` and an accessible name that states whether activating them shows or hides details.
 
 Working, cancelled, clarification, and Workflow Run regions are `role="status"`; failures are `role="alert"`. Conversation and Skill-call status changes use restrained live-region announcements without announcing every token. Keyboard focus remains in the editable composer after cancellation, history selection, and automatic execution updates. Reduced-motion mode replaces spinner motion with the same static working cue. Messages use neutral surface contrast and speaker labels rather than color alone.
 
@@ -181,7 +172,7 @@ Verified 2026-09-19. Differences found against `apps/web/src/components/workspac
 - The transcript does not expose an `aria-live` region for streaming updates. Working, cancelled, and failure blocks use `role="status"` and `role="alert"`, which announce on mount, but the incremental assistant response itself is not announced, so the restrained live-region requirement in this specification is unmet.
 - The panel is rendered whenever `isHome || open` and collapsed with `h-0` plus `aria-hidden`/`inert`. On Home the collapsed panel therefore stays mounted and its queries stay active, which is intended for session continuity but is not documented as a mount contract.
 - Archived executions are capped by `HISTORY_LIMIT` in browser storage with no user-facing indication that older entries are dropped, so `/resume` can silently stop offering a conversation the user remembers.
-- `error` is one component-level string shared by main-conversation, sub-session, and cancellation failures, so a sub-session failure renders in the same single region as a main-turn failure rather than local to the affected transcript.
+- `error` is one component-level string shared by Chat Bot and cancellation failures.
 - The floating Chat entry exposes status as `sr-only` text inside the button, making the accessible name and the status concatenate for screen readers rather than remaining distinct.
 - Mobile height uses `max-md:h-[min(70vh,680px)]`, matching the `70vh` cap, but the `12px` outer-margin requirement from `shared/responsive-behavior.md` is applied by the parent container rather than this surface, so the constraint is not verifiable from this component alone.
 
@@ -203,11 +194,11 @@ Verified 2026-09-19. Differences found against `apps/web/src/components/workspac
 
 ### 2026-09-09
 
-- Confirmed that the workspace composer always uses the built-in System Helper Agent; removed composer Agent/plugin switching and retained single custom-Agent dispatch through `@` mentions.
+- Confirmed that the workspace composer always uses the built-in Chat Bot Agent; removed composer Agent/plugin switching and retained single Workflow dispatch through `@` mentions.
 
 ### 2026-09-09
 
-- Confirmed that the composer always uses the built-in Agent target; removed Agent/plugin target switching and retained single custom-Agent dispatch through `@` mentions.
+- Confirmed that the composer always uses the built-in Agent target; removed Agent/plugin target switching and retained single Workflow dispatch through `@` mentions.
 
 ### 2026-09-04
 
@@ -215,7 +206,7 @@ Verified 2026-09-19. Differences found against `apps/web/src/components/workspac
 
 ### 2026-09-03
 
-- Moved System Helper configuration into the chat panel with Configuration and Conversation views; configuration selects existing workspace Provider/model pairs.
+- Moved Chat Bot configuration into the chat panel with Configuration and Conversation views; configuration selects existing workspace Provider/model pairs.
 
 - Changed cross-page Chat minimization to a draggable lower-right icon that opens and focuses the composer, while Home retains its visible input.
 - Use the Agent icon without a Tooltip for the floating entry and close expanded Chat when the pointer lands outside its surface.
@@ -227,13 +218,13 @@ Verified 2026-09-19. Differences found against `apps/web/src/components/workspac
 ### 2026-08-28
 
 - Added reconnecting and safe diagnostics states for persisted Agent executions, including retry and execution identifier disclosure.
-- Defined request-generation guards, online/visibility refresh, server-owned child unread transitions, and restoration of the selected child session.
+- Defined request-generation guards, online/visibility refresh, server-owned execution recovery and restoration of the active Chat Bot conversation.
 - Clarified that `/new` creates a new main conversation boundary without cancelling an archived background execution.
 
 ### 2026-08-28
 
-- Placed selected Agent mentions and task text inside one shared composer input surface.
-- Added structured `@` dispatch to configured custom Agents, persistent child-session navigation, independent child transcripts, follow-up, Stop, unread, return, and close behavior.
+- Placed the selected Workflow mention and task text inside one shared composer input surface.
+- Added structured `@` dispatch to published Workflows with independent Workflow Run presentation in the Chat Bot transcript.
 - Replaced the chat transcript and composer primitives with local AI Elements-compatible Conversation, Message, and Prompt Input components backed by the existing server execution contract.
 
 ### 2026-08-27
@@ -247,18 +238,18 @@ Verified 2026-09-19. Differences found against `apps/web/src/components/workspac
 
 ### 2026-08-27
 
-- Removed Skill-call permission decisions, `Run` and `Reject` actions, and approval-specific states from System Helper Chat.
+- Removed Skill-call permission decisions, `Run` and `Reject` actions, and approval-specific states from Chat Bot.
 - Made validated assigned-Skill requests execute automatically while Web remains a read-only observer of execution state and results.
 
 ### 2026-08-27
 
-- Replaced browser-owned proposals and the System Helper stream protocol with persisted generic Agent executions and inline `skill_script` approvals.
+- Replaced browser-owned proposals and the Chat Bot stream protocol with persisted generic Agent executions and inline `skill_script` approvals.
 - Required all platform mutations to execute through product-owned `worklite-platform` scripts and server APIs; Web now renders results and applies only typed server-validated navigation actions.
 - Made `/new`, `/resume`, and `/log` operate on server execution identifiers and rendered execution data instead of local proposal state.
 
 ### 2026-08-26
 
-- Bound System Helper Chat to the protected `worklite-platform` Skill and required model-emitted, server-validated platform actions instead of browser text heuristics.
+- Bound Chat Bot to the protected `worklite-platform` Skill and required model-emitted, server-validated platform actions instead of browser text heuristics.
 - Added Workflow draft creation and confirmed appearance or language changes while retaining immediate allowlisted navigation and secure Provider credential forms.
 
 ### 2026-08-26

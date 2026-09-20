@@ -6,10 +6,11 @@ const rootDir = new URL('..', import.meta.url);
 const rootPath = decodeURIComponent(rootDir.pathname).replace(/\/$/, '');
 const children = [];
 let shuttingDown = false;
+const webPort = process.env.WEB_PORT?.trim() || '23390';
 
 const commands = [
   ['api', ['--filter', '@worklite/api', 'exec', 'nest', 'start', '--builder', 'webpack', '--webpackPath', 'webpack.config.js']],
-  ['web', ['--filter', '@worklite/web', 'exec', 'vite', 'preview', '--host', '127.0.0.1', '--port', '23390']],
+  ['web', ['--filter', '@worklite/web', 'exec', 'vite', 'preview', '--host', '127.0.0.1', '--port', webPort]],
 ];
 
 for (const [name, args] of commands) {

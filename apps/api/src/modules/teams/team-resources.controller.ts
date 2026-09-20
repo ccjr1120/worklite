@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import type { CreateMcpServerRequest, CreateSkillRequest, ExecuteSkillScriptRequest, ImportSkillRequest, UpdateMcpServerRequest, UpdateSkillRequest, UpdateWorkspaceSettingsRequest } from '@worklite/contracts';
 import { WorkspaceResourcesService } from './team-resources.service';
@@ -73,6 +73,4 @@ export class WorkspaceResourcesController {
   @Get('audit-logs')
   audit(@Req() request: Request) { return this.resources.audit(request, 'personal'); }
 
-  @Get('diagnostic-logs')
-  diagnostics(@Req() request: Request, @Query('traceId') traceId?: string) { return this.resources.diagnosticLogs(request, 'personal', traceId); }
 }

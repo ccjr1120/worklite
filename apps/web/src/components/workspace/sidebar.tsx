@@ -1,5 +1,5 @@
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Bot, Home, KeyRound, Puzzle, Settings, Workflow } from 'lucide-react';
+import { Home, KeyRound, Puzzle, Settings, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { focusRingInset } from '@/components/ui/interaction';
@@ -20,7 +20,6 @@ const navigationGroups = [
     id: 'capabilities',
     labelKey: 'nav.capabilities',
     items: [
-      { id: 'agents', labelKey: 'nav.agents', to: '/agents', icon: Bot },
       { id: 'plugins', labelKey: 'nav.plugins', to: '/plugins', icon: Puzzle },
     ],
   },
@@ -40,7 +39,6 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
 
   function primaryActive(id: (typeof navigationGroups)[number]['items'][number]['id'], to: string) {
     if (id === 'settings') return pathname.startsWith('/settings');
-    if (id === 'agents') return ['/agents', '/skills', '/mcp-servers'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
     if (id === 'workflows') return ['/workflows', '/artifacts'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
     return pathname === to || pathname.startsWith(`${to}/`);
   }

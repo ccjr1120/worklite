@@ -5,7 +5,7 @@ import BetterSqlite3 from 'better-sqlite3';
 import { codexAuthStatus } from './codex-auth';
 import { codexModels } from './codex-transport';
 
-export type GatewayProviderProtocol = 'openai/chat' | 'openai/responses' | 'codex/responses' | 'deepseek/chat';
+export type GatewayProviderProtocol = 'openai/chat' | 'openai/responses' | 'anthropic/messages' | 'codex/responses';
 
 export type GatewayProvider = {
   id: string;
@@ -68,7 +68,7 @@ type ProviderRow = {
   updated_at: number | string | null;
 };
 
-const VALID_PROTOCOLS: GatewayProviderProtocol[] = ['openai/chat', 'openai/responses', 'codex/responses', 'deepseek/chat'];
+const VALID_PROTOCOLS: GatewayProviderProtocol[] = ['openai/chat', 'openai/responses', 'anthropic/messages', 'codex/responses'];
 const GATEWAY_PROVIDER_ID = 'gateway-provider';
 const CODEX_PROVIDER_ID = 'codex-provider';
 const CODEX_PROVIDER_NAME = 'codex';
@@ -117,8 +117,38 @@ function getDatabase(): BetterSqlite3.Database {
     );
     CREATE INDEX IF NOT EXISTS gateway_request_stats_occurred_idx ON gateway_request_stats(occurred_at);
     CREATE INDEX IF NOT EXISTS gateway_request_stats_provider_model_idx ON gateway_request_stats(provider_name, model);
+    CREATE TABLE IF NOT EXISTS gateway_request_logs (
+      id TEXT PRIMARY KEY,
+      occurred_at INTEGER NOT NULL,
+      provider_name TEXT NOT NULL,
+      model TEXT NOT NULL,
+      endpoint TEXT NOT NULL,
+      status INTEGER NOT NULL,
+      duration_ms INTEGER NOT NULL,
+      streaming INTEGER NOT NULL DEFAULT 0,
+      source TEXT,
+      workflow_run_id TEXT,
+      node_run_id TEXT,
+      prompt_tokens INTEGER,
+      completion_tokens INTEGER,
+      total_tokens INTEGER,
+      request_body TEXT,
+      response_kind TEXT NOT NULL,
+      response_body TEXT
+    );
+    CREATE INDEX IF NOT EXISTS gateway_request_logs_occurred_idx ON gateway_request_logs(occurred_at);
+    CREATE INDEX IF NOT EXISTS gateway_request_logs_provider_model_idx ON gateway_request_logs(provider_name, model);
+    CREATE INDEX IF NOT EXISTS gateway_request_logs_workflow_run_idx ON gateway_request_logs(workflow_run_id);
   `);
+  pruneRequestLogs(database);
   return database;
+}
+
+const REQUEST_LOG_RETENTION_DAYS = 3;
+const REQUEST_LOG_RETENTION_MS = REQUEST_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+function pruneRequestLogs(target: BetterSqlite3.Database): void {
+  target.prepare('DELETE FROM gateway_request_logs WHERE occurred_at < ?').run(Date.now() - REQUEST_LOG_RETENTION_MS);
 }
 
 function secretKey(): Buffer {
@@ -195,13 +225,15 @@ function maskSecret(value: string): string {
 }
 
 function configured(provider: GatewayProvider): boolean {
+  if (!VALID_PROTOCOLS.includes(provider.protocol)) return false;
   return provider.protocol === 'codex/responses'
     ? codexAuthStatus().status === 'connected'
     : Boolean(provider.apiKey);
 }
 
 function view(provider: GatewayProvider): GatewayProviderView {
-  return { id: provider.id, name: provider.name, protocol: provider.protocol, baseURL: provider.baseURL, models: provider.models, updatedAt: provider.updatedAt, status: configured(provider) ? 'connected' : 'unconfigured', maskedKey: provider.apiKey ? maskSecret(provider.apiKey) : '', headerNames: Object.keys(provider.headers ?? {}) };
+  const status = !VALID_PROTOCOLS.includes(provider.protocol) ? 'invalid' : configured(provider) ? 'connected' : 'unconfigured';
+  return { id: provider.id, name: provider.name, protocol: provider.protocol, baseURL: provider.baseURL, models: provider.models, updatedAt: provider.updatedAt, status, maskedKey: provider.apiKey ? maskSecret(provider.apiKey) : '', headerNames: Object.keys(provider.headers ?? {}) };
 }
 
 function validateInput(input: unknown, partial = false): Partial<GatewayProvider> {
@@ -414,4 +446,181 @@ export function requestStats(window: GatewayStatsWindow = '24h'): GatewayStats {
     },
     breakdown,
   };
+}
+
+export type GatewayRequestLogResponse =
+  | { kind: 'json'; body: unknown }
+  | { kind: 'text'; body: string }
+  | { kind: 'stream'; events: unknown[] }
+  | { kind: 'unavailable'; reason: string };
+
+type GatewayRequestLogRow = {
+  id: string;
+  occurred_at: number;
+  provider_name: string;
+  model: string;
+  endpoint: string;
+  status: number;
+  duration_ms: number;
+  streaming: number;
+  source: string | null;
+  workflow_run_id: string | null;
+  node_run_id: string | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  request_body: string | null;
+  response_kind: string;
+  response_body: string | null;
+};
+
+export function recordRequestLog(input: {
+  id?: string | null;
+  provider: string;
+  model: string;
+  endpoint: string;
+  status: number;
+  durationMs: number;
+  streaming: boolean;
+  source?: string | null;
+  workflowRunId?: string | null;
+  nodeRunId?: string | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
+  request: unknown;
+  response: GatewayRequestLogResponse;
+}): string {
+  const database = getDatabase();
+  const id = input.id?.trim() || `glog_${randomUUID()}`;
+  database.prepare(`INSERT INTO gateway_request_logs (id, occurred_at, provider_name, model, endpoint, status, duration_ms, streaming, source, workflow_run_id, node_run_id, prompt_tokens, completion_tokens, total_tokens, request_body, response_kind, response_body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    id,
+    Date.now(),
+    input.provider || 'Unknown',
+    input.model || 'Unknown',
+    input.endpoint || '/',
+    input.status,
+    Math.max(0, Math.round(input.durationMs)),
+    input.streaming ? 1 : 0,
+    input.source ?? null,
+    input.workflowRunId ?? null,
+    input.nodeRunId ?? null,
+    input.promptTokens ?? null,
+    input.completionTokens ?? null,
+    input.totalTokens ?? null,
+    safeJsonText(input.request),
+    input.response.kind,
+    responseBodyText(input.response),
+  );
+  pruneRequestLogs(database);
+  return id;
+}
+
+function safeJsonText(value: unknown): string | null {
+  if (value === undefined) return null;
+  try {
+    return JSON.stringify(value) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function responseBodyText(response: GatewayRequestLogResponse): string | null {
+  if (response.kind === 'text') return response.body;
+  if (response.kind === 'unavailable') return response.reason;
+  if (response.kind === 'stream') return safeJsonText(response.events);
+  return safeJsonText(response.body);
+}
+
+function parseStoredJson(value: string | null): unknown {
+  if (value === null) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function requestLogResponse(row: GatewayRequestLogRow): GatewayRequestLogResponse {
+  if (row.response_kind === 'text') return { kind: 'text', body: row.response_body ?? '' };
+  if (row.response_kind === 'unavailable') return { kind: 'unavailable', reason: row.response_body ?? 'The response was not captured.' };
+  if (row.response_kind === 'stream') {
+    const events = parseStoredJson(row.response_body);
+    return { kind: 'stream', events: Array.isArray(events) ? events : [] };
+  }
+  return { kind: 'json', body: parseStoredJson(row.response_body) };
+}
+
+function requestLogListItem(row: GatewayRequestLogRow) {
+  return {
+    id: row.id,
+    occurredAt: new Date(row.occurred_at).toISOString(),
+    provider: row.provider_name,
+    model: row.model,
+    endpoint: row.endpoint,
+    status: row.status,
+    durationMs: row.duration_ms,
+    streaming: row.streaming === 1,
+    source: row.source,
+    workflowRunId: row.workflow_run_id,
+    nodeRunId: row.node_run_id,
+    promptTokens: row.prompt_tokens,
+    completionTokens: row.completion_tokens,
+    totalTokens: row.total_tokens,
+  };
+}
+
+const REQUEST_LOG_PAGE_LIMIT = 50;
+
+export function requestLogs(query: {
+  provider?: string;
+  model?: string;
+  statusClass?: string;
+  workflowRunId?: string;
+  limit?: number;
+  cursor?: string;
+}) {
+  const database = getDatabase();
+  pruneRequestLogs(database);
+  const conditions: string[] = [];
+  const values: Array<string | number> = [];
+  if (query.provider?.trim()) {
+    conditions.push('provider_name = ?');
+    values.push(query.provider.trim());
+  }
+  if (query.model?.trim()) {
+    conditions.push('model = ?');
+    values.push(query.model.trim());
+  }
+  if (query.workflowRunId?.trim()) {
+    conditions.push('workflow_run_id = ?');
+    values.push(query.workflowRunId.trim());
+  }
+  if (query.statusClass === 'success') conditions.push('status >= 200 AND status < 400');
+  if (query.statusClass === 'client_error') conditions.push('status >= 400 AND status < 500');
+  if (query.statusClass === 'server_error') conditions.push('status >= 500');
+  const cursor = Number(query.cursor ?? '');
+  if (Number.isSafeInteger(cursor) && cursor > 0) {
+    conditions.push('occurred_at < ?');
+    values.push(cursor);
+  }
+  const requested = Number(query.limit ?? REQUEST_LOG_PAGE_LIMIT);
+  const limit = Number.isSafeInteger(requested) && requested > 0 ? Math.min(requested, REQUEST_LOG_PAGE_LIMIT) : REQUEST_LOG_PAGE_LIMIT;
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const rows = database.prepare(`SELECT * FROM gateway_request_logs ${where} ORDER BY occurred_at DESC, id DESC LIMIT ?`).all(...values, limit + 1) as GatewayRequestLogRow[];
+  const page = rows.slice(0, limit);
+  const last = page.at(-1);
+  return {
+    items: page.map(requestLogListItem),
+    nextCursor: rows.length > limit && last ? String(last.occurred_at) : null,
+    retentionDays: REQUEST_LOG_RETENTION_DAYS,
+  };
+}
+
+export function requestLog(requestLogId: string) {
+  const database = getDatabase();
+  pruneRequestLogs(database);
+  const row = database.prepare('SELECT * FROM gateway_request_logs WHERE id = ?').get(requestLogId) as GatewayRequestLogRow | undefined;
+  if (!row) return null;
+  return { ...requestLogListItem(row), request: parseStoredJson(row.request_body), response: requestLogResponse(row) };
 }

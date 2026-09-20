@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { PortkeyGatewayService } from './portkey-gateway.service';
-import type { CodexAccountUsageSnapshot, CodexRateLimitSnapshot, CreateModelProviderRequest, PortkeyGatewayStats, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
+import type { CodexAccountUsageSnapshot, CodexRateLimitSnapshot, CreateModelProviderRequest, GatewayRequestLogDetail, GatewayRequestLogList, PortkeyGatewayStats, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
 
 @Controller('portkey-gateway')
 export class PortkeyGatewayController {
@@ -19,6 +19,30 @@ export class PortkeyGatewayController {
   @Get('stats')
   stats(@Query('window') window?: string): Promise<PortkeyGatewayStats> {
     return this.gateway.stats(window);
+  }
+
+  @Get('request-logs')
+  requestLogs(
+    @Query('provider') provider?: string,
+    @Query('model') model?: string,
+    @Query('statusClass') statusClass?: string,
+    @Query('workflowRunId') workflowRunId?: string,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+  ): Promise<GatewayRequestLogList> {
+    return this.gateway.requestLogs({
+      provider,
+      model,
+      statusClass: statusClass === 'success' || statusClass === 'client_error' || statusClass === 'server_error' ? statusClass : undefined,
+      workflowRunId,
+      limit: limit ? Number(limit) : undefined,
+      cursor,
+    });
+  }
+
+  @Get('request-logs/:requestLogId')
+  requestLog(@Param('requestLogId') requestLogId: string): Promise<GatewayRequestLogDetail> {
+    return this.gateway.requestLog(requestLogId);
   }
 
   @Get('codex/auth/status')

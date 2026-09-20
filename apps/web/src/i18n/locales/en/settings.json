@@ -3,12 +3,11 @@
     "title": "Settings",
     "usage": "Usage",
     "auditLog": "Audit log",
-    "logs": "Diagnostic logs",
     "appearance": "Appearance"
   },
   "providers": {
     "title": "Model providers",
-    "description": "Credentials are write-only. Changing a provider can affect future agent runs, not published workflow versions.",
+    "description": "Credentials are write-only. Changing a provider can affect Chat Bot and future Workflow runs.",
     "create": "Create provider",
     "columns": {
       "provider": "Provider",
@@ -19,7 +18,7 @@
     },
     "empty": {
       "title": "No model providers",
-      "description": "Add a provider to make models available to agents."
+      "description": "Add a provider to make models available to Chat Bot and Workflow Agent nodes."
     },
     "noMatches": {
       "title": "No matching providers",
@@ -31,6 +30,8 @@
     "name": "Provider name",
     "namePlaceholder": "OpenAI",
     "protocol": "Protocol",
+    "protocolPlaceholder": "Select a protocol",
+    "protocolRequired": "Select a protocol before saving or fetching models.",
     "apiKey": "API key",
     "baseURL": "Base URL",
     "baseURLHint": "Enter the upstream API base URL.",
@@ -74,8 +75,6 @@
     "waitingReplyAccessible": "Waiting for the model reply.",
     "testDuration": "Duration: {{seconds}} s",
     "testFailed": "The provider test failed.",
-    "traceId": "Trace {{id}}",
-    "viewLogs": "View logs",
     "saved": "Provider saved",
     "delete": "Delete provider",
     "deleteTitle": "Delete {{provider}}?",
@@ -87,11 +86,12 @@
       "providers": "Model Providers",
       "codex": "Codex Account Pool",
       "statistics": "Statistics",
-      "gateway": "Portkey Gateway"
+      "gateway": "Portkey Gateway",
+      "requestLogs": "Request logs"
     },
     "gateway": {
       "title": "Portkey Gateway",
-      "description": "The local Portkey Gateway stays running and shares one OpenAI-compatible endpoint for all configured providers.",
+      "description": "The local Portkey Gateway stays running and shares one unified endpoint for all configured providers.",
       "port": "Gateway port",
       "status": "Status",
       "loading": "Loading Gateway status...",
@@ -189,7 +189,43 @@
     },
     "deleteFailed": "Unable to delete provider.",
     "loading": "Loading providers...",
-    "loadFailed": "Unable to load providers."
+    "loadFailed": "Unable to load providers.",
+    "requestLogs": {
+      "title": "Request logs",
+      "retention": "Captured requests and responses are kept for three days.",
+      "rowLabel": "{{provider}} {{model}} at {{time}}",
+      "filters": {
+        "provider": "All providers",
+        "model": "All models",
+        "statusClass": "All statuses",
+        "workflowRun": "Workflow run"
+      },
+      "statusClass": {
+        "all": "All statuses",
+        "success": "Succeeded",
+        "clientError": "Client error",
+        "serverError": "Server error"
+      },
+      "loadMore": "Load more",
+      "copied": "Copied",
+      "copyRequest": "Copy request body",
+      "copyResponse": "Copy response body",
+      "request": "Request",
+      "response": "Response",
+      "streamEvents": "Response stream events",
+      "streaming": "Streaming",
+      "correlatedRun": "Run {{id}}",
+      "responseUnavailable": "The response was not captured: {{reason}}",
+      "emptyTitle": "No requests captured yet",
+      "emptyDescription": "A captured request appears here after a provider request runs, and is kept for three days.",
+      "noMatches": {
+        "title": "No requests match these filters",
+        "description": "Clear the filters to see the captured requests that remain."
+      },
+      "error": "The request logs could not be loaded.",
+      "detailError": "This captured request could not be loaded."
+    },
+    "viewRequestLog": "View request log"
   },
   "usage": {
     "title": "Usage",
@@ -221,45 +257,6 @@
     },
     "loading": "Loading audit log...",
     "loadFailed": "Unable to load audit log."
-  },
-  "logs": {
-    "title": "Diagnostic logs",
-    "description": "Detailed local traces for Provider and Gateway operations.",
-    "search": "Filter by trace, Provider, stage, or message",
-    "traceFilter": "Trace: {{id}}",
-    "clearTrace": "Clear trace",
-    "loading": "Loading diagnostic logs...",
-    "error": "Unable to load diagnostic logs.",
-    "retry": "Retry",
-    "emptyTitle": "No diagnostic events",
-    "emptyDescription": "Provider connection tests and Gateway diagnostics will appear here.",
-    "noMatchesTitle": "No matching events",
-    "noMatchesDescription": "No diagnostic events match the current filters.",
-    "columns": {
-      "time": "Time",
-      "level": "Level",
-      "trace": "Trace",
-      "provider": "Provider",
-      "stage": "Stage",
-      "status": "Status",
-      "message": "Message"
-    },
-    "details": "Event details",
-    "duration": "Duration: {{ms}} ms",
-    "copyTrace": "Copy trace ID",
-    "copied": "Copied",
-    "filters": {
-      "allLevels": "All levels",
-      "allStages": "All stages"
-    },
-    "levels": {
-      "debug": "Debug",
-      "info": "Info",
-      "warn": "Warn",
-      "error": "Error"
-    },
-    "providerCount_one": "{{count}} Provider in result",
-    "providerCount_other": "{{count}} Providers in result"
   },
   "appearance": {
     "title": "Appearance",

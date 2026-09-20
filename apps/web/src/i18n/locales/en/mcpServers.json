@@ -52,5 +52,6 @@
     "failed": "Unable to delete mcp server."
   },
   "loading": "Loading MCP servers...",
-  "loadFailed": "Unable to load MCP servers."
+  "loadFailed": "Unable to load MCP servers.",
+  "description": "Connect a remote MCP server, test it, then choose the tools Chat Bot and Workflow Agent nodes may use."
 }

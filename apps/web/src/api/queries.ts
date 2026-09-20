@@ -1,20 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
-import type { AssignHomeBoardRequest, CreateHomeBoardCategoryRequest, UpdateHomeBoardCategoryRequest } from '@worklite/contracts';
+import type { AssignHomeBoardRequest, CreateHomeBoardCategoryRequest, GatewayRequestLogQuery, UpdateHomeBoardCategoryRequest } from '@worklite/contracts';
 
-export const agentsQueryKey = () => ['agents'] as const;
-export const agentSubSessionsQueryKey = () => ['agent-sub-sessions'] as const;
 export const workflowScheduleQueryKey = (workflowId: string) => ['workflow-schedule', workflowId] as const;
-export const agentScheduledTasksQueryKey = () => ['agent-scheduled-tasks'] as const;
 export const pluginsQueryKey = () => ['plugins'] as const;
 export const workflowsQueryKey = () => ['workflows'] as const;
 export const runsQueryKey = () => ['runs'] as const;
 export const mcpServersQueryKey = () => ['mcp-servers'] as const;
 export const artifactsQueryKey = () => ['artifacts'] as const;
-
-export function useAgentsQuery(workspace?: string) {
-  return useQuery({ queryKey: agentsQueryKey(), queryFn: () => api.agents(workspace) });
-}
 
 export function useWorkflowsQuery(workspace?: string) {
   return useQuery({ queryKey: workflowsQueryKey(), queryFn: () => api.workflows(workspace) });
@@ -24,13 +17,6 @@ export function useAgentQuery(workspace: string | undefined, agentId: string) {
   return useQuery({ queryKey: ['agent', agentId] as const, queryFn: () => api.agent(workspace, agentId), enabled: Boolean(agentId && agentId !== 'new') });
 }
 
-export function useAgentVersionsQuery(workspace: string | undefined, agentId: string) {
-  return useQuery({ queryKey: ['agent-versions', agentId] as const, queryFn: () => api.agentVersions(workspace, agentId), enabled: Boolean(agentId), staleTime: 10_000 });
-}
-
-export function useAgentSubSessionsQuery(workspace?: string) {
-  return useQuery({ queryKey: agentSubSessionsQueryKey(), queryFn: () => api.agentSubSessions(workspace), refetchInterval: 1_500 });
-}
 
 export function useWorkflowScheduleQuery(workspace: string | undefined, workflowId: string) {
   return useQuery({
@@ -41,9 +27,6 @@ export function useWorkflowScheduleQuery(workspace: string | undefined, workflow
   });
 }
 
-export function useAgentScheduledTasksQuery(workspace?: string) {
-  return useQuery({ queryKey: agentScheduledTasksQueryKey(), queryFn: () => api.agentScheduledTasks(workspace), refetchInterval: 5_000 });
-}
 
 export function usePluginsQuery() {
   return useQuery({ queryKey: pluginsQueryKey(), queryFn: api.plugins, staleTime: 30_000 });
@@ -149,6 +132,22 @@ export function usePortkeyGatewayStatsQuery(window: '24h' | '7d' | '30d') {
   return useQuery({ queryKey: ['portkey-gateway-stats', window] as const, queryFn: () => api.portkeyGatewayStats(window), refetchInterval: 30_000 });
 }
 
+export function useGatewayRequestLogsQuery(query: GatewayRequestLogQuery) {
+  return useQuery({
+    queryKey: ['gateway-request-logs', query.provider ?? '', query.model ?? '', query.statusClass ?? '', query.workflowRunId ?? ''] as const,
+    queryFn: () => api.gatewayRequestLogs(query),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useGatewayRequestLogQuery(requestLogId?: string) {
+  return useQuery({
+    queryKey: ['gateway-request-log', requestLogId ?? ''] as const,
+    queryFn: () => api.gatewayRequestLog(requestLogId as string),
+    enabled: Boolean(requestLogId),
+  });
+}
+
 export function useArtifactsQuery(workspace?: string) {
   return useQuery({ queryKey: artifactsQueryKey(), queryFn: () => api.artifacts(workspace) });
 }
@@ -163,10 +162,6 @@ export function useUsageQuery(workspace?: string) {
 
 export function useAuditLogsQuery(workspace?: string) {
   return useQuery({ queryKey: ['audit-logs'] as const, queryFn: () => api.auditLogs(workspace) });
-}
-
-export function useDiagnosticLogsQuery(workspace?: string, traceId?: string) {
-  return useQuery({ queryKey: ['diagnostic-logs', traceId ?? 'all'] as const, queryFn: () => api.diagnosticLogs(workspace, traceId) });
 }
 
 export function useWorkspaceSettingsQuery() {

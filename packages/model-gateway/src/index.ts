@@ -1,16 +1,16 @@
-import { createDeepSeek } from '@ai-sdk/deepseek';
+import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { APICallError, generateText, InvalidToolInputError, JSONParseError, jsonSchema, NoOutputGeneratedError, Output, streamText, tool, type LanguageModel, type LanguageModelUsage, type ModelMessage } from 'ai';
 
 export type ModelProviderConfig =
   | {
       id: string;
-      adapter: 'deepseek';
+      adapter: 'anthropic';
       apiKey: string;
       baseURL?: string;
       headers?: Readonly<Record<string, string>>;
       gatewayProviderName?: string;
-      operation?: 'chat/completions';
+      operation?: 'messages';
     }
   | {
       id: string;
@@ -34,11 +34,18 @@ export type GatewayAgentMessage =
 
 export type GatewayToolResultOutput = { type: 'text' | 'error-text'; value: string };
 
+export type GatewayCorrelation = {
+  source: 'agent' | 'workflow';
+  workflowRunId?: string;
+  nodeRunId?: string;
+};
+
 export type GenerateAgentStepRequest = {
   provider: ModelProviderConfig;
   model: string;
   systemPrompt: string;
   jsonOutput?: boolean;
+  correlation?: GatewayCorrelation;
   messages: readonly GatewayAgentMessage[];
   skillScripts: Array<{ skillId: string; skillName: string; path: string }>;
   builtinTools?: readonly GatewayToolDefinition[];
@@ -131,7 +138,7 @@ export class AiSdkModelGateway implements ModelGateway {
   }
 
   async generateAgentStep(request: GenerateAgentStepRequest): Promise<AgentStepResult> {
-    const model = resolveModel(request.provider, request.model);
+    const model = resolveModel(request.provider, request.model, request.correlation);
     const useResponses = isResponsesProvider(request.provider);
     const skillScript = tool({
       description: 'Run one script from an assigned Skill package immediately on the WorkLite host. Select only an exact Skill id and script path from the assigned script list.',
@@ -320,7 +327,16 @@ function argumentArray(value: unknown): string[] | null {
   return [...value] as string[];
 }
 
-function resolveModel(provider: ModelProviderConfig, modelId: string): LanguageModel {
+function correlationHeaders(correlation: GatewayCorrelation | undefined): Record<string, string> {
+  if (!correlation) return {};
+  return {
+    'x-worklite-log-source': correlation.source,
+    ...(correlation.workflowRunId ? { 'x-worklite-workflow-run-id': correlation.workflowRunId } : {}),
+    ...(correlation.nodeRunId ? { 'x-worklite-node-run-id': correlation.nodeRunId } : {}),
+  };
+}
+
+function resolveModel(provider: ModelProviderConfig, modelId: string, correlation?: GatewayCorrelation): LanguageModel {
   if (!modelId.trim()) {
     throw new ModelGatewayError('INVALID_REQUEST', 'A model id is required.');
   }
@@ -329,25 +345,28 @@ function resolveModel(provider: ModelProviderConfig, modelId: string): LanguageM
     throw new ModelGatewayError('INVALID_PROVIDER', `Provider ${provider.id} has no usable API key.`);
   }
 
+  const forwardHeaders = Object.keys(provider.headers ?? {}).filter((name) => !name.toLowerCase().startsWith('x-worklite-'));
   const portkeyConfig = JSON.stringify({
     provider: provider.adapter,
     api_key: provider.apiKey,
     ...(provider.baseURL ? { custom_host: provider.baseURL } : {}),
-    ...(provider.headers && Object.keys(provider.headers).length > 0 ? { forward_headers: Object.keys(provider.headers) } : {}),
+    ...(forwardHeaders.length > 0 ? { forward_headers: forwardHeaders } : {}),
   });
   const headers = {
     ...(provider.headers ?? {}),
+    ...(provider.gatewayProviderName ? { 'x-worklite-stat-provider': provider.gatewayProviderName } : {}),
+    ...correlationHeaders(correlation),
     'x-portkey-config': portkeyConfig,
   };
   const baseURL = gatewayBaseURL();
   const gatewayModel = provider.gatewayProviderName ? `${provider.gatewayProviderName}/${modelId}` : modelId;
 
-  if (provider.adapter === 'deepseek') {
-    return createDeepSeek({
+  if (provider.adapter === 'anthropic') {
+    return createAnthropic({
       apiKey: 'worklite-gateway',
       baseURL,
       headers,
-    })(gatewayModel);
+    })(gatewayModel) as unknown as LanguageModel;
   }
 
   const openai = createOpenAI({

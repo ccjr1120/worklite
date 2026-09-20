@@ -1,5 +1,4 @@
 import 'i18next';
-import type enAgents from './locales/en/agents.json';
 import type enAssistant from './locales/en/assistant.json';
 import type enArtifacts from './locales/en/artifacts.json';
 import type enCommon from './locales/en/common.json';
@@ -19,7 +18,6 @@ declare module 'i18next' {
       common: typeof enCommon;
       workspace: typeof enWorkspace;
       home: typeof enHome;
-      agents: typeof enAgents;
       assistant: typeof enAssistant;
       workflows: typeof enWorkflows;
       runs: typeof enRuns;

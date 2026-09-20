@@ -23,7 +23,7 @@ Open the server being looked for. Action budget: one — activate the row, which
 
 ## Layout
 
-Fluid collection width up to `1440px`. A page heading sits above the shared Agents resource tab strip; MCP Servers is the third tab. A toolbar carries the filter on the left and `Connect MCP server` on the right, directly above the table. Columns are Server, Connection, Transport, Allowed tools, Version, and a fixed-width Actions column.
+Fluid collection width up to `1440px`. A page heading sits above the shared resource navigation; MCP Servers is the third tab. A toolbar carries the filter on the left and `Connect MCP server` on the right, directly above the table. Columns are Server, Connection, Transport, Allowed tools, Version, and a fixed-width Actions column.
 
 Rows emphasize name, connection status, transport, allowed-tool count, published version, and update time. Connection status and version status remain distinct: a server may be published and unreachable at the same time, so the two must never collapse into one indicator.
 
@@ -33,7 +33,7 @@ Activating a row navigates to `/mcp-servers/:serverId`. Activating `Connect MCP 
 
 Typing in the filter narrows the list on each keystroke against the server name. The no-results state offers `Clear filters`.
 
-Deleting a server is the one action that costs a second deliberate step, because it is permanent. The row's destructive icon control opens a named confirmation. Confirming reports progress on the confirm control, closes the dialog on success, shows a toast, and refetches the list. Deletion is blocked with visible dependency feedback when an Agent or Workflow references the server; that feedback stays in the dialog rather than replacing the list.
+Deleting a server is the one action that costs a second deliberate step, because it is permanent. The row's destructive icon control opens a named confirmation. Confirming reports progress on the confirm control, closes the dialog on success, shows a toast, and refetches the list. Deletion is blocked with visible dependency feedback when a Workflow draft or version references the server; that feedback stays in the dialog rather than replacing the list.
 
 A failed load offers `Try again`, which refetches in place.
 

@@ -33,7 +33,7 @@ Online user Skills support a required root `SKILL.md`, executable text files und
 
 Protected built-ins use the same package tree and file surface, with read-only content and no save, validate, publish, upload, or delete actions. Read-only executable files retain the same `Run`, argument, output, and cancellation controls as user Skill scripts. Built-in and assignment metadata appears compactly beside the tree or file header instead of replacing the package layout with a centered marketing or settings page.
 
-For `terminal-command`, show its product-owned `scripts/run.sh`, built-in status, explicit per-Agent assignment, automatic Agent execution, API process working directory, `/bin/sh -lc`, and the non-sandbox host-permission warning. Do not present it as a special runtime capability. For `worklite-platform`, show its product-owned scripts and contract reference, built-in status, permanent System Helper Chat assignment, loopback API boundary, automatic script execution, secure credential rules, constrained client navigation, and the exclusion of external APIs, direct database access, deletion, terminal execution, editing, publication, and manual assignment.
+For `terminal-command`, show its product-owned `scripts/run.sh`, built-in status, explicit Workflow Agent node selection, automatic Workflow execution, API process working directory, `/bin/sh -lc`, and the non-sandbox host-permission warning. Do not present it as a special runtime capability. For `worklite-platform`, show its product-owned scripts and contract reference, built-in status, protected Chat Bot ownership, loopback API boundary, automatic script execution, secure credential rules, constrained client navigation, and the exclusion of external APIs, direct database access, deletion, terminal execution, editing, publication, and manual assignment.
 
 ## Interaction Contract
 
@@ -199,7 +199,7 @@ Verified 2026-09-19. Differences found against `apps/web/src/routes/skills/$skil
 
 ### 2026-08-26
 
-- Initially added an opt-in read-only terminal Skill state; the later zero-configuration entry above supersedes its enablement presentation while retaining host-permission, Unix-only, per-Agent assignment, and per-command approval disclosures.
+- Initially added an opt-in read-only terminal Skill state; the later zero-configuration entry above supersedes its enablement presentation while retaining host-permission, Unix-only, Workflow Agent node selection, and per-command approval disclosures.
 
 ### 2026-08-13
 

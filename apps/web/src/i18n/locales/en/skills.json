@@ -26,7 +26,7 @@
     "warning": "The product-owned scripts/run.sh delegates its single command argument to /bin/sh -lc without a sandbox and has the WorkLite process user's host permissions, including access to available files and networks."
   },
   "platform": {
-    "systemOnly": "System Helper Chat only",
+    "systemOnly": "Chat Bot only",
     "boundary": "Platform actions use a fixed tool registry. Resource and preference changes require confirmation, and secrets remain in dedicated secure forms."
   },
   "editor": {

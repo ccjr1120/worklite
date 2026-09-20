@@ -3,12 +3,11 @@
     "title": "设置",
     "usage": "用量",
     "auditLog": "审计日志",
-    "logs": "Diagnostic logs",
     "appearance": "外观"
   },
   "providers": {
     "title": "模型提供商",
-    "description": "凭据仅可写入。更改提供商会影响之后的 Agent 运行，不会影响已发布的工作流版本。",
+    "description": "凭据仅可写入。修改 Provider 可能影响 Chat Bot 和未来的 Workflow 运行。",
     "create": "创建提供商",
     "columns": {
       "provider": "提供商",
@@ -19,7 +18,7 @@
     },
     "empty": {
       "title": "还没有模型提供商",
-      "description": "添加提供商后，Agent 才能使用对应模型。"
+      "description": "添加 Provider，使 Chat Bot 和 Workflow Agent 节点可以使用模型。"
     },
     "noMatches": {
       "title": "没有匹配的提供商",
@@ -31,6 +30,8 @@
     "name": "提供商名称",
     "namePlaceholder": "OpenAI",
     "protocol": "协议",
+    "protocolPlaceholder": "选择协议",
+    "protocolRequired": "保存或获取模型前请先选择协议。",
     "apiKey": "API 密钥",
     "baseURL": "Base URL",
     "baseURLHint": "填写上游 API 的 Base URL。",
@@ -74,8 +75,6 @@
     "waitingReplyAccessible": "正在等待模型回复。",
     "testDuration": "耗时：{{seconds}} 秒",
     "testFailed": "提供商测试失败。",
-    "traceId": "Trace {{id}}",
-    "viewLogs": "View logs",
     "saved": "提供商已保存",
     "delete": "删除提供商",
     "deleteTitle": "删除 {{provider}}？",
@@ -87,11 +86,12 @@
       "providers": "模型提供商",
       "codex": "Codex 账号池",
       "statistics": "统计",
-      "gateway": "Portkey Gateway"
+      "gateway": "Portkey Gateway",
+      "requestLogs": "请求日志"
     },
     "gateway": {
       "title": "Portkey Gateway",
-      "description": "本地 Portkey Gateway 会持续运行，并为已配置的提供商共享一个 OpenAI 兼容入口。",
+      "description": "本地 Portkey Gateway 会持续运行，并为已配置的提供商共享一个统一入口。",
       "port": "Gateway 端口",
       "status": "状态",
       "loading": "正在加载 Gateway 状态...",
@@ -189,7 +189,43 @@
     },
     "deleteFailed": "无法删除模型提供商。",
     "loading": "正在加载提供商...",
-    "loadFailed": "无法加载提供商。"
+    "loadFailed": "无法加载提供商。",
+    "requestLogs": {
+      "title": "请求日志",
+      "retention": "已捕获的请求与响应保留三天。",
+      "rowLabel": "{{provider}} {{model}}，时间 {{time}}",
+      "filters": {
+        "provider": "所有供应商",
+        "model": "所有模型",
+        "statusClass": "所有状态",
+        "workflowRun": "工作流运行"
+      },
+      "statusClass": {
+        "all": "所有状态",
+        "success": "成功",
+        "clientError": "客户端错误",
+        "serverError": "服务端错误"
+      },
+      "loadMore": "加载更多",
+      "copied": "已复制",
+      "copyRequest": "复制请求内容",
+      "copyResponse": "复制响应内容",
+      "request": "请求",
+      "response": "响应",
+      "streamEvents": "响应流事件",
+      "streaming": "流式",
+      "correlatedRun": "运行 {{id}}",
+      "responseUnavailable": "未捕获到响应：{{reason}}",
+      "emptyTitle": "尚未捕获任何请求",
+      "emptyDescription": "供应商请求执行后，捕获的请求会显示在此处，并保留三天。",
+      "noMatches": {
+        "title": "没有符合筛选条件的请求",
+        "description": "清除筛选条件以查看其余已捕获的请求。"
+      },
+      "error": "无法加载请求日志。",
+      "detailError": "无法加载该捕获的请求。"
+    },
+    "viewRequestLog": "查看请求日志"
   },
   "usage": {
     "title": "用量",
@@ -221,44 +257,6 @@
     },
     "loading": "正在加载审计日志...",
     "loadFailed": "无法加载审计日志。"
-  },
-  "logs": {
-    "title": "诊断日志",
-    "description": "Provider 和 Gateway 操作的详细本地追踪记录。",
-    "search": "按追踪 ID、Provider、阶段或消息筛选",
-    "traceFilter": "追踪 ID：{{id}}",
-    "clearTrace": "清除追踪条件",
-    "loading": "正在加载诊断日志...",
-    "error": "无法加载诊断日志。",
-    "retry": "重试",
-    "emptyTitle": "暂无诊断事件",
-    "emptyDescription": "Provider 连接测试和 Gateway 诊断会显示在这里。",
-    "noMatchesTitle": "没有匹配的事件",
-    "noMatchesDescription": "当前筛选条件下没有匹配的诊断事件。",
-    "columns": {
-      "time": "时间",
-      "level": "级别",
-      "trace": "追踪 ID",
-      "provider": "Provider",
-      "stage": "阶段",
-      "status": "状态",
-      "message": "消息"
-    },
-    "details": "事件详情",
-    "duration": "时长：{{ms}} ms",
-    "copyTrace": "复制追踪 ID",
-    "copied": "已复制",
-    "filters": {
-      "allLevels": "全部级别",
-      "allStages": "全部阶段"
-    },
-    "levels": {
-      "debug": "调试",
-      "info": "信息",
-      "warn": "警告",
-      "error": "错误"
-    },
-    "providerCount_other": "结果中有 {{count}} 个 Provider"
   },
   "appearance": {
     "title": "外观",

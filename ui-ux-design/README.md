@@ -29,21 +29,20 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 ## Page and Surface Specifications
 
 - [Home](pages/home/DESIGN.md), including the server-derived first-use sequence
-- [Workspace System Helper Chat](surfaces/workspace/system-helper-chat/DESIGN.md)
-- Agents: [List](pages/agents/list/DESIGN.md), [Editor](pages/agents/editor/DESIGN.md)
+- [Workspace Chat Bot](surfaces/workspace/system-helper-chat/DESIGN.md)
 - Providers: [Model providers and Portkey Gateway](pages/model-providers/DESIGN.md), including the dedicated Codex Account Pool and Gateway request statistics
 - Workflows: [List](pages/workflows/list/DESIGN.md), [Editor](pages/workflows/editor/DESIGN.md), [Versions](pages/workflows/versions/DESIGN.md)
+- Runs: [Detail](pages/runs/detail/DESIGN.md), [Node logs](surfaces/workflow-run/node-logs/DESIGN.md)
 - Skills: [List](pages/skills/list/DESIGN.md), [Editor](pages/skills/editor/DESIGN.md)
 - MCP servers: [List](pages/mcp-servers/list/DESIGN.md), [Configuration](pages/mcp-servers/configuration/DESIGN.md)
 - Plugins: [List](pages/plugins/list/DESIGN.md), [Configuration](pages/plugins/configuration/DESIGN.md)
 - Artifacts: [Run artifacts](surfaces/workflow-run/artifacts/DESIGN.md), [Details](pages/artifacts/details/DESIGN.md)
-- Settings: [Usage](pages/settings/usage/DESIGN.md), [Audit log](pages/settings/audit-log/DESIGN.md), [Diagnostic logs](pages/settings/diagnostic-logs/DESIGN.md), [Appearance](pages/settings/appearance/DESIGN.md)
+- Settings: [Usage](pages/settings/usage/DESIGN.md), [Audit log](pages/settings/audit-log/DESIGN.md), [Appearance](pages/settings/appearance/DESIGN.md)
 
 ## Route Map
 
 ```text
 /home
-/agents/{new,:agentId}
 /model-providers
 /workflows/{new,:workflowId,:workflowId/versions}
 /skills/{new,:skillId}
@@ -51,18 +50,21 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 /plugins
 /plugins/:pluginId
 /artifacts/:artifactId
-/settings/{usage,audit-log,logs,appearance}
+/runs/:runId
+/settings/{usage,audit-log,appearance}
 ```
 
 The root route opens Home. `/settings/` opens Appearance. Route layouts and redirects are governed by the shared Workspace shell rather than separate page specifications.
 
 There is no `/onboarding` route family. First use is a server-derived sequence inside Home, so a separate browser-state onboarding flow would duplicate it with a less reliable completion signal.
 
-The `/model-providers` page is the top-level Providers destination. It uses page-level tabs for Model Providers, the dedicated Codex Account Pool, and Gateway Statistics; the Gateway summary remains on the Model Providers view.
+The `/model-providers` page is the top-level Providers destination. It uses page-level tabs for Model Providers, the dedicated Codex Account Pool, Gateway Statistics, and Gateway Request Logs; the Gateway summary remains on the Model Providers view.
+
+`/runs/:runId` is a Run log-reading destination reached from a Workflow's Run records dialog, not a top-level collection. There is no Run list route: Runs are reached through their Workflow. There is no `/settings/logs` route; Provider request observability belongs to the Providers destination.
 
 ## Shared Component Inventory
 
-Theme provider and appearance selector; application shell; router pending and error boundaries; sidebar; context bar; personal preferences menu; command menu; shell-level System Helper Chat with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; React Flow workflow graph canvas; workflow run history dialog; run timeline; plugin configuration; viewers for diagnostic logs, run output and artifacts; skeletons, errors, offline banner.
+Theme provider and appearance selector; application shell; router pending and error boundaries; sidebar; context bar; personal preferences menu; command menu; shell-level Chat Bot with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; React Flow workflow graph canvas; workflow run history dialog; run timeline; node log entry with payload and activity disclosure; plugin configuration; viewers for captured request bodies, run output and artifacts; skeletons, errors, offline banner.
 
 Domain-neutral reusable components belong in the shared UI package. Feature composition remains near its feature. Abstract only demonstrated repeated patterns.
 
@@ -77,6 +79,12 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-09-21 - Workflow and Provider log surfaces
+
+- Added the [Run detail](pages/runs/detail/DESIGN.md) route and the shared [node log](surfaces/workflow-run/node-logs/DESIGN.md) surface, which discloses a node's mapped input, committed output, streamed model text, and ordered activity timeline from one expansion in both the Run records dialog and the Run detail route.
+- Added the Gateway Request Logs view to the Providers destination for reading what an individual Provider request sent and received, with filters persisted together in route Search state.
+- Removed the Diagnostic Logs page, its `/settings/logs` route, and its locale keys; Provider request observability is now Gateway-owned and lives with Providers.
 
 ### 2026-09-19 - State completeness
 
@@ -121,7 +129,7 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 ### 2026-09-14
 
 - Refined Home board and category behavior around Workflow Dashboard output.
-- Added resumable System Helper Chat sessions and slash-command completions.
+- Added resumable Chat Bot sessions and slash-command completions.
 
 ### 2026-09-13
 
@@ -149,7 +157,7 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ### 2026-09-07
 
-- Refined Agents and Workflow editor layout and run-history surfaces.
+- Refined Workflow editor layout and run-history surfaces.
 
 ### 2026-09-06
 
@@ -181,12 +189,12 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ### 2026-08-30
 
-- Moved Skills, MCP Servers, and Providers from the sidebar subgroup into shared tabs on the four Agent resource collection pages; Plugins remains first-level navigation.
+- Moved Skills, MCP Servers, and Providers from the sidebar subgroup into shared tabs on the four resource collection pages; Plugins remains first-level navigation.
 - Unified workspace and Agent resource navigation into one hierarchical sidebar, with Plugins beside Agents and Skills, MCP Servers, and Providers beneath Agents.
 
 ### 2026-08-27
 
-- Reduced the Home first-use checklist to Model Provider configuration and System Helper Chat model binding, with completion derived from persisted resource state.
+- Reduced the Home first-use checklist to Model Provider configuration and Chat Bot model binding, with completion derived from persisted resource state.
 - Removed the standalone Terminal page; direct host execution is now an action on saved Skill scripts in the Skill editor.
 
 ### 2026-08-29

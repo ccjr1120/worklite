@@ -123,7 +123,7 @@
     "applied": "Applied",
     "runOutput": "Run output",
     "publishTitle": "Publish workflow",
-    "publishDescription": "Publishing locks the embedded Agent configuration. Later standalone Agent edits do not change this workflow or its historical runs.",
+    "publishDescription": "Publishing locks the embedded Agent configuration. Later draft edits do not change this workflow or its historical runs.",
     "published": "Workflow published",
     "publishFailed": "The workflow could not be published.",
     "saveFailed": "The workflow could not be saved.",

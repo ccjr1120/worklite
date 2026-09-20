@@ -5,7 +5,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { BadRequestException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import type { Request, Response } from 'express';
-import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatsWindow, PortkeyGatewayStatus, PortkeyGatewayView, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
+import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, GatewayRequestLogDetail, GatewayRequestLogList, GatewayRequestLogQuery, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatsWindow, PortkeyGatewayStatus, PortkeyGatewayView, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
 import type { ModelProviderConfig } from '@worklite/model-gateway';
 import { agents, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
@@ -25,7 +25,7 @@ const HOP_BY_HOP_HEADERS = new Set([
   'upgrade',
 ]);
 
-type GatewayProxyOperation = 'models' | 'chat/completions' | 'responses' | 'images/generations';
+type GatewayProxyOperation = 'models' | 'chat/completions' | 'responses' | 'messages' | 'images/generations';
 
 function forwardedHeaders(headers: IncomingMessage['headers']): Record<string, string> {
   return Object.fromEntries(
@@ -45,20 +45,21 @@ function responseHeaders(headers: IncomingMessage['headers']): Record<string, st
   );
 }
 
-function protocolParts(protocol: ModelProviderProtocol): { adapter: 'openai' | 'codex' | 'deepseek'; operation: 'chat/completions' | 'responses' } {
-  if (protocol === 'deepseek/chat') return { adapter: 'deepseek', operation: 'chat/completions' };
+function protocolParts(protocol: ModelProviderProtocol): { adapter: 'openai' | 'anthropic' | 'codex'; operation: 'chat/completions' | 'responses' | 'messages' } {
+  if (protocol === 'anthropic/messages') return { adapter: 'anthropic', operation: 'messages' };
   if (protocol === 'codex/responses') return { adapter: 'codex', operation: 'responses' };
   if (protocol === 'openai/responses') return { adapter: 'openai', operation: 'responses' };
-  return { adapter: 'openai', operation: 'chat/completions' };
+  if (protocol === 'openai/chat') return { adapter: 'openai', operation: 'chat/completions' };
+  throw new BadRequestException('Unsupported model provider protocol.');
 }
 
 function discoveryConfig(input: DiscoverModelProviderRequest): ModelProviderConfig {
+  const protocol = input.protocol;
+  if (protocol !== 'openai/chat' && protocol !== 'openai/responses' && protocol !== 'anthropic/messages' && protocol !== 'codex/responses') throw new BadRequestException('Unsupported model provider protocol.');
   const apiKey = input.apiKey?.trim() ?? '';
-  if (input.protocol !== 'codex/responses' && !apiKey) throw new BadRequestException('An API key is required to fetch models.');
+  if (protocol !== 'codex/responses' && !apiKey) throw new BadRequestException('An API key is required to fetch models.');
   const baseURL = input.baseURL?.trim();
   if (!baseURL) throw new BadRequestException('Base URL is required to fetch models.');
-  const protocol = input.protocol ?? 'openai/chat';
-  if (protocol !== 'openai/chat' && protocol !== 'openai/responses' && protocol !== 'codex/responses' && protocol !== 'deepseek/chat') throw new BadRequestException('Unsupported model provider protocol.');
   if (input.headers !== undefined && (input.headers === null || typeof input.headers !== 'object' || Array.isArray(input.headers) || Object.values(input.headers).some((value) => typeof value !== 'string'))) {
     throw new BadRequestException('Custom headers must be a JSON object with string values.');
   }
@@ -127,6 +128,24 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     const requested = window === '7d' || window === '30d' ? window : '24h';
     await this.ensureGatewayForDiscovery();
     return this.gatewayJson<PortkeyGatewayStats>(`/worklite/stats?window=${requested as PortkeyGatewayStatsWindow}`);
+  }
+
+  async requestLogs(query: GatewayRequestLogQuery): Promise<GatewayRequestLogList> {
+    await this.ensureGatewayForDiscovery();
+    const search = new URLSearchParams();
+    if (query.provider?.trim()) search.set('provider', query.provider.trim());
+    if (query.model?.trim()) search.set('model', query.model.trim());
+    if (query.statusClass) search.set('statusClass', query.statusClass);
+    if (query.workflowRunId?.trim()) search.set('workflowRunId', query.workflowRunId.trim());
+    if (query.limit) search.set('limit', String(query.limit));
+    if (query.cursor?.trim()) search.set('cursor', query.cursor.trim());
+    const suffix = search.size > 0 ? `?${search.toString()}` : '';
+    return this.gatewayJson<GatewayRequestLogList>(`/worklite/request-logs${suffix}`);
+  }
+
+  async requestLog(requestLogId: string): Promise<GatewayRequestLogDetail> {
+    await this.ensureGatewayForDiscovery();
+    return this.gatewayJson<GatewayRequestLogDetail>(`/worklite/request-logs/${encodeURIComponent(requestLogId)}`);
   }
 
   async codexAuthStatus(): Promise<CodexAuthStatus> {

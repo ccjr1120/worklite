@@ -1,7 +1,6 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import { applyDocumentLocale, DEFAULT_LOCALE, resolveInitialLocale } from './locale';
-import enAgents from './locales/en/agents.json';
 import enAssistant from './locales/en/assistant.json';
 import enArtifacts from './locales/en/artifacts.json';
 import enCommon from './locales/en/common.json';
@@ -13,7 +12,6 @@ import enSettings from './locales/en/settings.json';
 import enSkills from './locales/en/skills.json';
 import enWorkflows from './locales/en/workflows.json';
 import enWorkspace from './locales/en/workspace.json';
-import zhAgents from './locales/zh-CN/agents.json';
 import zhAssistant from './locales/zh-CN/assistant.json';
 import zhArtifacts from './locales/zh-CN/artifacts.json';
 import zhCommon from './locales/zh-CN/common.json';
@@ -30,7 +28,6 @@ export const NAMESPACES = [
   'common',
   'workspace',
   'home',
-  'agents',
   'assistant',
   'workflows',
   'runs',
@@ -46,7 +43,6 @@ const resources = {
     common: enCommon,
     workspace: enWorkspace,
     home: enHome,
-    agents: enAgents,
     assistant: enAssistant,
     workflows: enWorkflows,
     runs: enRuns,
@@ -60,7 +56,6 @@ const resources = {
     common: zhCommon,
     workspace: zhWorkspace,
     home: zhHome,
-    agents: zhAgents,
     assistant: zhAssistant,
     workflows: zhWorkflows,
     runs: zhRuns,

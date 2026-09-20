@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, Logger, Not
 import { randomUUID } from 'node:crypto';
 import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
-import type { AgentExecutionErrorCode, AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, WorkliteNavigationTarget, WorkliteScriptResult } from '@worklite/contracts';
+import type { AgentExecutionErrorCode, AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, WorkflowNodeActivityDetail, WorkliteNavigationTarget, WorkliteScriptResult } from '@worklite/contracts';
 import { agentExecutionEvents, agentExecutions, agentVersions, agents, agentSkills, agentSubSessions, agentToolCalls, auditLogs, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
 import { createModelGateway, ModelGatewayError, type GatewayAgentMessage, type GatewayToolResultOutput } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
@@ -17,7 +17,12 @@ import { CommandsService } from '../commands/commands.service';
 const SYSTEM_HELPER_CHAT_ID = 'agt_system_helper_chat';
 const WORKLITE_PLATFORM_SKILL_ID = 'sk_worklite_platform';
 const MAX_HELPER_TOOL_ROUNDS = 24;
-const MAX_WORKFLOW_TOOL_ROUNDS = 8;
+// A research node batches several retrieval calls per turn and still needs turns left to compose its
+// output. Eight rounds exhausted before collection finished; the retrieval allowance is enforced by the
+// Skill scripts themselves, so a higher ceiling here bounds runaway looping without capping real work.
+const MAX_WORKFLOW_TOOL_ROUNDS = 20;
+
+export type WorkflowAgentActivityReporter = (detail: Extract<WorkflowNodeActivityDetail, { phase: 'model.round' | 'skill.script' | 'mcp.call' }>) => void | Promise<void>;
 const MAX_TOOL_CALLS_PER_STEP = 4;
 
 class TooManyToolCallsError extends Error {
@@ -41,7 +46,7 @@ const HELPER_BUILTIN_TOOLS = [
 ] as const;
 
 const WORKLITE_NAVIGATION_ROUTES = {
-  home: '/home', agents: '/agents', 'system-helper-chat': '/agents/agt_system_helper_chat', skills: '/skills', 'mcp-servers': '/mcp-servers', 'model-providers': '/model-providers', workflows: '/workflows', 'settings-appearance': '/settings/appearance', 'settings-usage': '/settings/usage', 'settings-audit-log': '/settings/audit-log',
+  home: '/home', 'system-helper-chat': '/home', skills: '/skills', 'mcp-servers': '/mcp-servers', 'model-providers': '/model-providers', workflows: '/workflows', 'settings-appearance': '/settings/appearance', 'settings-usage': '/settings/usage', 'settings-audit-log': '/settings/audit-log',
 } as const satisfies Record<WorkliteNavigationTarget, string>;
 
 @Injectable()
@@ -130,6 +135,8 @@ export class AgentExecutionsService {
     signal: AbortSignal,
     onTextDelta?: (delta: string) => void | Promise<void>,
     jsonOutput = false,
+    activity?: WorkflowAgentActivityReporter,
+    correlation?: { workflowRunId: string; nodeRunId: string },
   ): Promise<string> {
     const selectedSkillIds = [...new Set(requestedSkillIds)];
     const skillRows = selectedSkillIds.length === 0
@@ -155,7 +162,8 @@ export class AgentExecutionsService {
 
     for (let round = 0; round <= MAX_WORKFLOW_TOOL_ROUNDS; round += 1) {
       signal.throwIfAborted();
-      const result = await createModelGateway().generateAgentStep({ provider: runtime.provider, model: runtime.model, systemPrompt: effectiveSystemPrompt, jsonOutput, messages, skillScripts: availableSkillScripts, mcpTools, maxToolRounds: MAX_WORKFLOW_TOOL_ROUNDS, abortSignal: signal, onTextDelta });
+      const result = await createModelGateway().generateAgentStep({ provider: runtime.provider, model: runtime.model, systemPrompt: effectiveSystemPrompt, jsonOutput, messages, skillScripts: availableSkillScripts, mcpTools, maxToolRounds: MAX_WORKFLOW_TOOL_ROUNDS, abortSignal: signal, onTextDelta, correlation: correlation ? { source: 'workflow', ...correlation } : undefined });
+      await activity?.({ phase: 'model.round', round, model: runtime.model, finishReason: result.finishReason, toolCalls: result.toolCalls.length, contextDropped: result.contextDropped });
       messages.push(...result.responseMessages);
       if (result.toolCalls.length === 0) {
         const output = result.text.trim();
@@ -176,6 +184,7 @@ export class AgentExecutionsService {
             signal.throwIfAborted();
             const succeeded = completed.execution.status === 'succeeded';
             const value = completed.output || (succeeded ? 'Skill script completed without output.' : `Skill script failed with exit code ${completed.execution.exitCode ?? 'unknown'}.`);
+            await activity?.({ phase: 'skill.script', skillId: skill.id, skillName: skill.name, scriptPath: call.scriptPath ?? '', arguments: call.arguments ?? [], commandExecutionId: started.id, exitCode: completed.execution.exitCode ?? null, status: succeeded ? 'succeeded' : 'failed' });
             messages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: call.toolCallId, toolName: call.toolName, output: { type: succeeded ? 'text' : 'error-text', value } }] });
           } finally {
             signal.removeEventListener('abort', cancel);
@@ -185,7 +194,14 @@ export class AgentExecutionsService {
         const mcpTool = mcpTools.find((tool) => tool.name === call.toolName);
         const mcpRuntime = mcpTool ? mcpRuntimes.find((item) => item.id === mcpTool.serverId) : undefined;
         if (!mcpTool || !mcpRuntime) throw new BadRequestException('The Workflow Agent requested an unavailable MCP tool.');
-        const value = await this.mcpRuntime.call(mcpRuntime, mcpTool.remoteName, call.input, signal);
+        let value: string;
+        try {
+          value = await this.mcpRuntime.call(mcpRuntime, mcpTool.remoteName, call.input, signal);
+        } catch (error) {
+          await activity?.({ phase: 'mcp.call', serverId: mcpRuntime.id, toolName: mcpTool.remoteName, input: call.input, result: error instanceof Error ? error.message : 'The MCP tool call failed.', status: 'failed' });
+          throw error;
+        }
+        await activity?.({ phase: 'mcp.call', serverId: mcpRuntime.id, toolName: mcpTool.remoteName, input: call.input, result: value, status: 'succeeded' });
         messages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: call.toolCallId, toolName: call.toolName, output: { type: 'text', value } }] });
       }
     }
@@ -778,7 +794,7 @@ function parseWorkliteScriptResult(output: string): WorkliteScriptResult | null 
     const resourceType = result.resourceType;
     const id = typeof result.id === 'string' && result.id.length > 0 && result.id.length <= 240 ? result.id : null;
     const route = typeof result.route === 'string' ? result.route : '';
-    if (!id || (resourceType !== 'provider' && resourceType !== 'agent' && resourceType !== 'skill' && resourceType !== 'mcp-server' && resourceType !== 'workflow')) return null;
+    if (!id || (resourceType !== 'provider' && resourceType !== 'skill' && resourceType !== 'mcp-server' && resourceType !== 'workflow')) return null;
     const expectedRoute = resourceType === 'provider' ? '/model-providers' : `/${resourceType === 'mcp-server' ? 'mcp-servers' : `${resourceType}s`}/${encodeURIComponent(id)}`;
     return route === expectedRoute ? { type: 'resource', resourceType, id, route } : null;
   }

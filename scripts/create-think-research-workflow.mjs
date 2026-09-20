@@ -48,12 +48,13 @@ const collectPrompt = `You are a technology research collector. You gather and s
 
 The input is an Artifact Query result containing request and candidates. The planning output is nested one level deeper: the original instruction is at request.request.original and the approved proposal is at request.proposal, holding title and description. Treat request.proposal as the assigned subject and collect evidence for it. Do not substitute a subject you find more interesting. Copy the candidates array verbatim into your output.
 
-Your retrieval budget is fixed and you must respect it:
-- At most two github-current-popularity calls. Decide your search terms before the first call. If the first result is thin, the second call may use different terms, and then you stop searching whatever the outcome.
-- At most two zhihu-research calls, used only for Chinese community viewpoints, disputes, and counterexamples.
-- Never repeat a call with the same arguments, and never re-run a call to confirm a result you already have.
+Each Skill enforces an allowance of five distinct queries per stage. The count is kept by the scripts, not by you: a sixth distinct query runs no search and returns quotaExhausted with instructions to write from what you have. Varying terms within the allowance is encouraged, since one query rarely surfaces both a mechanism and a dispute.
 
-Exceeding this budget fails the whole Workflow, and a thin evidence set is a recoverable outcome while an exhausted budget is not. When a call returns argumentNotes, read it: your arguments were corrected, and repeating the call will not improve the result. If you cannot find strong evidence, record that in gaps and stop.
+- Issue several distinct queries in a single turn when you already know what to ask. Batching is much cheaper than asking one at a time.
+- A repeat of a query you already issued returns the stored earlier result with a repeatedCall note. It is free of the allowance but yields nothing new, so treat it as a signal to move on rather than to search again.
+- When a call returns argumentNotes, your arguments were corrected; reissuing will not improve the result.
+
+Stop on evidence, not on the allowance. You have enough when you hold mechanism evidence for at least three projects or sources, at least one genuine dispute or tradeoff, and at least one contrast between two approaches. Stop there even with queries left. If quotaExhausted arrives, retrieval is over: write your evidence output immediately and record what is missing in gaps. A thin evidence set is recoverable; looping until the node runs out of turns fails the Workflow and discards everything you gathered.
 
 The GitHub Skill returns two layers. Search listings give the landscape. The studiedRepositories entries carry README prose, in-window commit subjects, release notes, and the most-discussed issues and pull requests, and they are the only layer that supports a real claim. A repository description is a self-applied label: it says what a project wants to be called, never how it works, what it changed, or whether its users agree. Evidence built from descriptions and star counts produces an article that says nothing, which is the failure this node exists to prevent.
 
@@ -216,7 +217,7 @@ function requirePublicModel(providers, model) {
   return model;
 }
 
-const AGENT_PROTOCOLS = new Set(['openai/chat', 'openai/responses']);
+const AGENT_PROTOCOLS = new Set(['openai/chat', 'openai/responses', 'anthropic/messages']);
 
 // Each Agent role names its own candidates in preference order. Planning and cover direction take a
 // fast model, research and finalization take the strongest verified writing model, and review takes a
@@ -250,7 +251,7 @@ function resolveRoleModel(providers, role) {
     const resolved = findPublicModel(providers, candidate);
     if (resolved && AGENT_PROTOCOLS.has(resolved.protocol)) return resolved;
   }
-  throw new Error(`No ${role} model is available. Configure one of ${candidates.join(', ')} with an OpenAI-compatible protocol, or set ${env}.`);
+  throw new Error(`No ${role} model is available. Configure one of ${candidates.join(', ')} with a supported model protocol, or set ${env}.`);
 }
 
 const [skills, providers, workflows] = await Promise.all([

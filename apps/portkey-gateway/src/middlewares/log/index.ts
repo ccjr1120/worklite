@@ -1,6 +1,6 @@
 import { Context } from 'hono';
 import { getRuntimeKey } from 'hono/adapter';
-import { recordRequestStat } from '../../worklite/provider-registry';
+import { recordRequestLog, recordRequestStat, type GatewayRequestLogResponse } from '../../worklite/provider-registry';
 
 let logId = 0;
 const MAX_RESPONSE_LENGTH = 100000;
@@ -48,6 +48,54 @@ const broadcastLog = async (log: any) => {
   });
 };
 
+function parseStreamCapture(raw: string): unknown[] {
+  const events: unknown[] = [];
+  for (const line of raw.split('\n')) {
+    if (!line.startsWith('data:')) continue;
+    const payload = line.slice(5).trim();
+    if (!payload || payload === '[DONE]') continue;
+    try {
+      events.push(JSON.parse(payload));
+    } catch {
+      events.push(payload);
+    }
+  }
+  return events;
+}
+
+function usageFromStreamEvents(events: readonly unknown[]): Record<string, unknown> | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (!event || typeof event !== 'object' || Array.isArray(event)) continue;
+    const record = event as Record<string, unknown>;
+    const usage = record.usage ?? (record.response && typeof record.response === 'object' && !Array.isArray(record.response) ? (record.response as Record<string, unknown>).usage : undefined);
+    if (usage && typeof usage === 'object' && !Array.isArray(usage)) return usage as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+async function captureResponse(c: Context, streaming: boolean): Promise<{ capture: GatewayRequestLogResponse; usage?: Record<string, unknown> }> {
+  try {
+    const clone = c.res.clone();
+    if (streaming) {
+      const raw = await clone.text();
+      const events = parseStreamCapture(raw);
+      if (events.length === 0) return { capture: { kind: 'text', body: raw } };
+      return { capture: { kind: 'stream', events }, usage: usageFromStreamEvents(events) };
+    }
+    const raw = await clone.text();
+    try {
+      const body = JSON.parse(raw);
+      const usage = body && typeof body === 'object' && !Array.isArray(body) && (body as Record<string, unknown>).usage;
+      return { capture: { kind: 'json', body }, usage: usage && typeof usage === 'object' && !Array.isArray(usage) ? usage as Record<string, unknown> : undefined };
+    } catch {
+      return { capture: { kind: 'text', body: raw } };
+    }
+  } catch (error) {
+    return { capture: { kind: 'unavailable', reason: error instanceof Error ? error.message : 'The response could not be captured.' } };
+  }
+}
+
 async function processLog(c: Context, start: number) {
   const ms = Date.now() - start;
   if (!c.req.url.includes('/v1/')) return;
@@ -57,11 +105,15 @@ async function processLog(c: Context, start: number) {
     return;
   }
 
+  const streaming = Boolean(requestOptionsArray[0].requestParams?.stream);
+  const captured = await captureResponse(c, streaming);
   let responseBody: any = undefined;
   try {
-    const response = requestOptionsArray[0].requestParams.stream
+    const response = streaming
       ? { message: 'The response was a stream.' }
-      : await c.res.clone().json();
+      : captured.capture.kind === 'json'
+        ? captured.capture.body
+        : { message: 'The response was not JSON.' };
     responseBody = response;
 
     const responseString = JSON.stringify(response);
@@ -81,18 +133,50 @@ async function processLog(c: Context, start: number) {
   const modelSeparator = requestedModel.indexOf('/');
   const provider = explicitProvider || (modelSeparator > 0 ? requestedModel.slice(0, modelSeparator) : 'Unknown');
   const model = modelSeparator > 0 ? requestedModel.slice(modelSeparator + 1) : requestedModel;
-  const usage = responseBody && typeof responseBody === 'object' && responseBody.usage && typeof responseBody.usage === 'object' ? responseBody.usage : undefined;
+  const usage = captured.usage
+    ?? (responseBody && typeof responseBody === 'object' && responseBody.usage && typeof responseBody.usage === 'object' ? responseBody.usage : undefined);
   const tokenValue = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) ? value : null;
+  const endpoint = new URL(c.req.url).pathname;
+  const promptTokens = tokenValue(usage?.prompt_tokens ?? usage?.input_tokens);
+  const completionTokens = tokenValue(usage?.completion_tokens ?? usage?.output_tokens);
+  const reportedTotalTokens = tokenValue(usage?.total_tokens ?? usage?.totalTokens);
+  const totalTokens = reportedTotalTokens ?? (promptTokens !== null && completionTokens !== null ? promptTokens + completionTokens : null);
   recordRequestStat({
     provider,
     model,
-    endpoint: new URL(c.req.url).pathname,
+    endpoint,
     status: c.res.status,
     durationMs: ms,
-    promptTokens: tokenValue(usage?.prompt_tokens ?? usage?.input_tokens),
-    completionTokens: tokenValue(usage?.completion_tokens ?? usage?.output_tokens),
-    totalTokens: tokenValue(usage?.total_tokens ?? usage?.totalTokens),
+    promptTokens,
+    completionTokens,
+    totalTokens,
   });
+
+  const correlationHeader = (name: string): string | null => {
+    const value = c.req.header(name);
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+  };
+  try {
+    recordRequestLog({
+      id: correlationHeader('x-worklite-log-id'),
+      provider,
+      model,
+      endpoint,
+      status: c.res.status,
+      durationMs: ms,
+      streaming,
+      source: correlationHeader('x-worklite-log-source'),
+      workflowRunId: correlationHeader('x-worklite-workflow-run-id'),
+      nodeRunId: correlationHeader('x-worklite-node-run-id'),
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      request: requestOptionsArray[0].transformedRequest?.body ?? requestOptionsArray[0].requestParams ?? null,
+      response: captured.capture,
+    });
+  } catch (error) {
+    console.error('Error recording request log:', error);
+  }
 
   await broadcastLog(
     JSON.stringify({

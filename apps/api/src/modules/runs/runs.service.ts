@@ -2,7 +2,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from '@nes
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import type { Request } from 'express';
-import type { ArtifactView, CreateRunRequest, RunProgressEvent, RunView, WorkflowNodeRunView, WorkflowPendingActionView } from '@worklite/contracts';
+import type { ArtifactView, CreateRunRequest, RunProgressEvent, RunView, WorkflowNodeActivityDetail, WorkflowNodeActivityEventPayload, WorkflowNodeActivityView, WorkflowNodeRunView, WorkflowPendingActionView } from '@worklite/contracts';
 import {
   artifacts,
   workflowNodeRuns,
@@ -13,6 +13,7 @@ import {
   workflows,
   type Database,
   type StoredWorkflowDefinition,
+  type StoredWorkflowEdge,
   type StoredWorkflowExecutionState,
   type StoredWorkflowNode,
 } from '@worklite/db';
@@ -108,7 +109,19 @@ export class RunsService {
         if (!Array.isArray(config.skillIds) || config.skillIds.some((id) => typeof id !== 'string')) throw new Error('Agent node requires valid Skill identifiers.');
         if (!Array.isArray(config.mcpServerIds) || config.mcpServerIds.some((id) => typeof id !== 'string')) throw new Error('Agent node requires valid MCP server identifiers.');
         const context = inputs && Object.prototype.hasOwnProperty.call(inputs, 'context') ? inputs.context : request.context.variables.workflowInput;
-        const response = await this.agentExecutions.executeWorkflowAgent(request.context.workspaceId, config.model, context, config.systemPrompt, config.skillIds as string[], config.mcpServerIds as string[], request.signal, (delta) => { void this.publish(request.context.workflowRunId, 'node.delta', { nodeId: request.context.nodeId, delta }); }, config.outputFormat === 'json');
+        const response = await this.agentExecutions.executeWorkflowAgent(
+          request.context.workspaceId,
+          config.model,
+          context,
+          config.systemPrompt,
+          config.skillIds as string[],
+          config.mcpServerIds as string[],
+          request.signal,
+          (delta) => { void this.publish(request.context.workflowRunId, 'node.delta', { nodeId: request.context.nodeId, nodeRunId: request.context.nodeRunId, delta }); },
+          config.outputFormat === 'json',
+          (detail) => this.publishActivity(request.context.workflowRunId, request.context.nodeId, request.context.nodeRunId, detail),
+          { workflowRunId: request.context.workflowRunId, nodeRunId: request.context.nodeRunId },
+        );
         const output = config.outputFormat === 'json' ? parseWorkflowAgentJson(response) : response;
         return { output };
       },
@@ -318,6 +331,14 @@ export class RunsService {
           });
         }
         await this.publish(runId, 'node.started', { nodeId: node.id, nodeRunId, position, type: node.type });
+        await this.publishActivity(runId, node.id, nodeRunId, {
+          phase: 'node.setup',
+          type: node.type,
+          typeVersion: node.typeVersion,
+          errorPolicy: node.errorPolicy,
+          config: node.config,
+          inputPorts: Object.keys(invocation.input),
+        });
 
         const attempts = node.errorPolicy === 'retry' ? 2 : 1;
         let output: unknown;
@@ -327,6 +348,7 @@ export class RunsService {
           try {
             await this.assertActive(runId, abortController.signal);
             if (attempt > 0) await this.db.update(workflowNodeRuns).set({ retryCount: sql`${workflowNodeRuns.retryCount} + 1` }).where(eq(workflowNodeRuns.id, nodeRunId));
+            await this.publishActivity(runId, node.id, nodeRunId, { phase: 'node.attempt', attempt: attempt + 1, attempts, automaticRetry: attempt > 0 });
             const nodeType = this.registry.resolve(node.type, node.typeVersion);
             const request: NodeExecutionRequest = {
               input: invocation.input,
@@ -366,7 +388,24 @@ export class RunsService {
           throw new Error(message);
         }
 
-        commitWorkflowInvocation(definition, state, node.id, output);
+        const outgoingEdges = definition.edges.filter((edge) => edge.sourceNodeId === node.id);
+        const traversedEdges = commitWorkflowInvocation(definition, state, node.id, output);
+        const traversedEdgeIds = new Set(traversedEdges.map((edge) => edge.id));
+        if (outgoingEdges.length > 0) {
+          await this.publishActivity(runId, node.id, nodeRunId, {
+            phase: 'edge.decision',
+            terminal: traversedEdges.length === 0,
+            decisions: outgoingEdges.map((edge) => ({
+              edgeId: edge.id,
+              targetNodeId: edge.targetNodeId,
+              targetPort: edge.targetPort,
+              traversed: traversedEdgeIds.has(edge.id),
+              condition: describeWorkflowEdgeCondition(edge.condition),
+              traversals: state.edgeTraversals[edge.id] ?? 0,
+              maxTraversals: edge.maxTraversals ?? null,
+            })),
+          });
+        }
         delete state.active;
         const finishedAt = new Date();
         await this.db.transaction((transaction) => {
@@ -495,11 +534,41 @@ export class RunsService {
     const nodeRows = await this.db.select().from(workflowNodeRuns).where(eq(workflowNodeRuns.runId, run.id)).orderBy(asc(workflowNodeRuns.position));
     const artifactRows = await this.db.select().from(artifacts).where(eq(artifacts.runId, run.id)).orderBy(asc(artifacts.createdAt));
     const retryableNodeRunId = retryableNodeRunIdOf(run);
-    view.nodeRuns = nodeRows.map((row) => toNodeRunView(row, row.id === retryableNodeRunId));
+    const eventRows = await this.db.select().from(workflowRunEvents)
+      .where(and(eq(workflowRunEvents.runId, run.id), inArray(workflowRunEvents.type, ['node.activity', 'node.delta'])))
+      .orderBy(asc(workflowRunEvents.sequence));
+    const activityByNodeRun = new Map<string, WorkflowNodeActivityView[]>();
+    const streamedByNodeRun = new Map<string, string>();
+    for (const row of eventRows) {
+      const payload = asRecord(row.payload);
+      const nodeRunId = typeof payload?.nodeRunId === 'string' ? payload.nodeRunId : null;
+      if (!nodeRunId) continue;
+      if (row.type === 'node.delta') {
+        const delta = typeof payload?.delta === 'string' ? payload.delta : '';
+        if (delta) streamedByNodeRun.set(nodeRunId, (streamedByNodeRun.get(nodeRunId) ?? '') + delta);
+        continue;
+      }
+      const activity = activityByNodeRun.get(nodeRunId) ?? [];
+      activity.push({
+        nodeId: typeof payload?.nodeId === 'string' ? payload.nodeId : '',
+        nodeRunId,
+        phase: payload?.phase as WorkflowNodeActivityView['phase'],
+        detail: payload?.detail as WorkflowNodeActivityView['detail'],
+        sequence: row.sequence,
+        occurredAt: row.createdAt.toISOString(),
+      });
+      activityByNodeRun.set(nodeRunId, activity);
+    }
+    view.nodeRuns = nodeRows.map((row) => toNodeRunView(row, row.id === retryableNodeRunId, activityByNodeRun.get(row.id) ?? [], streamedByNodeRun.get(row.id) ?? null));
     view.artifacts = artifactRows.map((artifact) => toArtifactView(artifact, workspaceSlug, workflow.name));
     const [pendingAction] = await this.db.select().from(workflowPendingActions).where(and(eq(workflowPendingActions.runId, run.id), inArray(workflowPendingActions.status, ['pending', 'expired']))).orderBy(desc(workflowPendingActions.createdAt)).limit(1);
     view.pendingAction = pendingAction ? toPendingActionView(pendingAction) : null;
     return view;
+  }
+
+  private async publishActivity(runId: string, nodeId: string, nodeRunId: string, detail: WorkflowNodeActivityDetail): Promise<void> {
+    const payload: WorkflowNodeActivityEventPayload = { nodeId, nodeRunId, phase: detail.phase, detail };
+    await this.publish(runId, 'node.activity', payload);
   }
 
   private async publish(runId: string, type: RunProgressEvent['type'], payload: unknown): Promise<void> {
@@ -532,6 +601,14 @@ function parseWorkflowAgentJson(value: string): unknown {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function describeWorkflowEdgeCondition(condition: StoredWorkflowEdge['condition']): string {
+  if (!condition) return 'unconditional';
+  if (condition.kind === 'fallback') return 'fallback';
+  const target = condition.path.trim() || '$';
+  if (condition.value === undefined) return `${target} ${condition.operator}`;
+  return `${target} ${condition.operator} ${JSON.stringify(condition.value)}`;
 }
 
 type GeneratedWorkflowImage = {
@@ -569,8 +646,8 @@ function sanitizeWorkflowImages<T>(value: T): T {
   return output as T;
 }
 
-function toNodeRunView(row: typeof workflowNodeRuns.$inferSelect, retryable: boolean): WorkflowNodeRunView {
-  return { id: row.id, runId: row.runId, nodeId: row.nodeId, position: row.position, type: row.type, typeVersion: row.typeVersion, status: row.status, input: sanitizeWorkflowImages(row.input), output: sanitizeWorkflowImages(row.output), artifactIds: row.artifactIds ?? [], error: row.error, retryCount: row.retryCount, retryable, startedAt: row.startedAt?.toISOString() ?? null, finishedAt: row.finishedAt?.toISOString() ?? null };
+function toNodeRunView(row: typeof workflowNodeRuns.$inferSelect, retryable: boolean, activity: WorkflowNodeActivityView[] = [], streamedOutput: string | null = null): WorkflowNodeRunView {
+  return { id: row.id, runId: row.runId, nodeId: row.nodeId, position: row.position, type: row.type, typeVersion: row.typeVersion, status: row.status, input: sanitizeWorkflowImages(row.input), output: sanitizeWorkflowImages(row.output), artifactIds: row.artifactIds ?? [], error: row.error, retryCount: row.retryCount, retryable, startedAt: row.startedAt?.toISOString() ?? null, finishedAt: row.finishedAt?.toISOString() ?? null, streamedOutput, activity };
 }
 
 function retryableNodeRunIdOf(run: typeof workflowRuns.$inferSelect): string | null {

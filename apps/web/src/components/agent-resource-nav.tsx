@@ -1,21 +1,20 @@
 import { Link } from '@tanstack/react-router';
-import { Blocks, Bot, Server } from 'lucide-react';
+import { Blocks, Server } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { cn } from '@/lib/utils';
 
-type AgentResourceView = 'agents' | 'skills' | 'mcp-servers';
+type AgentResourceView = 'skills' | 'mcp-servers';
 
 function AgentResourceNav({ active }: { active: AgentResourceView }) {
   const { t } = useTranslation('workspace');
   const items = [
-    { id: 'agents', label: t('nav.agents'), to: '/agents', icon: Bot },
     { id: 'skills', label: t('nav.skills'), to: '/skills', icon: Blocks },
     { id: 'mcp-servers', label: t('nav.mcpServers'), to: '/mcp-servers', icon: Server },
   ] as const;
 
   return (
-    <nav className="mt-6 flex max-w-full items-center gap-1 overflow-x-auto rounded-md bg-surface-subtle p-1" aria-label={t('nav.agentResources')}>
+    <nav className="mt-6 flex max-w-full items-center gap-1 overflow-x-auto rounded-md bg-surface-subtle p-1" aria-label={t('nav.capabilities')}>
       {items.map((item) => (
         <Link
           key={item.id}

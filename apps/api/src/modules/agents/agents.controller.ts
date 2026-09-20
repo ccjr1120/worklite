@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Header, Headers, Param, Patch, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import type { AgentExecutionEvent, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, CreateAgentRequest, UpdateAgentRequest } from '@worklite/contracts';
+import type { AgentExecutionEvent, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, UpdateAgentRequest } from '@worklite/contracts';
 import { AgentExecutionsService } from './agent-executions.service';
 import { AgentsService } from './agents.service';
 
@@ -8,30 +8,14 @@ import { AgentsService } from './agents.service';
 export class AgentsController {
   constructor(private readonly agents: AgentsService, private readonly executions: AgentExecutionsService) {}
 
-  @Get()
-  list(@Req() request: Request) {
-    return this.agents.list(request, 'personal');
-  }
 
   @Get(':agentId')
   get(@Req() request: Request, @Param('agentId') agentId: string) {
     return this.agents.get(request, 'personal', agentId);
   }
 
-  @Post()
-  create(@Req() request: Request, @Body() body: CreateAgentRequest) {
-    return this.agents.create(request, 'personal', body);
-  }
 
-  @Get(':agentId/versions')
-  versions(@Req() request: Request, @Param('agentId') agentId: string) {
-    return this.agents.versions(request, 'personal', agentId);
-  }
 
-  @Post(':agentId/versions')
-  createVersion(@Req() request: Request, @Param('agentId') agentId: string) {
-    return this.agents.createVersion(request, 'personal', agentId);
-  }
 
   @Post(':agentId/executions')
   createExecution(@Req() request: Request, @Param('agentId') agentId: string, @Body() body: CreateAgentExecutionRequest) {
@@ -121,10 +105,6 @@ export class AgentsController {
     return this.agents.update(request, 'personal', agentId, body);
   }
 
-  @Delete(':agentId')
-  delete(@Req() request: Request, @Param('agentId') agentId: string) {
-    return this.agents.delete(request, 'personal', agentId);
-  }
 }
 
 function parseLastEventId(value: string | undefined): number {
