@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -15,36 +15,11 @@
           var dark = appearance === 'dark' || (appearance === 'system' && prefersDark);
           document.documentElement.classList.toggle('dark', dark);
           document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
-          var storedLocale = localStorage.getItem('worklite.locale');
-          var locale = 'en';
-          if (storedLocale) {
-            var normalized = storedLocale.replace(/_/g, '-').toLowerCase();
-            if (normalized === 'zh' || normalized.indexOf('zh-cn') === 0 || normalized.indexOf('zh-hans') === 0 || normalized === 'zh-sg') {
-              locale = 'zh-CN';
-            } else if (normalized === 'en' || normalized.indexOf('en-') === 0) {
-              locale = 'en';
-            } else {
-              locale = 'en';
-            }
-          } else {
-            var languages = navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language];
-            for (var i = 0; i < languages.length; i++) {
-              var candidate = String(languages[i] || '').replace(/_/g, '-').toLowerCase();
-              if (candidate === 'zh' || candidate.indexOf('zh-cn') === 0 || candidate.indexOf('zh-hans') === 0 || candidate === 'zh-sg') {
-                locale = 'zh-CN';
-                break;
-              }
-              if (candidate === 'en' || candidate.indexOf('en-') === 0) {
-                locale = 'en';
-                break;
-              }
-            }
-          }
-          document.documentElement.lang = locale;
+          document.documentElement.lang = 'zh-CN';
         } catch (error) {
           document.documentElement.classList.remove('dark');
           document.documentElement.style.colorScheme = 'light';
-          document.documentElement.lang = 'en';
+          document.documentElement.lang = 'zh-CN';
         }
       })();
     </script>

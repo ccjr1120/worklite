@@ -91,7 +91,7 @@ Use `Inter`, `Geist`, or a compatible modern system sans-serif stack. Use a mono
 | Label | `12px` | `500` |
 | Code and data | `12px` to `13px` | `400` or `500` |
 
-Use concise, direct source copy and preserve the same meaning and tone in every supported locale. Avoid promotional language inside the application. Labels must describe actions or content without relying on placeholder text. Every string must qualify as an action, a state, a constraint, or a recovery under `ui-ux-design/shared/copy-standards.md`; section and page descriptions are optional and exist only to state a constraint or bound a scope. Follow `docs/internationalization/README.md` for translation ownership, locale-aware formatting, text expansion, and accessible localized content.
+Use concise, direct source copy and preserve the same meaning and tone in every supported locale. Avoid promotional language inside the application. Labels must describe actions or content without relying on placeholder text. Every string must qualify as an action, a state, a constraint, or a recovery under `ui-ux-design/shared/copy-standards.md`; section and page descriptions are optional and exist only to state a constraint or bound a scope. Use the fixed Chinese resource set for all product copy and locale-aware formatting.
 
 ## Spacing and Layout
 

@@ -1,6 +1,6 @@
 # Copy Standards
 
-This document is the source of truth for which user-facing text WorkLite is allowed to show. `docs/ui-design-system/README.md` governs typography and tone; `docs/internationalization/README.md` governs translation ownership. This document governs whether a string may exist at all.
+This document is the source of truth for which user-facing text WorkLite is allowed to show. `docs/ui-design-system/README.md` governs typography and tone; The fixed Chinese resource set governs product copy ownership. This document governs whether a string may exist at all.
 
 ## Admitted Categories
 
@@ -27,7 +27,7 @@ Remove promotional and reassuring phrasing. State the fact instead.
 
 When an interaction becomes automatic, the text that existed to support the manual path is removed in the same change. An automatically replaced authentication code shows neither its expiry time nor an instruction to replace it: both describe work the user no longer does.
 
-Automation that removes a control removes its label, its help text, and its locale keys together, in every supported locale.
+Automation that removes a control removes its label, its help text, and its locale keys together, in the fixed Chinese resource set.
 
 ## Optional Descriptions
 
@@ -35,7 +35,7 @@ A page or section description is optional. Write one only to state a constraint 
 
 ## Inventory
 
-Every `DESIGN.md` lists its surface's locale keys under Copy Inventory with the category each key belongs to. A key that cannot be assigned a category is removed rather than reclassified. Removing a key removes its Copy Inventory row in the same change.
+Every `DESIGN.md` lists its surface's Chinese resource keys under Copy Inventory with the category each key belongs to. A key that cannot be assigned a category is removed rather than reclassified. Removing a key removes its Copy Inventory row in the same change.
 
 ## Changelog
 

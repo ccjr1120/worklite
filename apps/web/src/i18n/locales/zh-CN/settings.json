@@ -38,8 +38,8 @@
     "baseURLPlaceholder": "https://api.example.com/v1",
     "baseURLRequired": "保存或获取模型前请先填写 Base URL。",
     "models": "模型",
-    "modelsHint": "每输入一个模型标识符后按 Enter。获取结果会添加到当前草稿。",
-    "modelsPlaceholder": "输入模型标识符",
+    "modelsHint": "模型列表支持拖拽排序；获取模型会将新模型追加到当前列表。",
+    "modelsPlaceholder": "暂无已配置模型",
     "addModel": "添加模型",
     "removeModel": "删除 {{model}}",
     "fetchModels": "获取模型",
@@ -64,11 +64,11 @@
     "testing": "正在测试...",
     "test": "测试连接",
     "testTitle": "测试 {{provider}}",
-    "testDescription": "Select a model, then send the fixed read-only test message.",
-    "testDescriptionWithModel": "来自 {{model}} 的回复。",
-    "testModel": "Model",
-    "testModelPlaceholder": "Select a model",
-    "runTest": "Run test",
+    "testDescription": "打开测试窗口不会发送请求，请选择模型后手动点击“运行测试”。",
+    "testDescriptionWithModel": "当前模型：{{model}}。点击“运行测试”后发送固定的只读测试消息。",
+    "testModel": "模型",
+    "testModelPlaceholder": "请选择模型",
+    "runTest": "运行测试",
     "testPromptLabel": "测试消息",
     "testReplyLabel": "模型回复",
     "waitingReply": "正在等待模型回复 · {{seconds}} 秒",
@@ -225,7 +225,8 @@
       "error": "无法加载请求日志。",
       "detailError": "无法加载该捕获的请求。"
     },
-    "viewRequestLog": "查看请求日志"
+    "viewRequestLog": "查看请求日志",
+    "emptyModels": "暂无已配置模型。"
   },
   "usage": {
     "title": "用量",

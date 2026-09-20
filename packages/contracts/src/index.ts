@@ -261,11 +261,10 @@ export type WorkliteNavigationTarget =
 
 export type WorkspaceSettingsView = {
   appearance: 'system' | 'light' | 'dark';
-  locale: 'en' | 'zh-CN';
   updatedAt: string;
 };
 
-export type UpdateWorkspaceSettingsRequest = Partial<Pick<WorkspaceSettingsView, 'appearance' | 'locale'>>;
+export type UpdateWorkspaceSettingsRequest = Partial<Pick<WorkspaceSettingsView, 'appearance'>>;
 
 export type PortkeyGatewayStatus = 'starting' | 'running' | 'failed';
 
@@ -389,7 +388,7 @@ export type PortkeyGatewayModelList = {
 export type WorkliteScriptResult =
   | { type: 'resource'; resourceType: 'provider' | 'skill' | 'mcp-server' | 'workflow'; id: string; route: string }
   | { type: 'navigation'; target: WorkliteNavigationTarget; route: string }
-  | { type: 'settings'; appearance: WorkspaceSettingsView['appearance']; locale: WorkspaceSettingsView['locale'] }
+  | { type: 'settings'; appearance: WorkspaceSettingsView['appearance'] }
   | { type: 'snapshot' };
 
 export type WorkflowNodePosition = {

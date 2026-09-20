@@ -77,7 +77,7 @@ function ChatBot({ workspaceSlug }: { workspaceSlug: string }) {
   const mcpServersQuery = useMcpServersQuery(workspaceSlug);
   const workflowsQuery = useWorkflowsQuery(workspaceSlug);
   const { applyAppearancePreference } = useTheme();
-  const { applyLocalePreference, locale } = useLocale();
+  const { locale } = useLocale();
   const initialState = useMemo(() => readStoredState(workspaceSlug), [workspaceSlug]);
   const [targetIds, setTargetIds] = useState({ 'system-helper': initialState.activeId });
   const [archived, setArchived] = useState<ArchivedExecution[]>(initialState.archived);
@@ -174,11 +174,10 @@ function ChatBot({ workspaceSlug }: { workspaceSlug: string }) {
       const saved = await api.settings();
       queryClient.setQueryData(['settings'], saved);
       applyAppearancePreference(saved.appearance);
-      applyLocalePreference(saved.locale);
       return;
     }
     if (result.type === 'navigation') void navigate({ to: result.route as never });
-  }, [applyAppearancePreference, applyLocalePreference, navigate]);
+  }, [applyAppearancePreference, navigate]);
 
   const applyCompletedResults = useCallback(async (next: AgentExecutionView) => {
     for (const call of next.toolCalls) {

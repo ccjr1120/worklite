@@ -13,27 +13,24 @@
 
 - `apps/web/src/routes/settings/appearance.tsx`
 - `apps/web/src/components/theme-provider.tsx`
-- `apps/web/src/components/locale-provider.tsx`
 
 ## Purpose
 
-Choose the personal theme and interface language for this workspace.
+Choose the personal theme for this workspace. The interface language is fixed to Simplified Chinese.
 
 ## Primary Task
 
-Change the theme or the language. Action budget: one. Selecting an option applies and persists it; there is no separate save action.
+Change the theme. Action budget: one. Selecting an option applies and persists it; there is no separate save action.
 
 ## Layout
 
-Settings form column at `840px` with the Settings local navigation. Theme options and language options are two radio groups of full-width selectable rows. The selected row uses `border-brand` with `brand-subtle`; unselected rows stay neutral.
+Settings form column at `840px` with the Settings local navigation. Theme options are full-width selectable rows. The selected row uses `border-brand` with `brand-subtle`; unselected rows stay neutral.
 
 ## Interaction Contract
 
-Selecting a theme applies it before the next paint and persists the preference. Selecting a language applies it immediately without a reload or a route change.
+Selecting a theme applies it before the next paint and persists the preference. The selection is optimistic: the new value renders at once, and a persistence failure restores the previous value and shows a message below the group.
 
-Both selections are optimistic: the new value renders at once, and a persistence failure restores the previous value and shows a message below the groups. Neither selection needs confirmation, because both are reversible in one further action.
-
-Initial resolution happens before first paint in this order: explicit browser-local choice, browser language, seeded default preference, then `en`. Theme resolves through the same pre-paint path so no light-theme flash occurs.
+Theme resolves before first paint so no light-theme flash occurs. The document language is always `zh-CN`.
 
 No self-healing values exist on this surface; nothing here goes stale.
 
@@ -41,7 +38,7 @@ No self-healing values exist on this surface; nothing here goes stale.
 
 | State | Behavior |
 | --- | --- |
-| Loading | No blocking load. Theme and locale resolve before first paint from local state. |
+| Loading | No blocking load. Theme resolves before first paint from local state. |
 | Empty | Cannot occur; both option sets are fixed. |
 | No results | Not applicable. |
 | Error | Persistence failure restores the previous selection and shows an inline `role="alert"` message below the affected group. |
@@ -63,28 +60,23 @@ Verify that application surfaces, shared editors, charts, diagrams, scrollbars, 
 | `settings:appearance.theme.systemDescription` | Constraint |
 | `settings:appearance.theme.lightDescription` | Constraint |
 | `settings:appearance.theme.darkDescription` | Constraint |
-| `settings:appearance.language.title` | State |
 | `settings:appearance.saveFailed` | Recovery |
 
-`settings:appearance.description` and `settings:appearance.language.description` are removed. The first restates that preferences are personal and names the resolved theme, which the System option already shows; the second restates its own heading. Language names render from `LOCALE_NATIVE_NAMES` rather than translated keys.
+`settings:appearance.description` and language-related copy are removed because the interface language is fixed.
 
 ## Accessibility
 
-Each radio group is reachable by `Tab` and navigable with arrow keys. Every row is a `label` bound to its `RadioGroupItem`, so the visible text is the accessible name. Icons are `aria-hidden`. Selection is communicated by the radio state and the border change, not by color alone. The failure message uses `role="alert"` and follows the group it belongs to.
+The theme radio group is reachable by `Tab` and navigable with arrow keys. Every row is a `label` bound to its `RadioGroupItem`, so the visible text is the accessible name. Icons are `aria-hidden`. Selection is communicated by the radio state and the border change, not by color alone. The failure message uses `role="alert"` and follows the group it belongs to.
 
 ## Coverage Status
 
-Verified 2026-09-19, resolved 2026-09-19. The differences found and their resolution:
-
-- No busy state; `setAppearance` and `setLocale` were fired without any pending cue. Resolved: the activated row shows a spinner beside its label while persistence is in flight.
-- No optimistic rollback; a rejected promise set `saveError` but left the failed selection displayed. Resolved: a failure restores the previous value so the interface cannot disagree with the stored preference.
-- Both descriptions were still rendered. Resolved: removed from both locales.
+Updated 2026-09-20. Removed the language setting and documented the fixed Chinese-only interface. Theme persistence remains the only action on this page.
 
 ## Changelog
 
-### 2026-09-19 - Copy and feedback
+### 2026-09-20 - Chinese-only interface
 
-- Added the per-row busy cue and optimistic rollback, and removed the page and language descriptions from both locales.
+- Removed language selection from the page and fixed the document language to `zh-CN`.
 
 ### 2026-09-19
 

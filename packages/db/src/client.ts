@@ -211,13 +211,12 @@ print({ worklite: { type: 'resource', resourceType: 'workflow', id: resource.id,
   ['scripts/update-settings.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, oneOf, print } from './lib.mjs';
 const raw = input();
-exactKeys(raw, ['appearance', 'locale']);
+exactKeys(raw, ['appearance']);
 const body = {};
 if ('appearance' in raw) body.appearance = oneOf(raw.appearance, 'appearance', ['system', 'light', 'dark']);
-if ('locale' in raw) body.locale = oneOf(raw.locale, 'locale', ['en', 'zh-CN']);
 if (Object.keys(body).length === 0) throw new Error('At least one setting is required.');
 const settings = await call('/settings', { method: 'PATCH', body });
-print({ worklite: { type: 'settings', appearance: settings.appearance, locale: settings.locale }, data: settings });
+print({ worklite: { type: 'settings', appearance: settings.appearance }, data: settings });
 `],
   ['scripts/navigate.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, oneOf, print } from './lib.mjs';
@@ -274,7 +273,7 @@ Workflow Agent context is optional. An Agent context may receive one unbounded i
 
 Scheduling is part of the immutable Workflow graph through the first-party \`worklite/timer\` node. Home board eligibility is part of the immutable graph through the first-party \`worklite/dashboard\` node: use at most one, connect its required \`data\` input, configure a layout of header, main, and footer element arrays (text, count, metric, and list kinds, where list elements own a \`titleKey\` matching their display-field keys), publish, and produce a successful Run. A Workflow has at most one Timer, the minimum interval is 300 seconds, Timer changes activate after Publish, and overlapping scheduled runs are prevented. There is no standalone schedule mutation script or API; \`GET /workflows/:workflowId/schedule\` exposes read-only runtime status. Home has no global Workflow data source; platform-defined Workflow boards are removed, and only a published Dashboard-node Workflow with a successful Dashboard output can be selected. Home category assignment is a database-backed organization reference with Uncategorized as the presentation default and at most one category per board; no Workflow output is persisted and no standalone category script is provided.
 
-- update-settings.mjs: { "appearance"?: "system" | "light" | "dark", "locale"?: "en" | "zh-CN" }
+- update-settings.mjs: { "appearance"?: "system" | "light" | "dark" }
 - navigate.mjs: { "target": "home" | "system-helper-chat" | "skills" | "mcp-servers" | "model-providers" | "workflows" | "settings-appearance" | "settings-usage" | "settings-audit-log" }
 `],
 ];

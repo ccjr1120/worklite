@@ -780,9 +780,8 @@ function parseWorkliteScriptResult(output: string): WorkliteScriptResult | null 
   if (result.type === 'snapshot') return Object.keys(result).length === 1 ? { type: 'snapshot' } : null;
   if (result.type === 'settings') {
     const appearance = result.appearance;
-    const locale = result.locale;
-    return (appearance === 'system' || appearance === 'light' || appearance === 'dark') && (locale === 'en' || locale === 'zh-CN')
-      ? { type: 'settings', appearance, locale }
+    return appearance === 'system' || appearance === 'light' || appearance === 'dark'
+      ? Object.keys(result).length === 2 ? { type: 'settings', appearance } : null
       : null;
   }
   if (result.type === 'navigation') {

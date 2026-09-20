@@ -10,7 +10,6 @@ export const workspaces = sqliteTable('workspaces', {
 export const workspaceSettings = sqliteTable('workspace_settings', {
   workspaceId: text('workspace_id').primaryKey().references(() => workspaces.id, { onDelete: 'cascade' }),
   appearance: text('appearance').$type<'system' | 'light' | 'dark'>().notNull().default('system'),
-  locale: text('locale').$type<'en' | 'zh-CN'>().notNull().default('en'),
   updatedAt: timestamp('updated_at'),
 });
 
@@ -308,7 +307,7 @@ export type StoredAgentPendingQuestion = {
 export type StoredWorkliteScriptResult =
   | { type: 'resource'; resourceType: 'provider' | 'agent' | 'skill' | 'mcp-server' | 'workflow'; id: string; route: string }
   | { type: 'navigation'; target: 'home' | 'agents' | 'system-helper-chat' | 'skills' | 'mcp-servers' | 'model-providers' | 'workflows' | 'settings-appearance' | 'settings-usage' | 'settings-audit-log'; route: string }
-  | { type: 'settings'; appearance: 'system' | 'light' | 'dark'; locale: 'en' | 'zh-CN' }
+  | { type: 'settings'; appearance: 'system' | 'light' | 'dark' }
   | { type: 'snapshot' };
 
 export const agentExecutions = sqliteTable('agent_executions', {

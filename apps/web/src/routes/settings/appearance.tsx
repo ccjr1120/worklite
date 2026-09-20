@@ -2,11 +2,9 @@ import { createFileRoute } from '@tanstack/react-router';
 import { LoaderCircle, Monitor, Moon, Sun } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useLocale } from '@/components/locale-provider';
 import { useTheme } from '@/components/theme-provider';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
-import { LOCALE_NATIVE_NAMES, SUPPORTED_LOCALES, type AppLocale } from '@/i18n/locale';
 import { cn } from '@/lib/utils';
 import type { Appearance } from '@/lib/theme';
 
@@ -17,14 +15,10 @@ export const Route = createFileRoute('/settings/appearance')({
 function AppearanceSettingsPage() {
   const { t } = useTranslation('settings');
   const { appearance, setAppearance } = useTheme();
-  const { locale, setLocale } = useLocale();
   const [saveError, setSaveError] = useState('');
   const [pendingTheme, setPendingTheme] = useState<Appearance | null>(null);
-  const [pendingLocale, setPendingLocale] = useState<AppLocale | null>(null);
 
-  // Both selections apply optimistically because the provider changes the theme or
-  // locale before persistence resolves. A rejected write restores the previous value
-  // so the interface never disagrees with the stored preference.
+  // Theme applies optimistically. A rejected write restores the previous value.
   async function selectTheme(next: Appearance) {
     if (next === appearance || pendingTheme !== null) return;
     const previous = appearance;
@@ -37,21 +31,6 @@ function AppearanceSettingsPage() {
       await setAppearance(previous).catch(() => undefined);
     } finally {
       setPendingTheme(null);
-    }
-  }
-
-  async function selectLocale(next: AppLocale) {
-    if (next === locale || pendingLocale !== null) return;
-    const previous = locale;
-    setSaveError('');
-    setPendingLocale(next);
-    try {
-      await setLocale(next);
-    } catch {
-      setSaveError(t('appearance.saveFailed'));
-      await setLocale(previous).catch(() => undefined);
-    } finally {
-      setPendingLocale(null);
     }
   }
 
@@ -95,28 +74,6 @@ function AppearanceSettingsPage() {
         })}
       </RadioGroup>
 
-      <h2 className="mt-8 text-base font-semibold">{t('appearance.language.title')}</h2>
-      <RadioGroup className="mt-3 gap-3" value={locale} onValueChange={(value) => void selectLocale(value as AppLocale)}>
-        {SUPPORTED_LOCALES.map((value) => {
-          const selected = locale === value;
-          const pending = pendingLocale === value;
-          return (
-            <label
-              key={value}
-              className={cn(
-                'flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors duration-[120ms] ease-out',
-                selected ? 'border-brand bg-brand-subtle' : 'border-border bg-surface',
-              )}
-            >
-              <RadioGroupItem value={value} className="mt-0.5" />
-              <span className="flex items-center gap-1.5 text-sm font-medium">
-                {LOCALE_NATIVE_NAMES[value]}
-                {pending ? <LoaderCircle className="size-3.5 text-muted-foreground motion-safe:animate-spin" aria-hidden="true" /> : null}
-              </span>
-            </label>
-          );
-        })}
-      </RadioGroup>
       {saveError ? <p className="mt-4 text-[13px] text-danger" role="alert">{saveError}</p> : null}
     </div>
   );

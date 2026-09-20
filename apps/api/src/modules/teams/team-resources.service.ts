@@ -558,7 +558,7 @@ export class WorkspaceResourcesService {
           schedule: schedule ? { enabled: schedule.enabled, intervalSeconds: schedule.intervalSeconds, workflowVersionId: schedule.workflowVersionId, nextRunAt: schedule.nextRunAt.toISOString(), lastStatus: schedule.lastStatus } : null,
         };
       }),
-      settings: settingsRows[0] ? { appearance: settingsRows[0].appearance, locale: settingsRows[0].locale } : null,
+      settings: settingsRows[0] ? { appearance: settingsRows[0].appearance } : null,
     };
   }
 
@@ -566,23 +566,21 @@ export class WorkspaceResourcesService {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [row] = await this.db.select().from(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspace.id)).limit(1);
     if (!row) throw new NotFoundException('Workspace settings not found');
-    return { appearance: row.appearance, locale: row.locale, updatedAt: row.updatedAt.toISOString() };
+    return { appearance: row.appearance, updatedAt: row.updatedAt.toISOString() };
   }
 
   async updateSettings(request: Request, workspaceSlug: string, input: UpdateWorkspaceSettingsRequest): Promise<WorkspaceSettingsView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new BadRequestException('Workspace settings must be an object.');
-    if (Object.keys(input).some((key) => key !== 'appearance' && key !== 'locale')) throw new BadRequestException('Only appearance and locale can be changed.');
+    if (Object.keys(input).some((key) => key !== 'appearance')) throw new BadRequestException('Only appearance can be changed.');
     if (input.appearance !== undefined && input.appearance !== 'system' && input.appearance !== 'light' && input.appearance !== 'dark') throw new BadRequestException('Unsupported appearance preference.');
-    if (input.locale !== undefined && input.locale !== 'en' && input.locale !== 'zh-CN') throw new BadRequestException('Unsupported locale preference.');
-    if (input.appearance === undefined && input.locale === undefined) throw new BadRequestException('At least one workspace setting is required.');
+    if (input.appearance === undefined) throw new BadRequestException('At least one workspace setting is required.');
     const [row] = await this.db.update(workspaceSettings).set({
       ...(input.appearance === undefined ? {} : { appearance: input.appearance }),
-      ...(input.locale === undefined ? {} : { locale: input.locale }),
       updatedAt: new Date(),
     }).where(eq(workspaceSettings.workspaceId, workspace.id)).returning();
     if (!row) throw new NotFoundException('Workspace settings not found');
-    return { appearance: row.appearance, locale: row.locale, updatedAt: row.updatedAt.toISOString() };
+    return { appearance: row.appearance, updatedAt: row.updatedAt.toISOString() };
   }
 
   async resolveNavigation(request: Request, workspaceSlug: string, input: { target?: unknown }) {

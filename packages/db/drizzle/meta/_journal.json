@@ -99,6 +99,13 @@
       "when": 1789632000000,
       "tag": "0014_drop_diagnostic_logs",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1789892930749,
+      "tag": "0015_remove_workspace_locale",
+      "breakpoints": true
     }
   ]
 }

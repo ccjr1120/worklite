@@ -75,7 +75,7 @@ The personal installation has no public sign-in, account creation, email verific
 
 Local development serves the Vite web application on port `3390` and the NestJS API on port `3391`. The local deployment exposes only the built Web application on port `23390`; its same-origin `/api` requests are proxied internally to the loopback API on port `23391`. Portkey Gateway uses loopback port `23392` in deployment; none of these backend ports are external endpoints. The development default is `3392` for the Gateway. Gateway lifecycle is API-owned and automatic: the sidecar starts with the API, is restarted after an unexpected exit, and has no user-facing start, stop, or restart controls. The Gateway port is configurable through `PORTKEY_GATEWAY_PORT`. The Vite development proxy forwards same-origin `/api` requests to the API port. Codex transport runs inside the Gateway process and has no separate listener.
 
-Authenticated workspace routes do not include a locale segment. The web application resolves and persists a personal locale preference, falls back to English, and translates product-owned presentation content at the UI boundary. API contracts, persisted domain values, identifiers, logs, and externally supplied content remain language-neutral. `docs/internationalization/README.md` is the source of truth for internationalization requirements.
+Authenticated workspace routes do not include a locale segment. The Web application uses one fixed Chinese resource set (`zh-CN`) and does not expose, persist, or synchronize a locale preference. API contracts, persisted domain values, identifiers, logs, and externally supplied content remain language-neutral.
 
 ### API and Execution
 
@@ -113,6 +113,7 @@ The Commands module owns all process spawning. It is an API runtime primitive ra
 - Agent Requests sent to a Provider whose runtime operation is OpenAI Responses declare function tools in non-strict mode and disable AI SDK strict JSON-schema response constraints for that request. This keeps providers that implement Responses but not every OpenAI strict-schema option usable for Skills and MCP tools; Chat Completions and Anthropic Messages requests retain their existing behavior.
 - AI SDK does not own WorkLite tenancy, workflow persistence, queues, audit records, quotas, or sandbox policy. Provider credentials and Provider catalog persistence belong to Portkey Gateway; the WorkLite API only mediates the local administration surface.
 - DeepSeek Harness is not a core runtime dependency. A future adapter may use it for DeepSeek-native Agent execution, but the initial Agent Runtime and Workflow Engine depend only on the WorkLite gateway contract.
+- The Web application is Chinese-only. It keeps one fixed `zh-CN` resource set for consistent copy and formatting, removes the language-selection setting and English runtime resources, and does not persist or synchronize a locale preference.
 - Gateway request observability is durable and Gateway-owned. Every Provider-bound `/v1` request is stored with its transformed request body, complete non-stream response or raw streaming SSE data, status, duration, usage when available, and opaque Workflow correlation metadata. Request headers, credentials, and custom header values are excluded. Provider attribution uses the internal `x-worklite-stat-provider` header supplied by WorkLite model execution when a model namespace alone cannot identify the Provider; explicit attribution takes precedence over model-prefix inference, and internal `x-worklite-*` metadata is not forwarded upstream. Request-log rows are automatically deleted after three days; the retention period is fixed by this increment and is not a user setting.
 
 ### Provider Proxy
@@ -616,6 +617,14 @@ Workflows support a versioned portable JSON envelope for moving editable definit
 Import validates the envelope, structured edge conditions, and bounded-cycle constraints, resolves every Skill and MCP server reference against the destination workspace, and creates a new mutable draft. Missing or ambiguous references reject the entire import. Import never overwrites an existing workflow, publishes a version, or enables a schedule.
 
 ## Changelog
+
+### 2026-09-20 - Chinese-only Web Interface and Provider Configuration Interactions
+
+- Removed the Web language-selection contract and made the interface use the Chinese resource set only.
+- Removed locale from workspace settings persistence, Agent settings tool results, CLI contracts, and the database schema through migration `0015_remove_workspace_locale`.
+- Required Provider Test to open without sending a request; the user must explicitly choose or confirm a model and activate the test action.
+- Replaced the free-form model token editor with an ordered draggable model list; discovery appends unique models and persistence retains the displayed order.
+
 
 ### 2026-09-20 - Remove Standalone Agent Capability
 
@@ -1375,7 +1384,7 @@ Superseded by the 2026-09-21 entry. The decisions below were approved and docume
 - Established English and Simplified Chinese as the initial application locales, with English as the fallback.
 - Kept authenticated workspace routes locale-neutral and defined locale as a personal preference.
 - Required machine-readable API values and presentation-boundary localization.
-- Added `docs/internationalization/README.md` as the internationalization source of truth.
+- Added the fixed Chinese-only Web interface contract; the former multi-locale design is retained only as historical context.
 
 ### 2026-08-13 - Initial Architecture Baseline
 

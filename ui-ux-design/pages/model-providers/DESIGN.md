@@ -19,9 +19,9 @@ Configure the upstream model providers the local Portkey Gateway dispatches to, 
 
 ## Primary Task
 
-Confirm that a configured provider actually answers. Action budget: one — activate `Test` on the provider row.
+Confirm that a configured provider actually answers. Action budget: two — open `Test`, then explicitly activate `Run test`.
 
-The test runs immediately when the product can resolve the model: a remembered still-valid model for that provider, or exactly one configured model. The dialog opens already in its waiting state. A model selection step remains only when neither condition holds, because then the model is a value the product cannot resolve.
+Opening the test dialog never sends a request. The dialog shows the Provider name, a model list, and an explicit `Run test` action. A remembered model or the first configured model may be selected by default, but the request starts only after the user activates the test action.
 
 Creating or editing a provider costs two actions — fill the form, then save — because the configuration is a set of values the product cannot resolve and a save writes credentials.
 
@@ -45,7 +45,7 @@ New provider forms do not offer `codex/responses`; an existing legacy Codex reco
 
 Secrets stay write-only. During editing, an empty API key preserves the stored key and a non-empty key replaces it. A supplied Headers JSON replaces the stored headers and `{}` clears them. Headers are entered as a JSON object in a multiline field; stored values are never loaded back into the browser. The list exposes only header names and count, never values, and omits header copy when none are configured. Invalid JSON, non-object JSON, or non-string header values prevent saving and produce an inline validation message.
 
-Model IDs use one token input rather than a comma-separated field or a multi-row editor. Typing an ID and pressing `Enter` commits one token inside the same bordered control and keeps focus in the input; leaving the field also commits the current non-empty draft, so `Save` and `Fetch models` cannot discard text just entered. Left and right arrows move through committed tokens and the caret; `Backspace` or `Delete` removes the active or adjacent token at the corresponding boundary. Each token has an accessible remove button. Fetching models merges newly discovered IDs into the draft token set with stable de-duplication; saving remains the only persistence action.
+Model IDs use an ordered draggable list rather than a free-form input. Each row exposes a drag handle, the model identifier, and an accessible remove action. Dragging changes the draft order; fetching models appends newly discovered IDs with stable de-duplication; saving remains the only persistence action and preserves the displayed order.
 
 Provider deletion uses the shared named confirmation pattern: close before success feedback and refresh, retain visible errors on failure.
 
@@ -364,3 +364,7 @@ Verified 2026-09-21 for the `request-logs` view; the entries below carry over fr
 ### 2026-08-13
 
 - Established Model Provider Settings.
+
+## Language
+
+The Web interface is Chinese-only. The language setting is not shown, and all page copy uses the fixed Chinese resource set.

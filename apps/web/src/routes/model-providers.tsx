@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { BarChart3, Bot, ChevronDown, Clipboard, Copy, KeyRound, LoaderCircle, LogIn, Pencil, Plus, RefreshCw, ScrollText, Trash2, Upload, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { BarChart3, Bot, ChevronDown, Clipboard, Copy, GripVertical, KeyRound, LoaderCircle, LogIn, Pencil, Plus, RefreshCw, ScrollText, Trash2, Upload, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitWindow, DiscoverModelProviderRequest, GatewayRequestLogList, GatewayRequestLogListItem, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayStats, PortkeyGatewayStatus } from '@worklite/contracts';
@@ -87,108 +87,40 @@ function parseHeaders(value: string): Record<string, string> | undefined {
   return headers;
 }
 
-type ModelTokenInputProps = {
+type ModelListProps = {
   id: string;
   value: string[];
   onChange: (value: string[]) => void;
-  placeholder: string;
   removeLabel: (model: string) => string;
+  emptyLabel: string;
   disabled?: boolean;
 };
 
-function ModelTokenInput({ id, value, onChange, placeholder, removeLabel, disabled = false }: ModelTokenInputProps) {
-  const [draft, setDraft] = useState('');
-  const [activeIndex, setActiveIndex] = useState<number | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  function focusInput(position?: number) {
-    inputRef.current?.focus();
-    if (position !== undefined) window.requestAnimationFrame(() => inputRef.current?.setSelectionRange(position, position));
+function ModelList({ id, value, onChange, removeLabel, emptyLabel, disabled = false }: ModelListProps) {
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  function moveModel(targetIndex: number) {
+    if (draggedIndex === null || draggedIndex === targetIndex) return;
+    const next = [...value];
+    const [moved] = next.splice(draggedIndex, 1);
+    if (moved) next.splice(targetIndex, 0, moved);
+    onChange(next);
+    setDraggedIndex(null);
   }
-
-  function removeAt(index: number) {
-    onChange(value.filter((_, itemIndex) => itemIndex !== index));
-    setActiveIndex(null);
-    focusInput();
-  }
-
-  function commit() {
-    const model = draft.trim();
-    if (!model) return;
-    if (!value.includes(model)) onChange([...value, model]);
-    setDraft('');
-    setActiveIndex(null);
-    focusInput();
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      commit();
-      return;
-    }
-    if ((event.key === 'Backspace' || event.key === 'Delete') && activeIndex !== null) {
-      event.preventDefault();
-      removeAt(activeIndex);
-      return;
-    }
-    if (event.key === 'ArrowLeft' && activeIndex === null && !draft && event.currentTarget.selectionStart === 0 && value.length > 0) {
-      event.preventDefault();
-      setActiveIndex(value.length - 1);
-      return;
-    }
-    if (event.key === 'ArrowLeft' && activeIndex !== null) {
-      event.preventDefault();
-      if (activeIndex === 0) {
-        setActiveIndex(null);
-        focusInput(0);
-      } else setActiveIndex(activeIndex - 1);
-      return;
-    }
-    if (event.key === 'ArrowRight' && activeIndex !== null) {
-      event.preventDefault();
-      if (activeIndex === value.length - 1) {
-        setActiveIndex(null);
-        focusInput();
-      } else setActiveIndex(activeIndex + 1);
-      return;
-    }
-    if (event.key === 'Backspace' && !draft && activeIndex === null && value.length > 0) {
-      event.preventDefault();
-      removeAt(value.length - 1);
-      return;
-    }
-    if (event.key === 'Delete' && !draft && activeIndex === null && value.length > 0 && event.currentTarget.selectionStart === 0) {
-      event.preventDefault();
-      removeAt(0);
-    }
-  }
-
   return (
-    <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1.5 focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
-      {value.map((model, index) => (
-        <span key={model} className={`inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium ${activeIndex === index ? 'border-brand bg-brand-subtle text-brand' : 'border-border bg-surface-subtle text-foreground'}`}>
-          <span className="max-w-[min(22rem,70vw)] truncate font-mono">{model}</span>
-          <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40" aria-label={removeLabel(model)} onClick={() => removeAt(index)} disabled={disabled}>
-            <X className="size-3" aria-hidden="true" />
+    <div id={id} className="grid gap-2 rounded-md border border-border bg-surface p-2" aria-label="模型列表">
+      {value.length === 0 ? <p className="px-2 py-3 text-sm text-muted-foreground">{emptyLabel}</p> : value.map((model, index) => (
+        <div key={model} draggable={!disabled} onDragStart={() => setDraggedIndex(index)} onDragOver={(event) => event.preventDefault()} onDrop={() => moveModel(index)} onDragEnd={() => setDraggedIndex(null)} className={`flex items-center gap-2 rounded-md border px-2.5 py-2 ${draggedIndex === index ? 'border-brand bg-brand-subtle' : 'border-border bg-surface-subtle'}`}>
+          <GripVertical className="size-4 shrink-0 cursor-grab text-muted-foreground" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate font-mono text-sm">{model}</span>
+          <button type="button" className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40" aria-label={removeLabel(model)} onClick={() => onChange(value.filter((_, itemIndex) => itemIndex !== index))} disabled={disabled}>
+            <X className="size-3.5" aria-hidden="true" />
           </button>
-        </span>
+        </div>
       ))}
-      <input
-        ref={inputRef}
-        id={id}
-        className="min-w-[12rem] flex-1 bg-transparent px-1 py-1 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
-        value={draft}
-        placeholder={value.length === 0 ? placeholder : ''}
-        disabled={disabled}
-        onChange={(event) => { setDraft(event.target.value); setActiveIndex(null); }}
-        onKeyDown={handleKeyDown}
-        onFocus={() => setActiveIndex(null)}
-        onBlur={commit}
-      />
     </div>
   );
 }
+
 
 function ModelProvidersPage() {
   const { t } = useTranslation(['settings', 'common']);
@@ -442,22 +374,10 @@ function ModelProvidersPage() {
     }
   }
 
-  // Testing is one goal with one activation point. When the product can resolve the
-  // model on its own — a remembered choice that is still configured, or a single
-  // configured model — the test starts immediately. The selection step appears only
-  // when neither holds, because then the model is a value we cannot resolve.
   function openProviderTest(provider: ModelProviderView) {
     const remembered = window.localStorage.getItem(`${PROVIDER_TEST_MODEL_KEY}${provider.id}`);
-    const resolved = remembered && provider.models.includes(remembered)
-      ? remembered
-      : provider.models.length === 1
-        ? provider.models[0]
-        : '';
-    if (resolved) {
-      startProviderTest(provider, resolved);
-      return;
-    }
-    setTestDialog({ provider, model: provider.models[0] ?? '', status: 'idle' });
+    const model = remembered && provider.models.includes(remembered) ? remembered : provider.models[0] ?? '';
+    setTestDialog({ provider, model, status: 'idle' });
   }
 
   function selectTestModel(model: string) {
@@ -596,7 +516,7 @@ function ModelProvidersPage() {
           </Field>
           <Field label={t('providers.models')} htmlFor="provider-models" hint={t('providers.modelsHint')} error={modelsError}>
             <div className="flex flex-col gap-2">
-              <ModelTokenInput id="provider-models" value={modelIds} onChange={(value) => { setModelIds(value); setModelsError(''); }} placeholder={t('providers.modelsPlaceholder')} removeLabel={(model) => t('providers.removeModel', { model })} disabled={providerBusy || modelsBusy} />
+              <ModelList id="provider-models" value={modelIds} onChange={(value) => { setModelIds(value); setModelsError(''); }} removeLabel={(model) => t('providers.removeModel', { model })} emptyLabel={t('providers.emptyModels')} disabled={providerBusy || modelsBusy} />
               <div className="flex items-center justify-between gap-3">
                 <Button variant="secondary" size="compact" onClick={() => void discoverModels()} disabled={providerBusy || modelsBusy || (protocol !== 'codex/responses' && !apiKey.trim())}>
                   {modelsBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <RefreshCw className="size-4" aria-hidden="true" />}

@@ -1,31 +1,31 @@
 import 'i18next';
-import type enAssistant from './locales/en/assistant.json';
-import type enArtifacts from './locales/en/artifacts.json';
-import type enCommon from './locales/en/common.json';
-import type enHome from './locales/en/home.json';
-import type enMcpServers from './locales/en/mcpServers.json';
-import type enPlugins from './locales/en/plugins.json';
-import type enRuns from './locales/en/runs.json';
-import type enSettings from './locales/en/settings.json';
-import type enSkills from './locales/en/skills.json';
-import type enWorkflows from './locales/en/workflows.json';
-import type enWorkspace from './locales/en/workspace.json';
+import type zhAssistant from './locales/zh-CN/assistant.json';
+import type zhArtifacts from './locales/zh-CN/artifacts.json';
+import type zhCommon from './locales/zh-CN/common.json';
+import type zhHome from './locales/zh-CN/home.json';
+import type zhMcpServers from './locales/zh-CN/mcpServers.json';
+import type zhPlugins from './locales/zh-CN/plugins.json';
+import type zhRuns from './locales/zh-CN/runs.json';
+import type zhSettings from './locales/zh-CN/settings.json';
+import type zhSkills from './locales/zh-CN/skills.json';
+import type zhWorkflows from './locales/zh-CN/workflows.json';
+import type zhWorkspace from './locales/zh-CN/workspace.json';
 
 declare module 'i18next' {
   interface CustomTypeOptions {
     defaultNS: 'common';
     resources: {
-      common: typeof enCommon;
-      workspace: typeof enWorkspace;
-      home: typeof enHome;
-      assistant: typeof enAssistant;
-      workflows: typeof enWorkflows;
-      runs: typeof enRuns;
-      skills: typeof enSkills;
-      mcpServers: typeof enMcpServers;
-      plugins: typeof enPlugins;
-      artifacts: typeof enArtifacts;
-      settings: typeof enSettings;
+      common: typeof zhCommon;
+      workspace: typeof zhWorkspace;
+      home: typeof zhHome;
+      assistant: typeof zhAssistant;
+      workflows: typeof zhWorkflows;
+      runs: typeof zhRuns;
+      skills: typeof zhSkills;
+      mcpServers: typeof zhMcpServers;
+      plugins: typeof zhPlugins;
+      artifacts: typeof zhArtifacts;
+      settings: typeof zhSettings;
     };
   }
 }
