@@ -1,3 +1,4 @@
+import { Lexer } from 'marked';
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
@@ -121,11 +122,47 @@ export class RunsService {
           config.outputFormat === 'json',
           (detail) => this.publishActivity(request.context.workflowRunId, request.context.nodeId, request.context.nodeRunId, detail),
           { workflowRunId: request.context.workflowRunId, nodeRunId: request.context.nodeRunId },
+          { maxToolCalls: config.maxToolCalls as number | undefined, maxToolRounds: config.maxToolRounds as number | undefined, maxToolResultChars: config.maxToolResultChars as number | undefined },
         );
         if (config.outputFormat !== 'json') return { output: response };
         const output = parseWorkflowAgentJson(response);
         assertWorkflowAgentOutputContract(output, config.outputContract);
+        if (Array.isArray(config.passthroughKeys)) {
+          const source = asRecord(context);
+          const target = asRecord(output);
+          if (!source || !target) throw new Error('Agent passthrough requires JSON objects.');
+          for (const key of config.passthroughKeys as string[]) {
+            if (!Object.prototype.hasOwnProperty.call(source, key)) throw new Error(`Agent passthrough input is missing ${key}.`);
+            target[key] = source[key];
+          }
+        }
         return { output };
+      },
+    });
+    this.registry.register({
+      ...capability('worklite/approved-article'),
+      execute: async (request) => {
+        const input = asRecord(request.input);
+        const reviewed = asRecord(input?.context);
+        if (reviewed?.approved !== true || reviewed.duplicate !== false || !Array.isArray(reviewed.feedback) || reviewed.feedback.length !== 0 || !Array.isArray(reviewed.open) || reviewed.open.length !== 0) throw new Error('The article was not approved or was marked as a duplicate.');
+        const article = reviewed.article;
+        if (typeof article !== 'string' || !article.trim()) throw new Error('The approved article is missing.');
+        const headings = Lexer.lex(article).filter((token) => token.type === 'heading' && token.depth === 1);
+        if (headings.length !== 1 || !/^# [^\n]+/.test(article) || headings[0]?.type !== 'heading' || headings[0].text !== reviewed.title) throw new Error('The approved article needs one matching level-one Markdown title.');
+        let fence: { marker: string; length: number } | null = null;
+        for (const line of article.split(/\r?\n/)) {
+          const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+          if (!match) continue;
+          const marker = match[1]![0]!;
+          if (!fence) {
+            if (marker === '`' && match[2]?.includes('`')) throw new Error('The article has a malformed Markdown code fence.');
+            fence = { marker, length: match[1]!.length };
+          } else if (marker === fence.marker && match[1]!.length >= fence.length && !match[2]?.trim()) {
+            fence = null;
+          }
+        }
+        if (fence) throw new Error('The article has an unclosed Markdown code fence.');
+        return { output: article };
       },
     });
     this.registry.register({

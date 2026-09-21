@@ -48,7 +48,7 @@ const collectPrompt = `You are a technology research collector. You gather and s
 
 The input is an Artifact Query result containing request and candidates. The planning output is nested one level deeper: the original instruction is at request.request.original and the approved proposal is at request.proposal, holding title and description. Treat request.proposal as the assigned subject and collect evidence for it. Do not substitute a subject you find more interesting. Copy the candidates array verbatim into your output.
 
-Each Skill enforces an allowance of five distinct queries per stage. The count is kept by the scripts, not by you: a sixth distinct query runs no search and returns quotaExhausted with instructions to write from what you have. Varying terms within the allowance is encouraged, since one query rarely surfaces both a mechanism and a dispute.
+Tool calls and model tool rounds are bounded by the Workflow runtime. Prioritize distinct, high-value queries; if a source fails or reports exhausted quota, do not repeat it. Conclude with gathered evidence and explicitly identify gaps.
 
 - Issue several distinct queries in a single turn when you already know what to ask. Batching is much cheaper than asking one at a time.
 - A repeat of a query you already issued returns the stored earlier result with a repeatedCall note. It is free of the allowance but yields nothing new, so treat it as a signal to move on rather than to search again.
@@ -88,7 +88,7 @@ Do not write article prose and do not wrap the JSON in a code fence.`;
 
 const writePrompt = `You are a Chinese technology writer. You write one article from an evidence package that is already collected. You have no research tools, and you must not invent a fact that is not in the package.
 
-The input is either the collector's evidence package, or a reviewer response from an earlier pass containing feedback, article, and the same evidence. On a reviewer response, keep what is valid, address every feedback item, and change nothing else. In every pass, copy the candidates array verbatim into your output.
+The input is either the collector's evidence package or a reviewer response containing feedback and the original writer fields. On a reviewer response, preserve supported claims, address every feedback item, and change nothing else. Copy candidates verbatim and preserve evidenceUsed for supported claims.
 
 Everything you may assert comes from findings, contrasts, and disputes. An item in gaps is unavailable: do not fill it with plausible reasoning. If the evidence cannot support a claim you want to make, drop the claim rather than softening it into vagueness.
 
@@ -166,21 +166,10 @@ Return only valid JSON with this shape:
   "approved": true,
   "duplicate": false,
   "matchedArtifactIds": [],
-  "feedback": [],
-  "evidenceUsed": [{ "claim": "...", "url": "https://..." }],
-  "candidates": [{ "artifactId": "...", "title": "...", "description": "...", "createdAt": "ISO timestamp or null" }],
-  "article": "the complete reviewed Markdown article"
+  "feedback": []
 }
 
-Copy evidenceUsed and candidates verbatim from the writer's output in every response. A rejected draft returns to the writer, which has no research tools, so this list is the only record of what each claim rests on. Dropping it strands the next pass.
-
-Set approved to true only when there are no actionable quality issues and duplicate is false. Set approved to false for quality issues or a duplicate; when a candidate matches, include its artifactId in matchedArtifactIds and include concise actionable feedback explaining how to choose a materially different subject or thesis.
-
-Return at most three feedback items, ordered by severity, and spend them on what matters: a factual claim the evidence does not support, a paragraph with no substance behind it, and a passage that reads as machine-generated, in that order. Write each item as a specific instruction naming the passage and the concrete change, not as a restatement of a rule. Ask for a rewritten sentence or paragraph rather than a rebuilt section, because a wholesale rewrite tends to introduce new unsupported claims. Do not repeat a feedback item the writer already addressed in a previous pass.
-
-Copy candidates verbatim in every response. When issues remain, copy the complete current article into article without replacing it with a summary. Do not wrap the JSON in a code fence.`;
-
-const articlePrompt = `You are a constrained article finalizer. The input is reviewer JSON with an article field. Return only that complete Markdown article verbatim. Do not add commentary, a code fence, links, or formatting that is not already present. Preserve the article's leading level-one Markdown heading exactly as supplied; it carries the published title and must not be removed, renamed, or demoted.`;
+Set approved to true only if no actionable quality issue remains and duplicate is false. For a duplicate, identify the matched artifact and give concise feedback requesting a materially different topic or thesis. Return at most three specific, severity-ordered feedback items naming the passage and exact change. Never reproduce the article or evidence in the response: the runtime preserves the writer's original fields. Do not wrap the JSON in a code fence.`;
 
 const coverPromptPrompt = `You are a concise visual director for a Chinese technology article. The input is the final reviewed Markdown article and its title. Read the topic and themes, then return only one concise English image-generation prompt for a WeChat Official Account cover.
 
@@ -220,7 +209,7 @@ function requirePublicModel(providers, model) {
 const AGENT_PROTOCOLS = new Set(['openai/chat', 'openai/responses', 'anthropic/messages']);
 
 // Each Agent role names its own candidates in preference order. Planning and cover direction take a
-// fast model, research and finalization take the strongest verified writing model, and review takes a
+// fast model, research and writing take the strongest verified writing model, and review takes a
 // different provider family so it does not share the writing model's stylistic habits.
 const roleModels = {
   planning: { env: 'WORKLITE_PLANNING_MODEL', candidates: ['GLM/glm-5.3-flash', 'GLM/glm-5.3'] },
@@ -287,11 +276,11 @@ const definition = {
     { id: 'input', position: { x: 0, y: 620 }, type: 'worklite/input', typeVersion: '1', config: {}, errorPolicy: 'stop' },
     { id: 'topic', position: { x: 260, y: 620 }, type: 'worklite/agent', typeVersion: '1', config: { model: planningModel, systemPrompt: topicPrompt, outputFormat: 'json', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
     { id: 'history', position: { x: 540, y: 620 }, type: 'worklite/artifact-query', typeVersion: '1', config: { name: 'Research Notes', titleField: 'title', descriptionFields: ['topic', 'thesis'] }, errorPolicy: 'stop' },
-    { id: 'collect', position: { x: 820, y: 620 }, type: 'worklite/agent', typeVersion: '1', config: { model: writingModel, systemPrompt: collectPrompt, outputFormat: 'json', skillIds: [githubSkill.id, zhihuSkill.id], mcpServerIds: [] }, errorPolicy: 'stop' },
+    { id: 'collect', position: { x: 820, y: 620 }, type: 'worklite/agent', typeVersion: '1', config: { model: writingModel, systemPrompt: collectPrompt, outputFormat: 'json', outputContract: ['title', 'topic', 'thesis', 'findings', 'candidates'], maxToolCalls: 7, maxToolRounds: 5, maxToolResultChars: 16000, skillIds: [githubSkill.id, zhihuSkill.id], mcpServerIds: [] }, errorPolicy: 'stop' },
     { id: 'evidence-artifact', position: { x: 1100, y: 620 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'Research Notes', type: 'json' }, errorPolicy: 'stop' },
-    { id: 'write', position: { x: 100, y: 120 }, type: 'worklite/agent', typeVersion: '1', config: { model: writingModel, systemPrompt: writePrompt, outputFormat: 'json', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
-    { id: 'review', position: { x: 420, y: 260 }, type: 'worklite/agent', typeVersion: '1', config: { model: reviewModel, systemPrompt: reviewerPrompt, outputFormat: 'json', skillIds: [], mcpServerIds: [] }, errorPolicy: reviewErrorPolicy },
-    { id: 'article', position: { x: 740, y: 260 }, type: 'worklite/agent', typeVersion: '1', config: { model: writingModel, systemPrompt: articlePrompt, outputFormat: 'text', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
+    { id: 'write', position: { x: 100, y: 120 }, type: 'worklite/agent', typeVersion: '1', config: { model: writingModel, systemPrompt: writePrompt, outputFormat: 'json', outputContract: ['title', 'topic', 'thesis', 'article'], skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
+    { id: 'review', position: { x: 420, y: 260 }, type: 'worklite/agent', typeVersion: '1', config: { model: reviewModel, systemPrompt: reviewerPrompt, outputFormat: 'json', outputContract: ['approved', 'duplicate'], passthroughKeys: ['title', 'topic', 'thesis', 'evidenceUsed', 'candidates', 'article'], skillIds: [], mcpServerIds: [] }, errorPolicy: reviewErrorPolicy },
+    { id: 'article', position: { x: 740, y: 260 }, type: 'worklite/approved-article', typeVersion: '1', config: {}, errorPolicy: 'stop' },
     { id: 'article-artifact', position: { x: 1020, y: 120 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'Article', type: 'markdown' }, errorPolicy: 'stop' },
     { id: 'cover-prompt', position: { x: 1020, y: 420 }, type: 'worklite/agent', typeVersion: '1', config: { model: planningModel, systemPrompt: coverPromptPrompt, outputFormat: 'text', skillIds: [], mcpServerIds: [] }, errorPolicy: 'stop' },
     { id: 'cover-image', position: { x: 1300, y: 420 }, type: 'worklite/image', typeVersion: '1', config: { model: imageModel, n: 1, background: 'opaque', quality: 'medium', size: '1024x1024' }, errorPolicy: 'stop' },
@@ -305,7 +294,7 @@ const definition = {
     { id: 'collect-to-write', sourceNodeId: 'collect', sourcePort: 'output', targetNodeId: 'write', targetPort: 'context' },
     { id: 'input-to-wechat-metadata', sourceNodeId: 'input', sourcePort: 'output', targetNodeId: 'wechat-publish', targetPort: 'metadata' },
     { id: 'write-to-review', sourceNodeId: 'write', sourcePort: 'output', targetNodeId: 'review', targetPort: 'context' },
-    { id: 'review-to-write', sourceNodeId: 'review', sourcePort: 'output', targetNodeId: 'write', targetPort: 'context', condition: { kind: 'predicate', path: '$.approved', operator: 'falsy' }, maxTraversals: 3 },
+    { id: 'review-to-write', sourceNodeId: 'review', sourcePort: 'output', targetNodeId: 'write', targetPort: 'context', condition: { kind: 'predicate', path: '$.approved', operator: 'falsy' }, maxTraversals: 1 },
     { id: 'review-to-article', sourceNodeId: 'review', sourcePort: 'output', targetNodeId: 'article', targetPort: 'context', condition: { kind: 'fallback' } },
     { id: 'article-to-output', sourceNodeId: 'article', sourcePort: 'output', targetNodeId: 'article-artifact', targetPort: 'data' },
     { id: 'article-to-cover-prompt', sourceNodeId: 'article', sourcePort: 'output', targetNodeId: 'cover-prompt', targetPort: 'context' },
@@ -328,7 +317,7 @@ if (!existing) {
     ...definition.edges.map((edge) => ({ type: 'addEdge', edge })),
     { type: 'updateSettings', input: definition.input, defaults: definition.defaults },
   ];
-  const updated = await request(`/workflows/${encodeURIComponent(existing.id)}/draft/operations`, { method: 'POST', body: JSON.stringify({ baseRevisionId: current.draft.revisionId, operations, source: 'manual', sourceInstruction: 'Assign research workflow Agent models per role, move duplicate screening into the editorial reviewer, and enforce reader-facing title and prose quality.' }) });
+  const updated = await request(`/workflows/${encodeURIComponent(existing.id)}/draft/operations`, { method: 'POST', body: JSON.stringify({ baseRevisionId: current.draft.revisionId, operations, source: 'manual', sourceInstruction: 'Keep writer Markdown unchanged, bound collection and revision, and block unapproved articles before draft creation.' }) });
   const version = await request(`/workflows/${encodeURIComponent(updated.id)}/publish`, { method: 'POST' });
   process.stdout.write(JSON.stringify({ id: updated.id, name: updated.name, existing: true, updated: true, publishedVersionId: version.id, models }) + '\n');
 }

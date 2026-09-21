@@ -181,6 +181,17 @@ const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     },
   },
   {
+    id: 'worklite/approved-article',
+    version: '1',
+    name: 'Approved Article',
+    purpose: 'Extract the original Markdown article only after explicit editorial approval.',
+    inputs: [{ name: 'context', required: true, dataType: 'json', multiple: false }],
+    outputs: [{ name: 'output', required: false, dataType: 'string', multiple: true }],
+    inputSchema: { type: 'object', required: ['context'] },
+    outputSchema: { type: 'string' },
+    configSchema: { type: 'object' },
+  },
+  {
     id: 'worklite/image',
     version: '1',
     name: 'Image Generation',
@@ -257,7 +268,7 @@ const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
     inputSchema: { type: 'object' },
     outputSchema: {},
-    configSchema: { type: 'object', required: ['model', 'systemPrompt', 'skillIds', 'mcpServerIds'], properties: { model: { type: 'string' }, systemPrompt: { type: 'string' }, outputFormat: { type: 'string', enum: ['text', 'json'] }, outputContract: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } }, skillIds: { type: 'array', items: { type: 'string' } }, mcpServerIds: { type: 'array', items: { type: 'string' } } } },
+    configSchema: { type: 'object', required: ['model', 'systemPrompt', 'skillIds', 'mcpServerIds'], properties: { model: { type: 'string' }, systemPrompt: { type: 'string' }, outputFormat: { type: 'string', enum: ['text', 'json'] }, outputContract: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } }, passthroughKeys: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } }, maxToolCalls: { type: 'integer', minimum: 1 }, maxToolRounds: { type: 'integer', minimum: 1 }, maxToolResultChars: { type: 'integer', minimum: 1 }, skillIds: { type: 'array', items: { type: 'string' } }, mcpServerIds: { type: 'array', items: { type: 'string' } } } },
   },
 ];
 

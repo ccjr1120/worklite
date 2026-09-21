@@ -555,6 +555,13 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
       if (new Set(names).size !== names.length) throw new BadRequestException('Agent node outputContract must not repeat a key name.');
       if (value.outputFormat !== 'json') throw new BadRequestException('Agent node outputContract requires outputFormat json.');
     }
+    for (const key of ['maxToolCalls', 'maxToolRounds', 'maxToolResultChars']) {
+      if (value[key] !== undefined && (typeof value[key] !== 'number' || !Number.isInteger(value[key]) || value[key] < 1)) throw new BadRequestException(`Agent node ${key} must be a positive integer.`);
+    }
+    if (value.passthroughKeys !== undefined) {
+      if (!Array.isArray(value.passthroughKeys) || !value.passthroughKeys.length || value.passthroughKeys.some((key) => typeof key !== 'string' || !key.trim()) || new Set(value.passthroughKeys).size !== value.passthroughKeys.length) throw new BadRequestException('Agent node passthroughKeys must be unique non-empty key names.');
+      if (value.outputFormat !== 'json') throw new BadRequestException('Agent node passthroughKeys requires outputFormat json.');
+    }
     if (requireCompleteAgents && (typeof value.model !== 'string' || !/^[^/]+\/.+/.test(value.model.trim()))) throw new BadRequestException('Every Agent node must contain a public provider/model id before publication.');
   }
   if (type === 'worklite/artifact') {

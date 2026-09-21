@@ -137,6 +137,7 @@ export class AgentExecutionsService {
     jsonOutput = false,
     activity?: WorkflowAgentActivityReporter,
     correlation?: { workflowRunId: string; nodeRunId: string },
+    limits?: { maxToolCalls?: number; maxToolRounds?: number; maxToolResultChars?: number },
   ): Promise<string> {
     const selectedSkillIds = [...new Set(requestedSkillIds)];
     const skillRows = selectedSkillIds.length === 0
@@ -160,9 +161,17 @@ export class AgentExecutionsService {
     const contextText = typeof context === 'string' ? context : JSON.stringify(context);
     const messages: GatewayAgentMessage[] = [{ role: 'user', content: contextText?.trim() ? contextText : 'No workflow input was provided.' }];
 
-    for (let round = 0; round <= MAX_WORKFLOW_TOOL_ROUNDS; round += 1) {
+    const maxRounds = Math.min(limits?.maxToolRounds ?? MAX_WORKFLOW_TOOL_ROUNDS, MAX_WORKFLOW_TOOL_ROUNDS);
+    let toolCallsUsed = 0;
+    let toolsClosed = false;
+    for (let round = 0; round <= maxRounds; round += 1) {
       signal.throwIfAborted();
-      const result = await createModelGateway().generateAgentStep({ provider: runtime.provider, model: runtime.model, systemPrompt: effectiveSystemPrompt, jsonOutput, messages, skillScripts: availableSkillScripts, mcpTools, maxToolRounds: MAX_WORKFLOW_TOOL_ROUNDS, abortSignal: signal, onTextDelta, correlation: correlation ? { source: 'workflow', ...correlation } : undefined });
+      const finalRound = round === maxRounds || toolCallsUsed >= (limits?.maxToolCalls ?? Infinity);
+      if (finalRound && !toolsClosed) {
+        messages.push({ role: 'user', content: 'Tool budget is exhausted. Return the final response now using the evidence already gathered; state any evidence gaps. Do not call tools.' });
+        toolsClosed = true;
+      }
+      const result = await createModelGateway().generateAgentStep({ provider: runtime.provider, model: runtime.model, systemPrompt: effectiveSystemPrompt, jsonOutput, messages, skillScripts: finalRound ? [] : availableSkillScripts, mcpTools: finalRound ? [] : mcpTools, maxToolRounds: maxRounds, abortSignal: signal, onTextDelta, correlation: correlation ? { source: 'workflow', ...correlation } : undefined });
       await activity?.({ phase: 'model.round', round, model: runtime.model, finishReason: result.finishReason, toolCalls: result.toolCalls.length, contextDropped: result.contextDropped });
       messages.push(...result.responseMessages);
       if (result.toolCalls.length === 0) {
@@ -170,8 +179,13 @@ export class AgentExecutionsService {
         if (!output) throw new Error('The Workflow Agent node returned an empty response.');
         return output;
       }
-      if (round === MAX_WORKFLOW_TOOL_ROUNDS) throw new Error('The Workflow Agent node reached its tool-round limit.');
+      if (finalRound) throw new Error('The Workflow Agent node requested a tool after its tool budget was exhausted.');
       for (const call of result.toolCalls) {
+        if (toolCallsUsed >= (limits?.maxToolCalls ?? Infinity)) {
+          messages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: call.toolCallId, toolName: call.toolName, output: { type: 'error-text', value: 'The tool-call budget is exhausted; finish with existing evidence.' } }] });
+          continue;
+        }
+        toolCallsUsed += 1;
         if (call.toolName === 'skill_script') {
           const skill = assignedSkills.find((item) => item.id === call.skillId);
           const script = skill?.files.find((file) => file.path === call.scriptPath && file.path.startsWith('scripts/') && file.content.startsWith('#!'));
@@ -183,7 +197,10 @@ export class AgentExecutionsService {
             const completed = await this.skillScripts.wait(started.id);
             signal.throwIfAborted();
             const succeeded = completed.execution.status === 'succeeded';
-            const value = completed.output || (succeeded ? 'Skill script completed without output.' : `Skill script failed with exit code ${completed.execution.exitCode ?? 'unknown'}.`);
+            const fullValue = completed.output || (succeeded ? 'Skill script completed without output.' : `Skill script failed with exit code ${completed.execution.exitCode ?? 'unknown'}.`);
+            const value = limits?.maxToolResultChars && fullValue.length > limits.maxToolResultChars
+              ? `${fullValue.slice(0, limits.maxToolResultChars)}\n[Tool output truncated; use available evidence and report gaps.]`
+              : fullValue;
             await activity?.({ phase: 'skill.script', skillId: skill.id, skillName: skill.name, scriptPath: call.scriptPath ?? '', arguments: call.arguments ?? [], commandExecutionId: started.id, exitCode: completed.execution.exitCode ?? null, status: succeeded ? 'succeeded' : 'failed' });
             messages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: call.toolCallId, toolName: call.toolName, output: { type: succeeded ? 'text' : 'error-text', value } }] });
           } finally {
