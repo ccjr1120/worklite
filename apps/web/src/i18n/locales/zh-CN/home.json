@@ -2,7 +2,7 @@
   "firstUse": {
     "intro": "个人工作台已准备好开始配置。请完成下面的步骤。",
     "configureProvider": "配置模型提供商",
-    "configureSystemHelper": "为 Chat Bot 选择模型提供商和模型"
+    "configureChatBot": "为 Chat Bot 选择模型提供商和模型"
   },
   "boards": {
     "title": "工作流看板",

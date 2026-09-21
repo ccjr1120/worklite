@@ -250,7 +250,6 @@ export type UpdateAgentRequest = Partial<CreateAgentRequest> & {
 
 export type WorkliteNavigationTarget =
   | 'home'
-  | 'system-helper-chat'
   | 'skills'
   | 'mcp-servers'
   | 'model-providers'

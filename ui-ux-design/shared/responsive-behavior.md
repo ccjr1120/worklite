@@ -14,9 +14,15 @@ Below `768px`, use a navigation drawer, retain page identity, state and primary 
 
 A shared time-range control keeps its preset selection and its custom start and end fields reachable at every breakpoint. Below `768px` the presets and the two fields stack in one column rather than dropping the custom range, because a range the reader cannot narrow on a small screen makes the surface unusable there.
 
-Responsive layouts must not remove status, recovery, or cancellation controls, including the per-node retry control on a retryable failed node entry. The Agent composer retains a stable Send-or-Stop target, editable input, and keyboard-accessible `@` Agent and published Workflow mention menu at every breakpoint; working feedback remains in the scrollable transcript rather than consuming composer space.
+Responsive layouts must not remove status, recovery, or cancellation controls, including the per-node retry control on a retryable failed node entry. The Agent composer retains a stable Send-or-Stop target, editable input, and keyboard-accessible published Workflow mention menu at every breakpoint; working feedback remains in the scrollable transcript rather than consuming composer space.
+
+Queued Chat Bot messages keep their rows, count, and per-row remove control inside the scrollable transcript at every breakpoint, and the return-to-end control stays reachable without covering the composer.
 
 ## Changelog
+
+### 2026-09-21 - Chat Bot queue and scroll controls
+
+- Required queued Chat Bot message rows, their count, and their remove controls to stay inside the scrollable transcript at every breakpoint, and the return-to-end control to stay reachable without covering the composer.
 
 ### 2026-09-21
 

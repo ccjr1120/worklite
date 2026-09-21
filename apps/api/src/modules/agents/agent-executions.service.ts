@@ -14,7 +14,7 @@ import { BuiltinAgentToolsService } from './builtin-agent-tools.service';
 import { CODEX_CLI_AGENT_ID, CODEX_CLI_PLUGIN_ID, PluginsService } from '../plugins/plugins.service';
 import { CommandsService } from '../commands/commands.service';
 
-const SYSTEM_HELPER_CHAT_ID = 'agt_system_helper_chat';
+const CHAT_BOT_AGENT_ID = 'agt_system_helper_chat';
 const WORKLITE_PLATFORM_SKILL_ID = 'sk_worklite_platform';
 const MAX_HELPER_TOOL_ROUNDS = 24;
 // A research node batches several retrieval calls per turn and still needs turns left to compose its
@@ -46,7 +46,7 @@ const HELPER_BUILTIN_TOOLS = [
 ] as const;
 
 const WORKLITE_NAVIGATION_ROUTES = {
-  home: '/home', 'system-helper-chat': '/home', skills: '/skills', 'mcp-servers': '/mcp-servers', 'model-providers': '/model-providers', logs: '/logs', workflows: '/workflows', 'settings-appearance': '/settings/appearance', 'settings-usage': '/settings/usage', 'settings-audit-log': '/settings/audit-log',
+  home: '/home', skills: '/skills', 'mcp-servers': '/mcp-servers', 'model-providers': '/model-providers', logs: '/logs', workflows: '/workflows', 'settings-appearance': '/settings/appearance', 'settings-usage': '/settings/usage', 'settings-audit-log': '/settings/audit-log',
 } as const satisfies Record<WorkliteNavigationTarget, string>;
 
 @Injectable()
@@ -367,13 +367,13 @@ export class AgentExecutionsService {
       && priorToolCalls[0].mcpToolName === 'update_plan';
     const { agent, assignedSkills } = await this.requireExecutableAgent(workspace.id, execution.agentId);
     if (agent.id === CODEX_CLI_AGENT_ID) return this.advanceCodexCli(workspace.id, execution);
-    const clarificationPass = agent.id === SYSTEM_HELPER_CHAT_ID && clarificationAllowed;
+    const clarificationPass = agent.id === CHAT_BOT_AGENT_ID && clarificationAllowed;
     const skillScripts = assignedSkills.flatMap((skill) => skill.files.filter((file) => file.path.startsWith('scripts/') && file.content.startsWith('#!')).map((file) => ({ skillId: skill.id, skillName: skill.name, path: file.path })));
     const mcpRuntimes = clarificationPass ? [] : await this.resources.agentMcpRuntimes(request, workspaceSlug, execution.agentId);
     const mcpTools = clarificationPass ? [] : await this.mcpRuntime.discover(mcpRuntimes);
     const availableSkillScripts = clarificationPass ? [] : skillScripts;
     const availableMcpTools = clarificationPass ? [] : mcpTools;
-    const builtinToolDefinitions = agent.id === SYSTEM_HELPER_CHAT_ID
+    const builtinToolDefinitions = agent.id === CHAT_BOT_AGENT_ID
       ? clarificationPass ? HELPER_BUILTIN_TOOLS : [...this.builtinTools.toolDefinitions(), HELPER_BUILTIN_TOOLS[0]]
       : [];
     const skillInstructions = assignedSkills.map((skill) => `## ${skill.name}\n${skill.instructions.trim()}`).filter((value) => value.trim()).join('\n\n');
@@ -571,7 +571,7 @@ export class AgentExecutionsService {
   private async requireExecutableAgent(workspaceId: string, agentId: string) {
     const [agent] = await this.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, workspaceId))).limit(1);
     if (!agent) throw new NotFoundException('Agent not found');
-    if (agent.kind !== 'custom' && agent.id !== SYSTEM_HELPER_CHAT_ID && agent.id !== CODEX_CLI_AGENT_ID) throw new BadRequestException('This built-in Agent cannot be executed.');
+    if (agent.kind !== 'custom' && agent.id !== CHAT_BOT_AGENT_ID && agent.id !== CODEX_CLI_AGENT_ID) throw new BadRequestException('This built-in Agent cannot be executed.');
     if (agent.id === CODEX_CLI_AGENT_ID && !(await this.plugins.get(CODEX_CLI_PLUGIN_ID)).enabled) throw new ConflictException('Configure an available Codex CLI command before running this plugin.');
     if (agent.id !== CODEX_CLI_AGENT_ID && (!agent.providerId || !agent.model)) throw new ConflictException('Configure a model provider and model before running this Agent.');
     const rows = await this.db.select({ id: skills.id, name: skills.name, instructions: skills.instructions }).from(agentSkills).innerJoin(skills, eq(agentSkills.skillId, skills.id)).where(and(eq(agentSkills.agentId, agentId), eq(skills.workspaceId, workspaceId)));

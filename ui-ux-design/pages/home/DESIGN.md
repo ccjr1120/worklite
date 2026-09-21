@@ -60,7 +60,7 @@ Focusing the composer expands the conversation panel without waiting for a submi
 
 The minimized dock retains the composer and, after the first request, a compact status summary such as preparing, tool calls in progress, needs review, completed, or failed. The summary carries a non-color cue and reopens the current conversation. Completion does not automatically minimize the panel.
 
-Command search may open or focus Chat Bot through the same Home state. Chat Bot is not a separate sidebar item. Transcript, Skill-call, and session behavior are specified in `../../surfaces/workspace/system-helper-chat/DESIGN.md`.
+Command search may open or focus Chat Bot through the same Home state. Chat Bot is not a separate sidebar item. Transcript, Skill-call, and session behavior are specified in `../../surfaces/workspace/chat-bot/DESIGN.md`.
 
 ### First use
 

@@ -28,7 +28,9 @@ Explain failures in user terms, preserve unaffected content, and provide recover
 
 ## Offline and Streaming
 
-Use a restrained persistent reconnecting bar. Explain whether edits are local, blocked or persisted. Resume run events without duplication. Streaming content preserves scroll position unless the user is following the end. Create the destination response region as soon as a turn starts, retain partial content on failure, and expose a non-color streaming, cancellation, or failure cue without announcing every token to assistive technology. Agent composer drafts remain editable during an active turn but are not queued; Send becomes Stop until the current turn completes or is cancelled.
+Use a restrained persistent reconnecting bar. Explain whether edits are local, blocked or persisted. Resume run events without duplication. Streaming content preserves scroll position unless the user is following the end, and offers an explicit return-to-end control while they are not. Create the destination response region as soon as a turn starts, retain partial content on failure, and expose a non-color streaming, cancellation, or failure cue without announcing every token to assistive technology. Send becomes Stop until the current turn completes or is cancelled.
+
+Agent composer drafts remain editable during an active turn. A draft submitted during that turn enters a visible removable FIFO queue and sends against the same execution when the turn completes, rather than being discarded: a composer that accepts a keystroke and then drops it reports work it did not do. The queue pauses without losing entries when the turn fails, when the reader stops it, and while a clarification question is pending, because in each case the queued message either depends on a result that did not arrive or would be misread as the answer to the question on screen. A paused queue states that it is paused. The queue is browser-session state and is not persisted.
 
 Human-gated execution is durable. A `Waiting for input` Run keeps its pending action visible across navigation and reload, exposes expiry and recovery controls, and resumes automatically when the server observes completion. QR expiry is a recoverable pending state rather than a failed Run.
 
@@ -43,6 +45,11 @@ Success feedback reports an outcome that occurred. A control must not confirm wo
 Truncate only summaries and provide expand, copy, download or details access. Inline Agent Skill calls stay collapsed by default, retain status and exit context in their summary, and reveal height-bounded scrollable raw output only on request. Never reveal secrets in fields, logs, errors or audit metadata. Untrusted content is rendered without inline execution.
 
 ## Changelog
+
+### 2026-09-21
+
+- Replaced the unqueued-draft rule with a visible removable FIFO queue for drafts submitted during an active Agent turn, including its pause conditions on failure, stop, and pending clarification. This supersedes the 2026-08-27 removal of message queuing.
+- Required streaming surfaces to offer an explicit return-to-end control while the reader is away from the end.
 
 ### 2026-09-19
 

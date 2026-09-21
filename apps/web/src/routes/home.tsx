@@ -26,11 +26,10 @@ import {
   useWorkflowsQuery,
 } from '@/api/queries';
 import { useLocale } from '@/components/locale-provider';
+import { CHAT_BOT_AGENT_ID } from '@/components/workspace/chat-bot';
 import { formatDateTime, formatNumber } from '@/i18n/format';
 import type { AppLocale } from '@/i18n/locale';
 import { cn } from '@/lib/utils';
-
-const SYSTEM_HELPER_CHAT_ID = 'agt_system_helper_chat';
 
 type HomeSearch = {
   assistant?: 'open';
@@ -66,7 +65,7 @@ function HomePage() {
   const [deletingCategory, setDeletingCategory] = useState<HomeBoardCategoryView | null>(null);
   const [addingCategory, setAddingCategory] = useState<HomeBoardCategoryView | null>(null);
   const modelProvidersQuery = useModelProvidersQuery(workspaceKey);
-  const systemHelperQuery = useAgentQuery(workspaceKey, SYSTEM_HELPER_CHAT_ID);
+  const chatBotQuery = useAgentQuery(workspaceKey, CHAT_BOT_AGENT_ID);
   const workflowsQuery = useWorkflowsQuery(workspaceKey);
   const runsQuery = useRunsQuery(workspaceKey);
   const categoriesQuery = useHomeBoardPreferencesQuery(workspaceKey);
@@ -98,9 +97,9 @@ function HomePage() {
     return groups;
   }, [boards, boardCategories, categoriesQuery.data]);
 
-  const firstUseStateReady = modelProvidersQuery.isSuccess && systemHelperQuery.isSuccess;
+  const firstUseStateReady = modelProvidersQuery.isSuccess && chatBotQuery.isSuccess;
   const providerConfigured = (modelProvidersQuery.data?.length ?? 0) > 0;
-  const systemHelperConfigured = providerConfigured && Boolean(systemHelperQuery.data?.providerId && systemHelperQuery.data.model);
+  const chatBotConfigured = providerConfigured && Boolean(chatBotQuery.data?.providerId && chatBotQuery.data.model);
   const libraryUnavailable = workflowsQuery.isError || runsQuery.isError || categoriesQuery.isError;
   const categoriesBusy = createCategoryMutation.isPending || renameCategoryMutation.isPending || deleteCategoryMutation.isPending || assignBoardMutation.isPending;
   const categoryError = categoriesQuery.isError || createCategoryMutation.isError || renameCategoryMutation.isError || deleteCategoryMutation.isError || assignBoardMutation.isError;
@@ -140,7 +139,7 @@ function HomePage() {
       <WorkspaceChrome crumbs={[{ label: t('workspace:nav.home') }]} />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1200px] px-6 pb-36 pt-6">
-          {firstUseStateReady && !systemHelperConfigured ? <FirstUseGuide providerConfigured={providerConfigured} /> : null}
+          {firstUseStateReady && !chatBotConfigured ? <FirstUseGuide providerConfigured={providerConfigured} /> : null}
 
           <div className="mt-8">
             <PageHeading title={t('home:boards.title')} />
@@ -540,7 +539,7 @@ function FirstUseGuide({ providerConfigured }: { providerConfigured: boolean }) 
         </li>
         <li className={cn(rowClassName, !providerConfigured && 'bg-surface-subtle/50 text-muted-foreground')}>
           <span className={cn(markerClassName, providerConfigured ? 'bg-brand text-brand-foreground' : 'bg-surface-subtle text-muted-foreground')} aria-hidden="true">2</span>
-          <span className="min-w-0 flex-1 text-sm font-medium">{t('home:firstUse.configureSystemHelper')}</span>
+          <span className="min-w-0 flex-1 text-sm font-medium">{t('home:firstUse.configureChatBot')}</span>
           {providerConfigured ? (
             <Button size="compact" asChild>
               <Link to="/home" search={{ assistant: 'open' }}>{t('common:actions.continue')}<ChevronRight /></Link>

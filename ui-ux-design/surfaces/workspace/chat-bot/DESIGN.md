@@ -11,7 +11,13 @@
 
 ## Implementation
 
-- `apps/web/src/components/workspace/agent-chat.tsx`
+- `apps/web/src/components/workspace/chat-bot/index.tsx`
+- `apps/web/src/components/workspace/chat-bot/transcript.tsx`
+- `apps/web/src/components/workspace/chat-bot/composer.tsx`
+- `apps/web/src/components/workspace/chat-bot/configuration.tsx`
+- `apps/web/src/components/workspace/chat-bot/session-switcher.tsx`
+- `apps/web/src/components/workspace/chat-bot/execution-log.ts`
+- `apps/web/src/components/ai-elements/conversation.tsx`
 
 ## Purpose
 
@@ -23,6 +29,8 @@ Send a request and read its result. Action budget: one — submit the composer. 
 
 Dispatching to a published Workflow costs two actions — select the mention, then submit — because the target is a value the product cannot resolve and only one mention is permitted per task.
 
+Submitting while a turn is running enqueues the message rather than refusing it. Each queued message costs one action, because each states a separate goal; the queue removes the wait between them rather than combining them into one request.
+
 ## Layout
 
 The expanded conversation panel is centered and capped at `1200px` wide by approximately `680px` high, constrained by `24px` desktop outer space. It contains `Chat` and `Configuration` views in that order, sharing one fixed panel height so switching tabs never resizes the surface.
@@ -33,17 +41,27 @@ Home shows a single-line composer by default. Other pages show only a draggable 
 
 The conversation is one unframed column. User messages are right-aligned compact neutral bubbles. Chat Bot responses are left-aligned and use the shared Markdown renderer.
 
+One Chat Bot turn is one block with one identity mark, however many messages and Skill calls it contains. A block starts at the first Chat Bot event after a user message and ends at the next user message. Its Markdown segments and Skill-call rows share the block's single content column, so a turn that answers, runs a script, and answers again reads as one reply rather than as three speakers. Working, cancelled, and failure cues are inline notes without their own identity mark, because a status is not a speaker.
+
+Queued messages appear as removable rows at the end of the transcript, after the active turn.
+
 ## Interaction Contract
 
 ### Opening and closing
 
-Composer focus opens the panel without waiting for a submission. Clicking outside, pressing `Escape`, using the icon-only minimize control, or navigating to another page closes it while preserving the current server execution identifier. Chat-owned popup menus remain interactive while the panel is open. Navigating closes the visible panel without cancelling work.
+Composer focus opens the panel without waiting for a submission. Clicking outside, using the icon-only minimize control, or navigating to another page closes it while preserving the current server execution identifier. Chat-owned popup menus remain interactive while the panel is open. Navigating closes the visible panel without cancelling work.
+
+`Escape` dismisses one layer per press, innermost first: an open slash or mention menu, then the selected Workflow mention token, then the Configuration view, and finally the expanded panel. Each press leaves every outer layer intact, so recovering from a mistyped `/` never also discards a chosen Workflow or collapses the conversation. On Home the last press collapses the expanded region while the persistent composer stays visible. The `/resume` selector is a modal dialog and closes through its own `Escape` handling rather than through this sequence.
 
 ### Submission and cancellation
 
-Only one turn or Skill call may be active. Submitting appends an unframed Agent placeholder with a restrained loader and `Working` label immediately, before any server response. The composer input stays editable while the execution is `running`, but its draft is not submitted or queued.
+Only one turn or Skill call may be active. Submitting appends an unframed Agent placeholder with a restrained loader and `Working` label immediately, before any server response.
 
-The icon-only Send target becomes an icon-only Stop target while running; Stop calls the server cancellation endpoint and preserves the current draft. Pressing `Enter` while running neither submits nor stops. After a completed or cancelled turn, submitting another message continues the same execution.
+The composer input stays editable while the execution is `running`. Submitting during a running turn appends the message to a visible FIFO queue instead of being discarded or refused: the input clears, the message becomes a removable transcript row, and the queue sends its head to the same execution as soon as the active turn completes. Removing a queued row is local and reaches no server.
+
+The queue pauses without losing entries when the active turn fails, when the reader stops it, and when the turn asks a clarification question. A failed turn pauses because a queued message usually depends on the result that did not arrive; a stopped turn pauses because the reader interrupted the work deliberately; a clarification pauses because the queue head answers the previous topic and would be read as the answer to the question on screen. A paused queue states that it is paused and why. Continuing the execution — by retrying the failed turn, or by answering the pending question — resumes it. The queue lives only in the browser session and is not persisted, because a message that was never sent cannot be judged still wanted after a reload.
+
+The icon-only Send target becomes an icon-only Stop target while running; Stop calls the server cancellation endpoint and preserves the current draft. After a completed or cancelled turn, submitting another message continues the same execution.
 
 ### Self-healing execution state
 
@@ -53,7 +71,7 @@ A failed turn is the one state with a manual recovery action: `Retry last reques
 
 ### Mentions
 
-Typing `@` opens a searchable menu of configured published Workflows and published Workflows above the composer. It filters from the text after the active `@`, supports pointer selection plus `ArrowUp`, `ArrowDown`, `Enter`, and `Escape`, and stays within the panel width. Published Workflows without a runnable published version are excluded. Draft Workflows are not offered as runnable mentions. Slash-command and mention menus are mutually exclusive.
+Typing `@` opens a searchable menu of published Workflows above the composer. It filters from the text after the active `@`, supports pointer selection plus `ArrowUp`, `ArrowDown`, `Enter`, and `Escape`, and stays within the panel width. Published Workflows without a runnable published version are excluded. Draft Workflows are not offered as runnable mentions. Slash-command and mention menus are mutually exclusive. A query that matches nothing shows an explicit no-match line rather than closing the menu.
 
 Selecting a target removes the active `@` query and inserts one removable mention token before the editable task inside the same bordered composer input surface. The textarea has no separate border or background in this state, and focus is shown around the shared mention-and-text surface. The token and task text wrap within that surface rather than becoming adjacent input regions. Only one mention is allowed.
 
@@ -61,11 +79,17 @@ Selecting a target removes the active `@` query and inserts one removable mentio
 
 ### Slash commands
 
-The composer accepts local slash commands before ordinary message handling. Typing `/` opens a raised command menu above the composer with `/log`, `/new`, and `/resume` and concise descriptions. It filters as the user types and supports pointer selection, `ArrowUp`, `ArrowDown`, `Enter`, and `Escape` without taking focus away from the composer.
+The composer accepts local slash commands before ordinary message handling. Typing `/` opens a raised command menu above the composer with `/log`, `/new`, and `/resume` and concise descriptions. It filters as the user types and supports pointer selection, `ArrowUp`, `ArrowDown`, `Enter`, and `Escape` without taking focus away from the composer. A query that matches no command shows an explicit no-match line rather than closing the menu.
+
+Both menus are built from the shared command primitive that the workspace command menu already uses, so option roles, active-option tracking, scroll-into-view, and the no-match line have one implementation. The menu does not own an input: filtering follows the composer text and the composer keeps keyboard focus throughout.
 
 `/log` downloads one readable Markdown document for the active conversation. It preserves server message order rather than re-sorting messages and Skill calls into one ambiguous timeline, keeps user content literal so its Markdown cannot change the document structure, and places a compact Skill activity summary after the transcript with script identity, localized status, and exit code. Raw arguments, output, stack traces, temporary paths, workspace snapshots, and provider responses are excluded from the default document. It includes the conversation status and localized export time, marks a running export as incomplete, and includes a localized safe failure or cancellation reason when present. With no active conversation it shows durable inline feedback instead of downloading an empty document. It never appends to the conversation, calls the model, creates a server record, or includes archived executions.
 
-`/new` archives the active execution identifier and opens a blank conversation while leaving all workspace resources unchanged. An archived execution that is still running remains a visible server-owned background execution and is not silently cancelled. `/resume` opens the execution history selector. Commands are trimmed and case-insensitive, and the panel stays open after execution.
+`/new` archives the active execution identifier and opens a blank conversation while leaving all workspace resources unchanged. An archived execution that is still running remains a visible server-owned background execution and is not silently cancelled.
+
+`/resume` opens a searchable session selector as a modal dialog rather than replacing the transcript region. It lists the archived executions this browser holds, filters as the reader types, moves with `ArrowUp` and `ArrowDown`, switches on `Enter` or pointer selection, and offers a per-row remove action for an entry the reader no longer wants. Switching archives the current execution first, so no conversation is lost by moving to another. Selecting a session leaves keyboard focus in the composer.
+
+Commands are trimmed and case-insensitive, and the panel stays open after execution.
 
 ### Session ownership and model calls
 
@@ -75,7 +99,7 @@ Chat Bot owns one protected conversation. Messages use the protected Chat Bot ex
 
 Chat Bot permanently owns the platform-operation capability. It is an internal Chat capability, not a persisted or assignable Skill resource. The model can request only its server-discovered shebang-bearing scripts through `skill_script`, and every valid request executes immediately on the server. The browser never authorizes the request, calls resource mutation APIs on behalf of a model response, or infers operations from message text, script names, or stdout.
 
-Skill calls appear inline between messages as compact collapsed rows showing the Skill name, script name, automatic execution status, and exit code when available. A disclosure control reveals the exact script path, JSON argument list, working directory, host-permission warning, and output. Details never open automatically for failures, and output uses a height-bounded internal scroller. Skill calls expose no permission, `Run`, or `Reject` actions, and there is no proposal inspector or browser-owned operation card.
+Skill calls appear as compact collapsed rows inside the content column of the Chat Bot turn that requested them, between that turn's Markdown segments, showing the Skill name, script name, automatic execution status, and exit code when available. They do not interrupt the turn into separate identity blocks. A disclosure control reveals the exact script path, JSON argument list, working directory, host-permission warning, and output. Details never open automatically for failures, and output uses a height-bounded internal scroller. Skill calls expose no permission, `Run`, or `Reject` actions, and there is no proposal inspector or browser-owned operation card.
 
 Completed resource scripts show their returned resource route as a normal link. Provider results lead to the secure Provider form because credentials cannot be passed through Chat. A completed navigation script may include a server-validated client action; Web applies only that typed route. Appearance and language results come from persisted server settings and are applied after the settings query refreshes.
 
@@ -91,13 +115,15 @@ Workflow Run entries use the same transcript surface: the user input, a compact 
 
 | State | Behavior |
 | --- | --- |
-| Loading | Loading the persisted execution shows a polite centered status line in the transcript region. The composer shows its own loading line while the Chat Bot configuration resolves. |
+| Loading | Loading the persisted execution shows a transcript-shaped skeleton standing in for the messages it replaces, not a centered spinner. The composer shows its own loading line while the Chat Bot configuration resolves. |
 | Empty | Before the first message, show the welcome line and compact task starters. |
-| No results | The mention and slash menus each show an explicit no-match line rather than collapsing. |
+| No results | The mention and slash menus each show an explicit no-match line rather than collapsing. The `/resume` selector shows its own no-match line, distinct from having no archived sessions at all. |
 | Error | A failed turn renders its credential-safe reason inline in the transcript with a non-color error cue, a retry action, and a diagnostics disclosure. Cancellation failures render as inline alerts. Raw SDK errors, malformed tool input, provider responses, stack traces, and credentials are never shown. |
-| Busy | The Send target becomes Stop while running; the transcript owns the working placeholder so the composer never loses its editable draft. |
+| Busy | The Send target becomes Stop while running; the transcript owns the working placeholder so the composer never loses its editable draft. The header status reflects the server execution state only, so a submission that the server has not yet accepted is reported by the Send control rather than as a running execution. |
+| Queued | Messages submitted during a running turn are removable transcript rows with a count. The head sends automatically when the turn completes. |
+| Queue paused | A failed, stopped, or clarification-waiting turn holds the queue in place and states that it is paused, keeping every entry and its order. Continuing the execution resumes it. |
 | Offline | Inherits `shared-states.md`. Reconnecting is shown separately from execution status and retries with increasing delay. |
-| Long content | Skill arguments and output scroll within their own stable regions. The transcript follows the end only while the reader is already at the end. |
+| Long content | Skill arguments and output scroll within their own stable regions. The transcript follows the end only while the reader is already at the end, and offers an explicit return-to-end control whenever they are not. |
 
 Also define unconfigured, submitting, working, executing script, cancelling, cancelled, and completed states. Status always carries a non-color cue. A cancelled turn shows an explicit neutral inline cue even when no Assistant text was produced. Meaningless residual output from a failed model tool request is omitted. A tool batch that exceeds the runtime boundary uses the server-owned `too_many_tool_calls` reason and retry action instead of Provider configuration guidance. Untrusted content is plain text or safe Markdown; script output is preformatted and never rendered as HTML.
 
@@ -109,7 +135,6 @@ Also define unconfigured, submitting, working, executing script, cancelling, can
 | `assistant:open` | Action |
 | `assistant:composer.label` | Action |
 | `assistant:composer.placeholder` | Action |
-| `assistant:composer.followUpPlaceholder` | Action |
 | `assistant:composer.answerPlaceholder` | Action |
 | `assistant:composer.send` / `composer.stop` | Action |
 | `assistant:composer.loading` | State |
@@ -127,7 +152,12 @@ Also define unconfigured, submitting, working, executing script, cancelling, can
 | `assistant:starters.*.prompt` | Action |
 | `assistant:minimized.minimize` | Action |
 | `assistant:commands.menuLabel` | State |
+| `assistant:commands.empty` | State |
 | `assistant:commands.logDescription` / `newDescription` / `resumeDescription` | Constraint |
+| `assistant:queue.title` | State |
+| `assistant:queue.paused` | State |
+| `assistant:queue.remove` | Action |
+| `assistant:transcript.scrollToEnd` | Action |
 | `assistant:messages.welcome` | Recovery |
 | `assistant:speaker.you` / `speaker.assistant` | State |
 | `assistant:status.*` | State |
@@ -138,11 +168,12 @@ Also define unconfigured, submitting, working, executing script, cancelling, can
 | `assistant:execution.id` / `phase` / `errorCode` / `updated` / `none` | State |
 | `assistant:mentions.menuLabel` | State |
 | `assistant:mentions.empty` | State |
-| `assistant:mentions.remove` / `removeWorkflow` | Action |
-| `assistant:mentions.workflow` | State |
+| `assistant:mentions.remove` | Action |
 | `assistant:history.title` | State |
 | `assistant:history.description` | Constraint |
 | `assistant:history.empty` / `untitled` | State |
+| `assistant:history.noMatch` | State |
+| `assistant:history.searchPlaceholder` | Action |
 | `assistant:history.remove` | Action |
 | `assistant:tool.*` | State, except `tool.expand` / `tool.collapse` / `tool.openSecureProvider` / `tool.openResource` which are Action and `tool.warning` which is Constraint |
 | `assistant:log.*` | State, except `log.noActive` which is Recovery |
@@ -157,26 +188,43 @@ Removed keys:
 
 ## Accessibility
 
-The composer's visible label is provided as screen-reader-only text bound to the input. The input is a `combobox` with `aria-expanded` reflecting whether the slash or mention menu is open; both menus are `listbox` regions whose items are `option` elements with `aria-selected`.
+The composer's visible label is provided as screen-reader-only text bound to the input. The input is a `combobox` with `aria-expanded` reflecting whether the slash or mention menu is open; both menus are `listbox` regions whose items are `option` elements with `aria-selected`. The shared command primitive supplies those roles and keeps the active option scrolled into view while focus stays in the composer.
 
 Send and Stop share one stable target with the same dimensions and distinct localized accessible names. Panel tabs are a `tablist` with roving `tabIndex` and arrow-key movement. The collapsed panel is marked `aria-hidden` and `inert` so its controls leave the tab order entirely.
 
 All icon-only controls carry accessible names and tooltips, except the intentionally unobtrusive cross-page floating Chat entry, which keeps an accessible name without a visible tooltip and exposes the current execution status as screen-reader-only text. Skill-call rows are buttons with `aria-expanded` and an accessible name that states whether activating them shows or hides details.
 
-Working, cancelled, clarification, and Workflow Run regions are `role="status"`; failures are `role="alert"`. Conversation and Skill-call status changes use restrained live-region announcements without announcing every token. Keyboard focus remains in the editable composer after cancellation, history selection, and automatic execution updates. Reduced-motion mode replaces spinner motion with the same static working cue. Messages use neutral surface contrast and speaker labels rather than color alone.
+Working, cancelled, clarification, queued, and Workflow Run regions are `role="status"`; failures are `role="alert"`. These remain independent status regions even though they render without an identity mark, so collapsing a turn's visual identity into one block does not remove a status announcement. Conversation and Skill-call status changes use restrained live-region announcements without announcing every token.
+
+A merged Chat Bot turn carries one accessible speaker name for the whole block rather than repeating it per segment. Each Skill-call row inside the block keeps its own accessible name and `aria-expanded`.
+
+Keyboard focus remains in the editable composer after cancellation, session selection, queue removal, and automatic execution updates. `Escape` never moves focus out of the composer while it is dismissing an inner layer. The return-to-end control is a labelled icon-only button reachable by keyboard whenever the reader is away from the end. Reduced-motion mode replaces spinner motion with the same static working cue and resolves scroll-to-end without animation. Messages use neutral surface contrast and speaker labels rather than color alone.
 
 ## Coverage Status
 
-Verified 2026-09-19. Differences found against `apps/web/src/components/workspace/agent-chat.tsx`:
+Verified 2026-09-21 against the implementation files listed above. Differences found:
 
-- The transcript does not expose an `aria-live` region for streaming updates. Working, cancelled, and failure blocks use `role="status"` and `role="alert"`, which announce on mount, but the incremental assistant response itself is not announced, so the restrained live-region requirement in this specification is unmet.
+- The transcript does not expose an `aria-live` region for streaming updates. Working, cancelled, queued, and failure blocks use `role="status"` and `role="alert"`, which announce on mount, but the incremental assistant response itself is not announced, so the restrained live-region requirement in this specification is unmet.
 - The panel is rendered whenever `isHome || open` and collapsed with `h-0` plus `aria-hidden`/`inert`. On Home the collapsed panel therefore stays mounted and its queries stay active, which is intended for session continuity but is not documented as a mount contract.
-- Archived executions are capped by `HISTORY_LIMIT` in browser storage with no user-facing indication that older entries are dropped, so `/resume` can silently stop offering a conversation the user remembers.
+- `/resume` lists only the executions this browser archived, capped at `HISTORY_LIMIT`, because the API exposes no route that lists a given Agent's executions. A conversation the reader remembers can therefore be absent from the selector, and the cap is not surfaced. A server-side execution list is required to close this.
 - `error` is one component-level string shared by Chat Bot and cancellation failures.
 - The floating Chat entry exposes status as `sr-only` text inside the button, making the accessible name and the status concatenate for screen readers rather than remaining distinct.
 - Mobile height uses `max-md:h-[min(70vh,680px)]`, matching the `70vh` cap, but the `12px` outer-margin requirement from `shared/responsive-behavior.md` is applied by the parent container rather than this surface, so the constraint is not verifiable from this component alone.
+- The queue is browser-session state and is intentionally not persisted, so a reload drops unsent entries without telling the reader they existed.
 
 ## Changelog
+
+### 2026-09-21 - Interaction pass
+
+- Reversed the 2026-08-27 decision to omit message queuing: submitting during a running turn now enqueues into a visible removable FIFO queue that auto-sends against the same execution, and pauses without data loss on failure, on stop, and while a clarification question is pending. The earlier decision made the composer accept keystrokes it then discarded, which is worse than either queuing or refusing.
+- Declared each queued message as one action in Primary Task, because each is an independently stated goal.
+- Defined `Escape` as a per-press layer dismissal — menu, mention token, Configuration view, panel — instead of one undifferentiated close.
+- Made one Chat Bot turn render as one identity block with its Skill-call rows inside its own content column, and reduced working, cancelled, and failure cues to inline notes without identity marks while keeping them independent status regions.
+- Rebuilt both composer menus on the shared command primitive already used by the workspace command menu, and required the no-match line the States table had specified but the implementation never rendered.
+- Replaced `/resume`'s transcript-replacing history pane with a searchable modal session selector, and recorded the missing server-side execution list as the reason its coverage is browser-local.
+- Replaced the persisted-execution loading spinner with a transcript-shaped skeleton and scoped the header status badge to server execution state, so a locally submitted message no longer reports itself as a running execution.
+- Moved transcript stickiness onto `use-stick-to-bottom`, adding a keyboard-reachable return-to-end control and resolving the view-switch and tab-switch cases where the previous manual handler left the reader away from the end.
+- Renamed the surface directory from `system-helper-chat` to `chat-bot` and the implementation from one `agent-chat.tsx` file to a `chat-bot/` directory.
 
 ### 2026-09-19 - Copy cleanup
 

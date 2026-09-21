@@ -29,7 +29,7 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 ## Page and Surface Specifications
 
 - [Home](pages/home/DESIGN.md), including the server-derived first-use sequence
-- [Workspace Chat Bot](surfaces/workspace/system-helper-chat/DESIGN.md)
+- [Workspace Chat Bot](surfaces/workspace/chat-bot/DESIGN.md)
 - Providers: [Model providers and Portkey Gateway](pages/model-providers/DESIGN.md), including the dedicated Codex Account Pool
 - Logs: [Gateway statistics and request logs](pages/logs/DESIGN.md), including the shared time range
 - Workflows: [List](pages/workflows/list/DESIGN.md), [Editor](pages/workflows/editor/DESIGN.md), [Versions](pages/workflows/versions/DESIGN.md)
@@ -83,6 +83,13 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-09-21 - Chat Bot interaction pass
+
+- Moved the Chat Bot surface specification from `surfaces/workspace/system-helper-chat/` to `surfaces/workspace/chat-bot/`, matching the product name the surface has used since the System Helper rename.
+- Reversed the omission of Chat Bot message queuing: a message submitted during a running turn enqueues into a visible removable FIFO queue instead of being silently discarded, and pauses on failure, on stop, and while a clarification is pending.
+- Defined per-press `Escape` layer dismissal, one identity block per Chat Bot turn with Skill calls inside it, a searchable modal `/resume` session selector, and transcript stickiness with a return-to-end control.
+- Removed the redundant `system-helper-chat` Chat Bot navigation target, which resolved to the same `/home` route as `home` and gave the model two enum values for one destination.
 
 ### 2026-09-21 - Logs destination
 

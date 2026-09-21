@@ -4,7 +4,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const localesRoot = path.join(root, 'src/i18n/locales');
-const referenceLocale = 'en';
+// WorkLite ships one fixed Chinese resource set, so zh-CN is the reference the other
+// locale directories, if any are ever added, are compared against.
+const referenceLocale = 'zh-CN';
 
 function flatten(value, prefix = '') {
   if (value && typeof value === 'object' && !Array.isArray(value)) {

@@ -23,7 +23,7 @@ fi
 exec /bin/sh -lc "$1"
 `;
 
-const SYSTEM_HELPER_PROMPT = `You are Chat Bot, the WorkLite workspace assistant.
+const CHAT_BOT_PROMPT = `You are Chat Bot, the WorkLite workspace assistant.
 Use only assigned Skill scripts for platform inspection and operations. For product capability questions, rely on the assigned Skill knowledge and the current workspace snapshot. Never invent configured resources, models, MCP tools, script results, or platform capabilities.
 The development profile uses Web port 3390, API port 3391, and Portkey Gateway port 3392. The local deployment profile uses Web port 23390, API port 23391, and Portkey Gateway port 23392. Do not suggest compatibility listeners for previous development ports.
 Model Provider drafts require an explicit protocol selection. Supported protocols are \`openai/chat\`, \`openai/responses\`, \`anthropic/messages\`, and \`codex/responses\`; do not invent or default another protocol. Existing \`deepseek/chat\` records are not migrated or aliased.
@@ -224,7 +224,7 @@ print({ worklite: { type: 'settings', appearance: settings.appearance }, data: s
 import { call, exactKeys, input, oneOf, print } from './lib.mjs';
 const raw = input();
 exactKeys(raw, ['target']);
-const target = oneOf(raw.target, 'target', ['home', 'system-helper-chat', 'skills', 'mcp-servers', 'model-providers', 'logs', 'workflows', 'settings-appearance', 'settings-usage', 'settings-audit-log']);
+const target = oneOf(raw.target, 'target', ['home', 'skills', 'mcp-servers', 'model-providers', 'logs', 'workflows', 'settings-appearance', 'settings-usage', 'settings-audit-log']);
 const action = await call('/navigation/resolve', { method: 'POST', body: { target } });
 print({ worklite: action });
 `],
@@ -276,7 +276,7 @@ Workflow Agent context is optional. An Agent context may receive one unbounded i
 Scheduling is part of the immutable Workflow graph through the first-party \`worklite/timer\` node. Home board eligibility is part of the immutable graph through the first-party \`worklite/dashboard\` node: use at most one, connect its required \`data\` input, configure a layout of header, main, and footer element arrays (text, count, metric, and list kinds, where list elements own a \`titleKey\` matching their display-field keys), publish, and produce a successful Run. A Workflow has at most one Timer, the minimum interval is 300 seconds, Timer changes activate after Publish, and overlapping scheduled runs are prevented. There is no standalone schedule mutation script or API; \`GET /workflows/:workflowId/schedule\` exposes read-only runtime status. Home has no global Workflow data source; platform-defined Workflow boards are removed, and only a published Dashboard-node Workflow with a successful Dashboard output can be selected. Home category assignment is a database-backed organization reference with Uncategorized as the presentation default and at most one category per board; no Workflow output is persisted and no standalone category script is provided.
 
 - update-settings.mjs: { "appearance"?: "system" | "light" | "dark" }
-- navigate.mjs: { "target": "home" | "system-helper-chat" | "skills" | "mcp-servers" | "model-providers" | "logs" | "workflows" | "settings-appearance" | "settings-usage" | "settings-audit-log" }
+- navigate.mjs: { "target": "home" | "skills" | "mcp-servers" | "model-providers" | "logs" | "workflows" | "settings-appearance" | "settings-usage" | "settings-audit-log" }
 `],
 ];
 
@@ -440,7 +440,7 @@ export async function initializeDatabase(db: Database): Promise<void> {
       FROM workspaces WHERE workspaces.slug = 'personal'
       ON CONFLICT (id) DO NOTHING;
     INSERT INTO agents (id, workspace_id, kind, name, responsibility, system_prompt, model)
-      SELECT 'agt_system_helper_chat', workspaces.id, 'system', 'Chat Bot', 'Configure workspace AI resources through guided conversation', '${SYSTEM_HELPER_PROMPT.replaceAll("'", "''")}', ''
+      SELECT 'agt_system_helper_chat', workspaces.id, 'system', 'Chat Bot', 'Configure workspace AI resources through guided conversation', '${CHAT_BOT_PROMPT.replaceAll("'", "''")}', ''
       FROM workspaces WHERE workspaces.slug = 'personal'
       ON CONFLICT (id) DO UPDATE SET kind = 'system', name = 'Chat Bot', responsibility = 'Configure workspace AI resources through guided conversation', system_prompt = excluded.system_prompt;
     INSERT INTO agents (id, workspace_id, kind, name, responsibility, system_prompt, model)

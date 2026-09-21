@@ -74,7 +74,7 @@ Headless QR login against the real WeChat MP site is verified working, including
 
 Gateway transport observability is its own `/logs` destination, not part of Providers and not a Settings page. Providers configures what the Gateway dispatches to; Logs reads what it did. Both of its read routes take an explicit absolute `from` and `to` range rather than a named relative window, because a name cannot express an arbitrary interval and a server-resolved name makes a shared link mean a different period for each reader. Statistics are retained indefinitely while request-log details expire after three days, so one shared range legitimately returns different coverage from the two stores; serve the request-log range as its intersection with the retention window and state the truncation rather than failing. Settings keeps Usage and Audit Log, which are WorkLite business records over Runs and resource mutations, not Gateway transport records.
 
-Whenever WorkLite product architecture, resource relationships, supported Workflow nodes, or platform operations change, update the built-in System Helper prompt and `worklite-platform` Skill knowledge, contracts, scripts, and platform snapshot capability metadata in the same change.
+Whenever WorkLite product architecture, resource relationships, supported Workflow nodes, or platform operations change, update the built-in Chat Bot prompt and `worklite-platform` Skill knowledge, contracts, scripts, and platform snapshot capability metadata in the same change.
 
 Chat Bot remains protected and is not user-deletable. Workflow Agent configuration is deleted with its owning Workflow version; there is no standalone Agent deletion flow. Skills and MCP servers cannot be deleted while referenced by an Agent or Workflow. Artifacts are independently permanently deletable. Runs, immutable versions, logs, and built-in resources are not independently deletable.
 
@@ -102,4 +102,6 @@ When implementing behavior that mirrors an existing open-source product or proto
 
 ## Chat Configuration UI
 
-The embedded Agent configuration view should follow the earlier Memory One chat-panel pattern: lightweight top tabs, unframed configuration content, and stable panel height across tabs.
+The embedded Agent configuration view should follow the earlier Memory One chat-panel pattern: lightweight top tabs, unframed configuration content, and stable panel height across tabs. Top tabs remain the primary way to reach Configuration; slash commands do not replace them.
+
+Chat Bot's product name is `Chat Bot`. `System Helper` is the former name and must not be reintroduced in identifiers, copy, documentation, or directory names. The persisted row id `agt_system_helper_chat` and Skill id `sk_worklite_platform` are data rather than naming, and are left unchanged because renaming them requires a migration that would orphan existing executions and Skill assignments.

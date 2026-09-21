@@ -18,7 +18,7 @@ Place navigation and breadcrumb context on the left. Place command search, state
 
 The inspector opens only for selected contextual content, keeps its header and essential actions available, scrolls internally, and does not discard unsaved work when closed. It may expand to `440px` for structured configuration.
 
-The workspace shell owns the active Chat Bot execution identifier and transient composer draft. Published Workflows are selected per message with `@` mentions and create normal Workflow Runs that remain independent from the Chat Bot session. Messages, plugin process state, script requests, automatic execution state, and results remain server-owned. Page navigation closes the visible conversation without cancelling work; a browser reload fetches the active execution identifier and selected target saved by the browser.
+The workspace shell owns the active Chat Bot execution identifier, the transient composer draft, and the pending message queue. Published Workflows are selected per message with `@` mentions and create normal Workflow Runs that remain independent from the Chat Bot session. Messages, plugin process state, script requests, automatic execution state, and results remain server-owned. Page navigation closes the visible conversation without cancelling work; a browser reload fetches the active execution identifier and selected target saved by the browser, and drops the queue, which is session state rather than persisted intent.
 
 Place the Chat Bot interaction surface at the bottom of the content region on every workspace page. Home keeps the single-line input visible by default. Other pages show only a draggable floating Chat Bot icon in the lower-right corner by default; clicking it opens the same raised conversation panel above the current page and focuses the input. Clicking outside an expanded Chat surface closes it while Chat-owned popup menus remain usable. Keep the icon inside the viewport safe area and preserve a keyboard-accessible open action without a visible Tooltip. Center the complete expanded surface and cap it at `1200px`. With a bound provider the expanded composer contains the single-line input and one stable icon-button target without a repeated visible Chat Bot title; the target shows Send while idle and Stop while the active turn is running. The input remains editable in both states. Without a bound provider the expanded surface contains its inline Chat Bot configuration panel instead of an input or send control. Home and other pages use the same personal session, expanded dimensions, and compact execution summary.
 
@@ -32,9 +32,14 @@ There is no separate first-use route family. Home derives first-use completion f
 
 ## Command and User Menus
 
-`Command+K` or `Control+K` opens grouped search, recent destinations, navigation and safe creation commands. Destructive actions are excluded. Opening System Helper through the command menu changes the shell-owned conversation state through typed route search and must not rely on an ignored URL flag. The user menu contains the personal workspace identity, Appearance, Keyboard shortcuts, and the application version. Appearance includes the personal theme and language preferences.
+`Command+K` or `Control+K` opens grouped search, recent destinations, navigation and safe creation commands. Destructive actions are excluded. Opening Chat Bot through the command menu changes the shell-owned conversation state through typed route search and must not rely on an ignored URL flag. The user menu contains the personal workspace identity, Appearance, Keyboard shortcuts, and the application version. Appearance includes the personal theme and language preferences.
 
 ## Changelog
+
+### 2026-09-21 - Chat Bot queue ownership
+
+- Gave the shell ownership of the pending Chat Bot message queue alongside the active execution identifier and composer draft, and recorded that a reload drops it because it is session state rather than persisted intent.
+- Replaced the remaining `System Helper` references with `Chat Bot`.
 
 ### 2026-09-21
 
@@ -88,11 +93,11 @@ There is no separate first-use route family. Home derives first-use completion f
 
 ### 2026-08-29
 
-- Required command-menu System Helper actions to open the shell-owned conversation through typed route state.
+- Required command-menu Chat Bot actions to open the shell-owned conversation through typed route state.
 
 ### 2026-08-27
 
-- Kept the System Helper composer editable during execution and made its stable Send target switch to Stop while the transcript owns loading feedback.
+- Kept the Chat Bot composer editable during execution and made its stable Send target switch to Stop while the transcript owns loading feedback.
 
 ### 2026-08-29
 
@@ -104,7 +109,7 @@ There is no separate first-use route family. Home derives first-use completion f
 
 ### 2026-08-27
 
-- Replaced browser-local System Helper conversation and proposal ownership with a persisted Agent execution identifier and server-owned messages, approvals, and results.
+- Replaced browser-local Chat Bot conversation and proposal ownership with a persisted Agent execution identifier and server-owned messages, approvals, and results.
 
 ### 2026-08-27
 

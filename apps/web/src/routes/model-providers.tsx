@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button';
 import { PasswordInput } from '@/components/password-input';
 import { StatusBadge } from '@/components/status-badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { CHAT_BOT_AGENT_ID } from '@/components/workspace/chat-bot';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useCodexAccountUsagesQuery, useCodexAuthQuery, useModelProvidersQuery, usePortkeyGatewayQuery } from '@/api/queries';
 import { api } from '@/api/client';
@@ -331,7 +332,7 @@ function ModelProvidersPage() {
       toast.success(t('providers.deleted'));
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: ['model-providers'] }),
-        queryClient.invalidateQueries({ queryKey: ['agent', 'agt_system_helper_chat'] }),
+        queryClient.invalidateQueries({ queryKey: ['agent', CHAT_BOT_AGENT_ID] }),
       ]).catch(() => undefined);
     } catch (error: unknown) {
       setDeleteError(error instanceof Error ? error.message : t('providers.deleteFailed'));

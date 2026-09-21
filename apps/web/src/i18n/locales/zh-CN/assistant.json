@@ -1,6 +1,5 @@
 {
   "title": "Chat Bot",
-  "description": "通过受保护的 Chat Bot 配置 WorkLite。",
   "starters": {
     "title": "开始任务",
     "provider": {
@@ -17,17 +16,29 @@
       "title": "连接 MCP 服务器",
       "description": "创建远程 MCP 服务器草稿。",
       "prompt": "为客户数据工具创建一个远程 MCP 服务器草稿，不要包含认证密钥。"
+    },
+    "workflow": {
+      "title": "创建 Workflow",
+      "description": "创建 Workflow 草稿并打开编辑器。",
+      "prompt": "创建一个用于每日汇总客户反馈的 Workflow 草稿。"
     }
   },
   "composer": {
     "label": "向 Chat Bot 发送消息",
     "placeholder": "询问 WorkLite，或输入 @ 运行已发布的 Workflow…",
-    "followUpPlaceholder": "向 Chat Bot 发送消息…",
     "send": "发送消息",
     "stop": "中断当前回复",
     "answerPlaceholder": "回答澄清问题...",
     "loading": "正在加载 Chat Bot 配置",
     "configure": "绑定模型提供商和模型后使用 Chat Bot"
+  },
+  "queue": {
+    "title": "排队中（{{count}}）",
+    "paused": "当前轮次尚未继续，队列已暂停。继续执行后将自动发送。",
+    "remove": "从队列中移除"
+  },
+  "transcript": {
+    "scrollToEnd": "回到最新消息"
   },
   "open": "打开 Chat Bot",
   "minimized": {
@@ -35,9 +46,10 @@
   },
   "commands": {
     "menuLabel": "对话命令",
+    "empty": "没有匹配的命令。",
     "logDescription": "仅将当前对话下载为 Markdown。",
     "newDescription": "结束当前对话并开始一个新对话。",
-    "resumeDescription": "恢复已归档的服务端执行。"
+    "resumeDescription": "切换到已归档的服务端执行。"
   },
   "messages": {
     "welcome": "选择一个任务，或描述你需要执行的工作区操作。"
@@ -78,15 +90,15 @@
   },
   "mentions": {
     "menuLabel": "可用的已发布 Workflow",
-    "empty": "No matching published Workflows.",
-    "remove": "移除 Workflow 提及",
-    "removeWorkflow": "Remove Workflow mention",
-    "workflow": "Published Workflow"
+    "empty": "没有匹配的已发布 Workflow。",
+    "remove": "移除 Workflow 提及"
   },
   "history": {
-    "title": "执行历史",
-    "description": "恢复此浏览器保存的服务端执行。",
+    "title": "切换对话",
+    "description": "仅包含此浏览器归档的执行。",
     "empty": "暂无已归档的执行。",
+    "noMatch": "没有匹配的对话。",
+    "searchPlaceholder": "搜索已归档的对话…",
     "untitled": "未命名对话",
     "remove": "从本地历史中移除"
   },

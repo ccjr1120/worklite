@@ -135,7 +135,6 @@ const MAX_SKILL_PACKAGE_BYTES = 1 * 1_024 * 1_024;
 
 const WORKLITE_NAVIGATION_ROUTES = {
   home: '/home',
-  'system-helper-chat': '/home',
   skills: '/skills',
   'mcp-servers': '/mcp-servers',
   'model-providers': '/model-providers',
@@ -209,7 +208,7 @@ function providerConfig(row: typeof modelProviders.$inferSelect, apiKey: string)
   throw new BadRequestException('Unsupported model provider protocol.');
 }
 
-const SYSTEM_HELPER_PLATFORM_SKILL_ID = 'sk_worklite_platform';
+const CHAT_BOT_PLATFORM_SKILL_ID = 'sk_worklite_platform';
 
 @Injectable()
 export class WorkspaceResourcesService {
@@ -222,7 +221,7 @@ export class WorkspaceResourcesService {
 
   async skills(request: Request, workspaceSlug: string): Promise<SkillView[]> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const rows = (await this.db.select().from(skills).where(eq(skills.workspaceId, team.id)).orderBy(desc(skills.updatedAt))).filter((row) => row.id !== SYSTEM_HELPER_PLATFORM_SKILL_ID);
+    const rows = (await this.db.select().from(skills).where(eq(skills.workspaceId, team.id)).orderBy(desc(skills.updatedAt))).filter((row) => row.id !== CHAT_BOT_PLATFORM_SKILL_ID);
     const files = rows.length === 0 ? [] : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, rows.map((row) => row.id))).orderBy(asc(skillFiles.path));
     const bySkill = new Map<string, PackageFile[]>();
     for (const file of files) bySkill.set(file.skillId, [...(bySkill.get(file.skillId) ?? []), { path: file.path, content: file.content }]);
@@ -230,7 +229,7 @@ export class WorkspaceResourcesService {
   }
 
   async skill(request: Request, workspaceSlug: string, skillId: string): Promise<SkillView> {
-    if (skillId === SYSTEM_HELPER_PLATFORM_SKILL_ID) throw new NotFoundException('Skill not found');
+    if (skillId === CHAT_BOT_PLATFORM_SKILL_ID) throw new NotFoundException('Skill not found');
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [row] = await this.db.select().from(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).limit(1);
     if (!row) throw new NotFoundException('Skill not found');
@@ -467,7 +466,7 @@ export class WorkspaceResourcesService {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [providerRows, skillRows, mcpRows, workflowRows, scheduleRows, settingsRows, officialAccountRows] = await Promise.all([
       this.providers(request, workspaceSlug),
-      this.db.select().from(skills).where(and(eq(skills.workspaceId, workspace.id), ne(skills.id, SYSTEM_HELPER_PLATFORM_SKILL_ID))).orderBy(skills.name),
+      this.db.select().from(skills).where(and(eq(skills.workspaceId, workspace.id), ne(skills.id, CHAT_BOT_PLATFORM_SKILL_ID))).orderBy(skills.name),
       this.db.select().from(mcpServers).where(eq(mcpServers.workspaceId, workspace.id)).orderBy(mcpServers.name),
       this.db.select().from(workflows).where(eq(workflows.workspaceId, workspace.id)).orderBy(workflows.name),
       this.db.select().from(workflowSchedules).where(eq(workflowSchedules.workspaceId, workspace.id)),

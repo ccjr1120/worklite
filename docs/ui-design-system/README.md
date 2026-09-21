@@ -172,11 +172,15 @@ Present agents as configurable work units, not cartoon characters. Identity come
 
 ### AI Response Content
 
-Use one shared streaming Markdown renderer for model-generated text across System Helper Chat and future Agent response surfaces. It must handle incomplete Markdown during streaming, GitHub Flavored Markdown, long words, tables, links, lists, quotations, and fenced code without executing embedded HTML or scripts. Product styling wraps the renderer and uses semantic tokens in both themes; transport parsing and conversation state do not belong inside the renderer.
+Use one shared streaming Markdown renderer for model-generated text across Chat Bot and future Agent response surfaces. It must handle incomplete Markdown during streaming, GitHub Flavored Markdown, long words, tables, links, lists, quotations, and fenced code without executing embedded HTML or scripts. Product styling wraps the renderer and uses semantic tokens in both themes; transport parsing and conversation state do not belong inside the renderer.
 
-In conversational layouts, user messages align to the right in compact neutral bubbles and remain plain text. Agent responses align to the left with a wider, unframed reading column so structured output remains scannable. Alignment, accessible labels, and optional identity marks distinguish speakers without relying on color. Streaming updates follow the end only when the reader was already at the end.
+In conversational layouts, user messages align to the right in compact neutral bubbles and remain plain text. Agent responses align to the left with a wider, unframed reading column so structured output remains scannable. Alignment, accessible labels, and optional identity marks distinguish speakers without relying on color. Streaming updates follow the end only when the reader was already at the end, and a return-to-end control appears while they are not.
+
+One Agent turn is one block with one identity mark, however many message segments and Skill calls it contains. Its segments and Skill-call rows share that block's content column, so a turn that answers, runs a script, and answers again reads as one reply instead of as several speakers. Working, cancelled, and failure cues render as inline notes without identity marks, because a status is not a speaker; they remain independent status regions for assistive technology.
 
 Create a Chat Bot response placeholder in the transcript as soon as a turn starts. Show restrained inline progress there instead of replacing or disabling the composer. While a turn is running, keep the draft input editable and replace the send control with a familiar square Stop icon; stopping is a neutral execution control rather than a destructive action. Preserve the draft after completion or cancellation, and use text plus icon cues for working and cancelled states.
+
+A message submitted during a running turn joins a visible removable queue and sends when that turn completes. A composer that accepts a keystroke and silently discards it reports work the product did not do, so queuing is the honest behavior for input the reader has already committed. Queue rows are restrained neutral transcript entries with a count and a per-row remove control, not a second execution surface. The queue pauses in place — keeping every entry and its order — when the turn fails, when the reader stops it, and while a clarification question is pending, and it says that it is paused.
 
 Present inline Skill calls as compact disclosure rows by default. The collapsed row keeps the Skill identity, script name, execution status, and exit code visible without allowing arguments, host details, or raw output to dominate the transcript. A keyboard-accessible disclosure control reveals the complete metadata, warning, and a height-bounded internally scrollable output region. Failed calls remain collapsed unless the user opens them.
 
@@ -257,6 +261,13 @@ Before confirming a UI proposal, verify that it:
 - Introduces a documented design-system decision before implementation when no existing rule applies.
 
 ## Changelog
+
+### 2026-09-21 - Conversational turn and queue
+
+- Defined one Agent turn as one identity block containing its own Skill-call rows, and reduced working, cancelled, and failure cues to inline notes without identity marks while keeping them independent status regions.
+- Replaced the discarded-draft behavior with a visible removable message queue for input submitted during a running turn, on the grounds that accepting a keystroke and dropping it reports work the product did not do. This supersedes the 2026-08-27 omission of message queuing.
+- Required a return-to-end control on streaming conversational surfaces whenever the reader is away from the end.
+- Replaced the remaining `System Helper Chat` references with `Chat Bot`.
 
 ### 2026-09-19 - Implementation
 
@@ -340,8 +351,8 @@ Before confirming a UI proposal, verify that it:
 ### 2026-08-28
 
 - Kept selected Agent mentions inline with task text inside one composer input surface.
-- Added structured `@` Agent selection, removable mention tokens, and a compact persistent child-session band for System Helper Chat.
-- Adopted Vercel AI Elements' compositional Conversation, Message, and Prompt Input pattern for System Helper Chat while retaining WorkLite's semantic tokens, persisted execution state, and shared safe Markdown renderer.
+- Added structured `@` Agent selection, removable mention tokens, and a compact persistent child-session band for Chat Bot.
+- Adopted Vercel AI Elements' compositional Conversation, Message, and Prompt Input pattern for Chat Bot while retaining WorkLite's semantic tokens, persisted execution state, and shared safe Markdown renderer.
 
 ### 2026-08-27
 
