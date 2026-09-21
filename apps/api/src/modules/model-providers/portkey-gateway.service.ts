@@ -5,7 +5,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { BadRequestException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import type { Request, Response } from 'express';
-import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, GatewayRequestLogDetail, GatewayRequestLogList, GatewayRequestLogQuery, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatsWindow, PortkeyGatewayStatus, PortkeyGatewayView, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
+import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, GatewayRequestLogDetail, GatewayRequestLogList, GatewayRequestLogQuery, GatewayTimeRange, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatus, PortkeyGatewayView, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
 import type { ModelProviderConfig } from '@worklite/model-gateway';
 import { agents, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
@@ -124,15 +124,20 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     return this.gatewayJson<ModelProviderView[]>('/worklite/providers');
   }
 
-  async stats(window?: string): Promise<PortkeyGatewayStats> {
-    const requested = window === '7d' || window === '30d' ? window : '24h';
+  async stats(range: GatewayTimeRange = {}): Promise<PortkeyGatewayStats> {
     await this.ensureGatewayForDiscovery();
-    return this.gatewayJson<PortkeyGatewayStats>(`/worklite/stats?window=${requested as PortkeyGatewayStatsWindow}`);
+    const search = new URLSearchParams();
+    if (range.from?.trim()) search.set('from', range.from.trim());
+    if (range.to?.trim()) search.set('to', range.to.trim());
+    const suffix = search.size > 0 ? `?${search.toString()}` : '';
+    return this.gatewayJson<PortkeyGatewayStats>(`/worklite/stats${suffix}`);
   }
 
   async requestLogs(query: GatewayRequestLogQuery): Promise<GatewayRequestLogList> {
     await this.ensureGatewayForDiscovery();
     const search = new URLSearchParams();
+    if (query.from?.trim()) search.set('from', query.from.trim());
+    if (query.to?.trim()) search.set('to', query.to.trim());
     if (query.provider?.trim()) search.set('provider', query.provider.trim());
     if (query.model?.trim()) search.set('model', query.model.trim());
     if (query.statusClass) search.set('statusClass', query.statusClass);

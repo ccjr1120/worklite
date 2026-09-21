@@ -30,7 +30,8 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 
 - [Home](pages/home/DESIGN.md), including the server-derived first-use sequence
 - [Workspace Chat Bot](surfaces/workspace/system-helper-chat/DESIGN.md)
-- Providers: [Model providers and Portkey Gateway](pages/model-providers/DESIGN.md), including the dedicated Codex Account Pool and Gateway request statistics
+- Providers: [Model providers and Portkey Gateway](pages/model-providers/DESIGN.md), including the dedicated Codex Account Pool
+- Logs: [Gateway statistics and request logs](pages/logs/DESIGN.md), including the shared time range
 - Workflows: [List](pages/workflows/list/DESIGN.md), [Editor](pages/workflows/editor/DESIGN.md), [Versions](pages/workflows/versions/DESIGN.md)
 - Runs: [Detail](pages/runs/detail/DESIGN.md), [Node logs](surfaces/workflow-run/node-logs/DESIGN.md)
 - Skills: [List](pages/skills/list/DESIGN.md), [Editor](pages/skills/editor/DESIGN.md)
@@ -44,6 +45,7 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 ```text
 /home
 /model-providers
+/logs
 /workflows/{new,:workflowId,:workflowId/versions}
 /skills/{new,:skillId}
 /mcp-servers/{new,:serverId}
@@ -58,9 +60,11 @@ The root route opens Home. `/settings/` opens Appearance. Route layouts and redi
 
 There is no `/onboarding` route family. First use is a server-derived sequence inside Home, so a separate browser-state onboarding flow would duplicate it with a less reliable completion signal.
 
-The `/model-providers` page is the top-level Providers destination. It uses page-level tabs for Model Providers, the dedicated Codex Account Pool, Gateway Statistics, and Gateway Request Logs; the Gateway summary remains on the Model Providers view.
+The `/model-providers` page is the top-level Providers destination. It uses page-level tabs for Model Providers and the dedicated Codex Account Pool; the Gateway summary remains on the Model Providers view.
 
-`/runs/:runId` is a Run log-reading destination reached from a Workflow's Run records dialog, not a top-level collection. There is no Run list route: Runs are reached through their Workflow. There is no `/settings/logs` route; Provider request observability belongs to the Providers destination.
+`/logs` is the top-level Logs destination for Gateway transport observability. It uses page-level tabs for Statistics and Requests over one shared time range. Providers configures what the Gateway dispatches to; Logs reads what it did.
+
+`/runs/:runId` is a Run log-reading destination reached from a Workflow's Run records dialog, not a top-level collection. There is no Run list route: Runs are reached through their Workflow. Provider request observability is not a Settings page: `/settings` keeps the WorkLite-owned Usage and Audit Log read models, which are business records over Runs and resource mutations rather than Gateway transport records.
 
 ## Shared Component Inventory
 
@@ -79,6 +83,18 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-09-21 - Logs destination
+
+- Added the [Logs](pages/logs/DESIGN.md) destination at `/logs` as a first-level navigation item under Configuration, with Statistics and Requests as its two page-level tabs.
+- Moved the Gateway Statistics and Gateway Request Logs views off the Providers destination. Providers keeps Model Providers and the Codex Account Pool, so Providers configures dispatch while Logs reads it. This supersedes the 2026-09-21 decision that Provider request observability lives with Providers.
+- Added one time range shared by both tabs: the presets last 1 hour, 24 hours, 7 days, and 30 days, plus a custom minute-precision start and end that expresses a specific date or a span of hours within one day. A preset persists as its own name and a custom range as absolute instants, so a shared preset link is not frozen into a dead interval.
+- Recorded the retention asymmetry as a Constraint on the Requests tab: statistics cover any range, request details cover at most the trailing three days of it, and a range reaching past that window says so rather than reading as an absence of requests.
+- Redirected both inbound observability links to the new destination: the node log's `View request logs` and the failed provider test's `View request log`.
+
+### 2026-09-20 - Run cancellation
+
+- Added the active Run cancellation action to the Run detail surface, using the existing cancellation API and shared confirmation interaction.
 
 ### 2026-09-21 - Workflow and Provider log surfaces
 

@@ -5,6 +5,7 @@ import zhAssistant from './locales/zh-CN/assistant.json';
 import zhArtifacts from './locales/zh-CN/artifacts.json';
 import zhCommon from './locales/zh-CN/common.json';
 import zhHome from './locales/zh-CN/home.json';
+import zhLogs from './locales/zh-CN/logs.json';
 import zhMcpServers from './locales/zh-CN/mcpServers.json';
 import zhPlugins from './locales/zh-CN/plugins.json';
 import zhRuns from './locales/zh-CN/runs.json';
@@ -25,6 +26,7 @@ export const NAMESPACES = [
   'plugins',
   'artifacts',
   'settings',
+  'logs',
 ] as const;
 
 const resources = {
@@ -40,6 +42,7 @@ const resources = {
     plugins: zhPlugins,
     artifacts: zhArtifacts,
     settings: zhSettings,
+    logs: zhLogs,
   },
 } as const;
 

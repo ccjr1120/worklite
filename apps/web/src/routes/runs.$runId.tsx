@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { FileStack, ScrollText } from 'lucide-react';
-import { useEffect } from 'react';
+import { Ban, FileStack, LoaderCircle, ScrollText } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RunProgressEvent } from '@worklite/contracts';
 import { EmptyState } from '@/components/empty-state';
@@ -9,6 +9,8 @@ import { PageHeading } from '@/components/page-heading';
 import { StatusBadge } from '@/components/status-badge';
 import { CopyableId } from '@/components/copyable-id';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
 import { NodeRunLogEntry, toRecordStatus } from '@/features/workflows/node-run-log';
@@ -28,6 +30,9 @@ function RunDetailPage() {
   const { locale } = useLocale();
   const { runId } = Route.useParams();
   const { data: run, isLoading, isError, error, refetch } = useRunQuery('personal', runId);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const terminal = run?.status === 'succeeded' || run?.status === 'failed' || run?.status === 'cancelled' || run?.status === 'timed_out';
 
   useEffect(() => {
@@ -85,11 +90,35 @@ function RunDetailPage() {
   const artifacts = run.artifacts ?? [];
   const duration = run.durationSeconds == null ? null : durationParts(run.durationSeconds);
   const failureReason = failureReasonOf(run.result, run.status);
+  const canCancel = run.status === 'queued' || run.status === 'running' || run.status === 'waiting_for_input';
+
+  const cancelRun = async () => {
+    if (!canCancel || cancelling) return;
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      await api.cancelRun('personal', runId);
+      setCancelOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ['run', runId] });
+    } catch (cancelFailure) {
+      setCancelError(cancelFailure instanceof Error ? cancelFailure.message : t('runs:cancel.failed'));
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   return (
     <div className="w-full px-6 py-6">
       <WorkspaceChrome crumbs={[{ label: run.workflowName, to: '/workflows' }, { label: t('runs:detail.title') }]} />
-      <PageHeading title={run.workflowName} />
+      <PageHeading
+        title={run.workflowName}
+        actions={canCancel ? (
+          <Button type="button" variant="destructive" size="compact" onClick={() => { setCancelError(null); setCancelOpen(true); }} disabled={cancelling}>
+            <Ban aria-hidden="true" />
+            {t('runs:cancel.action')}
+          </Button>
+        ) : null}
+      />
       <div className="mt-4 flex flex-wrap items-center gap-3 text-[13px] text-muted-foreground">
         <StatusBadge status={toRecordStatus(run.status)} />
         <CopyableId value={run.id} />
@@ -98,6 +127,24 @@ function RunDetailPage() {
         <span className="tabular-nums">{formatDateTime(run.startedAt, locale)}</span>
         {duration ? <span className="tabular-nums">{t('common:duration.compact', duration)}</span> : null}
       </div>
+
+
+      <Dialog open={cancelOpen} onOpenChange={(open) => { if (!cancelling) setCancelOpen(open); }}>
+        <DialogContent aria-busy={cancelling}>
+          <DialogHeader>
+            <DialogTitle>{t('runs:cancel.title')}</DialogTitle>
+            <DialogDescription>{t('runs:cancel.description')}</DialogDescription>
+          </DialogHeader>
+          {cancelError ? <p className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[13px] text-danger" role="alert">{cancelError}</p> : null}
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={() => setCancelOpen(false)} disabled={cancelling}>{t('common:actions.cancel')}</Button>
+            <Button type="button" variant="destructive" onClick={() => void cancelRun()} disabled={cancelling}>
+              {cancelling ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <Ban aria-hidden="true" />}
+              {cancelling ? t('runs:cancel.cancelling') : t('runs:cancel.confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {failureReason ? (
         <p className="mt-4 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[13px] text-danger" role="alert">

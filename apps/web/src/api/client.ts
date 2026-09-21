@@ -17,6 +17,7 @@ import type {
   GatewayRequestLogDetail,
   GatewayRequestLogList,
   GatewayRequestLogQuery,
+  GatewayTimeRange,
   CreateMcpServerRequest,
   UpdateMcpServerRequest,
   CreateModelProviderRequest,
@@ -47,7 +48,6 @@ import type {
   CodexAuthStatus,
   CodexRateLimitSnapshot,
   PortkeyGatewayStats,
-  PortkeyGatewayStatsWindow,
   PluginView,
   PluginTestResult,
   UpdatePluginRequest,
@@ -142,7 +142,13 @@ export const api = {
   updateCodexAccount: (accountId: string, enabled: boolean) => apiPatch<CodexAuthStatus>(`/api/portkey-gateway/codex/accounts/${encodeURIComponent(accountId)}`, { enabled }),
   refreshCodexAccount: (accountId: string) => apiPost<CodexAuthStatus>(`/api/portkey-gateway/codex/accounts/${encodeURIComponent(accountId)}/refresh`),
   deleteCodexAccount: (accountId: string) => apiDelete<CodexAuthStatus>(`/api/portkey-gateway/codex/accounts/${encodeURIComponent(accountId)}`),
-  portkeyGatewayStats: (window: PortkeyGatewayStatsWindow = '24h') => apiGet<PortkeyGatewayStats>(`/api/portkey-gateway/stats?window=${window}`),
+  portkeyGatewayStats: (range: GatewayTimeRange = {}) => {
+    const search = new URLSearchParams();
+    if (range.from?.trim()) search.set('from', range.from.trim());
+    if (range.to?.trim()) search.set('to', range.to.trim());
+    const suffix = search.size > 0 ? `?${search.toString()}` : '';
+    return apiGet<PortkeyGatewayStats>(`/api/portkey-gateway/stats${suffix}`);
+  },
   workflows: (_workspace?: string) => apiGet<WorkflowView[]>('/api/workflows'),
   homeBoardPreferences: (_workspace?: string) => apiGet<HomeBoardPreferencesView>('/api/home/board-categories'),
   createHomeBoardCategory: (_workspace: string | undefined, input: CreateHomeBoardCategoryRequest) => apiPost<HomeBoardPreferencesView>('/api/home/board-categories', input),
@@ -188,6 +194,8 @@ export const api = {
   auditLogs: (_workspace?: string) => apiGet<AuditEventView[]>('/api/audit-logs'),
   gatewayRequestLogs: (query: GatewayRequestLogQuery = {}) => {
     const search = new URLSearchParams();
+    if (query.from?.trim()) search.set('from', query.from.trim());
+    if (query.to?.trim()) search.set('to', query.to.trim());
     if (query.provider?.trim()) search.set('provider', query.provider.trim());
     if (query.model?.trim()) search.set('model', query.model.trim());
     if (query.statusClass) search.set('statusClass', query.statusClass);

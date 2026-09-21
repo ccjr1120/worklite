@@ -57,7 +57,7 @@ Incoming events apply incrementally to cached Run detail. An event must not trig
 
 ### Open the correlated Provider request
 
-An Agent or image node entry links to the Providers `request-logs` view filtered to this Run, where the captured upstream request and response for its model rounds are readable. The link states that captured requests are kept for three days, because a Run outliving that window keeps its activity while those bodies are already expired.
+An Agent or image node entry links to the Logs `requests` tab filtered to this Run, where the captured upstream request and response for its model rounds are readable. The link states that captured requests are kept for three days, because a Run outliving that window keeps its activity while those bodies are already expired.
 
 ## States
 
@@ -103,6 +103,10 @@ Verified 2026-09-21. Differences found against the implementation:
 - Captured payloads render as preformatted text only. No JSON tree, syntax highlighting, or payload diffing is provided in this increment.
 
 ## Changelog
+
+### 2026-09-21 - Logs destination
+
+- Repointed the Run-scoped request-log link from the Providers `request-logs` view to the Logs `requests` tab. The retention constraint beside it is unchanged.
 
 ### 2026-09-21
 

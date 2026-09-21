@@ -13,6 +13,7 @@
     "mcpServers": "MCP 服务器",
     "plugins": "插件",
     "modelProviders": "模型提供商",
+    "logs": "日志",
     "usage": "用量",
     "settings": "设置",
     "agentResources": "Capabilities",

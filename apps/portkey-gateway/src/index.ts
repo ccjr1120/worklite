@@ -100,20 +100,28 @@ app.get('/', (c) => c.text('AI Gateway says hey!'));
 
 app.get('/worklite/providers', async (c) => c.json(await listProviders()));
 app.get('/worklite/stats', (c) => {
-  const requestedWindow = c.req.query('window');
-  const window = requestedWindow === '7d' || requestedWindow === '30d' ? requestedWindow : '24h';
-  return c.json(requestStats(window));
+  try {
+    return c.json(requestStats({ from: c.req.query('from'), to: c.req.query('to') }));
+  } catch (error) {
+    return c.json({ message: error instanceof RangeError ? error.message : 'Gateway statistics are unavailable.' }, 400);
+  }
 });
 app.get('/worklite/request-logs', (c) => {
   const statusClass = c.req.query('statusClass');
-  return c.json(requestLogs({
-    provider: c.req.query('provider'),
-    model: c.req.query('model'),
-    statusClass: statusClass === 'success' || statusClass === 'client_error' || statusClass === 'server_error' ? statusClass : undefined,
-    workflowRunId: c.req.query('workflowRunId'),
-    limit: c.req.query('limit') ? Number(c.req.query('limit')) : undefined,
-    cursor: c.req.query('cursor'),
-  }));
+  try {
+    return c.json(requestLogs({
+      from: c.req.query('from'),
+      to: c.req.query('to'),
+      provider: c.req.query('provider'),
+      model: c.req.query('model'),
+      statusClass: statusClass === 'success' || statusClass === 'client_error' || statusClass === 'server_error' ? statusClass : undefined,
+      workflowRunId: c.req.query('workflowRunId'),
+      limit: c.req.query('limit') ? Number(c.req.query('limit')) : undefined,
+      cursor: c.req.query('cursor'),
+    }));
+  } catch (error) {
+    return c.json({ message: error instanceof RangeError ? error.message : 'Request logs are unavailable.' }, 400);
+  }
 });
 app.get('/worklite/request-logs/:requestLogId', (c) => {
   const log = requestLog(c.req.param('requestLogId'));

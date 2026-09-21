@@ -1,9 +1,9 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { BarChart3, Bot, ChevronDown, Clipboard, Copy, GripVertical, KeyRound, LoaderCircle, LogIn, Pencil, Plus, RefreshCw, ScrollText, Trash2, Upload, X } from 'lucide-react';
+import { Bot, ChevronDown, Copy, GripVertical, KeyRound, LoaderCircle, LogIn, Pencil, Plus, RefreshCw, Trash2, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitWindow, DiscoverModelProviderRequest, GatewayRequestLogList, GatewayRequestLogListItem, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayStats, PortkeyGatewayStatus } from '@worklite/contracts';
+import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitWindow, DiscoverModelProviderRequest, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayStatus } from '@worklite/contracts';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { CollectionTable, CollectionHeader, CollectionRow } from '@/components/collection-table';
 import { CollectionToolbar } from '@/components/collection-toolbar';
@@ -16,7 +16,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { PasswordInput } from '@/components/password-input';
@@ -24,43 +23,26 @@ import { StatusBadge } from '@/components/status-badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useCodexAccountUsagesQuery, useCodexAuthQuery, useModelProvidersQuery, usePortkeyGatewayQuery } from '@/api/queries';
-import { useGatewayRequestLogQuery, useGatewayRequestLogsQuery, usePortkeyGatewayStatsQuery } from '@/api/queries';
 import { api } from '@/api/client';
 import { queryClient } from '@/lib/query-client';
-import { formatDateTime, formatList, formatNumber } from '@/i18n/format';
+import { formatDateTime, formatList } from '@/i18n/format';
 import { useLocale } from '@/components/locale-provider';
 import type { AppLocale } from '@/i18n/locale';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-const MODEL_PROVIDER_TABS = ['providers', 'codex', 'statistics', 'request-logs'] as const;
+const MODEL_PROVIDER_TABS = ['providers', 'codex'] as const;
 type ModelProviderTab = (typeof MODEL_PROVIDER_TABS)[number];
-const REQUEST_LOG_STATUS_CLASSES = ['success', 'client_error', 'server_error'] as const;
-type RequestLogStatusClass = (typeof REQUEST_LOG_STATUS_CLASSES)[number];
 type ModelProvidersSearch = {
   tab: ModelProviderTab;
-  provider?: string;
-  model?: string;
-  statusClass?: RequestLogStatusClass;
-  workflowRunId?: string;
-  requestLogId?: string;
 };
 
 function isModelProviderTab(value: unknown): value is ModelProviderTab {
   return typeof value === 'string' && MODEL_PROVIDER_TABS.includes(value as ModelProviderTab);
 }
 
-function optionalSearchText(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
 export const Route = createFileRoute('/model-providers')({
   validateSearch: (search: Record<string, unknown>): ModelProvidersSearch => ({
     tab: isModelProviderTab(search.tab) ? search.tab : 'providers',
-    provider: optionalSearchText(search.provider),
-    model: optionalSearchText(search.model),
-    statusClass: REQUEST_LOG_STATUS_CLASSES.includes(search.statusClass as RequestLogStatusClass) ? search.statusClass as RequestLogStatusClass : undefined,
-    workflowRunId: optionalSearchText(search.workflowRunId),
-    requestLogId: optionalSearchText(search.requestLogId),
   }),
   component: ModelProvidersPage,
 });
@@ -126,7 +108,7 @@ function ModelProvidersPage() {
   const { t } = useTranslation(['settings', 'common']);
   const { locale } = useLocale();
   const workspaceSlug = 'personal';
-  const { tab: view, ...requestLogFilters } = Route.useSearch();
+  const { tab: view } = Route.useSearch();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [testDialog, setTestDialog] = useState<ProviderTestDialog | null>(null);
@@ -146,14 +128,12 @@ function ModelProvidersPage() {
   const [protocolError, setProtocolError] = useState('');
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState('');
-  const [statsWindow, setStatsWindow] = useState<'24h' | '7d' | '30d'>('24h');
   const { data: modelProviders = [], isLoading, isError, refetch } = useModelProvidersQuery(workspaceSlug);
   const gatewayQuery = usePortkeyGatewayQuery();
   const codexAuthQuery = useCodexAuthQuery();
   const codexUsageQuery = useCodexAccountUsagesQuery(view === 'codex');
   const [codexAuthBusy, setCodexAuthBusy] = useState(false);
   const codexImportRef = useRef<HTMLInputElement>(null);
-  const statsQuery = usePortkeyGatewayStatsQuery(statsWindow);
   const items = useMemo(
     () => modelProviders.filter((provider) => `${provider.name} ${provider.models.join(' ')}`.toLowerCase().includes(search.toLowerCase())),
     [modelProviders, search],
@@ -164,20 +144,6 @@ function ModelProvidersPage() {
   function changeView(value: string) {
     if (!isModelProviderTab(value)) return;
     void navigate({ to: '/model-providers', search: (current) => ({ ...current, tab: value }) });
-  }
-
-  function changeRequestLogFilters(next: RequestLogFilters) {
-    void navigate({
-      to: '/model-providers',
-      search: (current) => ({
-        ...current,
-        tab: 'request-logs' as const,
-        provider: next.provider,
-        model: next.model,
-        statusClass: next.statusClass,
-        workflowRunId: next.workflowRunId,
-      }),
-    });
   }
 
   useEffect(() => {
@@ -411,8 +377,6 @@ function ModelProvidersPage() {
         <TabsList aria-label={t('providers.views.label')}>
           <TabsTrigger value="providers">{t('providers.views.providers')}</TabsTrigger>
           <TabsTrigger value="codex">{t('providers.views.codex')}</TabsTrigger>
-          <TabsTrigger value="statistics"><BarChart3 className="size-4" />{t('providers.views.statistics')}</TabsTrigger>
-          <TabsTrigger value="request-logs"><ScrollText className="size-4" />{t('providers.views.requestLogs')}</TabsTrigger>
         </TabsList>
         <TabsContent value="providers">
       <GatewayPanel
@@ -477,17 +441,6 @@ function ModelProvidersPage() {
         </TabsContent>
         <TabsContent value="codex">
           <CodexAccountPool auth={codexAuthQuery.data} usage={codexUsageQuery.data} usageLoading={codexUsageQuery.isLoading} usageError={codexUsageQuery.isError} authBusy={codexAuthBusy} onLogin={() => void startCodexAuth()} importRef={codexImportRef} onImport={(file) => void importCodexAccounts(file)} onToggleAccount={(accountId, enabled) => void setCodexAccountEnabled(accountId, enabled)} onRefreshAccount={(accountId) => void refreshCodexAccount(accountId)} onDeleteAccount={(accountId) => void deleteCodexAccount(accountId)} locale={locale} t={(key) => t(key as never)} />
-        </TabsContent>
-        <TabsContent value="statistics">
-          <GatewayStatistics stats={statsQuery.data} isLoading={statsQuery.isLoading} isError={statsQuery.isError} onRetry={() => void statsQuery.refetch()} window={statsWindow} onWindowChange={setStatsWindow} locale={locale} t={(key) => t(key as never)} />
-        </TabsContent>
-        <TabsContent value="request-logs">
-          <GatewayRequestLogs
-            providers={modelProviders}
-            filters={{ provider: requestLogFilters.provider, model: requestLogFilters.model, statusClass: requestLogFilters.statusClass, workflowRunId: requestLogFilters.workflowRunId }}
-            onFiltersChange={changeRequestLogFilters}
-            locale={locale}
-          />
         </TabsContent>
       </Tabs>
 
@@ -564,7 +517,7 @@ function ModelProvidersPage() {
                 ) : testDialog?.status === 'success' ? (
                   <div aria-live="polite"><p className="whitespace-pre-wrap break-words">{testDialog.result.response}</p><p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></div>
                 ) : testDialog?.status === 'error' ? (
-                  <><p role="alert" className="break-words text-danger">{testDialog.message}</p>{testDialog.requestLogId ? <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2"><Button type="button" variant="ghost" size="compact" onClick={() => { const provider = testDialog.provider.name; setTestDialog(null); void navigate({ to: '/model-providers', search: { tab: 'request-logs', provider } }); }}>{t('providers.viewRequestLog')}</Button></div> : null}<p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></>
+                  <><p role="alert" className="break-words text-danger">{testDialog.message}</p>{testDialog.requestLogId ? <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2"><Button type="button" variant="ghost" size="compact" onClick={() => { const provider = testDialog.provider.name; setTestDialog(null); void navigate({ to: '/logs', search: { tab: 'requests', range: '24h', provider } }); }}>{t('providers.viewRequestLog')}</Button></div> : null}<p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></>
                 ) : null}
               </div>
             </div>
@@ -700,47 +653,6 @@ function maskAccountId(value: string): string {
   return `${value.slice(0, 4)}…${value.slice(-4)}`;
 }
 
-function GatewayStatistics({ stats, isLoading, isError, onRetry, window, onWindowChange, locale, t }: { stats?: PortkeyGatewayStats; isLoading: boolean; isError: boolean; onRetry: () => void; window: '24h' | '7d' | '30d'; onWindowChange: (value: '24h' | '7d' | '30d') => void; locale: AppLocale; t: (key: string) => string }) {
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const summary = stats?.summary;
-  const metricValue = (value: number | null, suffix = '') => value === null ? t('providers.statistics.unavailable') : `${formatNumber(value, locale)}${suffix}`;
-  return (
-    <section className="space-y-5" aria-labelledby="gateway-statistics-title">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><h2 id="gateway-statistics-title" className="text-base font-semibold">{t('providers.statistics.title')}</h2><p className="mt-1 text-[13px] text-muted-foreground">{t('providers.statistics.description')}</p></div>
-        <Select value={window} onValueChange={(value) => onWindowChange(value as '24h' | '7d' | '30d')}>
-          <SelectTrigger className="w-36" aria-label={t('providers.statistics.window')}><SelectValue /></SelectTrigger>
-          <SelectContent><SelectItem value="24h">{t('providers.statistics.last24h')}</SelectItem><SelectItem value="7d">{t('providers.statistics.last7d')}</SelectItem><SelectItem value="30d">{t('providers.statistics.last30d')}</SelectItem></SelectContent>
-        </Select>
-      </div>
-      {isLoading ? <div className="space-y-3" role="status" aria-busy="true" aria-live="polite"><span className="sr-only">{t('providers.statistics.loading')}</span><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-[70px]" />)}</div><Skeleton className="h-72 w-full" /></div> : isError ? <ErrorState title={t('providers.statistics.title')} description={t('providers.statistics.error')} onAction={onRetry} /> : !stats || stats.summary.requests === 0 ? <EmptyState title={t('providers.statistics.emptyTitle')} description={t('providers.statistics.emptyDescription')} /> : (
-        <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Metric label={t('providers.statistics.requests')} value={formatNumber(summary?.requests ?? 0, locale)} />
-            <Metric label={t('providers.statistics.successRate')} value={summary?.successRate === null ? t('providers.statistics.unavailable') : `${summary?.successRate}%`} />
-            <Metric label={t('providers.statistics.averageLatency')} value={metricValue(summary?.averageLatencyMs ?? null, ' ms')} />
-            <Metric label={t('providers.statistics.totalTokens')} value={metricValue(summary?.totalTokens ?? null)} />
-          </div>
-          <div className="overflow-hidden rounded-lg border border-border bg-surface">
-            <div className="hidden grid-cols-[1.2fr_1.4fr_0.7fr_0.8fr_0.9fr] gap-3 border-b border-border bg-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid"><span>{t('providers.statistics.provider')}</span><span>{t('providers.statistics.model')}</span><span>{t('providers.statistics.requests')}</span><span>{t('providers.statistics.successRate')}</span><span>{t('providers.statistics.averageLatency')}</span></div>
-            {stats.breakdown.map((row) => {
-              const key = `${row.provider}\u0000${row.model}`;
-              const open = expanded === key;
-              const rate = row.requests ? Math.round((row.successful / row.requests) * 1000) / 10 : null;
-              return <div key={key} className="border-b border-border last:border-b-0"><button type="button" className="grid w-full grid-cols-1 gap-2 px-4 py-3 text-left hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45 md:grid-cols-[1.2fr_1.4fr_0.7fr_0.8fr_0.9fr] md:items-center md:gap-3" onClick={() => setExpanded(open ? null : key)} aria-expanded={open}><span className="font-medium">{row.provider}</span><span className="font-mono text-xs text-muted-foreground break-all">{row.model}</span><span className="tabular-nums text-[13px]">{formatNumber(row.requests, locale)}</span><span className="tabular-nums text-[13px]">{rate === null ? t('providers.statistics.unavailable') : `${rate}%`}</span><span className="tabular-nums text-[13px] text-muted-foreground">{metricValue(row.averageLatencyMs, ' ms')} <ChevronDown className={`ml-1 inline size-4 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" /></span></button>{open ? <div className="grid gap-4 border-t border-border bg-surface-subtle px-4 py-4 text-[13px] sm:grid-cols-3"><Detail label={t('providers.statistics.endpoints')} value={row.endpoints.map((item) => `${item.endpoint} (${item.requests})`).join(', ') || t('providers.statistics.unavailable')} /><Detail label={t('providers.statistics.statuses')} value={row.statuses.map((item) => `${item.status} (${item.requests})`).join(', ') || t('providers.statistics.unavailable')} /><Detail label={t('providers.statistics.tokens')} value={`${t('providers.statistics.input')}: ${metricValue(row.promptTokens)} · ${t('providers.statistics.output')}: ${metricValue(row.completionTokens)} · ${t('providers.statistics.total')}: ${metricValue(row.totalTokens)}`} /></div> : null}</div>;
-            })}
-          </div>
-          <p className="text-xs text-muted-foreground">{t('providers.statistics.windowRange')} {stats.from ? formatDateTime(stats.from, locale) : '-'} - {stats.to ? formatDateTime(stats.to, locale) : '-'}</p>
-        </>
-      )}
-    </section>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-md border border-border bg-surface p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold tabular-nums">{value}</p></div>;
-}
-
 function Detail({ label, value }: { label: string; value: string }) {
   return <div><p className="text-xs font-medium text-muted-foreground">{label}</p><p className="mt-1 break-words font-mono text-xs">{value}</p></div>;
 }
@@ -749,221 +661,3 @@ function currentTime(): number {
   return Date.now();
 }
 
-type RequestLogFilters = {
-  provider?: string;
-  model?: string;
-  statusClass?: RequestLogStatusClass;
-  workflowRunId?: string;
-};
-
-function capturedBodyText(value: unknown): string {
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function CapturedBody({ label, body, copyLabel }: { label: string; body: string; copyLabel: string }) {
-  const { t } = useTranslation('settings');
-  const [copied, setCopied] = useState(false);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(body);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setCopied(false);
-    }
-  }
-
-  return (
-    <div>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground">{label}</span>
-        <Button type="button" variant="ghost" size="compact" onClick={() => void copy()} aria-label={copyLabel}>
-          <Clipboard aria-hidden="true" />
-          {copied ? t('providers.requestLogs.copied') : t('common:actions.copy' as never)}
-        </Button>
-      </div>
-      {/* A bounded scroll container must be reachable without a pointer, so it takes focus
-          while keeping its non-interactive group role. */}
-      <div
-        role="group"
-        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-        tabIndex={0}
-        aria-label={label}
-        className="mt-1 max-h-72 overflow-auto rounded-md border border-border bg-surface px-2 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45"
-      >
-        <pre className="font-mono text-xs whitespace-pre-wrap break-words">{body}</pre>
-      </div>
-    </div>
-  );
-}
-
-function RequestLogRow({ item, expanded, onToggle, locale }: { item: GatewayRequestLogListItem; expanded: boolean; onToggle: () => void; locale: AppLocale }) {
-  const { t } = useTranslation(['settings', 'common']);
-  const detailQuery = useGatewayRequestLogQuery(expanded ? item.id : undefined);
-  const detail = detailQuery.data;
-
-  return (
-    <li className="rounded-md border border-border bg-surface-subtle">
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        aria-label={t('providers.requestLogs.rowLabel', { provider: item.provider, model: item.model, time: formatDateTime(item.occurredAt, locale) })}
-        className="grid w-full grid-cols-1 gap-2 px-3 py-2 text-left hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45 md:grid-cols-[0.9fr_0.8fr_1fr_1fr_0.5fr_0.5fr] md:items-center md:gap-3"
-      >
-        <span className="text-[13px] tabular-nums text-muted-foreground">{formatDateTime(item.occurredAt, locale)}</span>
-        <span className="truncate font-medium">{item.provider}</span>
-        <span className="truncate font-mono text-xs text-muted-foreground">{item.model}</span>
-        <span className="truncate font-mono text-xs text-muted-foreground">{item.endpoint}</span>
-        <span className="flex items-center gap-1.5"><StatusBadge status={requestLogStatusBadge(item.status)} /><span className="tabular-nums text-xs text-muted-foreground">{item.status}</span></span>
-        <span className="flex items-center justify-end gap-1 text-xs tabular-nums text-muted-foreground">
-          {item.durationMs} ms
-          <ChevronDown className={`ml-1 inline size-4 transition-transform ${expanded ? 'rotate-180' : ''}`} aria-hidden="true" />
-        </span>
-      </button>
-      {expanded ? (
-        <div className="border-t border-border px-3 py-3">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            {item.streaming ? <span>{t('providers.requestLogs.streaming')}</span> : null}
-            {item.source ? <span className="font-mono">{item.source}</span> : null}
-            {item.workflowRunId ? <span className="font-mono">{t('providers.requestLogs.correlatedRun', { id: item.workflowRunId })}</span> : null}
-            {item.totalTokens !== null ? <span className="tabular-nums">{t('providers.statistics.total')}: {item.totalTokens}</span> : null}
-          </div>
-          {detailQuery.isLoading ? (
-            <div role="status" aria-busy="true" className="mt-2 grid gap-2">
-              <Skeleton className="h-24 w-full rounded-md" />
-              <Skeleton className="h-24 w-full rounded-md" />
-            </div>
-          ) : detailQuery.isError || !detail ? (
-            <p className="mt-2 text-[13px] text-danger" role="alert">{t('providers.requestLogs.detailError')}</p>
-          ) : (
-            <div className="mt-2 grid gap-3">
-              <CapturedBody label={t('providers.requestLogs.request')} body={capturedBodyText(detail.request)} copyLabel={t('providers.requestLogs.copyRequest')} />
-              {detail.response.kind === 'unavailable' ? (
-                <p className="text-[13px] text-muted-foreground">{t('providers.requestLogs.responseUnavailable', { reason: detail.response.reason })}</p>
-              ) : (
-                <CapturedBody
-                  label={detail.response.kind === 'stream' ? t('providers.requestLogs.streamEvents') : t('providers.requestLogs.response')}
-                  body={detail.response.kind === 'stream' ? capturedBodyText(detail.response.events) : capturedBodyText(detail.response.body)}
-                  copyLabel={t('providers.requestLogs.copyResponse')}
-                />
-              )}
-            </div>
-          )}
-        </div>
-      ) : null}
-    </li>
-  );
-}
-
-function requestLogStatusBadge(status: number): 'completed' | 'failed' {
-  return status >= 200 && status < 400 ? 'completed' : 'failed';
-}
-
-function GatewayRequestLogs({ providers, filters, onFiltersChange, locale }: { providers: ModelProviderView[]; filters: RequestLogFilters; onFiltersChange: (next: RequestLogFilters) => void; locale: AppLocale }) {
-  const { t } = useTranslation(['settings', 'common']);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [pages, setPages] = useState<GatewayRequestLogList[]>([]);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const logsQuery = useGatewayRequestLogsQuery(filters);
-  const hasFilters = Boolean(filters.provider || filters.model || filters.statusClass || filters.workflowRunId);
-
-  useEffect(() => {
-    setPages([]);
-    setExpandedId(null);
-  }, [filters.provider, filters.model, filters.statusClass, filters.workflowRunId]);
-
-  const items = useMemo(() => [...(logsQuery.data?.items ?? []), ...pages.flatMap((page) => page.items)], [logsQuery.data, pages]);
-  const nextCursor = pages.at(-1)?.nextCursor ?? logsQuery.data?.nextCursor ?? null;
-
-  async function loadMore() {
-    if (!nextCursor || loadingMore) return;
-    setLoadingMore(true);
-    try {
-      const page = await api.gatewayRequestLogs({ ...filters, cursor: nextCursor });
-      setPages((current) => [...current, page]);
-    } catch {
-      // The Load more control stays available so the reader can retry.
-    } finally {
-      setLoadingMore(false);
-    }
-  }
-
-  return (
-    <section className="mt-6" aria-labelledby="gateway-request-logs-title">
-      <div>
-        <h2 id="gateway-request-logs-title" className="text-base font-semibold">{t('providers.requestLogs.title')}</h2>
-        <p className="mt-1 text-[13px] text-muted-foreground">{t('providers.requestLogs.retention')}</p>
-      </div>
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Select value={filters.provider ?? 'all'} onValueChange={(value) => onFiltersChange({ ...filters, provider: value === 'all' ? undefined : value })}>
-          <SelectTrigger className="w-[190px]" aria-label={t('providers.requestLogs.filters.provider')}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t('providers.requestLogs.filters.provider')}</SelectItem>
-            {providers.map((provider) => <SelectItem key={provider.id} value={provider.name}>{provider.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={filters.statusClass ?? 'all'} onValueChange={(value) => onFiltersChange({ ...filters, statusClass: value === 'all' ? undefined : value as RequestLogStatusClass })}>
-          <SelectTrigger className="w-[190px]" aria-label={t('providers.requestLogs.filters.statusClass')}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t('providers.requestLogs.statusClass.all')}</SelectItem>
-            <SelectItem value="success">{t('providers.requestLogs.statusClass.success')}</SelectItem>
-            <SelectItem value="client_error">{t('providers.requestLogs.statusClass.clientError')}</SelectItem>
-            <SelectItem value="server_error">{t('providers.requestLogs.statusClass.serverError')}</SelectItem>
-          </SelectContent>
-        </Select>
-        {filters.workflowRunId ? (
-          <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-subtle px-2 py-1 font-mono text-xs">
-            {t('providers.requestLogs.correlatedRun', { id: filters.workflowRunId })}
-          </span>
-        ) : null}
-        {hasFilters ? (
-          <Button type="button" variant="ghost" size="compact" onClick={() => onFiltersChange({})}>{t('common:actions.clearFilters')}</Button>
-        ) : null}
-      </div>
-
-      <div className="mt-4">
-        {logsQuery.isLoading ? (
-          <div role="status" aria-busy="true" aria-live="polite" className="grid gap-2">
-            <span className="sr-only">{t('providers.requestLogs.title')}</span>
-            {Array.from({ length: 5 }, (_, index) => <Skeleton key={index} className="h-12 w-full rounded-md" />)}
-          </div>
-        ) : logsQuery.isError ? (
-          <ErrorState title={t('providers.requestLogs.title')} description={t('providers.requestLogs.error')} onAction={() => void logsQuery.refetch()} />
-        ) : items.length === 0 ? (
-          hasFilters
-            ? <EmptyState title={t('providers.requestLogs.noMatches.title')} description={t('providers.requestLogs.noMatches.description')} actionLabel={t('common:actions.clearFilters')} onAction={() => onFiltersChange({})} />
-            : <EmptyState title={t('providers.requestLogs.emptyTitle')} description={t('providers.requestLogs.emptyDescription')} />
-        ) : (
-          <>
-            <ul className="grid gap-2">
-              {items.map((item) => (
-                <RequestLogRow
-                  key={item.id}
-                  item={item}
-                  expanded={expandedId === item.id}
-                  onToggle={() => setExpandedId(expandedId === item.id ? null : item.id)}
-                  locale={locale}
-                />
-              ))}
-            </ul>
-            {nextCursor ? (
-              <div className="mt-3">
-                <Button type="button" variant="secondary" size="compact" onClick={() => void loadMore()} disabled={loadingMore}>
-                  {loadingMore ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : null}
-                  {t('providers.requestLogs.loadMore')}
-                </Button>
-              </div>
-            ) : null}
-          </>
-        )}
-      </div>
-    </section>
-  );
-}

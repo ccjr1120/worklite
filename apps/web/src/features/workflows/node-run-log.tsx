@@ -204,8 +204,8 @@ function NodeRunLogEntry({ nodeRun, runId, locale }: NodeRunLogEntryProps) {
           {showRequestLogs ? (
             <div className="mt-3">
               <Link
-                to="/model-providers"
-                search={{ tab: 'request-logs', workflowRunId: runId }}
+                to="/logs"
+                search={{ tab: 'requests', range: '24h', workflowRunId: runId }}
                 className={cn('inline-flex items-center gap-1.5 text-[13px] text-brand hover:underline', focusRing)}
               >
                 <ScrollText className="size-3.5" aria-hidden="true" />

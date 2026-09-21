@@ -677,6 +677,31 @@ function ChatBot({ workspaceSlug }: { workspaceSlug: string }) {
                 </ConversationContent>
               </Conversation>
             )}
+          </section>
+        </div>
+
+        {!open && status ? <button type="button" className={cn('flex min-h-8 items-center gap-2 border-b border-border px-3 text-left text-[13px] text-muted-foreground hover:bg-surface-subtle hover:text-foreground', surfaceInteraction, focusRingInset)} onClick={() => setOpen(true)}><MessageSquareText className="size-4 shrink-0 text-brand" /><span className="min-w-0 flex-1 truncate">{status}</span><ChevronRight className="size-4" /></button> : null}
+
+        {composerLoading ? (
+          <div className="flex min-h-12 items-center gap-2 px-3 text-[13px] text-muted-foreground" role="status"><LoaderCircle className="size-4 motion-safe:animate-spin" />{t('assistant:composer.loading')}</div>
+        ) : composerAvailable ? (
+          <PromptInput onSubmit={submit}>
+            <label htmlFor="assistant-message" className="sr-only">{t('assistant:composer.label')}</label>
+            <Popover open={commandMatches.length > 0 || mentionMenuOpen} onOpenChange={(next) => { if (next) return; setSlashDismissed(true); setMentionDismissed(true); }}>
+              <PopoverAnchor asChild><div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 rounded-md border border-border bg-surface px-2 focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
+                {selectedWorkflow ? <span className="inline-flex h-7 max-w-[min(16rem,70%)] shrink-0 items-center gap-1.5 rounded-md border border-brand/30 bg-brand-subtle px-2 text-[13px] font-medium text-foreground"><Play className="size-3.5 shrink-0 text-brand" /><span className="truncate">{selectedWorkflow.name}</span><Tooltip><TooltipTrigger asChild><button type="button" className={cn('rounded-sm text-muted-foreground hover:text-foreground', focusRingInset)} aria-label={t('assistant:mentions.remove')} onClick={() => setSelectedWorkflow(null)}><X className="size-3.5" /></button></TooltipTrigger><TooltipContent>{t('assistant:mentions.remove')}</TooltipContent></Tooltip></span> : null}
+                <PromptInputTextarea className="min-w-32 basis-40 border-0 bg-transparent px-1 focus:border-transparent focus:ring-0" id="assistant-message" name="system-helper-message" autoComplete="off" value={draft} onValueChange={(value) => { setDraft(value); setSlashDismissed(false); setMentionDismissed(false); setActiveCommandIndex(0); setActiveMentionIndex(0); }} onFocus={() => setOpen(true)} onKeyDown={handleComposerKeyDown} placeholder={waitingForInput ? t('assistant:composer.answerPlaceholder') : t('assistant:composer.placeholder')} role="combobox" aria-expanded={commandMatches.length > 0 || mentionMenuOpen} rows={1} />
+              </div></PopoverAnchor>
+              <PopoverContent side="top" align="start" className="w-[min(420px,calc(100vw-24px))] p-1" onOpenAutoFocus={(event) => event.preventDefault()} onCloseAutoFocus={(event) => event.preventDefault()}>
+                {mentionMenuOpen ? <div role="listbox" aria-label={t('assistant:mentions.label')}>{mentionMatches.map((item, index) => <button key={item.value.id} type="button" role="option" aria-selected={index === activeMentionIndex} className={cn('flex w-full items-center gap-3 rounded-md px-3 py-2 text-left', surfaceInteraction, focusRingInset, index === activeMentionIndex ? 'bg-brand-subtle' : 'hover:bg-surface-subtle')} onPointerDown={(event) => event.preventDefault()} onPointerMove={() => setActiveMentionIndex(index)} onClick={() => selectMention(item)}><Play className="size-4 shrink-0 text-brand" /><span className="truncate text-sm">{item.value.name}</span></button>)}</div> : <div role="listbox" aria-label={t('assistant:commands.menuLabel')}>{commandMatches.map((command, index) => { const Icon = command.icon; return <button key={command.value} type="button" role="option" aria-selected={index === activeCommandIndex} className={cn('flex w-full items-start gap-3 rounded-md px-3 py-2 text-left', surfaceInteraction, focusRingInset, index === activeCommandIndex ? 'bg-brand-subtle' : 'hover:bg-surface-subtle')} onPointerDown={(event) => event.preventDefault()} onPointerMove={() => setActiveCommandIndex(index)} onClick={() => runCommand(command.value)}><Icon className="mt-0.5 size-4 shrink-0 text-brand" /><span><span className="block font-mono text-[13px] font-medium">{command.value}</span><span className="mt-0.5 block text-xs text-muted-foreground">{t(`assistant:${command.descriptionKey}`)}</span></span></button>; })}</div>}
+              </PopoverContent>
+            </Popover>
+            <Tooltip><TooltipTrigger asChild><PromptInputSubmit className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md bg-brand text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50" status={activeExecutionRunning ? 'streaming' : busy ? 'submitted' : 'idle'} aria-label={activeExecutionRunning ? t('assistant:composer.stop') : t('assistant:composer.send')} disabled={submitDisabled} onStop={() => void cancelExecution()}>{activeExecutionRunning ? <Square className="size-3.5 fill-current" /> : busy ? <LoaderCircle className="size-4 motion-safe:animate-spin" /> : <ArrowUp className="size-4" />}</PromptInputSubmit></TooltipTrigger><TooltipContent>{activeExecutionRunning ? t('assistant:composer.stop') : t('assistant:composer.send')}</TooltipContent></Tooltip>
+          </PromptInput>
+        ) : (
+          <button type="button" className={cn('flex min-h-12 w-full items-center gap-2 px-3 text-left text-[13px] font-medium hover:bg-surface-subtle', surfaceInteraction, focusRingInset)} onClick={() => { setPanelView('configuration'); setOpen(true); }}><ShieldAlert className="size-4 shrink-0 text-brand" /><span className="min-w-0 flex-1">{t('assistant:composer.configure')}</span><ChevronRight className="size-4 text-muted-foreground" /></button>
+        )}
+      </div> : null}
     </div>
   );
 }

@@ -46,7 +46,7 @@ const HELPER_BUILTIN_TOOLS = [
 ] as const;
 
 const WORKLITE_NAVIGATION_ROUTES = {
-  home: '/home', 'system-helper-chat': '/home', skills: '/skills', 'mcp-servers': '/mcp-servers', 'model-providers': '/model-providers', workflows: '/workflows', 'settings-appearance': '/settings/appearance', 'settings-usage': '/settings/usage', 'settings-audit-log': '/settings/audit-log',
+  home: '/home', 'system-helper-chat': '/home', skills: '/skills', 'mcp-servers': '/mcp-servers', 'model-providers': '/model-providers', logs: '/logs', workflows: '/workflows', 'settings-appearance': '/settings/appearance', 'settings-usage': '/settings/usage', 'settings-audit-log': '/settings/audit-log',
 } as const satisfies Record<WorkliteNavigationTarget, string>;
 
 @Injectable()

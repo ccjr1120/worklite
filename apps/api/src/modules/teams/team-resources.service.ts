@@ -139,6 +139,7 @@ const WORKLITE_NAVIGATION_ROUTES = {
   skills: '/skills',
   'mcp-servers': '/mcp-servers',
   'model-providers': '/model-providers',
+  logs: '/logs',
   workflows: '/workflows',
   'settings-appearance': '/settings/appearance',
   'settings-usage': '/settings/usage',

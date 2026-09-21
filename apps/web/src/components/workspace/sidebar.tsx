@@ -1,5 +1,5 @@
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Home, KeyRound, Puzzle, Settings, Workflow } from 'lucide-react';
+import { Home, KeyRound, Puzzle, ScrollText, Settings, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { focusRingInset } from '@/components/ui/interaction';
@@ -28,6 +28,7 @@ const navigationGroups = [
     labelKey: 'nav.configuration',
     items: [
       { id: 'providers', labelKey: 'nav.modelProviders', to: '/model-providers', icon: KeyRound },
+      { id: 'logs', labelKey: 'nav.logs', to: '/logs', icon: ScrollText },
       { id: 'settings', labelKey: 'nav.settings', to: '/settings/appearance', icon: Settings },
     ],
   },

@@ -24,10 +24,12 @@ export type GatewayProviderView = Omit<GatewayProvider, 'apiKey' | 'headers'> & 
   headerNames: string[];
 };
 
-export type GatewayStatsWindow = '24h' | '7d' | '30d';
+export type GatewayTimeRangeQuery = {
+  from?: string;
+  to?: string;
+};
 
 export type GatewayStats = {
-  window: GatewayStatsWindow;
   from: string;
   to: string;
   summary: {
@@ -374,8 +376,28 @@ function nullableTotal(values: Array<number | null>): number | null {
   return known.length ? known.reduce((total, value) => total + value, 0) : null;
 }
 
-function windowMs(window: GatewayStatsWindow): number {
-  return window === '24h' ? 24 * 60 * 60 * 1000 : window === '7d' ? 7 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
+const DEFAULT_RANGE_MS = 24 * 60 * 60 * 1000;
+
+function parseInstant(value: string | undefined): number | null {
+  if (!value?.trim()) return null;
+  const parsed = Date.parse(value.trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Resolves an explicit absolute range. An absent bound falls back to the last 24
+ * hours ending now, `to` never runs past the current instant, and an inverted
+ * range is rejected rather than silently swapped: a caller that sent the bounds
+ * the wrong way round asked for something different from what swapping produces.
+ */
+export function resolveTimeRange(query: GatewayTimeRangeQuery = {}): { fromMs: number; toMs: number } {
+  const now = Date.now();
+  const requestedTo = parseInstant(query.to);
+  const requestedFrom = parseInstant(query.from);
+  const toMs = Math.min(requestedTo ?? now, now);
+  const fromMs = requestedFrom ?? toMs - DEFAULT_RANGE_MS;
+  if (fromMs > toMs) throw new RangeError('The range start must not be later than its end.');
+  return { fromMs, toMs };
 }
 
 export function recordRequestStat(input: {
@@ -391,9 +413,8 @@ export function recordRequestStat(input: {
   getDatabase().prepare(`INSERT INTO gateway_request_stats (occurred_at, provider_name, model, endpoint, status, duration_ms, prompt_tokens, completion_tokens, total_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(Date.now(), input.provider || 'Unknown', input.model || 'Unknown', input.endpoint || '/', input.status, Math.max(0, Math.round(input.durationMs)), input.promptTokens ?? null, input.completionTokens ?? null, input.totalTokens ?? null);
 }
 
-export function requestStats(window: GatewayStatsWindow = '24h'): GatewayStats {
-  const toMs = Date.now();
-  const fromMs = toMs - windowMs(window);
+export function requestStats(query: GatewayTimeRangeQuery = {}): GatewayStats {
+  const { fromMs, toMs } = resolveTimeRange(query);
   const records = getDatabase().prepare('SELECT provider_name, model, endpoint, status, duration_ms, prompt_tokens, completion_tokens, total_tokens FROM gateway_request_stats WHERE occurred_at >= ? AND occurred_at <= ? ORDER BY occurred_at DESC').all(fromMs, toMs) as Array<{ provider_name: string; model: string; endpoint: string; status: number; duration_ms: number; prompt_tokens: number | null; completion_tokens: number | null; total_tokens: number | null }>;
   const successful = records.filter((record) => record.status >= 200 && record.status < 400).length;
   const summaryTokens = {
@@ -432,7 +453,6 @@ export function requestStats(window: GatewayStatsWindow = '24h'): GatewayStats {
     };
   }).sort((a, b) => b.requests - a.requests || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model));
   return {
-    window,
     from: new Date(fromMs).toISOString(),
     to: new Date(toMs).toISOString(),
     summary: {
@@ -572,7 +592,7 @@ function requestLogListItem(row: GatewayRequestLogRow) {
 
 const REQUEST_LOG_PAGE_LIMIT = 50;
 
-export function requestLogs(query: {
+export function requestLogs(query: GatewayTimeRangeQuery & {
   provider?: string;
   model?: string;
   statusClass?: string;
@@ -582,8 +602,15 @@ export function requestLogs(query: {
 }) {
   const database = getDatabase();
   pruneRequestLogs(database);
-  const conditions: string[] = [];
-  const values: Array<string | number> = [];
+  const { fromMs, toMs } = resolveTimeRange(query);
+  // Details live for three days while statistics live forever, so a range that
+  // reaches further back is served as its intersection with the retention window.
+  // The reader is told what was actually covered instead of being handed a
+  // rejection for a range that is valid against the other store.
+  const retainedFromMs = Date.now() - REQUEST_LOG_RETENTION_MS;
+  const servedFromMs = Math.max(fromMs, retainedFromMs);
+  const conditions: string[] = ['occurred_at >= ?', 'occurred_at <= ?'];
+  const values: Array<string | number> = [servedFromMs, toMs];
   if (query.provider?.trim()) {
     conditions.push('provider_name = ?');
     values.push(query.provider.trim());
@@ -606,7 +633,7 @@ export function requestLogs(query: {
   }
   const requested = Number(query.limit ?? REQUEST_LOG_PAGE_LIMIT);
   const limit = Number.isSafeInteger(requested) && requested > 0 ? Math.min(requested, REQUEST_LOG_PAGE_LIMIT) : REQUEST_LOG_PAGE_LIMIT;
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const where = `WHERE ${conditions.join(' AND ')}`;
   const rows = database.prepare(`SELECT * FROM gateway_request_logs ${where} ORDER BY occurred_at DESC, id DESC LIMIT ?`).all(...values, limit + 1) as GatewayRequestLogRow[];
   const page = rows.slice(0, limit);
   const last = page.at(-1);
@@ -614,6 +641,9 @@ export function requestLogs(query: {
     items: page.map(requestLogListItem),
     nextCursor: rows.length > limit && last ? String(last.occurred_at) : null,
     retentionDays: REQUEST_LOG_RETENTION_DAYS,
+    from: new Date(fromMs).toISOString(),
+    to: new Date(toMs).toISOString(),
+    retainedFrom: new Date(retainedFromMs).toISOString(),
   };
 }
 

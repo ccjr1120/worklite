@@ -254,6 +254,7 @@ export type WorkliteNavigationTarget =
   | 'skills'
   | 'mcp-servers'
   | 'model-providers'
+  | 'logs'
   | 'workflows'
   | 'settings-appearance'
   | 'settings-usage'
@@ -338,7 +339,10 @@ export type CodexAccountUsageSnapshot = {
   fetchedAt: string;
 };
 
-export type PortkeyGatewayStatsWindow = '24h' | '7d' | '30d';
+export type GatewayTimeRange = {
+  from?: string;
+  to?: string;
+};
 
 export type PortkeyGatewayStatsBreakdown = {
   provider: string;
@@ -356,7 +360,6 @@ export type PortkeyGatewayStatsBreakdown = {
 };
 
 export type PortkeyGatewayStats = {
-  window: PortkeyGatewayStatsWindow;
   from: string;
   to: string;
   summary: {
@@ -826,7 +829,7 @@ export type GatewayRequestLogDetail = GatewayRequestLogListItem & {
   response: GatewayRequestLogResponseCapture;
 };
 
-export type GatewayRequestLogQuery = {
+export type GatewayRequestLogQuery = GatewayTimeRange & {
   provider?: string;
   model?: string;
   statusClass?: GatewayRequestLogStatusClass;
@@ -839,6 +842,14 @@ export type GatewayRequestLogList = {
   items: GatewayRequestLogListItem[];
   nextCursor: string | null;
   retentionDays: number;
+  /**
+   * The range actually served. It is the requested range intersected with the
+   * retention window, so a client can tell that an earlier part of what it asked
+   * for has already expired rather than being quiet.
+   */
+  from: string;
+  to: string;
+  retainedFrom: string;
 };
 
 export type ArtifactView = {

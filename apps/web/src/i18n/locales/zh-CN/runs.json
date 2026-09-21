@@ -10,6 +10,14 @@
   "logsFailed": "无法加载执行日志。",
   "noLogs": "暂时没有节点执行日志。",
   "failureReason": "失败原因",
+  "cancel": {
+    "action": "取消运行",
+    "title": "取消此次运行？",
+    "description": "这只会终止当前运行，不会删除工作流、版本或已经创建的产物。",
+    "confirm": "确认取消",
+    "cancelling": "正在取消...",
+    "failed": "无法取消此次运行。"
+  },
   "retryCount_other": "已重试 {{count}} 次",
   "nodeRetry": {
     "action": "重试该节点",

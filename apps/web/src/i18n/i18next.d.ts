@@ -3,6 +3,7 @@ import type zhAssistant from './locales/zh-CN/assistant.json';
 import type zhArtifacts from './locales/zh-CN/artifacts.json';
 import type zhCommon from './locales/zh-CN/common.json';
 import type zhHome from './locales/zh-CN/home.json';
+import type zhLogs from './locales/zh-CN/logs.json';
 import type zhMcpServers from './locales/zh-CN/mcpServers.json';
 import type zhPlugins from './locales/zh-CN/plugins.json';
 import type zhRuns from './locales/zh-CN/runs.json';
@@ -26,6 +27,7 @@ declare module 'i18next' {
       plugins: typeof zhPlugins;
       artifacts: typeof zhArtifacts;
       settings: typeof zhSettings;
+      logs: typeof zhLogs;
     };
   }
 }

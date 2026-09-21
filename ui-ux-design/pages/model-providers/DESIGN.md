@@ -15,7 +15,9 @@
 
 ## Purpose
 
-Configure the upstream model providers the local Portkey Gateway dispatches to, manage the Codex account pool, review Gateway request metrics, and inspect what an individual Provider request sent and received.
+Configure the upstream model providers the local Portkey Gateway dispatches to and manage the Codex account pool.
+
+Gateway request metrics and captured request details are read at [Logs](../logs/DESIGN.md), not here. This page owns what the Gateway dispatches to; that one owns what it did.
 
 ## Primary Task
 
@@ -29,9 +31,9 @@ Creating or editing a provider costs two actions — fill the form, then save �
 
 Fluid collection width up to `1440px`. Providers is a top-level workspace destination: it is not part of the Agent resource tabs and does not use the Settings local navigation.
 
-Four page-level tabs use the `tab` URL Search parameter with `providers`, `codex`, `statistics`, and `request-logs` values. A missing or invalid value resolves to `providers`, and changing tabs updates the URL so refreshes and direct links restore the selected view.
+Two page-level tabs use the `tab` URL Search parameter with `providers` and `codex` values. A missing or invalid value resolves to `providers`, and changing tabs updates the URL so refreshes and direct links restore the selected view.
 
-The `providers` view is one continuous surface: the full-width Portkey Gateway summary first, then Gateway-managed provider administration. The `codex` view holds the account pool as one neutral card per account, two per row at `xl`. The `statistics` view holds four summary metrics above an expandable provider and model breakdown. The `request-logs` view holds a filter toolbar above a compact request list whose rows expand in place to reveal the captured request and response.
+The `providers` view is one continuous surface: the full-width Portkey Gateway summary first, then Gateway-managed provider administration. The `codex` view holds the account pool as one neutral card per account, two per row at `xl`.
 
 ## Interaction Contract
 
@@ -59,7 +61,7 @@ Activating `Test` resolves the model and runs. Resolution order: the model remem
 
 When the model resolves, the dialog opens in its waiting state and the request is already in flight. When it does not, the dialog opens with a model selection and one explicit run action; selecting a model persists it as the remembered value for that provider.
 
-The test is read-only. It sends the fixed user message `你好` and contains no prompt input or composer. Starting the test locks model selection. The waiting label shows elapsed whole seconds from submission, updating once per second with tabular numerals and without resizing the layout. Success shows the provider name, selected model, and complete reply. Failure replaces the waiting state with a credential-safe error, keeps the dialog dismissible, and offers `View request log` when the server returns the correlated request-log identifier, which opens the `request-logs` view filtered to that captured request. Success, failure, and timeout all retain the final elapsed duration and allow another test.
+The test is read-only. It sends the fixed user message `你好` and contains no prompt input or composer. Starting the test locks model selection. The waiting label shows elapsed whole seconds from submission, updating once per second with tabular numerals and without resizing the layout. Success shows the provider name, selected model, and complete reply. Failure replaces the waiting state with a credential-safe error, keeps the dialog dismissible, and offers `View request log` when the server returns the correlated request-log identifier, which opens the Logs `requests` tab filtered to that Provider. Success, failure, and timeout all retain the final elapsed duration and allow another test.
 
 ### Portkey Gateway summary
 
@@ -77,31 +79,17 @@ Quota and token freshness are self-healing and expose no manual refresh control.
 
 Disabled accounts show persisted metadata without an upstream quota request. An individual usage error is shown on that account and never hides other accounts.
 
-### Gateway statistics
-
-Statistics offer 24-hour, 7-day, and 30-day windows and show request count, success rate, average latency, and known token totals, followed by provider and model breakdown rows. Rows expand in place to reveal endpoint, status, duration, and token availability without increasing the default page height. Token values missing from upstream responses are labeled unavailable rather than zero. The view is read-only and never exposes prompts, responses, credentials, or header values.
-
-### Gateway request logs
-
-Statistics answer how the Gateway is performing; request logs answer what one request actually sent and received. Each row carries its time, Provider, model, endpoint, status, and duration, with a non-color status cue and tabular numerals. A row expands in place to reveal the transformed upstream request body and the captured response. A streaming response is presented as its ordered captured events rather than as one opaque blob, and a response that could not be captured states that rather than rendering an empty body.
-
-Captured bodies are untrusted recorded content. They render as plain preformatted text inside a height-bounded scroll container, never as markup and never as an executed or fetched resource. Each body offers `Copy`, which reports on the control that was activated. Long bodies stay bounded by that container rather than extending the page.
-
-Filters cover Provider, model, status class, and correlated Workflow Run, and persist together in the route Search parameters so a refresh or a shared link restores the same investigation. A Run-scoped link from a Workflow Run opens this view already filtered to that Run. Paging is an explicit `Load more` action appending the next page; it is not infinite scroll, because the list is an investigation surface rather than a feed.
-
-Retention is a constraint the user cannot infer: the view states that captured requests are kept for three days. It exposes no delete, export, or retention-configuration control, because expiry is automatic and the window is fixed. The view is read-only and never exposes credentials or custom header values, which are excluded at capture time rather than filtered here.
-
 ## States
 
 | State | Behavior |
 | --- | --- |
-| Loading | Providers: `CollectionLoading` with four rows and the table's five columns. Statistics: four metric skeletons above a table-shaped skeleton in a `role="status"` live region. Codex pool: a polite status line while accounts are present; card geometry is preserved. Request logs: a row-shaped skeleton matching the list columns; an expanding row shows a bounded body-shaped skeleton while its detail loads. |
-| Empty | Providers: explain the object and offer `Create provider`. Codex pool: explain that an account can be added or imported. Statistics: explain that Gateway requests appear once they occur. Request logs: explain that captured requests appear once a Provider request occurs and that they are kept for three days. |
-| No results | Providers: names the active search and offers `Clear filters`. Request logs: names the active filters and offers `Clear filters`, branching on whether the unfiltered list is empty so an expired window is never reported as a filter mismatch. Codex pool and Statistics have no search. |
-| Error | Providers, Statistics, and Request logs: `ErrorState` with a retry action. A failed row detail keeps its row expanded and explains itself inside that row rather than collapsing it. Gateway and Codex errors render as inline `role="alert"` text scoped to the affected section or account without hiding sibling content. |
-| Busy | Every mutation reports on the control that was activated. The test dialog owns its own waiting state; the row's `Test` control shows its pending label only for the provider being tested. `Load more` reports progress on itself and keeps the existing rows visible. |
+| Loading | Providers: `CollectionLoading` with four rows and the table's five columns. Codex pool: a polite status line while accounts are present; card geometry is preserved. |
+| Empty | Providers: explain the object and offer `Create provider`. Codex pool: explain that an account can be added or imported. |
+| No results | Providers: names the active search and offers `Clear filters`. The Codex pool has no search. |
+| Error | Providers: `ErrorState` with a retry action. Gateway and Codex errors render as inline `role="alert"` text scoped to the affected section or account without hiding sibling content. |
+| Busy | Every mutation reports on the control that was activated. The test dialog owns its own waiting state; the row's `Test` control shows its pending label only for the provider being tested. |
 | Offline | Inherits `shared-states.md`. |
-| Long content | Provider table cells stay on one line with horizontal overflow on narrow layouts. Model tokens truncate individually. Breakdown model identifiers wrap by character rather than widening the row. Captured request and response bodies stay inside a height-bounded scroll container with `Copy`, so a large body never extends the page. |
+| Long content | Provider table cells stay on one line with horizontal overflow on narrow layouts. Model tokens truncate individually. |
 
 Define unconfigured, testing, connected, invalid credentials, unavailable provider, rate-limited, permission, and replacement-confirmation states. Changing configuration explains affected Agents or future Runs when known.
 
@@ -187,37 +175,19 @@ Define unconfigured, testing, connected, invalid credentials, unavailable provid
 | `settings:providers.codexPool.loading` | State |
 | `settings:providers.codexPool.emptyTitle` | State |
 | `settings:providers.codexPool.emptyDescription` | Recovery |
-| `settings:providers.statistics.title` | State |
-| `settings:providers.statistics.window` / `last24h` / `last7d` / `last30d` | Action |
-| `settings:providers.statistics.loading` | State |
-| `settings:providers.statistics.error` | Recovery |
-| `settings:providers.statistics.emptyTitle` | State |
-| `settings:providers.statistics.emptyDescription` | Recovery |
-| `settings:providers.statistics.requests` / `successRate` / `averageLatency` / `totalTokens` / `provider` / `model` / `endpoints` / `statuses` / `tokens` / `input` / `output` / `total` / `unavailable` / `windowRange` | State |
-| `settings:providers.views.requestLogs` | Action |
-| `settings:providers.requestLogs.title` | State |
-| `settings:providers.requestLogs.retention` | Constraint |
-| `settings:providers.requestLogs.filters.provider` / `model` / `statusClass` / `workflowRun` | Action |
-| `settings:providers.requestLogs.statusClass.all` / `success` / `clientError` / `serverError` | Action |
-| `settings:providers.requestLogs.clearFilters` | Action |
-| `settings:providers.requestLogs.loadMore` | Action |
-| `settings:providers.requestLogs.copyRequest` / `copyResponse` / `copied` | Action |
-| `settings:providers.requestLogs.request` / `response` / `streaming` / `streamEvents` | State |
-| `settings:providers.requestLogs.columns.*` | State |
-| `settings:providers.requestLogs.emptyTitle` | State |
-| `settings:providers.requestLogs.emptyDescription` | Recovery |
-| `settings:providers.requestLogs.noMatches.*` | State |
-| `settings:providers.requestLogs.error` / `detailError` | Recovery |
-| `settings:providers.requestLogs.responseUnavailable` | State |
-| `settings:providers.requestLogs.correlatedRun` | State |
 | `settings:providers.viewRequestLog` | Action |
 
+Moved keys: the `settings:providers.statistics.*` and `settings:providers.requestLogs.*` trees move to the `logs` namespace with the views they belong to. See [Logs](../logs/DESIGN.md) for their current inventory. `settings:providers.viewRequestLog` stays here because the failed provider test that offers it stays here; it now links to the Logs destination.
+
 Removed keys:
+
+- `settings:providers.views.statistics` and `settings:providers.views.requestLogs`: the tabs they labelled are removed from this page.
 
 - `settings:providers.codexPool.refreshAll` and `settings:providers.gateway.codex.refresh`, `refreshed`, `refreshFailed`, `quotasRefreshed`, `quotasRefreshFailed`: their controls are removed because quota and token staleness are already observable and recovered automatically. Under `shared/copy-standards.md` automation debt, the labels and failure copy go with the controls.
 - `settings:providers.codexPool.description`: it restates the pool heading and then documents the one-minute refresh cadence, which is internal mechanics the reader cannot act on.
 - `settings:providers.testDescription` ("Select a model, then send the fixed read-only test message."): it describes the removed selection step.
 - `settings:providers.viewLogs` and the `traceId` copy beside it: the Diagnostic Logs page they opened is removed, and the correlated Gateway request log replaces the trace identifier.
+- `settings:providers.requestLogs.clearFilters`: the shared `common:actions.clearFilters` label is what the control renders.
 - `settings:providers.gateway.codex.description`, `rateLimitsLoading`, `rateLimitsUnavailable`, `rateLimitsEmpty`: the summary section delegates account management to the pool tab through `manageInPool`, and the rate-limit strings are unrendered leftovers from the pre-pool presentation.
 
 `settings:providers.description` is retained as a Constraint: write-only credentials and the fact that a change affects future Agent runs but not published Workflow versions are both rules the interface does not otherwise show.
@@ -228,16 +198,13 @@ Tabs are a labelled `TabsList` with the selected tab reflected in the URL. Each 
 
 The model token input keeps focus in its text field after every commit and removal. Each token's remove button carries an accessible name naming that model. Arrow-key traversal moves between tokens and the caret without trapping focus.
 
-A request-log row is an expand control with an accessible name naming its Provider, model, and time, and its expanded state is exposed to assistive technology. Captured bodies sit in labelled, keyboard-scrollable regions, and each `Copy` control names the body it copies. Request status uses the shared status badge with a non-color cue, and a streaming capture is labelled as streaming in text rather than by styling alone.
-
-Icon-only edit, delete, per-account, and copy controls carry accessible names; per-account names include the account label so they are distinguishable. Enable and disable switches expose the action plus the account label. Quota bars are `progressbar` elements with `aria-valuenow` and a text percentage beside them, so width is never the only encoding. Breakdown and provider statuses use the shared status badge with a non-color cue. The waiting state exposes a stable accessible string separate from the ticking seconds so assistive technology is not re-announced every second.
+Icon-only edit, delete, per-account, and copy controls carry accessible names; per-account names include the account label so they are distinguishable. Enable and disable switches expose the action plus the account label. Quota bars are `progressbar` elements with `aria-valuenow` and a text percentage beside them, so width is never the only encoding. Provider statuses use the shared status badge with a non-color cue. The waiting state exposes a stable accessible string separate from the ticking seconds so assistive technology is not re-announced every second.
 
 ## Coverage Status
 
-Verified 2026-09-21 for the `request-logs` view; the entries below carry over from the 2026-09-20 verification of the other three views. Struck entries were resolved in the 2026-09-19 single-action pass.
+Verified 2026-09-21 after the observability views moved to [Logs](../logs/DESIGN.md); the remaining entries carry over from the 2026-09-20 verification of the Providers and Codex views. Struck entries were resolved in the 2026-09-19 single-action pass.
 
-- The `request-logs` view is specified and implemented in the same change. Its filters live in route Search state and its row expansion is local, so a shared link restores the filtered investigation but not which row was open.
-- Captured bodies are rendered as preformatted text only. No syntax highlighting, JSON tree, or diff view is provided in this increment.
+- ~~Statistics breakdown rows are keyed by the provider and model joined with a NUL separator, and expansion state is a single string, which is correct but leaves no reset when the window changes.~~ Resolved by relocation: the breakdown moved to Logs, where expansion resets when the range changes.
 
 - ~~The test flow costs two actions. `openProviderTest` resolves a remembered or first model and then opens the dialog in `status: 'idle'`, requiring `Run test`.~~ Resolved: a remembered still-configured model, or a provider with exactly one model, starts the test immediately and the dialog opens in its waiting state. The selection step remains only when neither holds, where the model is genuinely unresolvable.
 - ~~`Refresh all quotas` exists at pool level and calls `codexUsageQuery.refetch()`, duplicating the 60-second `useCodexAccountUsagesQuery` poll.~~ Resolved: the control and its `codexPool.refreshAll`, `quotasRefreshed`, and `quotasRefreshFailed` keys are removed. The already-rendered `usage.fetchedAt` line is the freshness signal.
@@ -245,11 +212,16 @@ Verified 2026-09-21 for the `request-logs` view; the entries below carry over fr
 - `codexAuthBusy` is one page-level flag shared by login, import, toggle, per-account refresh, and delete, so any single account mutation disables every control in the pool instead of reporting on the activated control.
 - Codex mutation failures are reported only through toasts, so a failure disappears rather than remaining on the affected account as `shared-states.md` requires for durable errors.
 - `settings:providers.gateway.codex.rateLimitsLoading`, `rateLimitsUnavailable`, and `rateLimitsEmpty` are defined but never rendered.
-- Statistics breakdown rows are keyed by the provider and model joined with a NUL separator, and expansion state is a single string, which is correct but leaves no reset when the window changes: switching windows can leave a stale row key expanded.
 - The provider row `Test` control is disabled only while that same provider is loading, so a second provider's test can replace the dialog state of one in flight.
 - ~~Protocol selection did not match the supported current contracts.~~ Resolved: `anthropic/messages` is available, `deepseek/chat` is removed, and a new provider draft starts without an implicit protocol.
 
 ## Changelog
+
+### 2026-09-21 - Observability Moved to Logs
+
+- Removed the `statistics` and `request-logs` tabs and their sections; this page now has two tabs, `providers` and `codex`. Gateway observability is specified at [Logs](../logs/DESIGN.md), which reads what the Gateway did while this page configures what it dispatches to.
+- Moved the `settings:providers.statistics.*` and `settings:providers.requestLogs.*` copy to the `logs` namespace and removed the two view labels.
+- Kept `View request log` on the failed provider test and repointed it at the Logs `requests` tab filtered to that Provider.
 
 ### 2026-09-21 - Gateway Request Logs
 

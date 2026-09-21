@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
-import type { AssignHomeBoardRequest, CreateHomeBoardCategoryRequest, GatewayRequestLogQuery, UpdateHomeBoardCategoryRequest } from '@worklite/contracts';
+import type { AssignHomeBoardRequest, CreateHomeBoardCategoryRequest, GatewayRequestLogQuery, GatewayTimeRange, UpdateHomeBoardCategoryRequest } from '@worklite/contracts';
 
 export const workflowScheduleQueryKey = (workflowId: string) => ['workflow-schedule', workflowId] as const;
 export const pluginsQueryKey = () => ['plugins'] as const;
@@ -128,13 +128,17 @@ export function useCodexAccountUsagesQuery(enabled: boolean) {
   return useQuery({ queryKey: ['codex-account-usages'] as const, queryFn: api.codexAccountUsages, enabled, refetchInterval: 60_000 });
 }
 
-export function usePortkeyGatewayStatsQuery(window: '24h' | '7d' | '30d') {
-  return useQuery({ queryKey: ['portkey-gateway-stats', window] as const, queryFn: () => api.portkeyGatewayStats(window), refetchInterval: 30_000 });
+export function usePortkeyGatewayStatsQuery(range: GatewayTimeRange) {
+  return useQuery({
+    queryKey: ['portkey-gateway-stats', range.from ?? '', range.to ?? ''] as const,
+    queryFn: () => api.portkeyGatewayStats(range),
+    refetchInterval: 30_000,
+  });
 }
 
 export function useGatewayRequestLogsQuery(query: GatewayRequestLogQuery) {
   return useQuery({
-    queryKey: ['gateway-request-logs', query.provider ?? '', query.model ?? '', query.statusClass ?? '', query.workflowRunId ?? ''] as const,
+    queryKey: ['gateway-request-logs', query.from ?? '', query.to ?? '', query.provider ?? '', query.model ?? '', query.statusClass ?? '', query.workflowRunId ?? ''] as const,
     queryFn: () => api.gatewayRequestLogs(query),
     refetchInterval: 30_000,
   });

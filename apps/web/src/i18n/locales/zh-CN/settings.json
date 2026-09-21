@@ -85,9 +85,7 @@
       "label": "提供商管理",
       "providers": "模型提供商",
       "codex": "Codex 账号池",
-      "statistics": "统计",
-      "gateway": "Portkey Gateway",
-      "requestLogs": "请求日志"
+      "gateway": "Portkey Gateway"
     },
     "gateway": {
       "title": "Portkey Gateway",
@@ -161,70 +159,9 @@
       "emptyTitle": "暂无 Codex 账号",
       "emptyDescription": "添加 Codex 账号或导入账号池 JSON 文件以开始使用。"
     },
-    "statistics": {
-      "title": "Gateway 统计",
-      "description": "由本地 Portkey Gateway 记录的安全请求指标。",
-      "window": "时间范围",
-      "last24h": "最近 24 小时",
-      "last7d": "最近 7 天",
-      "last30d": "最近 30 天",
-      "loading": "正在加载 Gateway 统计...",
-      "error": "无法加载 Gateway 统计。",
-      "emptyTitle": "暂无 Gateway 请求",
-      "emptyDescription": "通过 Portkey Gateway 的请求会显示在这里。",
-      "requests": "请求数",
-      "successRate": "成功率",
-      "averageLatency": "平均延迟",
-      "totalTokens": "Token 总量",
-      "provider": "提供商",
-      "model": "模型",
-      "endpoints": "接口",
-      "statuses": "状态码",
-      "tokens": "Token 用量",
-      "input": "输入",
-      "output": "输出",
-      "total": "总计",
-      "unavailable": "不可用",
-      "windowRange": "时间范围："
-    },
     "deleteFailed": "无法删除模型提供商。",
     "loading": "正在加载提供商...",
     "loadFailed": "无法加载提供商。",
-    "requestLogs": {
-      "title": "请求日志",
-      "retention": "已捕获的请求与响应保留三天。",
-      "rowLabel": "{{provider}} {{model}}，时间 {{time}}",
-      "filters": {
-        "provider": "所有供应商",
-        "model": "所有模型",
-        "statusClass": "所有状态",
-        "workflowRun": "工作流运行"
-      },
-      "statusClass": {
-        "all": "所有状态",
-        "success": "成功",
-        "clientError": "客户端错误",
-        "serverError": "服务端错误"
-      },
-      "loadMore": "加载更多",
-      "copied": "已复制",
-      "copyRequest": "复制请求内容",
-      "copyResponse": "复制响应内容",
-      "request": "请求",
-      "response": "响应",
-      "streamEvents": "响应流事件",
-      "streaming": "流式",
-      "correlatedRun": "运行 {{id}}",
-      "responseUnavailable": "未捕获到响应：{{reason}}",
-      "emptyTitle": "尚未捕获任何请求",
-      "emptyDescription": "供应商请求执行后，捕获的请求会显示在此处，并保留三天。",
-      "noMatches": {
-        "title": "没有符合筛选条件的请求",
-        "description": "清除筛选条件以查看其余已捕获的请求。"
-      },
-      "error": "无法加载请求日志。",
-      "detailError": "无法加载该捕获的请求。"
-    },
     "viewRequestLog": "查看请求日志",
     "emptyModels": "暂无已配置模型。"
   },

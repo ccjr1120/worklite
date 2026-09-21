@@ -122,7 +122,9 @@ export class RunsService {
           (detail) => this.publishActivity(request.context.workflowRunId, request.context.nodeId, request.context.nodeRunId, detail),
           { workflowRunId: request.context.workflowRunId, nodeRunId: request.context.nodeRunId },
         );
-        const output = config.outputFormat === 'json' ? parseWorkflowAgentJson(response) : response;
+        if (config.outputFormat !== 'json') return { output: response };
+        const output = parseWorkflowAgentJson(response);
+        assertWorkflowAgentOutputContract(output, config.outputContract);
         return { output };
       },
     });
@@ -597,6 +599,25 @@ function parseWorkflowAgentJson(value: string): unknown {
   } catch {
     throw new Error('Agent node JSON output requires valid JSON.');
   }
+}
+
+// Valid JSON is not the same thing as the node's intended result. Without a declared contract an
+// Agent could commit a progress note or a raw tool-call object, and every downstream node would
+// consume it as though the node had produced its evidence.
+function assertWorkflowAgentOutputContract(output: unknown, contract: unknown): void {
+  if (!Array.isArray(contract) || contract.length === 0) return;
+  const keys = contract.filter((key): key is string => typeof key === 'string' && key.trim().length > 0);
+  if (keys.length === 0) return;
+  const record = asRecord(output);
+  if (!record) throw new Error(`Agent node JSON output requires an object containing ${keys.join(', ')}.`);
+  const missing = keys.filter((key) => {
+    if (!Object.prototype.hasOwnProperty.call(record, key)) return true;
+    const value = record[key];
+    if (value === null || value === undefined) return true;
+    if (typeof value === 'string' && value.trim().length === 0) return true;
+    return Array.isArray(value) && value.length === 0;
+  });
+  if (missing.length > 0) throw new Error(`Agent node JSON output is missing required keys: ${missing.join(', ')}.`);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

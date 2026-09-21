@@ -323,8 +323,8 @@ function requiredString(value: unknown, maxLength: number): string | null {
 }
 
 function argumentArray(value: unknown): string[] | null {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) return null;
-  return [...value] as string[];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' && typeof item !== 'number' && typeof item !== 'boolean')) return null;
+  return value.map(String);
 }
 
 function correlationHeaders(correlation: GatewayCorrelation | undefined): Record<string, string> {
@@ -393,7 +393,10 @@ function normalizeAgentToolCall(call: { toolCallId: string; toolName: string; in
   const skillId = requiredString(input?.skillId, 200);
   const scriptPath = requiredString(input?.scriptPath, 240);
   const argumentsValue = argumentArray(input?.arguments);
-  return skillId && scriptPath && argumentsValue ? [{ toolCallId: call.toolCallId, toolName: 'skill_script', input: call.input, skillId, scriptPath, arguments: argumentsValue }] : [];
+  if (!skillId || !scriptPath || !argumentsValue) {
+    throw new ModelGatewayError('INVALID_TOOL_REQUEST', 'The model returned an invalid Skill request. Skill arguments must be scalar command-line values.');
+  }
+  return [{ toolCallId: call.toolCallId, toolName: 'skill_script', input: call.input, skillId, scriptPath, arguments: argumentsValue }];
 }
 
 function trimAgentMessages(systemPrompt: string, messages: readonly GatewayAgentMessage[], maxTokens: number): { messages: GatewayAgentMessage[]; dropped: number } {

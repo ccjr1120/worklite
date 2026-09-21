@@ -17,12 +17,14 @@ export class PortkeyGatewayController {
   }
 
   @Get('stats')
-  stats(@Query('window') window?: string): Promise<PortkeyGatewayStats> {
-    return this.gateway.stats(window);
+  stats(@Query('from') from?: string, @Query('to') to?: string): Promise<PortkeyGatewayStats> {
+    return this.gateway.stats({ from, to });
   }
 
   @Get('request-logs')
   requestLogs(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
     @Query('provider') provider?: string,
     @Query('model') model?: string,
     @Query('statusClass') statusClass?: string,
@@ -31,6 +33,8 @@ export class PortkeyGatewayController {
     @Query('cursor') cursor?: string,
   ): Promise<GatewayRequestLogList> {
     return this.gateway.requestLogs({
+      from,
+      to,
       provider,
       model,
       statusClass: statusClass === 'success' || statusClass === 'client_error' || statusClass === 'server_error' ? statusClass : undefined,

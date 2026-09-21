@@ -20,7 +20,7 @@ Read one Workflow Run's execution in full when the Run records dialog is too sma
 
 ## Primary Task
 
-Follow a Run's execution node by node to the point where it went wrong. Action budget: one — expand the node entry in question, as specified by `surfaces/workflow-run/node-logs/DESIGN.md`.
+Follow a Run's execution node by node to the point where it went wrong, or stop an active Run. Action budget: one activation point per goal — expand the node entry in question, or cancel the active Run.
 
 ## Layout
 
@@ -34,6 +34,10 @@ A durable Run summary leads: Workflow name, immutable version, status, initiator
 
 The Run detail query supplies the summary, node entries, input, result, pending action, and Artifacts. Node entry behavior is owned by `surfaces/workflow-run/node-logs/DESIGN.md` and is not restated here.
 
+### Cancel an active Run
+
+The Run summary exposes one destructive `Cancel run` action only while the Run is queued, running, or waiting for input. Activation opens a confirmation dialog explaining that only this Run is affected. Confirmation calls the existing Run cancellation endpoint, keeps the dialog controls busy until the request settles, closes on success, and leaves the dialog open with an inline error on failure. The event stream and Run query update the summary to the terminal `cancelled` state; no manual refresh is offered.
+
 ### Stay current during an active Run
 
 The route subscribes to the Run event stream and applies events incrementally to cached Run detail. There is no manual refresh control: every value on this page is backed by that stream, so staleness is server-observable. The stream resumes from its last sequence without duplicating events, and a terminal Run closes it.
@@ -44,7 +48,7 @@ Node-local retry and the durable pending action behave exactly as `shared-states
 
 ### Reach the correlated Provider requests
 
-An Agent or image node links to the Providers `request-logs` view filtered to this Run.
+An Agent or image node links to the Logs `requests` tab filtered to this Run.
 
 ## States
 
@@ -54,7 +58,7 @@ An Agent or image node links to the Providers `request-logs` view filtered to th
 | Empty | Not applicable; a Run that exists has a status and a summary. A Run with no node entries yet shows its summary and says execution has not reached a node. |
 | No results | Not applicable; this page has no filters. |
 | Error | A load failure shows a recoverable failure through the router boundary. A missing or non-workspace Run is a distinct not-found state offering the Workflows list. |
-| Busy | Retry reports on its own control. The page performs no other mutation. |
+| Busy | Cancellation reports progress on its confirmation control and disables dialog dismissal and duplicate submission until the request settles. Node retry retains its own control-local progress. |
 | Offline | Inherits `shared-states.md`. The reconnecting bar owns transport state and the Run retains the events already received. |
 | Long content | Payload and activity containers are bounded per `surfaces/workflow-run/node-logs/DESIGN.md`; the page itself scrolls. |
 
@@ -67,21 +71,27 @@ An Agent or image node links to the Providers `request-logs` view filtered to th
 | `runs:detail.noNodeRuns` | State |
 | `runs:detail.input` / `result` | State |
 | `runs:detail.backToWorkflows` | Action |
+| `runs:cancel.action` / `title` / `description` / `confirm` / `cancelling` / `failed` | Action, state, and recovery |
 
 The Run summary reuses the existing `runs:` status, duration, initiator, and version keys. Node entry copy belongs to `surfaces/workflow-run/node-logs/DESIGN.md`.
 
 ## Accessibility
 
-The Run summary is labelled by the page heading. Node entries carry the disclosure semantics defined by the node-log surface. Run status uses the shared status badge with a non-color cue. Keyboard order runs summary, node entries in execution order, then input, result, and Artifacts.
+The Run summary is labelled by the page heading. Node entries carry the disclosure semantics defined by the node-log surface. Run status uses the shared status badge with a non-color cue. Keyboard order runs summary, the active cancellation action when present, node entries in execution order, then input, result, and Artifacts. The cancellation dialog has labelled title and description, visible focus, and progress text independent of the spinner.
 
 ## Coverage Status
 
-Verified 2026-09-21. Differences found against the implementation:
+Verified 2026-09-20. Differences found against the implementation:
 
-- This route is specified and implemented in the same change. It is reached from the Run records dialog; no sidebar entry is added, because a Run is reached through its Workflow rather than as a top-level collection.
+- The route is reached from the Run records dialog; no sidebar entry is added, because a Run is reached through its Workflow rather than as a top-level collection.
+- Active Run cancellation is exposed in the page heading and confirmed in a shared Dialog; the implementation uses the existing `api.cancelRun` endpoint and query/event updates.
 - The route restores no expansion state from the URL, so a shared link opens the Run with every node entry collapsed.
 
 ## Changelog
+
+### 2026-09-20
+
+- Added Run-level cancellation for queued, running, and waiting-for-input Runs, with confirmation, control-local progress, failure feedback, and terminal-state streaming.
 
 ### 2026-09-21
 

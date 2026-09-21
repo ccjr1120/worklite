@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as HomeRouteImport } from './routes/home'
+import { Route as LogsRouteImport } from './routes/logs'
 import { Route as ModelProvidersRouteImport } from './routes/model-providers'
 import { Route as SettingsRouteRouteImport } from './routes/settings/route'
 import { Route as ArtifactsArtifactIdRouteImport } from './routes/artifacts/$artifactId'
@@ -37,6 +38,11 @@ const IndexRoute = IndexRouteImport.update({
 const HomeRoute = HomeRouteImport.update({
   id: '/home',
   path: '/home',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LogsRoute = LogsRouteImport.update({
+  id: '/logs',
+  path: '/logs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ModelProvidersRoute = ModelProvidersRouteImport.update({
@@ -130,6 +136,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRouteRouteWithChildren
   '/home': typeof HomeRoute
+  '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
@@ -150,6 +157,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/home': typeof HomeRoute
+  '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
@@ -172,6 +180,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRouteRouteWithChildren
   '/home': typeof HomeRoute
+  '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
@@ -195,6 +204,7 @@ export interface FileRouteTypes {
     | '/'
     | '/settings'
     | '/home'
+    | '/logs'
     | '/model-providers'
     | '/artifacts/$artifactId'
     | '/mcp-servers/$serverId'
@@ -215,6 +225,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/home'
+    | '/logs'
     | '/model-providers'
     | '/artifacts/$artifactId'
     | '/mcp-servers/$serverId'
@@ -236,6 +247,7 @@ export interface FileRouteTypes {
     | '/'
     | '/settings'
     | '/home'
+    | '/logs'
     | '/model-providers'
     | '/artifacts/$artifactId'
     | '/mcp-servers/$serverId'
@@ -258,6 +270,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   SettingsRouteRoute: typeof SettingsRouteRouteWithChildren
   HomeRoute: typeof HomeRoute
+  LogsRoute: typeof LogsRoute
   ModelProvidersRoute: typeof ModelProvidersRoute
   ArtifactsArtifactIdRoute: typeof ArtifactsArtifactIdRoute
   McpServersServerIdRoute: typeof McpServersServerIdRoute
@@ -285,6 +298,13 @@ declare module '@tanstack/react-router' {
       path: '/home'
       fullPath: '/home'
       preLoaderRoute: typeof HomeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/logs': {
+      id: '/logs'
+      path: '/logs'
+      fullPath: '/logs'
+      preLoaderRoute: typeof LogsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/model-providers': {
@@ -442,6 +462,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SettingsRouteRoute: SettingsRouteRouteWithChildren,
   HomeRoute: HomeRoute,
+  LogsRoute: LogsRoute,
   ModelProvidersRoute: ModelProvidersRoute,
   ArtifactsArtifactIdRoute: ArtifactsArtifactIdRoute,
   McpServersServerIdRoute: McpServersServerIdRoute,
