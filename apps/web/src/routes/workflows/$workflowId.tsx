@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { addEdge, Background, BackgroundVariant, Controls, MarkerType, PanOnScrollMode, ReactFlow, reconnectEdge, useEdgesState, useNodesState, type OnConnect, type OnConnectEnd, type OnReconnect, type ReactFlowInstance } from '@xyflow/react';
-import { ArrowLeft, Bot, Braces, Check, Copy, Download, FilePlus2, FileSearch, FileText, Image as ImageIcon, LayoutDashboard, PanelRight, Plus, Redo2, Search, Send, SlidersHorizontal, Timer, Trash2, Undo2, Workflow } from 'lucide-react';
+import { ArrowLeft, Bot, Braces, Check, Copy, Download, FilePlus2, FileSearch, FileText, GitBranch, Image as ImageIcon, LayoutDashboard, PanelRight, Plus, Redo2, Search, Send, SlidersHorizontal, Timer, Trash2, Undo2, Workflow } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
@@ -118,6 +118,7 @@ function WorkflowEditorPage() {
   const modelOptions = useMemo(() => availableProviders.filter((provider) => provider.protocol !== 'typesafe/systemone').flatMap((provider) => provider.models.map((model) => `${provider.name}/${model}`)), [availableProviders]);
   const filteredTimerVisible = !paletteQuery.trim() || `${t('editor.timerNode')} ${t('editor.timerNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredAgentVisible = !paletteQuery.trim() || `${t('editor.agentNode')} ${t('editor.agentNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
+  const filteredBranchVisible = !paletteQuery.trim() || `${t('editor.branchNode')} ${t('editor.branchNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredDashboardVisible = !paletteQuery.trim() || `${t('editor.dashboardNode')} ${t('editor.dashboardNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredArtifactVisible = !paletteQuery.trim() || `${t('editor.artifactNode')} ${t('editor.artifactNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredArtifactQueryVisible = !paletteQuery.trim() || `${t('editor.artifactQueryNode')} ${t('editor.artifactQueryNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
@@ -273,6 +274,11 @@ function WorkflowEditorPage() {
       data: { nodeType: 'agent', label: t('editor.agentNode'), model: modelOptions[0] ?? '', systemPrompt: '', outputFormat: 'text', skillIds: [], skillNames: [], mcpServerIds: [], mcpServerNames: [], errorPolicy: executionPolicy },
     };
     addNode(node);
+  }
+
+  function addBranchNode() {
+    const id = createId('branch');
+    addNode({ id, type: 'branch', position: nextPosition(), selected: true, data: { nodeType: 'branch', label: t('editor.branchNode'), errorPolicy: executionPolicy } });
   }
 
   function addArtifactNode() {
@@ -533,9 +539,9 @@ function WorkflowEditorPage() {
         toast.error(t('editor.publishBeforeRun'));
         return;
       }
-      await api.createRun(existing.latestVersionId, { input });
+      const created = await api.createRun(existing.latestVersionId, { input });
       await queryClient.invalidateQueries({ queryKey: runsQueryKey() });
-      toast.success(t('editor.runStarted'));
+      void navigate({ to: '/runs/$runId', params: { runId: created.runId } });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('editor.runFailed'));
     } finally {
@@ -551,6 +557,7 @@ function WorkflowEditorPage() {
         <PaletteButton icon={<Braces className="size-5 text-info" />} title={t('editor.workflowInputNode')} description={t('editor.runPayload')} onClick={addInputNode} />
         {filteredTimerVisible ? <PaletteButton icon={<Timer className="size-5 text-foreground" />} title={t('editor.timerNode')} description={t('editor.timerNodeDescription')} onClick={addTimerNode} /> : null}
         {filteredAgentVisible ? <PaletteButton icon={<Bot className="size-5 text-info" />} title={t('editor.agentNode')} description={t('editor.agentNodeDescription')} onClick={addAgentNode} /> : null}
+        {filteredBranchVisible ? <PaletteButton icon={<GitBranch className="size-5 text-foreground" />} title={t('editor.branchNode')} description={t('editor.branchNodeDescription')} onClick={addBranchNode} /> : null}
         {filteredDashboardVisible ? <PaletteButton icon={<LayoutDashboard className="size-5 text-foreground" />} title={t('editor.dashboardNode')} description={t('editor.dashboardNodeDescription')} onClick={addDashboardNode} /> : null}
         {filteredArtifactVisible ? <PaletteButton icon={<FileText className="size-5 text-foreground" />} title={t('editor.artifactNode')} description={t('editor.artifactNodeDescription')} onClick={addArtifactNode} /> : null}
         {filteredArtifactQueryVisible ? <PaletteButton icon={<FileSearch className="size-5 text-foreground" />} title={t('editor.artifactQueryNode')} description={t('editor.artifactQueryNodeDescription')} onClick={addArtifactQueryNode} /> : null}
@@ -634,6 +641,10 @@ function WorkflowEditorPage() {
           <div><p className="text-[12px] font-medium">{t('editor.skills')}</p><div className="mt-2 space-y-2">{availableSkills.map((skill) => { const checked = (selectedNode.data.skillIds ?? []).includes(skill.id); return <label key={skill.id} className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-[13px]"><Checkbox checked={checked} onCheckedChange={(value) => { const nextIds = value === true ? [...new Set([...(selectedNode.data.skillIds ?? []), skill.id])] : (selectedNode.data.skillIds ?? []).filter((id) => id !== skill.id); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, skillIds: nextIds, skillNames: availableSkills.filter((item) => nextIds.includes(item.id)).map((item) => item.name) } } : node)); setSaveState('unsaved'); }} aria-label={skill.name} /><span>{skill.name}</span></label>; })}</div></div>
           <div><p className="text-[12px] font-medium">{t('editor.mcpServers')}</p><div className="mt-2 space-y-2">{availableMcpServers.map((server) => { const checked = (selectedNode.data.mcpServerIds ?? []).includes(server.id); return <label key={server.id} className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-[13px]"><Checkbox checked={checked} onCheckedChange={(value) => { const nextIds = value === true ? [...new Set([...(selectedNode.data.mcpServerIds ?? []), server.id])] : (selectedNode.data.mcpServerIds ?? []).filter((id) => id !== server.id); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, mcpServerIds: nextIds, mcpServerNames: availableMcpServers.filter((item) => nextIds.includes(item.id)).map((item) => item.name) } } : node)); setSaveState('unsaved'); }} aria-label={server.name} /><span>{server.name}</span></label>; })}</div></div>
           <Field label={t('editor.errorPolicy')} htmlFor="policy"><Select value={selectedNode.data.errorPolicy} onValueChange={(value) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, errorPolicy: value as 'stop' | 'retry' } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="policy"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="stop">{t('editor.stop')}</SelectItem><SelectItem value="retry">{t('editor.retry')}</SelectItem></SelectContent></Select></Field>
+        </> : null}
+        {selectedNode.data.nodeType === 'branch' ? <>
+          <p className="text-[12px] text-muted-foreground">{t('editor.branchSelectionHint')}</p>
+          <Field label={t('editor.errorPolicy')} htmlFor="branch-policy"><Select value={selectedNode.data.errorPolicy} onValueChange={(value) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, errorPolicy: value as 'stop' | 'retry' } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="branch-policy"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="stop">{t('editor.stop')}</SelectItem><SelectItem value="retry">{t('editor.retry')}</SelectItem></SelectContent></Select></Field>
         </> : null}
         <div className="rounded-md border border-border bg-surface-subtle p-3"><p className="text-[12px] font-medium">{t('editor.connections')}</p><div className="mt-2 flex justify-between gap-3 text-[12px] text-muted-foreground"><span>{t('editor.incomingConnections')}</span><span className="tabular-nums">{edges.filter((edge) => edge.target === selectedNode.id).length}</span></div><div className="mt-1 flex justify-between gap-3 text-[12px] text-muted-foreground"><span>{t('editor.outgoingConnections')}</span><span className="tabular-nums">{edges.filter((edge) => edge.source === selectedNode.id).length}</span></div></div>
         <div className="flex gap-2 border-t border-border pt-4"><Button type="button" variant="secondary" size="compact" className="flex-1" onClick={() => duplicateNode(selectedNode.id)}><Copy className="size-4" />{t('editor.duplicate')}</Button><Button type="button" variant="secondary" size="compact" className="flex-1" onClick={() => removeNode(selectedNode.id)}><Trash2 className="size-4" />{t('editor.remove')}</Button></div>
@@ -759,8 +770,8 @@ function WorkflowEditorPage() {
 function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
   return definition.nodes.map((node) => {
     const config = asRecord(node.config);
-    const nodeType = node.type === 'worklite/input' ? 'input' : node.type === 'worklite/timer' ? 'timer' : node.type === 'worklite/dashboard' ? 'dashboard' : node.type === 'worklite/artifact' ? 'artifact' : node.type === 'worklite/artifact-query' ? 'artifactQuery' : node.type === 'worklite/image' ? 'image' : node.type === 'wechat-official-account/publish' ? 'wechatPublish' : 'agent';
-    const label = typeof config.label === 'string' ? config.label : nodeType === 'input' ? 'Workflow Input' : nodeType === 'timer' ? 'Timer' : nodeType === 'dashboard' ? 'Dashboard' : nodeType === 'artifact' ? 'Artifact' : nodeType === 'artifactQuery' ? 'Artifact Query' : nodeType === 'image' ? 'Image Generation' : nodeType === 'wechatPublish' ? 'WeChat Official Account' : 'Agent';
+    const nodeType = node.type === 'worklite/input' ? 'input' : node.type === 'worklite/timer' ? 'timer' : node.type === 'worklite/branch' ? 'branch' : node.type === 'worklite/dashboard' ? 'dashboard' : node.type === 'worklite/artifact' ? 'artifact' : node.type === 'worklite/artifact-query' ? 'artifactQuery' : node.type === 'worklite/image' ? 'image' : node.type === 'wechat-official-account/publish' ? 'wechatPublish' : 'agent';
+    const label = typeof config.label === 'string' ? config.label : nodeType === 'input' ? 'Workflow Input' : nodeType === 'timer' ? 'Timer' : nodeType === 'branch' ? 'Choice Branch' : nodeType === 'dashboard' ? 'Dashboard' : nodeType === 'artifact' ? 'Artifact' : nodeType === 'artifactQuery' ? 'Artifact Query' : nodeType === 'image' ? 'Image Generation' : nodeType === 'wechatPublish' ? 'WeChat Official Account' : 'Agent';
     return {
       id: node.id,
       type: nodeType,
@@ -850,6 +861,8 @@ function canConnect(connection: { source: string | null; sourceHandle?: string |
     if (targetHandle !== 'data') return false;
   } else if (targetNode.data.nodeType === 'artifactQuery') {
     if (targetHandle !== 'request') return false;
+  } else if (targetNode.data.nodeType === 'branch') {
+    if (targetHandle !== 'value') return false;
   } else if (targetNode.data.nodeType === 'image') {
     if (targetHandle !== 'prompt') return false;
   } else if (targetNode.data.nodeType === 'wechatPublish') {
@@ -892,6 +905,8 @@ function toDefinitionNode(node: WorkflowCanvasNode): WorkflowNodeDefinition {
   let config: Record<string, unknown> = base;
   if (node.data.nodeType === 'input') {
     type = 'worklite/input';
+  } else if (node.data.nodeType === 'branch') {
+    type = 'worklite/branch';
   } else if (node.data.nodeType === 'timer') {
     type = 'worklite/timer';
     config = { ...base, enabled: node.data.timerEnabled !== false, intervalSeconds: node.data.timerIntervalSeconds ?? 300 };
@@ -1082,6 +1097,7 @@ function readDashboardElements(value: unknown): WorkflowDashboardElement[] {
 function nodeTypeLabel(nodeType: WorkflowCanvasNode['data']['nodeType'], t: TFunction<'workflows'>): string {
   if (nodeType === 'input') return t('editor.workflowInputNode');
   if (nodeType === 'timer') return t('editor.timerNode');
+  if (nodeType === 'branch') return t('editor.branchNode');
   if (nodeType === 'dashboard') return t('editor.dashboardNode');
   if (nodeType === 'artifact') return t('editor.artifactNode');
   if (nodeType === 'artifactQuery') return t('editor.artifactQueryNode');

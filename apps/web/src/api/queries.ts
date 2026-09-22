@@ -9,8 +9,8 @@ export const runsQueryKey = () => ['runs'] as const;
 export const mcpServersQueryKey = () => ['mcp-servers'] as const;
 export const artifactsQueryKey = () => ['artifacts'] as const;
 
-export function useWorkflowsQuery(workspace?: string) {
-  return useQuery({ queryKey: workflowsQueryKey(), queryFn: () => api.workflows(workspace) });
+export function useWorkflowsQuery(workspace?: string, options?: { refetchInterval?: number | false }) {
+  return useQuery({ queryKey: workflowsQueryKey(), queryFn: () => api.workflows(workspace), refetchInterval: options?.refetchInterval });
 }
 
 export function useAgentQuery(workspace: string | undefined, agentId: string) {

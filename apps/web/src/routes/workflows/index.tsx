@@ -41,7 +41,7 @@ function WorkflowListPage() {
   const [importing, setImporting] = useState(false);
   const [runHistoryWorkflow, setRunHistoryWorkflow] = useState<RunHistoryTarget | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
-  const { data: all = [], isLoading, isError, refetch } = useWorkflowsQuery(workspaceSlug);
+  const { data: all = [], isLoading, isError, refetch } = useWorkflowsQuery(workspaceSlug, { refetchInterval: 5_000 });
   async function importWorkflow(file: File | undefined) {
     if (!file) return;
     setImporting(true);

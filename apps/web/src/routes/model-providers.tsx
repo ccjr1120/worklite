@@ -3,7 +3,7 @@ import { Bot, ChevronDown, Copy, GripVertical, KeyRound, LoaderCircle, LogIn, Pe
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitWindow, DiscoverModelProviderRequest, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayStatus } from '@worklite/contracts';
+import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitWindow, DiscoverModelProviderRequest, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayStatus, SystemOneTestInput } from '@worklite/contracts';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { CollectionTable, CollectionHeader, CollectionRow } from '@/components/collection-table';
 import { CollectionToolbar } from '@/components/collection-toolbar';
@@ -24,7 +24,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { CHAT_BOT_AGENT_ID } from '@/components/workspace/chat-bot';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useCodexAccountUsagesQuery, useCodexAuthQuery, useModelProvidersQuery, usePortkeyGatewayQuery } from '@/api/queries';
-import { api } from '@/api/client';
+import { ApiError, api } from '@/api/client';
 import { queryClient } from '@/lib/query-client';
 import { formatDateTime, formatList } from '@/i18n/format';
 import { useLocale } from '@/components/locale-provider';
@@ -56,10 +56,18 @@ type ProviderTestDialog =
   | { provider: ModelProviderView; model: string; status: 'idle' }
   | { provider: ModelProviderView; model: string; status: 'loading'; startedAt: number; elapsedSeconds: number }
   | { provider: ModelProviderView; model: string; status: 'success'; result: ModelProviderTestResult; elapsedSeconds: number }
-  | { provider: ModelProviderView; model: string; status: 'error'; message: string; requestLogId?: string; elapsedSeconds: number };
+  | { provider: ModelProviderView; model: string; status: 'error'; message: string; requestLogId?: string; testInput?: SystemOneTestInput; elapsedSeconds: number };
 
-const PROVIDER_TEST_PROMPT = '\u4f60\u597d';
+const CHAT_PROVIDER_TEST_PROMPT = '\u4f60\u597d';
+const SYSTEM_ONE_TEST_INPUT: SystemOneTestInput = {
+  state: { message: 'WorkLite provider connection test' },
+  questions: { connection: { type: 'noul', instructions: 'Does `message` contain text?' } },
+};
 const PROVIDER_TEST_MODEL_KEY = 'worklite.provider-test-model.';
+
+function formatTestValue(value: unknown): string {
+  return JSON.stringify(value, null, 2) ?? '';
+}
 
 function parseHeaders(value: string): Record<string, string> | undefined {
   if (!value.trim()) return undefined;
@@ -435,7 +443,10 @@ function ModelProvidersPage() {
     }).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : t('providers.testFailed');
       const requestLogId = error instanceof Error && 'requestLogId' in error && typeof error.requestLogId === 'string' ? error.requestLogId : undefined;
-      setTestDialog((current) => current?.provider.id === provider.id ? { provider, model, status: 'error', message, requestLogId, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1_000) } : current);
+      const testInput = provider.protocol === 'typesafe/systemone'
+        ? error instanceof ApiError && error.testInput ? error.testInput : SYSTEM_ONE_TEST_INPUT
+        : undefined;
+      setTestDialog((current) => current?.provider.id === provider.id ? { provider, model, status: 'error', message, requestLogId, testInput, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1_000) } : current);
     });
   }
 
@@ -568,7 +579,11 @@ function ModelProvidersPage() {
           <DialogHeader>
             <DialogTitle>{t('providers.testTitle', { provider: testDialog?.provider.name })}</DialogTitle>
             <DialogDescription>
-              {testDialog?.status === 'success' ? t('providers.testDescriptionWithModel', { model: testDialog.result.model }) : t('providers.testDescription')}
+              {testDialog?.provider.protocol === 'typesafe/systemone'
+                ? t('providers.testDescriptionSystemOne')
+                : testDialog?.status === 'success' && testDialog.result.protocol !== 'typesafe/systemone'
+                  ? t('providers.testDescriptionWithModel', { model: testDialog.result.model })
+                  : t('providers.testDescription')}
             </DialogDescription>
           </DialogHeader>
           <Field label={t('providers.testModel')} htmlFor="provider-test-model">
@@ -577,24 +592,39 @@ function ModelProvidersPage() {
               <SelectContent>{testDialog?.provider.models.map((model) => <SelectItem key={model} value={model}>{model}</SelectItem>)}</SelectContent>
             </Select>
           </Field>
-          {testDialog?.status !== 'idle' ? <div className="flex min-h-52 flex-col gap-5 py-2">
+          {testDialog && testDialog.status !== 'idle' ? testDialog.provider.protocol === 'typesafe/systemone' ? <div className="flex min-h-52 flex-col gap-4 py-2">
+            <div className="rounded-md border border-border bg-surface-subtle px-4 py-3 text-sm">
+              <p className="text-xs font-medium text-muted-foreground">{t('providers.testInputLabel')}</p>
+              <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">{formatTestValue(testDialog.status === 'success' && testDialog.result.protocol === 'typesafe/systemone' ? testDialog.result.input : testDialog.status === 'error' && testDialog.testInput ? testDialog.testInput : SYSTEM_ONE_TEST_INPUT)}</pre>
+            </div>
+            <div className="rounded-md border border-border bg-surface-subtle px-4 py-3 text-sm">
+              <p className="text-xs font-medium text-muted-foreground">{t('providers.testOutputLabel')}</p>
+              {testDialog.status === 'loading' ? (
+                <div className="mt-3 flex items-center gap-2 text-muted-foreground"><LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /><span className="sr-only">{t('providers.waitingReplyAccessible')}</span><span aria-hidden="true" className="tabular-nums">{t('providers.waitingReply', { seconds: testDialog.elapsedSeconds })}</span></div>
+              ) : testDialog.status === 'success' ? (
+                <div aria-live="polite"><pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">{formatTestValue(testDialog.result.protocol === 'typesafe/systemone' ? testDialog.result.output : {})}</pre><p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></div>
+              ) : (
+                <><p role="alert" className="mt-3 break-words text-danger">{testDialog.message}</p>{testDialog.requestLogId ? <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2"><Button type="button" variant="ghost" size="compact" onClick={() => { const provider = testDialog.provider.name; setTestDialog(null); void navigate({ to: '/logs', search: { tab: 'requests', range: '24h', provider } }); }}>{t('providers.viewRequestLog')}</Button></div> : null}<p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></>
+              )}
+            </div>
+          </div> : <div className="flex min-h-52 flex-col gap-5 py-2">
             <div className="flex justify-end">
               <div className="max-w-[80%] rounded-md bg-brand px-4 py-3 text-sm text-white">
                 <p className="sr-only">{t('providers.testPromptLabel')}</p>
-                <p className="whitespace-pre-wrap">{testDialog?.status === 'success' ? testDialog.result.prompt : PROVIDER_TEST_PROMPT}</p>
+                <p className="whitespace-pre-wrap">{testDialog.status === 'success' && testDialog.result.protocol !== 'typesafe/systemone' ? testDialog.result.prompt : CHAT_PROVIDER_TEST_PROMPT}</p>
               </div>
             </div>
             <div className="flex items-start gap-3">
               <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-brand-subtle text-brand" aria-hidden="true"><Bot className="size-4" /></div>
               <div className="min-w-0 flex-1 rounded-md border border-border bg-surface-subtle px-4 py-3 text-sm">
                 <p className="sr-only">{t('providers.testReplyLabel')}</p>
-                {testDialog?.status === 'loading' ? (
+                {testDialog.status === 'loading' ? (
                   <div className="flex items-center gap-2 text-muted-foreground"><LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /><span className="sr-only">{t('providers.waitingReplyAccessible')}</span><span aria-hidden="true" className="tabular-nums">{t('providers.waitingReply', { seconds: testDialog.elapsedSeconds })}</span></div>
-                ) : testDialog?.status === 'success' ? (
-                  <div aria-live="polite"><p className="whitespace-pre-wrap break-words">{testDialog.result.response}</p><p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></div>
-                ) : testDialog?.status === 'error' ? (
+                ) : testDialog.status === 'success' ? (
+                  <div aria-live="polite"><p className="whitespace-pre-wrap break-words">{testDialog.result.protocol === 'typesafe/systemone' ? '' : testDialog.result.response}</p><p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></div>
+                ) : (
                   <><p role="alert" className="break-words text-danger">{testDialog.message}</p>{testDialog.requestLogId ? <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2"><Button type="button" variant="ghost" size="compact" onClick={() => { const provider = testDialog.provider.name; setTestDialog(null); void navigate({ to: '/logs', search: { tab: 'requests', range: '24h', provider } }); }}>{t('providers.viewRequestLog')}</Button></div> : null}<p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></>
-                ) : null}
+                )}
               </div>
             </div>
           </div> : null}
@@ -736,4 +766,3 @@ function Detail({ label, value }: { label: string; value: string }) {
 function currentTime(): number {
   return Date.now();
 }
-

@@ -81,7 +81,9 @@ The Run summary is labelled by the page heading. Node entries carry the disclosu
 
 ## Coverage Status
 
-Verified 2026-09-20. Differences found against the implementation:
+Verified 2026-09-22. Differences found against the implementation:
+
+- The Workflow editor now enters this route after creating a Run, using the server-returned Run id.
 
 - The route is reached from the Run records dialog; no sidebar entry is added, because a Run is reached through its Workflow rather than as a top-level collection.
 - Active Run cancellation is exposed in the page heading and confirmed in a shared Dialog; the implementation uses the existing `api.cancelRun` endpoint and query/event updates.
@@ -98,3 +100,7 @@ Verified 2026-09-20. Differences found against the implementation:
 - Established the Run detail route as the deep log-reading destination alongside the Run records dialog, using available width and reusing the shared node-log and Artifact surfaces.
 - Required incremental event application with no manual refresh control, and required loading, not-found, and load failure to remain three distinct states.
 - Recorded that Run-level rerun is absent because retry is node-scoped by contract.
+
+### 2026-09-22
+
+- Made Run detail the destination opened after starting a Run from the Workflow editor, using the server-returned Run id.

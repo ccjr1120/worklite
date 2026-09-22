@@ -5,7 +5,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { BadRequestException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import type { Request, Response } from 'express';
-import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, GatewayRequestLogDetail, GatewayRequestLogList, GatewayRequestLogQuery, GatewayTimeRange, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatus, PortkeyGatewayView, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
+import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, GatewayRequestLogDetail, GatewayRequestLogList, GatewayRequestLogQuery, GatewayTimeRange, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatus, PortkeyGatewayView, SystemOneTestInput, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
 import type { ModelProviderConfig } from '@worklite/model-gateway';
 import { agents, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
@@ -100,6 +100,19 @@ function gatewayErrorMessage(body: unknown): string {
     return (error as Record<string, unknown>).message as string;
   }
   return 'Portkey Gateway request failed.';
+}
+
+function isSystemOneTestInput(value: unknown): value is SystemOneTestInput {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  const state = record.state;
+  const questions = record.questions;
+  if (!state || typeof state !== 'object' || Array.isArray(state) || typeof (state as Record<string, unknown>).message !== 'string') return false;
+  if (!questions || typeof questions !== 'object' || Array.isArray(questions)) return false;
+  const connection = (questions as Record<string, unknown>).connection;
+  return Boolean(connection && typeof connection === 'object' && !Array.isArray(connection)
+    && (connection as Record<string, unknown>).type === 'noul'
+    && typeof (connection as Record<string, unknown>).instructions === 'string');
 }
 
 @Injectable()
@@ -452,7 +465,12 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     try { body = text ? JSON.parse(text) : undefined; } catch { body = undefined; }
     if (!response.ok) {
       const message = gatewayErrorMessage(body);
-      throw new BadRequestException(message);
+      const record = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : undefined;
+      const details = {
+        ...(typeof record?.requestLogId === 'string' ? { requestLogId: record.requestLogId } : {}),
+        ...(isSystemOneTestInput(record?.testInput) ? { testInput: record.testInput } : {}),
+      };
+      throw new BadRequestException(Object.keys(details).length > 0 ? { message, ...details } : message);
     }
     return body as T;
   }

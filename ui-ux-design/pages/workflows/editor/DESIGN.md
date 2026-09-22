@@ -30,18 +30,19 @@ The budget is above one because the graph is a composite draft rather than a sin
 
 The workflow editor presents a directed control-flow dataflow graph with structured conditional edges and bounded loop edges.
 
-The palette includes Timer, Workflow Input, Dashboard, Agent, Artifact, Artifact Query, Image, and the trusted WeChat Official Account Publish node when its built-in Plugin is available.
+The palette includes Timer, Workflow Input, Agent, Choice Branch, Dashboard, Artifact, Artifact Query, Image, and the trusted WeChat Official Account Publish node when its built-in Plugin is available.
 
 - **Timer** is a source trigger with no inputs, one JSON output, an enabled control, and a fixed interval of at least five minutes; each Workflow may contain at most one Timer.
 - **Dashboard** has one required JSON `data` input, one JSON `output` port, and at most one instance per Workflow.
 - **Workflow Input** exposes the run input and may connect explicitly to Agent `context` as the initial token.
 - **Agent** owns its immutable embedded configuration and has one optional `context` input plus one output. When `context` has no explicit Workflow Input edge and no unbounded incoming edge, the initial Agent invocation uses the Workflow Run input, while later bounded-loop traversals supply the next context value. Its inspector selects `Text` or `JSON` output format.
+- **Choice Branch** has one required JSON `value` input and one JSON `output` port. It passes the input through unchanged and evaluates its outgoing unconditional or predicate edges in connection order, traversing only the first match; when no non-fallback edge matches, it traverses the first fallback edge. It can consume JSON from any upstream node.
 - **Artifact** has one required JSON `data` input, one output, and permits multiple instances; it configures a non-empty display name and a `Text`, `Markdown`, or `JSON` artifact type.
 - **Artifact Query** has one required JSON `request` input and one JSON output; its inspector selects a JSON Artifact name, a top-level title field, and one or more top-level description fields. It reads matching workspace history, including detached Artifacts, and emits the request with compact title-and-description candidates without creating Artifacts.
 - **Image** has one required string `prompt` input and one JSON output. Its inspector fixes `codex/gpt-image-2` and exposes only the supported image count, background, quality, and size choices. The node displays an image summary after execution and never renders or inspects base64 data.
 - **WeChat Official Account Publish** accepts required Markdown `article` and generated cover-image inputs plus optional JSON `metadata`, and outputs a publication reference.
 
-One output may fan out to multiple downstream nodes. Each named input accepts at most one edge, except Agent `context`, which may combine one unbounded initial upstream edge with one bounded feedback edge. An initial Workflow Input edge must remain unconditional. Edges may be unconditional, predicate-based, or fallback routes. A loop-closing edge must define a positive maximum traversal count, and every possible cycle must cross at least one bounded edge. Dynamic joins and parallel execution remain unavailable.
+One output may fan out to multiple downstream nodes. Choice Branch output is the deliberate exception to that fan-out behavior: its outgoing routes are exclusive and only the first matching route is traversed. Each named input accepts at most one edge, except Agent `context`, which may combine one unbounded initial upstream edge with one bounded feedback edge. An initial Workflow Input edge must remain unconditional. Edges may be unconditional, predicate-based, or fallback routes. A loop-closing edge must define a positive maximum traversal count, and every possible cycle must cross at least one bounded edge. Dynamic joins and parallel execution remain unavailable.
 
 ## Layout
 
@@ -67,7 +68,7 @@ Workflow-level settings are grouped into General, Inputs, Execution, and Version
 
 **Undo and redo.** Server-backed revision movement, reported through the same save state. Both controls disable while a save is in flight.
 
-**Run.** Targets the latest published version, is unavailable while the draft has unsaved changes, and labels that version boundary explicitly. The control reports busy on itself and the editor stays in place; Run history remains in the Workflow List dialog.
+**Run.** Targets the latest published version, is unavailable while the draft has unsaved changes, and labels that version boundary explicitly. The control reports busy on itself. After the server returns the new Run id, navigation enters `/runs/:runId` so the live Run detail becomes the immediate execution surface; Run history remains available in the Workflow List dialog.
 
 **Publish.** Opens a confirmation explaining that publishing locks the embedded Agent configuration and that later draft edits do not change this Workflow or its historical runs. Publication validates bounded-cycle constraints, port rules, public model ids, image generation settings, required WeChat cover connectivity, and selected Skill and MCP availability. Validation failures navigate directly to the affected content.
 
@@ -82,6 +83,8 @@ The Timer inspector's read-only runtime status is the one self-healing value her
 **Dashboard** nodes expose only a `header`, `main`, and `footer` layout editor. Each region holds an ordered list of elements added from the generic kinds `text`, `count`, `metric`, and `list`. `text` edits static text; `count` and `metric` edit a visible label, and `metric` also binds a field key and a text, number, boolean, or datetime type; `list` edits a title-key binding plus its own display fields, each with a unique non-empty key, visible label, and supported type (`text`, `number`, `boolean`, `datetime`, or `url`, where `url` fields become row links instead of rendered text). The inspector explains that the node becomes the Home board only after Publish, that Home reads its output from a successful Run, and that the board title is the Workflow name.
 
 **Agent** nodes are created without selecting a standalone Agent. Their inspector directly exposes a public model selector, system prompt, Skill multi-selection, MCP server multi-selection, output format, and error policy. Skill and MCP choices come only from real workspace resources.
+
+**Choice Branch** nodes expose no provider-specific configuration. Their inspector explains that the JSON value is passed through and that outgoing conditions are evaluated in connection order, with only the first match or first fallback traversed. Use the edge inspector to configure JSON paths such as `$.articleType` and their comparison values.
 
 **Artifact** nodes expose name and artifact-type controls and explain that a successful Run creates the Artifact while the node output carries its reference.
 
@@ -126,6 +129,7 @@ The output panel contains only persisted output from a selected run. AI editing 
 | `workflows:editor.timer*` / `editor.schedule*` | State, plus `editor.timerActivatesOnPublish` as Constraint |
 | `workflows:editor.timerLimit` / `editor.dashboardLimit` | Constraint |
 | `workflows:editor.agentNode*` / `editor.model` / `editor.selectModel` / `editor.systemPrompt` / `editor.skills` / `editor.mcpServers` | State |
+| `workflows:editor.branchNode*` / `editor.branchValuePort` / `editor.branchSelectionHint` | State, Constraint |
 | `workflows:editor.outputFormat` / `editor.outputFormats.*` | State |
 | `workflows:editor.outputFormatDescription` | Constraint |
 | `workflows:editor.artifactNode*` / `editor.artifactName` / `editor.artifactType` / `editor.artifactTypes.*` | State |
@@ -141,7 +145,6 @@ The output panel contains only persisted output from a selected run. AI editing 
 | `workflows:editor.edgeFallbackHint` / `editor.edgeMaxTraversalsHint` | Constraint |
 | `workflows:editor.edgeComparisonInvalid` | Recovery |
 | `workflows:editor.run` / `editor.runVersion` / `editor.running` | Action, State |
-| `workflows:editor.runStarted` | State |
 | `workflows:editor.saveBeforeRun` / `editor.saveBeforePublish` / `editor.publishBeforeRun` / `editor.saveBeforeExport` | Recovery |
 | `workflows:editor.runFailed` / `editor.saveFailed` / `editor.publishFailed` / `editor.exportFailed` | Recovery |
 | `workflows:editor.publishTitle` | State |
@@ -169,7 +172,11 @@ Port labels and accessible names identify context and output semantics without r
 
 ## Coverage Status
 
-Verified 2026-09-19. Differences found against `apps/web/src/routes/workflows/$workflowId.tsx`:
+Verified 2026-09-22. Differences found against `apps/web/src/routes/workflows/$workflowId.tsx`:
+
+- ~~The editor had no reusable JSON Choice Branch node.~~ Resolved: the palette, canvas, inspector, and graph serializer now expose `worklite/branch@1`; its outgoing conditions select one route in definition order.
+
+- ~~`Run` created a Run but left the editor as the active surface.~~ Resolved: successful creation now navigates to the returned `/runs/:runId` detail route.
 
 - No loading state for an existing Workflow. `useWorkflowQuery` destructures only `data`, so a pending load renders an empty canvas that is indistinguishable from an empty graph; the name field shows `editor.untitled` until the draft arrives.
 - No load-failure state. A failed Workflow query leaves the editor on an empty canvas with no explanation, and unsaved work could be attempted against a draft that never loaded.
@@ -181,6 +188,14 @@ Verified 2026-09-19. Differences found against `apps/web/src/routes/workflows/$w
 - Delete sets `setDeleteBusy(true)` and only resets it inside the `catch`, relying on navigation to unmount the component on success; the busy flag is never cleared on the success path.
 
 ## Changelog
+
+### 2026-09-22 - JSON Choice Branch
+
+- Added the generic Choice Branch node with a required JSON input, pass-through output, exclusive first-match routing, and first-fallback behavior. It is independent of any Provider protocol and uses the existing structured edge inspector.
+
+### 2026-09-22 - Run detail navigation
+
+- Changed the editor's Run completion path to open the returned Run detail route so active execution is immediately observable.
 
 ### 2026-09-19
 

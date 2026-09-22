@@ -67,7 +67,7 @@ Activating `Test` resolves the model and runs. Resolution order: the model remem
 
 When the model resolves, the dialog opens in its waiting state and the request is already in flight. When it does not, the dialog opens with a model selection and one explicit run action; selecting a model persists it as the remembered value for that provider.
 
-The test is read-only. It sends the fixed user message `你好` and contains no prompt input or composer. Starting the test locks model selection. The waiting label shows elapsed whole seconds from submission, updating once per second with tabular numerals and without resizing the layout. Success shows the provider name, selected model, and complete reply. Failure replaces the waiting state with a credential-safe error, keeps the dialog dismissible, and offers `View request log` when the server returns the correlated request-log identifier, which opens the Logs `requests` tab filtered to that Provider. Success, failure, and timeout all retain the final elapsed duration and allow another test.
+The test is read-only. Chat-compatible protocols send the fixed user message `你好` and contain no prompt input or composer. `typesafe/systemone` sends the fixed typed input `{ state: { message: "WorkLite provider connection test" }, questions: { connection: { type: "noul", instructions: "Does message contain text?" } } }`; its dialog presents that state and question as the input and the returned typed `answers` as the output rather than rendering a chat exchange. Starting the test locks model selection. The waiting label shows elapsed whole seconds from submission, updating once per second with tabular numerals and without resizing the layout. Success shows the provider name, selected model, and complete reply or typed answer. Failure replaces the waiting state with a credential-safe error, keeps the dialog dismissible, and offers `View request log` when the server returns the correlated request-log identifier, which opens the Logs `requests` tab filtered to that Provider. Success, failure, and timeout all retain the final elapsed duration and allow another test.
 
 ### Portkey Gateway summary
 
@@ -146,8 +146,10 @@ Define unconfigured, testing, connected, invalid credentials, unavailable provid
 | `settings:providers.testing` | State |
 | `settings:providers.testTitle` | State |
 | `settings:providers.testDescriptionWithModel` | State |
+| `settings:providers.testDescriptionSystemOne` | State |
 | `settings:providers.testModel` / `testModelPlaceholder` / `runTest` | Action |
 | `settings:providers.testPromptLabel` / `testReplyLabel` | State |
+| `settings:providers.testInputLabel` / `testOutputLabel` | State |
 | `settings:providers.waitingReply` / `waitingReplyAccessible` | State |
 | `settings:providers.testDuration` | State |
 | `settings:providers.testFailed` | Recovery |
@@ -214,6 +216,7 @@ Verified 2026-09-22 for the create and edit dialog's autocomplete behavior and t
 - Resolved 2026-09-22: the protocol selection omitted `typesafe/systemone` after that Provider protocol was added, so a credential-forwarding upstream could not be configured from this page.
 - Resolved 2026-09-22: the model list had no manual entry path at all — `discoverModels` was the only writer — so disabling discovery for `typesafe/systemone` left its catalog permanently empty and every request rejected against an empty catalog. A text field with Enter commit and in-place editing of existing IDs restores manual entry for every protocol. The unused `providers.addModel` string was removed in the same change.
 - Resolved 2026-09-22: swept every locale namespace for strings no surface renders and removed 55 of them, including `providers.modelsPlaceholder`, which duplicated `providers.emptyModels`, the three unreachable Codex rate-limit strings recorded above, and 37 `workflows.editor.*` strings left behind by the simplified node model and the removed step-list editor. The two `mcpServers.config.testErrors.*` entries that the sweep also flagged were kept: they are selected dynamically from the server's error code, so no literal reference exists in the source.
+- Resolved 2026-09-22: the connection-test dialog rendered the chat message `你好` for every protocol even though `typesafe/systemone` sends a typed state and question. The specialized state/question input and typed answer output now share one response contract with the Gateway and are rendered as structured JSON in the System One test state.
 
 - ~~Statistics breakdown rows are keyed by the provider and model joined with a NUL separator, and expansion state is a single string, which is correct but leaves no reset when the window changes.~~ Resolved by relocation: the breakdown moved to Logs, where expansion resets when the range changes.
 
@@ -227,6 +230,10 @@ Verified 2026-09-22 for the create and edit dialog's autocomplete behavior and t
 - ~~Protocol selection did not match the supported current contracts.~~ Resolved: `anthropic/messages` is available, `deepseek/chat` is removed, and a new provider draft starts without an implicit protocol.
 
 ## Changelog
+
+### 2026-09-22 - TypeSafe Connection Test
+
+- Aligned the `typesafe/systemone` connection-test presentation with its non-chat contract: the dialog shows the typed `state` and `questions` input and the typed `answers` output, while chat protocols retain the fixed message exchange.
 
 ### 2026-09-21 - Observability Moved to Logs
 

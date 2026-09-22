@@ -29,6 +29,7 @@ import type {
   McpServerView,
   McpServerTestResult,
   ModelProviderTestResult,
+  SystemOneTestInput,
   TestModelProviderRequest,
   ModelProviderView,
   RunView,
@@ -57,7 +58,7 @@ import type {
 } from '@worklite/contracts';
 
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string, public readonly requestLogId?: string) {
+  constructor(public readonly status: number, message: string, public readonly requestLogId?: string, public readonly testInput?: SystemOneTestInput) {
     super(message);
     this.name = 'ApiError';
   }
@@ -75,14 +76,16 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   if (!response.ok) {
     let message = `Request failed: ${response.status}`;
     let requestLogId: string | undefined;
+    let testInput: SystemOneTestInput | undefined;
     try {
-      const body = (await response.json()) as { message?: string | string[]; requestLogId?: string };
+      const body = (await response.json()) as { message?: string | string[]; requestLogId?: string; testInput?: SystemOneTestInput };
       if (body.message) message = Array.isArray(body.message) ? body.message.join(', ') : body.message;
       requestLogId = body.requestLogId;
+      testInput = body.testInput;
     } catch {
       // Keep the status-based error when the server does not return JSON.
     }
-    throw new ApiError(response.status, message, requestLogId);
+    throw new ApiError(response.status, message, requestLogId, testInput);
   }
   if (response.status === 204 || response.headers.get('content-length') === '0') return undefined as T;
   const text = await response.text();

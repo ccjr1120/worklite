@@ -84,6 +84,11 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-09-22 - Workflow execution freshness
+
+- Added automatic five-second refresh to the mounted Workflow List so server-observable latest-run state stays current without a manual refresh action.
+- Made the Workflow editor enter `/runs/:runId` after starting a Run, reusing the existing live Run detail surface for execution progress.
+
 ### 2026-09-21 - Chat Bot interaction pass
 
 - Moved the Chat Bot surface specification from `surfaces/workspace/system-helper-chat/` to `surfaces/workspace/chat-bot/`, matching the product name the surface has used since the System Helper rename.
@@ -98,6 +103,10 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 - Added one time range shared by both tabs: the presets last 1 hour, 24 hours, 7 days, and 30 days, plus a custom minute-precision start and end that expresses a specific date or a span of hours within one day. A preset persists as its own name and a custom range as absolute instants, so a shared preset link is not frozen into a dead interval.
 - Recorded the retention asymmetry as a Constraint on the Requests tab: statistics cover any range, request details cover at most the trailing three days of it, and a range reaching past that window says so rather than reading as an absence of requests.
 - Redirected both inbound observability links to the new destination: the node log's `View request logs` and the failed provider test's `View request log`.
+
+### 2026-09-22 - JSON Choice Branch
+
+- Updated the [Workflow Editor specification](pages/workflows/editor/DESIGN.md) for the generic `worklite/branch@1` node, which routes any JSON output through the first matching structured edge condition and does not depend on System One.
 
 ### 2026-09-20 - Run cancellation
 

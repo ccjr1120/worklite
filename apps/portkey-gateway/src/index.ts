@@ -201,8 +201,8 @@ app.post('/worklite/providers/:providerId/test', async (c) => {
     // sends one minimal typed question instead.
     const requestLogId = `glog_${crypto.randomUUID()}`;
     const result = await systemOneTest(provider, model, requestLogId);
-    if (!result.ok) return c.json({ message: 'Provider connection failed.', requestLogId }, result.status as 400);
-    return c.json({ connection: 'connected', model, prompt: 'noul', response: result.response, traceId: crypto.randomUUID() });
+    if (!result.ok) return c.json({ message: result.message, requestLogId, protocol: 'typesafe/systemone', testInput: result.input }, result.status as 400);
+    return c.json({ connection: 'connected', protocol: 'typesafe/systemone', model, input: result.input, output: result.output, traceId: crypto.randomUUID() });
   }
   const adapter = provider.protocol === 'anthropic/messages'
     ? 'anthropic'
@@ -243,7 +243,7 @@ app.post('/worklite/providers/:providerId/test', async (c) => {
       : isMessages
         ? payload.content?.filter((part) => part.type === 'text').map((part) => part.text ?? '').join('') ?? ''
         : payload.choices?.[0]?.message?.content ?? '';
-  return c.json({ connection: 'connected', model, prompt, response, traceId: crypto.randomUUID() });
+  return c.json({ connection: 'connected', protocol: provider.protocol, model, prompt, response, traceId: crypto.randomUUID() });
 });
 app.post('/worklite/providers', async (c) => {
   try { return c.json(await createProvider(await c.req.json()), 201); } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Provider could not be created.' }, 400); }

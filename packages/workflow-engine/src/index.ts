@@ -270,6 +270,17 @@ const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     outputSchema: {},
     configSchema: { type: 'object', required: ['model', 'systemPrompt', 'skillIds', 'mcpServerIds'], properties: { model: { type: 'string' }, systemPrompt: { type: 'string' }, outputFormat: { type: 'string', enum: ['text', 'json'] }, outputContract: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } }, passthroughKeys: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } }, maxToolCalls: { type: 'integer', minimum: 1 }, maxToolRounds: { type: 'integer', minimum: 1 }, maxToolResultChars: { type: 'integer', minimum: 1 }, skillIds: { type: 'array', items: { type: 'string' } }, mcpServerIds: { type: 'array', items: { type: 'string' } } } },
   },
+  {
+    id: 'worklite/branch',
+    version: '1',
+    name: 'Choice Branch',
+    purpose: 'Pass through a JSON value and select the first matching outgoing route.',
+    inputs: [{ name: 'value', required: true, dataType: 'json', multiple: false }],
+    outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
+    inputSchema: { type: 'object', required: ['value'] },
+    outputSchema: {},
+    configSchema: { type: 'object' },
+  },
 ];
 
 export function listWorkflowNodeCapabilities(): WorkflowNodeCapability[] {
@@ -501,7 +512,10 @@ export function takeNextWorkflowInvocation(state: WorkflowSchedulerState): Workf
 export function selectWorkflowEdges(definition: WorkflowDefinition, state: WorkflowSchedulerState, nodeId: string, output: unknown): WorkflowEdgeDefinition[] {
   const available = definition.edges.filter((edge) => edge.sourceNodeId === nodeId && (edge.maxTraversals === undefined || (state.edgeTraversals[edge.id] ?? 0) < edge.maxTraversals));
   const matched = available.filter((edge) => edge.condition?.kind !== 'fallback' && evaluateWorkflowEdgeCondition(edge, output));
-  return matched.length > 0 ? matched : available.filter((edge) => edge.condition?.kind === 'fallback');
+  const exclusive = definition.nodes.find((node) => node.id === nodeId)?.type === 'worklite/branch';
+  if (matched.length > 0) return exclusive ? matched.slice(0, 1) : matched;
+  const fallback = available.filter((edge) => edge.condition?.kind === 'fallback');
+  return exclusive ? fallback.slice(0, 1) : fallback;
 }
 
 export function commitWorkflowInvocation(definition: WorkflowDefinition, state: WorkflowSchedulerState, nodeId: string, output: unknown): WorkflowEdgeDefinition[] {

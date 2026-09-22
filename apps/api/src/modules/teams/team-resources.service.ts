@@ -496,8 +496,16 @@ export class WorkspaceResourcesService {
       capabilities: {
         supportedResourceOperations: ['inspect workspace resources', 'inspect Workflow capabilities', 'navigate to known WorkLite pages', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server draft', 'create Workflow draft', 'edit Workflow draft from a logical plan', 'change appearance', 'change language'],
         modelProviderProxy: {
-          protocols: ['openai/chat', 'openai/responses', 'anthropic/messages', 'codex/responses'],
+          protocols: ['openai/chat', 'openai/responses', 'anthropic/messages', 'codex/responses', 'typesafe/systemone'],
           requiresExplicitProtocol: true,
+          typesafeSystemOne: {
+            route: '/api/portkey-gateway/v1/systemone',
+            requestShape: 'state and typed questions',
+            responseShape: 'typed answers',
+            modelCatalog: 'manual',
+            agentExecution: false,
+            connectionTest: 'typed input and output; failures include the upstream reason and request-log id',
+          },
           imageGeneration: {
             route: '/api/portkey-gateway/v1/images/generations',
             codexModel: 'codex/gpt-image-2',
@@ -525,7 +533,7 @@ export class WorkspaceResourcesService {
             configSchema: capability.configSchema,
           })),
           unsupportedFeatures: ['standalone Agent resources', 'Agent version references', 'template selection', 'dynamic joins', 'parallel execution', 'webhook triggers', 'API triggers', 'notification nodes'],
-          controlFlow: { edgeModes: ['always', 'predicate', 'fallback'], predicatePaths: 'dot_delimited_output_path', boundedLoops: true, traversalLimitField: 'maxTraversals', cycleRule: 'every_cycle_crosses_a_bounded_edge', initialSourceRule: 'no_unbounded_incoming_edges_and_no_connected_required_inputs', agentContext: { maximumInitialEdges: 1, initialEdgeUnbounded: true, maximumBoundedFeedbackEdges: 1, workflowInputEdgeMustBeUnconditionalAndUnbounded: true }, explicitInitialInputEdges: { available: true, source: 'worklite/input.output', target: 'worklite/agent.context', mustBeUnconditionalAndUnbounded: true, mayCombineWithOneBoundedFeedbackEdge: true }, execution: 'deterministic_sequential_token_scheduler' },
+          controlFlow: { edgeModes: ['always', 'predicate', 'fallback'], predicatePaths: 'dot_delimited_output_path', boundedLoops: true, traversalLimitField: 'maxTraversals', cycleRule: 'every_cycle_crosses_a_bounded_edge', initialSourceRule: 'no_unbounded_incoming_edges_and_no_connected_required_inputs', agentContext: { maximumInitialEdges: 1, initialEdgeUnbounded: true, maximumBoundedFeedbackEdges: 1, workflowInputEdgeMustBeUnconditionalAndUnbounded: true }, explicitInitialInputEdges: { available: true, source: 'worklite/input.output', target: 'worklite/agent.context', mustBeUnconditionalAndUnbounded: true, mayCombineWithOneBoundedFeedbackEdge: true }, choiceBranch: { nodeType: 'worklite/branch', version: '1', inputPort: 'value', outputPort: 'output', selection: 'first_matching_outgoing_edge_in_definition_order', fallback: 'first_fallback_edge_when_no_non_fallback_edge_matches', passThrough: 'original_json_value' }, execution: 'deterministic_sequential_token_scheduler' },
           approvedArticle: { nodeType: 'worklite/approved-article', version: '1', requiresApproval: true, rejectsDuplicate: true, preservesWriterMarkdown: true },
           workflowAgentReview: { passthroughKeys: true, maxToolCalls: true, maxToolRounds: true, maxToolResultChars: true },
           artifactHistoryQuery: { nodeType: 'worklite/artifact-query', version: '1', scope: 'workspace_json_artifact_history_including_detached', requestPassthrough: true, emptyCandidatesAllowed: true, readOnly: true },

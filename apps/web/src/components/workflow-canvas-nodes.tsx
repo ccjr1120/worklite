@@ -1,10 +1,10 @@
 import { Handle, Position, type Edge, type Node, type NodeProps } from '@xyflow/react';
-import { Bot, Braces, FileSearch, FileText, Image as ImageIcon, LayoutDashboard, Send, Timer } from 'lucide-react';
+import { Bot, Braces, FileSearch, FileText, GitBranch, Image as ImageIcon, LayoutDashboard, Send, Timer } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { WorkflowDashboardLayout, WorkflowEdgeCondition } from '@worklite/contracts';
 import { cn } from '@/lib/utils';
 
-export type WorkflowCanvasNodeType = 'input' | 'timer' | 'agent' | 'dashboard' | 'artifact' | 'artifactQuery' | 'wechatPublish' | 'image';
+export type WorkflowCanvasNodeType = 'input' | 'timer' | 'agent' | 'branch' | 'dashboard' | 'artifact' | 'artifactQuery' | 'wechatPublish' | 'image';
 
 export type WorkflowCanvasNodeData = {
   nodeType: WorkflowCanvasNodeType;
@@ -124,6 +124,18 @@ function AgentNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   </div>;
 }
 
+function BranchNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
+  const { t } = useTranslation('workflows');
+  return <div className={nodeClassName(selected)}>
+    <NodeHeader icon={<GitBranch className="size-4 text-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
+    <div className="mt-3 border-t border-border py-1">
+      <PortRow label={t('editor.branchValuePort')}><Handle type="target" position={Position.Left} id="value" className={handleClass} aria-label={t('editor.branchValuePort')} /></PortRow>
+      <div className="relative flex h-7 items-center justify-end px-3 text-[11px] font-medium"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
+    </div>
+    <div className="px-3 pb-3 text-[11px] text-muted-foreground">{t('editor.branchSelectionHint')}</div>
+  </div>;
+}
+
 function WechatPublishNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   const { t } = useTranslation('workflows');
   return <div className={nodeClassName(selected)}>
@@ -161,6 +173,7 @@ export const workflowNodeTypes = {
   input: InputNode,
   timer: TimerNode,
   agent: AgentNode,
+  branch: BranchNode,
   dashboard: DashboardNode,
   artifact: ArtifactNode,
   artifactQuery: ArtifactQueryNode,

@@ -40,6 +40,8 @@ The Run records dialog is centered, scrolls internally, and preserves keyboard d
 
 **Open Run records.** The Actions-column control opens the dialog scoped to that Workflow. When a Workflow has a latest run, its status is also an interactive control for every status and opens the same dialog; a failed latest run additionally expands the matching Run row so the failure is visible without a further action.
 
+**Stay current.** While the Workflow List is mounted, its collection query polls every five seconds so server-observable latest-run status and update timestamps recover without a manual refresh control. The interval is transport behavior, not user-facing copy.
+
 **Expand a Run.** A dialog row expands in place and lazily loads ordered node execution logs with node identity, status, start time, duration, retry count, and credential-safe error text. Failed Runs show their failure reason before the log list, and the failed node repeats that reason in context. The same detail response states whether the immutable version contains an Artifact node; disclosure follows `../../../surfaces/workflow-run/artifacts/DESIGN.md`.
 
 **Pending authentication.** An expanded waiting Run places its active pending action before the ordered logs, showing the required action's title, description, a `waiting_for_input` status badge, and the QR image.
@@ -117,7 +119,9 @@ In the dialog, each Run row is a `button` carrying `aria-expanded` and `aria-con
 
 ## Coverage Status
 
-Verified 2026-09-19. Struck entries were resolved in the 2026-09-19 single-action pass; the rest remain open.
+Verified 2026-09-22. Struck entries were resolved in the 2026-09-19 single-action pass; the rest remain open.
+
+- ~~The Workflow collection query did not refresh latest-run status and update timestamps while the page was mounted.~~ Resolved: the collection query now polls every five seconds without adding a refresh control.
 
 - ~~`run-history-dialog.tsx` renders the manual `Refresh QR code` button, the `expiresAt` line, and the `expired` instruction alongside the automatic refresh effect that already replaces a stale code.~~ Resolved: the manual control and both strings are gone. Replacement runs from a single effect that attempts each distinct expiry marker once, so an equally stale response cannot spin, and the panel reports `pendingAction.replacing` while a new code arrives.
 - The dialog's own run-list loading and failure states are bare paragraphs rather than the shared loading and error treatments, so a failed run list has no retry path.
@@ -127,6 +131,10 @@ Verified 2026-09-19. Struck entries were resolved in the 2026-09-19 single-actio
 - `failedNode` picks the first node with `status === 'failed'` while `retryable` is server-marked per entry; the failure-reason banner and the retryable entry are resolved independently and may disagree on which node is authoritative.
 
 ## Changelog
+
+### 2026-09-22 - Workflow list freshness
+
+- Added five-second polling while the Workflow List is mounted so latest-run state and update timestamps recover automatically.
 
 ### 2026-09-19 - Copy cleanup
 

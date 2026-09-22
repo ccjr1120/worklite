@@ -785,12 +785,47 @@ export type ModelProviderView = {
   headerNames: string[];
 };
 
-export type ModelProviderTestResult = {
-  prompt: string;
-  model: string;
-  response: string;
-  traceId: string;
+export type SystemOneTestInput = {
+  state: {
+    message: string;
+  };
+  questions: {
+    connection: {
+      type: 'noul';
+      instructions: string;
+    };
+  };
 };
+
+export type SystemOneTestOutput = {
+  answers: {
+    connection: {
+      type: 'noul';
+      noul: number;
+    };
+  };
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+  };
+};
+
+export type ModelProviderTestResult =
+  | {
+    protocol: 'typesafe/systemone';
+    model: string;
+    input: SystemOneTestInput;
+    output: SystemOneTestOutput;
+    traceId: string;
+  }
+  | {
+    protocol: Exclude<ModelProviderProtocol, 'typesafe/systemone'>;
+    model: string;
+    prompt: string;
+    response: string;
+    traceId: string;
+  };
 
 export type TestModelProviderRequest = {
   model: string;

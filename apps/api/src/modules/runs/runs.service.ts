@@ -64,6 +64,14 @@ export class RunsService {
       execute: async ({ input }) => ({ output: { trigger: 'timer', value: input ?? null } }),
     });
     this.registry.register({
+      ...capability('worklite/branch'),
+      execute: async ({ input }) => {
+        const values = asRecord(input);
+        if (!values || !Object.prototype.hasOwnProperty.call(values, 'value')) throw new Error('Choice Branch node requires a JSON value input.');
+        return { output: values.value };
+      },
+    });
+    this.registry.register({
       ...capability('worklite/dashboard'),
       execute: async ({ input }) => ({ output: (input as { data?: unknown } | null | undefined)?.data ?? null }),
     });

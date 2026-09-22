@@ -8,12 +8,33 @@ import { recordRequestLog, recordRequestStat, type GatewayProvider, type Gateway
  */
 const SYSTEMONE_PATH = '/v1/systemone';
 const SYSTEMONE_TIMEOUT_MS = 60_000;
+export const SYSTEM_ONE_TEST_INPUT = {
+  state: { message: 'WorkLite provider connection test' },
+  questions: { connection: { type: 'noul' as const, instructions: 'Does `message` contain text?' } },
+};
+
+export type SystemOneTestInput = typeof SYSTEM_ONE_TEST_INPUT;
+
+export type SystemOneTestOutput = {
+  answers: {
+    connection: {
+      type: 'noul';
+      noul: number;
+    };
+  };
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+  };
+};
 
 function upstreamURL(baseURL: string): URL {
   const target = new URL(baseURL);
   if (target.protocol !== 'http:' && target.protocol !== 'https:') throw new Error('Unsupported URL');
   if (target.username || target.password) throw new Error('Unsupported URL');
-  target.pathname = `${target.pathname.replace(/\/+$/, '')}${SYSTEMONE_PATH}`;
+  const basePath = target.pathname.replace(/\/+$/, '');
+  target.pathname = basePath.endsWith('/v1') ? `${basePath}/systemone` : `${basePath}${SYSTEMONE_PATH}`;
   target.search = '';
   target.hash = '';
   return target;
@@ -41,6 +62,56 @@ function usageTokens(payload: unknown): { promptTokens: number | null; completio
 function correlation(request: Request, name: string): string | null {
   const value = request.headers.get(name);
   return value?.trim() ? value.trim() : null;
+}
+
+function upstreamErrorMessage(raw: string, status: number): string {
+  let payload: unknown;
+  try { payload = raw ? JSON.parse(raw) : undefined; } catch { payload = undefined; }
+  let reason: string | undefined;
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    const record = payload as Record<string, unknown>;
+    const error = record.error;
+    reason = typeof record.detail === 'string'
+      ? record.detail
+      : typeof record.message === 'string'
+        ? record.message
+        : typeof error === 'string'
+          ? error
+          : error && typeof error === 'object' && !Array.isArray(error) && typeof (error as Record<string, unknown>).message === 'string'
+            ? (error as Record<string, unknown>).message as string
+            : undefined;
+  } else if (raw.trim()) {
+    reason = raw.trim();
+  }
+  const suffix = reason?.trim() ? `: ${reason.trim()}` : '.';
+  return `TypeSafe provider request failed (${status})${suffix}`;
+}
+
+function parseSystemOneTestOutput(payload: unknown): SystemOneTestOutput | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const answers = (payload as Record<string, unknown>).answers;
+  if (!answers || typeof answers !== 'object' || Array.isArray(answers)) return null;
+  const connection = (answers as Record<string, unknown>).connection;
+  if (!connection || typeof connection !== 'object' || Array.isArray(connection)) return null;
+  const answer = connection as Record<string, unknown>;
+  if (answer.type !== 'noul' || typeof answer.noul !== 'number' || !Number.isFinite(answer.noul)) return null;
+
+  const usage = (payload as Record<string, unknown>).usage;
+  const usageRecord = usage && typeof usage === 'object' && !Array.isArray(usage) ? usage as Record<string, unknown> : undefined;
+  const inputTokens = tokenValue(usageRecord?.input_tokens);
+  const outputTokens = tokenValue(usageRecord?.output_tokens);
+  const totalTokens = tokenValue(usageRecord?.total_tokens);
+  const output: SystemOneTestOutput = {
+    answers: { connection: { type: 'noul', noul: answer.noul } },
+  };
+  if (inputTokens !== null || outputTokens !== null || totalTokens !== null) {
+    output.usage = {
+      ...(inputTokens !== null ? { input_tokens: inputTokens } : {}),
+      ...(outputTokens !== null ? { output_tokens: outputTokens } : {}),
+      ...(totalTokens !== null ? { total_tokens: totalTokens } : {}),
+    };
+  }
+  return output;
 }
 
 /**
@@ -118,15 +189,21 @@ export async function systemOnePassthrough(request: Request, provider: GatewayPr
  * contract. The fixed chat prompt used by other protocols has no representation
  * here.
  */
-export async function systemOneTest(provider: GatewayProvider, model: string, requestLogId: string): Promise<{ ok: boolean; status: number; response: string }> {
-  const body = JSON.stringify({ model, state: 'ok', questions: { connection: { type: 'noul', instructions: 'Does this message contain text?' } } });
+export type SystemOneTestResult =
+  | { ok: true; status: number; input: SystemOneTestInput; output: SystemOneTestOutput }
+  | { ok: false; status: number; input: SystemOneTestInput; message: string };
+
+export async function systemOneTest(provider: GatewayProvider, model: string, requestLogId: string): Promise<SystemOneTestResult> {
+  const body = JSON.stringify({ model, ...SYSTEM_ONE_TEST_INPUT });
   const headers = new Headers({ 'content-type': 'application/json', 'x-worklite-log-source': 'provider_test', 'x-worklite-log-id': requestLogId });
   const response = await systemOnePassthrough(new Request(`http://127.0.0.1${SYSTEMONE_PATH}`, { method: 'POST', headers, body }), provider, model);
   const raw = await response.text();
-  if (!response.ok) return { ok: false, status: response.status, response: '' };
-  let answer: unknown;
-  try { answer = (JSON.parse(raw) as { answers?: Record<string, { noul?: unknown }> }).answers?.connection?.noul; } catch { answer = undefined; }
-  return { ok: true, status: response.status, response: typeof answer === 'number' ? String(answer) : raw };
+  if (!response.ok) return { ok: false, status: response.status, input: SYSTEM_ONE_TEST_INPUT, message: upstreamErrorMessage(raw, response.status) };
+  let payload: unknown;
+  try { payload = JSON.parse(raw); } catch { payload = undefined; }
+  const output = parseSystemOneTestOutput(payload);
+  if (!output) return { ok: false, status: 502, input: SYSTEM_ONE_TEST_INPUT, message: 'TypeSafe provider returned an invalid System One response.' };
+  return { ok: true, status: response.status, input: SYSTEM_ONE_TEST_INPUT, output };
 }
 
 export function isSystemOneProtocol(provider: Pick<GatewayProvider, 'protocol'>): boolean {
