@@ -222,7 +222,7 @@ function WorkflowRunRow({ run, workflow, input }: { run: RunView; workflow: Work
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium">{workflow.name}</span>
-            <Badge variant={run.status === 'failed' || run.status === 'timed_out' ? 'danger' : 'neutral'}>
+            <Badge variant={run.status === 'failed' || run.status === 'timed_out' ? 'danger' : run.status === 'paused' ? 'warning' : 'neutral'}>
               {run.status === 'waiting_for_input' ? t('workflowRun.waitingForConfirmation') : t(`status.${statusKey}`)}
             </Badge>
           </div>

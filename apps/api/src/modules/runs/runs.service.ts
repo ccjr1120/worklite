@@ -287,7 +287,7 @@ export class RunsService {
   async cancel(request: Request, workspaceSlug: string, runId: string): Promise<RunView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const finishedAt = new Date();
-    const [run] = await this.db.update(workflowRuns).set({ status: 'cancelled', currentNodeId: null, finishedAt, updatedAt: finishedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id), sql`${workflowRuns.status} in ('queued', 'running', 'waiting_for_input')`)).returning();
+    const [run] = await this.db.update(workflowRuns).set({ status: 'cancelled', currentNodeId: null, finishedAt, updatedAt: finishedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id), sql`${workflowRuns.status} in ('queued', 'running', 'paused', 'waiting_for_input')`)).returning();
     if (!run) return this.get(request, workspaceSlug, runId);
     this.activeRuns.get(runId)?.abort();
     const pendingActions = await this.db.select({ id: workflowPendingActions.id }).from(workflowPendingActions).where(and(eq(workflowPendingActions.runId, runId), eq(workflowPendingActions.status, 'pending')));
@@ -299,6 +299,51 @@ export class RunsService {
     const [version] = await this.db.select().from(workflowVersions).where(eq(workflowVersions.id, run.workflowVersionId)).limit(1);
     if (!workflow || !version) throw new NotFoundException('Run dependencies not found');
     return this.toView(run, workflow, version, workspaceSlug, 'You', true);
+  }
+
+  async pause(request: Request, workspaceSlug: string, runId: string): Promise<RunView> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const now = new Date();
+    const pausedRun = await this.db.transaction((transaction) => {
+      const [updatedRun] = transaction.update(workflowRuns)
+        .set({ status: 'paused', updatedAt: now })
+        .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id), inArray(workflowRuns.status, ['queued', 'running'])))
+        .returning().all();
+      if (!updatedRun) return null;
+      transaction.update(workflowNodeRuns)
+        .set({ status: 'queued' })
+        .where(and(eq(workflowNodeRuns.runId, runId), eq(workflowNodeRuns.status, 'running')))
+        .run();
+      return updatedRun;
+    });
+    if (!pausedRun) return this.get(request, workspaceSlug, runId);
+    this.activeRuns.get(runId)?.abort();
+    await this.publish(runId, 'run.status', { status: 'paused' });
+    const [workflow] = await this.db.select().from(workflows).where(eq(workflows.id, pausedRun.workflowId)).limit(1);
+    const [version] = await this.db.select().from(workflowVersions).where(eq(workflowVersions.id, pausedRun.workflowVersionId)).limit(1);
+    if (!workflow || !version) throw new NotFoundException('Run dependencies not found');
+    return this.toView(pausedRun, workflow, version, workspaceSlug, 'You', true);
+  }
+
+  async resume(request: Request, workspaceSlug: string, runId: string): Promise<RunView> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const now = new Date();
+    const resumedRun = await this.db.transaction((transaction) => {
+      const [updatedRun] = transaction.update(workflowRuns)
+        .set({ status: 'queued', updatedAt: now })
+        .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id), eq(workflowRuns.status, 'paused')))
+        .returning().all();
+      if (!updatedRun) return null;
+      transaction.update(workflowNodeRuns)
+        .set({ status: 'queued' })
+        .where(and(eq(workflowNodeRuns.runId, runId), eq(workflowNodeRuns.status, 'running')))
+        .run();
+      return updatedRun;
+    });
+    if (!resumedRun) return this.get(request, workspaceSlug, runId);
+    await this.publish(runId, 'run.status', { status: 'queued' });
+    this.schedule(runId);
+    return this.get(request, workspaceSlug, runId);
   }
 
   async refreshPendingAction(request: Request, workspaceSlug: string, runId: string): Promise<RunView> {
@@ -495,7 +540,7 @@ export class RunsService {
     } catch (error) {
       if (error instanceof RunCancelledError) return;
       const [current] = await this.db.select({ status: workflowRuns.status }).from(workflowRuns).where(eq(workflowRuns.id, runId)).limit(1);
-      if (current?.status === 'cancelled') return;
+      if (current?.status === 'cancelled' || current?.status === 'paused') return;
       const message = error instanceof Error ? error.message : 'Workflow execution failed.';
       const failedAt = new Date();
       const failedRun = await this.db.transaction((transaction) => {
@@ -507,8 +552,16 @@ export class RunsService {
       if (!failedRun) return;
       await this.publish(runId, 'run.status', { status: 'failed', error: message });
     } finally {
-      if (this.activeRuns.get(runId) === abortController) this.activeRuns.delete(runId);
+      if (this.activeRuns.get(runId) === abortController) {
+        this.activeRuns.delete(runId);
+        await this.resumeQueuedAfterPause(runId);
+      }
     }
+  }
+
+  private async resumeQueuedAfterPause(runId: string): Promise<void> {
+    const [current] = await this.db.select({ status: workflowRuns.status }).from(workflowRuns).where(eq(workflowRuns.id, runId)).limit(1);
+    if (current?.status === 'queued') this.schedule(runId);
   }
 
   private async assertActive(runId: string, signal: AbortSignal): Promise<void> {

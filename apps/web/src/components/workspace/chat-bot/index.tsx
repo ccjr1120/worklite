@@ -130,7 +130,7 @@ function ChatBot({ workspaceSlug }: { workspaceSlug: string }) {
   const running = visibleExecution?.status === 'running';
   const isHome = pathname === '/home';
   const waitingForInput = visibleExecution?.status === 'waiting_for_input';
-  const workflowRunning = workflowRun?.run.status === 'queued' || workflowRun?.run.status === 'running' || workflowRun?.run.status === 'waiting_for_input';
+  const workflowRunning = workflowRun?.run.status === 'queued' || workflowRun?.run.status === 'running' || workflowRun?.run.status === 'paused' || workflowRun?.run.status === 'waiting_for_input';
   const mentionMatch = !selectedWorkflow && !workflowRunning ? /(?:^|\s)@([^\s@]*)$/.exec(draft) : null;
   const mentionQuery = mentionMatch?.[1]?.toLocaleLowerCase() ?? '';
   const eligibleWorkflows = useMemo(() => (workflowsQuery.data ?? []).filter((workflow) => workflow.state === 'published' && workflow.latestVersionId), [workflowsQuery.data]);
@@ -662,6 +662,7 @@ function ChatBot({ workspaceSlug }: { workspaceSlug: string }) {
   // not accepted yet is reported by the Send control, not as a running execution.
   const status = workflowRun?.run.status === 'queued' ? t('assistant:status.queued')
     : workflowRun?.run.status === 'running' ? t('assistant:status.running')
+    : workflowRun?.run.status === 'paused' ? t('assistant:status.paused')
     : workflowRun?.run.status === 'waiting_for_input' ? t('assistant:workflowRun.waitingForConfirmation')
     : connectionState === 'reconnecting' ? t('assistant:status.reconnecting')
     : visibleExecution?.status === 'failed' ? t('assistant:status.failed')

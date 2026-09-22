@@ -34,6 +34,8 @@ Agent composer drafts remain editable during an active turn. A draft submitted d
 
 Human-gated execution is durable. A `Waiting for input` Run keeps its pending action visible across navigation and reload, exposes expiry and recovery controls, and resumes automatically when the server observes completion. QR expiry is a recoverable pending state rather than a failed Run.
 
+A paused Run is active but reversible execution state. It remains visible while suspended, offers resume through one neutral execution control, and keeps cancellation available as a separate terminal intent. Pause and resume report progress on the activated control; a failed command explains itself there without replacing the Run summary.
+
 A failed Run is recoverable at the node the server marks as retryable. Retry is a neutral execution control local to that node entry, not a destructive action and not a Run-level rerun. It reports progress on the control itself, preserves the existing failure reason until execution continues, and surfaces a rejected retry beside that reason rather than replacing it.
 
 ## Truthful Feedback
@@ -45,6 +47,10 @@ Success feedback reports an outcome that occurred. A control must not confirm wo
 Truncate only summaries and provide expand, copy, download or details access. Inline Agent Skill calls stay collapsed by default, retain status and exit context in their summary, and reveal height-bounded scrollable raw output only on request. Never reveal secrets in fields, logs, errors or audit metadata. Untrusted content is rendered without inline execution.
 
 ## Changelog
+
+### 2026-09-22
+
+- Added paused Runs as reversible active execution state with neutral resume feedback, preserved Run visibility, and an independent cancellation intent.
 
 ### 2026-09-21
 

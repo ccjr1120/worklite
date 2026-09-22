@@ -84,6 +84,11 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-09-22 - Run pause and resume
+
+- Added reversible Run pause and resume controls to the Run Detail acceptance contract, with a warning paused status and control-local feedback.
+- Extended Run cancellation eligibility to paused Runs and documented paused execution as active reversible state.
+
 ### 2026-09-22 - Workflow execution freshness
 
 - Added automatic five-second refresh to the mounted Workflow List so server-observable latest-run state stays current without a manual refresh action.

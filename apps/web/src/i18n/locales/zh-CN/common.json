@@ -34,6 +34,7 @@
   "status": {
     "queued": "排队中",
     "running": "运行中",
+    "paused": "已暂停",
     "waiting_for_input": "等待输入",
     "completed": "已完成",
     "failed": "失败",

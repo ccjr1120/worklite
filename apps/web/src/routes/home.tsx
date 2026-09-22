@@ -498,7 +498,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-type StatusUiStatus = 'queued' | 'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled';
+type StatusUiStatus = 'queued' | 'running' | 'paused' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled';
 
 function statusLabel(status: RunView['status']): StatusUiStatus {
   if (status === 'succeeded') return 'completed';

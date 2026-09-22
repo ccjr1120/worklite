@@ -78,5 +78,13 @@
     "phase": {
       "setup": "{{type}}@{{version}}，错误策略 {{policy}}"
     }
+  },
+  "pause": {
+    "action": "暂停",
+    "failed": "无法暂停此次运行。"
+  },
+  "resume": {
+    "action": "继续",
+    "failed": "无法继续此次运行。"
   }
 }

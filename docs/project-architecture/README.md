@@ -421,7 +421,7 @@ A draft-mode failure is otherwise reported with the platform's own reason when t
 
 WorkLite has two primary product services: Workflow automation and Home. Workflows acquire, process, and produce data. Home displays only boards published by Dashboard nodes and owns no global Workflow data source or platform widgets. Source-specific integrations such as Meegle are Workflow use cases rather than standalone products, API domains, routes, or navigation destinations.
 
-A Workflow's fixed-interval scheduling source of truth is its versioned `worklite/timer` node, not an independently editable schedule resource. Draft Timer changes do not affect active scheduling until Publish. Publishing a version with a Timer synchronizes the internal `workflow_schedules` runtime projection to that immutable WorkflowVersion; an enabled Timer schedules future runs, a disabled Timer retains disabled runtime status without future runs, and a version without a Timer removes the projection. The read-only `GET /workflows/:workflowId/schedule` endpoint exposes the active bound version, next-run time, and last-run status for the Timer inspector. There is no schedule mutation endpoint. Scheduled executions are ordinary Workflow Runs, cannot overlap for the same Workflow, and an overdue schedule advances by running once after restart. Cron expressions, calendars, webhook triggers, catch-up replay, and compatibility routes for removed schedule APIs are intentionally omitted.
+A Workflow's fixed-interval scheduling source of truth is its versioned `worklite/timer` node, not an independently editable schedule resource. Draft Timer changes do not affect active scheduling until Publish. Publishing a version with a Timer synchronizes the internal `workflow_schedules` runtime projection to that immutable WorkflowVersion; an enabled Timer schedules future runs, a disabled Timer retains disabled runtime status without future runs, and a version without a Timer removes the projection. The read-only `GET /workflows/:workflowId/schedule` endpoint exposes the active bound version, next-run time, and last-run status for the Timer inspector. There is no schedule mutation endpoint. Scheduled executions are ordinary Workflow Runs, cannot overlap for the same Workflow, and a paused scheduled Run remains the active overlap guard until resumed or cancelled; an overdue schedule advances by running once after restart. Cron expressions, calendars, webhook triggers, catch-up replay, and compatibility routes for removed schedule APIs are intentionally omitted.
 
 A workflow may invoke an embedded Workflow Agent node configured with instructions, a public model id, Skills, and MCP server access. Skill and MCP capabilities serve Agent execution. Plugins and Agents remain peer-level workspace capabilities: a Plugin may register runtime capabilities or Node Types, while an Agent performs model-driven work and may consume Skills and MCP servers. Workflow composes these capabilities without making a source-specific integration a first-class product surface.
 
@@ -451,6 +451,7 @@ The API returns a `runId` immediately. The browser loads run state through the A
 ```text
 queued -> running -> succeeded
                   -> waiting_for_input -> running
+                  -> paused -> queued
                   -> failed
                   -> cancelled
                   -> timed_out
@@ -466,6 +467,8 @@ Runtime requirements include node and workflow timeouts, cooperative cancellatio
 
 Completed and suspended node runs are retained. The API-local executor resolves registered node types, persists each node transition, persists Artifacts during successful Artifact-node execution, and publishes replayable run events. Continuation reloads the persisted scheduler state and re-enters only the suspended invocation. A pre-scheduler Run that already contains Node Runs but has no scheduler state fails explicitly instead of reconstructing tokens or rerunning predecessors; no compatibility adapter or in-flight Run migration is provided. Conditional branches and loop iterations execute sequentially; concurrent branch execution remains deferred. A durable queue such as BullMQ remains a later boundary for multi-instance execution, concurrent branches, or stronger leasing; the single-process runtime uses SQLite-backed suspension and continuation for human-gated nodes.
 
+A queued or running Run may be paused without a mid-invocation checkpoint. Pause transactionally marks the Run `paused`, moves a running active Node Run back to `queued`, preserves scheduler state, current node, and completed predecessor invocations, and aborts the in-memory request. Resume transactionally returns the Run to `queued` with its active Node Run still `queued` and re-enters the existing scheduler; the interrupted active invocation reruns from its beginning, while completed predecessors never rerun. `waiting_for_input` already provides durable human-gated suspension and cannot be paused. A paused Run is active but reversible execution state: it remains observable on Run SSE, survives restart, accepts cancellation, and prevents overlapping scheduled execution until it leaves `paused`; schedule recovery preserves the paused Run's existing schedule claim.
+
 A failed Run may be retried from its failed node. Node failure preserves the persisted scheduler state, including the active invocation's NodeRun identifier, ordered position, and mapped input, so retry re-enters that same invocation with every committed predecessor output intact. Retry never reruns a successful predecessor, never creates a duplicate NodeRun row, and never advances the ready queue or edge traversal counts on its own. It is accepted only when the Run is `failed` and the requested NodeRun is the persisted active invocation; any other NodeRun, a Run in another status, and a Run without persisted scheduler state are rejected. An accepted retry returns that NodeRun to `queued`, clears its previous failure text and finish time, increments its retry count, and returns the Run to `queued` so the normal executor continues from the same node. Node-level retry is a manual recovery command and is independent of the per-node `retry` error policy, which still governs automatic in-run attempts. Retrying an earlier successful node would require rolling back committed input tokens, edge traversal counts, and downstream Artifacts, and remains deferred.
 
 Initial run endpoints are:
@@ -475,6 +478,8 @@ POST /workflow-versions/:workflowVersionId/runs
 GET  /runs/:runId
 GET  /runs/:runId/events
 POST /runs/:runId/cancel
+POST /runs/:runId/pause
+POST /runs/:runId/resume
 POST /runs/:runId/pending-action/refresh
 POST /runs/:runId/nodes/:nodeRunId/retry
 ```
@@ -631,6 +636,12 @@ Workflows support a versioned portable JSON envelope for moving editable definit
 Import validates the envelope, structured edge conditions, and bounded-cycle constraints, resolves every Skill and MCP server reference against the destination workspace, and creates a new mutable draft. Missing or ambiguous references reject the entire import. Import never overwrites an existing workflow, publishes a version, or enables a schedule.
 
 ## Changelog
+
+### 2026-09-22 - Workflow Run Pause and Resume
+
+- Added Run-level pause for queued or running Runs and resume for paused Runs without a mid-node checkpoint.
+- Preserved scheduler state and completed predecessors, reran only the interrupted active invocation after resume, and left durable human-gated waiting unchanged.
+- Kept paused Runs observable and restart-stable, allowed their cancellation, and made them continue to prevent scheduled overlap.
 
 ### 2026-09-22 - AI SDK Workflow Agent Tool Loop
 

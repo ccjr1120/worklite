@@ -12,7 +12,7 @@ import { api } from '@/api/client';
 import { queryClient } from '@/lib/query-client';
 import { cn } from '@/lib/utils';
 
-type RunRecordStatus = 'queued' | 'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled';
+type RunRecordStatus = 'queued' | 'running' | 'paused' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled';
 
 function toRecordStatus(status: RunView['status'] | WorkflowNodeRunView['status']): RunRecordStatus {
   if (status === 'succeeded') return 'completed';

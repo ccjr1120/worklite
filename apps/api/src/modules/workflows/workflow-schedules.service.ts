@@ -76,7 +76,18 @@ export class WorkflowSchedulesService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async recoverAndTick(): Promise<void> {
-    await this.db.update(workflowSchedules).set({ running: false, lastStatus: 'failed', updatedAt: new Date() }).where(eq(workflowSchedules.running, true));
+    const interrupted = await this.db.select().from(workflowSchedules).where(eq(workflowSchedules.running, true));
+    for (const schedule of interrupted) {
+      const [run] = schedule.lastRunId
+        ? await this.db.select({ status: workflowRuns.status }).from(workflowRuns).where(eq(workflowRuns.id, schedule.lastRunId)).limit(1)
+        : [];
+      // Startup fails queued and running Runs, but a persisted paused Run remains durable.
+      if (run?.status === 'paused') {
+        await this.db.update(workflowSchedules).set({ running: true, lastStatus: 'paused', updatedAt: new Date() }).where(eq(workflowSchedules.id, schedule.id));
+      } else {
+        await this.db.update(workflowSchedules).set({ running: false, lastStatus: 'failed', updatedAt: new Date() }).where(eq(workflowSchedules.id, schedule.id));
+      }
+    }
     await this.tick();
   }
 
@@ -121,7 +132,7 @@ export class WorkflowSchedulesService implements OnModuleInit, OnModuleDestroy {
   private async finishSchedule(schedule: typeof workflowSchedules.$inferSelect): Promise<void> {
     if (!schedule.lastRunId) return;
     const [run] = await this.db.select().from(workflowRuns).where(eq(workflowRuns.id, schedule.lastRunId)).limit(1);
-    if (!run || run.status === 'queued' || run.status === 'running' || run.status === 'waiting_for_input') return;
+    if (!run || run.status === 'queued' || run.status === 'running' || run.status === 'paused' || run.status === 'waiting_for_input') return;
     await this.db.update(workflowSchedules).set({ running: false, lastStatus: run.status, updatedAt: new Date() }).where(eq(workflowSchedules.id, schedule.id));
   }
 

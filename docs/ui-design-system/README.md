@@ -262,6 +262,11 @@ Before confirming a UI proposal, verify that it:
 
 ## Changelog
 
+### 2026-09-22 - Paused Workflow Run
+
+- Added `paused` as a warning status with a non-color pause cue, visually distinct from durable `waiting_for_input` and neutral cancelled execution.
+- Added reversible Run pause and resume controls with control-local progress and retained Run-detail cancellation for paused Runs.
+
 ### 2026-09-21 - Conversational turn and queue
 
 - Defined one Agent turn as one identity block containing its own Skill-call rows, and reduced working, cancelled, and failure cues to inline notes without identity marks while keeping them independent status regions.

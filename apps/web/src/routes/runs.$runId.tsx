@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { Ban, FileStack, LoaderCircle, ScrollText } from 'lucide-react';
+import { Ban, FileStack, LoaderCircle, Pause, Play, ScrollText } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RunProgressEvent } from '@worklite/contracts';
@@ -33,6 +33,8 @@ function RunDetailPage() {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [lifecycleAction, setLifecycleAction] = useState<'pause' | 'resume' | null>(null);
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
   const terminal = run?.status === 'succeeded' || run?.status === 'failed' || run?.status === 'cancelled' || run?.status === 'timed_out';
 
   useEffect(() => {
@@ -90,7 +92,24 @@ function RunDetailPage() {
   const artifacts = run.artifacts ?? [];
   const duration = run.durationSeconds == null ? null : durationParts(run.durationSeconds);
   const failureReason = failureReasonOf(run.result, run.status);
-  const canCancel = run.status === 'queued' || run.status === 'running' || run.status === 'waiting_for_input';
+  const canPause = run.status === 'queued' || run.status === 'running';
+  const canResume = run.status === 'paused';
+  const canCancel = run.status === 'queued' || run.status === 'running' || run.status === 'paused' || run.status === 'waiting_for_input';
+
+  const changeRunLifecycle = async (action: 'pause' | 'resume') => {
+    if (lifecycleAction) return;
+    setLifecycleAction(action);
+    setLifecycleError(null);
+    try {
+      await (action === 'pause' ? api.pauseRun('personal', runId) : api.resumeRun('personal', runId));
+      await queryClient.invalidateQueries({ queryKey: ['run', runId] });
+    } catch (lifecycleFailure) {
+      const fallback = action === 'pause' ? t('runs:pause.failed') : t('runs:resume.failed');
+      setLifecycleError(lifecycleFailure instanceof Error ? lifecycleFailure.message : fallback);
+    } finally {
+      setLifecycleAction(null);
+    }
+  };
 
   const cancelRun = async () => {
     if (!canCancel || cancelling) return;
@@ -112,12 +131,43 @@ function RunDetailPage() {
       <WorkspaceChrome crumbs={[{ label: run.workflowName, to: '/workflows' }, { label: t('runs:detail.title') }]} />
       <PageHeading
         title={run.workflowName}
-        actions={canCancel ? (
-          <Button type="button" variant="destructive" size="compact" onClick={() => { setCancelError(null); setCancelOpen(true); }} disabled={cancelling}>
-            <Ban aria-hidden="true" />
-            {t('runs:cancel.action')}
-          </Button>
-        ) : null}
+        actions={(
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-2">
+              {canPause ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="compact"
+                  onClick={() => void changeRunLifecycle('pause')}
+                  disabled={cancelling || lifecycleAction !== null}
+                >
+                  {lifecycleAction === 'pause' ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <Pause aria-hidden="true" />}
+                  {t('runs:pause.action')}
+                </Button>
+              ) : null}
+              {canResume ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="compact"
+                  onClick={() => void changeRunLifecycle('resume')}
+                  disabled={cancelling || lifecycleAction !== null}
+                >
+                  {lifecycleAction === 'resume' ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <Play aria-hidden="true" />}
+                  {t('runs:resume.action')}
+                </Button>
+              ) : null}
+              {canCancel ? (
+                <Button type="button" variant="destructive" size="compact" onClick={() => { setCancelError(null); setCancelOpen(true); }} disabled={cancelling || lifecycleAction !== null}>
+                  <Ban aria-hidden="true" />
+                  {t('runs:cancel.action')}
+                </Button>
+              ) : null}
+            </div>
+            {lifecycleError ? <p className="text-right text-[13px] text-danger" role="alert">{lifecycleError}</p> : null}
+          </div>
+        )}
       />
       <div className="mt-4 flex flex-wrap items-center gap-3 text-[13px] text-muted-foreground">
         <StatusBadge status={toRecordStatus(run.status)} />

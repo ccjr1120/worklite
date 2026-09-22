@@ -1,9 +1,9 @@
-import { Ban, CheckCircle2, CircleDashed, LoaderCircle, PauseCircle, XCircle } from 'lucide-react';
+import { Ban, CheckCircle2, CircleDashed, LoaderCircle, Pause, PauseCircle, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
-type RunUiStatus = 'queued' | 'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled';
+type RunUiStatus = 'queued' | 'running' | 'paused' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled';
 
 type StatusKey =
   | RunUiStatus
@@ -34,6 +34,7 @@ const STATUS_CONFIG: Record<
 > = {
   queued: { variant: 'neutral', icon: CircleDashed },
   running: { variant: 'brand', icon: LoaderCircle },
+  paused: { variant: 'warning', icon: Pause },
   waiting_for_input: { variant: 'warning', icon: PauseCircle },
   completed: { variant: 'success', icon: CheckCircle2 },
   failed: { variant: 'danger', icon: XCircle },

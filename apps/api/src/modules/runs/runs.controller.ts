@@ -70,6 +70,16 @@ export class RunsController {
     return this.runs.cancel(request, 'personal', runId);
   }
 
+  @Post('runs/:runId/pause')
+  pause(@Req() request: Request, @Param('runId') runId: string) {
+    return this.runs.pause(request, 'personal', runId);
+  }
+
+  @Post('runs/:runId/resume')
+  resume(@Req() request: Request, @Param('runId') runId: string) {
+    return this.runs.resume(request, 'personal', runId);
+  }
+
   @Post('runs/:runId/pending-action/refresh')
   refreshPendingAction(@Req() request: Request, @Param('runId') runId: string) {
     return this.runs.refreshPendingAction(request, 'personal', runId);

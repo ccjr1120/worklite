@@ -65,7 +65,8 @@
     "cancelled": "已中断",
     "failed": "失败",
     "reconnecting": "正在重新连接",
-    "queued": "Queued"
+    "queued": "Queued",
+    "paused": "已暂停"
   },
   "execution": {
     "loading": "正在加载服务端执行",
