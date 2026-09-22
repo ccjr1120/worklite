@@ -544,7 +544,7 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
   const required = Array.isArray(capability.configSchema.required) ? capability.configSchema.required.filter((key): key is string => typeof key === 'string') : [];
   const allowedMissing = type === 'worklite/agent' && !requireCompleteAgents
     ? new Set(['model', 'systemPrompt'])
-    : type === 'typesafe/systemone' && !requireCompleteAgents
+    : (type === 'typesafe/systemone' || type === 'typesafe/systemone-map') && !requireCompleteAgents
       ? new Set(['model'])
       : new Set<string>();
   for (const key of required) {
@@ -576,6 +576,23 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
   }
   if (type === 'typesafe/systemone' && requireCompleteAgents && (typeof value.model !== 'string' || !/^[^/]+\/.+/.test(value.model.trim()))) {
     throw new BadRequestException('Every TypeSafe System One node must contain a public provider/model id before publication.');
+  }
+  if (type === 'typesafe/systemone-map') {
+    if (value.itemsPath !== undefined && typeof value.itemsPath !== 'string') throw new BadRequestException('TypeSafe System One Map node itemsPath must be a string.');
+    if (value.contextPath !== undefined && (typeof value.contextPath !== 'string' || !value.contextPath.trim())) throw new BadRequestException('TypeSafe System One Map node contextPath must be a non-empty output path.');
+    if (value.concurrency !== undefined && (typeof value.concurrency !== 'number' || !Number.isInteger(value.concurrency) || value.concurrency < 1)) throw new BadRequestException('TypeSafe System One Map node concurrency must be a positive integer.');
+    if (value.rank !== undefined) {
+      if (!isRecord(value.rank)) throw new BadRequestException('TypeSafe System One Map node rank must be an object.');
+      if (typeof value.rank.path !== 'string' || !value.rank.path.trim()) throw new BadRequestException('TypeSafe System One Map node rank path must be a non-empty answer path.');
+      if (value.rank.order !== undefined && value.rank.order !== 'asc' && value.rank.order !== 'desc') throw new BadRequestException('TypeSafe System One Map node rank order must be asc or desc.');
+      if (value.rank.limit !== undefined && (typeof value.rank.limit !== 'number' || !Number.isInteger(value.rank.limit) || value.rank.limit < 1)) throw new BadRequestException('TypeSafe System One Map node rank limit must be a positive integer.');
+      if (value.rank.minimum !== undefined && (typeof value.rank.minimum !== 'number' || !Number.isFinite(value.rank.minimum))) throw new BadRequestException('TypeSafe System One Map node rank minimum must be a number.');
+    }
+    if (requireCompleteAgents) {
+      if (typeof value.itemsPath !== 'string' || !value.itemsPath.trim()) throw new BadRequestException('Every TypeSafe System One Map node must address an array with a non-empty items path before publication.');
+      if (!isRecord(value.questions) || Object.keys(value.questions).length === 0) throw new BadRequestException('Every TypeSafe System One Map node must contain at least one typed question before publication.');
+      if (typeof value.model !== 'string' || !/^[^/]+\/.+/.test(value.model.trim())) throw new BadRequestException('Every TypeSafe System One Map node must contain a public provider/model id before publication.');
+    }
   }
   if (type === 'worklite/artifact') {
     if (typeof value.name !== 'string' || !value.name.trim()) throw new BadRequestException('Artifact node name must be a non-empty string.');

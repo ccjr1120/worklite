@@ -18,7 +18,7 @@ import {
   type StoredWorkflowExecutionState,
   type StoredWorkflowNode,
 } from '@worklite/db';
-import { commitWorkflowInvocation, createWorkflowSchedulerState, NodeTypeRegistry, resolveWorkflowNodeCapability, takeNextWorkflowInvocation, workflowRunResult, type NodeExecutionRequest, type PendingNodeExecutionResult, type WorkflowSchedulerState } from '@worklite/workflow-engine';
+import { commitWorkflowInvocation, createWorkflowSchedulerState, NodeTypeRegistry, readWorkflowOutputPath, resolveWorkflowNodeCapability, takeNextWorkflowInvocation, workflowRunResult, type NodeExecutionRequest, type PendingNodeExecutionResult, type WorkflowSchedulerState } from '@worklite/workflow-engine';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from '../agents/agent-executions.service';
@@ -168,6 +168,60 @@ export class RunsService {
           ? state as Record<string, unknown>
           : { state };
         return { output: { ...stateOutput, ...output } };
+      },
+    });
+    this.registry.register({
+      ...capability('typesafe/systemone-map'),
+      execute: async (request) => {
+        const config = asRecord(request.config);
+        const inputs = asRecord(request.input);
+        if (!config || typeof config.model !== 'string' || !config.model.trim()) throw new Error('TypeSafe System One Map node requires a public model id.');
+        if (!config.questions || typeof config.questions !== 'object' || Array.isArray(config.questions)) throw new Error('TypeSafe System One Map node requires a questions object.');
+        if (typeof config.itemsPath !== 'string' || !config.itemsPath.trim()) throw new Error('TypeSafe System One Map node requires an items path.');
+        if (!inputs || !Object.prototype.hasOwnProperty.call(inputs, 'state')) throw new Error('TypeSafe System One Map node requires a state input.');
+        const state = inputs.state;
+        const located = readWorkflowOutputPath(state, config.itemsPath);
+        if (!located.exists || !Array.isArray(located.value)) throw new Error(`TypeSafe System One Map node requires a JSON array at ${config.itemsPath}.`);
+        const items = located.value;
+        const context = typeof config.contextPath === 'string' && config.contextPath.trim() ? readWorkflowOutputPath(state, config.contextPath).value ?? null : null;
+        const questions = config.questions as Record<string, unknown>;
+        const evaluated = new Array<Record<string, unknown>>(items.length);
+        const usage = { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+        let usageReported = false;
+        // Iteration stays inside this single invocation, so the scheduler still sees one token and
+        // one committed output. A failed element rejects the whole node under its error policy
+        // rather than committing a partially evaluated array to a downstream node.
+        const concurrency = typeof config.concurrency === 'number' && Number.isInteger(config.concurrency) && config.concurrency > 0 ? config.concurrency : 4;
+        let cursor = 0;
+        const evaluate = async (): Promise<void> => {
+          for (let index = cursor++; index < items.length; index = cursor++) {
+            const item = items[index];
+            // Each element carries only its own content plus the shared context the author
+            // addressed, because surplus state measurably degrades a typed judgement.
+            const answer = await this.gateway.executeSystemOne({
+              model: (config.model as string).trim(),
+              state: { item, context },
+              questions,
+              workflowRunId: request.context.workflowRunId,
+              nodeRunId: request.context.nodeRunId,
+              signal: request.signal,
+            });
+            const record = asRecord(item);
+            evaluated[index] = { ...(record ?? { item }), answers: answer.answers };
+            if (answer.usage) {
+              usageReported = true;
+              const inputTokens = answer.usage.input_tokens ?? 0;
+              const outputTokens = answer.usage.output_tokens ?? 0;
+              usage.input_tokens += inputTokens;
+              usage.output_tokens += outputTokens;
+              usage.total_tokens += answer.usage.total_tokens ?? inputTokens + outputTokens;
+            }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => evaluate()));
+        const results = rankSystemOneMapResults(evaluated, config.rank);
+        const stateOutput = state && typeof state === 'object' && !Array.isArray(state) ? state as Record<string, unknown> : { state };
+        return { output: { ...stateOutput, results, ...(usageReported ? { usage } : {}) } };
       },
     });
     this.registry.register({
@@ -739,6 +793,37 @@ function assertWorkflowAgentOutputContract(output: unknown, contract: unknown): 
     return Array.isArray(value) && value.length === 0;
   });
   if (missing.length > 0) throw new Error(`Agent node JSON output is missing required keys: ${missing.join(', ')}.`);
+}
+
+function rankSystemOneMapResults(entries: Record<string, unknown>[], rank: unknown): Record<string, unknown>[] {
+  const config = asRecord(rank);
+  if (!config || typeof config.path !== 'string' || !config.path.trim()) return entries;
+  const path = config.path.trim();
+  const score = (entry: Record<string, unknown>): number | null => {
+    const value = readWorkflowOutputPath(entry, path).value;
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  };
+  // Ranking is deterministic selection applied after evaluation, never a second model judgement.
+  // An element whose answer path holds no number cannot be compared with a threshold, so a
+  // configured minimum drops it instead of letting it survive as though it had scored.
+  const minimum = typeof config.minimum === 'number' && Number.isFinite(config.minimum) ? config.minimum : null;
+  const kept = minimum === null ? [...entries] : entries.filter((entry) => {
+    const value = score(entry);
+    return value !== null && value >= minimum;
+  });
+  const descending = config.order !== 'asc';
+  const ordered = kept
+    .map((entry, index) => ({ entry, index, value: score(entry) }))
+    .sort((left, right) => {
+      if (left.value === null && right.value === null) return left.index - right.index;
+      if (left.value === null) return 1;
+      if (right.value === null) return -1;
+      if (left.value === right.value) return left.index - right.index;
+      return descending ? right.value - left.value : left.value - right.value;
+    })
+    .map((item) => item.entry);
+  const limit = typeof config.limit === 'number' && Number.isInteger(config.limit) && config.limit > 0 ? config.limit : null;
+  return limit === null ? ordered : ordered.slice(0, limit);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

@@ -30,7 +30,7 @@ The budget is above one because the graph is a composite draft rather than a sin
 
 The workflow editor presents a directed control-flow dataflow graph with structured conditional edges and bounded loop edges.
 
-The palette includes Timer, Workflow Input, Agent, Choice Branch, TypeSafe System One, Dashboard, Artifact, Artifact Query, Image, and the trusted WeChat Official Account Publish node when its built-in Plugin is available.
+The palette includes Timer, Workflow Input, Agent, Choice Branch, TypeSafe System One, TypeSafe System One Map, Dashboard, Artifact, Artifact Query, Image, and the trusted WeChat Official Account Publish node when its built-in Plugin is available.
 
 - **Timer** is a source trigger with no inputs, one JSON output, an enabled control, and a fixed interval of at least five minutes; each Workflow may contain at most one Timer.
 - **Dashboard** has one required JSON `data` input, one JSON `output` port, and at most one instance per Workflow.
@@ -38,6 +38,7 @@ The palette includes Timer, Workflow Input, Agent, Choice Branch, TypeSafe Syste
 - **Agent** owns its immutable embedded configuration and has one optional `context` input plus one output. When `context` has no explicit Workflow Input edge and no unbounded incoming edge, the initial Agent invocation uses the Workflow Run input, while later bounded-loop traversals supply the next context value. Its inspector selects `Text` or `JSON` output format.
 - **Choice Branch** has one required JSON `value` input and one JSON `output` port. It passes the input through unchanged and evaluates its outgoing unconditional or predicate edges in connection order, traversing only the first match; when no non-fallback edge matches, it traverses the first fallback edge. It can consume JSON from any upstream node.
 - **TypeSafe System One** has one required JSON `state` input and one JSON `output` port. Its inspector selects a configured TypeSafe public model and edits the immutable typed `questions` object. The node forwards the upstream System One response, including `answers`, without chat or Agent adaptation, while retaining object state fields for downstream context; outgoing predicates may address paths such as `$.answers.articleType.choice`.
+- **TypeSafe System One Map** has the same required JSON `state` input and JSON `output` port as TypeSafe System One, and evaluates its typed questions once per element of an array inside that state. Its inspector adds the items path, an optional context path, an optional concurrency bound, and an optional ranking answer path whose order, result limit, and minimum score appear only once a ranking path exists. Ranking is deterministic ordering applied after evaluation, so the inspector presents it as selection rather than as a second question.
 - **Artifact** has one required JSON `data` input, one output, and permits multiple instances; it configures a non-empty display name and a `Text`, `Markdown`, or `JSON` artifact type.
 - **Artifact Query** has one required JSON `request` input and one JSON output; its inspector selects a JSON Artifact name, a top-level title field, and one or more top-level description fields. It reads matching workspace history, including detached Artifacts, and emits the request with compact title-and-description candidates without creating Artifacts.
 - **Image** has one required string `prompt` input and one JSON output. Its inspector fixes `codex/gpt-image-2` and exposes only the supported image count, background, quality, and size choices. The node displays an image summary after execution and never renders or inspects base64 data.
@@ -89,6 +90,8 @@ The Timer inspector's read-only runtime status is the one self-healing value her
 
 **TypeSafe System One** nodes expose a TypeSafe public model selector and a structured JSON `questions` editor. The required `state` input is supplied by a connected JSON upstream node. The inspector explains that the request is forwarded as typed state and questions, that object state remains available in the output, and that typed answers support downstream routing.
 
+**TypeSafe System One Map** nodes reuse that model selector, questions editor, and error policy, because those controls mean the same thing for both nodes. They add an items path naming the array inside the connected state, an optional context path for the shared value sent beside every element, an optional concurrent-request bound, and an optional ranking answer path. Order, result limit, and minimum score are disclosed only after a ranking path exists, so no control is shown that would order nothing. The questions hint states that the question set is sent once per element rather than once per Run, and the node body shows the selected model, the items path, and the question count.
+
 **Artifact** nodes expose name and artifact-type controls and explain that a successful Run creates the Artifact while the node output carries its reference.
 
 **Artifact Query** nodes expose the JSON Artifact name, title field, and description fields as labeled controls. The inspector explains that the query reads all matching workspace history, including detached Artifacts and unfinished Research Notes, without editing them, and that the output carries the original request and candidate metadata. An empty result is an empty candidate list, not an error.
@@ -134,6 +137,8 @@ The output panel contains only persisted output from a selected run. AI editing 
 | `workflows:editor.agentNode*` / `editor.model` / `editor.selectModel` / `editor.systemPrompt` / `editor.skills` / `editor.mcpServers` | State |
 | `workflows:editor.branchNode*` / `editor.branchValuePort` / `editor.branchSelectionHint` | State, Constraint |
 | `workflows:editor.systemOneNode*` / `editor.systemOneStatePort` / `editor.systemOneModel` / `editor.systemOneSelectModel` / `editor.systemOneQuestions` / `editor.systemOneQuestionsDescription` / `editor.systemOneQuestionsInvalid` / `editor.systemOneQuestionCount` | State, Constraint, Recovery |
+| `workflows:editor.systemOneMapNode*` / `editor.systemOneMapItemsPath*` / `editor.systemOneMapContextPath*` / `editor.systemOneMapConcurrency` / `editor.systemOneMapQuestionsDescription` | State, plus the path and questions descriptions as Constraint |
+| `workflows:editor.systemOneMapRankPath` / `editor.systemOneMapRankDescription` / `editor.systemOneMapRankOrder` / `editor.systemOneMapRankOrders.*` / `editor.systemOneMapRankLimit` / `editor.systemOneMapRankMinimum` / `editor.systemOneMapRankMinimumDescription` | State, plus both rank descriptions as Constraint |
 | `workflows:editor.outputFormat` / `editor.outputFormats.*` | State |
 | `workflows:editor.outputFormatDescription` | Constraint |
 | `workflows:editor.artifactNode*` / `editor.artifactName` / `editor.artifactType` / `editor.artifactTypes.*` | State |
@@ -194,6 +199,12 @@ Verified 2026-09-22. Differences found against `apps/web/src/routes/workflows/$w
 - Delete sets `setDeleteBusy(true)` and only resets it inside the `catch`, relying on navigation to unmount the component on success; the busy flag is never cleared on the success path.
 
 ## Changelog
+
+### 2026-09-23 - TypeSafe System One Map node
+
+- Added the per-element TypeSafe node to the palette, canvas, and contextual inspector. It reuses the existing model selector, questions editor, and error policy rather than introducing a second grammar for the same controls.
+- Added items path, context path, concurrency, and ranking controls, disclosing ranking order, limit, and minimum only after a ranking path exists so the inspector never shows a control that orders nothing.
+- Introduced no new color, icon, or layout language: the node uses the neutral node surface, the shared single `state` port, and the existing selection, focus, and execution treatments in both themes.
 
 ### 2026-09-22 - TypeSafe System One Workflow node
 

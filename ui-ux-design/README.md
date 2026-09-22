@@ -109,6 +109,10 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 - Recorded the retention asymmetry as a Constraint on the Requests tab: statistics cover any range, request details cover at most the trailing three days of it, and a range reaching past that window says so rather than reading as an absence of requests.
 - Redirected both inbound observability links to the new destination: the node log's `View request logs` and the failed provider test's `View request log`.
 
+### 2026-09-23 - TypeSafe System One Map node
+
+- Updated the [Workflow Editor specification](pages/workflows/editor/DESIGN.md) for the per-element `typesafe/systemone-map@1` node, including its shared state port, items and context paths, concurrency bound, and progressively disclosed ranking controls.
+
 ### 2026-09-22 - JSON Choice Branch
 
 - Updated the [Workflow Editor specification](pages/workflows/editor/DESIGN.md) for the generic `worklite/branch@1` node, which routes any JSON output through the first matching structured edge condition and does not depend on System One.

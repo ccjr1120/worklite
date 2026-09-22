@@ -282,6 +282,37 @@ const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     configSchema: { type: 'object' },
   },
   {
+    id: 'typesafe/systemone-map',
+    version: '1',
+    name: 'TypeSafe System One Map',
+    purpose: 'Evaluate one typed question set against every element of an array inside the Workflow state, then rank the evaluated elements.',
+    inputs: [{ name: 'state', required: true, dataType: 'json', multiple: false }],
+    outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
+    inputSchema: { type: 'object', required: ['state'], properties: { state: {} } },
+    outputSchema: { type: 'object', required: ['results'] },
+    configSchema: {
+      type: 'object',
+      required: ['model', 'questions', 'itemsPath'],
+      properties: {
+        model: { type: 'string' },
+        questions: { type: 'object' },
+        itemsPath: { type: 'string', minLength: 1 },
+        contextPath: { type: 'string', minLength: 1 },
+        concurrency: { type: 'integer', minimum: 1 },
+        rank: {
+          type: 'object',
+          required: ['path'],
+          properties: {
+            path: { type: 'string', minLength: 1 },
+            order: { type: 'string', enum: ['asc', 'desc'] },
+            limit: { type: 'integer', minimum: 1 },
+            minimum: { type: 'number' },
+          },
+        },
+      },
+    },
+  },
+  {
     id: 'typesafe/systemone',
     version: '1',
     name: 'TypeSafe System One',

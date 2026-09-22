@@ -1,10 +1,17 @@
 import { Handle, Position, type Edge, type Node, type NodeProps } from '@xyflow/react';
-import { Bot, Braces, FileSearch, FileText, GitBranch, Image as ImageIcon, LayoutDashboard, Send, Timer } from 'lucide-react';
+import { Bot, Braces, FileSearch, FileText, GitBranch, Image as ImageIcon, LayoutDashboard, ListChecks, Send, Timer } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { WorkflowDashboardLayout, WorkflowEdgeCondition } from '@worklite/contracts';
 import { cn } from '@/lib/utils';
 
-export type WorkflowCanvasNodeType = 'input' | 'timer' | 'agent' | 'branch' | 'systemOne' | 'dashboard' | 'artifact' | 'artifactQuery' | 'wechatPublish' | 'image';
+export type WorkflowCanvasNodeType = 'input' | 'timer' | 'agent' | 'branch' | 'systemOne' | 'systemOneMap' | 'dashboard' | 'artifact' | 'artifactQuery' | 'wechatPublish' | 'image';
+
+export type WorkflowSystemOneRank = {
+  path: string;
+  order?: 'asc' | 'desc';
+  limit?: number;
+  minimum?: number;
+};
 
 export type WorkflowCanvasNodeData = {
   nodeType: WorkflowCanvasNodeType;
@@ -13,6 +20,10 @@ export type WorkflowCanvasNodeData = {
   systemPrompt?: string;
   outputFormat?: 'text' | 'json';
   systemOneQuestions?: Record<string, unknown>;
+  systemOneItemsPath?: string;
+  systemOneContextPath?: string;
+  systemOneConcurrency?: number;
+  systemOneRank?: WorkflowSystemOneRank;
   mcpServerIds?: string[];
   mcpServerNames?: string[];
   timerEnabled?: boolean;
@@ -149,6 +160,22 @@ function SystemOneNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   </div>;
 }
 
+function SystemOneMapNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
+  const { t } = useTranslation('workflows');
+  return <div className={cn(nodeClassName(selected), 'w-[300px]')}>
+    <NodeHeader icon={<ListChecks className="size-4 text-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
+    <div className="mt-3 border-t border-border py-1">
+      <PortRow label={t('editor.systemOneStatePort')}><Handle type="target" position={Position.Left} id="state" className={handleClass} aria-label={t('editor.systemOneStatePort')} /></PortRow>
+      <div className="relative flex h-7 items-center justify-end px-3 text-[11px] font-medium"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
+    </div>
+    <div className="px-3 pb-3 text-[11px] text-muted-foreground">
+      <p>{data.model || t('editor.systemOneSelectModel')}</p>
+      <p className="font-mono">{data.systemOneItemsPath || t('editor.systemOneMapItemsPathEmpty')}</p>
+      <p>{t('editor.systemOneQuestionCount', { count: Object.keys(data.systemOneQuestions ?? {}).length })}</p>
+    </div>
+  </div>;
+}
+
 function WechatPublishNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   const { t } = useTranslation('workflows');
   return <div className={nodeClassName(selected)}>
@@ -188,6 +215,7 @@ export const workflowNodeTypes = {
   agent: AgentNode,
   branch: BranchNode,
   systemOne: SystemOneNode,
+  systemOneMap: SystemOneMapNode,
   dashboard: DashboardNode,
   artifact: ArtifactNode,
   artifactQuery: ArtifactQueryNode,

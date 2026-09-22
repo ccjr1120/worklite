@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { addEdge, Background, BackgroundVariant, Controls, MarkerType, PanOnScrollMode, ReactFlow, reconnectEdge, useEdgesState, useNodesState, type OnConnect, type OnConnectEnd, type OnReconnect, type ReactFlowInstance } from '@xyflow/react';
-import { ArrowLeft, Bot, Braces, Check, Copy, Download, FilePlus2, FileSearch, FileText, GitBranch, Image as ImageIcon, LayoutDashboard, PanelRight, Plus, Redo2, Search, Send, SlidersHorizontal, Timer, Trash2, Undo2, Workflow } from 'lucide-react';
+import { ArrowLeft, Bot, Braces, Check, Copy, Download, FilePlus2, FileSearch, FileText, GitBranch, Image as ImageIcon, LayoutDashboard, ListChecks, PanelRight, Plus, Redo2, Search, Send, SlidersHorizontal, Timer, Trash2, Undo2, Workflow } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
@@ -19,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { workflowNodeTypes, type WorkflowCanvasEdge, type WorkflowCanvasEdgeData, type WorkflowCanvasNode } from '@/components/workflow-canvas-nodes';
+import { workflowNodeTypes, type WorkflowCanvasEdge, type WorkflowCanvasEdgeData, type WorkflowCanvasNode, type WorkflowSystemOneRank } from '@/components/workflow-canvas-nodes';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { api } from '@/api/client';
 import { useMcpServersQuery, useModelProvidersQuery, runsQueryKey, useSkillsQuery, useWorkflowQuery, useWorkflowScheduleQuery, workflowScheduleQueryKey, workflowsQueryKey } from '@/api/queries';
@@ -125,6 +125,7 @@ function WorkflowEditorPage() {
   const filteredAgentVisible = !paletteQuery.trim() || `${t('editor.agentNode')} ${t('editor.agentNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredBranchVisible = !paletteQuery.trim() || `${t('editor.branchNode')} ${t('editor.branchNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredSystemOneVisible = !paletteQuery.trim() || `${t('editor.systemOneNode')} ${t('editor.systemOneNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
+  const filteredSystemOneMapVisible = !paletteQuery.trim() || `${t('editor.systemOneMapNode')} ${t('editor.systemOneMapNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredDashboardVisible = !paletteQuery.trim() || `${t('editor.dashboardNode')} ${t('editor.dashboardNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredArtifactVisible = !paletteQuery.trim() || `${t('editor.artifactNode')} ${t('editor.artifactNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredArtifactQueryVisible = !paletteQuery.trim() || `${t('editor.artifactQueryNode')} ${t('editor.artifactQueryNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
@@ -290,6 +291,22 @@ function WorkflowEditorPage() {
   function addSystemOneNode() {
     const id = createId('system-one');
     addNode({ id, type: 'systemOne', position: nextPosition(), selected: true, data: { nodeType: 'systemOne', label: t('editor.systemOneNode'), model: systemOneModelOptions[0] ?? '', systemOneQuestions: {}, errorPolicy: executionPolicy } });
+  }
+
+  function addSystemOneMapNode() {
+    const id = createId('system-one-map');
+    addNode({ id, type: 'systemOneMap', position: nextPosition(), selected: true, data: { nodeType: 'systemOneMap', label: t('editor.systemOneMapNode'), model: systemOneModelOptions[0] ?? '', systemOneQuestions: {}, systemOneItemsPath: '', errorPolicy: executionPolicy } });
+  }
+
+  function updateSystemOneRank(nodeId: string, patch: Partial<WorkflowSystemOneRank>) {
+    setNodes((current) => current.map((node) => {
+      if (node.id !== nodeId) return node;
+      const next: WorkflowSystemOneRank = { path: '', ...node.data.systemOneRank, ...patch };
+      // Without a ranking path the node commits results in input order, so an empty path drops the
+      // whole ranking configuration instead of persisting a fragment that orders nothing.
+      return { ...node, data: { ...node.data, systemOneRank: next.path.trim() ? next : undefined } };
+    }));
+    setSaveState('unsaved');
   }
 
   function addArtifactNode() {
@@ -586,6 +603,7 @@ function WorkflowEditorPage() {
         {filteredAgentVisible ? <PaletteButton icon={<Bot className="size-5 text-info" />} title={t('editor.agentNode')} description={t('editor.agentNodeDescription')} onClick={addAgentNode} /> : null}
         {filteredBranchVisible ? <PaletteButton icon={<GitBranch className="size-5 text-foreground" />} title={t('editor.branchNode')} description={t('editor.branchNodeDescription')} onClick={addBranchNode} /> : null}
         {filteredSystemOneVisible ? <PaletteButton icon={<Braces className="size-5 text-foreground" />} title={t('editor.systemOneNode')} description={t('editor.systemOneNodeDescription')} onClick={addSystemOneNode} /> : null}
+        {filteredSystemOneMapVisible ? <PaletteButton icon={<ListChecks className="size-5 text-foreground" />} title={t('editor.systemOneMapNode')} description={t('editor.systemOneMapNodeDescription')} onClick={addSystemOneMapNode} /> : null}
         {filteredDashboardVisible ? <PaletteButton icon={<LayoutDashboard className="size-5 text-foreground" />} title={t('editor.dashboardNode')} description={t('editor.dashboardNodeDescription')} onClick={addDashboardNode} /> : null}
         {filteredArtifactVisible ? <PaletteButton icon={<FileText className="size-5 text-foreground" />} title={t('editor.artifactNode')} description={t('editor.artifactNodeDescription')} onClick={addArtifactNode} /> : null}
         {filteredArtifactQueryVisible ? <PaletteButton icon={<FileSearch className="size-5 text-foreground" />} title={t('editor.artifactQueryNode')} description={t('editor.artifactQueryNodeDescription')} onClick={addArtifactQueryNode} /> : null}
@@ -662,9 +680,9 @@ function WorkflowEditorPage() {
           <p className="text-[12px] text-muted-foreground">{selectedNode.data.wechatMode === 'publish' ? t('editor.wechatPublishPendingHint') : t('editor.wechatDraftHint')}</p>
           {selectedNode.data.wechatNodeVersion !== '1' ? <p className="text-[12px] text-muted-foreground">{t('editor.wechatCoverHint')}</p> : null}
         </> : null}
-        {selectedNode.data.nodeType === 'systemOne' ? <>
+        {selectedNode.data.nodeType === 'systemOne' || selectedNode.data.nodeType === 'systemOneMap' ? <>
           <Field label={t('editor.systemOneModel')} htmlFor="system-one-model"><Select value={selectedNode.data.model ?? ''} onValueChange={(model) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, model } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="system-one-model"><SelectValue placeholder={t('editor.systemOneSelectModel')} /></SelectTrigger><SelectContent>{systemOneModelOptions.map((model) => <SelectItem key={model} value={model}>{model}</SelectItem>)}</SelectContent></Select></Field>
-          <Field label={t('editor.systemOneQuestions')} htmlFor="system-one-questions" hint={t('editor.systemOneQuestionsDescription')}>
+          <Field label={t('editor.systemOneQuestions')} htmlFor="system-one-questions" hint={selectedNode.data.nodeType === 'systemOneMap' ? t('editor.systemOneMapQuestionsDescription') : t('editor.systemOneQuestionsDescription')}>
             <Textarea id="system-one-questions" className="min-h-36 font-mono text-[12px]" aria-invalid={systemOneQuestionErrors[selectedNode.id] || undefined} value={systemOneQuestionDrafts[selectedNode.id] ?? JSON.stringify(selectedNode.data.systemOneQuestions ?? {}, null, 2)} onChange={(event) => {
               const draft = event.target.value;
               setSystemOneQuestionDrafts((current) => ({ ...current, [selectedNode.id]: draft }));
@@ -680,6 +698,31 @@ function WorkflowEditorPage() {
             }} />
             {systemOneQuestionErrors[selectedNode.id] ? <p className="mt-1 text-[12px] text-danger" role="alert">{t('editor.systemOneQuestionsInvalid')}</p> : null}
           </Field>
+          {selectedNode.data.nodeType === 'systemOneMap' ? <>
+            <Field label={t('editor.systemOneMapItemsPath')} htmlFor="system-one-items-path" hint={t('editor.systemOneMapItemsPathDescription')}>
+              <Input id="system-one-items-path" className="font-mono text-[12px]" value={selectedNode.data.systemOneItemsPath ?? ''} onChange={(event) => { const systemOneItemsPath = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, systemOneItemsPath } } : node)); setSaveState('unsaved'); }} />
+            </Field>
+            <Field label={t('editor.systemOneMapContextPath')} htmlFor="system-one-context-path" hint={t('editor.systemOneMapContextPathDescription')}>
+              <Input id="system-one-context-path" className="font-mono text-[12px]" value={selectedNode.data.systemOneContextPath ?? ''} onChange={(event) => { const systemOneContextPath = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, systemOneContextPath } } : node)); setSaveState('unsaved'); }} />
+            </Field>
+            <Field label={t('editor.systemOneMapConcurrency')} htmlFor="system-one-concurrency">
+              <Input id="system-one-concurrency" type="number" min={1} step={1} value={selectedNode.data.systemOneConcurrency ? String(selectedNode.data.systemOneConcurrency) : ''} onChange={(event) => { const parsed = Number(event.target.value); const systemOneConcurrency = Number.isInteger(parsed) && parsed > 0 ? parsed : undefined; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, systemOneConcurrency } } : node)); setSaveState('unsaved'); }} />
+            </Field>
+            <Field label={t('editor.systemOneMapRankPath')} htmlFor="system-one-rank-path" hint={t('editor.systemOneMapRankDescription')}>
+              <Input id="system-one-rank-path" className="font-mono text-[12px]" value={selectedNode.data.systemOneRank?.path ?? ''} onChange={(event) => updateSystemOneRank(selectedNode.id, { path: event.target.value })} />
+            </Field>
+            {selectedNode.data.systemOneRank?.path.trim() ? <>
+              <Field label={t('editor.systemOneMapRankOrder')} htmlFor="system-one-rank-order">
+                <Select value={selectedNode.data.systemOneRank.order ?? 'desc'} onValueChange={(value) => updateSystemOneRank(selectedNode.id, { order: value as 'asc' | 'desc' })}><SelectTrigger id="system-one-rank-order"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="desc">{t('editor.systemOneMapRankOrders.desc')}</SelectItem><SelectItem value="asc">{t('editor.systemOneMapRankOrders.asc')}</SelectItem></SelectContent></Select>
+              </Field>
+              <Field label={t('editor.systemOneMapRankLimit')} htmlFor="system-one-rank-limit">
+                <Input id="system-one-rank-limit" type="number" min={1} step={1} value={selectedNode.data.systemOneRank.limit ? String(selectedNode.data.systemOneRank.limit) : ''} onChange={(event) => { const parsed = Number(event.target.value); updateSystemOneRank(selectedNode.id, { limit: Number.isInteger(parsed) && parsed > 0 ? parsed : undefined }); }} />
+              </Field>
+              <Field label={t('editor.systemOneMapRankMinimum')} htmlFor="system-one-rank-minimum" hint={t('editor.systemOneMapRankMinimumDescription')}>
+                <Input id="system-one-rank-minimum" type="number" step="any" value={typeof selectedNode.data.systemOneRank.minimum === 'number' ? String(selectedNode.data.systemOneRank.minimum) : ''} onChange={(event) => { const parsed = Number(event.target.value); updateSystemOneRank(selectedNode.id, { minimum: event.target.value.trim() && Number.isFinite(parsed) ? parsed : undefined }); }} />
+              </Field>
+            </> : null}
+          </> : null}
           <Field label={t('editor.errorPolicy')} htmlFor="system-one-policy"><Select value={selectedNode.data.errorPolicy} onValueChange={(value) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, errorPolicy: value as 'stop' | 'retry' } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="system-one-policy"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="stop">{t('editor.stop')}</SelectItem><SelectItem value="retry">{t('editor.retry')}</SelectItem></SelectContent></Select></Field>
         </> : null}
         {selectedNode.data.nodeType === 'agent' ? <>
@@ -815,11 +858,22 @@ function WorkflowEditorPage() {
   );
 }
 
+function toSystemOneRank(value: unknown): WorkflowSystemOneRank | undefined {
+  const rank = asRecord(value);
+  if (!rank || typeof rank.path !== 'string' || !rank.path.trim()) return undefined;
+  return {
+    path: rank.path,
+    ...(rank.order === 'asc' || rank.order === 'desc' ? { order: rank.order } : {}),
+    ...(typeof rank.limit === 'number' && Number.isInteger(rank.limit) && rank.limit > 0 ? { limit: rank.limit } : {}),
+    ...(typeof rank.minimum === 'number' && Number.isFinite(rank.minimum) ? { minimum: rank.minimum } : {}),
+  };
+}
+
 function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
   return definition.nodes.map((node) => {
     const config = asRecord(node.config);
-    const nodeType = node.type === 'worklite/input' ? 'input' : node.type === 'worklite/timer' ? 'timer' : node.type === 'worklite/branch' ? 'branch' : node.type === 'typesafe/systemone' ? 'systemOne' : node.type === 'worklite/dashboard' ? 'dashboard' : node.type === 'worklite/artifact' ? 'artifact' : node.type === 'worklite/artifact-query' ? 'artifactQuery' : node.type === 'worklite/image' ? 'image' : node.type === 'wechat-official-account/publish' ? 'wechatPublish' : 'agent';
-    const label = typeof config.label === 'string' ? config.label : nodeType === 'input' ? 'Workflow Input' : nodeType === 'timer' ? 'Timer' : nodeType === 'branch' ? 'Choice Branch' : nodeType === 'systemOne' ? 'TypeSafe System One' : nodeType === 'dashboard' ? 'Dashboard' : nodeType === 'artifact' ? 'Artifact' : nodeType === 'artifactQuery' ? 'Artifact Query' : nodeType === 'image' ? 'Image Generation' : nodeType === 'wechatPublish' ? 'WeChat Official Account' : 'Agent';
+    const nodeType = node.type === 'worklite/input' ? 'input' : node.type === 'worklite/timer' ? 'timer' : node.type === 'worklite/branch' ? 'branch' : node.type === 'typesafe/systemone' ? 'systemOne' : node.type === 'typesafe/systemone-map' ? 'systemOneMap' : node.type === 'worklite/dashboard' ? 'dashboard' : node.type === 'worklite/artifact' ? 'artifact' : node.type === 'worklite/artifact-query' ? 'artifactQuery' : node.type === 'worklite/image' ? 'image' : node.type === 'wechat-official-account/publish' ? 'wechatPublish' : 'agent';
+    const label = typeof config.label === 'string' ? config.label : nodeType === 'input' ? 'Workflow Input' : nodeType === 'timer' ? 'Timer' : nodeType === 'branch' ? 'Choice Branch' : nodeType === 'systemOne' ? 'TypeSafe System One' : nodeType === 'systemOneMap' ? 'TypeSafe System One Map' : nodeType === 'dashboard' ? 'Dashboard' : nodeType === 'artifact' ? 'Artifact' : nodeType === 'artifactQuery' ? 'Artifact Query' : nodeType === 'image' ? 'Image Generation' : nodeType === 'wechatPublish' ? 'WeChat Official Account' : 'Agent';
     return {
       id: node.id,
       type: nodeType,
@@ -831,6 +885,10 @@ function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
         systemPrompt: typeof config.systemPrompt === 'string' ? config.systemPrompt : '',
         outputFormat: config.outputFormat === 'json' || config.outputFormat === 'text' ? config.outputFormat : 'text',
         systemOneQuestions: config.questions && typeof config.questions === 'object' && !Array.isArray(config.questions) ? config.questions as Record<string, unknown> : {},
+        systemOneItemsPath: typeof config.itemsPath === 'string' ? config.itemsPath : '',
+        systemOneContextPath: typeof config.contextPath === 'string' ? config.contextPath : '',
+        systemOneConcurrency: typeof config.concurrency === 'number' && Number.isInteger(config.concurrency) && config.concurrency > 0 ? config.concurrency : undefined,
+        systemOneRank: toSystemOneRank(config.rank),
         mcpServerIds: Array.isArray(config.mcpServerIds) ? config.mcpServerIds.filter((value): value is string => typeof value === 'string') : [],
         mcpServerNames: Array.isArray(config.mcpServerNames) ? config.mcpServerNames.filter((value): value is string => typeof value === 'string') : [],
         timerEnabled: typeof config.enabled === 'boolean' ? config.enabled : true,
@@ -912,7 +970,7 @@ function canConnect(connection: { source: string | null; sourceHandle?: string |
     if (targetHandle !== 'request') return false;
   } else if (targetNode.data.nodeType === 'branch') {
     if (targetHandle !== 'value') return false;
-  } else if (targetNode.data.nodeType === 'systemOne') {
+  } else if (targetNode.data.nodeType === 'systemOne' || targetNode.data.nodeType === 'systemOneMap') {
     if (targetHandle !== 'state') return false;
   } else if (targetNode.data.nodeType === 'image') {
     if (targetHandle !== 'prompt') return false;
@@ -961,6 +1019,17 @@ function toDefinitionNode(node: WorkflowCanvasNode): WorkflowNodeDefinition {
   } else if (node.data.nodeType === 'systemOne') {
     type = 'typesafe/systemone';
     config = { ...base, model: node.data.model ?? '', questions: node.data.systemOneQuestions ?? {} };
+  } else if (node.data.nodeType === 'systemOneMap') {
+    type = 'typesafe/systemone-map';
+    config = {
+      ...base,
+      model: node.data.model ?? '',
+      questions: node.data.systemOneQuestions ?? {},
+      itemsPath: node.data.systemOneItemsPath ?? '',
+      ...(node.data.systemOneContextPath?.trim() ? { contextPath: node.data.systemOneContextPath.trim() } : {}),
+      ...(node.data.systemOneConcurrency ? { concurrency: node.data.systemOneConcurrency } : {}),
+      ...(node.data.systemOneRank?.path.trim() ? { rank: node.data.systemOneRank } : {}),
+    };
   } else if (node.data.nodeType === 'timer') {
     type = 'worklite/timer';
     config = { ...base, enabled: node.data.timerEnabled !== false, intervalSeconds: node.data.timerIntervalSeconds ?? 300 };
@@ -1153,6 +1222,7 @@ function nodeTypeLabel(nodeType: WorkflowCanvasNode['data']['nodeType'], t: TFun
   if (nodeType === 'timer') return t('editor.timerNode');
   if (nodeType === 'branch') return t('editor.branchNode');
   if (nodeType === 'systemOne') return t('editor.systemOneNode');
+  if (nodeType === 'systemOneMap') return t('editor.systemOneMapNode');
   if (nodeType === 'dashboard') return t('editor.dashboardNode');
   if (nodeType === 'artifact') return t('editor.artifactNode');
   if (nodeType === 'artifactQuery') return t('editor.artifactQueryNode');
