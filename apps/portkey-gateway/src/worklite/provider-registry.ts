@@ -5,7 +5,7 @@ import BetterSqlite3 from 'better-sqlite3';
 import { codexAuthStatus } from './codex-auth';
 import { codexModels } from './codex-transport';
 
-export type GatewayProviderProtocol = 'openai/chat' | 'openai/responses' | 'anthropic/messages' | 'codex/responses';
+export type GatewayProviderProtocol = 'openai/chat' | 'openai/responses' | 'anthropic/messages' | 'codex/responses' | 'typesafe/systemone';
 
 export type GatewayProvider = {
   id: string;
@@ -70,7 +70,7 @@ type ProviderRow = {
   updated_at: number | string | null;
 };
 
-const VALID_PROTOCOLS: GatewayProviderProtocol[] = ['openai/chat', 'openai/responses', 'anthropic/messages', 'codex/responses'];
+const VALID_PROTOCOLS: GatewayProviderProtocol[] = ['openai/chat', 'openai/responses', 'anthropic/messages', 'codex/responses', 'typesafe/systemone'];
 const GATEWAY_PROVIDER_ID = 'gateway-provider';
 const CODEX_PROVIDER_ID = 'codex-provider';
 const CODEX_PROVIDER_NAME = 'codex';

@@ -113,7 +113,9 @@ function WorkflowEditorPage() {
 
   const selectedNode = nodes.find((node) => node.selected);
   const selectedEdge = edges.find((edge) => edge.selected);
-  const modelOptions = useMemo(() => availableProviders.flatMap((provider) => provider.models.map((model) => `${provider.name}/${model}`)), [availableProviders]);
+  // Credential-forwarding providers exchange typed questions for typed answers and
+  // cannot run an Agent node, so they are omitted from model selection.
+  const modelOptions = useMemo(() => availableProviders.filter((provider) => provider.protocol !== 'typesafe/systemone').flatMap((provider) => provider.models.map((model) => `${provider.name}/${model}`)), [availableProviders]);
   const filteredTimerVisible = !paletteQuery.trim() || `${t('editor.timerNode')} ${t('editor.timerNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredAgentVisible = !paletteQuery.trim() || `${t('editor.agentNode')} ${t('editor.agentNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredDashboardVisible = !paletteQuery.trim() || `${t('editor.dashboardNode')} ${t('editor.dashboardNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());

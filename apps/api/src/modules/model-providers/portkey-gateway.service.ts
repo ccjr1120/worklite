@@ -25,7 +25,7 @@ const HOP_BY_HOP_HEADERS = new Set([
   'upgrade',
 ]);
 
-type GatewayProxyOperation = 'models' | 'chat/completions' | 'responses' | 'messages' | 'images/generations';
+type GatewayProxyOperation = 'models' | 'chat/completions' | 'responses' | 'messages' | 'images/generations' | 'systemone';
 
 function forwardedHeaders(headers: IncomingMessage['headers']): Record<string, string> {
   return Object.fromEntries(
@@ -45,7 +45,10 @@ function responseHeaders(headers: IncomingMessage['headers']): Record<string, st
   );
 }
 
-function protocolParts(protocol: ModelProviderProtocol): { adapter: 'openai' | 'anthropic' | 'codex'; operation: 'chat/completions' | 'responses' | 'messages' } {
+function protocolParts(protocol: ModelProviderProtocol): { adapter: 'openai' | 'anthropic' | 'codex' | 'typesafe'; operation: 'chat/completions' | 'responses' | 'messages' | 'systemone' } {
+  // The `typesafe` adapter name is only an operation-routing label: this protocol
+  // is forwarded verbatim by the Gateway and never selects a Portkey adapter.
+  if (protocol === 'typesafe/systemone') return { adapter: 'typesafe', operation: 'systemone' };
   if (protocol === 'anthropic/messages') return { adapter: 'anthropic', operation: 'messages' };
   if (protocol === 'codex/responses') return { adapter: 'codex', operation: 'responses' };
   if (protocol === 'openai/responses') return { adapter: 'openai', operation: 'responses' };
@@ -65,7 +68,9 @@ function discoveryConfig(input: DiscoverModelProviderRequest): ModelProviderConf
   }
   const headers = input.headers === undefined ? undefined : Object.fromEntries(Object.entries(input.headers).map(([name, value]) => [name.trim().toLowerCase(), value]));
   if (headers && Object.keys(headers).some((name) => !name)) throw new BadRequestException('Custom header names must be non-empty.');
-  const { adapter } = protocolParts(protocol);
+  // The guard above already excludes every protocol without a discovery adapter,
+  // so this narrows to the Agent-capable adapters rather than widening the config.
+  const adapter = protocol === 'anthropic/messages' ? 'anthropic' : protocol === 'codex/responses' ? 'codex' : 'openai';
   return { id: 'discovery', adapter, apiKey, baseURL, headers };
 }
 
@@ -292,7 +297,11 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     if (selectedModel && !provider.models.includes(model)) throw new BadRequestException('The selected model is not configured for this provider.');
     const configuredProtocol = provider.protocol;
     const { operation: configuredOperation } = protocolParts(configuredProtocol);
-    const operationSupported = operation === 'models' || operation === configuredOperation || (configuredProtocol === 'codex/responses' && operation === 'images/generations');
+    // System One is forwarded verbatim and shares no operation with the chat
+    // protocols, so it is matched exactly instead of through the general rules.
+    const operationSupported = configuredProtocol === 'typesafe/systemone' || operation === 'systemone'
+      ? configuredProtocol === 'typesafe/systemone' && operation === 'systemone'
+      : operation === 'models' || operation === configuredOperation || (configuredProtocol === 'codex/responses' && operation === 'images/generations');
     if (!operationSupported) throw new BadRequestException(`Provider protocol ${configuredProtocol} does not support ${operation}.`);
     const bodyValue = selectedModel && request.body && typeof request.body === 'object' && !Array.isArray(request.body)
       ? { ...request.body, model }

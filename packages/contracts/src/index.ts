@@ -772,7 +772,7 @@ export type McpServerView = {
   updatedAt: string;
 };
 
-export type ModelProviderProtocol = 'openai/chat' | 'openai/responses' | 'anthropic/messages' | 'codex/responses';
+export type ModelProviderProtocol = 'openai/chat' | 'openai/responses' | 'anthropic/messages' | 'codex/responses' | 'typesafe/systemone';
 
 export type ModelProviderView = {
   id: string;

@@ -54,6 +54,17 @@ function maskSecret(value: string): string {
   return value.length > 4 ? `****${value.slice(-4)}` : '****';
 }
 
+/**
+ * The legacy API provider table stores only the protocols its own rows may hold.
+ * Credential-forwarding protocols belong to the Gateway store, so this guard both
+ * rejects them and narrows the value to what the column accepts.
+ */
+type StoredModelProviderProtocol = typeof modelProviders.$inferSelect['protocol'];
+
+function isStoredProtocol(protocol: ModelProviderProtocol): protocol is StoredModelProviderProtocol {
+  return protocol === 'openai/chat' || protocol === 'openai/responses' || protocol === 'anthropic/messages' || protocol === 'codex/responses';
+}
+
 function encryptSecret(value: string): string {
   const key = createHash('sha256').update(process.env.SECRET_ENCRYPTION_KEY ?? 'worklite-development-secret').digest();
   const iv = randomBytes(12);
@@ -356,9 +367,12 @@ export class WorkspaceResourcesService {
       throw new ServiceUnavailableException('Portkey Gateway is unavailable.');
     }
     if (!gatewayResponse.ok) throw new ServiceUnavailableException('Portkey Gateway is unavailable.');
-    const providers = await gatewayResponse.json() as Array<Pick<ModelProviderView, 'id' | 'name'>>;
+    const providers = await gatewayResponse.json() as Array<Pick<ModelProviderView, 'id' | 'name' | 'protocol'>>;
     const provider = providers.find((candidate) => candidate.name === providerName);
     if (!provider) throw new NotFoundException(`Model provider ${providerName} was not found.`);
+    // A credential-forwarding protocol exchanges typed questions for typed
+    // answers, so it cannot serve an Agent's system prompt and output format.
+    if (provider.protocol === 'typesafe/systemone') throw new BadRequestException(`Model provider ${providerName} does not support Agent execution.`);
     return this.providerRuntime({} as Request, 'personal', provider.id, model);
   }
 
@@ -598,8 +612,7 @@ export class WorkspaceResourcesService {
     const name = input.name.trim();
     if (!name) throw new BadRequestException('Provider name is required.');
     const protocol = input.protocol;
-    const validProtocols: ModelProviderProtocol[] = ['openai/chat', 'openai/responses', 'anthropic/messages', 'codex/responses'];
-    if (!validProtocols.includes(protocol)) throw new BadRequestException('Unsupported model provider protocol.');
+    if (!isStoredProtocol(protocol)) throw new BadRequestException('Unsupported model provider protocol.');
     const headers = normalizeHeaders(input.headers);
     const serializedHeaders = headers === undefined ? undefined : encryptSecret(JSON.stringify(headers));
     const baseURL = input.baseURL?.trim() || null;
@@ -631,8 +644,7 @@ export class WorkspaceResourcesService {
     const name = input.name === undefined ? existing.name : input.name.trim();
     if (!name) throw new BadRequestException('Provider name is required.');
     const protocol = input.protocol ?? existing.protocol;
-    const validProtocols: ModelProviderProtocol[] = ['openai/chat', 'openai/responses', 'anthropic/messages', 'codex/responses'];
-    if (!validProtocols.includes(protocol)) throw new BadRequestException('Unsupported model provider protocol.');
+    if (!isStoredProtocol(protocol)) throw new BadRequestException('Unsupported model provider protocol.');
     const baseURL = input.baseURL === undefined ? existing.baseURL : input.baseURL.trim() || null;
     if (!baseURL) throw new BadRequestException('Base URL is required.');
     const headers = normalizeHeaders(input.headers);

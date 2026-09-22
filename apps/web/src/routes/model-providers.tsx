@@ -461,6 +461,7 @@ function ModelProvidersPage() {
                 <SelectItem value="openai/chat">openai/chat</SelectItem>
                 <SelectItem value="openai/responses">openai/responses</SelectItem>
                 <SelectItem value="anthropic/messages">anthropic/messages</SelectItem>
+                <SelectItem value="typesafe/systemone">typesafe/systemone</SelectItem>
                 {dialog?.mode === 'edit' && protocol === 'codex/responses' ? <SelectItem value="codex/responses">codex/responses</SelectItem> : null}
               </SelectContent>
             </Select>
@@ -472,7 +473,7 @@ function ModelProvidersPage() {
             <div className="flex flex-col gap-2">
               <ModelList id="provider-models" value={modelIds} onChange={(value) => { setModelIds(value); setModelsError(''); }} removeLabel={(model) => t('providers.removeModel', { model })} emptyLabel={t('providers.emptyModels')} disabled={providerBusy || modelsBusy} />
               <div className="flex items-center justify-between gap-3">
-                <Button variant="secondary" size="compact" onClick={() => void discoverModels()} disabled={providerBusy || modelsBusy || (protocol !== 'codex/responses' && !apiKey.trim())}>
+                <Button variant="secondary" size="compact" onClick={() => void discoverModels()} disabled={providerBusy || modelsBusy || protocol === 'typesafe/systemone' || (protocol !== 'codex/responses' && !apiKey.trim())}>
                   {modelsBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <RefreshCw className="size-4" aria-hidden="true" />}
                   {modelsBusy ? t('providers.fetchingModels') : t('providers.fetchModels')}
                 </Button>

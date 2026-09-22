@@ -36,4 +36,9 @@ export class ProviderProxyController {
   unifiedImageGenerations(@Req() request: Request, @Res() response: Response) {
     return this.proxyService.proxyUnified(request, response, 'images/generations');
   }
+
+  @Post('v1/systemone')
+  unifiedSystemOne(@Req() request: Request, @Res() response: Response) {
+    return this.proxyService.proxyUnified(request, response, 'systemone');
+  }
 }

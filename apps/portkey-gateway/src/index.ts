@@ -38,6 +38,7 @@ import modelResponsesHandler from './handlers/modelResponsesHandler';
 import { createProvider, deleteProvider, getProvider, listProviders, providerView, requestLog, requestLogs, requestStats, updateProvider } from './worklite/provider-registry';
 import { codexAuthStatus, deleteCodexAccount, importCodexAccounts, refreshCodexAccount, startCodexLogin, startCodexOAuthCallbackServer, updateCodexAccount } from './worklite/codex-auth';
 import { codexAccountUsages, codexRateLimits } from './worklite/codex-transport';
+import { isSystemOneProtocol, systemOnePassthrough, systemOneTest } from './worklite/systemone-transport';
 
 // utils
 import { logger } from './apm';
@@ -195,6 +196,14 @@ app.post('/worklite/providers/:providerId/test', async (c) => {
   const model = typeof input?.model === 'string' ? input.model.trim() : '';
   if (!model) return c.json({ message: 'Select a model before testing this provider.' }, 400);
   if (!provider.models.includes(model)) return c.json({ message: 'The selected model is not configured for this provider.' }, 400);
+  if (isSystemOneProtocol(provider)) {
+    // The fixed chat prompt has no representation in this contract, so the test
+    // sends one minimal typed question instead.
+    const requestLogId = `glog_${crypto.randomUUID()}`;
+    const result = await systemOneTest(provider, model, requestLogId);
+    if (!result.ok) return c.json({ message: 'Provider connection failed.', requestLogId }, result.status as 400);
+    return c.json({ connection: 'connected', model, prompt: 'noul', response: result.response, traceId: crypto.randomUUID() });
+  }
   const adapter = provider.protocol === 'anthropic/messages'
     ? 'anthropic'
     : provider.protocol === 'codex/responses'
@@ -250,7 +259,22 @@ app.all('/worklite/proxy/*', async (c) => {
   const provider = providerId ? await getProvider(providerId) : undefined;
   if (!provider) return c.json({ error: { message: 'Model provider not found.' } }, 404);
   const operation = c.req.path.slice('/worklite/proxy/'.length);
-  if (operation !== 'models' && operation !== 'chat/completions' && operation !== 'responses' && operation !== 'messages' && operation !== 'images/generations') return c.json({ error: { message: 'Unsupported Gateway operation.' } }, 400);
+  if (operation !== 'models' && operation !== 'chat/completions' && operation !== 'responses' && operation !== 'messages' && operation !== 'images/generations' && operation !== 'systemone') return c.json({ error: { message: 'Unsupported Gateway operation.' } }, 400);
+  if (operation === 'systemone' || isSystemOneProtocol(provider)) {
+    // System One is forwarded verbatim rather than routed through a Portkey
+    // adapter, so both sides of this pairing must agree.
+    if (operation !== 'systemone' || !isSystemOneProtocol(provider)) return c.json({ error: { message: `Provider protocol ${provider.protocol} does not support ${operation}.` } }, 400);
+    const forwardedBody = await c.req.text();
+    let requestedModel = 'Unknown';
+    try {
+      const parsed = JSON.parse(forwardedBody) as { model?: unknown };
+      if (typeof parsed.model === 'string' && parsed.model.trim()) requestedModel = parsed.model.trim();
+    } catch {
+      // A malformed body is forwarded unchanged so the upstream owns validation.
+    }
+    const forwarded = new Request(new URL('/v1/systemone', c.req.url), { method: 'POST', headers: c.req.raw.headers, body: forwardedBody });
+    return systemOnePassthrough(forwarded, provider, requestedModel);
+  }
   const adapter = provider.protocol === 'anthropic/messages'
     ? 'anthropic'
     : provider.protocol === 'codex/responses'
