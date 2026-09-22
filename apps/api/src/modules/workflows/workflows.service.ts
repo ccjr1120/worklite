@@ -508,11 +508,17 @@ function validateIncomingEdges(
     const inputEdges = edges.filter((edge) => definition.nodes.some((node) => node.id === edge.sourceNodeId && node.type === 'worklite/input'));
     const isAgentContext = target.type === 'worklite/agent' && targetPortName === 'context';
     if (isAgentContext && inputEdges.some((edge) => edge.condition !== undefined || edge.maxTraversals !== undefined)) throw new BadRequestException('A Workflow Input edge must be unconditional and unbounded.');
-    if (edges.length === 1 && (!isAgentContext || inputEdges.length <= 1)) continue;
-    if (!isAgentContext) throw new BadRequestException('A workflow input port accepts only one edge.');
-    const initialEdges = edges.filter((edge) => edge.maxTraversals === undefined);
+    if (inputEdges.length > 1) throw new BadRequestException('A workflow input port accepts only one Workflow Input edge.');
+    if (edges.length === 1) continue;
+    // Cardinality is the author's decision: the scheduler queues tokens per port, so converging
+    // branches that carry conditions deliver one token and run the target once, while two
+    // unconditional sources deliberately run it twice. Only the Agent context initial-plus-feedback
+    // pair keeps a fixed shape, because a second unbounded edge there would race the loop token.
+    const unboundedEdges = edges.filter((edge) => edge.maxTraversals === undefined);
     const feedbackEdges = edges.filter((edge) => edge.maxTraversals !== undefined);
-    if (edges.length !== 2 || initialEdges.length !== 1 || feedbackEdges.length !== 1 || inputEdges.length > 1) {
+    if (feedbackEdges.length === 0) continue;
+    if (!isAgentContext) throw new BadRequestException('Only an Agent context port accepts a bounded feedback edge alongside another incoming edge.');
+    if (feedbackEdges.length !== 1 || unboundedEdges.length !== 1 || inputEdges.length > 1) {
       throw new BadRequestException('Agent context may combine one initial edge with one bounded feedback edge.');
     }
   }
