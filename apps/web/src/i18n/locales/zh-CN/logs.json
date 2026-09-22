@@ -14,8 +14,7 @@
     "start": "开始时间",
     "end": "结束时间",
     "apply": "应用",
-    "invalid": "开始时间必须早于结束时间。",
-    "applied": "{{from}} 至 {{to}}"
+    "invalid": "开始时间必须早于结束时间。"
   },
   "statistics": {
     "loading": "正在加载 Gateway 统计...",

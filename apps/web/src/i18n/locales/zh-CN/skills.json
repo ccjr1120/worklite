@@ -26,7 +26,6 @@
     "warning": "产品内置的 scripts/run.sh 会把唯一的命令参数交给 /bin/sh -lc 执行。它没有沙箱，并拥有 WorkLite 进程用户的宿主权限，包括访问可用文件和网络。"
   },
   "platform": {
-    "systemOnly": "仅供 Chat Bot 使用",
     "boundary": "平台操作使用固定工具注册表。资源和偏好变更需要确认，敏感凭据仍只能通过专用安全表单提交。"
   },
   "editor": {

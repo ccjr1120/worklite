@@ -25,8 +25,6 @@
     "commandPlaceholder": "codex",
     "commandHint": "输入可执行文件名或路径，后面可以附加参数。不会使用 Shell 语法或环境变量覆盖。",
     "testFailed": "无法启动插件命令。",
-    "testMissing": "找不到配置的命令。",
-    "testUnavailable": "配置的命令执行失败。",
     "saved": "插件配置已保存",
     "saveFailed": "无法保存插件配置。",
     "verifying": "正在验证..."

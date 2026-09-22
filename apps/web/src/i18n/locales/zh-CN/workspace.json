@@ -5,8 +5,6 @@
     "capabilities": "能力",
     "configuration": "配置",
     "assistant": "Chat Bot",
-    "build": "构建",
-    "operate": "运行",
     "manage": "管理",
     "workflows": "工作流",
     "skills": "技能",
@@ -16,7 +14,6 @@
     "logs": "日志",
     "usage": "用量",
     "settings": "设置",
-    "agentResources": "Capabilities",
     "title": "导航"
   },
   "command": {

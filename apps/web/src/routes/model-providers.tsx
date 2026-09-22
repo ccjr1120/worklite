@@ -75,12 +75,17 @@ type ModelListProps = {
   value: string[];
   onChange: (value: string[]) => void;
   removeLabel: (model: string) => string;
+  editLabel: (model: string) => string;
+  addPlaceholder: string;
   emptyLabel: string;
   disabled?: boolean;
 };
 
-function ModelList({ id, value, onChange, removeLabel, emptyLabel, disabled = false }: ModelListProps) {
+function ModelList({ id, value, onChange, removeLabel, editLabel, addPlaceholder, emptyLabel, disabled = false }: ModelListProps) {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [draft, setDraft] = useState('');
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState('');
   function moveModel(targetIndex: number) {
     if (draggedIndex === null || draggedIndex === targetIndex) return;
     const next = [...value];
@@ -89,12 +94,81 @@ function ModelList({ id, value, onChange, removeLabel, emptyLabel, disabled = fa
     onChange(next);
     setDraggedIndex(null);
   }
+  function addModel() {
+    const model = draft.trim();
+    // An empty or duplicate entry is dropped so the list stays de-duplicated and
+    // the field is ready for the next id without reporting a failure.
+    if (model && !value.includes(model)) onChange([...value, model]);
+    setDraft('');
+  }
+  function startEditing(index: number) {
+    if (disabled) return;
+    setEditingIndex(index);
+    setEditDraft(value[index] ?? '');
+  }
+  function commitEditing(index: number) {
+    const model = editDraft.trim();
+    const current = value[index];
+    // Clearing the text or reusing another id cancels the edit: removal has its own
+    // control, and a silent merge would drop a row the user did not ask to remove.
+    if (model && model !== current && !value.includes(model)) onChange(value.map((item, itemIndex) => itemIndex === index ? model : item));
+    setEditingIndex(null);
+    setEditDraft('');
+  }
+  function cancelEditing() {
+    setEditingIndex(null);
+    setEditDraft('');
+  }
   return (
     <div id={id} className="grid gap-2 rounded-md border border-border bg-surface p-2" aria-label="模型列表">
+      <Input
+        autoComplete="off"
+        className="font-mono text-[13px]"
+        placeholder={addPlaceholder}
+        value={draft}
+        disabled={disabled}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={addModel}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter') return;
+          // The dialog's default submit would save the provider instead of
+          // committing the id being typed.
+          event.preventDefault();
+          addModel();
+        }}
+      />
       {value.length === 0 ? <p className="px-2 py-3 text-sm text-muted-foreground">{emptyLabel}</p> : value.map((model, index) => (
-        <div key={model} draggable={!disabled} onDragStart={() => setDraggedIndex(index)} onDragOver={(event) => event.preventDefault()} onDrop={() => moveModel(index)} onDragEnd={() => setDraggedIndex(null)} className={`flex items-center gap-2 rounded-md border px-2.5 py-2 ${draggedIndex === index ? 'border-brand bg-brand-subtle' : 'border-border bg-surface-subtle'}`}>
+        <div key={model} draggable={!disabled && editingIndex !== index} onDragStart={() => setDraggedIndex(index)} onDragOver={(event) => event.preventDefault()} onDrop={() => moveModel(index)} onDragEnd={() => setDraggedIndex(null)} className={`flex items-center gap-2 rounded-md border px-2.5 py-2 ${draggedIndex === index ? 'border-brand bg-brand-subtle' : 'border-border bg-surface-subtle'}`}>
           <GripVertical className="size-4 shrink-0 cursor-grab text-muted-foreground" aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate font-mono text-sm">{model}</span>
+          {editingIndex === index ? (
+            <Input
+              autoComplete="off"
+              // Focus follows the activation that opened this field, so the row the user just chose to
+              // edit is the one receiving input. This is not a page-load focus steal.
+              // eslint-disable-next-line jsx-a11y/no-autofocus
+              autoFocus
+              aria-label={editLabel(model)}
+              className="h-7 min-w-0 flex-1 font-mono text-sm"
+              value={editDraft}
+              onChange={(event) => setEditDraft(event.target.value)}
+              onBlur={() => commitEditing(index)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  commitEditing(index);
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  cancelEditing();
+                }
+              }}
+            />
+          ) : (
+            // A real button rather than a clickable span so the edit affordance is
+            // reachable by keyboard and announced to assistive technology.
+            <button type="button" aria-label={editLabel(model)} className="min-w-0 flex-1 truncate rounded-sm text-left font-mono text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40" onClick={() => startEditing(index)} disabled={disabled}>
+              {model}
+            </button>
+          )}
           <button type="button" className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40" aria-label={removeLabel(model)} onClick={() => onChange(value.filter((_, itemIndex) => itemIndex !== index))} disabled={disabled}>
             <X className="size-3.5" aria-hidden="true" />
           </button>
@@ -452,8 +526,8 @@ function ModelProvidersPage() {
             <DialogDescription>{t(dialog?.mode === 'edit' ? 'providers.editDescription' : 'providers.createDescription')}</DialogDescription>
           </DialogHeader>
           {providerError ? <p className="text-[13px] text-danger" role="alert">{providerError}</p> : null}
-          <Field label={t('providers.name')} htmlFor="provider-name"><Input id="provider-name" placeholder={t('providers.namePlaceholder')} value={name} onChange={(event) => setName(event.target.value)} disabled={providerBusy} /></Field>
-          <Field label={t('providers.baseURL')} htmlFor="provider-base-url" hint={t('providers.baseURLHint')}><Input id="provider-base-url" placeholder={t('providers.baseURLPlaceholder')} value={baseURL} onChange={(event) => setBaseURL(event.target.value)} /></Field>
+          <Field label={t('providers.name')} htmlFor="provider-name"><Input id="provider-name" autoComplete="off" placeholder={t('providers.namePlaceholder')} value={name} onChange={(event) => setName(event.target.value)} disabled={providerBusy} /></Field>
+          <Field label={t('providers.baseURL')} htmlFor="provider-base-url" hint={t('providers.baseURLHint')}><Input id="provider-base-url" autoComplete="off" placeholder={t('providers.baseURLPlaceholder')} value={baseURL} onChange={(event) => setBaseURL(event.target.value)} /></Field>
           <Field label={t('providers.protocol')} htmlFor="provider-protocol" error={protocolError}>
             <Select value={protocol || undefined} onValueChange={(value) => { setProtocol(value as ModelProviderProtocol); setProtocolError(''); }}>
               <SelectTrigger id="provider-protocol" aria-invalid={Boolean(protocolError)}><SelectValue placeholder={t('providers.protocolPlaceholder')} /></SelectTrigger>
@@ -471,7 +545,7 @@ function ModelProvidersPage() {
           </Field>
           <Field label={t('providers.models')} htmlFor="provider-models" hint={t('providers.modelsHint')} error={modelsError}>
             <div className="flex flex-col gap-2">
-              <ModelList id="provider-models" value={modelIds} onChange={(value) => { setModelIds(value); setModelsError(''); }} removeLabel={(model) => t('providers.removeModel', { model })} emptyLabel={t('providers.emptyModels')} disabled={providerBusy || modelsBusy} />
+              <ModelList id="provider-models" value={modelIds} onChange={(value) => { setModelIds(value); setModelsError(''); }} removeLabel={(model) => t('providers.removeModel', { model })} editLabel={(model) => t('providers.editModel', { model })} addPlaceholder={t('providers.addModelPlaceholder')} emptyLabel={t('providers.emptyModels')} disabled={providerBusy || modelsBusy} />
               <div className="flex items-center justify-between gap-3">
                 <Button variant="secondary" size="compact" onClick={() => void discoverModels()} disabled={providerBusy || modelsBusy || protocol === 'typesafe/systemone' || (protocol !== 'codex/responses' && !apiKey.trim())}>
                   {modelsBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <RefreshCw className="size-4" aria-hidden="true" />}
@@ -481,7 +555,7 @@ function ModelProvidersPage() {
               </div>
             </div>
           </Field>
-          <Field label={t('providers.headers')} htmlFor="provider-headers" hint={t('providers.headersHint')} error={headersError}><Textarea id="provider-headers" className="min-h-28 font-mono text-[13px]" placeholder={t('providers.headersPlaceholder')} value={headersText} aria-invalid={Boolean(headersError)} onChange={(event) => { setHeadersText(event.target.value); setHeadersError(''); }} /></Field>
+          <Field label={t('providers.headers')} htmlFor="provider-headers" hint={t('providers.headersHint')} error={headersError}><Textarea id="provider-headers" autoComplete="off" className="min-h-28 font-mono text-[13px]" placeholder={t('providers.headersPlaceholder')} value={headersText} aria-invalid={Boolean(headersError)} onChange={(event) => { setHeadersText(event.target.value); setHeadersError(''); }} /></Field>
           <DialogFooter>
             <Button variant="secondary" onClick={closeProviderDialog} disabled={providerBusy}>{t('common:actions.cancel')}</Button>
             <Button onClick={() => void saveProvider()} disabled={providerBusy || !name.trim()}>{providerBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}{t(dialog?.mode === 'edit' ? 'providers.editAction' : 'providers.createAction')}</Button>
