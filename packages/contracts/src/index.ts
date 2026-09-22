@@ -811,6 +811,21 @@ export type SystemOneTestOutput = {
   };
 };
 
+export type SystemOneWorkflowOutput = {
+  answers: Record<string, unknown>;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+  };
+};
+
+export type SystemOneWorkflowRequest = {
+  model: string;
+  state: unknown;
+  questions: Record<string, unknown>;
+};
+
 export type ModelProviderTestResult =
   | {
     protocol: 'typesafe/systemone';

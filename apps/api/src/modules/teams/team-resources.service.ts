@@ -501,9 +501,16 @@ export class WorkspaceResourcesService {
           typesafeSystemOne: {
             route: '/api/portkey-gateway/v1/systemone',
             requestShape: 'state and typed questions',
-            responseShape: 'typed answers',
+            responseShape: 'typed answers plus preserved JSON state fields',
             modelCatalog: 'manual',
             agentExecution: false,
+            workflowNode: true,
+            workflowNodeType: 'typesafe/systemone',
+            workflowNodeVersion: '1',
+            stateInputPort: 'state',
+            statePassthrough: 'object fields retained; non-object state is exposed under state',
+            questionsConfig: 'immutable_workflow_version',
+            answerRouting: 'structured_output_paths',
             connectionTest: 'typed input and output; failures include the upstream reason and request-log id',
           },
           imageGeneration: {

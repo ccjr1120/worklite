@@ -108,6 +108,10 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 - Updated the [Workflow Editor specification](pages/workflows/editor/DESIGN.md) for the generic `worklite/branch@1` node, which routes any JSON output through the first matching structured edge condition and does not depend on System One.
 
+### 2026-09-22 - TypeSafe System One Workflow node
+
+- Updated the [Workflow Editor specification](pages/workflows/editor/DESIGN.md) for the dedicated `typesafe/systemone@1` node, including its state input, preserved object context, typed-answer output, model selector, and structured questions editor.
+
 ### 2026-09-20 - Run cancellation
 
 - Added the active Run cancellation action to the Run detail surface, using the existing cancellation API and shared confirmation interaction.

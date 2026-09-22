@@ -281,6 +281,24 @@ const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     outputSchema: {},
     configSchema: { type: 'object' },
   },
+  {
+    id: 'typesafe/systemone',
+    version: '1',
+    name: 'TypeSafe System One',
+    purpose: 'Forward typed Workflow state and questions to a TypeSafe System One Provider while retaining JSON state fields for downstream routing.',
+    inputs: [{ name: 'state', required: true, dataType: 'json', multiple: false }],
+    outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
+    inputSchema: { type: 'object', required: ['state'], properties: { state: {} } },
+    outputSchema: { type: 'object', required: ['answers'] },
+    configSchema: {
+      type: 'object',
+      required: ['model', 'questions'],
+      properties: {
+        model: { type: 'string' },
+        questions: { type: 'object' },
+      },
+    },
+  },
 ];
 
 export function listWorkflowNodeCapabilities(): WorkflowNodeCapability[] {

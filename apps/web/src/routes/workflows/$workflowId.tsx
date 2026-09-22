@@ -71,6 +71,8 @@ function WorkflowEditorPage() {
   const [saveError, setSaveError] = useState('');
   const [edgeValueDrafts, setEdgeValueDrafts] = useState<Record<string, string>>({});
   const [edgeValueErrors, setEdgeValueErrors] = useState<Record<string, boolean>>({});
+  const [systemOneQuestionDrafts, setSystemOneQuestionDrafts] = useState<Record<string, string>>({});
+  const [systemOneQuestionErrors, setSystemOneQuestionErrors] = useState<Record<string, boolean>>({});
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<WorkflowCanvasNode, WorkflowCanvasEdge> | null>(null);
   const canvasRef = useRef<HTMLElement>(null);
   const navigate = useNavigate();
@@ -83,6 +85,8 @@ function WorkflowEditorPage() {
     setEdges(nextEdges.map((edge) => ({ ...edge, selected: false })));
     setEdgeValueDrafts({});
     setEdgeValueErrors({});
+    setSystemOneQuestionDrafts({});
+    setSystemOneQuestionErrors({});
   }, [setEdges, setNodes, t]);
 
   useEffect(() => {
@@ -116,9 +120,11 @@ function WorkflowEditorPage() {
   // Credential-forwarding providers exchange typed questions for typed answers and
   // cannot run an Agent node, so they are omitted from model selection.
   const modelOptions = useMemo(() => availableProviders.filter((provider) => provider.protocol !== 'typesafe/systemone').flatMap((provider) => provider.models.map((model) => `${provider.name}/${model}`)), [availableProviders]);
+  const systemOneModelOptions = useMemo(() => availableProviders.filter((provider) => provider.protocol === 'typesafe/systemone').flatMap((provider) => provider.models.map((model) => `${provider.name}/${model}`)), [availableProviders]);
   const filteredTimerVisible = !paletteQuery.trim() || `${t('editor.timerNode')} ${t('editor.timerNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredAgentVisible = !paletteQuery.trim() || `${t('editor.agentNode')} ${t('editor.agentNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredBranchVisible = !paletteQuery.trim() || `${t('editor.branchNode')} ${t('editor.branchNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
+  const filteredSystemOneVisible = !paletteQuery.trim() || `${t('editor.systemOneNode')} ${t('editor.systemOneNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredDashboardVisible = !paletteQuery.trim() || `${t('editor.dashboardNode')} ${t('editor.dashboardNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredArtifactVisible = !paletteQuery.trim() || `${t('editor.artifactNode')} ${t('editor.artifactNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredArtifactQueryVisible = !paletteQuery.trim() || `${t('editor.artifactQueryNode')} ${t('editor.artifactQueryNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
@@ -281,6 +287,11 @@ function WorkflowEditorPage() {
     addNode({ id, type: 'branch', position: nextPosition(), selected: true, data: { nodeType: 'branch', label: t('editor.branchNode'), errorPolicy: executionPolicy } });
   }
 
+  function addSystemOneNode() {
+    const id = createId('system-one');
+    addNode({ id, type: 'systemOne', position: nextPosition(), selected: true, data: { nodeType: 'systemOne', label: t('editor.systemOneNode'), model: systemOneModelOptions[0] ?? '', systemOneQuestions: {}, errorPolicy: executionPolicy } });
+  }
+
   function addArtifactNode() {
     const id = createId('artifact');
     const node: WorkflowCanvasNode = {
@@ -332,6 +343,7 @@ function WorkflowEditorPage() {
     for (const edge of edges) {
       if (edge.source === nodeId || edge.target === nodeId) clearEdgeValueState(edge.id);
     }
+    clearSystemOneQuestionState(nodeId);
     setNodes((current) => current.filter((node) => node.id !== nodeId));
     setEdges((current) => current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId));
     setSaveState('unsaved');
@@ -401,6 +413,21 @@ function WorkflowEditorPage() {
     });
   }
 
+  function clearSystemOneQuestionState(nodeId: string) {
+    setSystemOneQuestionDrafts((current) => {
+      if (!(nodeId in current)) return current;
+      const next = { ...current };
+      delete next[nodeId];
+      return next;
+    });
+    setSystemOneQuestionErrors((current) => {
+      if (!(nodeId in current)) return current;
+      const next = { ...current };
+      delete next[nodeId];
+      return next;
+    });
+  }
+
   function removeEdge(edgeId: string) {
     setEdges((current) => current.filter((edge) => edge.id !== edgeId));
     clearEdgeValueState(edgeId);
@@ -435,8 +462,8 @@ function WorkflowEditorPage() {
 
   async function save() {
     if (saveState === 'saving') return;
-    if (Object.values(edgeValueErrors).some(Boolean)) {
-      setSaveError(t('editor.edgeComparisonInvalid'));
+    if (Object.values(edgeValueErrors).some(Boolean) || Object.values(systemOneQuestionErrors).some(Boolean)) {
+      setSaveError(Object.values(systemOneQuestionErrors).some(Boolean) ? t('editor.systemOneQuestionsInvalid') : t('editor.edgeComparisonInvalid'));
       return;
     }
     setSaveState('saving');
@@ -558,6 +585,7 @@ function WorkflowEditorPage() {
         {filteredTimerVisible ? <PaletteButton icon={<Timer className="size-5 text-foreground" />} title={t('editor.timerNode')} description={t('editor.timerNodeDescription')} onClick={addTimerNode} /> : null}
         {filteredAgentVisible ? <PaletteButton icon={<Bot className="size-5 text-info" />} title={t('editor.agentNode')} description={t('editor.agentNodeDescription')} onClick={addAgentNode} /> : null}
         {filteredBranchVisible ? <PaletteButton icon={<GitBranch className="size-5 text-foreground" />} title={t('editor.branchNode')} description={t('editor.branchNodeDescription')} onClick={addBranchNode} /> : null}
+        {filteredSystemOneVisible ? <PaletteButton icon={<Braces className="size-5 text-foreground" />} title={t('editor.systemOneNode')} description={t('editor.systemOneNodeDescription')} onClick={addSystemOneNode} /> : null}
         {filteredDashboardVisible ? <PaletteButton icon={<LayoutDashboard className="size-5 text-foreground" />} title={t('editor.dashboardNode')} description={t('editor.dashboardNodeDescription')} onClick={addDashboardNode} /> : null}
         {filteredArtifactVisible ? <PaletteButton icon={<FileText className="size-5 text-foreground" />} title={t('editor.artifactNode')} description={t('editor.artifactNodeDescription')} onClick={addArtifactNode} /> : null}
         {filteredArtifactQueryVisible ? <PaletteButton icon={<FileSearch className="size-5 text-foreground" />} title={t('editor.artifactQueryNode')} description={t('editor.artifactQueryNodeDescription')} onClick={addArtifactQueryNode} /> : null}
@@ -633,6 +661,26 @@ function WorkflowEditorPage() {
           <Field label={t('editor.wechatMode')} htmlFor="wechat-mode"><Select value={selectedNode.data.wechatMode ?? 'draft'} onValueChange={(value) => { const wechatMode = value as 'draft' | 'publish'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, wechatMode } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="wechat-mode"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="draft">{t('editor.wechatModes.draft')}</SelectItem><SelectItem value="publish">{t('editor.wechatModes.publish')}</SelectItem></SelectContent></Select></Field>
           <p className="text-[12px] text-muted-foreground">{selectedNode.data.wechatMode === 'publish' ? t('editor.wechatPublishPendingHint') : t('editor.wechatDraftHint')}</p>
           {selectedNode.data.wechatNodeVersion !== '1' ? <p className="text-[12px] text-muted-foreground">{t('editor.wechatCoverHint')}</p> : null}
+        </> : null}
+        {selectedNode.data.nodeType === 'systemOne' ? <>
+          <Field label={t('editor.systemOneModel')} htmlFor="system-one-model"><Select value={selectedNode.data.model ?? ''} onValueChange={(model) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, model } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="system-one-model"><SelectValue placeholder={t('editor.systemOneSelectModel')} /></SelectTrigger><SelectContent>{systemOneModelOptions.map((model) => <SelectItem key={model} value={model}>{model}</SelectItem>)}</SelectContent></Select></Field>
+          <Field label={t('editor.systemOneQuestions')} htmlFor="system-one-questions" hint={t('editor.systemOneQuestionsDescription')}>
+            <Textarea id="system-one-questions" className="min-h-36 font-mono text-[12px]" aria-invalid={systemOneQuestionErrors[selectedNode.id] || undefined} value={systemOneQuestionDrafts[selectedNode.id] ?? JSON.stringify(selectedNode.data.systemOneQuestions ?? {}, null, 2)} onChange={(event) => {
+              const draft = event.target.value;
+              setSystemOneQuestionDrafts((current) => ({ ...current, [selectedNode.id]: draft }));
+              setSaveState('unsaved');
+              try {
+                const parsed = JSON.parse(draft);
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Questions must be an object.');
+                setSystemOneQuestionErrors((current) => ({ ...current, [selectedNode.id]: false }));
+                setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, systemOneQuestions: parsed as Record<string, unknown> } } : node));
+              } catch {
+                setSystemOneQuestionErrors((current) => ({ ...current, [selectedNode.id]: true }));
+              }
+            }} />
+            {systemOneQuestionErrors[selectedNode.id] ? <p className="mt-1 text-[12px] text-danger" role="alert">{t('editor.systemOneQuestionsInvalid')}</p> : null}
+          </Field>
+          <Field label={t('editor.errorPolicy')} htmlFor="system-one-policy"><Select value={selectedNode.data.errorPolicy} onValueChange={(value) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, errorPolicy: value as 'stop' | 'retry' } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="system-one-policy"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="stop">{t('editor.stop')}</SelectItem><SelectItem value="retry">{t('editor.retry')}</SelectItem></SelectContent></Select></Field>
         </> : null}
         {selectedNode.data.nodeType === 'agent' ? <>
           <Field label={t('editor.model')} htmlFor="agent-model"><Select value={selectedNode.data.model} onValueChange={(value) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, model: value } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="agent-model"><SelectValue placeholder={t('editor.selectModel')} /></SelectTrigger><SelectContent>{modelOptions.map((model) => <SelectItem key={model} value={model}>{model}</SelectItem>)}</SelectContent></Select></Field>
@@ -715,7 +763,7 @@ function WorkflowEditorPage() {
             onEdgeClick={(_, edge) => selectOnlyEdge(edge.id)}
             onPaneClick={showNodePalette}
             onSelectionChange={({ nodes: selectedNodes, edges: selectedEdges }) => { if (selectedNodes.length + selectedEdges.length > 0 && !window.matchMedia('(min-width: 1024px)').matches) setContextPanelOpen(true); }}
-            onNodesDelete={(deleted) => { if (deleted.length > 0) { const deletedIds = new Set(deleted.map((node) => node.id)); for (const edge of edges) { if (deletedIds.has(edge.source) || deletedIds.has(edge.target)) clearEdgeValueState(edge.id); } setEdges((current) => current.filter((edge) => !deletedIds.has(edge.source) && !deletedIds.has(edge.target))); setSaveState('unsaved'); } }}
+            onNodesDelete={(deleted) => { if (deleted.length > 0) { const deletedIds = new Set(deleted.map((node) => node.id)); for (const edge of edges) { if (deletedIds.has(edge.source) || deletedIds.has(edge.target)) clearEdgeValueState(edge.id); } for (const node of deleted) clearSystemOneQuestionState(node.id); setEdges((current) => current.filter((edge) => !deletedIds.has(edge.source) && !deletedIds.has(edge.target))); setSaveState('unsaved'); } }}
             onEdgesDelete={(deleted) => { if (deleted.length > 0) setSaveState('unsaved'); }}
             deleteKeyCode={['Backspace', 'Delete']}
             multiSelectionKeyCode={null}
@@ -770,8 +818,8 @@ function WorkflowEditorPage() {
 function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
   return definition.nodes.map((node) => {
     const config = asRecord(node.config);
-    const nodeType = node.type === 'worklite/input' ? 'input' : node.type === 'worklite/timer' ? 'timer' : node.type === 'worklite/branch' ? 'branch' : node.type === 'worklite/dashboard' ? 'dashboard' : node.type === 'worklite/artifact' ? 'artifact' : node.type === 'worklite/artifact-query' ? 'artifactQuery' : node.type === 'worklite/image' ? 'image' : node.type === 'wechat-official-account/publish' ? 'wechatPublish' : 'agent';
-    const label = typeof config.label === 'string' ? config.label : nodeType === 'input' ? 'Workflow Input' : nodeType === 'timer' ? 'Timer' : nodeType === 'branch' ? 'Choice Branch' : nodeType === 'dashboard' ? 'Dashboard' : nodeType === 'artifact' ? 'Artifact' : nodeType === 'artifactQuery' ? 'Artifact Query' : nodeType === 'image' ? 'Image Generation' : nodeType === 'wechatPublish' ? 'WeChat Official Account' : 'Agent';
+    const nodeType = node.type === 'worklite/input' ? 'input' : node.type === 'worklite/timer' ? 'timer' : node.type === 'worklite/branch' ? 'branch' : node.type === 'typesafe/systemone' ? 'systemOne' : node.type === 'worklite/dashboard' ? 'dashboard' : node.type === 'worklite/artifact' ? 'artifact' : node.type === 'worklite/artifact-query' ? 'artifactQuery' : node.type === 'worklite/image' ? 'image' : node.type === 'wechat-official-account/publish' ? 'wechatPublish' : 'agent';
+    const label = typeof config.label === 'string' ? config.label : nodeType === 'input' ? 'Workflow Input' : nodeType === 'timer' ? 'Timer' : nodeType === 'branch' ? 'Choice Branch' : nodeType === 'systemOne' ? 'TypeSafe System One' : nodeType === 'dashboard' ? 'Dashboard' : nodeType === 'artifact' ? 'Artifact' : nodeType === 'artifactQuery' ? 'Artifact Query' : nodeType === 'image' ? 'Image Generation' : nodeType === 'wechatPublish' ? 'WeChat Official Account' : 'Agent';
     return {
       id: node.id,
       type: nodeType,
@@ -782,6 +830,7 @@ function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
         model: typeof config.model === 'string' ? config.model : '',
         systemPrompt: typeof config.systemPrompt === 'string' ? config.systemPrompt : '',
         outputFormat: config.outputFormat === 'json' || config.outputFormat === 'text' ? config.outputFormat : 'text',
+        systemOneQuestions: config.questions && typeof config.questions === 'object' && !Array.isArray(config.questions) ? config.questions as Record<string, unknown> : {},
         mcpServerIds: Array.isArray(config.mcpServerIds) ? config.mcpServerIds.filter((value): value is string => typeof value === 'string') : [],
         mcpServerNames: Array.isArray(config.mcpServerNames) ? config.mcpServerNames.filter((value): value is string => typeof value === 'string') : [],
         timerEnabled: typeof config.enabled === 'boolean' ? config.enabled : true,
@@ -863,6 +912,8 @@ function canConnect(connection: { source: string | null; sourceHandle?: string |
     if (targetHandle !== 'request') return false;
   } else if (targetNode.data.nodeType === 'branch') {
     if (targetHandle !== 'value') return false;
+  } else if (targetNode.data.nodeType === 'systemOne') {
+    if (targetHandle !== 'state') return false;
   } else if (targetNode.data.nodeType === 'image') {
     if (targetHandle !== 'prompt') return false;
   } else if (targetNode.data.nodeType === 'wechatPublish') {
@@ -907,6 +958,9 @@ function toDefinitionNode(node: WorkflowCanvasNode): WorkflowNodeDefinition {
     type = 'worklite/input';
   } else if (node.data.nodeType === 'branch') {
     type = 'worklite/branch';
+  } else if (node.data.nodeType === 'systemOne') {
+    type = 'typesafe/systemone';
+    config = { ...base, model: node.data.model ?? '', questions: node.data.systemOneQuestions ?? {} };
   } else if (node.data.nodeType === 'timer') {
     type = 'worklite/timer';
     config = { ...base, enabled: node.data.timerEnabled !== false, intervalSeconds: node.data.timerIntervalSeconds ?? 300 };
@@ -1098,6 +1152,7 @@ function nodeTypeLabel(nodeType: WorkflowCanvasNode['data']['nodeType'], t: TFun
   if (nodeType === 'input') return t('editor.workflowInputNode');
   if (nodeType === 'timer') return t('editor.timerNode');
   if (nodeType === 'branch') return t('editor.branchNode');
+  if (nodeType === 'systemOne') return t('editor.systemOneNode');
   if (nodeType === 'dashboard') return t('editor.dashboardNode');
   if (nodeType === 'artifact') return t('editor.artifactNode');
   if (nodeType === 'artifactQuery') return t('editor.artifactQueryNode');

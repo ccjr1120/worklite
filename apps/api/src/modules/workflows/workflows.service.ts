@@ -542,7 +542,11 @@ function validateEdgeControlFlow(edge: StoredWorkflowDefinition['edges'][number]
 function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, type: string, requireCompleteAgents: boolean): void {
   if (!isRecord(value)) throw new BadRequestException(`${capability.name} node configuration must be an object.`);
   const required = Array.isArray(capability.configSchema.required) ? capability.configSchema.required.filter((key): key is string => typeof key === 'string') : [];
-  const allowedMissing = type === 'worklite/agent' && !requireCompleteAgents ? new Set(['model', 'systemPrompt']) : new Set<string>();
+  const allowedMissing = type === 'worklite/agent' && !requireCompleteAgents
+    ? new Set(['model', 'systemPrompt'])
+    : type === 'typesafe/systemone' && !requireCompleteAgents
+      ? new Set(['model'])
+      : new Set<string>();
   for (const key of required) {
     if (allowedMissing.has(key)) continue;
     if (!(key in value)) throw new BadRequestException(`${capability.name} node configuration is missing ${key}.`);
@@ -569,6 +573,9 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
       if (value.outputFormat !== 'json') throw new BadRequestException('Agent node passthroughKeys requires outputFormat json.');
     }
     if (requireCompleteAgents && (typeof value.model !== 'string' || !/^[^/]+\/.+/.test(value.model.trim()))) throw new BadRequestException('Every Agent node must contain a public provider/model id before publication.');
+  }
+  if (type === 'typesafe/systemone' && requireCompleteAgents && (typeof value.model !== 'string' || !/^[^/]+\/.+/.test(value.model.trim()))) {
+    throw new BadRequestException('Every TypeSafe System One node must contain a public provider/model id before publication.');
   }
   if (type === 'worklite/artifact') {
     if (typeof value.name !== 'string' || !value.name.trim()) throw new BadRequestException('Artifact node name must be a non-empty string.');

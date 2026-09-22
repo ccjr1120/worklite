@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { WorkflowDashboardLayout, WorkflowEdgeCondition } from '@worklite/contracts';
 import { cn } from '@/lib/utils';
 
-export type WorkflowCanvasNodeType = 'input' | 'timer' | 'agent' | 'branch' | 'dashboard' | 'artifact' | 'artifactQuery' | 'wechatPublish' | 'image';
+export type WorkflowCanvasNodeType = 'input' | 'timer' | 'agent' | 'branch' | 'systemOne' | 'dashboard' | 'artifact' | 'artifactQuery' | 'wechatPublish' | 'image';
 
 export type WorkflowCanvasNodeData = {
   nodeType: WorkflowCanvasNodeType;
@@ -12,6 +12,7 @@ export type WorkflowCanvasNodeData = {
   model?: string;
   systemPrompt?: string;
   outputFormat?: 'text' | 'json';
+  systemOneQuestions?: Record<string, unknown>;
   mcpServerIds?: string[];
   mcpServerNames?: string[];
   timerEnabled?: boolean;
@@ -136,6 +137,18 @@ function BranchNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   </div>;
 }
 
+function SystemOneNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
+  const { t } = useTranslation('workflows');
+  return <div className={cn(nodeClassName(selected), 'w-[300px]')}>
+    <NodeHeader icon={<Braces className="size-4 text-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
+    <div className="mt-3 border-t border-border py-1">
+      <PortRow label={t('editor.systemOneStatePort')}><Handle type="target" position={Position.Left} id="state" className={handleClass} aria-label={t('editor.systemOneStatePort')} /></PortRow>
+      <div className="relative flex h-7 items-center justify-end px-3 text-[11px] font-medium"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
+    </div>
+    <div className="px-3 pb-3 text-[11px] text-muted-foreground"><p>{data.model || t('editor.systemOneSelectModel')}</p><p>{t('editor.systemOneQuestionCount', { count: Object.keys(data.systemOneQuestions ?? {}).length })}</p></div>
+  </div>;
+}
+
 function WechatPublishNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   const { t } = useTranslation('workflows');
   return <div className={nodeClassName(selected)}>
@@ -174,6 +187,7 @@ export const workflowNodeTypes = {
   timer: TimerNode,
   agent: AgentNode,
   branch: BranchNode,
+  systemOne: SystemOneNode,
   dashboard: DashboardNode,
   artifact: ArtifactNode,
   artifactQuery: ArtifactQueryNode,

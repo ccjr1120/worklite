@@ -148,6 +148,29 @@ export class RunsService {
       },
     });
     this.registry.register({
+      ...capability('typesafe/systemone'),
+      execute: async (request) => {
+        const config = asRecord(request.config);
+        const inputs = asRecord(request.input);
+        if (!config || typeof config.model !== 'string' || !config.model.trim()) throw new Error('TypeSafe System One node requires a public model id.');
+        if (!config.questions || typeof config.questions !== 'object' || Array.isArray(config.questions)) throw new Error('TypeSafe System One node requires a questions object.');
+        if (!inputs || !Object.prototype.hasOwnProperty.call(inputs, 'state')) throw new Error('TypeSafe System One node requires a state input.');
+        const output = await this.gateway.executeSystemOne({
+          model: config.model,
+          state: inputs.state,
+          questions: config.questions as Record<string, unknown>,
+          workflowRunId: request.context.workflowRunId,
+          nodeRunId: request.context.nodeRunId,
+          signal: request.signal,
+        });
+        const state = inputs.state;
+        const stateOutput = state && typeof state === 'object' && !Array.isArray(state)
+          ? state as Record<string, unknown>
+          : { state };
+        return { output: { ...stateOutput, ...output } };
+      },
+    });
+    this.registry.register({
       ...capability('worklite/approved-article'),
       execute: async (request) => {
         const input = asRecord(request.input);

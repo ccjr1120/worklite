@@ -30,13 +30,14 @@ The budget is above one because the graph is a composite draft rather than a sin
 
 The workflow editor presents a directed control-flow dataflow graph with structured conditional edges and bounded loop edges.
 
-The palette includes Timer, Workflow Input, Agent, Choice Branch, Dashboard, Artifact, Artifact Query, Image, and the trusted WeChat Official Account Publish node when its built-in Plugin is available.
+The palette includes Timer, Workflow Input, Agent, Choice Branch, TypeSafe System One, Dashboard, Artifact, Artifact Query, Image, and the trusted WeChat Official Account Publish node when its built-in Plugin is available.
 
 - **Timer** is a source trigger with no inputs, one JSON output, an enabled control, and a fixed interval of at least five minutes; each Workflow may contain at most one Timer.
 - **Dashboard** has one required JSON `data` input, one JSON `output` port, and at most one instance per Workflow.
 - **Workflow Input** exposes the run input and may connect explicitly to Agent `context` as the initial token.
 - **Agent** owns its immutable embedded configuration and has one optional `context` input plus one output. When `context` has no explicit Workflow Input edge and no unbounded incoming edge, the initial Agent invocation uses the Workflow Run input, while later bounded-loop traversals supply the next context value. Its inspector selects `Text` or `JSON` output format.
 - **Choice Branch** has one required JSON `value` input and one JSON `output` port. It passes the input through unchanged and evaluates its outgoing unconditional or predicate edges in connection order, traversing only the first match; when no non-fallback edge matches, it traverses the first fallback edge. It can consume JSON from any upstream node.
+- **TypeSafe System One** has one required JSON `state` input and one JSON `output` port. Its inspector selects a configured TypeSafe public model and edits the immutable typed `questions` object. The node forwards the upstream System One response, including `answers`, without chat or Agent adaptation, while retaining object state fields for downstream context; outgoing predicates may address paths such as `$.answers.articleType.choice`.
 - **Artifact** has one required JSON `data` input, one output, and permits multiple instances; it configures a non-empty display name and a `Text`, `Markdown`, or `JSON` artifact type.
 - **Artifact Query** has one required JSON `request` input and one JSON output; its inspector selects a JSON Artifact name, a top-level title field, and one or more top-level description fields. It reads matching workspace history, including detached Artifacts, and emits the request with compact title-and-description candidates without creating Artifacts.
 - **Image** has one required string `prompt` input and one JSON output. Its inspector fixes `codex/gpt-image-2` and exposes only the supported image count, background, quality, and size choices. The node displays an image summary after execution and never renders or inspects base64 data.
@@ -70,7 +71,7 @@ Workflow-level settings are grouped into General, Inputs, Execution, and Version
 
 **Run.** Targets the latest published version, is unavailable while the draft has unsaved changes, and labels that version boundary explicitly. The control reports busy on itself. After the server returns the new Run id, navigation enters `/runs/:runId` so the live Run detail becomes the immediate execution surface; Run history remains available in the Workflow List dialog.
 
-**Publish.** Opens a confirmation explaining that publishing locks the embedded Agent configuration and that later draft edits do not change this Workflow or its historical runs. Publication validates bounded-cycle constraints, port rules, public model ids, image generation settings, required WeChat cover connectivity, and selected Skill and MCP availability. Validation failures navigate directly to the affected content.
+**Publish.** Opens a confirmation explaining that publishing locks the embedded Agent configuration and that later draft edits do not change this Workflow or its historical runs. Publication validates bounded-cycle constraints, port rules, public model ids, TypeSafe questions, image generation settings, required WeChat cover connectivity, and selected Skill and MCP availability. Validation failures navigate directly to the affected content.
 
 **Export JSON.** Downloads the current draft in the portable WorkLite format. Unsaved new Workflows must be saved first. The action stays neutral in both themes and does not compete with save, run, or publish.
 
@@ -85,6 +86,8 @@ The Timer inspector's read-only runtime status is the one self-healing value her
 **Agent** nodes are created without selecting a standalone Agent. Their inspector directly exposes a public model selector, system prompt, Skill multi-selection, MCP server multi-selection, output format, and error policy. Skill and MCP choices come only from real workspace resources.
 
 **Choice Branch** nodes expose no provider-specific configuration. Their inspector explains that the JSON value is passed through and that outgoing conditions are evaluated in connection order, with only the first match or first fallback traversed. Use the edge inspector to configure JSON paths such as `$.articleType` and their comparison values.
+
+**TypeSafe System One** nodes expose a TypeSafe public model selector and a structured JSON `questions` editor. The required `state` input is supplied by a connected JSON upstream node. The inspector explains that the request is forwarded as typed state and questions, that object state remains available in the output, and that typed answers support downstream routing.
 
 **Artifact** nodes expose name and artifact-type controls and explain that a successful Run creates the Artifact while the node output carries its reference.
 
@@ -130,6 +133,7 @@ The output panel contains only persisted output from a selected run. AI editing 
 | `workflows:editor.timerLimit` / `editor.dashboardLimit` | Constraint |
 | `workflows:editor.agentNode*` / `editor.model` / `editor.selectModel` / `editor.systemPrompt` / `editor.skills` / `editor.mcpServers` | State |
 | `workflows:editor.branchNode*` / `editor.branchValuePort` / `editor.branchSelectionHint` | State, Constraint |
+| `workflows:editor.systemOneNode*` / `editor.systemOneStatePort` / `editor.systemOneModel` / `editor.systemOneSelectModel` / `editor.systemOneQuestions` / `editor.systemOneQuestionsDescription` / `editor.systemOneQuestionsInvalid` / `editor.systemOneQuestionCount` | State, Constraint, Recovery |
 | `workflows:editor.outputFormat` / `editor.outputFormats.*` | State |
 | `workflows:editor.outputFormatDescription` | Constraint |
 | `workflows:editor.artifactNode*` / `editor.artifactName` / `editor.artifactType` / `editor.artifactTypes.*` | State |
@@ -176,6 +180,8 @@ Verified 2026-09-22. Differences found against `apps/web/src/routes/workflows/$w
 
 - ~~The editor had no reusable JSON Choice Branch node.~~ Resolved: the palette, canvas, inspector, and graph serializer now expose `worklite/branch@1`; its outgoing conditions select one route in definition order.
 
+- ~~The editor had no TypeSafe System One Workflow node.~~ Resolved: the palette, canvas, inspector, and graph serializer now expose `typesafe/systemone@1`; its `state` input and typed `answers` output use the existing JSON port and edge-condition contract.
+
 - ~~`Run` created a Run but left the editor as the active surface.~~ Resolved: successful creation now navigates to the returned `/runs/:runId` detail route.
 
 - No loading state for an existing Workflow. `useWorkflowQuery` destructures only `data`, so a pending load renders an empty canvas that is indistinguishable from an empty graph; the name field shows `editor.untitled` until the draft arrives.
@@ -188,6 +194,10 @@ Verified 2026-09-22. Differences found against `apps/web/src/routes/workflows/$w
 - Delete sets `setDeleteBusy(true)` and only resets it inside the `catch`, relying on navigation to unmount the component on success; the busy flag is never cleared on the success path.
 
 ## Changelog
+
+### 2026-09-22 - TypeSafe System One Workflow node
+
+- Added the dedicated TypeSafe System One node to the palette and contextual inspector. It keeps model selection and typed questions in Workflow configuration, uses the required JSON state port, preserves object state for downstream context, and exposes typed answers for structured routing.
 
 ### 2026-09-22 - JSON Choice Branch
 

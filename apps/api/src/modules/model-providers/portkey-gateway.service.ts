@@ -1,11 +1,12 @@
 import { createRequire } from 'node:module';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { BadRequestException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import type { Request, Response } from 'express';
-import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, GatewayRequestLogDetail, GatewayRequestLogList, GatewayRequestLogQuery, GatewayTimeRange, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatus, PortkeyGatewayView, SystemOneTestInput, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
+import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, GatewayRequestLogDetail, GatewayRequestLogList, GatewayRequestLogQuery, GatewayTimeRange, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatus, PortkeyGatewayView, SystemOneTestInput, SystemOneWorkflowOutput, SystemOneWorkflowRequest, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
 import type { ModelProviderConfig } from '@worklite/model-gateway';
 import { agents, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
@@ -392,6 +393,39 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     });
     if (images.length === 0) throw new ServiceUnavailableException('The image provider returned no generated PNG data.');
     return { type: 'workflow_image', model, mediaType: 'image/png', data: images };
+  }
+
+  async executeSystemOne(input: SystemOneWorkflowRequest & {
+    workflowRunId: string;
+    nodeRunId: string;
+    signal?: AbortSignal;
+  }): Promise<SystemOneWorkflowOutput> {
+    await this.ensureGatewayForDiscovery();
+    const model = input.model.trim();
+    const separator = model.indexOf('/');
+    const providerName = separator > 0 ? model.slice(0, separator).trim() : '';
+    const modelId = separator > 0 ? model.slice(separator + 1).trim() : '';
+    if (!providerName || !modelId) throw new BadRequestException('TypeSafe System One requires a public <providerName>/<modelId> model id.');
+    const provider = (await this.providers()).find((candidate) => candidate.name === providerName);
+    if (!provider) throw new BadRequestException('Model provider not found.');
+    if (provider.protocol !== 'typesafe/systemone' || !provider.models.includes(modelId)) throw new BadRequestException('The selected TypeSafe model is not configured for this Provider.');
+    const payload = await this.gatewayJson<SystemOneWorkflowOutput>('/worklite/proxy/systemone', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-worklite-provider-id': provider.id,
+        'x-worklite-log-id': `glog_${randomUUID()}`,
+        'x-worklite-log-source': 'workflow',
+        'x-worklite-workflow-run-id': input.workflowRunId,
+        'x-worklite-node-run-id': input.nodeRunId,
+      },
+      body: JSON.stringify({ model: modelId, state: input.state, questions: input.questions }),
+      signal: input.signal,
+    });
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new BadRequestException('TypeSafe provider returned an invalid System One response.');
+    const answers = payload.answers;
+    if (!answers || typeof answers !== 'object' || Array.isArray(answers)) throw new BadRequestException('TypeSafe provider returned an invalid System One response.');
+    return payload;
   }
 
   async proxyUnified(request: Request, response: Response, operation: Exclude<GatewayProxyOperation, 'models'>): Promise<void> {
