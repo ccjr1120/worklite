@@ -4,7 +4,7 @@ import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { AgentExecutionErrorCode, AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, WorkflowNodeActivityDetail, WorkliteNavigationTarget, WorkliteScriptResult } from '@worklite/contracts';
 import { agentExecutionEvents, agentExecutions, agentVersions, agents, agentSkills, agentSubSessions, agentToolCalls, auditLogs, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
-import { createModelGateway, ModelGatewayError, type GatewayAgentMessage, type GatewayToolResultOutput } from '@worklite/model-gateway';
+import { createModelGateway, ModelGatewayError, type GatewayAgentMessage, type GatewayToolResultOutput, type WorkflowAgentToolCall, type WorkflowAgentToolResult } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
@@ -159,33 +159,22 @@ export class AgentExecutionsService {
     const mcpRuntimes = await this.resources.workflowMcpRuntimes(workspaceId, requestedMcpServerIds);
     const mcpTools = await this.mcpRuntime.discover(mcpRuntimes, signal);
     const contextText = typeof context === 'string' ? context : JSON.stringify(context);
-    const messages: GatewayAgentMessage[] = [{ role: 'user', content: contextText?.trim() ? contextText : 'No workflow input was provided.' }];
-
     const maxRounds = Math.min(limits?.maxToolRounds ?? MAX_WORKFLOW_TOOL_ROUNDS, MAX_WORKFLOW_TOOL_ROUNDS);
-    let toolCallsUsed = 0;
-    let toolsClosed = false;
-    for (let round = 0; round <= maxRounds; round += 1) {
-      signal.throwIfAborted();
-      const finalRound = round === maxRounds || toolCallsUsed >= (limits?.maxToolCalls ?? Infinity);
-      if (finalRound && !toolsClosed) {
-        messages.push({ role: 'user', content: 'Tool budget is exhausted. Return the final response now using the evidence already gathered; state any evidence gaps. Do not call tools.' });
-        toolsClosed = true;
-      }
-      const result = await createModelGateway().generateAgentStep({ provider: runtime.provider, model: runtime.model, systemPrompt: effectiveSystemPrompt, jsonOutput, messages, skillScripts: finalRound ? [] : availableSkillScripts, mcpTools: finalRound ? [] : mcpTools, maxToolRounds: maxRounds, abortSignal: signal, onTextDelta, correlation: correlation ? { source: 'workflow', ...correlation } : undefined });
-      await activity?.({ phase: 'model.round', round, model: runtime.model, finishReason: result.finishReason, toolCalls: result.toolCalls.length, contextDropped: result.contextDropped });
-      messages.push(...result.responseMessages);
-      if (result.toolCalls.length === 0) {
-        const output = result.text.trim();
-        if (!output) throw new Error('The Workflow Agent node returned an empty response.');
-        return output;
-      }
-      if (finalRound) throw new Error('The Workflow Agent node requested a tool after its tool budget was exhausted.');
-      for (const call of result.toolCalls) {
-        if (toolCallsUsed >= (limits?.maxToolCalls ?? Infinity)) {
-          messages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: call.toolCallId, toolName: call.toolName, output: { type: 'error-text', value: 'The tool-call budget is exhausted; finish with existing evidence.' } }] });
-          continue;
-        }
-        toolCallsUsed += 1;
+    const result = await createModelGateway().runWorkflowAgent({
+      provider: runtime.provider,
+      model: runtime.model,
+      systemPrompt: effectiveSystemPrompt,
+      initialUserContent: contextText?.trim() ? contextText : 'No workflow input was provided.',
+      jsonOutput,
+      correlation: correlation ? { source: 'workflow', ...correlation } : undefined,
+      skillScripts: availableSkillScripts,
+      mcpTools,
+      maxToolRounds: maxRounds,
+      maxToolCalls: limits?.maxToolCalls,
+      abortSignal: signal,
+      onTextDelta,
+      onModelRound: activity ? async (round) => activity({ phase: 'model.round', ...round }) : undefined,
+      executeTool: async (call: WorkflowAgentToolCall): Promise<WorkflowAgentToolResult> => {
         if (call.toolName === 'skill_script') {
           const skill = assignedSkills.find((item) => item.id === call.skillId);
           const script = skill?.files.find((file) => file.path === call.scriptPath && file.path.startsWith('scripts/') && file.content.startsWith('#!'));
@@ -202,11 +191,10 @@ export class AgentExecutionsService {
               ? `${fullValue.slice(0, limits.maxToolResultChars)}\n[Tool output truncated; use available evidence and report gaps.]`
               : fullValue;
             await activity?.({ phase: 'skill.script', skillId: skill.id, skillName: skill.name, scriptPath: call.scriptPath ?? '', arguments: call.arguments ?? [], commandExecutionId: started.id, exitCode: completed.execution.exitCode ?? null, status: succeeded ? 'succeeded' : 'failed' });
-            messages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: call.toolCallId, toolName: call.toolName, output: { type: succeeded ? 'text' : 'error-text', value } }] });
+            return { type: succeeded ? 'text' : 'error-text', value };
           } finally {
             signal.removeEventListener('abort', cancel);
           }
-          continue;
         }
         const mcpTool = mcpTools.find((tool) => tool.name === call.toolName);
         const mcpRuntime = mcpTool ? mcpRuntimes.find((item) => item.id === mcpTool.serverId) : undefined;
@@ -219,10 +207,12 @@ export class AgentExecutionsService {
           throw error;
         }
         await activity?.({ phase: 'mcp.call', serverId: mcpRuntime.id, toolName: mcpTool.remoteName, input: call.input, result: value, status: 'succeeded' });
-        messages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: call.toolCallId, toolName: call.toolName, output: { type: 'text', value } }] });
-      }
-    }
-    throw new Error('The Workflow Agent node did not complete.');
+        return { type: 'text', value };
+      },
+    });
+    const output = result.text.trim();
+    if (!output) throw new Error('The Workflow Agent node returned an empty response.');
+    return output;
   }
 
   async get(request: Request, workspaceSlug: string, agentId: string, executionId: string): Promise<AgentExecutionView> {
