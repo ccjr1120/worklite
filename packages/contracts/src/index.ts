@@ -781,6 +781,7 @@ export type ModelProviderView = {
   baseURL: string | null;
   protocol: ModelProviderProtocol;
   status: 'connected' | 'unconfigured' | 'invalid';
+  apiKey: string;
   maskedKey: string;
   models: string[];
   headerNames: string[];

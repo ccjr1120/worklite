@@ -18,7 +18,7 @@ export type GatewayProvider = {
   updatedAt: string;
 };
 
-export type GatewayProviderView = Omit<GatewayProvider, 'apiKey' | 'headers'> & {
+export type GatewayProviderView = Omit<GatewayProvider, 'headers'> & {
   status: 'connected' | 'unconfigured' | 'invalid';
   maskedKey: string;
   headerNames: string[];
@@ -235,7 +235,7 @@ function configured(provider: GatewayProvider): boolean {
 
 function view(provider: GatewayProvider): GatewayProviderView {
   const status = !VALID_PROTOCOLS.includes(provider.protocol) ? 'invalid' : configured(provider) ? 'connected' : 'unconfigured';
-  return { id: provider.id, name: provider.name, protocol: provider.protocol, baseURL: provider.baseURL, models: provider.models, updatedAt: provider.updatedAt, status, maskedKey: provider.apiKey ? maskSecret(provider.apiKey) : '', headerNames: Object.keys(provider.headers ?? {}) };
+  return { id: provider.id, name: provider.name, protocol: provider.protocol, baseURL: provider.baseURL, models: provider.models, updatedAt: provider.updatedAt, status, apiKey: provider.apiKey, maskedKey: provider.apiKey ? maskSecret(provider.apiKey) : '', headerNames: Object.keys(provider.headers ?? {}) };
 }
 
 function validateInput(input: unknown, partial = false): Partial<GatewayProvider> {

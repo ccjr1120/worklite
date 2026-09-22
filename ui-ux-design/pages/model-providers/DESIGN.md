@@ -39,17 +39,17 @@ The `providers` view is one continuous surface: the full-width Portkey Gateway s
 
 ### Provider administration
 
-Show provider configuration status, protocol, endpoint metadata, masked credentials, configured model IDs, and header names. Support creating a provider, editing its complete non-secret configuration, replacing its write-only secrets, and deleting it after explicit confirmation.
+Show provider configuration status, protocol, endpoint metadata, masked credentials, configured model IDs, and header names. Support creating a provider, editing its complete configuration including the stored API key, replacing its write-only headers, and deleting it after explicit confirmation.
 
 The create and edit dialog presents fields in this order: Provider name, Base URL, Protocol, API key, Models, Headers. Base URL and Protocol establish the upstream contract before credentials and model discovery. Protocol is a namespaced selection of `openai/chat`, `openai/responses`, `anthropic/messages`, `typesafe/systemone`, or `codex/responses`. There is no separate Provider type field. New provider forms require an explicit protocol selection and do not prefill one.
 
-Every text field in the create and edit dialog disables browser autocomplete. Provider name, Base URL, and the Headers JSON field are configuration values belonging to one upstream record, so a browser history suggestion or a saved-credential fill offers values that were never valid for the provider being configured. The API key field already suppresses it as a write-only secret. Editing still loads the stored non-secret configuration into the form, which is the record's own value rather than a browser suggestion.
+Every text field in the create and edit dialog disables browser autocomplete. Provider name, Base URL, and the Headers JSON field are configuration values belonging to one upstream record, so a browser history suggestion or a saved-credential fill offers values that were never valid for the provider being configured. The API key field already suppresses it, because its value is loaded from the record rather than offered by the browser. Editing still loads the stored non-secret configuration into the form, which is the record's own value rather than a browser suggestion.
 
 `typesafe/systemone` is a credential-forwarding protocol whose upstream exchanges a state value and typed questions for typed answers. Its `Fetch models` control stays disabled because the upstream publishes no model-discovery endpoint, so its catalog is entered by hand. Its connection test sends one minimal typed question rather than the fixed chat prompt. Providers using it are omitted from Agent model selection, since an Agent node's system prompt and output format have no meaning in that contract.
 
 New provider forms do not offer `codex/responses`; an existing legacy Codex record may retain that protocol while being edited. For `codex/responses` the API key is not required, the Base URL is descriptive Provider metadata, and the Gateway uses its Codex authentication manager and private upstream configuration.
 
-Secrets stay write-only. During editing, an empty API key preserves the stored key and a non-empty key replaces it. A supplied Headers JSON replaces the stored headers and `{}` clears them. Headers are entered as a JSON object in a multiline field; stored values are never loaded back into the browser. The list exposes only header names and count, never values, and omits header copy when none are configured. Invalid JSON, non-object JSON, or non-string header values prevent saving and produce an inline validation message.
+The API key is readable; every other secret stays write-only. Editing loads the stored key into the field, which masks it until the existing reveal control is activated. An empty API key still preserves the stored key and a non-empty key replaces it, so clearing the field does not clear the credential. A supplied Headers JSON replaces the stored headers and `{}` clears them. Headers are entered as a JSON object in a multiline field; stored header values are never loaded back into the browser. The list exposes only header names and count, never values, and omits header copy when none are configured. Invalid JSON, non-object JSON, or non-string header values prevent saving and produce an inline validation message.
 
 Model IDs are an ordered list entered by hand and optionally extended by discovery. A text field sits above the list: Enter commits the typed ID, and blur commits a pending draft so activating Save or Fetch models does not discard it. An empty or duplicate entry is dropped without an error, keeping the list de-duplicated. Each row exposes a drag handle, the model identifier as an activatable control, and an accessible remove action. Activating an identifier edits it in place, where Enter commits, Escape cancels, and blur commits; clearing the text or reusing another ID cancels the edit, because removal has its own control and a silent merge would drop a row the user did not ask to remove. A row being edited is not draggable. Dragging changes the draft order; fetching models appends newly discovered IDs with stable de-duplication; saving remains the only persistence action and preserves the displayed order.
 
@@ -123,7 +123,6 @@ Define unconfigured, testing, connected, invalid credentials, unavailable provid
 | `settings:providers.protocolRequired` | Recovery |
 | `settings:providers.apiKey` | Action |
 | `settings:providers.secretPlaceholder` | Action |
-| `settings:providers.keepSecretPlaceholder` | Constraint |
 | `settings:providers.models` / `modelsPlaceholder` / `addModel` / `removeModel` | Action |
 | `settings:providers.modelsHint` | Constraint |
 | `settings:providers.modelCount` | State |
@@ -198,7 +197,7 @@ Removed keys:
 - `settings:providers.requestLogs.clearFilters`: the shared `common:actions.clearFilters` label is what the control renders.
 - `settings:providers.gateway.codex.description`, `rateLimitsLoading`, `rateLimitsUnavailable`, `rateLimitsEmpty`: the summary section delegates account management to the pool tab through `manageInPool`, and the rate-limit strings are unrendered leftovers from the pre-pool presentation.
 
-`settings:providers.description` is retained as a Constraint: write-only credentials and the fact that a change affects future Agent runs but not published Workflow versions are both rules the interface does not otherwise show.
+`settings:providers.description` is retained as a Constraint: write-only custom headers and the fact that a change affects future Agent runs but not published Workflow versions are both rules the interface does not otherwise show. It no longer claims credentials are write-only, which stopped being true for the API key.
 
 ## Accessibility
 
@@ -210,8 +209,9 @@ Icon-only edit, delete, per-account, and copy controls carry accessible names; p
 
 ## Coverage Status
 
-Verified 2026-09-22 for the create and edit dialog's autocomplete behavior and the `typesafe/systemone` protocol option; the observability entries carry over from the 2026-09-21 verification after those views moved to [Logs](../logs/DESIGN.md), and the remainder from the 2026-09-20 verification of the Providers and Codex views. Struck entries were resolved in the 2026-09-19 single-action pass.
+Verified 2026-09-22 for the API key field's readability, the create and edit dialog's autocomplete behavior, and the `typesafe/systemone` protocol option; the observability entries carry over from the 2026-09-21 verification after those views moved to [Logs](../logs/DESIGN.md), and the remainder from the 2026-09-20 verification of the Providers and Codex views. Struck entries were resolved in the 2026-09-19 single-action pass.
 
+- Resolved 2026-09-22: the edit dialog cleared the API key field, because the view carried only `maskedKey` and the stored key never reached the browser. The field now prefills from the record, so the existing reveal control can show the key being edited. This also re-enables `Fetch models` while editing, which was disabled by its empty-key guard for every saved provider except `codex/responses`. The obsolete `keepSecretPlaceholder` string was removed in the same change.
 - Resolved 2026-09-22: Provider name, Base URL, and the Headers JSON field carried no `autoComplete` attribute, so the browser offered unrelated history and saved-credential values for fields scoped to one upstream record. All three now disable it, matching the API key field and the transient chat composer.
 - Resolved 2026-09-22: the protocol selection omitted `typesafe/systemone` after that Provider protocol was added, so a credential-forwarding upstream could not be configured from this page.
 - Resolved 2026-09-22: the model list had no manual entry path at all — `discoverModels` was the only writer — so disabling discovery for `typesafe/systemone` left its catalog permanently empty and every request rejected against an empty catalog. A text field with Enter commit and in-place editing of existing IDs restores manual entry for every protocol. The unused `providers.addModel` string was removed in the same change.

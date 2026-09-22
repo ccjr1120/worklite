@@ -7,7 +7,7 @@
   },
   "providers": {
     "title": "模型提供商",
-    "description": "凭据仅可写入。修改 Provider 可能影响 Chat Bot 和未来的 Workflow 运行。",
+    "description": "自定义请求头仅可写入。修改 Provider 可能影响 Chat Bot 和未来的 Workflow 运行。",
     "create": "创建提供商",
     "columns": {
       "provider": "提供商",
@@ -57,7 +57,6 @@
     "created": "提供商已创建",
     "edit": "编辑提供商",
     "secretPlaceholder": "新密钥",
-    "keepSecretPlaceholder": "留空以保留当前密钥",
     "editTitle": "编辑模型提供商",
     "editDescription": "更新提供商配置。API 密钥留空会保留当前密钥，Header 值不会显示。",
     "editAction": "保存修改",

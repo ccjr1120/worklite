@@ -105,8 +105,15 @@ function headerNames(value: string | null): string[] {
   }
 }
 
+function storedSecret(value: string | null): string {
+  if (!value) return '';
+  // A rotated SECRET_ENCRYPTION_KEY leaves rows this process cannot decrypt.
+  // Reading one must not fail the response, matching the Gateway registry.
+  try { return decryptSecret(value); } catch { return ''; }
+}
+
 function providerView(row: typeof modelProviders.$inferSelect): ModelProviderView {
-  return { id: row.id, name: row.name, baseURL: row.baseURL, protocol: row.protocol, status: row.status, maskedKey: row.maskedKey, models: row.models ?? [], headerNames: headerNames(row.headers) };
+  return { id: row.id, name: row.name, baseURL: row.baseURL, protocol: row.protocol, status: row.status, apiKey: storedSecret(row.apiKey), maskedKey: row.maskedKey, models: row.models ?? [], headerNames: headerNames(row.headers) };
 }
 
 function mcpServerView(row: typeof mcpServers.$inferSelect, workspaceSlug: string): McpServerView {

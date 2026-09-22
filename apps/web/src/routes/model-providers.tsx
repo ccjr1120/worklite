@@ -311,7 +311,7 @@ function ModelProvidersPage() {
 
   function openEdit(provider: ModelProviderView) {
     setName(provider.name);
-    setApiKey('');
+    setApiKey(provider.apiKey);
     setProtocol(provider.protocol);
     setBaseURL(provider.baseURL ?? '');
     setModelIds(provider.models);
@@ -552,7 +552,7 @@ function ModelProvidersPage() {
             </Select>
           </Field>
           <Field label={t('providers.apiKey')} htmlFor="provider-api-key">
-            <PasswordInput id="provider-api-key" autoComplete="off" placeholder={t(dialog?.mode === 'edit' ? 'providers.keepSecretPlaceholder' : 'providers.secretPlaceholder')} value={apiKey} onChange={(event) => setApiKey(event.target.value)} />
+            <PasswordInput id="provider-api-key" autoComplete="off" placeholder={t('providers.secretPlaceholder')} value={apiKey} onChange={(event) => setApiKey(event.target.value)} />
           </Field>
           <Field label={t('providers.models')} htmlFor="provider-models" hint={t('providers.modelsHint')} error={modelsError}>
             <div className="flex flex-col gap-2">
