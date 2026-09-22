@@ -1,6 +1,6 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
-import { APICallError, generateText, InvalidToolInputError, JSONParseError, jsonSchema, NoOutputGeneratedError, Output, streamText, tool, type LanguageModel, type LanguageModelUsage, type ModelMessage } from 'ai';
+import { APICallError, generateText, InvalidToolInputError, isStepCount, JSONParseError, jsonSchema, NoOutputGeneratedError, Output, streamText, ToolLoopAgent, tool, wrapLanguageModel, type LanguageModel, type LanguageModelCallEndEvent, type LanguageModelUsage, type ModelMessage, type PrepareStepFunction, type ToolExecutionEndEvent, type ToolSet } from 'ai';
 
 export type ModelProviderConfig =
   | {
@@ -71,6 +71,51 @@ export type AgentStepResult = {
   contextDropped: number;
 };
 
+export type WorkflowAgentToolCall = {
+  toolCallId: string;
+  toolName: string;
+  input: unknown;
+  skillId?: string;
+  scriptPath?: string;
+  arguments?: string[];
+};
+
+export type WorkflowAgentToolResult = {
+  type: 'text' | 'error-text';
+  value: string;
+};
+
+export type WorkflowAgentRound = {
+  round: number;
+  model: string;
+  finishReason: string | null;
+  toolCalls: number;
+  contextDropped: number;
+};
+
+export type RunWorkflowAgentRequest = {
+  provider: ModelProviderConfig;
+  model: string;
+  systemPrompt: string;
+  initialUserContent: string;
+  jsonOutput?: boolean;
+  correlation?: GatewayCorrelation;
+  skillScripts: Array<{ skillId: string; skillName: string; path: string }>;
+  mcpTools: readonly GatewayToolDefinition[];
+  maxToolRounds: number;
+  maxToolCalls?: number;
+  maxContextTokens?: number;
+  maxOutputTokens?: number;
+  abortSignal?: AbortSignal;
+  onTextDelta?: (delta: string) => void | Promise<void>;
+  onModelRound?: (round: WorkflowAgentRound) => void | Promise<void>;
+  executeTool: (call: WorkflowAgentToolCall) => Promise<WorkflowAgentToolResult>;
+};
+
+export type WorkflowAgentLoopResult = {
+  text: string;
+};
+
 export type StreamTextRequest = {
   provider: ModelProviderConfig;
   model: string;
@@ -102,6 +147,7 @@ export type ModelStream = {
 export interface ModelGateway {
   streamText(request: StreamTextRequest): ModelStream;
   generateAgentStep(request: GenerateAgentStepRequest): Promise<AgentStepResult>;
+  runWorkflowAgent(request: RunWorkflowAgentRequest): Promise<WorkflowAgentLoopResult>;
 }
 
 export class ModelGatewayError extends Error {
@@ -195,6 +241,297 @@ export class AiSdkModelGateway implements ModelGateway {
 
     return toAgentStepResult(result, tools, context.dropped, request.jsonOutput === true);
   }
+
+  async runWorkflowAgent(request: RunWorkflowAgentRequest): Promise<WorkflowAgentLoopResult> {
+    const model = withWorkflowAgentStreamTransport(
+      resolveModel(request.provider, request.model, request.correlation),
+      request.abortSignal,
+    );
+    const useResponses = isResponsesProvider(request.provider);
+    const maxToolCalls = request.maxToolCalls ?? Infinity;
+    const maxToolRounds = Math.max(0, Math.floor(request.maxToolRounds));
+    let currentRound = 0;
+    let contextDropped = 0;
+    let toolCallsUsed = 0;
+    let budgetMessageAdded = false;
+    let toolExecutionError: unknown;
+
+    let lastToolTask = Promise.resolve();
+    const runToolExclusively = <T>(operation: () => Promise<T>): Promise<T> => {
+      const task = lastToolTask.then(operation, operation);
+      lastToolTask = task.then(() => undefined, () => undefined);
+      return task;
+    };
+    const recordToolExecutionError = (error: unknown): unknown => {
+      toolExecutionError ??= error;
+      return error;
+    };
+    const executeManagedTool = async (
+      toolCallId: string,
+      call: Omit<WorkflowAgentToolCall, 'toolCallId'>,
+    ): Promise<WorkflowAgentToolResult> => runToolExclusively(async () => {
+      if (toolExecutionError) {
+        return { type: 'error-text', value: 'A previous tool call failed; no new host actions were started.' };
+      }
+      if (toolCallsUsed >= maxToolCalls) {
+        return { type: 'error-text', value: 'The tool-call budget is exhausted; finish with existing evidence.' };
+      }
+      toolCallsUsed += 1;
+      try {
+        return await request.executeTool({ ...call, toolCallId });
+      } catch (error) {
+        throw recordToolExecutionError(error);
+      }
+    });
+
+    const skillScript = tool({
+      description: 'Run one script from an assigned Skill package immediately on the WorkLite host. Select only an exact Skill id and script path from the assigned script list.',
+      strict: useResponses ? false : undefined,
+      inputSchema: jsonSchema<{ skillId: string; scriptPath: string; arguments: string[] }>({
+        type: 'object',
+        additionalProperties: false,
+        required: ['skillId', 'scriptPath', 'arguments'],
+        properties: {
+          skillId: { type: 'string', enum: [...new Set(request.skillScripts.map((script) => script.skillId))] },
+          scriptPath: { type: 'string', enum: request.skillScripts.map((script) => script.path) },
+          arguments: { type: 'array', items: { type: 'string' } },
+        },
+      }),
+      execute: (input, { toolCallId }) => {
+        let normalized: WorkflowAgentToolCall;
+        try {
+          normalized = normalizeWorkflowSkillCall(toolCallId, input);
+        } catch (error) {
+          throw recordToolExecutionError(error);
+        }
+        return executeManagedTool(toolCallId, normalized);
+      },
+    });
+    const tools: Record<string, unknown> = {
+      ...(request.skillScripts.length > 0 ? { skill_script: skillScript } : {}),
+    };
+    for (const definition of request.mcpTools) {
+      if (!definition.name || tools[definition.name]) continue;
+      tools[definition.name] = tool({
+        description: definition.description,
+        strict: useResponses ? false : undefined,
+        inputSchema: jsonSchema<Record<string, unknown>>(definition.inputSchema as never),
+        execute: (input, { toolCallId }) => executeManagedTool(toolCallId, { toolName: definition.name, input }),
+      });
+    }
+
+    const openaiProviderOptions = {
+      ...(request.provider.adapter === 'openai' ? { parallelToolCalls: false as const } : {}),
+      ...(useResponses ? { strictJsonSchema: false as const } : {}),
+    };
+    const agentSettings = {
+      model,
+      instructions: request.systemPrompt,
+      messages: [{ role: 'user', content: request.initialUserContent }] satisfies ModelMessage[],
+      output: request.jsonOutput ? Output.json({ name: 'response' }) : undefined,
+      tools: Object.keys(tools).length > 0 ? tools : undefined,
+      providerOptions: Object.keys(openaiProviderOptions).length > 0 ? { openai: openaiProviderOptions } : undefined,
+      maxOutputTokens: request.maxOutputTokens,
+      abortSignal: request.abortSignal,
+      maxRetries: 0,
+      stopWhen: isStepCount(maxToolRounds + 1),
+      prepareStep: ({ stepNumber, messages }: Parameters<PrepareStepFunction<ToolSet>>[0]) => {
+        currentRound = stepNumber;
+        const context = trimAgentMessages(request.systemPrompt, messages as readonly GatewayAgentMessage[], request.maxContextTokens ?? 12_000);
+        contextDropped = context.dropped;
+        const toolsClosed = stepNumber >= maxToolRounds || toolCallsUsed >= maxToolCalls;
+        let nextMessages = context.messages;
+        if (toolsClosed && !budgetMessageAdded) {
+          budgetMessageAdded = true;
+          nextMessages = [...nextMessages, {
+            role: 'user',
+            content: 'Tool budget is exhausted. Return the final response now using the evidence already gathered; state any evidence gaps. Do not call tools.',
+          }];
+        }
+        return {
+          messages: nextMessages,
+          ...(toolsClosed ? { activeTools: [] } : {}),
+        };
+      },
+      onToolExecutionEnd: async (event: ToolExecutionEndEvent<ToolSet>) => {
+        if (event.toolOutput.type === 'tool-error') recordToolExecutionError(event.toolOutput.error);
+      },
+      onLanguageModelCallEnd: async (event: LanguageModelCallEndEvent<ToolSet>) => {
+        await request.onModelRound?.({
+          round: currentRound,
+          model: request.model,
+          finishReason: event.finishReason ?? null,
+          toolCalls: event.content.filter((part) => part.type === 'tool-call').length,
+          contextDropped,
+        });
+      },
+    };
+    const agent = new ToolLoopAgent(agentSettings as never) as ToolLoopAgent<never, ToolSet>;
+    const result = await agent.stream({
+      abortSignal: request.abortSignal,
+      messages: [{ role: 'user', content: request.initialUserContent }],
+    });
+    for await (const delta of result.textStream) {
+      await request.onTextDelta?.(delta);
+    }
+    if (toolExecutionError) throw toolExecutionError;
+    const [text, toolCalls] = await Promise.all([result.text, result.toolCalls]);
+    const invalidToolRequest = classifyInvalidToolRequest(toolCalls);
+    if (invalidToolRequest) throw invalidToolRequest;
+    if (toolCalls.length > 0) {
+      throw new Error('The Workflow Agent node requested a tool after its tool budget was exhausted.');
+    }
+    return { text: request.jsonOutput ? extractJsonText(text.trim()) : text };
+  }
+}
+
+function normalizeWorkflowSkillCall(
+  toolCallId: string,
+  input: { skillId: string; scriptPath: string; arguments: string[] },
+): WorkflowAgentToolCall {
+  const skillId = requiredString(input?.skillId, 200);
+  const scriptPath = requiredString(input?.scriptPath, 240);
+  const argumentsValue = argumentArray(input?.arguments);
+  if (!skillId || !scriptPath || !argumentsValue) {
+    throw new ModelGatewayError('INVALID_TOOL_REQUEST', 'The model returned an invalid Skill request. Skill arguments must be scalar command-line values.');
+  }
+  return { toolCallId, toolName: 'skill_script', input, skillId, scriptPath, arguments: argumentsValue };
+}
+
+function withWorkflowAgentStreamTransport(model: LanguageModel, signal?: AbortSignal): LanguageModel {
+  return wrapLanguageModel({
+    model: model as never,
+    middleware: {
+      specificationVersion: 'v4',
+      wrapStream: async ({ doStream, doGenerate }) => {
+        let firstAttempt: Awaited<ReturnType<typeof doStream>> | undefined;
+        let attempt = 0;
+        const maxAttempts = 3;
+        for (; attempt < maxAttempts; attempt += 1) {
+          signal?.throwIfAborted();
+          try {
+            firstAttempt = await doStream();
+            break;
+          } catch (error) {
+            if (attempt + 1 >= maxAttempts || signal?.aborted || !isRetryableGatewayError(error)) throw modelFailure(error, error);
+            await abortableDelay(Math.min(250 * 2 ** attempt, 2_000), signal);
+          }
+        }
+        const initial = firstAttempt;
+        if (!initial) throw new Error('The provider returned no usable model output.');
+        const stream = new ReadableStream<unknown>({
+          start(controller) {
+            void (async () => {
+              let emitted = false;
+              let preamble: unknown[] = [];
+              let failure: unknown;
+              for (let retryAttempt = attempt; retryAttempt < maxAttempts; retryAttempt += 1) {
+                const reader = (retryAttempt === attempt ? initial : await doStream()).stream.getReader();
+                preamble = emitted ? [] : [];
+                try {
+                  for (;;) {
+                    const chunk = await reader.read();
+                    if (chunk.done) break;
+                    const part = chunk.value as Record<string, unknown> | undefined;
+                    const type = part?.type;
+                    if (!part) {
+                      if (emitted) controller.enqueue(part);
+                      else preamble.push(part);
+                      continue;
+                    }
+                    if (type === 'error') {
+                      failure = part.error;
+                      break;
+                    }
+                    if (type === 'text-delta' || type === 'tool-input-start' || type === 'tool-input-delta' || type === 'tool-call') {
+                      emitted = true;
+                      for (const queuedPart of preamble) controller.enqueue(queuedPart);
+                      preamble = [];
+                      controller.enqueue(part);
+                      continue;
+                    }
+                    if (!emitted) preamble.push(part);
+                    else controller.enqueue(part);
+                  }
+                  if (emitted) return;
+                  failure ??= new NoOutputGeneratedError({ message: 'The provider returned no usable model output.' });
+                  if (retryAttempt + 1 < maxAttempts && signal?.aborted !== true && isRetryableGatewayError(failure)) {
+                    await abortableDelay(Math.min(250 * 2 ** retryAttempt, 2_000), signal);
+                    continue;
+                  }
+                  if (signal?.aborted || !NoOutputGeneratedError.isInstance(failure)) throw failure;
+                  const generated = await doGenerate();
+                  for (const part of generatedResultToStreamParts(generated)) controller.enqueue(part);
+                  return;
+                } catch (error) {
+                  failure = error;
+                  if (retryAttempt + 1 < maxAttempts && !signal?.aborted && isRetryableGatewayError(error)) {
+                    await abortableDelay(Math.min(250 * 2 ** retryAttempt, 2_000), signal);
+                    continue;
+                  }
+                  if (!signal?.aborted && NoOutputGeneratedError.isInstance(error)) {
+                    try {
+                      const generated = await doGenerate();
+                      for (const part of generatedResultToStreamParts(generated)) controller.enqueue(part);
+                      return;
+                    } catch (fallbackError) {
+                      throw modelFailure(fallbackError, failure);
+                    }
+                  }
+                  throw modelFailure(error, failure);
+                }
+              }
+              throw modelFailure(failure, failure);
+            })().catch((error) => controller.error(error));
+          },
+        });
+        return {
+          stream: stream as never,
+          ...(initial.request ? { request: initial.request } : {}),
+          ...(initial.response ? { response: initial.response } : {}),
+        };
+      },
+    },
+  }) as LanguageModel;
+}
+
+function generatedResultToStreamParts(generated: {
+  content: Iterable<unknown>;
+  finishReason: { unified: string; raw: string | undefined };
+  usage: unknown;
+  providerMetadata?: unknown;
+  response?: object;
+}): Array<unknown> {
+  const parts: Array<unknown> = [{ type: 'stream-start', warnings: [] }];
+  if (generated.response) {
+    parts.push({ type: 'response-metadata', ...generated.response });
+  }
+  for (const value of generated.content) {
+    const content = asRecord(value);
+    if (!content) continue;
+    if (content.type === 'text') {
+      const id = 'fallback-text';
+      parts.push({ type: 'text-start', id });
+      parts.push({ type: 'text-delta', id, delta: content.text });
+      parts.push({ type: 'text-end', id });
+      continue;
+    }
+    if (content.type === 'reasoning') {
+      const id = typeof content.id === 'string' ? content.id : 'fallback-reasoning';
+      parts.push({ type: 'reasoning-start', id });
+      if (typeof content.text === 'string') parts.push({ type: 'reasoning-delta', id, delta: content.text });
+      parts.push({ type: 'reasoning-end', id });
+      continue;
+    }
+    parts.push(content);
+  }
+  parts.push({
+    type: 'finish',
+    usage: generated.usage,
+    finishReason: generated.finishReason,
+    ...(generated.providerMetadata ? { providerMetadata: generated.providerMetadata } : {}),
+  });
+  return parts;
 }
 
 function extractJsonText(text: string): string {
