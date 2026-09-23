@@ -69,6 +69,10 @@ A missing platform identifier is not the same condition as a platform rejection,
 
 A WeChat draft-mode failure must report the platform's own reason when the browser session exposes one: the failed draft-save response status text, or the text of a blocking editor dialog other than the known content-structure warning. A bare missing-draft-identifier message is the last resort, not the default, because remote runs are otherwise undiagnosable. A publication record that already holds a draft id reopens that draft even while its status is `failed`, so a node retry cannot leave a second draft in the official account.
 
+The WeChat article editor is ProseMirror. It reparses pasted markup against its own schema and discards inline styles, so article HTML is inserted through the editor's own `window.__MP_Editor_JSAPI__` call `mp_editor_set_content` after `mp_editor_get_isready` reports a ready and new editor, with the clipboard paste kept only as a fallback. That content call requires a new editor, so the compose entry point opens the editor with `isNew=1`; a publication that already holds a draft id never refills its body. Calling the editor page's own JSAPI is operating the real MP page and is not a substituted WeChat backend API.
+
+Retained block structure is not evidence of retained styling. A style-stripped article still yields multiple block elements, so a block-count check alone reports an unstyled article as a successful publish. Any pre-save verification must also assert that inline styles survived.
+
 Headless QR login against the real WeChat MP site is verified working, including the `cgi-bin/home?token=` transition. Do not attribute a login failure to headless mode or add user-agent, locale, or other fingerprint overrides without first reproducing the failure and ruling out automation-side causes. WeChat sets the `slave_sid` and `slave_user` cookies about one second before the token page appears, so login confirmation must require the token page; cookie presence alone captures a storage state that has no editor token.
 
 

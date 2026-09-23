@@ -188,24 +188,28 @@ Treat `@` selection in the Chat Bot composer as structured dispatch, not decorat
 
 ### Workflow Editor
 
-- Represent workflows on a focused React Flow node canvas with explicit input and output handles, directional edges, and persisted spatial layout.
-- Keep graph nodes compact: show the node name, kind, and named ports on the canvas, and place model and detailed configuration in the contextual inspector. Derive `x` from dependency rank and `y` from symmetric lanes; order peers by mean incoming-source topological order, using definition order as the stable tie-break. Recalculate when graph topology changes, fit the hydrated graph into view with a readable minimum scale, advance horizontally by wheel or trackpad, and allow two-axis canvas dragging.
-- Use a canvas with one right-side contextual panel. The panel shows the searchable node palette when nothing is selected and replaces it with the selected node or edge inspector.
+- Represent workflows in a fixed-scale left-to-right diagram built from HTML stage cards and SVG connections, with explicit input and output ports and deterministic coordinates.
+- Keep graph nodes compact: show the node name, kind, and named ports in each card, and place model and detailed configuration in the contextual inspector. Derive `x` from dependency rank and `y` from symmetric lanes; order peers by mean incoming-source topological order, using definition order as the stable tie-break. Recalculate when graph topology changes and browse long flows with native two-axis scrolling, trackpad movement, and Shift+wheel. Do not transform or pan the diagram canvas.
+- Use a diagram above a bottom inspector dock that appears only for a selected node or edge. The diagram uses the full height when nothing is selected. Open a floating searchable node picker from the diagram toolbar for independent additions, and from an output connection released on blank canvas for compatible target nodes.
 - Keep nodes visually consistent and compact. Expose the name, node kind, and named ports on the canvas; expose editable content and other node-owned parameters in the contextual inspector.
-- Add nodes through the searchable palette at a predictable viewport position and allow direct node dragging for spatial organization.
-- Provide familiar icon controls for zoom in, zoom out, fit view, and deletion.
+- Add independent nodes through the floating searchable picker. Releasing an output connection on blank canvas opens that picker with compatible target nodes; selecting one creates the node and connection together. Recalculate coordinates from graph topology. Node positions are automatic rather than freely draggable.
+- Keep nodes at a readable fixed scale; the scroll container exposes the complete flow without zoom or fit controls.
 - Keep edge direction and handle compatibility visible through shape, persistent port labels, and valid or invalid interaction state rather than color alone.
-- Preserve a keyboard-accessible inspector path for reviewing configuration and removing selected nodes or edges, with an explicit return to the node palette.
-- Keep the contextual panel available at every breakpoint; collapse the combined palette and inspector to one drawer or bottom sheet when the layout cannot support a side panel.
+- Preserve a keyboard-accessible inspector path for reviewing configuration and removing selected nodes or edges. The diagram toolbar exposes independent node addition without an idle side palette.
+- Keep the selected-item inspector in a bounded, independently scrollable dock below the diagram at every breakpoint. Keep the node picker anchored to the diagram.
 - Use blue borders or indicators for the selected and currently executing node or edge. Selection belongs to the graph and must remain synchronized with contextual panel content and keyboard focus.
 - Represent successful and failed states through compact green or red markers rather than filling the whole node.
 - Render edges with restrained neutral strokes and reserve stronger treatment for selection and execution.
 - Shorten conditional edge labels to the decision value on the canvas; the inspector retains the full predicate. Selecting a graph item emphasizes its directly connected nodes and edges and softens unrelated paths. A subtle directional animation may run on those selected edges only, with a static equivalent for reduced-motion preferences.
-- Offer an explicit align action for dense graphs. It rearranges draft positions without changing graph behavior and leaves the draft unsaved until the user saves it.
+- Automatically recalculate layout after graph topology changes so no manual alignment action is needed.
 - Present AI-assisted edits in a side panel and make proposed structured operations understandable and reviewable.
 - Group workflow-level settings into General, Inputs, Execution, and Versioning sections, with advanced fields disclosed progressively.
 
 Restrained blue emphasis communicates graph selection and active execution while neutral surfaces and edges keep dense workflows readable. Directional selection animation indicates the path being inspected, not Run progress.
+
+### WeChat Article Output
+
+The real WeChat Official Account body follows [the shared output specification](../../ui-ux-design/shared/wechat-article-output.md), because it is reader-facing content rather than a WorkLite application surface. Mint Cyan identifies headings; paragraphs, emphasis, lists, quotations, and code remain neutral. Tables use a charcoal header with a pale mint top rule and neutral rows. Inline styles keep the output usable inside the MP editor.
 
 ### Runs and Logs
 
@@ -265,6 +269,18 @@ Before confirming a UI proposal, verify that it:
 
 ## Changelog
 
+### 2026-09-23 - Contextual Workflow node picker
+
+- Made the Workflow inspector selection-driven and moved node creation into a floating picker opened from the toolbar or a blank-canvas connection drop.
+
+### 2026-09-23 - Workflow bottom inspector
+
+- Moved selected Workflow node and edge details below the diagram, with an independent scroll region at every breakpoint.
+
+### 2026-09-23 - WeChat article output
+
+- Defined a restrained Mint Cyan article style for the external WeChat reading surface, including semantic heading hierarchy, indented paragraphs, neutral code blocks, and same-family table accents.
+
 ### 2026-09-23 - Workflow canvas readability
 
 - Replaced parameter-heavy canvas cards with compact stage nodes and moved detailed configuration into the inspector.
@@ -274,6 +290,11 @@ Before confirming a UI proposal, verify that it:
 
 - Applied the left-to-right dependency layout when an existing graph loads and fit the viewport after asynchronous node hydration.
 - Made horizontal wheel navigation and two-axis canvas dragging explicit; the fit scale has a readable minimum so wide workflows can be panned instead of shrinking node cards to fit.
+
+### 2026-09-23 - Workflow diagram navigation
+
+- Replaced the transformed React Flow canvas model with fixed-scale HTML nodes, SVG connections, deterministic automatic layout, and native two-axis scrolling.
+- Kept ordinary wheel input vertical and assigned horizontal trackpad gestures and Shift+wheel to horizontal navigation; removed canvas panning, zooming, node dragging, and manual alignment.
 
 ### 2026-09-23 - Workflow coordinate layout
 

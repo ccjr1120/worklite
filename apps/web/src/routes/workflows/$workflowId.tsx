@@ -1,6 +1,5 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import { addEdge, Background, BackgroundVariant, Controls, MarkerType, PanOnScrollMode, ReactFlow, reconnectEdge, useEdgesState, useNodesState, type OnConnect, type OnConnectEnd, type OnReconnect, type ReactFlowInstance } from '@xyflow/react';
-import { ArrowLeft, Bot, Braces, Check, Copy, Download, FilePlus2, FileSearch, FileText, GitBranch, Image as ImageIcon, LayoutDashboard, ListChecks, PanelRight, Plus, Redo2, Search, Send, SlidersHorizontal, Timer, Trash2, Undo2, Workflow } from 'lucide-react';
+import { ArrowLeft, Bot, Braces, Check, Copy, Download, FilePlus2, FileSearch, FileText, GitBranch, Image as ImageIcon, LayoutDashboard, ListChecks, Plus, Redo2, Search, Send, SlidersHorizontal, Timer, Trash2, Undo2, Workflow, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
@@ -9,17 +8,16 @@ import type { WorkflowDashboardElement, WorkflowDashboardField, WorkflowDashboar
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { SaveIndicator } from '@/components/save-indicator';
 import { useLocale } from '@/components/locale-provider';
-import { useTheme } from '@/components/theme-provider';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { workflowNodeTypes, type WorkflowCanvasEdge, type WorkflowCanvasEdgeData, type WorkflowCanvasNode, type WorkflowSystemOneRank } from '@/components/workflow-canvas-nodes';
+import { type WorkflowCanvasEdge, type WorkflowCanvasEdgeData, type WorkflowCanvasNode, type WorkflowCanvasNodeType, type WorkflowConnection, type WorkflowSystemOneRank } from '@/components/workflow-canvas-nodes';
+import { WorkflowFlowDiagram } from '@/components/workflow-flow-diagram';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { api } from '@/api/client';
 import { useMcpServersQuery, useModelProvidersQuery, runsQueryKey, useSkillsQuery, useWorkflowQuery, useWorkflowScheduleQuery, workflowScheduleQueryKey, workflowsQueryKey } from '@/api/queries';
@@ -40,7 +38,6 @@ const emptyDefinition: WorkflowDefinition = {
 
 function WorkflowEditorPage() {
   const { t } = useTranslation(['workflows', 'common']);
-  const { resolvedTheme } = useTheme();
   const { locale } = useLocale();
   const { workflowId } = Route.useParams();
   const workspaceSlug = 'personal';
@@ -50,8 +47,8 @@ function WorkflowEditorPage() {
   const { data: availableSkills = [] } = useSkillsQuery(workspaceSlug);
   const { data: availableMcpServers = [] } = useMcpServersQuery(workspaceSlug);
   const { data: availableProviders = [] } = useModelProvidersQuery(workspaceSlug);
-  const [nodes, setNodes, onNodesChange] = useNodesState<WorkflowCanvasNode>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<WorkflowCanvasEdge>([]);
+  const [nodes, setNodes] = useState<WorkflowCanvasNode[]>([]);
+  const [edges, setEdges] = useState<WorkflowCanvasEdge[]>([]);
   const [name, setName] = useState(existing?.name ?? t('editor.untitled'));
   const [input, setInput] = useState('');
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'unsaved'>(isNew ? 'unsaved' : 'saved');
@@ -60,7 +57,6 @@ function WorkflowEditorPage() {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
-  const [contextPanelOpen, setContextPanelOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [executionPolicy, setExecutionPolicy] = useState<'stop' | 'retry'>('stop');
   const [publishOpen, setPublishOpen] = useState(false);
@@ -73,21 +69,17 @@ function WorkflowEditorPage() {
   const [edgeValueErrors, setEdgeValueErrors] = useState<Record<string, boolean>>({});
   const [systemOneQuestionDrafts, setSystemOneQuestionDrafts] = useState<Record<string, string>>({});
   const [systemOneQuestionErrors, setSystemOneQuestionErrors] = useState<Record<string, boolean>>({});
-  const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<WorkflowCanvasNode, WorkflowCanvasEdge> | null>(null);
   const appliedLayoutSignature = useRef('');
-  const initialLayoutWorkflowId = useRef<string | null>(null);
-  const pendingFitView = useRef(false);
-  const canvasRef = useRef<HTMLElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  const hydrateDefinition = useCallback((definition: WorkflowDefinition, preferredNodeId?: string | null, arrangeOnLoad = false) => {
+  const hydrateDefinition = useCallback((definition: WorkflowDefinition, preferredNodeId?: string | null) => {
     const nextNodes = toFlowNodes(definition);
     const nextEdges = toFlowEdges(definition, t);
-    const positions = arrangeOnLoad ? calculateFlowLayout(nextNodes, nextEdges) : new Map<string, { x: number; y: number }>();
+    const positions = calculateFlowLayout(nextNodes, nextEdges);
     const nextSelection = preferredNodeId && nextNodes.some((node) => node.id === preferredNodeId) ? preferredNodeId : null;
     setNodes(nextNodes.map((node) => ({ ...node, position: positions.get(node.id) ?? node.position, selected: node.id === nextSelection })));
     setEdges(nextEdges.map((edge) => ({ ...edge, selected: false })));
-    pendingFitView.current = arrangeOnLoad && nextNodes.length > 0;
     setEdgeValueDrafts({});
     setEdgeValueErrors({});
     setSystemOneQuestionDrafts({});
@@ -104,9 +96,7 @@ function WorkflowEditorPage() {
     setName(existing.name);
     if (existing.draft) {
       const definition = existing.draft.definition;
-      const arrangeOnLoad = initialLayoutWorkflowId.current !== workflowId;
-      hydrateDefinition(definition, undefined, arrangeOnLoad);
-      initialLayoutWorkflowId.current = workflowId;
+      hydrateDefinition(definition);
       setInput(typeof definition.input.example === 'string' ? definition.input.example : '');
       setExecutionPolicy(definition.defaults.errorPolicy);
       setDraftRevisionId(existing.draft.revisionId);
@@ -116,17 +106,6 @@ function WorkflowEditorPage() {
     }
     setSaveState('saved');
   }, [existing, hydrateDefinition]);
-
-  useEffect(() => {
-    if (!pendingFitView.current || !flowInstance || nodes.length === 0) return;
-    const frame = window.requestAnimationFrame(() => {
-      if (!pendingFitView.current) return;
-      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      void flowInstance.fitView({ padding: 0.2, duration: reducedMotion ? 0 : 180 });
-      pendingFitView.current = false;
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [flowInstance, nodes]);
 
   useEffect(() => {
     if (graphLayoutSignature === appliedLayoutSignature.current) return;
@@ -144,16 +123,6 @@ function WorkflowEditorPage() {
       return changed ? next : current;
     });
   }, [edges, graphLayoutSignature, nodes, setNodes]);
-
-  useEffect(() => {
-    const desktopPanel = window.matchMedia('(min-width: 1024px)');
-    const closeSheetForDesktop = () => {
-      if (desktopPanel.matches) setContextPanelOpen(false);
-    };
-    closeSheetForDesktop();
-    desktopPanel.addEventListener('change', closeSheetForDesktop);
-    return () => desktopPanel.removeEventListener('change', closeSheetForDesktop);
-  }, []);
 
   const selectedNode = nodes.find((node) => node.selected);
   const selectedEdge = edges.find((edge) => edge.selected);
@@ -190,6 +159,7 @@ function WorkflowEditorPage() {
   // cannot run an Agent node, so they are omitted from model selection.
   const modelOptions = useMemo(() => availableProviders.filter((provider) => provider.protocol !== 'typesafe/systemone').flatMap((provider) => provider.models.map((model) => `${provider.name}/${model}`)), [availableProviders]);
   const systemOneModelOptions = useMemo(() => availableProviders.filter((provider) => provider.protocol === 'typesafe/systemone').flatMap((provider) => provider.models.map((model) => `${provider.name}/${model}`)), [availableProviders]);
+  const filteredInputVisible = !paletteQuery.trim() || `${t('editor.workflowInputNode')} ${t('editor.runPayload')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredTimerVisible = !paletteQuery.trim() || `${t('editor.timerNode')} ${t('editor.timerNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredAgentVisible = !paletteQuery.trim() || `${t('editor.agentNode')} ${t('editor.agentNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredBranchVisible = !paletteQuery.trim() || `${t('editor.branchNode')} ${t('editor.branchNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
@@ -242,67 +212,50 @@ function WorkflowEditorPage() {
   }
 
   function nextPosition() {
-    const bounds = canvasRef.current?.getBoundingClientRect();
-    if (flowInstance && bounds) return flowInstance.screenToFlowPosition({ x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 });
-    return { x: 80 + nodes.length * 48, y: 80 + nodes.length * 36 };
+    return { x: 48, y: 48 };
   }
 
   function selectOnlyNode(nodeId: string) {
     setNodes((current) => current.map((node) => ({ ...node, selected: node.id === nodeId })));
     setEdges((current) => current.map((edge) => ({ ...edge, selected: false })));
-    if (!window.matchMedia('(min-width: 1024px)').matches) setContextPanelOpen(true);
   }
 
   function selectOnlyEdge(edgeId: string) {
     setNodes((current) => current.map((node) => ({ ...node, selected: false })));
     setEdges((current) => current.map((edge) => ({ ...edge, selected: edge.id === edgeId })));
-    if (!window.matchMedia('(min-width: 1024px)').matches) setContextPanelOpen(true);
   }
 
-  function showNodePalette() {
+  function clearGraphSelection() {
     setNodes((current) => current.map((node) => ({ ...node, selected: false })));
     setEdges((current) => current.map((edge) => ({ ...edge, selected: false })));
   }
 
-  function alignFlow() {
-    if (nodes.length < 2) return;
-    const positions = calculateFlowLayout(nodes, edges);
-    setNodes((current) => current.map((node) => ({ ...node, position: positions.get(node.id) ?? node.position })));
-    setSaveError('');
-    setSaveState('unsaved');
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    window.requestAnimationFrame(() => flowInstance?.fitView({ padding: 0.2, duration: reducedMotion ? 0 : 180 }));
-  }
-
-  const handleConnect: OnConnect = useCallback((connection) => {
+  const handleConnect = useCallback((connection: WorkflowConnection) => {
     if (!canConnect(connection, nodes, edges)) {
       toast.error(t('editor.invalidConnection'));
       return;
     }
-    const data: WorkflowCanvasEdgeData = wouldCreateCycle(connection.source!, connection.target!, edges) ? { maxTraversals: 1 } : {};
-    const edge = applyEdgePresentation({ ...connection, id: createId('edge'), type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed }, selected: false, data } as WorkflowCanvasEdge, t);
-    setEdges((current) => addEdge(edge, current.map((item) => ({ ...item, selected: false }))));
+    const data: WorkflowCanvasEdgeData = wouldCreateCycle(connection.source, connection.target, edges) ? { maxTraversals: 1 } : {};
+    const edge = applyEdgePresentation({ ...connection, id: createId('edge'), selected: false, data }, t);
+    setEdges((current) => [...current.map((item) => ({ ...item, selected: false })), edge]);
     setSaveState('unsaved');
   }, [edges, nodes, setEdges, t]);
 
-  const handleConnectEnd: OnConnectEnd = useCallback((_event, connectionState) => {
-    if (connectionState.toNode && connectionState.isValid === false) toast.error(t('editor.invalidConnection'));
-  }, [t]);
-
-  const handleReconnect: OnReconnect = useCallback((oldEdge, connection) => {
-    const nextEdges = reconnectEdge(oldEdge, connection, edges);
-    if (!canConnect(connection, nodes, nextEdges.filter((edge) => edge.id !== oldEdge.id))) {
+  const handleReconnect = useCallback((oldEdge: WorkflowCanvasEdge, connection: WorkflowConnection) => {
+    const remainingEdges = edges.filter((edge) => edge.id !== oldEdge.id);
+    if (!canConnect(connection, nodes, remainingEdges)) {
       toast.error(t('editor.invalidConnection'));
       return;
     }
-    const bounded = wouldCreateCycle(connection.source!, connection.target!, nextEdges.filter((edge) => edge.id !== oldEdge.id));
-    setEdges(nextEdges.map((edge) => applyEdgePresentation({
-      ...edge,
-      type: edge.type ?? 'smoothstep',
-      markerEnd: edge.markerEnd ?? { type: MarkerType.ArrowClosed },
-      selected: false,
-      data: edge.id === oldEdge.id && bounded && edge.data?.maxTraversals === undefined ? { ...edge.data, maxTraversals: 1 } : edge.data,
-    }, t)));
+    const bounded = wouldCreateCycle(connection.source, connection.target, remainingEdges);
+    setEdges((current) => current.map((edge) => edge.id === oldEdge.id
+      ? applyEdgePresentation({
+        ...edge,
+        ...connection,
+        selected: false,
+        data: bounded && edge.data?.maxTraversals === undefined ? { ...edge.data, maxTraversals: 1 } : edge.data,
+      }, t)
+      : { ...edge, selected: false }));
     setSaveState('unsaved');
   }, [edges, nodes, setEdges, t]);
 
@@ -334,7 +287,7 @@ function WorkflowEditorPage() {
     addNode(node);
   }
 
-  function addDashboardNode() {
+  function addDashboardNode(sourceNodeId?: string) {
     if (nodes.some((node) => node.data.nodeType === 'dashboard')) {
       toast.error(t('editor.dashboardLimit'));
       return;
@@ -347,10 +300,10 @@ function WorkflowEditorPage() {
       selected: true,
       data: { nodeType: 'dashboard', label: t('editor.dashboardNode'), dashboardLayout: { header: [], main: [{ kind: 'list', titleKey: 'title', fields: [{ key: 'title', label: t('editor.fieldTitle'), type: 'text' }] }], footer: [] }, errorPolicy: executionPolicy },
     };
-    addNode(node);
+    addNode(node, sourceNodeId);
   }
 
-  function addAgentNode() {
+  function addAgentNode(sourceNodeId?: string) {
     const id = createId('agent');
     const node: WorkflowCanvasNode = {
       id,
@@ -359,22 +312,22 @@ function WorkflowEditorPage() {
       selected: true,
       data: { nodeType: 'agent', label: t('editor.agentNode'), model: modelOptions[0] ?? '', systemPrompt: '', outputFormat: 'text', skillIds: [], skillNames: [], mcpServerIds: [], mcpServerNames: [], errorPolicy: executionPolicy },
     };
-    addNode(node);
+    addNode(node, sourceNodeId);
   }
 
-  function addBranchNode() {
+  function addBranchNode(sourceNodeId?: string) {
     const id = createId('branch');
-    addNode({ id, type: 'branch', position: nextPosition(), selected: true, data: { nodeType: 'branch', label: t('editor.branchNode'), errorPolicy: executionPolicy } });
+    addNode({ id, type: 'branch', position: nextPosition(), selected: true, data: { nodeType: 'branch', label: t('editor.branchNode'), errorPolicy: executionPolicy } }, sourceNodeId);
   }
 
-  function addSystemOneNode() {
+  function addSystemOneNode(sourceNodeId?: string) {
     const id = createId('system-one');
-    addNode({ id, type: 'systemOne', position: nextPosition(), selected: true, data: { nodeType: 'systemOne', label: t('editor.systemOneNode'), model: systemOneModelOptions[0] ?? '', systemOneQuestions: {}, errorPolicy: executionPolicy } });
+    addNode({ id, type: 'systemOne', position: nextPosition(), selected: true, data: { nodeType: 'systemOne', label: t('editor.systemOneNode'), model: systemOneModelOptions[0] ?? '', systemOneQuestions: {}, errorPolicy: executionPolicy } }, sourceNodeId);
   }
 
-  function addSystemOneMapNode() {
+  function addSystemOneMapNode(sourceNodeId?: string) {
     const id = createId('system-one-map');
-    addNode({ id, type: 'systemOneMap', position: nextPosition(), selected: true, data: { nodeType: 'systemOneMap', label: t('editor.systemOneMapNode'), model: systemOneModelOptions[0] ?? '', systemOneQuestions: {}, systemOneItemsPath: '', errorPolicy: executionPolicy } });
+    addNode({ id, type: 'systemOneMap', position: nextPosition(), selected: true, data: { nodeType: 'systemOneMap', label: t('editor.systemOneMapNode'), model: systemOneModelOptions[0] ?? '', systemOneQuestions: {}, systemOneItemsPath: '', errorPolicy: executionPolicy } }, sourceNodeId);
   }
 
   function updateSystemOneRank(nodeId: string, patch: Partial<WorkflowSystemOneRank>) {
@@ -388,7 +341,7 @@ function WorkflowEditorPage() {
     setSaveState('unsaved');
   }
 
-  function addArtifactNode() {
+  function addArtifactNode(sourceNodeId?: string) {
     const id = createId('artifact');
     const node: WorkflowCanvasNode = {
       id,
@@ -397,15 +350,15 @@ function WorkflowEditorPage() {
       selected: true,
       data: { nodeType: 'artifact', label: t('editor.artifactNode'), artifactName: '', artifactType: 'text', errorPolicy: executionPolicy },
     };
-    addNode(node);
+    addNode(node, sourceNodeId);
   }
 
-  function addArtifactQueryNode() {
+  function addArtifactQueryNode(sourceNodeId?: string) {
     const id = createId('artifact-query');
-    addNode({ id, type: 'artifactQuery', position: nextPosition(), selected: true, data: { nodeType: 'artifactQuery', label: t('editor.artifactQueryNode'), queryName: '', queryTitleField: 'title', queryDescriptionFields: ['description'], errorPolicy: executionPolicy } });
+    addNode({ id, type: 'artifactQuery', position: nextPosition(), selected: true, data: { nodeType: 'artifactQuery', label: t('editor.artifactQueryNode'), queryName: '', queryTitleField: 'title', queryDescriptionFields: ['description'], errorPolicy: executionPolicy } }, sourceNodeId);
   }
 
-  function addImageNode() {
+  function addImageNode(sourceNodeId?: string) {
     const id = createId('image');
     const node: WorkflowCanvasNode = {
       id,
@@ -414,10 +367,10 @@ function WorkflowEditorPage() {
       selected: true,
       data: { nodeType: 'image', label: t('editor.imageNode'), imageCount: 1, imageBackground: 'opaque', imageQuality: 'medium', imageSize: '1024x1024', errorPolicy: executionPolicy },
     };
-    addNode(node);
+    addNode(node, sourceNodeId);
   }
 
-  function addWechatPublishNode() {
+  function addWechatPublishNode(sourceNodeId?: string) {
     const id = createId('wechat');
     const node: WorkflowCanvasNode = {
       id,
@@ -426,13 +379,46 @@ function WorkflowEditorPage() {
       selected: true,
       data: { nodeType: 'wechatPublish', label: t('editor.wechatNode'), wechatAccountId: 'wechat_official_account_personal', wechatMode: 'draft', wechatNodeVersion: '2', errorPolicy: executionPolicy },
     };
-    addNode(node);
+    addNode(node, sourceNodeId);
   }
 
-  function addNode(node: WorkflowCanvasNode) {
+  function addNode(node: WorkflowCanvasNode, sourceNodeId?: string) {
+    let connectionEdge: WorkflowCanvasEdge | undefined;
+    if (sourceNodeId) {
+      const sourceNode = nodes.find((item) => item.id === sourceNodeId);
+      const targetHandle = node.data.nodeType === 'agent' ? 'context'
+        : node.data.nodeType === 'branch' ? 'value'
+          : node.data.nodeType === 'systemOne' || node.data.nodeType === 'systemOneMap' ? 'state'
+            : node.data.nodeType === 'dashboard' || node.data.nodeType === 'artifact' ? 'data'
+              : node.data.nodeType === 'artifactQuery' ? 'request'
+                : node.data.nodeType === 'image' ? 'prompt'
+                  : node.data.nodeType === 'wechatPublish' ? sourceNode?.data.nodeType === 'image' ? 'coverImage' : 'article'
+                    : null;
+      const connection = sourceNode && targetHandle ? { source: sourceNode.id, sourceHandle: 'output', target: node.id, targetHandle } : null;
+      if (!connection || !canConnect(connection, [...nodes, node], edges)) {
+        toast.error(t('editor.invalidConnection'));
+        return;
+      }
+      const data: WorkflowCanvasEdgeData = wouldCreateCycle(connection.source, connection.target, edges) ? { maxTraversals: 1 } : {};
+      connectionEdge = applyEdgePresentation({ ...connection, id: createId('edge'), selected: false, data }, t);
+    }
     setNodes((current) => [...current.map((item) => ({ ...item, selected: false })), node]);
-    setEdges((current) => current.map((edge) => ({ ...edge, selected: false })));
+    setEdges((current) => [...current.map((edge) => ({ ...edge, selected: false })), ...(connectionEdge ? [connectionEdge] : [])]);
     setSaveState('unsaved');
+  }
+
+  function addWorkflowNode(nodeType: WorkflowCanvasNodeType, sourceNodeId?: string) {
+    if (nodeType === 'input') addInputNode();
+    else if (nodeType === 'timer') addTimerNode();
+    else if (nodeType === 'agent') addAgentNode(sourceNodeId);
+    else if (nodeType === 'branch') addBranchNode(sourceNodeId);
+    else if (nodeType === 'systemOne') addSystemOneNode(sourceNodeId);
+    else if (nodeType === 'systemOneMap') addSystemOneMapNode(sourceNodeId);
+    else if (nodeType === 'dashboard') addDashboardNode(sourceNodeId);
+    else if (nodeType === 'artifact') addArtifactNode(sourceNodeId);
+    else if (nodeType === 'artifactQuery') addArtifactQueryNode(sourceNodeId);
+    else if (nodeType === 'image') addImageNode(sourceNodeId);
+    else addWechatPublishNode(sourceNodeId);
   }
 
   function removeNode(nodeId: string) {
@@ -672,29 +658,62 @@ function WorkflowEditorPage() {
     }
   }
 
-  const palette = (
-    <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col">
-      <div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-semibold">{t('editor.nodePalette')}</h2><p className="mt-1 text-[12px] text-muted-foreground">{t('editor.paletteHint')}</p></div><FilePlus2 className="size-4 text-muted-foreground" aria-hidden="true" /></div>
-      <label className="relative mt-4 block"><span className="sr-only">{t('editor.searchNodes')}</span><Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" aria-hidden="true" /><Input className="pl-8" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} placeholder={t('editor.searchNodes')} /></label>
-      <div className="mt-3 min-h-0 flex-1 space-y-1 overflow-auto">
-        <PaletteButton icon={<Braces className="size-5 text-info" />} title={t('editor.workflowInputNode')} description={t('editor.runPayload')} onClick={addInputNode} />
-        {filteredTimerVisible ? <PaletteButton icon={<Timer className="size-5 text-foreground" />} title={t('editor.timerNode')} description={t('editor.timerNodeDescription')} onClick={addTimerNode} /> : null}
-        {filteredAgentVisible ? <PaletteButton icon={<Bot className="size-5 text-info" />} title={t('editor.agentNode')} description={t('editor.agentNodeDescription')} onClick={addAgentNode} /> : null}
-        {filteredBranchVisible ? <PaletteButton icon={<GitBranch className="size-5 text-foreground" />} title={t('editor.branchNode')} description={t('editor.branchNodeDescription')} onClick={addBranchNode} /> : null}
-        {filteredSystemOneVisible ? <PaletteButton icon={<Braces className="size-5 text-foreground" />} title={t('editor.systemOneNode')} description={t('editor.systemOneNodeDescription')} onClick={addSystemOneNode} /> : null}
-        {filteredSystemOneMapVisible ? <PaletteButton icon={<ListChecks className="size-5 text-foreground" />} title={t('editor.systemOneMapNode')} description={t('editor.systemOneMapNodeDescription')} onClick={addSystemOneMapNode} /> : null}
-        {filteredDashboardVisible ? <PaletteButton icon={<LayoutDashboard className="size-5 text-foreground" />} title={t('editor.dashboardNode')} description={t('editor.dashboardNodeDescription')} onClick={addDashboardNode} /> : null}
-        {filteredArtifactVisible ? <PaletteButton icon={<FileText className="size-5 text-foreground" />} title={t('editor.artifactNode')} description={t('editor.artifactNodeDescription')} onClick={addArtifactNode} /> : null}
-        {filteredArtifactQueryVisible ? <PaletteButton icon={<FileSearch className="size-5 text-foreground" />} title={t('editor.artifactQueryNode')} description={t('editor.artifactQueryNodeDescription')} onClick={addArtifactQueryNode} /> : null}
-        {filteredImageVisible ? <PaletteButton icon={<ImageIcon className="size-5 text-foreground" />} title={t('editor.imageNode')} description={t('editor.imageNodeDescription')} onClick={addImageNode} /> : null}
-        {filteredWechatVisible ? <PaletteButton icon={<Send className="size-5 text-foreground" />} title={t('editor.wechatNode')} description={t('editor.wechatNodeDescription')} onClick={addWechatPublishNode} /> : null}
+  const renderNodePicker = (sourceNodeId: string | null, onSelectNodeType: (nodeType: WorkflowCanvasNodeType) => void) => {
+    const sourceNode = sourceNodeId ? nodes.find((node) => node.id === sourceNodeId) : undefined;
+    const compatibleTypes: WorkflowCanvasNodeType[] = sourceNodeId
+      ? sourceNode
+        ? sourceNode.data.nodeType === 'image' ? ['wechatPublish']
+          : sourceNode.data.nodeType === 'input' ? ['agent']
+            : ['agent', 'branch', 'systemOne', 'systemOneMap', 'dashboard', 'artifact', 'artifactQuery', 'image', 'wechatPublish']
+        : []
+      : ['input', 'timer', 'agent', 'branch', 'systemOne', 'systemOneMap', 'dashboard', 'artifact', 'artifactQuery', 'image', 'wechatPublish'];
+    const availableTypes = compatibleTypes.filter((nodeType) => {
+      if (nodeType === 'timer' && nodes.some((node) => node.data.nodeType === 'timer')) return false;
+      if (nodeType === 'dashboard' && nodes.some((node) => node.data.nodeType === 'dashboard')) return false;
+      return true;
+    });
+    const filteredTypes: Record<WorkflowCanvasNodeType, boolean> = {
+      input: filteredInputVisible,
+      timer: filteredTimerVisible,
+      agent: filteredAgentVisible,
+      branch: filteredBranchVisible,
+      systemOne: filteredSystemOneVisible,
+      systemOneMap: filteredSystemOneMapVisible,
+      dashboard: filteredDashboardVisible,
+      artifact: filteredArtifactVisible,
+      artifactQuery: filteredArtifactQueryVisible,
+      image: filteredImageVisible,
+      wechatPublish: filteredWechatVisible,
+    };
+    const hasFilteredNodes = availableTypes.some((nodeType) => filteredTypes[nodeType]);
+    const canShow = (nodeType: WorkflowCanvasNodeType) => availableTypes.includes(nodeType);
+    const choose = (nodeType: WorkflowCanvasNodeType) => () => onSelectNodeType(nodeType);
+
+    return (
+      <div className="flex min-h-0 w-full min-w-0 flex-col">
+        <div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-semibold">{sourceNodeId ? t('editor.connectNode') : t('editor.nodePalette')}</h2><p className="mt-1 text-[12px] text-muted-foreground">{sourceNodeId ? t('editor.connectNodeHint') : t('editor.paletteHint')}</p></div><FilePlus2 className="size-4 text-muted-foreground" aria-hidden="true" /></div>
+        <label className="relative mt-4 block"><span className="sr-only">{t('editor.searchNodes')}</span><Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" aria-hidden="true" /><Input className="pl-8" value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} placeholder={t('editor.searchNodes')} /></label>
+        <div className="mt-3 min-h-0 flex-1 space-y-1 overflow-auto">
+          {canShow('input') && filteredInputVisible ? <PaletteButton icon={<Braces className="size-5 text-info" />} title={t('editor.workflowInputNode')} description={t('editor.runPayload')} onClick={choose('input')} /> : null}
+          {canShow('timer') && filteredTimerVisible ? <PaletteButton icon={<Timer className="size-5 text-foreground" />} title={t('editor.timerNode')} description={t('editor.timerNodeDescription')} onClick={choose('timer')} /> : null}
+          {canShow('agent') && filteredAgentVisible ? <PaletteButton icon={<Bot className="size-5 text-info" />} title={t('editor.agentNode')} description={t('editor.agentNodeDescription')} onClick={choose('agent')} /> : null}
+          {canShow('branch') && filteredBranchVisible ? <PaletteButton icon={<GitBranch className="size-5 text-foreground" />} title={t('editor.branchNode')} description={t('editor.branchNodeDescription')} onClick={choose('branch')} /> : null}
+          {canShow('systemOne') && filteredSystemOneVisible ? <PaletteButton icon={<Braces className="size-5 text-foreground" />} title={t('editor.systemOneNode')} description={t('editor.systemOneNodeDescription')} onClick={choose('systemOne')} /> : null}
+          {canShow('systemOneMap') && filteredSystemOneMapVisible ? <PaletteButton icon={<ListChecks className="size-5 text-foreground" />} title={t('editor.systemOneMapNode')} description={t('editor.systemOneMapNodeDescription')} onClick={choose('systemOneMap')} /> : null}
+          {canShow('dashboard') && filteredDashboardVisible ? <PaletteButton icon={<LayoutDashboard className="size-5 text-foreground" />} title={t('editor.dashboardNode')} description={t('editor.dashboardNodeDescription')} onClick={choose('dashboard')} /> : null}
+          {canShow('artifact') && filteredArtifactVisible ? <PaletteButton icon={<FileText className="size-5 text-foreground" />} title={t('editor.artifactNode')} description={t('editor.artifactNodeDescription')} onClick={choose('artifact')} /> : null}
+          {canShow('artifactQuery') && filteredArtifactQueryVisible ? <PaletteButton icon={<FileSearch className="size-5 text-foreground" />} title={t('editor.artifactQueryNode')} description={t('editor.artifactQueryNodeDescription')} onClick={choose('artifactQuery')} /> : null}
+          {canShow('image') && filteredImageVisible ? <PaletteButton icon={<ImageIcon className="size-5 text-foreground" />} title={t('editor.imageNode')} description={t('editor.imageNodeDescription')} onClick={choose('image')} /> : null}
+          {canShow('wechatPublish') && filteredWechatVisible ? <PaletteButton icon={<Send className="size-5 text-foreground" />} title={t('editor.wechatNode')} description={t('editor.wechatNodeDescription')} onClick={choose('wechatPublish')} /> : null}
+          {!hasFilteredNodes ? <p className="px-2 py-3 text-[12px] text-muted-foreground">{t('editor.noNodeMatches', { search: paletteQuery })}</p> : null}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const inspector = selectedNode ? (
     <div className="flex min-h-0 w-full min-w-0 flex-col">
-      <div className="flex items-start gap-2"><Button type="button" variant="ghost" size="icon-compact" aria-label={t('editor.nodePalette')} onClick={showNodePalette}><ArrowLeft className="size-4" /></Button><div className="min-w-0 flex-1"><p className="text-xs font-medium text-muted-foreground">{nodeTypeLabel(selectedNode.data.nodeType, t)}</p><h2 className="mt-1 truncate text-sm font-semibold">{selectedNode.data.label}</h2></div><PanelRight className="mt-2 size-4 text-muted-foreground" aria-hidden="true" /></div>
+      <div className="flex items-start gap-2"><Button type="button" variant="ghost" size="icon-compact" aria-label={t('editor.closeInspector')} onClick={clearGraphSelection}><X className="size-4" /></Button><div className="min-w-0 flex-1"><p className="text-xs font-medium text-muted-foreground">{nodeTypeLabel(selectedNode.data.nodeType, t)}</p><h2 className="mt-1 truncate text-sm font-semibold">{selectedNode.data.label}</h2></div></div>
       <div className="mt-5 flex flex-col gap-4">
         <Field label={t('editor.nodeName')} htmlFor="node-name"><Input id="node-name" value={selectedNode.data.label} onChange={(event) => { const label = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, label } } : node)); setSaveState('unsaved'); }} /></Field>
         {selectedNode.data.nodeType === 'timer' ? <>
@@ -822,7 +841,7 @@ function WorkflowEditorPage() {
     </div>
   ) : selectedEdge ? (
     <div className="flex min-h-0 w-full min-w-0 flex-col">
-      <div className="flex items-start gap-2"><Button type="button" variant="ghost" size="icon-compact" aria-label={t('editor.nodePalette')} onClick={showNodePalette}><ArrowLeft className="size-4" /></Button><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">{t('editor.connection')}</p><h2 className="mt-1 text-sm font-semibold">{nodeLabel(nodes, selectedEdge.source)} → {nodeLabel(nodes, selectedEdge.target)}</h2></div></div>
+      <div className="flex items-start gap-2"><Button type="button" variant="ghost" size="icon-compact" aria-label={t('editor.closeInspector')} onClick={clearGraphSelection}><X className="size-4" /></Button><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">{t('editor.connection')}</p><h2 className="mt-1 text-sm font-semibold">{nodeLabel(nodes, selectedEdge.source)} → {nodeLabel(nodes, selectedEdge.target)}</h2></div></div>
       <div className="mt-5 rounded-md border border-border bg-surface-subtle p-3 font-mono text-[12px] text-muted-foreground"><p>{selectedEdge.sourceHandle ?? 'output'}</p><p className="my-1">↓</p><p>{selectedEdge.targetHandle ?? 'input'}</p></div>
       <div className="mt-4 space-y-4">
         <Field label={t('editor.edgeMode')} htmlFor="edge-mode">
@@ -854,7 +873,7 @@ function WorkflowEditorPage() {
     </div>
   ) : <div className="flex h-full min-h-32 items-center justify-center text-center text-[13px] text-muted-foreground">{t('editor.selectCanvasItem')}</div>;
 
-  const contextPanel = selectedNode || selectedEdge ? inspector : palette;
+  const contextPanel = selectedNode || selectedEdge ? inspector : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -862,56 +881,35 @@ function WorkflowEditorPage() {
         back={<Button variant="ghost" size="icon-compact" type="button" aria-label={t('common:actions.back')} onClick={() => void navigate({ to: '/workflows' })}><ArrowLeft className="size-4" /></Button>}
         crumbs={[{ label: t('title'), to: '/workflows' }, { label: isNew ? t('editor.new') : existing?.name ?? t('editor.fallback') }]}
         status={<SaveIndicator state={saveState} />}
-        actions={<div className="flex items-center gap-1.5"><Button variant="ghost" size="icon-compact" className="lg:hidden" type="button" aria-label={t('editor.nodePalette')} onClick={() => { showNodePalette(); setContextPanelOpen(true); }}><Plus className="size-4" /></Button><Button variant="ghost" size="icon-compact" className="lg:hidden" type="button" aria-label={t('editor.configureStep')} onClick={() => setContextPanelOpen(true)} disabled={!selectedNode && !selectedEdge}><PanelRight className="size-4" /></Button><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" type="button" aria-label={t('editor.undo')} onClick={() => void moveRevision('undo')} disabled={!canUndo || saveState === 'saving'}><Undo2 className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('editor.undo')}</TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" type="button" aria-label={t('editor.redo')} onClick={() => void moveRevision('redo')} disabled={!canRedo || saveState === 'saving'}><Redo2 className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('editor.redo')}</TooltipContent></Tooltip><Button variant="ghost" size="compact" onClick={() => setSettingsOpen(true)}><SlidersHorizontal className="size-4" />{t('editor.workflowSettings')}</Button><Button asChild variant="ghost" size="compact" className="hidden sm:inline-flex"><Link to="/workflows/$workflowId/versions" params={{ workflowId }}>{t('editor.versions')}</Link></Button><Button variant="ghost" size="compact" className="hidden sm:inline-flex" onClick={() => void exportWorkflow()} disabled={isNew}><Download className="size-4" />{t('editor.exportJson')}</Button><Button variant="ghost" size="icon-compact" className="hidden text-danger hover:text-danger sm:inline-flex" type="button" aria-label={t('delete.action', { name: existing?.name ?? name })} onClick={() => { setDeleteError(''); setDeleteOpen(true); }} disabled={isNew}><Trash2 className="size-4" /></Button><Button variant="secondary" size="compact" className="hidden sm:inline-flex" onClick={save} disabled={saveState === 'saving'}>{t('common:actions.save')}</Button><Button variant="secondary" size="compact" className="hidden sm:inline-flex" onClick={() => void runWorkflow()} disabled={runSubmitting || isNew || saveState !== 'saved' || !existing?.latestVersionId}>{runSubmitting ? t('editor.running') : existing?.latestVersion ? t('editor.runVersion', { version: existing.latestVersion }) : t('editor.run')}</Button><Button size="compact" onClick={() => setPublishOpen(true)}>{t('common:actions.publish')}</Button></div>}
+        actions={<div className="flex items-center gap-1.5"><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" type="button" aria-label={t('editor.undo')} onClick={() => void moveRevision('undo')} disabled={!canUndo || saveState === 'saving'}><Undo2 className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('editor.undo')}</TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" type="button" aria-label={t('editor.redo')} onClick={() => void moveRevision('redo')} disabled={!canRedo || saveState === 'saving'}><Redo2 className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('editor.redo')}</TooltipContent></Tooltip><Button variant="ghost" size="compact" onClick={() => setSettingsOpen(true)}><SlidersHorizontal className="size-4" />{t('editor.workflowSettings')}</Button><Button asChild variant="ghost" size="compact" className="hidden sm:inline-flex"><Link to="/workflows/$workflowId/versions" params={{ workflowId }}>{t('editor.versions')}</Link></Button><Button variant="ghost" size="compact" className="hidden sm:inline-flex" onClick={() => void exportWorkflow()} disabled={isNew}><Download className="size-4" />{t('editor.exportJson')}</Button><Button variant="ghost" size="icon-compact" className="hidden text-danger hover:text-danger sm:inline-flex" type="button" aria-label={t('delete.action', { name: existing?.name ?? name })} onClick={() => { setDeleteError(''); setDeleteOpen(true); }} disabled={isNew}><Trash2 className="size-4" /></Button><Button variant="secondary" size="compact" className="hidden sm:inline-flex" onClick={save} disabled={saveState === 'saving'}>{t('common:actions.save')}</Button><Button variant="secondary" size="compact" className="hidden sm:inline-flex" onClick={() => void runWorkflow()} disabled={runSubmitting || isNew || saveState !== 'saved' || !existing?.latestVersionId}>{runSubmitting ? t('editor.running') : existing?.latestVersion ? t('editor.runVersion', { version: existing.latestVersion }) : t('editor.run')}</Button><Button size="compact" onClick={() => setPublishOpen(true)}>{t('common:actions.publish')}</Button></div>}
       />
-      <div className="flex min-h-0 flex-1">
-        <main ref={canvasRef} className="relative min-w-0 flex-1 bg-background" aria-label={t('editor.canvas')}>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <main className="relative min-h-0 min-w-0 flex-1 bg-background">
           {saveError ? <p className="absolute left-4 top-4 z-10 rounded-md border border-danger/30 bg-danger-subtle px-3 py-2 text-[13px] text-danger" role="alert">{saveError}</p> : null}
-          <div className="absolute right-3 top-3 z-10 flex items-center gap-2 rounded-md border border-border bg-surface-raised px-2.5 py-1.5 text-[12px] text-muted-foreground">
-            <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" className="sm:hidden" type="button" aria-label={t('editor.alignFlow')} onClick={alignFlow} disabled={nodes.length < 2}><Workflow className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('editor.alignFlow')}</TooltipContent></Tooltip>
-            <Button variant="ghost" size="compact" className="hidden sm:inline-flex" type="button" onClick={alignFlow} disabled={nodes.length < 2}><Workflow className="size-4" />{t('editor.alignFlow')}</Button>
-            <span>{t('editor.nodeCount', { count: nodes.length })}</span><span aria-hidden="true">·</span><span>{t('editor.edgeCount', { count: edges.length })}</span>
-            <Button variant="secondary" size="compact" className="sm:hidden" onClick={save} disabled={saveState === 'saving'}><Check className="size-4" />{t('common:actions.save')}</Button>
-            <Button variant="secondary" size="compact" className="sm:hidden" onClick={() => void runWorkflow()} disabled={runSubmitting || isNew || saveState !== 'saved' || !existing?.latestVersionId}>{t('editor.run')}</Button>
-          </div>
-          {nodes.length === 0 ? <div className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center p-6 text-center"><div><Workflow className="mx-auto size-6 text-muted-foreground" aria-hidden="true" /><p className="mt-3 text-sm font-medium">{t('editor.emptyCanvas')}</p></div></div> : null}
-          <ReactFlow<WorkflowCanvasNode, WorkflowCanvasEdge>
+          <WorkflowFlowDiagram
             nodes={canvasNodes}
             edges={canvasEdges}
-            nodeTypes={workflowNodeTypes}
-            colorMode={resolvedTheme}
-            onInit={setFlowInstance}
-            onNodesChange={(changes) => { onNodesChange(changes); if (changes.some((change) => change.type === 'position' && change.dragging === false)) setSaveState('unsaved'); }}
-            onEdgesChange={(changes) => { onEdgesChange(changes); for (const change of changes) { if (change.type === 'remove') clearEdgeValueState(change.id); } if (changes.some((change) => change.type === 'remove')) setSaveState('unsaved'); }}
-            isValidConnection={(connection) => canConnect(connection, nodes, edges)}
+            viewportRef={canvasRef}
+            toolbar={(openNodePicker) => <div className="flex items-center gap-2 rounded-md border border-border bg-surface-raised px-2.5 py-1.5 text-[12px] text-muted-foreground">
+              <span>{t('editor.nodeCount', { count: nodes.length })}</span><span aria-hidden="true">·</span><span>{t('editor.edgeCount', { count: edges.length })}</span>
+              <Button variant="secondary" size="compact" aria-label={t('editor.addNode')} onClick={openNodePicker}><Plus className="size-4" /><span className="hidden sm:inline">{t('editor.addNode')}</span></Button>
+              <Button variant="secondary" size="compact" className="sm:hidden" onClick={save} disabled={saveState === 'saving'}><Check className="size-4" />{t('common:actions.save')}</Button>
+              <Button variant="secondary" size="compact" className="sm:hidden" onClick={() => void runWorkflow()} disabled={runSubmitting || isNew || saveState !== 'saved' || !existing?.latestVersionId}>{t('editor.run')}</Button>
+            </div>}
+            emptyState={<div className="text-center"><Workflow className="mx-auto size-6 text-muted-foreground" aria-hidden="true" /><p className="mt-3 text-sm font-medium">{t('editor.emptyCanvas')}</p></div>}
+            renderNodePicker={renderNodePicker}
+            isValidConnection={(connection, ignoreEdgeId) => canConnect(connection, nodes, edges.filter((edge) => edge.id !== ignoreEdgeId))}
             onConnect={handleConnect}
-            onConnectEnd={handleConnectEnd}
             onReconnect={handleReconnect}
-            onNodeClick={(_, node) => selectOnlyNode(node.id)}
-            onEdgeClick={(_, edge) => selectOnlyEdge(edge.id)}
-            onPaneClick={showNodePalette}
-            onSelectionChange={({ nodes: selectedNodes, edges: selectedEdges }) => { if (selectedNodes.length + selectedEdges.length > 0 && !window.matchMedia('(min-width: 1024px)').matches) setContextPanelOpen(true); }}
-            onNodesDelete={(deleted) => { if (deleted.length > 0) { const deletedIds = new Set(deleted.map((node) => node.id)); for (const edge of edges) { if (deletedIds.has(edge.source) || deletedIds.has(edge.target)) clearEdgeValueState(edge.id); } for (const node of deleted) clearSystemOneQuestionState(node.id); setEdges((current) => current.filter((edge) => !deletedIds.has(edge.source) && !deletedIds.has(edge.target))); setSaveState('unsaved'); } }}
-            onEdgesDelete={(deleted) => { if (deleted.length > 0) setSaveState('unsaved'); }}
-            deleteKeyCode={['Backspace', 'Delete']}
-            multiSelectionKeyCode={null}
-            selectionKeyCode={null}
-            panOnScroll
-            panOnScrollMode={PanOnScrollMode.Horizontal}
-            panOnDrag
-            zoomOnScroll={false}
-            zoomOnPinch
-            minZoom={0.7}
-            fitView
-            fitViewOptions={{ padding: 0.2, duration: 180 }}
-            proOptions={{ hideAttribution: true }}
-            className="workflow-react-flow"
-          >
-            <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-            <Controls showInteractive={false} />
-          </ReactFlow>
+            onAddNode={addWorkflowNode}
+            onSelectNode={selectOnlyNode}
+            onSelectEdge={selectOnlyEdge}
+            onClearSelection={clearGraphSelection}
+            onRemoveNode={removeNode}
+            onRemoveEdge={removeEdge}
+          />
         </main>
-        <aside className="hidden w-[360px] min-w-0 shrink-0 overflow-auto border-l border-border bg-surface p-4 lg:flex">{contextPanel}</aside>
+        {contextPanel ? <aside aria-label={t('editor.selectionInspector')} className="h-[280px] max-h-[40vh] min-h-[160px] shrink-0 overflow-auto border-t border-border bg-surface p-4">{contextPanel}</aside> : null}
       </div>
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
         <DialogContent className="max-h-[85vh] overflow-auto">
@@ -928,7 +926,6 @@ function WorkflowEditorPage() {
           <DialogFooter><Button onClick={() => setSettingsOpen(false)}>{t('common:actions.close')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
-      <Sheet open={contextPanelOpen} onOpenChange={setContextPanelOpen}><SheetContent side="right" className="overflow-auto p-4 pt-5"><SheetHeader className="sr-only"><SheetTitle>{selectedNode || selectedEdge ? t('editor.configureStep') : t('editor.nodePalette')}</SheetTitle><SheetDescription>{selectedNode || selectedEdge ? t('editor.selectCanvasItem') : t('editor.paletteHint')}</SheetDescription></SheetHeader>{contextPanel}</SheetContent></Sheet>
       <Dialog open={publishOpen} onOpenChange={setPublishOpen}><DialogContent><DialogHeader><DialogTitle>{t('editor.publishTitle')}</DialogTitle><DialogDescription>{t('editor.publishDescription')}</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setPublishOpen(false)}>{t('common:actions.cancel')}</Button><Button onClick={() => void publishWorkflow()}>{t('common:actions.publish')}</Button></DialogFooter></DialogContent></Dialog>
       <ConfirmDialog
         open={deleteOpen}
@@ -1009,8 +1006,6 @@ function toFlowEdges(definition: WorkflowDefinition, t: TFunction<'workflows'>):
     sourceHandle: edge.sourcePort,
     target: edge.targetNodeId,
     targetHandle: edge.targetPort,
-    type: 'smoothstep',
-    markerEnd: { type: MarkerType.ArrowClosed },
     data: { condition: edge.condition, maxTraversals: edge.maxTraversals },
   }, t));
 }
@@ -1033,11 +1028,6 @@ function applyEdgePresentation(edge: WorkflowCanvasEdge, t: TFunction<'workflows
   return {
     ...edge,
     label: labels.join(' · ') || undefined,
-    labelStyle: { fill: 'currentColor', fontSize: 10, fontWeight: 500 },
-    labelBgStyle: { fill: 'var(--surface-raised)', fillOpacity: 0.92 },
-    labelBgPadding: [4, 2],
-    labelBgBorderRadius: 3,
-    style: edge.data?.maxTraversals !== undefined ? { ...edge.style, strokeDasharray: '6 4' } : { ...edge.style, strokeDasharray: undefined },
   };
 }
 
@@ -1112,7 +1102,10 @@ function calculateFlowLayout(nodes: WorkflowCanvasNode[], edges: WorkflowCanvasE
   }
 
   const positions = new Map<string, { x: number; y: number }>();
-  for (const [columnRank, columnNodeIds] of [...columns.entries()].sort(([left], [right]) => left - right)) {
+  const orderedColumns = [...columns.entries()].sort(([left], [right]) => left - right);
+  const laneSpacing = 160;
+  const minimumYOffset = Math.min(0, ...orderedColumns.map(([, columnNodeIds]) => -((columnNodeIds.length - 1) / 2) * laneSpacing));
+  for (const [columnRank, columnNodeIds] of orderedColumns) {
     const incomingSources = new Map(columnNodeIds.map((nodeId) => [
       nodeId,
       forwardEdges.filter((edge) => edge.target === nodeId).map((edge) => orderIndex.get(edge.source) ?? 0),
@@ -1125,11 +1118,9 @@ function calculateFlowLayout(nodes: WorkflowCanvasNode[], edges: WorkflowCanvasE
       return leftCenter - rightCenter || byDefinitionOrder(leftId, rightId);
     });
     columnNodeIds.forEach((nodeId, index) => {
-      const columnSpacing = 340;
-      const laneSpacing = 160;
       positions.set(nodeId, {
-        x: columnRank * columnSpacing,
-        y: (index - (columnNodeIds.length - 1) / 2) * laneSpacing,
+        x: 48 + columnRank * 340,
+        y: 48 + (index - (columnNodeIds.length - 1) / 2) * laneSpacing - minimumYOffset,
       });
     });
   }

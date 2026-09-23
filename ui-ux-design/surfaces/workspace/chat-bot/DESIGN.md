@@ -18,6 +18,8 @@
 - `apps/web/src/components/workspace/chat-bot/session-switcher.tsx`
 - `apps/web/src/components/workspace/chat-bot/execution-log.ts`
 - `apps/web/src/components/ai-elements/conversation.tsx`
+- `apps/web/src/components/ai/streaming-markdown.tsx`
+- `apps/web/src/components/ai/streaming-markdown-view.tsx`
 
 ## Purpose
 
@@ -39,7 +41,7 @@ Configuration belongs to the Chat Bot panel rather than a resource collection. I
 
 Home shows a single-line composer by default. Other pages show only a draggable lower-right Chat icon until it is opened; clicking it opens the same centered panel above the current page and focuses the composer. The icon stays inside the viewport safe area.
 
-The conversation is one unframed column. User messages are right-aligned compact neutral bubbles. Chat Bot responses are left-aligned and use the shared Markdown renderer.
+The conversation is one unframed column. User messages are right-aligned compact neutral bubbles. Chat Bot responses are left-aligned and use the shared Markdown renderer. On Home, the collapsed panel, execution queries, and transcript remain mounted, but the rich Markdown renderer is not loaded; opening the panel loads it on demand. While that module loads, response text remains readable as plain text and is enhanced in place without a new loading label.
 
 One Chat Bot turn is one block with one identity mark, however many messages and Skill calls it contains. A block starts at the first Chat Bot event after a user message and ends at the next user message. Its Markdown segments and Skill-call rows share the block's single content column, so a turn that answers, runs a script, and answers again reads as one reply rather than as three speakers. Working, cancelled, and failure cues are inline notes without their own identity mark, because a status is not a speaker.
 
@@ -124,6 +126,7 @@ Workflow Run entries use the same transcript surface: the user input, a compact 
 | Queue paused | A failed, stopped, or clarification-waiting turn holds the queue in place and states that it is paused, keeping every entry and its order. Continuing the execution resumes it. |
 | Offline | Inherits `shared-states.md`. Reconnecting is shown separately from execution status and retries with increasing delay. |
 | Long content | Skill arguments and output scroll within their own stable regions. The transcript follows the end only while the reader is already at the end, and offers an explicit return-to-end control whenever they are not. |
+| Markdown renderer loading | A visible response stays readable as plain text until the shared safe Markdown renderer loads, then upgrades in place without additional copy or controls. The renderer is not loaded for the collapsed Home transcript. |
 
 Also define unconfigured, submitting, working, executing script, cancelling, cancelled, and completed states. Status always carries a non-color cue. A cancelled turn shows an explicit neutral inline cue even when no Assistant text was produced. Meaningless residual output from a failed model tool request is omitted. A tool batch that exceeds the runtime boundary uses the server-owned `too_many_tool_calls` reason and retry action instead of Provider configuration guidance. Untrusted content is plain text or safe Markdown; script output is preformatted and never rendered as HTML.
 
@@ -202,10 +205,9 @@ Keyboard focus remains in the editable composer after cancellation, session sele
 
 ## Coverage Status
 
-Verified 2026-09-21 against the implementation files listed above. Differences found:
+Verified 2026-09-23 against the implementation files listed above. Differences found:
 
 - The transcript does not expose an `aria-live` region for streaming updates. Working, cancelled, queued, and failure blocks use `role="status"` and `role="alert"`, which announce on mount, but the incremental assistant response itself is not announced, so the restrained live-region requirement in this specification is unmet.
-- The panel is rendered whenever `isHome || open` and collapsed with `h-0` plus `aria-hidden`/`inert`. On Home the collapsed panel therefore stays mounted and its queries stay active, which is intended for session continuity but is not documented as a mount contract.
 - `/resume` lists only the executions this browser archived, capped at `HISTORY_LIMIT`, because the API exposes no route that lists a given Agent's executions. A conversation the reader remembers can therefore be absent from the selector, and the cap is not surfaced. A server-side execution list is required to close this.
 - `error` is one component-level string shared by Chat Bot and cancellation failures.
 - The floating Chat entry exposes status as `sr-only` text inside the button, making the accessible name and the status concatenate for screen readers rather than remaining distinct.

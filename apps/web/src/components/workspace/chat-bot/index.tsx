@@ -748,8 +748,15 @@ function ChatBot({ workspaceSlug }: { workspaceSlug: string }) {
                     {loadingExecution ? <TranscriptSkeleton /> : null}
                     {turns.map((turn, index) => turn.kind === 'user'
                       ? <UserMessage key={turn.item.id} message={turn.item} />
-                      : <AssistantTurn key={turn.segments[0].item.id} segments={turn.segments} working={showWorkingInLastTurn && index === turns.length - 1} />)}
-                    {running && !showWorkingInLastTurn ? <AssistantTurn segments={[]} working /> : null}
+                      : <AssistantTurn
+                          key={turn.segments[0].item.id}
+                          segments={turn.segments}
+                          working={showWorkingInLastTurn && index === turns.length - 1}
+                          markdownEnabled={open}
+                        />)}
+                    {running && !showWorkingInLastTurn ? (
+                      <AssistantTurn segments={[]} working markdownEnabled={open} />
+                    ) : null}
                     {waitingForInput && visibleExecution?.pendingQuestion ? <QuestionNote question={visibleExecution.pendingQuestion} /> : null}
                     {visibleExecution?.status === 'cancelled' ? <CancelledNote /> : null}
                     {workflowRun ? <WorkflowRunRow run={workflowRun.run} workflow={workflowRun.workflow} input={workflowRun.input} /> : null}

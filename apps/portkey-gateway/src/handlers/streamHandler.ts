@@ -65,7 +65,7 @@ export async function* readAWSStream(
   strictOpenAiCompliance: boolean,
   gatewayRequest: Params
 ) {
-  let buffer = new Uint8Array();
+  let buffer: Uint8Array<ArrayBufferLike> = new Uint8Array();
   let expectedLength = 0;
   const streamState = {};
   while (true) {

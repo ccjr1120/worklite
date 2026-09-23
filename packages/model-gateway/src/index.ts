@@ -371,14 +371,21 @@ export class AiSdkModelGateway implements ModelGateway {
       abortSignal: request.abortSignal,
       messages: [{ role: 'user', content: request.initialUserContent }],
     });
-    for await (const delta of result.textStream) {
-      await request.onTextDelta?.(delta);
+    let streamError: unknown;
+    for await (const part of result.fullStream) {
+      if (part.type === 'text-delta') {
+        await request.onTextDelta?.(part.text);
+      } else if (part.type === 'error') {
+        streamError ??= part.error;
+      }
     }
+    if (streamError) throw streamError;
     if (toolExecutionError) throw toolExecutionError;
-    const [text, toolCalls] = await Promise.all([result.text, result.toolCalls]);
+    const [text, finalStep] = await Promise.all([result.text, result.finalStep]);
+    const toolCalls = finalStep?.toolCalls ?? [];
     const invalidToolRequest = classifyInvalidToolRequest(toolCalls);
     if (invalidToolRequest) throw invalidToolRequest;
-    if (toolCalls.length > 0) {
+    if (!text.trim() && toolCalls.length > 0) {
       throw new Error('The Workflow Agent node requested a tool after its tool budget was exhausted.');
     }
     return { text: request.jsonOutput ? extractJsonText(text.trim()) : text };
@@ -482,7 +489,9 @@ function withWorkflowAgentStreamTransport(model: LanguageModel, signal?: AbortSi
                 }
               }
               throw modelFailure(failure, failure);
-            })().catch((error) => controller.error(error));
+            })().then(() => {
+              controller.close();
+            }).catch((error) => controller.error(error));
           },
         });
         return {

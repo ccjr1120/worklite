@@ -25,6 +25,7 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 - [Interaction contract](shared/interaction-contract.md)
 - [Copy standards](shared/copy-standards.md)
 - [Responsive behavior](shared/responsive-behavior.md)
+- [WeChat article output](shared/wechat-article-output.md)
 
 ## Page and Surface Specifications
 
@@ -68,7 +69,7 @@ The `/model-providers` page is the top-level Providers destination. It uses page
 
 ## Shared Component Inventory
 
-Theme provider and appearance selector; application shell; router pending and error boundaries; sidebar; context bar; personal preferences menu; command menu; shell-level Chat Bot with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; React Flow workflow graph canvas; workflow run history dialog; run timeline; node log entry with payload and activity disclosure; plugin configuration; viewers for captured request bodies, run output and artifacts; skeletons, errors, offline banner.
+Theme provider and appearance selector; application shell; router pending and error boundaries; sidebar; context bar; personal preferences menu; command menu; shell-level Chat Bot with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; fixed-scale HTML/SVG Workflow diagram with a bottom inspector dock and contextual floating node picker; workflow run history dialog; run timeline; node log entry with payload and activity disclosure; plugin configuration; viewers for captured request bodies, run output and artifacts; skeletons, errors, offline banner.
 
 Domain-neutral reusable components belong in the shared UI package. Feature composition remains near its feature. Abstract only demonstrated repeated patterns.
 
@@ -84,6 +85,19 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-09-23 - Contextual Workflow node picker
+
+- Removed the idle node palette from the Workflow editor's right panel; the inspector appears only for selected graph items.
+- Added a floating picker for independent node additions and compatible targets dropped onto blank canvas.
+
+### 2026-09-23 - Workflow bottom inspector
+
+- Placed selected Workflow node and edge configuration below the diagram at every breakpoint, keeping the diagram full height when nothing is selected.
+
+### 2026-09-23 - WeChat article output
+
+- Added the shared Mint Cyan article-body contract for heading hierarchy, paragraph indentation, neutral content blocks, code, and creative same-family tables.
+
 ### 2026-09-23 - Compact Workflow flow view
 
 - Updated the [Workflow Editor specification](pages/workflows/editor/DESIGN.md) for compact stage nodes, concise route labels, selection path emphasis, reduced-motion directional feedback, and explicit draft alignment.
@@ -97,6 +111,19 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 - Defined `x` from dependency rank and `y` from symmetric lanes, with mean incoming-source topological order and graph definition order providing stable parallel-node placement.
 - Recalculate the complete layout whenever nodes or edges are added, removed, connected, or reconnected.
+
+### 2026-09-23 - Workflow diagram navigation
+
+- Replaced the React Flow canvas with a fixed-scale HTML/SVG diagram and native horizontal and vertical scrolling.
+- Kept automatic dependency layout, graph selection, port connections, conditional edges, and bounded feedback while removing canvas zoom, pan-dragging, node dragging, and manual alignment.
+
+### 2026-09-23 - Chat Bot response loading
+
+- Deferred the shared Markdown renderer until the Chat Bot transcript is visible, keeping the collapsed Home transcript mounted and response text readable while the renderer loads.
+
+### 2026-09-23 - Home Workflow output links
+
+- Updated the [Home](pages/home/DESIGN.md) contract so rows use a top-level `url` from the Dashboard output when the layout has no explicit URL field.
 
 ### 2026-09-22 - Run pause and resume
 

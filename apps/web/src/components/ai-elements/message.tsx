@@ -12,8 +12,18 @@ function MessageContent({ className, ...props }: ComponentProps<'div'>) {
   return <div className={cn('min-w-0 max-w-full text-sm', className)} {...props} />;
 }
 
-function MessageResponse({ content, streaming = false, className }: { content: string; streaming?: boolean; className?: string }) {
-  return <StreamingMarkdown content={content} streaming={streaming} className={className} />;
+function MessageResponse({
+  content,
+  streaming = false,
+  className,
+  enabled = true,
+}: {
+  content: string;
+  streaming?: boolean;
+  className?: string;
+  enabled?: boolean;
+}) {
+  return <StreamingMarkdown content={content} streaming={streaming} className={className} enabled={enabled} />;
 }
 
 export { Message, MessageContent, MessageResponse };

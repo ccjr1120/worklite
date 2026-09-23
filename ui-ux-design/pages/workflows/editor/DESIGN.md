@@ -8,11 +8,13 @@
 
 - `docs/ui-design-system/README.md`
 - Applicable shared specifications in `ui-ux-design/shared/`
+- [WeChat article output](../../../shared/wechat-article-output.md)
 
 ## Implementation
 
 - `apps/web/src/routes/workflows/$workflowId.tsx`
 - `apps/web/src/components/workflow-canvas-nodes.tsx`
+- `apps/web/src/components/workflow-flow-diagram.tsx`
 
 ## Purpose
 
@@ -30,7 +32,7 @@ The budget is above one because the graph is a composite draft rather than a sin
 
 The workflow editor presents a directed control-flow dataflow graph with structured conditional edges and bounded loop edges.
 
-The palette includes Timer, Workflow Input, Agent, Choice Branch, TypeSafe System One, TypeSafe System One Map, Dashboard, Artifact, Artifact Query, Image, and the trusted WeChat Official Account Publish node when its built-in Plugin is available.
+The floating node picker offers Timer, Workflow Input, Agent, Choice Branch, TypeSafe System One, TypeSafe System One Map, Dashboard, Artifact, Artifact Query, Image, and the trusted WeChat Official Account Publish node when its built-in Plugin is available.
 
 - **Timer** is a source trigger with no inputs, one JSON output, an enabled control, and a fixed interval of at least five minutes; each Workflow may contain at most one Timer.
 - **Dashboard** has one required JSON `data` input, one JSON `output` port, and at most one instance per Workflow.
@@ -42,7 +44,7 @@ The palette includes Timer, Workflow Input, Agent, Choice Branch, TypeSafe Syste
 - **Artifact** has one required JSON `data` input, one output, and permits multiple instances; it configures a non-empty display name and a `Text`, `Markdown`, or `JSON` artifact type.
 - **Artifact Query** has one required JSON `request` input and one JSON output; its inspector selects a JSON Artifact name, a top-level title field, and one or more top-level description fields. It reads matching workspace history, including detached Artifacts, and emits the request with compact title-and-description candidates without creating Artifacts.
 - **Image** has one required string `prompt` input and one JSON output. Its inspector fixes `codex/gpt-image-2` and exposes only the supported image count, background, quality, and size choices. The node displays an image summary after execution and never renders or inspects base64 data.
-- **WeChat Official Account Publish** accepts required Markdown `article` and generated cover-image inputs plus optional JSON `metadata`, and outputs a publication reference.
+- **WeChat Official Account Publish** accepts required Markdown `article` and generated cover-image inputs plus optional JSON `metadata`, and outputs a publication reference. Its body renderer follows the [WeChat article output](../../../shared/wechat-article-output.md) contract, including escaped fenced code and inline code.
 
 One output may fan out to multiple downstream nodes. Choice Branch output is the deliberate exception to that fan-out behavior: its outgoing routes are exclusive and only the first matching route is traversed. Each named input accepts at most one edge, except Agent `context`, which may combine one unbounded initial upstream edge with one bounded feedback edge. An initial Workflow Input edge must remain unconditional. Edges may be unconditional, predicate-based, or fallback routes. A loop-closing edge must define a positive maximum traversal count, and every possible cycle must cross at least one bounded edge. Dynamic joins and parallel execution remain unavailable.
 
@@ -50,27 +52,27 @@ One output may fan out to multiple downstream nodes. Choice Branch output is the
 
 The context bar contains breadcrumb, saved state, revision history, Workflow settings, Versions, `Export JSON`, the destructive delete action, `Save`, `Run` where valid, and `Publish`.
 
-The editor workspace has a central `@xyflow/react` canvas and one right-side contextual panel. React Flow selection is authoritative and synchronizes the selected node or edge with the panel. With no selection the panel shows the searchable node palette; selecting a node or edge replaces the palette with its inspector; clicking the canvas background or using the inspector's back action clears all graph selection and restores the palette. Palette and inspector content always use the panel's full available width.
+The editor workspace has a fixed-scale HTML/SVG Workflow diagram above a bottom inspector dock that appears only while a node or edge is selected. With no selection, the diagram uses the full available height. Selecting a node or edge opens its inspector below the diagram; clearing selection closes the dock. The diagram toolbar opens a floating searchable node picker for independent additions. Releasing a node output connection on blank canvas opens the same picker at the release point, filtered to compatible target nodes; selecting one creates and connects it. Workflow Input and Timer are available only for independent additions because they have no input ports.
 
-The canvas supports node dragging, handle-to-handle connection, edge selection and deletion, pointer-drag panning on both axes, horizontal wheel or trackpad panning, pinch zoom, zoom controls, fit-to-view, and an explicit Align flow action. Ordinary wheel input advances through the process horizontally instead of zooming; the canvas keeps node cards at 70% scale or larger so wide graphs remain readable and can be panned horizontally. It intentionally renders no minimap and no canvas-wide selection outline. Compact stage nodes show the name, node kind, and named ports; configuration details stay in the inspector. The main path reads left to right, with branches separated vertically. Existing graphs receive this dependency layout as they load, with bounded feedback edges excluded from the left-to-right ranking, so users can follow the full process without first activating Align flow. Node and edge topology changes recompute every node coordinate. Dependency rank `r` is the longest path from a source after bounded feedback edges are excluded; `x = r × 340px`. Nodes in one rank are ordered by the mean topological-order index of their incoming sources, with Workflow definition order breaking ties. For `n` nodes in a column, `y = (laneIndex - (n - 1) / 2) × 160px`, so two parallel nodes occupy `-80px` and `+80px`. Prior saved coordinates never affect the automatic result. Selected nodes and edges use the blue brand token, and keyboard focus remains visible on the focused node, edge, or control. React Flow primitives follow the resolved light or dark application theme.
+The picker uses the shared raised-surface, border, and text tokens so it remains legible in both light and dark themes.
 
-On smaller breakpoints the combined contextual panel becomes one drawer or sheet, opens automatically for a canvas selection, and closes when the fixed desktop panel becomes available. A bottom panel shows test output, logs, and artifacts.
+The diagram scrolls natively in both directions inside the editor region. Ordinary wheel input scrolls vertically; horizontal trackpad gestures and Shift+wheel scroll horizontally. Touch devices use native two-axis scrolling. It has no transformed viewport, pan-dragging, zoom controls, fit-to-view, node dragging, or manual alignment action. Node-to-node connections remain handle-driven; edges remain selectable and removable. Compact stage cards show the name, node kind, and named ports; configuration details stay in the inspector. The main path reads left to right, with branches separated vertically. A deterministic dependency layout is applied when a draft loads and whenever node or edge topology changes. Bounded feedback edges are excluded from left-to-right ranking. Dependency rank `r` is the longest path from a source after those edges are excluded; `x = 48px + r × 340px`. Nodes in one rank are ordered by the mean topological-order index of their incoming sources, with Workflow definition order breaking ties. For `n` nodes in a column, the lane offset is `(laneIndex - (n - 1) / 2) × 160px`, so two parallel nodes occupy `-80px` and `+80px`; the whole graph is shifted together so its top-left content begins at least `48px` inside the scroll region. Prior saved coordinates never affect the automatic result. Selected nodes and edges use the blue brand token, and keyboard focus remains visible on the focused node, edge, or control. HTML cards and SVG connections follow the resolved light or dark application theme.
+
+The selected-item inspector stays in the bottom dock at every breakpoint. The dock prefers `280px`, is capped at `40vh`, stays at least `160px` tall, and scrolls independently from the diagram, which keeps native two-axis scrolling. The node picker remains anchored over the diagram and does not open the inspector. A bottom panel shows test output, logs, and artifacts.
 
 Workflow-level settings are grouped into General, Inputs, Execution, and Versioning. General contains the workflow name and publication metadata; Inputs contains the input editor and examples; Execution contains default error policy and runtime defaults; Versioning contains draft, revision, and publication context. Advanced settings stay collapsed until requested. Scheduling is configured only through the Timer node, never through Workflow settings.
 
 ## Interaction Contract
 
-**Add a node.** The searchable palette inserts and selects a node, marks the draft unsaved, and automatically recalculates all node coordinates from the current graph topology. Insertion never requires pointer dragging.
+**Add a node.** The diagram toolbar's `Add node` action opens a floating searchable picker for independent additions. Choosing a node inserts and selects it, marks the draft unsaved, automatically recalculates all node coordinates from the current graph topology, and scrolls the inserted node into view. Workflow Input and Timer are available here because they have no input ports. Insertion never requires pointer dragging.
 
-**Connect nodes.** Handle-to-handle connection validates against the port rules above. While connecting, compatible and incompatible targets have distinct visual states. An invalid or type-incompatible attempt leaves graph state unchanged and reports concisely. A connection that would close a cycle receives a bounded traversal limit rather than being rejected. A successful connection recalculates all node coordinates from the updated topology.
+**Connect nodes.** Handle-to-handle connection validates against the port rules above. While connecting, compatible and incompatible targets have distinct visual states. Releasing an output connection on blank canvas opens a floating picker at the release point with compatible target nodes; choosing one inserts the node and edge together. Releasing on an existing input still connects directly. Keyboard users activate an output port and then a compatible input port, or use `Add node` for independent insertion. Selecting an edge exposes endpoint handles that can be dragged onto compatible ports to reconnect it. An invalid or type-incompatible attempt leaves graph state unchanged and reports concisely. A connection that would close a cycle receives a bounded traversal limit rather than being rejected. A successful connection recalculates all node coordinates from the updated topology.
 
-**Configure a selection.** Selecting a node or edge opens its inspector. Node inspectors expose node-owned parameters directly. Edge selection reveals endpoints, routing mode, structured predicate controls, maximum traversals, and a remove command. Predicate controls take a dot-delimited source-output path, a supported comparison operator, and a JSON comparison value when the operator requires one. Fallback routes explain that they run only when no unconditional or predicate edge from the same source invocation matches. Conditional edges show a concise condition label on the canvas; bounded edges use a dashed line and a traversal-limit label. Pointer dragging is never required to review, configure, or remove graph objects.
+**Configure a selection.** Selecting a node or edge opens its inspector in a bottom dock below the diagram. Node inspectors expose node-owned parameters directly. Edge selection reveals endpoints, routing mode, structured predicate controls, maximum traversals, and a remove command. Predicate controls take a dot-delimited source-output path, a supported comparison operator, and a JSON comparison value when the operator requires one. Fallback routes explain that they run only when no unconditional or predicate edge from the same source invocation matches. Conditional edges show a concise condition label on the canvas; bounded edges use a dashed line and a traversal-limit label. Pointer dragging is never required to review, configure, or remove graph objects.
 
-**Move around the canvas.** Drag empty canvas space to pan the graph horizontally or vertically. Drag a node to change its draft position. Wheel or trackpad scrolling advances horizontally through the main path, pinch and the zoom controls change scale, and fit-to-view frames the graph without reducing node scale below 70%. The initial graph load arranges the main path from left to right and separates branches vertically.
+**Move around the diagram.** The scroll region uses native vertical wheel behavior, horizontal trackpad gestures, Shift+wheel, and touch scrolling. Nodes stay at a fixed readable scale. The initial graph load arranges the main path from left to right and separates branches vertically; new nodes and topology changes recalculate that arrangement. Newly added nodes scroll into view after insertion. Users do not reposition nodes manually.
 
 Selecting a node emphasizes its direct connections and adjacent nodes while softening unrelated paths. Selecting an edge emphasizes that edge and its endpoints. A slow directional stroke on emphasized edges identifies the inspected route; it does not claim that a Run is executing. Selection changes use restrained motion, and reduced-motion settings retain the same static contrast and arrows.
-
-**Align flow.** A canvas action applies the deterministic coordinate formula above, excluding bounded feedback edges from rank calculation. It changes draft positions only, preserves node and edge definitions, marks the draft unsaved, and fits the rearranged graph in view. The same arrangement is applied when an existing draft loads for display, without changing its saved revision or save state, and after any node or edge topology change. Moving an individual node remains a draft edit and is persisted on Save; its manual position remains until the next topology change or Align flow action.
 
 **Save.** Persists the accumulated revision. The save state reports `Saving` and settles on `Saved`. A failure returns the state to `Unsaved changes` and keeps the reason visible in the canvas region rather than only in a toast. An invalid edge comparison value blocks the save and names that specific problem.
 
@@ -104,7 +106,7 @@ The Timer inspector's read-only runtime status is the one self-healing value her
 
 **Image** inspectors present the fixed model and compact count, background, quality, and size controls.
 
-**WeChat Official Account Publish** inspectors select the configured official account and `Save draft` or `Publish` mode. The required cover input is reserved for a Workflow Image output; the inspector explains that the generated PNG is uploaded through the real MP cover picker and never offers a placeholder fallback. Metadata may provide a title override, author, and digest; otherwise the node reads the first Markdown heading as the title. The inspector explains that Publish may pause the Run for login or final confirmation. Workflows containing both an enabled Timer and a Publish-mode WeChat node are invalid in the initial increment.
+**WeChat Official Account Publish** inspectors select the configured official account and `Save draft` or `Publish` mode. The required cover input is reserved for a Workflow Image output; the inspector explains that the generated PNG is uploaded through the real MP cover picker and never offers a placeholder fallback. Metadata may provide a title override, author, and digest; otherwise the node reads the first Markdown heading as the title. Article bodies preserve Markdown hierarchy and use the shared Mint Cyan output style. The inspector explains that Publish may pause the Run for login or final confirmation. Workflows containing both an enabled Timer and a Publish-mode WeChat node are invalid in the initial increment.
 
 **Timer** inspectors expose `enabled` and the interval in minutes with a five-minute minimum, and explain that draft Timer changes become active only after Publish. For a published Workflow the inspector also shows read-only runtime status when available: the bound published version, next-run time, and last-run status.
 
@@ -115,12 +117,12 @@ Node surfaces, default icons, and ordinary hover states remain neutral; selected
 | State | Behavior |
 | --- | --- |
 | Loading | An existing Workflow's draft loads into a content-shaped canvas and panel rather than an empty graph. A new Workflow starts empty by definition, not by absence of data. |
-| Empty | An empty canvas states that nodes are added from the palette. |
-| No results | A palette search with no match names the query. |
+| Empty | An empty canvas states that it is empty; the diagram toolbar's `Add node` action opens the floating picker. |
+| No results | A picker search with no match names the query. |
 | Error | Save, publish, run, export, and delete failures stay visible next to their action or affected content. The Timer schedule region reports its own unavailability without affecting the rest of the inspector. |
 | Busy | Save reports through the save state; run, publish, export, and delete report on their own controls. Undo and redo disable only while a save is in flight. |
 | Offline | Inherits `shared-states.md`. Draft edits are local until saved, and the offline bar states that. |
-| Long content | The canvas pans and zooms rather than growing the page. The contextual panel scrolls internally. The output panel shows only persisted output from a selected run and never seeded logs. |
+| Long content | The diagram scrolls natively on both axes inside its region at a fixed node scale. The bottom inspector dock scrolls internally. The output panel shows only persisted output from a selected run and never seeded logs. |
 
 The output panel contains only persisted output from a selected run. AI editing controls appear only when a server-backed proposal operation exists and never simulate an applied edit.
 
@@ -130,9 +132,10 @@ The output panel contains only persisted output from a selected run. AI editing 
 | --- | --- |
 | `workflows:editor.new` / `editor.fallback` / `editor.untitled` | State |
 | `workflows:editor.name` / `editor.input` / `editor.nodeName` | State |
-| `workflows:editor.nodePalette` / `editor.paletteHint` / `editor.searchNodes` | Action |
+| `workflows:editor.addNode` / `editor.nodePalette` / `editor.connectNode` / `editor.closeInspector` / `editor.paletteHint` / `editor.connectNodeHint` / `editor.searchNodes` | Action |
+| `workflows:editor.selectionInspector` | State |
+| `workflows:editor.noNodeMatches` | Recovery |
 | `workflows:editor.canvas` / `editor.emptyCanvas` | State |
-| `workflows:editor.zoomIn` / `editor.zoomOut` / `editor.fitView` / `editor.alignFlow` | Action |
 | `workflows:editor.nodeCount` / `editor.edgeCount` | State |
 | `workflows:editor.contextPort` / `editor.inputPort` / `editor.outputPort` / `editor.dataPort` | State |
 | `workflows:editor.connections` / `editor.incomingConnections` / `editor.outgoingConnections` / `editor.connection` | State |
@@ -181,13 +184,13 @@ The following keys are removed as orphans from features this editor no longer ha
 
 ## Accessibility
 
-The graph is fully operable without pointer dragging: the palette adds nodes, and the inspector reviews, configures, and removes both nodes and edges. Selection stays synchronized between the canvas and the panel so keyboard focus and inspector content never disagree.
+The graph is fully operable without pointer dragging: the toolbar opens the node picker, and the bottom inspector reviews, configures, and removes selected nodes and edges. The picker supports keyboard search and selection; output-to-blank-canvas selection remains available through the pointer, while keyboard users can connect existing ports directly. Selection stays synchronized between the canvas and the inspector so keyboard focus and inspector content never disagree.
 
-Port labels and accessible names identify context and output semantics without relying on color. Blue marks selection and current execution only; completion and failure use semantic markers alongside text. Every icon-only control in the context bar and canvas carries an accessible name, and the zoom, fit-view, and deletion controls keep `40px` to `44px` touch targets at mobile widths. Save failures use `role="alert"`.
+Port labels and accessible names identify context and output semantics without relying on color. Blue marks selection and current execution only; completion and failure use semantic markers alongside text. Node cards, ports, and edge paths remain keyboard-selectable, and keyboard users can scroll the diagram region in both directions. Deletion controls keep `40px` to `44px` touch targets at mobile widths. Save failures use `role="alert"`.
 
 ## Coverage Status
 
-Reviewed 2026-09-23 against `apps/web/src/routes/workflows/$workflowId.tsx` and `apps/web/src/components/workflow-canvas-nodes.tsx`. The compact node, concise route label, selection emphasis, reduced-motion, deterministic `x`/`y` coordinate calculation on initial hydration and topology changes, stable definition-order tie breaks, symmetric vertical lanes, fit-to-view after hydration, horizontal wheel panning, two-axis pointer-drag panning, and 70% minimum zoom are represented in code; they have not been visually checked in a running browser. Remaining differences found:
+Reviewed 2026-09-23 against `apps/web/src/routes/workflows/$workflowId.tsx`, `apps/web/src/components/workflow-canvas-nodes.tsx`, `apps/web/src/components/workflow-flow-diagram.tsx`, and `apps/api/src/modules/plugins/wechat-official-account.service.ts`. The Workflow diagram now uses fixed-scale HTML cards, SVG edges, native two-axis scrolling, automatic coordinates, handle connections, keyboard selection, endpoint reconnection, and reduced-motion-aware selection flow. The bottom inspector dock is selection-only and appears below the diagram; independent additions and blank-canvas connections use a floating picker, and choosing a compatible target creates its edge in the same graph update. No running-browser visual review was performed. Remaining differences found:
 
 - ~~The editor had no reusable JSON Choice Branch node.~~ Resolved: the palette, canvas, inspector, and graph serializer now expose `worklite/branch@1`; its outgoing conditions select one route in definition order.
 
@@ -195,7 +198,10 @@ Reviewed 2026-09-23 against `apps/web/src/routes/workflows/$workflowId.tsx` and 
 
 - ~~`Run` created a Run but left the editor as the active surface.~~ Resolved: successful creation now navigates to the returned `/runs/:runId` detail route.
 
-- ~~The Workflow layout depended on saved coordinates to order parallel nodes and only recalculated after initial load or explicit alignment.~~ Resolved: topology changes now recalculate `x` and `y` deterministically from dependency rank and definition order, with parallel nodes in symmetric vertical lanes; Align flow remains available after manual edits.
+- ~~The Workflow layout depended on saved coordinates to order parallel nodes and only recalculated after initial load or explicit alignment.~~ Resolved: each draft load and topology change recalculates `x` and `y` from dependency rank and definition order, with parallel nodes in symmetric vertical lanes. Node positions are no longer manually editable.
+- ~~React Flow viewport behavior remained in place.~~ Resolved: the editor uses fixed-scale HTML cards, SVG connections, and native two-axis scrolling; canvas pan-dragging, zoom, fit-to-view, and manual alignment were removed.
+- ~~The idle right panel showed the node palette.~~ Resolved: the inspector appears only for a selected node or edge; the diagram toolbar opens an independent-add picker, while releasing an output on blank canvas opens a compatible-target picker.
+- ~~The selected-item inspector occupied the right side of the diagram.~~ Resolved: the inspector now appears in a bounded, independently scrollable bottom dock at all breakpoints.
 
 - No loading state for an existing Workflow. `useWorkflowQuery` destructures only `data`, so a pending load renders an empty canvas that is indistinguishable from an empty graph; the name field shows `editor.untitled` until the draft arrives.
 - No load-failure state. A failed Workflow query leaves the editor on an empty canvas with no explanation, and unsaved work could be attempted against a draft that never loaded.
@@ -203,10 +209,32 @@ Reviewed 2026-09-23 against `apps/web/src/routes/workflows/$workflowId.tsx` and 
 - Run, publish, export, and import failures are toast-only. `shared-states.md` requires durable errors to remain in the page; only `save` writes to the persistent `saveError` region.
 - `editor.saveBeforeRun` is reused as the publish precondition message when `isNew`, so publishing a brand-new Workflow tells the user to save before *running* it.
 - 34 locale keys under `workflows:editor.*` are orphaned, enumerated in the Copy Inventory above.
-- `editor.emptyCanvas` is defined and referenced once but the canvas renders no empty-state text region, so an empty graph shows a bare grid.
+- ~~`editor.emptyCanvas` was defined without an empty-state region.~~ Resolved: an empty Workflow displays the empty-state icon and label over the diagram background.
 - Delete sets `setDeleteBusy(true)` and only resets it inside the `catch`, relying on navigation to unmount the component on success; the busy flag is never cleared on the success path.
+- A short save-draft Run accepted the Mint Cyan article sample with inline and fenced code. Its final appearance has not been reviewed in the WeChat MP editor.
 
 ## Changelog
+
+### 2026-09-23 - Native-scroll Workflow diagram
+
+- Replaced the React Flow interaction contract with fixed-scale HTML cards and SVG connections in a native two-axis scroll region.
+- Kept automatic dependency layout and handle connections while removing canvas transforms, pan-dragging, node dragging, zoom, fit-to-view, and manual alignment.
+- Specified vertical wheel, horizontal trackpad and Shift+wheel behavior plus mobile touch scrolling.
+
+### 2026-09-23 - Contextual Workflow node picker
+
+- Removed the idle right-side node palette; the contextual inspector now appears only for a selected node or edge.
+- Added a floating node picker for independent additions and for creating a compatible target when a connection is released on blank canvas.
+- Kept Workflow Input and Timer in independent additions because neither has an input port.
+
+### 2026-09-23 - Workflow bottom inspector
+
+- Moved selected-node and selected-edge configuration below the diagram at every breakpoint.
+- Let the diagram use the full height when there is no selection; the inspector dock appears only for a selected graph item and scrolls independently.
+
+### 2026-09-23 - WeChat article output
+
+- Linked the WeChat Publish node to the shared Mint Cyan article-body contract, including escaped inline and fenced code.
 
 ### 2026-09-23 - TypeSafe System One Map node
 

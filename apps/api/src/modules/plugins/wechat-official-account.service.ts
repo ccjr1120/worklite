@@ -150,7 +150,7 @@ export class WechatOfficialAccountService {
       }
       const token = new URL(session.page.url()).searchParams.get('token');
       if (!token) throw new Error('WeChat Official Account session did not provide an editor token.');
-      await session.page.goto(`https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&type=10&token=${encodeURIComponent(token)}&lang=en_US`, { waitUntil: 'domcontentloaded' });
+      await session.page.goto(`https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&isNew=1&type=10&token=${encodeURIComponent(token)}&lang=en_US`, { waitUntil: 'domcontentloaded' });
       await fillArticle(session.page, publication.title, publication.article, coverPath);
       if (signal.aborted) throw new Error('Workflow run cancelled.');
       const draftId = await saveDraft(session.page);
@@ -349,9 +349,11 @@ async function captureLoginQrCode(page: Page): Promise<string> {
 async function showScanLogin(page: Page): Promise<void> {
   const qr = loginQrCode(page);
   const toggle = page.locator('a.login__type__container__link_text').first();
-  await qr.or(toggle).first().waitFor({ state: 'visible', timeout: 20_000 });
+  await qr.or(toggle).first().waitFor({ state: 'attached', timeout: 20_000 });
   if (await qr.waitFor({ state: 'visible', timeout: 3_000 }).then(() => true).catch(() => false)) return;
-  await toggle.click();
+  // WeChat sometimes renders the scan-login toggle as hidden even while it is
+  // the only control exposed. Dispatch its DOM click so the QR can appear.
+  await toggle.evaluate(`element => { if (element instanceof HTMLElement) element.click(); }`);
   await qr.waitFor({ state: 'visible', timeout: 20_000 });
 }
 
@@ -365,22 +367,112 @@ async function fillArticle(page: Page, title: string, article: string, coverPath
   await titleEditor.click();
   await titleEditor.fill(title.slice(0, 64));
 
-  const bodyEditor = page.locator('.ProseMirror').nth(1);
+  const bodyEditor = await articleEditor(page);
   await bodyEditor.waitFor({ state: 'visible', timeout: 20_000 });
-  await bodyEditor.click();
   const html = markdownToHtml(article.replace(/^#\s+.+$/m, '').trim() || article);
-  await bodyEditor.evaluate((element, value) => {
-    const view = element.ownerDocument.defaultView;
-    if (!view) throw new Error('Missing editor window.');
-    const data = new view.DataTransfer();
-    data.setData('text/html', value);
-    const paste = new view.ClipboardEvent('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(paste, 'clipboardData', { value: data });
-    element.dispatchEvent(paste);
-  }, html);
+  // The article editor is ProseMirror, so pasted markup is reparsed against its
+  // schema and the inline styles the article depends on are dropped. Hand the
+  // HTML to the editor's own content API first and keep the paste as a fallback.
+  if (!await setArticleBodyThroughEditorApi(page, html)) await pasteArticleBody(page, bodyEditor, html);
+  await titleEditor.click();
+  await assertArticleBody(bodyEditor, article, html);
   // Version 1 nodes have no cover input. Leave the cover unset rather than
   // uploading a substitute image the author never asked for.
   if (coverPath) await setCoverImage(page, coverPath);
+}
+
+// WeChat renders the title in its own ProseMirror instance and can mount the
+// article editor later, so the article editor is resolved by excluding the
+// title, then by its placeholder, and only then by the larger editing surface.
+async function articleEditor(page: Page): Promise<Locator> {
+  const position = await page.waitForFunction(`(() => {
+    const nodes = Array.from(document.querySelectorAll('.ProseMirror'));
+    const candidates = nodes.filter((node) => !node.closest('.title-editor__input'));
+    if (candidates.length === 0) return 0;
+    const area = (node) => node.clientWidth * node.clientHeight;
+    const placeholder = candidates.find((node) => /\u4ece\u8fd9\u91cc\u5f00\u59cb\u5199\u6b63\u6587|Start writing/.test(node.textContent ?? ''));
+    const chosen = placeholder ?? candidates.slice().sort((a, b) => area(b) - area(a))[0];
+    return nodes.indexOf(chosen) + 1;
+  })()`, undefined, { timeout: 20_000 }).then((handle) => handle.jsonValue() as Promise<number>);
+  return page.locator('.ProseMirror').nth(position - 1);
+}
+
+// The editor exposes mp_editor_get_isready and mp_editor_set_content on the
+// page, and the content call is only accepted while the editor reports itself
+// as new, which is why the editor is opened with isNew.
+async function setArticleBodyThroughEditorApi(page: Page, html: string): Promise<boolean> {
+  return page.evaluate(async (content: string) => {
+    type EditorApiResult = { ok: boolean; result?: { isReady?: boolean; isNew?: boolean } };
+    const api = (globalThis as unknown as { __MP_Editor_JSAPI__?: { invoke?: (options: unknown) => void } }).__MP_Editor_JSAPI__;
+    if (!api || typeof api.invoke !== 'function') return false;
+    const invoke = (apiName: string, apiParam: unknown): Promise<EditorApiResult> => new Promise((resolve) => {
+      let settled = false;
+      const finish = (value: EditorApiResult): void => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      try {
+        api.invoke?.({ apiName, apiParam, sucCb: (result: EditorApiResult['result']) => finish({ ok: true, result }), errCb: () => finish({ ok: false }) });
+      } catch {
+        finish({ ok: false });
+      }
+      setTimeout(() => finish({ ok: false }), 5_000);
+    });
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      const state = await invoke('mp_editor_get_isready', {});
+      if (state.ok && state.result?.isReady) {
+        if (!state.result.isNew) return false;
+        return (await invoke('mp_editor_set_content', { content })).ok;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    return false;
+  }, html);
+}
+
+async function pasteArticleBody(page: Page, bodyEditor: Locator, html: string): Promise<void> {
+  await bodyEditor.click();
+  const plainText = htmlToPlainText(html);
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'https://mp.weixin.qq.com' });
+  const copied = await page.evaluate(async ({ richText, text }) => {
+    const browser = globalThis as unknown as {
+      navigator?: { clipboard?: { write(items: unknown[]): Promise<void> } };
+      ClipboardItem?: new (items: Record<string, Blob>) => unknown;
+    };
+    if (!browser.navigator?.clipboard || !browser.ClipboardItem) return false;
+    await browser.navigator.clipboard.write([
+      new browser.ClipboardItem({
+        'text/html': new Blob([richText], { type: 'text/html' }),
+        'text/plain': new Blob([text], { type: 'text/plain' }),
+      }),
+    ]);
+    return true;
+  }, { richText: html, text: plainText });
+  if (!copied) throw new Error('The browser could not prepare formatted article content for the WeChat editor.');
+  await bodyEditor.press('ControlOrMeta+A');
+  await bodyEditor.press('Backspace');
+  await bodyEditor.press('ControlOrMeta+V');
+}
+
+async function assertArticleBody(bodyEditor: Locator, article: string, html: string): Promise<void> {
+  const expectedLine = article.replace(/^#\s+.+$/m, '').split(/\r?\n/).map((line) => line.trim()).find((line) => line && !line.startsWith('#'));
+  const expectedExcerpt = expectedLine?.replace(/^>\s*/, '').replace(/[*_`]/g, '').slice(0, 32);
+  const structure = await bodyEditor.evaluate((element) => ({
+    text: (element.textContent ?? '').replace(/\s+/g, ' ').trim(),
+    blockCount: element.querySelectorAll('p,h1,h2,h3,h4,h5,h6,blockquote,ul,ol,table').length,
+    styledCount: element.querySelectorAll('[style]').length,
+  }));
+  const expectedBlockCount = html.match(/<(?:p|h[1-6]|blockquote|ul|ol|table)\b/g)?.length ?? 0;
+  const expectedStyledCount = html.match(/\sstyle="/g)?.length ?? 0;
+  if (!expectedExcerpt || !structure.text.includes(expectedExcerpt)) throw new Error('WeChat article body did not retain its first paragraph after leaving the editor.');
+  if (expectedBlockCount > 1 && structure.blockCount < 2) throw new Error('WeChat editor flattened the article instead of retaining its formatted blocks.');
+  // Block structure survives even when every inline style is discarded, which
+  // is how an unstyled article reached readers through a successful run.
+  if (expectedStyledCount > 0 && structure.styledCount * 2 < expectedStyledCount) {
+    throw new Error(`WeChat editor discarded the article styles: ${structure.styledCount} of ${expectedStyledCount} styled elements remain.`);
+  }
 }
 
 async function saveDraft(page: Page): Promise<string> {
@@ -621,29 +713,44 @@ async function detectPublishedUrl(page: Page): Promise<string | null> {
 type ReferenceEntry = { number: number | null; label: string; url: string | null };
 type CitationContext = { entries: ReferenceEntry[]; numbersByUrl: Map<string, number>; nextNumber: number };
 
-const ARTICLE_ROOT_STYLE = "font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:16px;line-height:1.75;color:#3f3f46;letter-spacing:0.2px;word-break:break-word;";
-const PARAGRAPH_STYLE = 'margin:0 0 18px;padding:0;text-align:justify;';
+const ARTICLE_STYLE_COLORS = {
+  accent: '#008d83',
+  accentSurface: '#ddf0ed',
+  accentBar: '#a8d8d4',
+  accentUnderline: '#9ed4d0',
+  text: '#292b30',
+  mutedText: '#777b83',
+  neutralSurface: '#f3f5f7',
+  rule: '#d9dee3',
+  tableRule: '#dfe3e6',
+  tableHeader: '#303943',
+  tableHeaderText: '#f8fafc',
+} as const;
+const ARTICLE_ROOT_STYLE = `font-size:16px;line-height:1.9;color:${ARTICLE_STYLE_COLORS.text};letter-spacing:0.24px;word-break:break-word;`;
+const PARAGRAPH_STYLE = `margin:0 0 18px;padding:0;text-align:justify;text-indent:2em;font-size:16px;line-height:1.9;color:${ARTICLE_STYLE_COLORS.text};letter-spacing:0.24px;word-break:break-word;`;
+const LEAD_PARAGRAPH_STYLE = `margin:0 0 18px;padding:0 0 0 15px;border-left:2px solid ${ARTICLE_STYLE_COLORS.rule};text-align:justify;text-indent:2em;font-size:17px;font-weight:500;line-height:1.82;color:${ARTICLE_STYLE_COLORS.text};letter-spacing:0.24px;word-break:break-word;`;
 const HEADING_LEVEL_STYLES: Record<number, string> = {
-  1: 'margin:38px 0 16px;font-size:22px;line-height:1.45;color:#18181b;font-weight:600;',
-  2: 'margin:38px 0 16px;padding-left:10px;border-left:3px solid #2563eb;font-size:20px;line-height:1.45;color:#18181b;font-weight:600;',
-  3: 'margin:30px 0 12px;font-size:17px;line-height:1.5;color:#27272a;font-weight:600;',
-  4: 'margin:26px 0 10px;font-size:16px;line-height:1.5;color:#27272a;font-weight:600;',
-  5: 'margin:24px 0 10px;font-size:16px;line-height:1.5;color:#3f3f46;font-weight:600;',
-  6: 'margin:24px 0 10px;font-size:16px;line-height:1.5;color:#3f3f46;font-weight:600;',
+  1: `margin:34px 0 16px;font-size:28px;line-height:1.4;color:${ARTICLE_STYLE_COLORS.accent};font-weight:600;letter-spacing:-0.4px;`,
+  2: `margin:32px 0 16px;padding:7px 12px;border-left:3px solid ${ARTICLE_STYLE_COLORS.accentBar};border-radius:0 6px 6px 0;background:${ARTICLE_STYLE_COLORS.accentSurface};font-size:19px;line-height:1.5;color:${ARTICLE_STYLE_COLORS.accent};font-weight:600;letter-spacing:-0.16px;`,
+  3: `margin:25px 0 12px;padding-bottom:7px;border-bottom:1px solid ${ARTICLE_STYLE_COLORS.rule};font-size:16px;line-height:1.55;color:${ARTICLE_STYLE_COLORS.accent};font-weight:600;`,
+  4: `margin:22px 0 10px;font-size:16px;line-height:1.5;color:${ARTICLE_STYLE_COLORS.accent};font-weight:600;`,
+  5: `margin:20px 0 10px;font-size:15px;line-height:1.5;color:${ARTICLE_STYLE_COLORS.accent};font-weight:600;`,
+  6: `margin:20px 0 10px;font-size:15px;line-height:1.5;color:${ARTICLE_STYLE_COLORS.accent};font-weight:600;`,
 };
-const CODE_BLOCK_STYLE = 'margin:0 0 18px;padding:14px 16px;background:#f4f4f5;border-radius:6px;overflow-x:auto;';
-const CODE_TEXT_STYLE = "font-family:SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:13px;line-height:1.7;color:#27272a;white-space:pre;";
-const INLINE_CODE_STYLE = "padding:2px 5px;background:#f4f4f5;border-radius:4px;font-family:SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:14px;color:#18181b;";
-const BLOCKQUOTE_STYLE = 'margin:0 0 18px;padding:14px 16px;background:#f4f4f5;border-left:3px solid #a1a1aa;border-radius:4px;color:#52525b;';
+const HEADING_UNDERLINE_STYLE = `display:block;width:24px;height:2px;margin-top:7px;background:${ARTICLE_STYLE_COLORS.accentUnderline};font-size:0;line-height:0;`;
+const CODE_LINE_STYLE = `margin:0;padding:3px 12px;background:${ARTICLE_STYLE_COLORS.neutralSurface};border-left:3px solid ${ARTICLE_STYLE_COLORS.rule};font-size:13px;line-height:1.7;color:${ARTICLE_STYLE_COLORS.text};white-space:pre-wrap;word-break:break-all;text-indent:0;`;
+const INLINE_CODE_STYLE = `padding:1px 5px;border:1px solid ${ARTICLE_STYLE_COLORS.rule};border-radius:4px;font-size:14px;color:${ARTICLE_STYLE_COLORS.text};`;
+const BLOCKQUOTE_STYLE = `margin:24px 0;padding:0 0 0 14px;border-left:3px solid ${ARTICLE_STYLE_COLORS.rule};color:${ARTICLE_STYLE_COLORS.text};font-size:15px;line-height:1.8;`;
+const QUOTE_PARAGRAPH_STYLE = `margin:0;padding:0;text-align:justify;text-indent:0;font-size:15px;line-height:1.8;color:${ARTICLE_STYLE_COLORS.text};letter-spacing:0.24px;word-break:break-word;`;
 const REFERENCE_ENTRY_STYLE = 'margin:0 0 10px;';
-const REFERENCE_MARKER_STYLE = 'margin-right:4px;font-size:13px;line-height:1.55;color:#3f3f46;font-weight:600;';
-const REFERENCE_TITLE_STYLE = 'font-size:13px;line-height:1.55;color:#3f3f46;font-weight:600;';
-const REFERENCE_URL_STYLE = 'font-size:12px;line-height:1.55;color:#71717a;word-break:break-all;';
+const REFERENCE_MARKER_STYLE = `margin-right:4px;font-size:13px;line-height:1.55;color:${ARTICLE_STYLE_COLORS.text};font-weight:600;`;
+const REFERENCE_TITLE_STYLE = `font-size:13px;line-height:1.55;color:${ARTICLE_STYLE_COLORS.text};font-weight:600;`;
+const REFERENCE_URL_STYLE = `font-size:12px;line-height:1.55;color:${ARTICLE_STYLE_COLORS.mutedText};word-break:break-all;`;
 
 function markdownToHtml(markdown: string): string {
   const { articleMarkdown, referenceHeading, referencesMarkdown } = splitReferences(markdown);
   const context = createCitationContext(parseReferenceEntries(referencesMarkdown));
-  const articleHtml = renderTokens(Lexer.lex(articleMarkdown), context);
+  const articleHtml = renderTokens(Lexer.lex(articleMarkdown), context, true);
   const referencesHeading = containsChinese(markdown) ? '相关链接' : referenceHeading ?? generatedReferenceHeading(markdown);
   const referencesHtml = context.entries.length > 0 ? renderReferences(referencesHeading, context.entries) : '';
   return `<section style="${ARTICLE_ROOT_STYLE}">${articleHtml}${referencesHtml}</section>`;
@@ -757,26 +864,27 @@ function citationNumberFor(url: string, label: string, context: CitationContext)
   return number;
 }
 
-function renderTokens(tokens: Token[], context: CitationContext): string {
-  return tokens.map((token) => renderBlockToken(token, context)).join('');
+function renderTokens(tokens: Token[], context: CitationContext, decorateLeadParagraph = false, paragraphStyle = PARAGRAPH_STYLE): string {
+  const leadParagraphIndex = decorateLeadParagraph ? tokens.findIndex((token) => token.type === 'paragraph') : -1;
+  return tokens.map((token, index) => renderBlockToken(token, context, index === leadParagraphIndex, paragraphStyle)).join('');
 }
 
-function renderBlockToken(token: Token, context: CitationContext): string {
+function renderBlockToken(token: Token, context: CitationContext, isLeadParagraph = false, paragraphStyle = PARAGRAPH_STYLE): string {
   switch (token.type) {
     case 'space':
     case 'def':
     case 'html':
       return '';
     case 'paragraph':
-      return `<p style="${PARAGRAPH_STYLE}">${renderInlineTokens((token as Tokens.Paragraph).tokens, context)}</p>`;
+      return `<p style="${isLeadParagraph ? LEAD_PARAGRAPH_STYLE : paragraphStyle}">${renderInlineTokens((token as Tokens.Paragraph).tokens, context)}</p>`;
     case 'heading':
       return renderHeading(token.depth, renderInlineTokens((token as Tokens.Heading).tokens, context));
     case 'code':
-      return `<section style="${CODE_BLOCK_STYLE}"><code style="${CODE_TEXT_STYLE}">${escapeHtml(token.text)}</code></section>`;
+      return renderCodeBlock(token.text);
     case 'blockquote':
-      return `<section style="${BLOCKQUOTE_STYLE}">${renderTokens((token as Tokens.Blockquote).tokens, context)}</section>`;
+      return `<blockquote style="${BLOCKQUOTE_STYLE}">${renderTokens((token as Tokens.Blockquote).tokens, context, false, QUOTE_PARAGRAPH_STYLE)}</blockquote>`;
     case 'hr':
-      return '<section style="height:1px;margin:30px 0;background:#e4e4e7;font-size:0;line-height:0;">&nbsp;</section>';
+      return `<section style="height:1px;margin:30px 0;background:${ARTICLE_STYLE_COLORS.rule};font-size:0;line-height:0;">&nbsp;</section>`;
     case 'list':
       return renderList(token as Tokens.List, context);
     case 'table':
@@ -788,26 +896,43 @@ function renderBlockToken(token: Token, context: CitationContext): string {
   }
 }
 
+function renderCodeBlock(value: string): string {
+  const lines = value.split(/\r?\n/);
+  return lines.map((line, index) => {
+    const escaped = escapeHtml(line.replaceAll('\t', '    ')) || '&nbsp;';
+    const edge = index === 0
+      ? 'border-radius:7px 7px 0 0;padding-top:12px;'
+      : index === lines.length - 1
+        ? 'border-radius:0 0 7px 7px;padding-bottom:12px;margin-bottom:22px;'
+        : '';
+    return `<p style="${CODE_LINE_STYLE}${edge}"><code>${escaped}</code></p>`;
+  }).join('');
+}
+
 function renderHeading(depth: number, html: string): string {
   const level = Math.min(Math.max(depth, 1), 6);
-  return `<h${level} style="${HEADING_LEVEL_STYLES[level]}">${html}</h${level}>`;
+  const underline = level === 3 ? `<span style="${HEADING_UNDERLINE_STYLE}">&nbsp;</span>` : '';
+  return `<h${level} style="${HEADING_LEVEL_STYLES[level]}">${html}${underline}</h${level}>`;
 }
 
 function renderList(token: Tokens.List, context: CitationContext): string {
   const tag = token.ordered ? 'ol' : 'ul';
   const listStyle = token.ordered ? 'decimal' : 'disc';
-  const items = token.items.map((item) => `<li style="margin:0 0 8px;">${renderTokens(item.tokens, context)}</li>`).join('');
-  return `<${tag} style="margin:0 0 18px;padding-left:1.35em;list-style-type:${listStyle};">${items}</${tag}>`;
+  const items = token.items.map((item) => `<li style="margin:0 0 7px;padding-left:3px;">${renderTokens(item.tokens, context)}</li>`).join('');
+  return `<${tag} style="margin:4px 0 22px;padding-left:1.5em;list-style-type:${listStyle};">${items}</${tag}>`;
 }
 
 function renderTable(token: Tokens.Table, context: CitationContext): string {
   const header = token.header.map((cell) => `<th style="${tableCellStyle(true, cell.align)}">${renderInlineTokens(cell.tokens, context)}</th>`).join('');
-  const rows = token.rows.map((row) => `<tr>${row.map((cell) => `<td style="${tableCellStyle(false, cell.align)}">${renderInlineTokens(cell.tokens, context)}</td>`).join('')}</tr>`).join('');
-  return `<section style="margin:0 0 18px;overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:14px;line-height:1.6;"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table></section>`;
+  const rows = token.rows.map((row, rowIndex) => `<tr>${row.map((cell, cellIndex) => `<td style="${tableCellStyle(false, cell.align, cellIndex, rowIndex === token.rows.length - 1)}">${renderInlineTokens(cell.tokens, context)}</td>`).join('')}</tr>`).join('');
+  return `<section style="margin:8px 0 24px;border:1px solid ${ARTICLE_STYLE_COLORS.tableRule};border-radius:11px;overflow-x:auto;"><table style="width:100%;border-collapse:separate;border-spacing:0;font-size:14px;line-height:1.65;text-align:left;"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table></section>`;
 }
 
-function tableCellStyle(header: boolean, align: 'left' | 'center' | 'right' | null): string {
-  return `padding:9px 10px;border:1px solid #e4e4e7;text-align:${align ?? 'left'};${header ? 'background:#fafafa;color:#27272a;font-weight:600;' : 'color:#3f3f46;'}`;
+function tableCellStyle(header: boolean, align: 'left' | 'center' | 'right' | null, cellIndex = 0, lastRow = false): string {
+  if (header) return `padding:12px 14px;border:0;border-top:3px solid ${ARTICLE_STYLE_COLORS.accentUnderline};text-align:${align ?? 'left'};background:${ARTICLE_STYLE_COLORS.tableHeader};color:${ARTICLE_STYLE_COLORS.tableHeaderText};font-weight:700;`;
+  const bottom = lastRow ? '' : `border-bottom:1px solid ${ARTICLE_STYLE_COLORS.tableRule};`;
+  const firstColumn = cellIndex === 0 ? `border-right:1px solid ${ARTICLE_STYLE_COLORS.tableRule};font-weight:600;` : '';
+  return `padding:12px 14px;${bottom}${firstColumn}text-align:${align ?? 'left'};color:${ARTICLE_STYLE_COLORS.text};`;
 }
 
 function renderInlineTokens(tokens: Token[], context: CitationContext): string {
@@ -829,11 +954,11 @@ function renderInlineToken(token: Token, context: CitationContext): string {
     case 'escape':
       return 'tokens' in token && token.tokens ? renderInlineTokens(token.tokens, context) : renderTextWithCitations(token.text, context);
     case 'strong':
-      return `<strong style="color:#18181b;font-weight:600;">${renderInlineTokens(nestedTokens(token), context)}</strong>`;
+      return `<strong style="color:${ARTICLE_STYLE_COLORS.text};font-weight:700;text-decoration:underline;">${renderInlineTokens(nestedTokens(token), context)}</strong>`;
     case 'em':
-      return `<em style="color:#18181b;">${renderInlineTokens(nestedTokens(token), context)}</em>`;
+      return `<em style="color:${ARTICLE_STYLE_COLORS.text};">${renderInlineTokens(nestedTokens(token), context)}</em>`;
     case 'del':
-      return `<del style="color:#71717a;">${renderInlineTokens(nestedTokens(token), context)}</del>`;
+      return `<del style="color:${ARTICLE_STYLE_COLORS.mutedText};">${renderInlineTokens(nestedTokens(token), context)}</del>`;
     case 'codespan':
       return `<code style="${INLINE_CODE_STYLE}">${escapeHtml(token.text)}</code>`;
     case 'br':
@@ -855,12 +980,12 @@ function renderLink(token: Tokens.Link, context: CitationContext): string {
   const url = normalizeHttpUrl(token.href);
   if (!url) return renderInlineTokens(token.tokens, context);
   if (isWechatArticleUrl(url)) {
-    return `<a href="${escapeHtml(url)}" style="color:#2563eb;text-decoration:none;border-bottom:1px solid rgba(37,99,235,0.35);">${renderInlineTokens(token.tokens, context)}</a>`;
+    return `<a href="${escapeHtml(url)}" style="color:${ARTICLE_STYLE_COLORS.text};text-decoration:none;border-bottom:1px solid ${ARTICLE_STYLE_COLORS.rule};">${renderInlineTokens(token.tokens, context)}</a>`;
   }
   const plainText = plainInlineTokens(token.tokens).trim();
   const label = !plainText || token.autolink === true || plainText === url ? referenceSourceLabel(url) : plainText;
   citationNumberFor(url, label, context);
-  return `<span style="color:#18181b;font-weight:600;">${escapeHtml(label)}</span>`;
+  return `<span style="color:${ARTICLE_STYLE_COLORS.text};font-weight:600;">${escapeHtml(label)}</span>`;
 }
 
 function renderTextWithCitations(value: string, context: CitationContext): string {
@@ -943,6 +1068,16 @@ function referenceSourceLabel(value: string): string {
   } catch {
     return value;
   }
+}
+
+function htmlToPlainText(value: string): string {
+  return value
+    .replace(/<[^>]+>/g, '')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#39;', "'")
+    .replaceAll('&amp;', '&');
 }
 
 function escapeHtml(value: string): string {

@@ -52,7 +52,11 @@ function UserMessage({ message }: { message: TranscriptMessage }) {
   );
 }
 
-function AssistantTurn({ segments, working }: { segments: TurnSegment[]; working: boolean }) {
+function AssistantTurn({ segments, working, markdownEnabled }: {
+  segments: TurnSegment[];
+  working: boolean;
+  markdownEnabled: boolean;
+}) {
   const { t } = useTranslation('assistant');
   return (
     <Message from="assistant" aria-label={t('speaker.assistant')}>
@@ -62,7 +66,7 @@ function AssistantTurn({ segments, working }: { segments: TurnSegment[]; working
         </span>
         <MessageContent className="min-w-0 flex-1 pt-0.5">
           {segments.map((segment) => segment.kind === 'message'
-            ? <MessageResponse key={segment.item.id} content={segment.item.content} />
+            ? <MessageResponse key={segment.item.id} content={segment.item.content} enabled={markdownEnabled} />
             : <ToolCallPanel key={segment.item.id} call={segment.item} />)}
           {working ? <WorkingNote /> : null}
         </MessageContent>

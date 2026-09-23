@@ -40,7 +40,7 @@ A Workflow is not listed while it is draft, while its latest version has no Dash
 
 Board cards are static surfaces, not full-card selection controls. The header area shows the icon followed immediately by the configured `header` elements — `text`, `count`, and `metric` — resolved against the latest successful Run output, with version, run time, and status metadata aligned right. The content area uses the first `list` element found in main, then header, then footer order, and renders it as a table of up to three columns drawn from its non-`url` fields beginning with the `titleKey` field, falling back to its first display field. Unknown fields are ignored, missing fields display an explicit empty value, and non-object rows display their raw JSON in a bounded monospace region.
 
-A `url` field never renders as a column. When its value is an `http(s)` string, activating the row opens that value in a new browser tab, and the title cell remains the accessible link. The content area paginates five rows at a time with quiet previous and next controls and a current-page indicator.
+A configured `url` field is omitted from secondary list columns and supplies the item link when its value is an `http(s)` string; if selected as `titleKey`, it remains the title column. If the Dashboard layout has no configured `url` field, Home uses the row object's top-level `url` string when it is an `http(s)` URL. Activating the row opens the item link in a new browser tab, and the title cell remains the accessible link. The content area paginates five rows at a time with quiet previous and next controls and a current-page indicator.
 
 Board output is not self-healing. It loads per visit through the Run query; a newer successful Run appears on the next load. Cards carry no refresh control, because the board reflects a completed Run rather than a live value.
 
@@ -136,7 +136,7 @@ Run status uses the shared status badge with a non-color cue. First-use step mar
 
 ## Coverage Status
 
-Verified 2026-09-19. Differences found against `apps/web/src/routes/home.tsx`:
+Checked 2026-09-23 against `apps/web/src/routes/home.tsx` and the deployed Workflow Dashboard output shape. The deployed list output includes a top-level `url` property although its Dashboard layout omits a configured URL field; Home now resolves that shape. Remaining differences found:
 
 - The category-level error banner is driven by one combined `categoryError` flag covering the categories query and all four mutations, so a failed assignment inside the add dialog also paints the page-level banner while the dialog shows its own copy of the same message.
 - Board-card Run loading uses `runDetailQuery.isPending`, which is also true when the query is disabled or idle, so a card can sit in its loading notice rather than reaching a resolved state.
@@ -146,6 +146,10 @@ Verified 2026-09-19. Differences found against `apps/web/src/routes/home.tsx`:
 - The board-card pagination `nav` uses the page indicator string as its accessible name, which names the current state rather than the control group.
 
 ## Changelog
+
+### 2026-09-23 - Workflow output links
+
+- Resolve item links from the Workflow Dashboard output's top-level `url` property when its layout does not configure a `url` field, while keeping configured URL fields authoritative and hidden from table columns.
 
 ### 2026-09-19 - Copy cleanup
 

@@ -219,118 +219,74 @@
   font-variant-numeric: tabular-nums;
 }
 
-.workflow-react-flow {
-  --xy-background-color: var(--background);
-  --xy-background-pattern-color: color-mix(in srgb, var(--muted-foreground) 45%, transparent);
-  --xy-edge-stroke: color-mix(in srgb, var(--muted-foreground) 65%, transparent);
-  --xy-edge-stroke-selected: var(--brand);
-  --xy-connectionline-stroke: var(--brand);
-  background: var(--background);
+.workflow-flow-viewport {
+  position:absolute;
+  inset:0;
+  overflow:auto;
+  overscroll-behavior:contain;
+  background-color:var(--background);
+  background-image:radial-gradient(color-mix(in srgb, var(--muted-foreground) 30%, transparent) 0.7px, transparent 0.7px);
+  background-size:20px 20px;
+  scrollbar-gutter:stable;
+  -webkit-overflow-scrolling:touch;
 }
-
-.workflow-react-flow .react-flow__node:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--ring) 72%, transparent);
-  outline-offset: 3px;
-}
-
-.workflow-react-flow .react-flow__node {
-  transition: opacity 150ms ease-out;
-}
-
-.workflow-react-flow .react-flow__node.workflow-node-muted {
-  opacity: 0.28;
-}
-
-.workflow-react-flow .workflow-stage-card {
-  transition: border-color 150ms ease-out, box-shadow 150ms ease-out;
-}
-
-.workflow-react-flow .workflow-node-related .workflow-stage-card {
-  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
-}
-
-.workflow-react-flow .react-flow__edge.selected .react-flow__edge-path,
-.workflow-react-flow .react-flow__edge:focus-visible .react-flow__edge-path {
-  stroke: var(--brand);
-  stroke-width: 2;
-}
-
-.workflow-react-flow .react-flow__edge {
-  transition: opacity 150ms ease-out;
-}
-
-.workflow-react-flow .react-flow__edge.workflow-edge-muted {
-  opacity: 0.18;
-}
-
-.workflow-react-flow .react-flow__edge.workflow-edge-emphasized .react-flow__edge-path {
-  stroke: var(--brand);
-  stroke-width: 2;
-  stroke-dasharray: 8 7;
-  animation: workflow-edge-flow 1.6s linear infinite;
-}
-
-.workflow-react-flow .react-flow__edge.workflow-edge-emphasized.workflow-edge-bounded .react-flow__edge-path {
-  stroke-dasharray: 4 5;
-}
+.workflow-flow-viewport:focus-visible { outline:2px solid color-mix(in srgb, var(--ring) 72%, transparent); outline-offset:-2px; }
+.workflow-flow-toolbar { position:absolute; top:12px; right:12px; z-index:10; pointer-events:none; }
+.workflow-flow-toolbar > div { pointer-events:auto; }
+.workflow-flow-content { position:relative; min-width:100%; min-height:100%; }
+.workflow-flow-edges { position:absolute; inset:0; z-index:0; overflow:visible; }
+.workflow-flow-node-position { position:absolute; z-index:1; width:220px; height:128px; }
+.workflow-flow-node { display:flex; width:220px; height:128px; flex-direction:column; overflow:visible; border:1px solid var(--border); border-radius:6px; background:var(--surface-raised); color:var(--foreground); transition:opacity 150ms ease-out, border-color 150ms ease-out, box-shadow 150ms ease-out; }
+.workflow-flow-node.workflow-node-muted { opacity:0.28; }
+.workflow-flow-node.workflow-node-related { border-color:color-mix(in srgb, var(--brand) 45%, var(--border)); }
+.workflow-flow-node.workflow-node-selected { border-color:var(--brand); box-shadow:0 0 0 2px color-mix(in srgb, var(--brand) 25%, transparent); }
+.workflow-node-heading { display:flex; width:100%; height:44px; min-height:44px; align-items:center; gap:8px; padding:7px 12px; border:0; border-radius:5px 5px 0 0; background:transparent; color:inherit; text-align:left; cursor:pointer; }
+.workflow-node-heading:hover { background:color-mix(in srgb, var(--surface-subtle) 55%, transparent); }
+.workflow-node-heading:focus-visible,.workflow-node-port:focus-visible { outline:2px solid color-mix(in srgb, var(--ring) 72%, transparent); outline-offset:1px; }
+.workflow-node-title,.workflow-node-kind { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.workflow-node-title { font-size:12px; font-weight:600; }
+.workflow-node-kind { color:var(--muted-foreground); font-size:10px; line-height:14px; }
+.workflow-node-ports { display:grid; height:72px; align-content:center; overflow:visible; padding:0 12px; border-top:1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.workflow-node-port-row { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:8px; }
+.workflow-node-port { position:relative; display:flex; min-width:0; max-width:100%; height:24px; align-items:center; gap:5px; padding:0; border:0; background:transparent; color:var(--muted-foreground); font-size:10px; font-weight:500; line-height:1; cursor:crosshair; touch-action:none; }
+.workflow-node-port-target { justify-content:flex-start; }
+.workflow-node-port-source { justify-content:flex-end; }
+.workflow-node-port-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.workflow-node-port-dot { position:absolute; top:8px; width:8px; height:8px; border:2px solid var(--surface-raised); border-radius:999px; background:var(--muted-foreground); box-shadow:0 0 0 1px color-mix(in srgb, var(--muted-foreground) 55%, transparent); transition:background-color 120ms ease-out, box-shadow 120ms ease-out; }
+.workflow-node-port-target .workflow-node-port-dot { left:-16px; }
+.workflow-node-port-source .workflow-node-port-dot { right:-16px; }
+.workflow-flow-node.workflow-node-selected .workflow-node-port-dot,.workflow-node-port.workflow-port-connecting .workflow-node-port-dot { background:var(--brand); box-shadow:0 0 0 3px var(--brand-subtle); }
+.workflow-node-port.workflow-port-valid .workflow-node-port-dot { background:var(--success); box-shadow:0 0 0 3px var(--success-subtle); }
+.workflow-node-port.workflow-port-invalid .workflow-node-port-dot { background:var(--danger); box-shadow:0 0 0 3px var(--danger-subtle); }
+.workflow-flow-edge { cursor:pointer; transition:opacity 150ms ease-out; }
+.workflow-flow-edge.workflow-edge-muted { opacity:0.18; }
+.workflow-edge-hit-area { fill:none; stroke:transparent; stroke-width:14; pointer-events:stroke; }
+.workflow-edge-visible { fill:none; stroke:color-mix(in srgb, var(--muted-foreground) 68%, transparent); stroke-width:1.5; pointer-events:none; transition:stroke 150ms ease-out, stroke-width 150ms ease-out; }
+.workflow-flow-edge.workflow-edge-bounded .workflow-edge-visible { stroke-dasharray:6 4; }
+.workflow-flow-edge.workflow-edge-selected .workflow-edge-visible,.workflow-flow-edge:focus-visible .workflow-edge-visible { stroke:var(--brand); stroke-width:2.5; }
+.workflow-flow-edge.workflow-edge-emphasized .workflow-edge-visible { stroke:var(--brand); stroke-width:2; stroke-dasharray:8 7; animation:workflow-edge-flow 1.6s linear infinite; }
+.workflow-flow-edge.workflow-edge-emphasized.workflow-edge-bounded .workflow-edge-visible { stroke-dasharray:4 5; }
+.workflow-edge-label-background { fill:var(--surface-raised); stroke:var(--border); stroke-width:0.75; opacity:0.96; pointer-events:none; }
+.workflow-edge-label { fill:var(--muted-foreground); font-size:10px; font-weight:500; text-anchor:middle; dominant-baseline:middle; pointer-events:none; }
+.workflow-edge-endpoint { fill:var(--surface-raised); stroke:var(--brand); stroke-width:2; cursor:crosshair; touch-action:none; }
+.workflow-connection-preview { fill:none; stroke:var(--brand); stroke-width:2; stroke-dasharray:6 4; pointer-events:none; }
+.workflow-connection-preview.workflow-connection-valid { stroke:var(--success); }
+.workflow-connection-preview.workflow-connection-invalid { stroke:var(--danger); }
+.workflow-flow-empty { position:absolute; inset:0; z-index:1; display:flex; align-items:center; justify-content:center; padding:24px; text-align:center; pointer-events:none; }
 
 @keyframes workflow-edge-flow {
   to { stroke-dashoffset: -30; }
 }
 
-.workflow-node-handle {
-  background: var(--muted-foreground) !important;
-  transition: background-color 120ms ease-out, box-shadow 120ms ease-out;
-}
-
-.workflow-react-flow .react-flow__node.selected .workflow-node-handle {
-  background: var(--brand) !important;
-}
-
-.workflow-react-flow .react-flow__node .workflow-node-handle.connecting {
-  background: var(--danger) !important;
-  box-shadow: 0 0 0 3px var(--danger-subtle);
-}
-
-.workflow-react-flow .react-flow__node .workflow-node-handle.connecting.valid {
-  background: var(--success) !important;
-  box-shadow: 0 0 0 3px var(--success-subtle);
-}
-
-.workflow-react-flow .react-flow__controls {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-  box-shadow: none;
-}
-
-.workflow-react-flow .react-flow__controls-button {
-  width: 32px;
-  height: 32px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-raised);
-  fill: var(--foreground);
-}
-
-.workflow-react-flow .react-flow__controls-button:hover {
-  background: var(--surface-subtle);
-}
-
-@media (max-width: 767px) {
-  .workflow-react-flow .react-flow__controls-button {
-    width: 40px;
-    height: 40px;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .workflow-react-flow .react-flow__node,
-  .workflow-react-flow .workflow-stage-card,
-  .workflow-react-flow .react-flow__edge {
+  .workflow-flow-node,
+  .workflow-node-port-dot,
+  .workflow-edge-visible,
+  .workflow-flow-edge {
     transition: none;
   }
 
-  .workflow-react-flow .react-flow__edge.workflow-edge-emphasized .react-flow__edge-path {
+  .workflow-flow-edge.workflow-edge-emphasized .workflow-edge-visible {
     animation: none;
   }
 }

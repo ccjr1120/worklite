@@ -4,7 +4,6 @@ import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { QueryClientProvider } from '@tanstack/react-query';
 import '@fontsource-variable/inter';
 import '@fontsource-variable/jetbrains-mono';
-import '@xyflow/react/dist/style.css';
 import { routeTree } from './routeTree.gen';
 import { RouteError, RoutePending } from './components/route-boundaries';
 import { queryClient } from './lib/query-client';

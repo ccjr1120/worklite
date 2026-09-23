@@ -1,5 +1,6 @@
-import { Handle, Position, type Edge, type Node, type NodeProps } from '@xyflow/react';
 import { Bot, Braces, FileSearch, FileText, GitBranch, Image as ImageIcon, LayoutDashboard, ListChecks, Send, Timer } from 'lucide-react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import type { WorkflowDashboardLayout, WorkflowEdgeCondition } from '@worklite/contracts';
 import { cn } from '@/lib/utils';
@@ -46,51 +47,43 @@ export type WorkflowCanvasNodeData = {
   errorPolicy: 'stop' | 'retry';
 };
 
-export type WorkflowCanvasNode = Node<WorkflowCanvasNodeData, WorkflowCanvasNodeType>;
+export type WorkflowCanvasNode = {
+  id: string;
+  type: WorkflowCanvasNodeType;
+  position: { x: number; y: number };
+  data: WorkflowCanvasNodeData;
+  selected?: boolean;
+  className?: string;
+};
 
 export type WorkflowCanvasEdgeData = {
   condition?: WorkflowEdgeCondition;
   maxTraversals?: number;
 };
 
-export type WorkflowCanvasEdge = Edge<WorkflowCanvasEdgeData>;
+export type WorkflowCanvasEdge = {
+  id: string;
+  source: string;
+  sourceHandle?: string | null;
+  target: string;
+  targetHandle?: string | null;
+  data?: WorkflowCanvasEdgeData;
+  label?: string;
+  selected?: boolean;
+  className?: string;
+};
 
-const nodeClass = 'relative w-[220px] rounded-md border bg-surface-raised text-foreground transition-[border-color,box-shadow] duration-150';
-const handleClass = 'workflow-node-handle !h-3 !w-3 border-2 border-surface-raised';
+export type WorkflowConnection = {
+  source: string;
+  sourceHandle?: string | null;
+  target: string;
+  targetHandle?: string | null;
+};
 
-function nodeClassName(selected: boolean): string {
-  return cn('workflow-stage-card', nodeClass, selected ? 'border-brand ring-2 ring-brand/25' : 'border-border hover:border-foreground/25');
-}
+type WorkflowNodeInput = { id: string; label: string };
 
-function WorkflowStageNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
-  const { t } = useTranslation('workflows');
-  const icon = {
-    input: <Braces className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
-    timer: <Timer className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
-    agent: <Bot className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
-    branch: <GitBranch className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
-    systemOne: <Braces className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
-    systemOneMap: <ListChecks className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
-    dashboard: <LayoutDashboard className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
-    artifact: <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
-    artifactQuery: <FileSearch className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
-    wechatPublish: <Send className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
-    image: <ImageIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
-  }[data.nodeType];
-  const kind = {
-    input: t('editor.workflowInputNode'),
-    timer: t('editor.timerNode'),
-    agent: t('editor.agentNode'),
-    branch: t('editor.branchNode'),
-    systemOne: t('editor.systemOneNode'),
-    systemOneMap: t('editor.systemOneMapNode'),
-    dashboard: t('editor.dashboardNode'),
-    artifact: t('editor.artifactNode'),
-    artifactQuery: t('editor.artifactQueryNode'),
-    wechatPublish: t('editor.wechatNode'),
-    image: t('editor.imageNode'),
-  }[data.nodeType];
-  const inputs = {
+export function workflowNodeInputs(node: WorkflowCanvasNode, t: TFunction<'workflows'>): WorkflowNodeInput[] {
+  const inputs: Record<WorkflowCanvasNodeType, WorkflowNodeInput[]> = {
     input: [],
     timer: [],
     agent: [{ id: 'context', label: t('editor.contextPort') }],
@@ -103,29 +96,146 @@ function WorkflowStageNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
     wechatPublish: [
       { id: 'article', label: t('editor.wechatArticlePort') },
       { id: 'metadata', label: t('editor.wechatMetadataPort') },
-      ...(data.wechatNodeVersion === '1' ? [] : [{ id: 'coverImage', label: t('editor.wechatCoverPort') }]),
+      ...(node.data.wechatNodeVersion === '1' ? [] : [{ id: 'coverImage', label: t('editor.wechatCoverPort') }]),
     ],
     image: [{ id: 'prompt', label: t('editor.imagePromptPort') }],
-  }[data.nodeType];
+  };
+  return inputs[node.data.nodeType];
+}
+
+export function workflowNodeKind(nodeType: WorkflowCanvasNodeType, t: TFunction<'workflows'>): string {
+  const kinds: Record<WorkflowCanvasNodeType, string> = {
+    input: t('editor.workflowInputNode'),
+    timer: t('editor.timerNode'),
+    agent: t('editor.agentNode'),
+    branch: t('editor.branchNode'),
+    systemOne: t('editor.systemOneNode'),
+    systemOneMap: t('editor.systemOneMapNode'),
+    dashboard: t('editor.dashboardNode'),
+    artifact: t('editor.artifactNode'),
+    artifactQuery: t('editor.artifactQueryNode'),
+    wechatPublish: t('editor.wechatNode'),
+    image: t('editor.imageNode'),
+  };
+  return kinds[nodeType];
+}
+
+export function workflowNodeRowCount(node: WorkflowCanvasNode, t: (key: string) => string): number {
+  return Math.max(workflowNodeInputs(node, t).length, 1);
+}
+
+export function workflowNodePortOffset(rowCount: number, rowIndex: number): number {
+  return 80 + (rowIndex - (rowCount - 1) / 2) * 24;
+}
+
+const iconClass = 'size-4 shrink-0 text-muted-foreground';
+
+export function WorkflowStageNode({
+  node,
+  selected,
+  keyboardSource,
+  connectionTarget,
+  connectionSource,
+  onSelect,
+  onStartConnection,
+  onKeyboardConnectStart,
+  onKeyboardConnectTarget,
+}: {
+  node: WorkflowCanvasNode;
+  selected: boolean;
+  keyboardSource: boolean;
+  connectionTarget?: { nodeId: string; portId: string; valid: boolean };
+  connectionSource?: { nodeId: string; portId: string; valid: boolean };
+  onSelect: (nodeId: string) => void;
+  onStartConnection: (nodeId: string, portId: string, event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onKeyboardConnectStart: (nodeId: string, portId: string) => void;
+  onKeyboardConnectTarget: (nodeId: string, portId: string) => void;
+}) {
+  const { t } = useTranslation('workflows');
+  const icon = {
+    input: <Braces className={iconClass} aria-hidden="true" />,
+    timer: <Timer className={iconClass} aria-hidden="true" />,
+    agent: <Bot className={iconClass} aria-hidden="true" />,
+    branch: <GitBranch className={iconClass} aria-hidden="true" />,
+    systemOne: <Braces className={iconClass} aria-hidden="true" />,
+    systemOneMap: <ListChecks className={iconClass} aria-hidden="true" />,
+    dashboard: <LayoutDashboard className={iconClass} aria-hidden="true" />,
+    artifact: <FileText className={iconClass} aria-hidden="true" />,
+    artifactQuery: <FileSearch className={iconClass} aria-hidden="true" />,
+    wechatPublish: <Send className={iconClass} aria-hidden="true" />,
+    image: <ImageIcon className={iconClass} aria-hidden="true" />,
+  }[node.data.nodeType];
+  const kind = workflowNodeKind(node.data.nodeType, t);
+  const inputs = workflowNodeInputs(node, t);
   const rowCount = Math.max(inputs.length, 1);
 
   return (
-    <div className={nodeClassName(selected)}>
-      <div className="flex min-h-12 items-center gap-2 px-3 py-2">
+    <div
+      className={cn('workflow-flow-node', node.className, selected && 'workflow-node-selected')}
+      data-flow-node={node.id}
+      data-selected={selected || undefined}
+      role="group"
+      aria-label={`${node.data.label}, ${kind}`}
+      onClick={(event) => {
+        if ((event.target as HTMLElement).closest('[data-flow-port-type]')) return;
+        onSelect(node.id);
+      }}
+    >
+      <button type="button" className="workflow-node-heading" aria-pressed={selected} onClick={(event) => { event.stopPropagation(); onSelect(node.id); }}>
         {icon}
-        <div className="min-w-0">
-          <p className="truncate text-[12px] font-semibold" title={data.label}>{data.label}</p>
-          {data.label.trim() !== kind ? <p className="truncate text-[10px] leading-4 text-muted-foreground">{kind}</p> : null}
-        </div>
-      </div>
-      <div className="border-t border-border/70 px-3 py-1">
+        <span className="min-w-0 text-left">
+          <span className="workflow-node-title" title={node.data.label}>{node.data.label}</span>
+          {node.data.label.trim() !== kind ? <span className="workflow-node-kind">{kind}</span> : null}
+        </span>
+      </button>
+      <div className="workflow-node-ports" style={{ gridTemplateRows: `repeat(${rowCount}, 24px)` }}>
         {Array.from({ length: rowCount }, (_, index) => {
           const input = inputs[index];
           const isOutputRow = index === rowCount - 1;
+          const targetConnectionState = input && connectionTarget?.nodeId === node.id && connectionTarget.portId === input.id ? connectionTarget.valid ? 'workflow-port-valid' : 'workflow-port-invalid' : '';
+          const sourceConnectionState = connectionSource?.nodeId === node.id && connectionSource.portId === 'output' ? connectionSource.valid ? 'workflow-port-valid' : 'workflow-port-invalid' : '';
           return (
-            <div key={input?.id ?? 'output'} className="relative flex h-6 items-center justify-between gap-2 text-[10px] font-medium text-muted-foreground">
-              {input ? <><Handle type="target" position={Position.Left} id={input.id} className={handleClass} aria-label={input.label} /><span className="truncate">{input.label}</span></> : <span />}
-              {isOutputRow ? <><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></> : null}
+            <div key={input?.id ?? 'output'} className="workflow-node-port-row">
+              {input ? (
+                <button
+                  type="button"
+                  className={cn('workflow-node-port workflow-node-port-target', targetConnectionState)}
+                  data-flow-port-type="target"
+                  data-flow-node-id={node.id}
+                  data-flow-port-id={input.id}
+                  aria-label={input.label}
+                  onKeyDown={(event) => {
+                    if ((event.key === 'Enter' || event.key === ' ') && keyboardSource) {
+                      event.preventDefault();
+                      onKeyboardConnectTarget(node.id, input.id);
+                    }
+                  }}
+                >
+                  <span className="workflow-node-port-dot" aria-hidden="true" />
+                  <span className="workflow-node-port-label">{input.label}</span>
+                </button>
+              ) : <span />}
+              {isOutputRow ? (
+                <button
+                  type="button"
+                  className={cn('workflow-node-port workflow-node-port-source', keyboardSource && 'workflow-port-connecting', sourceConnectionState)}
+                  data-flow-port-type="source"
+                  data-flow-node-id={node.id}
+                  data-flow-port-id="output"
+                  aria-label={t('editor.outputPort')}
+                  aria-pressed={keyboardSource}
+                  onPointerDown={(event) => onStartConnection(node.id, 'output', event)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onKeyboardConnectStart(node.id, 'output');
+                    }
+                  }}
+                >
+                  <span className="workflow-node-port-label">{t('editor.outputPort')}</span>
+                  <span className="workflow-node-port-dot" aria-hidden="true" />
+                </button>
+              ) : <span />}
             </div>
           );
         })}
@@ -133,17 +243,3 @@ function WorkflowStageNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
     </div>
   );
 }
-
-export const workflowNodeTypes = {
-  input: WorkflowStageNode,
-  timer: WorkflowStageNode,
-  agent: WorkflowStageNode,
-  branch: WorkflowStageNode,
-  systemOne: WorkflowStageNode,
-  systemOneMap: WorkflowStageNode,
-  dashboard: WorkflowStageNode,
-  artifact: WorkflowStageNode,
-  artifactQuery: WorkflowStageNode,
-  wechatPublish: WorkflowStageNode,
-  image: WorkflowStageNode,
-};

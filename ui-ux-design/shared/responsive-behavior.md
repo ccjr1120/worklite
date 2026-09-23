@@ -2,15 +2,15 @@
 
 ## Wide Desktop
 
-At `1024px` and above, expand the sidebar, allow side-by-side inspectors, and retain useful table columns. Home keeps the Agent Chat composer visible; other pages use a lower-right draggable Chat icon until opened. The expanded Agent Chat panel uses the same centered panel up to `1200px` wide and approximately `680px` high, constrained by `24px` outer space. Its message region keeps `16px` horizontal padding, and automatic Skill execution regions remain inline as compact collapsed disclosure rows.
+At `1024px` and above, expand the sidebar, allow side-by-side inspectors on applicable pages, and retain useful table columns. The Workflow editor keeps its selected-item inspector dock below the diagram. Home keeps the Agent Chat composer visible; other pages use a lower-right draggable Chat icon until opened. The expanded Agent Chat panel uses the same centered panel up to `1200px` wide and approximately `680px` high, constrained by `24px` outer space. Its message region keeps `16px` horizontal padding, and automatic Skill execution regions remain inline as compact collapsed disclosure rows.
 
 ## Compact Desktop and Tablet
 
-From `768px` to `1023px`, use the `56px` grouped icon rail, hide low-priority columns, and let inspectors overlay or reduce content according to task importance. The workflow contextual Sheet yields to its fixed right-side panel as soon as that panel's desktop breakpoint becomes active. Agent resource tabs remain horizontally scrollable within their collection pages, and the Workflow Run records dialog keeps expanded artifact rows readable and its per-node retry control reachable within its scrolling surface. Keep the Home composer visible and use the draggable lower-right Chat icon on other pages; constrain the expanded Agent Chat panel within `16px` to `24px` outer space, and keep expanded Skill arguments, execution states, and bounded results inside the transcript column.
+From `768px` to `1023px`, use the `56px` grouped icon rail, hide low-priority columns, and let inspectors overlay or reduce content according to task importance. The Workflow inspector stays in a bounded dock below the diagram; the floating node picker remains anchored over the diagram. Agent resource tabs remain horizontally scrollable within their collection pages, and the Workflow Run records dialog keeps expanded artifact rows readable and its per-node retry control reachable within its scrolling surface. Keep the Home composer visible and use the draggable lower-right Chat icon on other pages; constrain the expanded Agent Chat panel within `16px` to `24px` outer space, and keep expanded Skill arguments, execution states, and bounded results inside the transcript column.
 
 ## Mobile
 
-Below `768px`, use a navigation drawer, retain page identity, state and primary action in the context bar, convert the workflow editor's combined palette and inspector to one full-screen or bottom sheet, keep the workflow canvas full-bleed within its editor region, replace wide tables with object rows, and show detailed logs full-screen or in a resizable sheet. Canvas zoom, fit-to-view, selection, and deletion controls remain reachable with `40px` to `44px` touch targets. The drawer preserves every grouped desktop destination named in `workspace-shell.md`, including Plugins and Logs; page-level collection and observability tabs remain reachable through horizontal scrolling, and the Workflow Run records dialog exposes Artifacts through in-place expansion. Home keeps its composer visible; other pages use a draggable lower-right Chat icon with `12px` safe-area margins until opened. Agent Chat uses at most about `70vh`; it does not become full-screen. Its single-line composer remains reachable above browser controls, and Chat and Proposed changes use internal views.
+Below `768px`, use a navigation drawer, retain page identity, state and primary action in the context bar, show the selected Workflow node or edge inspector in a bounded dock below the full-bleed diagram, and keep the floating node picker anchored over the diagram. The inspector dock and diagram scroll independently; the fixed-scale diagram scrolls natively on both axes with touch gestures. Node selection and deletion remain available through the diagram and inspector. The drawer preserves every grouped desktop destination named in `workspace-shell.md`, including Plugins and Logs; page-level collection and observability tabs remain reachable through horizontal scrolling, and the Workflow Run records dialog exposes Artifacts through in-place expansion. Home keeps its composer visible; other pages use a draggable lower-right Chat icon with `12px` safe-area margins until opened. Agent Chat uses at most about `70vh`; it does not become full-screen. Its single-line composer remains reachable above browser controls, and Chat and Proposed changes use internal views.
 
 A shared time-range control keeps its preset selection and its custom start and end fields reachable at every breakpoint. Below `768px` the presets and the two fields stack in one column rather than dropping the custom range, because a range the reader cannot narrow on a small screen makes the surface unusable there.
 
@@ -19,6 +19,18 @@ Responsive layouts must not remove status, recovery, or cancellation controls, i
 Queued Chat Bot messages keep their rows, count, and per-row remove control inside the scrollable transcript at every breakpoint, and the return-to-end control stays reachable without covering the composer.
 
 ## Changelog
+
+### 2026-09-23 - Workflow node picker
+
+- Kept the Workflow inspector selection-driven on mobile and anchored the node picker to the diagram instead of placing it in the inspector sheet.
+
+### 2026-09-23 - Workflow bottom inspector
+
+- Kept the selected Workflow inspector below the diagram at desktop and mobile widths, with separate scrolling for the dock and diagram.
+
+### 2026-09-23 - Workflow diagram scrolling
+
+- Replaced canvas zoom and pan controls with native two-axis scrolling for the fixed-scale Workflow diagram, including touch scrolling on mobile.
 
 ### 2026-09-21 - Chat Bot queue and scroll controls
 

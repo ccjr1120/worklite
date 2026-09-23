@@ -488,9 +488,9 @@ function listUrlField(element: Extract<WorkflowDashboardElement, { kind: 'list' 
 }
 
 function itemUrl(element: Extract<WorkflowDashboardElement, { kind: 'list' }>, item: unknown): string | null {
+  if (!isRecord(item)) return null;
   const field = listUrlField(element);
-  if (!field || !isRecord(item)) return null;
-  const value = item[field.key];
+  const value = field ? item[field.key] : item.url;
   return typeof value === 'string' && /^https?:\/\//i.test(value) ? value : null;
 }
 
