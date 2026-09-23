@@ -117,6 +117,35 @@ function WorkflowEditorPage() {
 
   const selectedNode = nodes.find((node) => node.selected);
   const selectedEdge = edges.find((edge) => edge.selected);
+  const selectedNodeId = selectedNode?.id;
+  const selectedEdgeId = selectedEdge?.id;
+  const emphasizedEdgeIds = useMemo(() => {
+    if (selectedNodeId) return new Set(edges.filter((edge) => edge.source === selectedNodeId || edge.target === selectedNodeId).map((edge) => edge.id));
+    if (!selectedEdgeId) return new Set<string>();
+    const edge = edges.find((item) => item.id === selectedEdgeId);
+    return edge ? new Set([edge.id]) : new Set<string>();
+  }, [edges, selectedEdgeId, selectedNodeId]);
+  const emphasizedNodeIds = useMemo(() => {
+    if (selectedNodeId) {
+      return new Set([selectedNodeId, ...edges.filter((edge) => edge.source === selectedNodeId || edge.target === selectedNodeId).flatMap((edge) => [edge.source, edge.target])]);
+    }
+    if (!selectedEdgeId) return new Set<string>();
+    const edge = edges.find((item) => item.id === selectedEdgeId);
+    return edge ? new Set([edge.source, edge.target]) : new Set<string>();
+  }, [edges, selectedEdgeId, selectedNodeId]);
+  const canvasNodes = useMemo(() => nodes.map((node) => ({
+    ...node,
+    className: selectedNodeId || selectedEdgeId
+      ? emphasizedNodeIds.has(node.id) ? 'workflow-node-related' : 'workflow-node-muted'
+      : undefined,
+  })), [emphasizedNodeIds, nodes, selectedEdgeId, selectedNodeId]);
+  const canvasEdges = useMemo(() => edges.map((edge) => ({
+    ...edge,
+    className: [
+      selectedNodeId || selectedEdgeId ? emphasizedEdgeIds.has(edge.id) ? 'workflow-edge-emphasized' : 'workflow-edge-muted' : '',
+      edge.data?.maxTraversals !== undefined ? 'workflow-edge-bounded' : '',
+    ].filter(Boolean).join(' '),
+  })), [edges, emphasizedEdgeIds, selectedEdgeId, selectedNodeId]);
   // Credential-forwarding providers exchange typed questions for typed answers and
   // cannot run an Agent node, so they are omitted from model selection.
   const modelOptions = useMemo(() => availableProviders.filter((provider) => provider.protocol !== 'typesafe/systemone').flatMap((provider) => provider.models.map((model) => `${provider.name}/${model}`)), [availableProviders]);
@@ -193,6 +222,16 @@ function WorkflowEditorPage() {
   function showNodePalette() {
     setNodes((current) => current.map((node) => ({ ...node, selected: false })));
     setEdges((current) => current.map((edge) => ({ ...edge, selected: false })));
+  }
+
+  function alignFlow() {
+    if (nodes.length < 2) return;
+    const positions = calculateFlowLayout(nodes, edges);
+    setNodes((current) => current.map((node) => ({ ...node, position: positions.get(node.id) ?? node.position })));
+    setSaveError('');
+    setSaveState('unsaved');
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    window.requestAnimationFrame(() => flowInstance?.fitView({ padding: 0.2, duration: reducedMotion ? 0 : 180 }));
   }
 
   const handleConnect: OnConnect = useCallback((connection) => {
@@ -788,11 +827,17 @@ function WorkflowEditorPage() {
       <div className="flex min-h-0 flex-1">
         <main ref={canvasRef} className="relative min-w-0 flex-1 bg-background" aria-label={t('editor.canvas')}>
           {saveError ? <p className="absolute left-4 top-4 z-10 rounded-md border border-danger/30 bg-danger-subtle px-3 py-2 text-[13px] text-danger" role="alert">{saveError}</p> : null}
-          <div className="absolute right-3 top-3 z-10 flex items-center gap-2 rounded-md border border-border bg-surface-raised px-2.5 py-1.5 text-[12px] text-muted-foreground"><span>{t('editor.nodeCount', { count: nodes.length })}</span><span aria-hidden="true">·</span><span>{t('editor.edgeCount', { count: edges.length })}</span><Button variant="secondary" size="compact" className="sm:hidden" onClick={save} disabled={saveState === 'saving'}><Check className="size-4" />{t('common:actions.save')}</Button><Button variant="secondary" size="compact" className="sm:hidden" onClick={() => void runWorkflow()} disabled={runSubmitting || isNew || saveState !== 'saved' || !existing?.latestVersionId}>{t('editor.run')}</Button></div>
+          <div className="absolute right-3 top-3 z-10 flex items-center gap-2 rounded-md border border-border bg-surface-raised px-2.5 py-1.5 text-[12px] text-muted-foreground">
+            <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-compact" className="sm:hidden" type="button" aria-label={t('editor.alignFlow')} onClick={alignFlow} disabled={nodes.length < 2}><Workflow className="size-4" /></Button></TooltipTrigger><TooltipContent>{t('editor.alignFlow')}</TooltipContent></Tooltip>
+            <Button variant="ghost" size="compact" className="hidden sm:inline-flex" type="button" onClick={alignFlow} disabled={nodes.length < 2}><Workflow className="size-4" />{t('editor.alignFlow')}</Button>
+            <span>{t('editor.nodeCount', { count: nodes.length })}</span><span aria-hidden="true">·</span><span>{t('editor.edgeCount', { count: edges.length })}</span>
+            <Button variant="secondary" size="compact" className="sm:hidden" onClick={save} disabled={saveState === 'saving'}><Check className="size-4" />{t('common:actions.save')}</Button>
+            <Button variant="secondary" size="compact" className="sm:hidden" onClick={() => void runWorkflow()} disabled={runSubmitting || isNew || saveState !== 'saved' || !existing?.latestVersionId}>{t('editor.run')}</Button>
+          </div>
           {nodes.length === 0 ? <div className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center p-6 text-center"><div><Workflow className="mx-auto size-6 text-muted-foreground" aria-hidden="true" /><p className="mt-3 text-sm font-medium">{t('editor.emptyCanvas')}</p></div></div> : null}
           <ReactFlow<WorkflowCanvasNode, WorkflowCanvasEdge>
-            nodes={nodes}
-            edges={edges}
+            nodes={canvasNodes}
+            edges={canvasEdges}
             nodeTypes={workflowNodeTypes}
             colorMode={resolvedTheme}
             onInit={setFlowInstance}
@@ -932,14 +977,20 @@ function applyEdgePresentation(edge: WorkflowCanvasEdge, t: TFunction<'workflows
   const labels: string[] = [];
   if (condition?.kind === 'fallback') labels.push(t('editor.edgeModes.fallback'));
   if (condition?.kind === 'predicate') {
-    const value = edgeOperatorRequiresValue(condition.operator) ? ` ${JSON.stringify(condition.value)}` : '';
-    labels.push(`${condition.path} ${t(`editor.edgeOperators.${condition.operator}`)}${value}`);
+    const pathParts = condition.path.replace(/^\$\.?/, '').split('.').filter(Boolean);
+    const path = pathParts.at(-1) === 'choice' ? pathParts.at(-2) ?? condition.path : pathParts.at(-1) ?? condition.path;
+    const operator = edgeOperatorSymbol(condition.operator);
+    const value = typeof condition.value === 'string' ? condition.value || '""' : JSON.stringify(condition.value) ?? String(condition.value);
+    const label = condition.operator === 'equals' && edgeOperatorRequiresValue(condition.operator)
+      ? value
+      : `${path} ${operator}${edgeOperatorRequiresValue(condition.operator) ? ` ${value}` : ''}`;
+    labels.push(label.length > 28 ? `${label.slice(0, 25)}…` : label);
   }
-  if (edge.data?.maxTraversals !== undefined) labels.push(t('editor.edgeTraversalLabel', { count: edge.data.maxTraversals }));
+  if (edge.data?.maxTraversals !== undefined) labels.push(t('editor.edgeTraversalShort', { count: edge.data.maxTraversals }));
   return {
     ...edge,
     label: labels.join(' · ') || undefined,
-    labelStyle: { fill: 'currentColor', fontSize: 11 },
+    labelStyle: { fill: 'currentColor', fontSize: 10, fontWeight: 500 },
     labelBgStyle: { fill: 'var(--surface-raised)', fillOpacity: 0.92 },
     labelBgPadding: [4, 2],
     labelBgBorderRadius: 3,
@@ -949,6 +1000,108 @@ function applyEdgePresentation(edge: WorkflowCanvasEdge, t: TFunction<'workflows
 
 function edgeOperatorRequiresValue(operator: WorkflowEdgePredicateOperator): boolean {
   return operator === 'equals' || operator === 'notEquals' || operator === 'greaterThan' || operator === 'greaterThanOrEqual' || operator === 'lessThan' || operator === 'lessThanOrEqual';
+}
+
+function edgeOperatorSymbol(operator: WorkflowEdgePredicateOperator): string {
+  const symbols: Record<WorkflowEdgePredicateOperator, string> = {
+    equals: '=',
+    notEquals: '≠',
+    truthy: '?',
+    falsy: '!',
+    exists: '∃',
+    notExists: '∄',
+    greaterThan: '>',
+    greaterThanOrEqual: '≥',
+    lessThan: '<',
+    lessThanOrEqual: '≤',
+  };
+  return symbols[operator];
+}
+
+function calculateFlowLayout(nodes: WorkflowCanvasNode[], edges: WorkflowCanvasEdge[]): Map<string, { x: number; y: number }> {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const rank = new Map(nodes.map((node) => [node.id, 0]));
+  const indegree = new Map(nodes.map((node) => [node.id, 0]));
+  const successors = new Map(nodes.map((node) => [node.id, [] as string[]]));
+  const graphEdges = edges.filter((edge) => nodeById.has(edge.source) && nodeById.has(edge.target));
+  const feedbackEdgeIds = new Set(graphEdges
+    .filter((edge) => edge.data?.maxTraversals !== undefined)
+    .filter((edge) => isReachable(edge.target, edge.source, graphEdges.filter((candidate) => candidate.id !== edge.id)))
+    .map((edge) => edge.id));
+  const forwardEdges = graphEdges.filter((edge) => !feedbackEdgeIds.has(edge.id));
+
+  for (const edge of forwardEdges) {
+    successors.get(edge.source)?.push(edge.target);
+    indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1);
+  }
+
+  const byExistingPosition = (leftId: string, rightId: string) => {
+    const left = nodeById.get(leftId)!;
+    const right = nodeById.get(rightId)!;
+    return left.position.x - right.position.x || left.position.y - right.position.y || leftId.localeCompare(rightId);
+  };
+  const ready = nodes.filter((node) => indegree.get(node.id) === 0).map((node) => node.id).sort(byExistingPosition);
+  const order: string[] = [];
+
+  while (ready.length > 0) {
+    const nodeId = ready.shift()!;
+    order.push(nodeId);
+    for (const targetId of successors.get(nodeId) ?? []) {
+      rank.set(targetId, Math.max(rank.get(targetId) ?? 0, (rank.get(nodeId) ?? 0) + 1));
+      const remaining = (indegree.get(targetId) ?? 0) - 1;
+      indegree.set(targetId, remaining);
+      if (remaining === 0) {
+        ready.push(targetId);
+        ready.sort(byExistingPosition);
+      }
+    }
+  }
+
+  for (const node of nodes) {
+    if (!order.includes(node.id)) {
+      rank.set(node.id, Math.max(-1, ...rank.values()) + 1);
+      order.push(node.id);
+    }
+  }
+
+  const orderIndex = new Map(order.map((nodeId, index) => [nodeId, index]));
+  const columns = new Map<number, string[]>();
+  for (const nodeId of order) {
+    const column = rank.get(nodeId) ?? 0;
+    columns.set(column, [...(columns.get(column) ?? []), nodeId]);
+  }
+
+  const positions = new Map<string, { x: number; y: number }>();
+  for (const [columnRank, columnNodeIds] of [...columns.entries()].sort(([left], [right]) => left - right)) {
+    const incomingSources = new Map(columnNodeIds.map((nodeId) => [
+      nodeId,
+      forwardEdges.filter((edge) => edge.target === nodeId).map((edge) => orderIndex.get(edge.source) ?? 0),
+    ]));
+    columnNodeIds.sort((leftId, rightId) => {
+      const leftSources = incomingSources.get(leftId) ?? [];
+      const rightSources = incomingSources.get(rightId) ?? [];
+      const leftCenter = leftSources.length ? leftSources.reduce((sum, value) => sum + value, 0) / leftSources.length : orderIndex.get(leftId) ?? 0;
+      const rightCenter = rightSources.length ? rightSources.reduce((sum, value) => sum + value, 0) / rightSources.length : orderIndex.get(rightId) ?? 0;
+      return leftCenter - rightCenter || byExistingPosition(leftId, rightId);
+    });
+    columnNodeIds.forEach((nodeId, index) => {
+      positions.set(nodeId, { x: columnRank * 340, y: (index - (columnNodeIds.length - 1) / 2) * 160 });
+    });
+  }
+  return positions;
+}
+
+function isReachable(startNodeId: string, targetNodeId: string, edges: WorkflowCanvasEdge[]): boolean {
+  const pending = [startNodeId];
+  const visited = new Set<string>();
+  while (pending.length > 0) {
+    const nodeId = pending.pop();
+    if (!nodeId || visited.has(nodeId)) continue;
+    if (nodeId === targetNodeId) return true;
+    visited.add(nodeId);
+    for (const edge of edges) if (edge.source === nodeId) pending.push(edge.target);
+  }
+  return false;
 }
 
 function canConnect(connection: { source: string | null; sourceHandle?: string | null; target: string | null; targetHandle?: string | null }, nodes: WorkflowCanvasNode[], edges: WorkflowCanvasEdge[]): boolean {

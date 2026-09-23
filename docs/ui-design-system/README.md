@@ -189,8 +189,9 @@ Treat `@` selection in the Chat Bot composer as structured dispatch, not decorat
 ### Workflow Editor
 
 - Represent workflows on a focused React Flow node canvas with explicit input and output handles, directional edges, and persisted spatial layout.
+- Keep graph nodes compact: show the node name, kind, and named ports on the canvas, and place model and detailed configuration in the contextual inspector. Arrange the main path from left to right and give branches enough vertical separation to follow them.
 - Use a canvas with one right-side contextual panel. The panel shows the searchable node palette when nothing is selected and replaces it with the selected node or edge inspector.
-- Keep nodes visually consistent and expose essential node-owned parameters, including editable Text content, without requiring the inspector for common work.
+- Keep nodes visually consistent and compact. Expose the name, node kind, and named ports on the canvas; expose editable content and other node-owned parameters in the contextual inspector.
 - Add nodes through the searchable palette at a predictable viewport position and allow direct node dragging for spatial organization.
 - Provide familiar icon controls for zoom in, zoom out, fit view, and deletion.
 - Keep edge direction and handle compatibility visible through shape, persistent port labels, and valid or invalid interaction state rather than color alone.
@@ -199,10 +200,12 @@ Treat `@` selection in the Chat Bot composer as structured dispatch, not decorat
 - Use blue borders or indicators for the selected and currently executing node or edge. Selection belongs to the graph and must remain synchronized with contextual panel content and keyboard focus.
 - Represent successful and failed states through compact green or red markers rather than filling the whole node.
 - Render edges with restrained neutral strokes and reserve stronger treatment for selection and execution.
+- Shorten conditional edge labels to the decision value on the canvas; the inspector retains the full predicate. Selecting a graph item emphasizes its directly connected nodes and edges and softens unrelated paths. A subtle directional animation may run on those selected edges only, with a static equivalent for reduced-motion preferences.
+- Offer an explicit align action for dense graphs. It rearranges draft positions without changing graph behavior and leaves the draft unsaved until the user saves it.
 - Present AI-assisted edits in a side panel and make proposed structured operations understandable and reviewable.
 - Group workflow-level settings into General, Inputs, Execution, and Versioning sections, with advanced fields disclosed progressively.
 
-Persimmon progression through the graph is a distinctive WorkLite motif. It communicates selection and active execution while neutral surfaces and edges keep dense workflows readable. The initial graph supports acyclic data fan-out; conditional branches, joins, loops, and parallel execution remain outside the current product scope.
+Restrained blue emphasis communicates graph selection and active execution while neutral surfaces and edges keep dense workflows readable. Directional selection animation indicates the path being inspected, not Run progress.
 
 ### Runs and Logs
 
@@ -261,6 +264,11 @@ Before confirming a UI proposal, verify that it:
 - Introduces a documented design-system decision before implementation when no existing rule applies.
 
 ## Changelog
+
+### 2026-09-23 - Workflow canvas readability
+
+- Replaced parameter-heavy canvas cards with compact stage nodes and moved detailed configuration into the inspector.
+- Added direct-connection emphasis, reduced-motion directional selection feedback, concise condition labels, and explicit graph alignment while keeping execution state distinct from selection.
 
 ### 2026-09-22 - Paused Workflow Run
 

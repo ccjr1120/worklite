@@ -31,6 +31,7 @@
     "paletteHint": "Add Timer, Input, Agent, Choice Branch, TypeSafe System One, and data nodes.",
     "searchNodes": "Search nodes",
     "canvas": "Workflow canvas",
+    "alignFlow": "Align flow",
     "nodeCount": "{{count}} nodes",
     "edgeCount": "{{count}} connections",
     "agentNode": "Agent",
@@ -246,6 +247,7 @@
     "edgeMaxTraversals": "最大经过次数",
     "edgeMaxTraversalsHint": "设置正整数可限制循环次数；留空表示该路由不限制次数。",
     "edgeTraversalLabel": "最多 {{count}} 次",
+    "edgeTraversalShort": "Max {{count}}",
     "edgeOperators": {
       "equals": "等于",
       "notEquals": "不等于",

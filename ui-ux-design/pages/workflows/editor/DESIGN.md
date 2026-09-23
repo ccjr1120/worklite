@@ -52,7 +52,7 @@ The context bar contains breadcrumb, saved state, revision history, Workflow set
 
 The editor workspace has a central `@xyflow/react` canvas and one right-side contextual panel. React Flow selection is authoritative and synchronizes the selected node or edge with the panel. With no selection the panel shows the searchable node palette; selecting a node or edge replaces the palette with its inspector; clicking the canvas background or using the inspector's back action clears all graph selection and restores the palette. Palette and inspector content always use the panel's full available width.
 
-The canvas supports node dragging, handle-to-handle connection, edge selection and deletion, pointer-drag panning, free horizontal and vertical trackpad or wheel panning, pinch zoom, zoom controls, and fit-to-view. Ordinary wheel input pans instead of zooming. It intentionally renders no minimap and no canvas-wide selection outline: selected nodes use a persimmon node border, selected edges use a persimmon stroke, and keyboard focus remains visible on the focused node, edge, or control. React Flow primitives follow the resolved light or dark application theme.
+The canvas supports node dragging, handle-to-handle connection, edge selection and deletion, pointer-drag panning, free horizontal and vertical trackpad or wheel panning, pinch zoom, zoom controls, fit-to-view, and an explicit Align flow action. Ordinary wheel input pans instead of zooming. It intentionally renders no minimap and no canvas-wide selection outline. Compact stage nodes show the name, node kind, and named ports; configuration details stay in the inspector. The main path reads left to right, with branches separated vertically. Selected nodes and edges use the blue brand token, and keyboard focus remains visible on the focused node, edge, or control. React Flow primitives follow the resolved light or dark application theme.
 
 On smaller breakpoints the combined contextual panel becomes one drawer or sheet, opens automatically for a canvas selection, and closes when the fixed desktop panel becomes available. A bottom panel shows test output, logs, and artifacts.
 
@@ -65,6 +65,10 @@ Workflow-level settings are grouped into General, Inputs, Execution, and Version
 **Connect nodes.** Handle-to-handle connection validates against the port rules above. While connecting, compatible and incompatible targets have distinct visual states. An invalid or type-incompatible attempt leaves graph state unchanged and reports concisely. A connection that would close a cycle receives a bounded traversal limit rather than being rejected.
 
 **Configure a selection.** Selecting a node or edge opens its inspector. Node inspectors expose node-owned parameters directly. Edge selection reveals endpoints, routing mode, structured predicate controls, maximum traversals, and a remove command. Predicate controls take a dot-delimited source-output path, a supported comparison operator, and a JSON comparison value when the operator requires one. Fallback routes explain that they run only when no unconditional or predicate edge from the same source invocation matches. Conditional edges show a concise condition label on the canvas; bounded edges use a dashed line and a traversal-limit label. Pointer dragging is never required to review, configure, or remove graph objects.
+
+Selecting a node emphasizes its direct connections and adjacent nodes while softening unrelated paths. Selecting an edge emphasizes that edge and its endpoints. A slow directional stroke on emphasized edges identifies the inspected route; it does not claim that a Run is executing. Selection changes use restrained motion, and reduced-motion settings retain the same static contrast and arrows.
+
+**Align flow.** A canvas action arranges the current graph in left-to-right dependency columns, excluding bounded feedback edges from rank calculation and retaining clear spacing between nodes in each column. It changes draft positions only, preserves node and edge definitions, marks the draft unsaved, and fits the rearranged graph in view. Existing saved positions are left alone until the user invokes this action.
 
 **Save.** Persists the accumulated revision. The save state reports `Saving` and settles on `Saved`. A failure returns the state to `Unsaved changes` and keeps the reason visible in the canvas region rather than only in a toast. An invalid edge comparison value blocks the save and names that specific problem.
 
@@ -90,7 +94,7 @@ The Timer inspector's read-only runtime status is the one self-healing value her
 
 **TypeSafe System One** nodes expose a TypeSafe public model selector and a structured JSON `questions` editor. The required `state` input is supplied by a connected JSON upstream node. The inspector explains that the request is forwarded as typed state and questions, that object state remains available in the output, and that typed answers support downstream routing.
 
-**TypeSafe System One Map** nodes reuse that model selector, questions editor, and error policy, because those controls mean the same thing for both nodes. They add an items path naming the array inside the connected state, an optional context path for the shared value sent beside every element, an optional concurrent-request bound, and an optional ranking answer path. Order, result limit, and minimum score are disclosed only after a ranking path exists, so no control is shown that would order nothing. The questions hint states that the question set is sent once per element rather than once per Run, and the node body shows the selected model, the items path, and the question count.
+**TypeSafe System One Map** nodes reuse that model selector, questions editor, and error policy, because those controls mean the same thing for both nodes. They add an items path naming the array inside the connected state, an optional context path for the shared value sent beside every element, an optional concurrent-request bound, and an optional ranking answer path. Order, result limit, and minimum score are disclosed only after a ranking path exists, so no control is shown that would order nothing. The questions hint states that the question set is sent once per element rather than once per Run. The compact node body shows its kind and named ports; the inspector holds the selected model, items path, and question count.
 
 **Artifact** nodes expose name and artifact-type controls and explain that a successful Run creates the Artifact while the node output carries its reference.
 
@@ -126,7 +130,7 @@ The output panel contains only persisted output from a selected run. AI editing 
 | `workflows:editor.name` / `editor.input` / `editor.nodeName` | State |
 | `workflows:editor.nodePalette` / `editor.paletteHint` / `editor.searchNodes` | Action |
 | `workflows:editor.canvas` / `editor.emptyCanvas` | State |
-| `workflows:editor.zoomIn` / `editor.zoomOut` / `editor.fitView` | Action |
+| `workflows:editor.zoomIn` / `editor.zoomOut` / `editor.fitView` / `editor.alignFlow` | Action |
 | `workflows:editor.nodeCount` / `editor.edgeCount` | State |
 | `workflows:editor.contextPort` / `editor.inputPort` / `editor.outputPort` / `editor.dataPort` | State |
 | `workflows:editor.connections` / `editor.incomingConnections` / `editor.outgoingConnections` / `editor.connection` | State |
@@ -150,7 +154,7 @@ The output panel contains only persisted output from a selected run. AI editing 
 | `workflows:editor.wechatCoverHint` / `editor.wechatDraftHint` / `editor.wechatPublishPendingHint` | Constraint |
 | `workflows:editor.dashboardNode*` / `editor.dashboardRegion.*` / `editor.elementKinds.*` / `editor.element*` / `editor.field*` | State |
 | `workflows:editor.dashboardActivation` | Constraint |
-| `workflows:editor.edgeMode` / `editor.edgeModes.*` / `editor.edgeOperators.*` / `editor.edgeOutputPath` / `editor.edgeOperator` / `editor.edgeComparisonValue` / `editor.edgeMaxTraversals` / `editor.edgeTraversalLabel` | State |
+| `workflows:editor.edgeMode` / `editor.edgeModes.*` / `editor.edgeOperators.*` / `editor.edgeOutputPath` / `editor.edgeOperator` / `editor.edgeComparisonValue` / `editor.edgeMaxTraversals` / `editor.edgeTraversalLabel` / `editor.edgeTraversalShort` | State |
 | `workflows:editor.edgeFallbackHint` / `editor.edgeMaxTraversalsHint` | Constraint |
 | `workflows:editor.edgeComparisonInvalid` | Recovery |
 | `workflows:editor.run` / `editor.runVersion` / `editor.running` | Action, State |
@@ -177,17 +181,19 @@ The following keys are removed as orphans from features this editor no longer ha
 
 The graph is fully operable without pointer dragging: the palette adds nodes, and the inspector reviews, configures, and removes both nodes and edges. Selection stays synchronized between the canvas and the panel so keyboard focus and inspector content never disagree.
 
-Port labels and accessible names identify context and output semantics without relying on color. Persimmon marks selection and current execution only; completion and failure use semantic markers alongside text. Every icon-only control in the context bar and canvas carries an accessible name, and the zoom, fit-view, and deletion controls keep `40px` to `44px` touch targets at mobile widths. Save failures use `role="alert"`.
+Port labels and accessible names identify context and output semantics without relying on color. Blue marks selection and current execution only; completion and failure use semantic markers alongside text. Every icon-only control in the context bar and canvas carries an accessible name, and the zoom, fit-view, and deletion controls keep `40px` to `44px` touch targets at mobile widths. Save failures use `role="alert"`.
 
 ## Coverage Status
 
-Verified 2026-09-22. Differences found against `apps/web/src/routes/workflows/$workflowId.tsx`:
+Reviewed 2026-09-23 against `apps/web/src/routes/workflows/$workflowId.tsx` and `apps/web/src/components/workflow-canvas-nodes.tsx`. The compact node, concise route label, selection emphasis, reduced-motion, and explicit alignment behaviors are represented in code; they have not been visually checked in a running browser. Remaining differences found:
 
 - ~~The editor had no reusable JSON Choice Branch node.~~ Resolved: the palette, canvas, inspector, and graph serializer now expose `worklite/branch@1`; its outgoing conditions select one route in definition order.
 
 - ~~The editor had no TypeSafe System One Workflow node.~~ Resolved: the palette, canvas, inspector, and graph serializer now expose `typesafe/systemone@1`; its `state` input and typed `answers` output use the existing JSON port and edge-condition contract.
 
 - ~~`Run` created a Run but left the editor as the active surface.~~ Resolved: successful creation now navigates to the returned `/runs/:runId` detail route.
+
+- The Workflow layout has an explicit Align flow action, but a first-time user must activate it to apply the layered layout; saved coordinates are intentionally preserved on open.
 
 - No loading state for an existing Workflow. `useWorkflowQuery` destructures only `data`, so a pending load renders an empty canvas that is indistinguishable from an empty graph; the name field shows `editor.untitled` until the draft arrives.
 - No load-failure state. A failed Workflow query leaves the editor on an empty canvas with no explanation, and unsaved work could be attempted against a draft that never loaded.
@@ -205,6 +211,11 @@ Verified 2026-09-22. Differences found against `apps/web/src/routes/workflows/$w
 - Added the per-element TypeSafe node to the palette, canvas, and contextual inspector. It reuses the existing model selector, questions editor, and error policy rather than introducing a second grammar for the same controls.
 - Added items path, context path, concurrency, and ranking controls, disclosing ranking order, limit, and minimum only after a ranking path exists so the inspector never shows a control that orders nothing.
 - Introduced no new color, icon, or layout language: the node uses the neutral node surface, the shared single `state` port, and the existing selection, focus, and execution treatments in both themes.
+
+### 2026-09-23 - Workflow canvas readability
+
+- Replaced parameter-heavy node cards with compact stage nodes that keep names, node kinds, and named ports visible while moving detailed configuration into the inspector.
+- Added a draft-only layered layout action that ignores bounded feedback edges, plus concise condition labels and selected-path emphasis with a static reduced-motion state.
 
 ### 2026-09-22 - TypeSafe System One Workflow node
 

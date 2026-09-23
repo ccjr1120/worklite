@@ -55,170 +55,95 @@ export type WorkflowCanvasEdgeData = {
 
 export type WorkflowCanvasEdge = Edge<WorkflowCanvasEdgeData>;
 
-const nodeClass = 'relative min-w-[220px] rounded-md border bg-surface-raised text-foreground shadow-sm';
-const headerClass = 'flex items-center gap-2 border-b border-border px-3 py-2 text-[13px] font-semibold';
+const nodeClass = 'relative w-[220px] rounded-md border bg-surface-raised text-foreground transition-[border-color,box-shadow] duration-150';
 const handleClass = 'workflow-node-handle !h-3 !w-3 border-2 border-surface-raised';
 
 function nodeClassName(selected: boolean): string {
-  return cn(nodeClass, selected ? 'border-brand ring-2 ring-brand/35' : 'border-border');
+  return cn('workflow-stage-card', nodeClass, selected ? 'border-brand ring-2 ring-brand/25' : 'border-border hover:border-foreground/25');
 }
 
-function NodeHeader({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
-  return <div className={headerClass}>{icon}<span className="min-w-0 truncate">{children}</span></div>;
-}
-
-function InputNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
+function WorkflowStageNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
   const { t } = useTranslation('workflows');
-  return <div className={nodeClassName(selected)}>
-    <NodeHeader icon={<Braces className="size-4 text-info" aria-hidden="true" />}>{data.label}</NodeHeader>
-    <div className="px-3 pt-3 text-[12px] text-muted-foreground">{t('editor.runPayload')}</div>
-    <div className="relative flex h-9 items-center justify-end px-3 text-[11px] font-medium text-muted-foreground"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
-  </div>;
-}
+  const icon = {
+    input: <Braces className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
+    timer: <Timer className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
+    agent: <Bot className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
+    branch: <GitBranch className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
+    systemOne: <Braces className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
+    systemOneMap: <ListChecks className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
+    dashboard: <LayoutDashboard className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
+    artifact: <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
+    artifactQuery: <FileSearch className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
+    wechatPublish: <Send className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
+    image: <ImageIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />,
+  }[data.nodeType];
+  const kind = {
+    input: t('editor.workflowInputNode'),
+    timer: t('editor.timerNode'),
+    agent: t('editor.agentNode'),
+    branch: t('editor.branchNode'),
+    systemOne: t('editor.systemOneNode'),
+    systemOneMap: t('editor.systemOneMapNode'),
+    dashboard: t('editor.dashboardNode'),
+    artifact: t('editor.artifactNode'),
+    artifactQuery: t('editor.artifactQueryNode'),
+    wechatPublish: t('editor.wechatNode'),
+    image: t('editor.imageNode'),
+  }[data.nodeType];
+  const inputs = {
+    input: [],
+    timer: [],
+    agent: [{ id: 'context', label: t('editor.contextPort') }],
+    branch: [{ id: 'value', label: t('editor.branchValuePort') }],
+    systemOne: [{ id: 'state', label: t('editor.systemOneStatePort') }],
+    systemOneMap: [{ id: 'state', label: t('editor.systemOneStatePort') }],
+    dashboard: [{ id: 'data', label: t('editor.dataPort') }],
+    artifact: [{ id: 'data', label: t('editor.dataPort') }],
+    artifactQuery: [{ id: 'request', label: t('editor.queryRequestPort') }],
+    wechatPublish: [
+      { id: 'article', label: t('editor.wechatArticlePort') },
+      { id: 'metadata', label: t('editor.wechatMetadataPort') },
+      ...(data.wechatNodeVersion === '1' ? [] : [{ id: 'coverImage', label: t('editor.wechatCoverPort') }]),
+    ],
+    image: [{ id: 'prompt', label: t('editor.imagePromptPort') }],
+  }[data.nodeType];
+  const rowCount = Math.max(inputs.length, 1);
 
-function TimerNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
-  const { t } = useTranslation('workflows');
-  const intervalMinutes = Math.round((data.timerIntervalSeconds ?? 300) / 60);
-  return <div className={nodeClassName(selected)}>
-    <NodeHeader icon={<Timer className="size-4 text-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
-    <div className="px-3 py-3 text-[12px] text-muted-foreground">{data.timerEnabled === false ? t('editor.timerDisabled') : t('editor.timerEveryInterval', { interval: intervalMinutes })}</div>
-    <div className="relative flex h-9 items-center justify-end px-3 text-[11px] font-medium text-muted-foreground"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
-  </div>;
-}
-
-function DashboardNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
-  const { t } = useTranslation('workflows');
-  const layout = data.dashboardLayout;
-  const elementCount = layout ? layout.header.length + layout.main.length + layout.footer.length : 0;
-  return <div className={nodeClassName(selected)}>
-    <NodeHeader icon={<LayoutDashboard className="size-4 text-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
-    <div className="mt-3 border-t border-border">
-      <PortRow label={t('editor.dataPort')}><Handle type="target" position={Position.Left} id="data" className={handleClass} aria-label={t('editor.dataPort')} /></PortRow>
-      <div className="relative flex h-7 items-center justify-end px-3 text-[11px] font-medium"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
+  return (
+    <div className={nodeClassName(selected)}>
+      <div className="flex min-h-12 items-center gap-2 px-3 py-2">
+        {icon}
+        <div className="min-w-0">
+          <p className="truncate text-[12px] font-semibold" title={data.label}>{data.label}</p>
+          {data.label.trim() !== kind ? <p className="truncate text-[10px] leading-4 text-muted-foreground">{kind}</p> : null}
+        </div>
+      </div>
+      <div className="border-t border-border/70 px-3 py-1">
+        {Array.from({ length: rowCount }, (_, index) => {
+          const input = inputs[index];
+          const isOutputRow = index === rowCount - 1;
+          return (
+            <div key={input?.id ?? 'output'} className="relative flex h-6 items-center justify-between gap-2 text-[10px] font-medium text-muted-foreground">
+              {input ? <><Handle type="target" position={Position.Left} id={input.id} className={handleClass} aria-label={input.label} /><span className="truncate">{input.label}</span></> : <span />}
+              {isOutputRow ? <><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></> : null}
+            </div>
+          );
+        })}
+      </div>
     </div>
-    <div className="px-3 pb-3 text-[11px] text-muted-foreground">{t('editor.dashboardElementCount', { count: elementCount })}</div>
-  </div>;
-}
-
-function ArtifactNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
-  const { t } = useTranslation('workflows');
-  return <div className={nodeClassName(selected)}>
-    <NodeHeader icon={<FileText className="size-4 text-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
-    <div className="mt-3 border-t border-border">
-      <PortRow label={t('editor.dataPort')}><Handle type="target" position={Position.Left} id="data" className={handleClass} aria-label={t('editor.dataPort')} /></PortRow>
-      <div className="relative flex h-7 items-center justify-end px-3 text-[11px] font-medium"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
-    </div>
-    <div className="px-3 pb-3 text-[11px] text-muted-foreground">{data.artifactName || t('editor.artifactUnnamed')} · {t(`editor.artifactTypes.${data.artifactType ?? 'text'}`)}</div>
-  </div>;
-}
-
-function ArtifactQueryNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
-  const { t } = useTranslation('workflows');
-  return <div className={nodeClassName(selected)}>
-    <NodeHeader icon={<FileSearch className="size-4 text-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
-    <div className="mt-3 border-t border-border py-1">
-      <PortRow label={t('editor.queryRequestPort')}><Handle type="target" position={Position.Left} id="request" className={handleClass} aria-label={t('editor.queryRequestPort')} /></PortRow>
-      <div className="relative flex h-7 items-center justify-end px-3 text-[11px] font-medium"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
-    </div>
-    <div className="px-3 pb-3 text-[11px] text-muted-foreground">{data.queryName || t('editor.artifactUnnamed')}</div>
-  </div>;
-}
-
-function AgentNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
-  const { t } = useTranslation('workflows');
-  return <div className={cn(nodeClassName(selected), 'w-[300px]')}>
-    <NodeHeader icon={<Bot className="size-4 text-info" aria-hidden="true" />}>{data.label}</NodeHeader>
-    <div className="py-3 text-[12px] text-muted-foreground">
-      <p className="px-3 pb-1">{data.model || t('editor.selectModel')}</p>
-      <PortRow label={t('editor.contextPort')}><Handle type="target" position={Position.Left} id="context" className={handleClass} aria-label={t('editor.contextPort')} /></PortRow>
-      <div className="relative flex h-7 items-center justify-end px-3 text-[11px] font-medium"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
-    </div>
-  </div>;
-}
-
-function BranchNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
-  const { t } = useTranslation('workflows');
-  return <div className={nodeClassName(selected)}>
-    <NodeHeader icon={<GitBranch className="size-4 text-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
-    <div className="mt-3 border-t border-border py-1">
-      <PortRow label={t('editor.branchValuePort')}><Handle type="target" position={Position.Left} id="value" className={handleClass} aria-label={t('editor.branchValuePort')} /></PortRow>
-      <div className="relative flex h-7 items-center justify-end px-3 text-[11px] font-medium"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
-    </div>
-    <div className="px-3 pb-3 text-[11px] text-muted-foreground">{t('editor.branchSelectionHint')}</div>
-  </div>;
-}
-
-function SystemOneNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
-  const { t } = useTranslation('workflows');
-  return <div className={cn(nodeClassName(selected), 'w-[300px]')}>
-    <NodeHeader icon={<Braces className="size-4 text-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
-    <div className="mt-3 border-t border-border py-1">
-      <PortRow label={t('editor.systemOneStatePort')}><Handle type="target" position={Position.Left} id="state" className={handleClass} aria-label={t('editor.systemOneStatePort')} /></PortRow>
-      <div className="relative flex h-7 items-center justify-end px-3 text-[11px] font-medium"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
-    </div>
-    <div className="px-3 pb-3 text-[11px] text-muted-foreground"><p>{data.model || t('editor.systemOneSelectModel')}</p><p>{t('editor.systemOneQuestionCount', { count: Object.keys(data.systemOneQuestions ?? {}).length })}</p></div>
-  </div>;
-}
-
-function SystemOneMapNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
-  const { t } = useTranslation('workflows');
-  return <div className={cn(nodeClassName(selected), 'w-[300px]')}>
-    <NodeHeader icon={<ListChecks className="size-4 text-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
-    <div className="mt-3 border-t border-border py-1">
-      <PortRow label={t('editor.systemOneStatePort')}><Handle type="target" position={Position.Left} id="state" className={handleClass} aria-label={t('editor.systemOneStatePort')} /></PortRow>
-      <div className="relative flex h-7 items-center justify-end px-3 text-[11px] font-medium"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
-    </div>
-    <div className="px-3 pb-3 text-[11px] text-muted-foreground">
-      <p>{data.model || t('editor.systemOneSelectModel')}</p>
-      <p className="font-mono">{data.systemOneItemsPath || t('editor.systemOneMapItemsPathEmpty')}</p>
-      <p>{t('editor.systemOneQuestionCount', { count: Object.keys(data.systemOneQuestions ?? {}).length })}</p>
-    </div>
-  </div>;
-}
-
-function WechatPublishNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
-  const { t } = useTranslation('workflows');
-  return <div className={nodeClassName(selected)}>
-    <NodeHeader icon={<Send className="size-4 text-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
-    <div className="mt-3 border-t border-border py-1">
-      <PortRow label={t('editor.wechatArticlePort')}><Handle type="target" position={Position.Left} id="article" className={handleClass} aria-label={t('editor.wechatArticlePort')} /></PortRow>
-      <PortRow label={t('editor.wechatMetadataPort')}><Handle type="target" position={Position.Left} id="metadata" className={handleClass} aria-label={t('editor.wechatMetadataPort')} /></PortRow>
-      {data.wechatNodeVersion !== '1' ? <PortRow label={t('editor.wechatCoverPort')}><Handle type="target" position={Position.Left} id="coverImage" className={handleClass} aria-label={t('editor.wechatCoverPort')} /></PortRow> : null}
-      <div className="relative flex h-7 items-center justify-end px-3 text-[11px] font-medium"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
-    </div>
-    <div className="px-3 pb-3 text-[11px] text-muted-foreground">{t(`editor.wechatModes.${data.wechatMode ?? 'draft'}`)}</div>
-  </div>;
-}
-
-function ImageNode({ data, selected }: NodeProps<WorkflowCanvasNode>) {
-  const { t } = useTranslation('workflows');
-  return <div className={cn(nodeClassName(selected), 'w-[280px]')}>
-    <NodeHeader icon={<ImageIcon className="size-4 text-foreground" aria-hidden="true" />}>{data.label}</NodeHeader>
-    <div className="mt-3 border-t border-border py-1">
-      <PortRow label={t('editor.imagePromptPort')}><Handle type="target" position={Position.Left} id="prompt" className={handleClass} aria-label={t('editor.imagePromptPort')} /></PortRow>
-      <div className="relative flex h-7 items-center justify-end px-3 text-[11px] font-medium"><span>{t('editor.outputPort')}</span><Handle type="source" position={Position.Right} id="output" className={handleClass} aria-label={t('editor.outputPort')} /></div>
-    </div>
-    <div className="px-3 pb-3 text-[11px] text-muted-foreground">
-      <p>codex/gpt-image-2</p>
-      <p>{t('editor.imageSummary', { count: data.imageCount ?? 1, background: t(`editor.imageBackgrounds.${data.imageBackground ?? 'opaque'}`), quality: t(`editor.imageQualities.${data.imageQuality ?? 'medium'}`), size: data.imageSize ?? '1024x1024' })}</p>
-    </div>
-  </div>;
-}
-
-function PortRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div className="relative flex h-7 items-center px-3 text-[11px] font-medium">{children}<span>{label}</span></div>;
+  );
 }
 
 export const workflowNodeTypes = {
-  input: InputNode,
-  timer: TimerNode,
-  agent: AgentNode,
-  branch: BranchNode,
-  systemOne: SystemOneNode,
-  systemOneMap: SystemOneMapNode,
-  dashboard: DashboardNode,
-  artifact: ArtifactNode,
-  artifactQuery: ArtifactQueryNode,
-  wechatPublish: WechatPublishNode,
-  image: ImageNode,
+  input: WorkflowStageNode,
+  timer: WorkflowStageNode,
+  agent: WorkflowStageNode,
+  branch: WorkflowStageNode,
+  systemOne: WorkflowStageNode,
+  systemOneMap: WorkflowStageNode,
+  dashboard: WorkflowStageNode,
+  artifact: WorkflowStageNode,
+  artifactQuery: WorkflowStageNode,
+  wechatPublish: WorkflowStageNode,
+  image: WorkflowStageNode,
 };

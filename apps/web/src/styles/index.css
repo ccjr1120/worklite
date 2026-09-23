@@ -233,23 +233,66 @@
   outline-offset: 3px;
 }
 
+.workflow-react-flow .react-flow__node {
+  transition: opacity 150ms ease-out;
+}
+
+.workflow-react-flow .react-flow__node.workflow-node-muted {
+  opacity: 0.28;
+}
+
+.workflow-react-flow .workflow-stage-card {
+  transition: border-color 150ms ease-out, box-shadow 150ms ease-out;
+}
+
+.workflow-react-flow .workflow-node-related .workflow-stage-card {
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
+}
+
 .workflow-react-flow .react-flow__edge.selected .react-flow__edge-path,
 .workflow-react-flow .react-flow__edge:focus-visible .react-flow__edge-path {
   stroke: var(--brand);
   stroke-width: 2;
 }
 
+.workflow-react-flow .react-flow__edge {
+  transition: opacity 150ms ease-out;
+}
+
+.workflow-react-flow .react-flow__edge.workflow-edge-muted {
+  opacity: 0.18;
+}
+
+.workflow-react-flow .react-flow__edge.workflow-edge-emphasized .react-flow__edge-path {
+  stroke: var(--brand);
+  stroke-width: 2;
+  stroke-dasharray: 8 7;
+  animation: workflow-edge-flow 1.6s linear infinite;
+}
+
+.workflow-react-flow .react-flow__edge.workflow-edge-emphasized.workflow-edge-bounded .react-flow__edge-path {
+  stroke-dasharray: 4 5;
+}
+
+@keyframes workflow-edge-flow {
+  to { stroke-dashoffset: -30; }
+}
+
 .workflow-node-handle {
-  background: var(--brand) !important;
+  background: var(--muted-foreground) !important;
   transition: background-color 120ms ease-out, box-shadow 120ms ease-out;
 }
 
-.workflow-node-handle.connecting {
+.workflow-react-flow .react-flow__node.selected .workflow-node-handle {
+  background: var(--brand) !important;
+}
+
+.workflow-react-flow .react-flow__node .workflow-node-handle.connecting {
   background: var(--danger) !important;
   box-shadow: 0 0 0 3px var(--danger-subtle);
 }
 
-.workflow-node-handle.connecting.valid {
+.workflow-react-flow .react-flow__node .workflow-node-handle.connecting.valid {
   background: var(--success) !important;
   box-shadow: 0 0 0 3px var(--success-subtle);
 }
@@ -277,5 +320,17 @@
   .workflow-react-flow .react-flow__controls-button {
     width: 40px;
     height: 40px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workflow-react-flow .react-flow__node,
+  .workflow-react-flow .workflow-stage-card,
+  .workflow-react-flow .react-flow__edge {
+    transition: none;
+  }
+
+  .workflow-react-flow .react-flow__edge.workflow-edge-emphasized .react-flow__edge-path {
+    animation: none;
   }
 }

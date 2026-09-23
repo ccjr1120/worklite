@@ -84,6 +84,10 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-09-23 - Compact Workflow flow view
+
+- Updated the [Workflow Editor specification](pages/workflows/editor/DESIGN.md) for compact stage nodes, concise route labels, selection path emphasis, reduced-motion directional feedback, and explicit draft alignment.
+
 ### 2026-09-22 - Run pause and resume
 
 - Added reversible Run pause and resume controls to the Run Detail acceptance contract, with a warning paused status and control-local feedback.
