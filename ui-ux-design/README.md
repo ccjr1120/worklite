@@ -88,6 +88,11 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 - Updated the [Workflow Editor specification](pages/workflows/editor/DESIGN.md) for compact stage nodes, concise route labels, selection path emphasis, reduced-motion directional feedback, and explicit draft alignment.
 
+### 2026-09-23 - Workflow canvas navigation
+
+- Made existing Workflow graphs open in a left-to-right dependency layout, with the viewport fitted after graph hydration, horizontal wheel panning, and two-axis canvas dragging.
+- Kept saved graph coordinates and save state unchanged on open; manual node movement remains a draft edit.
+
 ### 2026-09-22 - Run pause and resume
 
 - Added reversible Run pause and resume controls to the Run Detail acceptance contract, with a warning paused status and control-local feedback.

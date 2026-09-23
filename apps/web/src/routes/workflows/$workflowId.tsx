@@ -74,15 +74,19 @@ function WorkflowEditorPage() {
   const [systemOneQuestionDrafts, setSystemOneQuestionDrafts] = useState<Record<string, string>>({});
   const [systemOneQuestionErrors, setSystemOneQuestionErrors] = useState<Record<string, boolean>>({});
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<WorkflowCanvasNode, WorkflowCanvasEdge> | null>(null);
+  const initialLayoutWorkflowId = useRef<string | null>(null);
+  const pendingFitView = useRef(false);
   const canvasRef = useRef<HTMLElement>(null);
   const navigate = useNavigate();
 
-  const hydrateDefinition = useCallback((definition: WorkflowDefinition, preferredNodeId?: string | null) => {
+  const hydrateDefinition = useCallback((definition: WorkflowDefinition, preferredNodeId?: string | null, arrangeOnLoad = false) => {
     const nextNodes = toFlowNodes(definition);
     const nextEdges = toFlowEdges(definition, t);
+    const positions = arrangeOnLoad ? calculateFlowLayout(nextNodes, nextEdges) : new Map<string, { x: number; y: number }>();
     const nextSelection = preferredNodeId && nextNodes.some((node) => node.id === preferredNodeId) ? preferredNodeId : null;
-    setNodes(nextNodes.map((node) => ({ ...node, selected: node.id === nextSelection })));
+    setNodes(nextNodes.map((node) => ({ ...node, position: positions.get(node.id) ?? node.position, selected: node.id === nextSelection })));
     setEdges(nextEdges.map((edge) => ({ ...edge, selected: false })));
+    pendingFitView.current = arrangeOnLoad && nextNodes.length > 0;
     setEdgeValueDrafts({});
     setEdgeValueErrors({});
     setSystemOneQuestionDrafts({});
@@ -94,7 +98,9 @@ function WorkflowEditorPage() {
     setName(existing.name);
     if (existing.draft) {
       const definition = existing.draft.definition;
-      hydrateDefinition(definition);
+      const arrangeOnLoad = initialLayoutWorkflowId.current !== workflowId;
+      hydrateDefinition(definition, undefined, arrangeOnLoad);
+      initialLayoutWorkflowId.current = workflowId;
       setInput(typeof definition.input.example === 'string' ? definition.input.example : '');
       setExecutionPolicy(definition.defaults.errorPolicy);
       setDraftRevisionId(existing.draft.revisionId);
@@ -104,6 +110,17 @@ function WorkflowEditorPage() {
     }
     setSaveState('saved');
   }, [existing, hydrateDefinition]);
+
+  useEffect(() => {
+    if (!pendingFitView.current || !flowInstance || nodes.length === 0) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (!pendingFitView.current) return;
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      void flowInstance.fitView({ padding: 0.2, duration: reducedMotion ? 0 : 180 });
+      pendingFitView.current = false;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [flowInstance, nodes]);
 
   useEffect(() => {
     const desktopPanel = window.matchMedia('(min-width: 1024px)');
@@ -857,8 +874,11 @@ function WorkflowEditorPage() {
             multiSelectionKeyCode={null}
             selectionKeyCode={null}
             panOnScroll
-            panOnScrollMode={PanOnScrollMode.Free}
+            panOnScrollMode={PanOnScrollMode.Horizontal}
+            panOnDrag
             zoomOnScroll={false}
+            zoomOnPinch
+            minZoom={0.7}
             fitView
             fitViewOptions={{ padding: 0.2, duration: 180 }}
             proOptions={{ hideAttribution: true }}

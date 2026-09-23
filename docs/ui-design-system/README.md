@@ -189,7 +189,7 @@ Treat `@` selection in the Chat Bot composer as structured dispatch, not decorat
 ### Workflow Editor
 
 - Represent workflows on a focused React Flow node canvas with explicit input and output handles, directional edges, and persisted spatial layout.
-- Keep graph nodes compact: show the node name, kind, and named ports on the canvas, and place model and detailed configuration in the contextual inspector. Arrange the main path from left to right and give branches enough vertical separation to follow them.
+- Keep graph nodes compact: show the node name, kind, and named ports on the canvas, and place model and detailed configuration in the contextual inspector. On load, derive a left-to-right dependency layout from unbounded edges with enough vertical separation between branches; fit the hydrated graph into view with a readable minimum scale, advance horizontally by wheel or trackpad, and allow two-axis canvas dragging.
 - Use a canvas with one right-side contextual panel. The panel shows the searchable node palette when nothing is selected and replaces it with the selected node or edge inspector.
 - Keep nodes visually consistent and compact. Expose the name, node kind, and named ports on the canvas; expose editable content and other node-owned parameters in the contextual inspector.
 - Add nodes through the searchable palette at a predictable viewport position and allow direct node dragging for spatial organization.
@@ -269,6 +269,11 @@ Before confirming a UI proposal, verify that it:
 
 - Replaced parameter-heavy canvas cards with compact stage nodes and moved detailed configuration into the inspector.
 - Added direct-connection emphasis, reduced-motion directional selection feedback, concise condition labels, and explicit graph alignment while keeping execution state distinct from selection.
+
+### 2026-09-23 - Workflow canvas navigation
+
+- Applied the left-to-right dependency layout when an existing graph loads and fit the viewport after asynchronous node hydration.
+- Made horizontal wheel navigation and two-axis canvas dragging explicit; the fit scale has a readable minimum so wide workflows can be panned instead of shrinking node cards to fit.
 
 ### 2026-09-22 - Paused Workflow Run
 
