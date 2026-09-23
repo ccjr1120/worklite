@@ -74,6 +74,7 @@ function WorkflowEditorPage() {
   const [systemOneQuestionDrafts, setSystemOneQuestionDrafts] = useState<Record<string, string>>({});
   const [systemOneQuestionErrors, setSystemOneQuestionErrors] = useState<Record<string, boolean>>({});
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<WorkflowCanvasNode, WorkflowCanvasEdge> | null>(null);
+  const appliedLayoutSignature = useRef('');
   const initialLayoutWorkflowId = useRef<string | null>(null);
   const pendingFitView = useRef(false);
   const canvasRef = useRef<HTMLElement>(null);
@@ -92,6 +93,11 @@ function WorkflowEditorPage() {
     setSystemOneQuestionDrafts({});
     setSystemOneQuestionErrors({});
   }, [setEdges, setNodes, t]);
+
+  const graphLayoutSignature = useMemo(() => JSON.stringify([
+    nodes.map((node) => node.id),
+    edges.map((edge) => [edge.source, edge.target, edge.data?.maxTraversals !== undefined]),
+  ]), [edges, nodes]);
 
   useEffect(() => {
     if (!existing) return;
@@ -121,6 +127,23 @@ function WorkflowEditorPage() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [flowInstance, nodes]);
+
+  useEffect(() => {
+    if (graphLayoutSignature === appliedLayoutSignature.current) return;
+    appliedLayoutSignature.current = graphLayoutSignature;
+    if (nodes.length === 0) return;
+    const positions = calculateFlowLayout(nodes, edges);
+    setNodes((current) => {
+      let changed = false;
+      const next = current.map((node) => {
+        const position = positions.get(node.id);
+        if (!position || (node.position.x === position.x && node.position.y === position.y)) return node;
+        changed = true;
+        return { ...node, position };
+      });
+      return changed ? next : current;
+    });
+  }, [edges, graphLayoutSignature, nodes, setNodes]);
 
   useEffect(() => {
     const desktopPanel = window.matchMedia('(min-width: 1024px)');
@@ -1040,6 +1063,7 @@ function edgeOperatorSymbol(operator: WorkflowEdgePredicateOperator): string {
 
 function calculateFlowLayout(nodes: WorkflowCanvasNode[], edges: WorkflowCanvasEdge[]): Map<string, { x: number; y: number }> {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const nodeOrder = new Map(nodes.map((node, index) => [node.id, index]));
   const rank = new Map(nodes.map((node) => [node.id, 0]));
   const indegree = new Map(nodes.map((node) => [node.id, 0]));
   const successors = new Map(nodes.map((node) => [node.id, [] as string[]]));
@@ -1055,12 +1079,8 @@ function calculateFlowLayout(nodes: WorkflowCanvasNode[], edges: WorkflowCanvasE
     indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1);
   }
 
-  const byExistingPosition = (leftId: string, rightId: string) => {
-    const left = nodeById.get(leftId)!;
-    const right = nodeById.get(rightId)!;
-    return left.position.x - right.position.x || left.position.y - right.position.y || leftId.localeCompare(rightId);
-  };
-  const ready = nodes.filter((node) => indegree.get(node.id) === 0).map((node) => node.id).sort(byExistingPosition);
+  const byDefinitionOrder = (leftId: string, rightId: string) => (nodeOrder.get(leftId) ?? 0) - (nodeOrder.get(rightId) ?? 0);
+  const ready = nodes.filter((node) => indegree.get(node.id) === 0).map((node) => node.id).sort(byDefinitionOrder);
   const order: string[] = [];
 
   while (ready.length > 0) {
@@ -1072,7 +1092,7 @@ function calculateFlowLayout(nodes: WorkflowCanvasNode[], edges: WorkflowCanvasE
       indegree.set(targetId, remaining);
       if (remaining === 0) {
         ready.push(targetId);
-        ready.sort(byExistingPosition);
+        ready.sort(byDefinitionOrder);
       }
     }
   }
@@ -1102,10 +1122,15 @@ function calculateFlowLayout(nodes: WorkflowCanvasNode[], edges: WorkflowCanvasE
       const rightSources = incomingSources.get(rightId) ?? [];
       const leftCenter = leftSources.length ? leftSources.reduce((sum, value) => sum + value, 0) / leftSources.length : orderIndex.get(leftId) ?? 0;
       const rightCenter = rightSources.length ? rightSources.reduce((sum, value) => sum + value, 0) / rightSources.length : orderIndex.get(rightId) ?? 0;
-      return leftCenter - rightCenter || byExistingPosition(leftId, rightId);
+      return leftCenter - rightCenter || byDefinitionOrder(leftId, rightId);
     });
     columnNodeIds.forEach((nodeId, index) => {
-      positions.set(nodeId, { x: columnRank * 340, y: (index - (columnNodeIds.length - 1) / 2) * 160 });
+      const columnSpacing = 340;
+      const laneSpacing = 160;
+      positions.set(nodeId, {
+        x: columnRank * columnSpacing,
+        y: (index - (columnNodeIds.length - 1) / 2) * laneSpacing,
+      });
     });
   }
   return positions;

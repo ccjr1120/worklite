@@ -93,6 +93,11 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 - Made existing Workflow graphs open in a left-to-right dependency layout, with the viewport fitted after graph hydration, horizontal wheel panning, and two-axis canvas dragging.
 - Kept saved graph coordinates and save state unchanged on open; manual node movement remains a draft edit.
 
+### 2026-09-23 - Workflow coordinate layout
+
+- Defined `x` from dependency rank and `y` from symmetric lanes, with mean incoming-source topological order and graph definition order providing stable parallel-node placement.
+- Recalculate the complete layout whenever nodes or edges are added, removed, connected, or reconnected.
+
 ### 2026-09-22 - Run pause and resume
 
 - Added reversible Run pause and resume controls to the Run Detail acceptance contract, with a warning paused status and control-local feedback.
