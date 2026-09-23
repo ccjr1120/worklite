@@ -90,9 +90,9 @@ Development and deployment profiles must use separate port ranges and data direc
 
 The development profile uses Web port `3390`, API port `3391`, and Portkey Gateway port `3392`. The local deployment profile remains on Web port `23390`, API port `23391`, and Portkey Gateway port `23392`. Do not add listeners, redirects, or fallbacks for previous development ports.
 
-## Git Worktree Directory Rule
+## Git Branch and Worktree Rule
 
-Place additional worktrees in the parent directory of the primary checkout. Name each worktree as `../<repository-name>-<purpose>`, such as `../work-lite-workflow-optimization`.
+Make authorized project changes directly on the `main` branch in the primary checkout. Do not create feature branches or additional worktrees unless the user explicitly requests them. Preserve existing local changes: inspect the working tree first, and do not commit or discard unrelated work. When the user requests a separate worktree, place it in the parent directory of the primary checkout and name it `../<repository-name>-<purpose>`, such as `../work-lite-workflow-optimization`.
 
 ## GitHub Research Rule
 
