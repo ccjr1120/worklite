@@ -864,6 +864,14 @@ function citationNumberFor(url: string, label: string, context: CitationContext)
   return number;
 }
 
+// A Chinese author indents a paragraph with two U+3000 spaces out of habit, and the paragraph styles
+// above already carry text-indent, so the two stack into a four-character indent. Indentation is this
+// renderer's decision, so the authored one is dropped here instead of being legislated in a prompt,
+// where every future writer would have to be told again and any drift would reach publication.
+function stripAuthoredIndent(html: string): string {
+  return html.replace(/^[\u3000\u00a0\s]+/, '');
+}
+
 function renderTokens(tokens: Token[], context: CitationContext, decorateLeadParagraph = false, paragraphStyle = PARAGRAPH_STYLE): string {
   const leadParagraphIndex = decorateLeadParagraph ? tokens.findIndex((token) => token.type === 'paragraph') : -1;
   return tokens.map((token, index) => renderBlockToken(token, context, index === leadParagraphIndex, paragraphStyle)).join('');
@@ -876,7 +884,7 @@ function renderBlockToken(token: Token, context: CitationContext, isLeadParagrap
     case 'html':
       return '';
     case 'paragraph':
-      return `<p style="${isLeadParagraph ? LEAD_PARAGRAPH_STYLE : paragraphStyle}">${renderInlineTokens((token as Tokens.Paragraph).tokens, context)}</p>`;
+      return `<p style="${isLeadParagraph ? LEAD_PARAGRAPH_STYLE : paragraphStyle}">${stripAuthoredIndent(renderInlineTokens((token as Tokens.Paragraph).tokens, context))}</p>`;
     case 'heading':
       return renderHeading(token.depth, renderInlineTokens((token as Tokens.Heading).tokens, context));
     case 'code':

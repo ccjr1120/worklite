@@ -211,7 +211,7 @@ export class AiSdkModelGateway implements ModelGateway {
         inputSchema: jsonSchema<Record<string, unknown>>(definition.inputSchema as never),
       });
     }
-    const context = trimAgentMessages(request.systemPrompt, request.messages, request.maxContextTokens ?? 12_000);
+    const context = trimAgentMessages(request.systemPrompt, request.messages, request.maxContextTokens);
     const openaiProviderOptions = {
       ...(request.provider.adapter === 'openai' ? { parallelToolCalls: false as const } : {}),
       ...(useResponses ? { strictJsonSchema: false as const } : {}),
@@ -337,7 +337,7 @@ export class AiSdkModelGateway implements ModelGateway {
       stopWhen: isStepCount(maxToolRounds + 1),
       prepareStep: ({ stepNumber, messages }: Parameters<PrepareStepFunction<ToolSet>>[0]) => {
         currentRound = stepNumber;
-        const context = trimAgentMessages(request.systemPrompt, messages as readonly GatewayAgentMessage[], request.maxContextTokens ?? 12_000);
+        const context = trimAgentMessages(request.systemPrompt, messages as readonly GatewayAgentMessage[], request.maxContextTokens);
         contextDropped = context.dropped;
         const toolsClosed = stepNumber >= maxToolRounds || toolCallsUsed >= maxToolCalls;
         let nextMessages = context.messages;
@@ -745,12 +745,17 @@ function normalizeAgentToolCall(call: { toolCallId: string; toolName: string; in
   return [{ toolCallId: call.toolCallId, toolName: 'skill_script', input: call.input, skillId, scriptPath, arguments: argumentsValue }];
 }
 
-function trimAgentMessages(systemPrompt: string, messages: readonly GatewayAgentMessage[], maxTokens: number): { messages: GatewayAgentMessage[]; dropped: number } {
+// Trimming for size is opt-in. A fixed budget cannot know the model's real context window, and the
+// loop below stops at three messages whether or not it has freed enough, so a budget set too low does
+// not degrade gracefully: it silently discards every earlier tool result and the agent then reports
+// work it no longer remembers doing. Callers that need a bound pass one; otherwise only the leading
+// orphan tool messages are removed, which is a structural requirement rather than a size decision.
+function trimAgentMessages(systemPrompt: string, messages: readonly GatewayAgentMessage[], maxTokens?: number): { messages: GatewayAgentMessage[]; dropped: number } {
   const result = [...messages];
   const estimate = (value: unknown) => Math.ceil(JSON.stringify(value).length / 4);
   const total = () => Math.ceil(systemPrompt.length / 4) + result.reduce((sum, message) => sum + estimate(message) + 4, 0);
   let dropped = 0;
-  while (result.length > 3 && total() > maxTokens) {
+  while (maxTokens !== undefined && result.length > 3 && total() > maxTokens) {
     const candidate = result[1];
     if (!candidate || candidate.role === 'tool') {
       result.splice(1, 1);
