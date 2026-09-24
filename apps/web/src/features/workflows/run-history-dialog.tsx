@@ -1,9 +1,10 @@
 import { Link } from '@tanstack/react-router';
-import { AlertCircle, ChevronDown, FileStack, LoaderCircle, QrCode, ScrollText, X } from 'lucide-react';
+import { AlertCircle, ChevronDown, FileStack, LoaderCircle, QrCode, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ArtifactView, RunProgressEvent, RunView } from '@worklite/contracts';
-import { NodeRunLogEntry, toRecordStatus } from './node-run-log';
+import { RunExecutionView } from './run-execution-view';
+import { toRecordStatus } from './node-run-log';
 import { applyRunProgressEvent } from './run-progress';
 import { StatusBadge } from '@/components/status-badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -211,7 +212,6 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
               ) : null}
               <section aria-labelledby={`workflow-run-${run.id}-logs-title`}>
                 <div className="flex items-center gap-2">
-                  <ScrollText className="size-4 text-muted-foreground" aria-hidden="true" />
                   <h4 id={`workflow-run-${run.id}-logs-title`} className="text-sm font-semibold">{t('runs:logs')}</h4>
                   <Link to="/runs/$runId" params={{ runId: run.id }} className="ml-auto text-[13px] text-brand hover:underline">
                     {t('runs:detail.open')}
@@ -223,20 +223,7 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
                     <p><span className="font-medium">{t('runs:failureReason')}:</span> {failureReason}</p>
                   </div>
                 ) : null}
-                {isLoading ? (
-                  <p className="mt-2 flex items-center gap-2 text-[13px] text-muted-foreground">
-                    <LoaderCircle className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
-                    {t('runs:logsLoading')}
-                  </p>
-                ) : isError ? (
-                  <p className="mt-2 text-[13px] text-danger">{t('runs:logsFailed')}</p>
-                ) : nodeRuns.length === 0 ? (
-                  <p className="mt-2 text-[13px] text-muted-foreground">{t('runs:noLogs')}</p>
-                ) : (
-                  <ol className="mt-2 grid gap-2">
-                    {nodeRuns.map((nodeRun) => <NodeRunLogEntry key={nodeRun.id} nodeRun={nodeRun} locale={locale} runId={run.id} />)}
-                  </ol>
-                )}
+                <RunExecutionView run={runDetail} locale={locale} loading={isLoading} failed={isError} compact />
               </section>
               {run.hasArtifactNode ? (
                 <section aria-labelledby={`workflow-run-${run.id}-artifacts-title`}>

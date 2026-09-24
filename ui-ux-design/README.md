@@ -69,7 +69,7 @@ The `/model-providers` page is the top-level Providers destination. It uses page
 
 ## Shared Component Inventory
 
-Theme provider and appearance selector; application shell; router pending and error boundaries; sidebar; context bar; personal preferences menu; command menu; shell-level Chat Bot with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; fixed-scale HTML/SVG Workflow diagram with a bottom inspector dock and contextual floating node picker; workflow run history dialog; run timeline; node log entry with payload and activity disclosure; plugin configuration; viewers for captured request bodies, run output and artifacts; skeletons, errors, offline banner.
+Theme provider and appearance selector; application shell; router pending and error boundaries; sidebar; context bar; personal preferences menu; command menu; shell-level Chat Bot with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; fixed-scale HTML/SVG Workflow diagram with a bottom inspector dock and contextual floating node picker; read-only Run execution graph with node state, edge traversal, chronological trace, and node detail dock; workflow run history dialog; node log entry with payload and activity disclosure; plugin configuration; viewers for captured request bodies, run output and artifacts; skeletons, errors, offline banner.
 
 Domain-neutral reusable components belong in the shared UI package. Feature composition remains near its feature. Abstract only demonstrated repeated patterns.
 
@@ -84,6 +84,11 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-09-24 - Run execution graph
+
+- Added a read-only immutable-version graph to expanded Run records and Run detail, with a chronological trace for node invocations and edge decisions.
+- Kept per-node input, activity, output, failure, and retry details in the selected-node dock.
 
 ### 2026-09-23 - Contextual Workflow node picker
 

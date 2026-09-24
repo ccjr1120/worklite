@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { Ban, FileStack, LoaderCircle, Pause, Play, ScrollText } from 'lucide-react';
+import { Ban, FileStack, LoaderCircle, Pause, Play } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RunProgressEvent } from '@worklite/contracts';
@@ -13,7 +13,8 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
-import { NodeRunLogEntry, toRecordStatus } from '@/features/workflows/node-run-log';
+import { RunExecutionView } from '@/features/workflows/run-execution-view';
+import { toRecordStatus } from '@/features/workflows/node-run-log';
 import { applyRunProgressEvent } from '@/features/workflows/run-progress';
 import { durationParts, formatDateTime } from '@/i18n/format';
 import { api } from '@/api/client';
@@ -88,7 +89,6 @@ function RunDetailPage() {
     );
   }
 
-  const nodeRuns = run.nodeRuns ?? [];
   const artifacts = run.artifacts ?? [];
   const duration = run.durationSeconds == null ? null : durationParts(run.durationSeconds);
   const failureReason = failureReasonOf(run.result, run.status);
@@ -203,17 +203,8 @@ function RunDetailPage() {
       ) : null}
 
       <section className="mt-6" aria-labelledby="run-detail-logs-title">
-        <div className="flex items-center gap-2">
-          <ScrollText className="size-4 text-muted-foreground" aria-hidden="true" />
-          <h2 id="run-detail-logs-title" className="text-sm font-semibold">{t('runs:logs')}</h2>
-        </div>
-        {nodeRuns.length === 0 ? (
-          <p className="mt-2 text-[13px] text-muted-foreground">{t('runs:detail.noNodeRuns')}</p>
-        ) : (
-          <ol className="mt-2 grid gap-2">
-            {nodeRuns.map((nodeRun) => <NodeRunLogEntry key={nodeRun.id} nodeRun={nodeRun} locale={locale} runId={run.id} />)}
-          </ol>
-        )}
+        <h2 id="run-detail-logs-title" className="text-sm font-semibold">{t('runs:logs')}</h2>
+        <RunExecutionView run={run} locale={locale} loading={false} failed={false} />
       </section>
 
       {run.hasArtifactNode ? (

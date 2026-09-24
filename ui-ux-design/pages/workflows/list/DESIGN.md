@@ -30,7 +30,7 @@ Fluid collection width up to `1440px`. The context bar carries a secondary `Impo
 
 Columns are Workflow, state, last run, updated, and actions. Desktop values stay on one line: the name truncates with its complete value as a tooltip, and narrow layouts scroll horizontally rather than wrapping status, date, or action cells. The last-run timestamp is hover context on its cell while the status itself stays visible.
 
-The Run records dialog is centered, scrolls internally, and preserves keyboard dialog behavior. There is no separate Runs route.
+The Run records dialog is centered, scrolls internally, and preserves keyboard dialog behavior. Each expanded Run presents its immutable version as a read-only execution graph, followed by its chronological node and edge trace. Selecting a node opens its invocation details in a bounded dock. There is no separate Runs collection route.
 
 ## Interaction Contract
 
@@ -42,7 +42,7 @@ The Run records dialog is centered, scrolls internally, and preserves keyboard d
 
 **Stay current.** While the Workflow List is mounted, its collection query polls every five seconds so server-observable latest-run status and update timestamps recover without a manual refresh control. The interval is transport behavior, not user-facing copy.
 
-**Expand a Run.** A dialog row expands in place and lazily loads ordered node execution logs with node identity, status, start time, duration, retry count, and credential-safe error text. Failed Runs show their failure reason before the log list, and the failed node repeats that reason in context. The same detail response states whether the immutable version contains an Artifact node; disclosure follows `../../../surfaces/workflow-run/artifacts/DESIGN.md`.
+**Expand a Run.** A dialog row expands in place and lazily loads its immutable Workflow version and Run details. The graph uses the same fixed-scale node layout as the editor but is read-only. Nodes show their latest invocation status and count; edges distinguish traversed from skipped routes. A chronological trace lists every invocation and edge decision so loops and repeated visits remain explicit. Failed Runs show their failure reason before the graph, and the failed node repeats it in its selected-node details. The same detail response states whether the immutable version contains an Artifact node; disclosure follows `../../../surfaces/workflow-run/artifacts/DESIGN.md`.
 
 **Pending authentication.** An expanded waiting Run places its active pending action before the ordered logs, showing the required action's title, description, a `waiting_for_input` status badge, and the QR image.
 
@@ -64,7 +64,7 @@ The QR is self-healing. The dialog subscribes to the Run event stream and replac
 | Error | `ErrorState` with a retry action, preserving the toolbar and the search term. Inside the dialog, a failed run list, log load, or Artifact load explains itself inline without removing the sections beside it. |
 | Busy | Import reports on the import control; cancellation and retry report on their own controls. No mutation disables the surrounding region. |
 | Offline | Inherits `shared-states.md`. Run events resume without duplication. |
-| Long content | Long names truncate with a tooltip. The dialog scrolls internally and keeps the retry control reachable at every breakpoint. |
+| Long content | Long names truncate with a tooltip. The graph scrolls independently on both axes; the trace and dialog scroll vertically, and the selected-node detail dock keeps retry and payload controls reachable at every breakpoint. |
 
 Validation attention and permission states follow `shared-states.md`.
 
@@ -115,11 +115,13 @@ Validation attention and permission states follow `shared-states.md`.
 
 Each row name is a link; the Run records control is an icon-only button with an accessible name naming its Workflow and a tooltip. The latest-run status control has its own accessible name distinguishing it from the Actions-column control. Every run status uses the shared status badge with a text label, never color alone.
 
-In the dialog, each Run row is a `button` carrying `aria-expanded` and `aria-controls` for its detail region, and each section is labelled by its heading. Failure text uses `role="alert"`. The pending-action QR carries an accessible alt name. Spinners are `motion-safe` and always paired with text.
+In the dialog, each Run row is a `button` carrying `aria-expanded` and `aria-controls` for its detail region, and each section is labelled by its heading. Run graph nodes expose their name, latest status, and invocation count; edge labels expose whether a route was traversed or skipped. The chronological trace is ordered and keyboard-readable, and selecting a node keeps the existing node-log disclosure semantics. Failure text uses `role="alert"`. The pending-action QR carries an accessible alt name. Spinners are `motion-safe` and always paired with text.
 
 ## Coverage Status
 
-Verified 2026-09-22. Struck entries were resolved in the 2026-09-19 single-action pass; the rest remain open.
+Reviewed against implementation source 2026-09-24. Browser visual review was not performed. Struck entries were resolved in the listed passes; the rest remain open.
+
+- ~~The expanded Run rendered node execution logs as a list without loading its immutable graph or showing a chronological node-and-edge trace.~~ Resolved: the expanded Run now shows the immutable version graph, node status and invocation count, edge state, ordered trace, and selected-node details.
 
 - ~~The Workflow collection query did not refresh latest-run status and update timestamps while the page was mounted.~~ Resolved: the collection query now polls every five seconds without adding a refresh control.
 
@@ -131,6 +133,11 @@ Verified 2026-09-22. Struck entries were resolved in the 2026-09-19 single-actio
 - `failedNode` picks the first node with `status === 'failed'` while `retryable` is server-marked per entry; the failure-reason banner and the retryable entry are resolved independently and may disagree on which node is authoritative.
 
 ## Changelog
+
+### 2026-09-24 - Run execution graph
+
+- Replaced the expanded Run's node list overview with the immutable version graph and an ordered trace of every node invocation and edge decision.
+- Kept node input, activity, output, failure, and retry details in a selected-node dock.
 
 ### 2026-09-22 - Workflow list freshness
 

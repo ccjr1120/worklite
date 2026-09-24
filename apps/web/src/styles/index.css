@@ -249,6 +249,7 @@
 .workflow-node-ports { display:grid; height:72px; align-content:center; overflow:visible; padding:0 12px; border-top:1px solid color-mix(in srgb, var(--border) 70%, transparent); }
 .workflow-node-port-row { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:8px; }
 .workflow-node-port { position:relative; display:flex; min-width:0; max-width:100%; height:24px; align-items:center; gap:5px; padding:0; border:0; background:transparent; color:var(--muted-foreground); font-size:10px; font-weight:500; line-height:1; cursor:crosshair; touch-action:none; }
+.workflow-node-port-readonly { cursor:default; touch-action:auto; }
 .workflow-node-port-target { justify-content:flex-start; }
 .workflow-node-port-source { justify-content:flex-end; }
 .workflow-node-port-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -266,6 +267,18 @@
 .workflow-flow-edge.workflow-edge-selected .workflow-edge-visible,.workflow-flow-edge:focus-visible .workflow-edge-visible { stroke:var(--brand); stroke-width:2.5; }
 .workflow-flow-edge.workflow-edge-emphasized .workflow-edge-visible { stroke:var(--brand); stroke-width:2; stroke-dasharray:8 7; animation:workflow-edge-flow 1.6s linear infinite; }
 .workflow-flow-edge.workflow-edge-emphasized.workflow-edge-bounded .workflow-edge-visible { stroke-dasharray:4 5; }
+.workflow-run-edge { cursor:default; pointer-events:none; }
+.workflow-run-edge.workflow-run-edge-traversed .workflow-edge-visible { stroke:var(--success); stroke-width:2.25; }
+.workflow-run-edge.workflow-run-edge-skipped { opacity:0.45; }
+.workflow-run-edge.workflow-run-edge-skipped .workflow-edge-visible { stroke-dasharray:3 5; }
+.workflow-flow-node.workflow-run-node-completed { border-color:color-mix(in srgb, var(--success) 45%, var(--border)); }
+.workflow-flow-node.workflow-run-node-running { border-color:var(--brand); }
+.workflow-flow-node.workflow-run-node-waiting_for_input { border-color:color-mix(in srgb, var(--warning) 50%, var(--border)); }
+.workflow-flow-node.workflow-run-node-failed { border-color:color-mix(in srgb, var(--danger) 52%, var(--border)); }
+.workflow-flow-node.workflow-run-node-cancelled { border-color:var(--border); }
+.workflow-run-node-indicator { display:inline-flex; flex-shrink:0; align-items:center; gap:3px; }
+.workflow-run-node-badge { min-height:20px; gap:3px; padding-inline:5px; font-size:9px; }
+.workflow-run-node-visits { color:var(--muted-foreground); font-size:10px; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .workflow-edge-label-background { fill:var(--surface-raised); stroke:var(--border); stroke-width:0.75; opacity:0.96; pointer-events:none; }
 .workflow-edge-label { fill:var(--muted-foreground); font-size:10px; font-weight:500; text-anchor:middle; dominant-baseline:middle; pointer-events:none; }
 .workflow-edge-endpoint { fill:var(--surface-raised); stroke:var(--brand); stroke-width:2; cursor:crosshair; touch-action:none; }

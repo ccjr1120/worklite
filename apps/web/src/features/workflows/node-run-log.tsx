@@ -131,9 +131,10 @@ type NodeRunLogEntryProps = {
   nodeRun: WorkflowNodeRunView;
   runId: string;
   locale: AppLocale;
+  nodeLabel?: string;
 };
 
-function NodeRunLogEntry({ nodeRun, runId, locale }: NodeRunLogEntryProps) {
+function NodeRunLogEntry({ nodeRun, runId, locale, nodeLabel }: NodeRunLogEntryProps) {
   const { t } = useTranslation(['runs', 'common']);
   const [expanded, setExpanded] = useState(false);
   const [retryBusy, setRetryBusy] = useState(false);
@@ -167,7 +168,8 @@ function NodeRunLogEntry({ nodeRun, runId, locale }: NodeRunLogEntryProps) {
         className={cn('flex w-full items-center gap-2 text-left', focusRing)}
       >
         <StatusBadge status={toRecordStatus(nodeRun.status)} />
-        <span className="font-mono text-xs">{nodeRun.type}</span>
+        <span className="min-w-0 truncate text-xs font-medium">{nodeLabel ?? nodeRun.type}</span>
+        <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{nodeRun.type}</span>
         <span className="font-mono text-xs text-muted-foreground">#{nodeRun.position} · {nodeRun.nodeId}</span>
         <ChevronDown className={cn('ml-auto size-4 shrink-0 text-muted-foreground transition-transform duration-[120ms]', expanded && 'rotate-180')} aria-hidden="true" />
       </button>

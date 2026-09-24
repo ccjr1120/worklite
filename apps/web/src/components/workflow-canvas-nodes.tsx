@@ -1,5 +1,5 @@
 import { Bot, Braces, FileSearch, FileText, GitBranch, Image as ImageIcon, LayoutDashboard, ListChecks, Send, Timer } from 'lucide-react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import type { WorkflowDashboardLayout, WorkflowEdgeCondition } from '@worklite/contracts';
@@ -136,6 +136,9 @@ export function WorkflowStageNode({
   keyboardSource,
   connectionTarget,
   connectionSource,
+  readOnly = false,
+  statusIndicator,
+  statusDescription,
   onSelect,
   onStartConnection,
   onKeyboardConnectStart,
@@ -146,10 +149,13 @@ export function WorkflowStageNode({
   keyboardSource: boolean;
   connectionTarget?: { nodeId: string; portId: string; valid: boolean };
   connectionSource?: { nodeId: string; portId: string; valid: boolean };
+  readOnly?: boolean;
+  statusIndicator?: ReactNode;
+  statusDescription?: string;
   onSelect: (nodeId: string) => void;
-  onStartConnection: (nodeId: string, portId: string, event: ReactPointerEvent<HTMLButtonElement>) => void;
-  onKeyboardConnectStart: (nodeId: string, portId: string) => void;
-  onKeyboardConnectTarget: (nodeId: string, portId: string) => void;
+  onStartConnection?: (nodeId: string, portId: string, event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onKeyboardConnectStart?: (nodeId: string, portId: string) => void;
+  onKeyboardConnectTarget?: (nodeId: string, portId: string) => void;
 }) {
   const { t } = useTranslation('workflows');
   const icon = {
@@ -175,7 +181,7 @@ export function WorkflowStageNode({
       data-flow-node={node.id}
       data-selected={selected || undefined}
       role="group"
-      aria-label={`${node.data.label}, ${kind}`}
+      aria-label={`${node.data.label}, ${kind}${statusDescription ? `, ${statusDescription}` : ''}`}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest('[data-flow-port-type]')) return;
         onSelect(node.id);
@@ -187,6 +193,7 @@ export function WorkflowStageNode({
           <span className="workflow-node-title" title={node.data.label}>{node.data.label}</span>
           {node.data.label.trim() !== kind ? <span className="workflow-node-kind">{kind}</span> : null}
         </span>
+        {statusIndicator}
       </button>
       <div className="workflow-node-ports" style={{ gridTemplateRows: `repeat(${rowCount}, 24px)` }}>
         {Array.from({ length: rowCount }, (_, index) => {
@@ -196,7 +203,12 @@ export function WorkflowStageNode({
           const sourceConnectionState = connectionSource?.nodeId === node.id && connectionSource.portId === 'output' ? connectionSource.valid ? 'workflow-port-valid' : 'workflow-port-invalid' : '';
           return (
             <div key={input?.id ?? 'output'} className="workflow-node-port-row">
-              {input ? (
+              {input ? readOnly ? (
+                <span className="workflow-node-port workflow-node-port-target workflow-node-port-readonly">
+                  <span className="workflow-node-port-dot" aria-hidden="true" />
+                  <span className="workflow-node-port-label">{input.label}</span>
+                </span>
+              ) : (
                 <button
                   type="button"
                   className={cn('workflow-node-port workflow-node-port-target', targetConnectionState)}
@@ -207,7 +219,7 @@ export function WorkflowStageNode({
                   onKeyDown={(event) => {
                     if ((event.key === 'Enter' || event.key === ' ') && keyboardSource) {
                       event.preventDefault();
-                      onKeyboardConnectTarget(node.id, input.id);
+                      onKeyboardConnectTarget?.(node.id, input.id);
                     }
                   }}
                 >
@@ -215,7 +227,12 @@ export function WorkflowStageNode({
                   <span className="workflow-node-port-label">{input.label}</span>
                 </button>
               ) : <span />}
-              {isOutputRow ? (
+              {isOutputRow ? readOnly ? (
+                <span className="workflow-node-port workflow-node-port-source workflow-node-port-readonly">
+                  <span className="workflow-node-port-label">{t('editor.outputPort')}</span>
+                  <span className="workflow-node-port-dot" aria-hidden="true" />
+                </span>
+              ) : (
                 <button
                   type="button"
                   className={cn('workflow-node-port workflow-node-port-source', keyboardSource && 'workflow-port-connecting', sourceConnectionState)}
@@ -224,11 +241,11 @@ export function WorkflowStageNode({
                   data-flow-port-id="output"
                   aria-label={t('editor.outputPort')}
                   aria-pressed={keyboardSource}
-                  onPointerDown={(event) => onStartConnection(node.id, 'output', event)}
+                  onPointerDown={(event) => onStartConnection?.(node.id, 'output', event)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault();
-                      onKeyboardConnectStart(node.id, 'output');
+                      onKeyboardConnectStart?.(node.id, 'output');
                     }
                   }}
                 >

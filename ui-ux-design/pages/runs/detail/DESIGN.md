@@ -26,13 +26,13 @@ Follow a Run's execution node by node to the point where it went wrong, suspend 
 
 Available width, following the `page-patterns.md` rule that logs use available width. This is the one Run surface not bounded by a dialog, which is its reason to exist.
 
-A durable Run summary leads: Workflow name, immutable version, status, initiator, start time, and duration. Ordered node entries follow. Run input and result, the pending action when one exists, and Artifacts follow the nodes. Artifact presentation is owned by `surfaces/workflow-run/artifacts/DESIGN.md` and keeps its version-eligibility rule here, so a version that cannot produce Artifacts renders no section.
+A durable Run summary leads: Workflow name, immutable version, status, initiator, start time, and duration. A read-only graph of that immutable Workflow version follows, then a chronological trace of node invocations and edge decisions. Selecting a graph node opens its invocation details in a bounded dock. Run input and result, the pending action when one exists, and Artifacts follow the execution view. Artifact presentation is owned by `surfaces/workflow-run/artifacts/DESIGN.md` and keeps its version-eligibility rule here, so a version that cannot produce Artifacts renders no section.
 
 ## Interaction Contract
 
 ### Read the Run
 
-The Run detail query supplies the summary, node entries, input, result, pending action, and Artifacts. Node entry behavior is owned by `surfaces/workflow-run/node-logs/DESIGN.md` and is not restated here.
+The Run detail query supplies the summary, node entries, input, result, pending action, and Artifacts. The immutable graph definition is resolved from the published version identified by the Run's Workflow and version. The graph marks each node with its latest invocation status and visit count, and marks each edge as traversed or skipped from edge-decision activity. The chronological trace preserves repeated invocations, edge decisions, conditions, and bounded traversal counts. Node detail behavior is owned by `surfaces/workflow-run/node-logs/DESIGN.md` and is not restated here.
 
 ### Pause an active Run
 
@@ -63,12 +63,12 @@ An Agent or image node links to the Logs `requests` tab filtered to this Run.
 | State | Behavior |
 | --- | --- |
 | Loading | The router's shell-level content-shaped skeleton. Loading, not-found, and load failure are three distinct states, as `shared-states.md` requires of a detail route. |
-| Empty | Not applicable; a Run that exists has a status and a summary. A Run with no node entries yet shows its summary and says execution has not reached a node. |
+| Empty | Not applicable; a Run that exists has a status and a summary. A Run with no node entries yet shows its summary and says execution has not reached a node. If it has no node entries, the graph remains visible without execution markers and the trace reports no node execution. |
 | No results | Not applicable; this page has no filters. |
 | Error | A load failure shows a recoverable failure through the router boundary. A missing or non-workspace Run is a distinct not-found state offering the Workflows list. |
 | Busy | Cancellation reports progress on its confirmation control and disables dialog dismissal and duplicate submission until the request settles. Pause and resume report progress on their own buttons and prevent duplicate submission. Node retry retains its own control-local progress. |
 | Offline | Inherits `shared-states.md`. The reconnecting bar owns transport state and the Run retains the events already received. |
-| Long content | Payload and activity containers are bounded per `surfaces/workflow-run/node-logs/DESIGN.md`; the page itself scrolls. |
+| Long content | The graph scrolls independently on both axes. The trace and page scroll vertically. Payload, activity, and selected-node invocation details are bounded per `surfaces/workflow-run/node-logs/DESIGN.md`. |
 
 ## Copy Inventory
 
@@ -88,11 +88,13 @@ The Run summary reuses the existing `runs:` status, duration, initiator, and ver
 
 ## Accessibility
 
-The Run summary is labelled by the page heading. Node entries carry the disclosure semantics defined by the node-log surface. Run status uses the shared status badge with a non-color cue. Keyboard order runs summary, the available pause, resume, or cancellation action when present, node entries in execution order, then input, result, and Artifacts. The cancellation dialog has labelled title and description, visible focus, and progress text independent of the spinner.
+The Run summary is labelled by the page heading. Run status uses the shared status badge with a non-color cue. Keyboard order runs summary, the available pause, resume, or cancellation action when present, graph nodes in definition order, the chronological trace, then input, result, and Artifacts. Graph status and edge route state have text cues as well as color; the selected-node dock exposes the existing node-log disclosure controls. The cancellation dialog has labelled title and description, visible focus, and progress text independent of the spinner.
 
 ## Coverage Status
 
-Verified 2026-09-22. Differences found against the implementation:
+Reviewed against implementation source 2026-09-24. Browser visual review was not performed. Differences found against the implementation:
+
+- ~~The route displayed node runs as an ordered list without loading the Run's immutable graph or exposing a chronological edge-decision trace.~~ Resolved: the route now shows the immutable graph, node status and invocation count, edge state, chronological trace, and selected-node details.
 
 - The Workflow editor now enters this route after creating a Run, using the server-returned Run id.
 
@@ -101,6 +103,11 @@ Verified 2026-09-22. Differences found against the implementation:
 - The route restores no expansion state from the URL, so a shared link opens the Run with every node entry collapsed.
 
 ## Changelog
+
+### 2026-09-24 - Run execution graph
+
+- Replaced the node-run list overview with the immutable Workflow graph, execution markers, and an ordered trace that preserves node visits and edge decisions.
+- Kept selected-node input, activity, output, failure, and retry details in a bounded dock.
 
 ### 2026-09-22
 

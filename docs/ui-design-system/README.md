@@ -215,9 +215,11 @@ The real WeChat Official Account body follows [the shared output specification](
 
 Workflow List exposes Run records through a per-Workflow dialog. Use the following canonical run labels: `Queued`, `Running`, `Waiting for input`, `Completed`, `Failed`, and `Cancelled`.
 
+Expanded Run records and Run detail use the immutable Workflow version as a read-only graph. Node cards show the latest invocation status and invocation count; edges show whether a route was traversed or skipped. An ordered execution trace beneath the graph preserves every node invocation and edge decision, including repeated bounded-loop traversals. Selecting a node opens its node-run records in the bottom detail dock, where the existing Input, Activity, Output, failure, and retry content remains available. The graph is an overview of topology and status; the trace is the source for execution order.
+
 A Run waiting on a human-gated browser action presents a compact amber pending-action panel before its node logs. The panel names the required action and shows the QR image. An expired code is replaced automatically, so the panel shows neither an expiry time nor an instruction to refresh: during replacement the current image dims and a status line reports that a new code is arriving. `Cancel run` remains, because abandoning the Run is a separate intent rather than a recovery from staleness. Authentication state is communicated with text and icon cues; the QR is not the only explanation. Completion updates through the existing Run event stream and does not require a separate “I scanned it” control.
 
-Show the current step and continuing progress for long operations. Expanded Workflow Run records present ordered node execution logs with node identity, status, timing, duration, and retry context. Failed Runs surface the credential-safe failure reason before the log list and repeat it on the failed node entry. Append logs without forcing disruptive scrolling. Use monospace text for identifiers and raw output, and allow users to distinguish timestamps, severity, source, and content. Successful completion should be clear but restrained; failure must include context and a next step where possible. Artifact disclosure is absent when the immutable Workflow version has no Artifact node; an empty Artifact state is reserved for eligible versions that produced none.
+Show the current step and continuing progress for long operations. Expanded Workflow Run records present the immutable Workflow as a read-only graph with latest node status and visit count, plus an ordered trace of node invocations and edge decisions. Selecting a node opens its input, activity, output, failure, and retry context in a detail dock. Failed Runs surface the credential-safe failure reason before the graph and repeat it in the failed node's details. Append logs without forcing disruptive scrolling. Use monospace text for identifiers and raw output, and allow users to distinguish timestamps, severity, source, and content. Successful completion should be clear but restrained; failure must include context and a next step where possible. Artifact disclosure is absent when the immutable Workflow version has no Artifact node; an empty Artifact state is reserved for eligible versions that produced none.
 
 Failure is the one node log state that carries a recovery action. When the server reports a failed node entry as retryable, that entry offers a single neutral secondary `Retry node` control beside its failure reason. Retry is an ordinary execution control, not a destructive or primary action, so it uses neutral styling with an icon and text label rather than brand fill or red. Only the retryable entry exposes it; other failed, cancelled, and successful entries show none, and the control never appears at the Run level where it could be mistaken for rerunning the whole Workflow. Activating it shows a local busy state on that control alone, leaves the surrounding log list in place, and keeps any failure text visible until the Run event stream replaces it with continued execution. A retry that the server rejects preserves the original failure reason and explains the rejection in the same entry.
 
@@ -268,6 +270,11 @@ Before confirming a UI proposal, verify that it:
 - Introduces a documented design-system decision before implementation when no existing rule applies.
 
 ## Changelog
+
+### 2026-09-24 - Run execution graph
+
+- Replaced the Run node list as the primary overview with the immutable Workflow version graph, execution status on nodes, and traversed or skipped state on edges.
+- Kept execution order in a chronological trace and preserved node input, activity, output, failure, and retry details in a node-selected dock.
 
 ### 2026-09-23 - Contextual Workflow node picker
 

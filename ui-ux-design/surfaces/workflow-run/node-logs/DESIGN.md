@@ -59,6 +59,12 @@ Incoming events apply incrementally to cached Run detail. An event must not trig
 
 An Agent or image node entry links to the Logs `requests` tab filtered to this Run, where the captured upstream request and response for its model rounds are readable. The link states that captured requests are kept for three days, because a Run outliving that window keeps its activity while those bodies are already expired.
 
+### Read the Run graph and trace
+
+The read-only graph owns the topology overview. Node cards show the latest invocation status and total invocation count for that Workflow node; edges show traversed or skipped state. Selecting a graph node opens its node-run entries in a bounded dock. Each entry retains the Input, Activity, and Output disclosure, including per-invocation edge decisions and retry recovery.
+
+The chronological trace is the source for execution order. It lists every node invocation in `position` order and its edge decisions in event sequence, including condition text and bounded traversal count. It does not replace the node Activity disclosure or combine repeated invocations into one record.
+
 ## States
 
 | State | Behavior |
@@ -69,7 +75,7 @@ An Agent or image node entry links to the Logs `requests` tab filtered to this R
 | Error | A failed node keeps its existing credential-safe failure reason above the payload regions, and retry remains the node-local control defined in `shared-states.md`. A rejected retry appears beside that reason rather than replacing it. |
 | Busy | Retry reports on its own control. Expansion is immediate and reports nothing, because it fetches nothing. |
 | Offline | Inherits `shared-states.md`. The reconnecting bar owns transport state; entries retain the activity already received. |
-| Long content | Payloads and streamed text stay inside height-bounded scroll containers with `Copy`. A long activity timeline scrolls within its host rather than extending it. Streaming text preserves scroll position unless the reader is following the end. |
+| Long content | Payloads and streamed text stay inside height-bounded scroll containers with `Copy`. A long activity timeline scrolls within its host rather than extending it. The selected-node dock scrolls independently from the graph and chronological trace. Streaming text preserves scroll position unless the reader is following the end. |
 
 ## Copy Inventory
 
@@ -92,17 +98,23 @@ Node identifiers, model ids, script paths, tool names, evaluated conditions, and
 
 ## Accessibility
 
-The entry disclosure is a button whose accessible name names the node and its position, with its expanded state exposed. Payload and activity regions are labelled by their headings and are keyboard-scrollable, so a bounded container is reachable without a pointer. Each `Copy` control names what it copies. Activity phase and status are text, never color alone; the streaming cue pairs its indicator with text and does not announce every token to assistive technology.
+The entry disclosure is a button whose accessible name names the node and its position, with its expanded state exposed. Payload and activity regions are labelled by their headings and are keyboard-scrollable, so a bounded container is reachable without a pointer. Each `Copy` control names what it copies. Activity phase and status are text, never color alone; graph nodes and edges likewise expose status and route text labels, and the chronological trace is keyboard-readable. The streaming cue pairs its indicator with text and does not announce every token to assistive technology.
 
 ## Coverage Status
 
-Verified 2026-09-21. Differences found against the implementation:
+Reviewed against implementation source 2026-09-24. Browser visual review was not performed. Differences found against the implementation:
 
 - The Run records dialog previously discarded `node.delta` events and invalidated the whole Run detail on every other event. This change applies events incrementally, so streamed text is now displayed rather than dropped.
 - Expansion state is local to each host and is not restored by a shared link, unlike the `request-logs` filters, which are.
 - Captured payloads render as preformatted text only. No JSON tree, syntax highlighting, or payload diffing is provided in this increment.
+- ~~The Run overview remained an ordered list without a graph or chronological trace.~~ Resolved: the graph now shows node status and invocation count plus edge state; the trace preserves each invocation and edge decision, and the selected-node dock retains invocation details.
 
 ## Changelog
+
+### 2026-09-24 - Run execution graph
+
+- Defined the immutable Workflow graph as the Run overview and the chronological trace as the source of execution order.
+- Kept repeated node invocations, node-log details, and per-invocation edge decisions intact.
 
 ### 2026-09-21 - Logs destination
 

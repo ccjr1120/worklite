@@ -8,9 +8,11 @@ At `1024px` and above, expand the sidebar, allow side-by-side inspectors on appl
 
 From `768px` to `1023px`, use the `56px` grouped icon rail, hide low-priority columns, and let inspectors overlay or reduce content according to task importance. The Workflow inspector stays in a bounded dock below the diagram; the floating node picker remains anchored over the diagram. Agent resource tabs remain horizontally scrollable within their collection pages, and the Workflow Run records dialog keeps expanded artifact rows readable and its per-node retry control reachable within its scrolling surface. Keep the Home composer visible and use the draggable lower-right Chat icon on other pages; constrain the expanded Agent Chat panel within `16px` to `24px` outer space, and keep expanded Skill arguments, execution states, and bounded results inside the transcript column.
 
+The Run execution graph scrolls natively on both axes at every desktop width. Its chronological trace remains below the graph, and the selected-node detail dock scrolls independently so retry and payload controls remain reachable.
+
 ## Mobile
 
-Below `768px`, use a navigation drawer, retain page identity, state and primary action in the context bar, show the selected Workflow node or edge inspector in a bounded dock below the full-bleed diagram, and keep the floating node picker anchored over the diagram. The inspector dock and diagram scroll independently; the fixed-scale diagram scrolls natively on both axes with touch gestures. Node selection and deletion remain available through the diagram and inspector. The drawer preserves every grouped desktop destination named in `workspace-shell.md`, including Plugins and Logs; page-level collection and observability tabs remain reachable through horizontal scrolling, and the Workflow Run records dialog exposes Artifacts through in-place expansion. Home keeps its composer visible; other pages use a draggable lower-right Chat icon with `12px` safe-area margins until opened. Agent Chat uses at most about `70vh`; it does not become full-screen. Its single-line composer remains reachable above browser controls, and Chat and Proposed changes use internal views.
+Below `768px`, use a navigation drawer, retain page identity, state and primary action in the context bar, show the selected Workflow node or edge inspector in a bounded dock below the full-bleed diagram, and keep the floating node picker anchored over the diagram. The inspector dock and diagram scroll independently; the fixed-scale diagram scrolls natively on both axes with touch gestures. Node selection and deletion remain available through the diagram and inspector. Run execution graphs use the same fixed-scale touch scrolling; their chronological trace follows the graph and selected-node details stay in a bounded dock. The drawer preserves every grouped desktop destination named in `workspace-shell.md`, including Plugins and Logs; page-level collection and observability tabs remain reachable through horizontal scrolling, and the Workflow Run records dialog exposes Artifacts through in-place expansion. Home keeps its composer visible; other pages use a draggable lower-right Chat icon with `12px` safe-area margins until opened. Agent Chat uses at most about `70vh`; it does not become full-screen. Its single-line composer remains reachable above browser controls, and Chat and Proposed changes use internal views.
 
 A shared time-range control keeps its preset selection and its custom start and end fields reachable at every breakpoint. Below `768px` the presets and the two fields stack in one column rather than dropping the custom range, because a range the reader cannot narrow on a small screen makes the surface unusable there.
 
@@ -19,6 +21,10 @@ Responsive layouts must not remove status, recovery, or cancellation controls, i
 Queued Chat Bot messages keep their rows, count, and per-row remove control inside the scrollable transcript at every breakpoint, and the return-to-end control stays reachable without covering the composer.
 
 ## Changelog
+
+### 2026-09-24 - Run execution graph
+
+- Kept the Run graph and chronological trace reachable at constrained widths, with independent scrolling for the graph and selected-node details.
 
 ### 2026-09-23 - Workflow node picker
 
