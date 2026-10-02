@@ -14,6 +14,8 @@ The user-facing AI execution model is Workflow-first. Published Workflows are av
 
 Chat Bot can inspect the workspace and create Provider, Skill, MCP server, and Workflow drafts through assigned Skill scripts. Every script request is explicit, executes automatically after server validation, and remains subject to the same validation, secret-handling, publication, and audit rules as manual configuration.
 
+Agent Team is a planned software-development capability. Its confirmed implementation direction combines BMAD and TEA process content with a LangGraph.js execution runtime. The implementation plan is recorded in [Agent Team Implementation Plan](agent-team-implementation.md); the capability is not implemented or available through current platform APIs.
+
 ## Architectural Principles
 
 1. Use a browser/server architecture with a separately deployable web application and API; durable worker execution is a later scale-out boundary.
@@ -222,7 +224,7 @@ All workspace-owned records include `workspace_id`. The API resolves the singlet
 
 Chat Bot is the protected product-owned assistant entry point. It is available from the shell as a floating icon and from Home as a bottom composer. It is not listed as a capability resource, does not have a standalone resource route, and is not configurable through Settings. Its runtime may reuse the internal Agent execution infrastructure, but the user-facing configuration and execution model is owned by Chat Bot.
 
-Workflow Agent nodes are the only user-configurable Agent capability. Each node owns its public model id, system prompt, output format, Skill selections, and MCP server selections inside the immutable WorkflowVersion. Workflows never reference standalone Agent or AgentVersion resources. Every Agent uses the protected `gateway-provider` binding; the binding is not a user-selectable Provider and is omitted from Provider listings and forms. Skill and MCP definitions remain reusable workspace resources, but their assignment is explicit inside each Workflow Agent node. Chat Bot configuration is protected and is not a user-managed Agent assignment. The API validates that every selected Skill and MCP server belongs to the same workspace.
+In the implemented product, Workflow Agent nodes are the only user-configurable Agent capability. Each node owns its public model id, system prompt, output format, Skill selections, and MCP server selections inside the immutable WorkflowVersion. Workflows never reference standalone Agent or AgentVersion resources. Every Agent uses the protected `gateway-provider` binding; the binding is not a user-selectable Provider and is omitted from Provider listings and forms. Skill and MCP definitions remain reusable workspace resources, but their assignment is explicit inside each Workflow Agent node. Chat Bot configuration is protected and is not a user-managed Agent assignment. The API validates that every selected Skill and MCP server belongs to the same workspace.
 
 Workflow Agent nodes execute their model-tool loop through the shared AI SDK-backed Workflow Agent loop in Model Gateway. The loop preserves Workflow-owned sequential tool execution, round and tool-call budgets, final-round tool shutdown, Skill and MCP activity, streaming text, and Portkey correlation. Chat Bot remains on its existing persisted execution state machine in this phase. This is runtime composition only: Workflow versions, Node Runs, retry, Dashboard, Artifacts, and the deterministic scheduler retain their existing contracts.
 
@@ -466,7 +468,7 @@ Activity is durable and replayable through the existing run event sequence, so a
 
 Runtime requirements include node and workflow timeouts, cooperative cancellation, worker heartbeats or leases, persisted intermediate results, classified transient retries, idempotency for retryable external side effects, and per-workspace concurrency, duration, and model-usage quotas.
 
-Completed and suspended node runs are retained. The API-local executor resolves registered node types, persists each node transition, persists Artifacts during successful Artifact-node execution, and publishes replayable run events. Continuation reloads the persisted scheduler state and re-enters only the suspended invocation. A pre-scheduler Run that already contains Node Runs but has no scheduler state fails explicitly instead of reconstructing tokens or rerunning predecessors; no compatibility adapter or in-flight Run migration is provided. Conditional branches and loop iterations execute sequentially; concurrent branch execution remains deferred. A durable queue such as BullMQ remains a later boundary for multi-instance execution, concurrent branches, or stronger leasing; the single-process runtime uses SQLite-backed suspension and continuation for human-gated nodes.
+Completed and suspended node runs are retained. The API-local executor resolves registered node types and persists each node transition. For an Artifact node, the Artifact row, successful NodeRun output and Artifact reference, and advanced scheduler state commit in one SQLite transaction; the replayable `artifact.created` event is published only after that transaction succeeds. A failed transaction leaves no Artifact and preserves the active invocation for the normal failed-node retry path. Continuation reloads the persisted scheduler state and re-enters only the suspended invocation. A pre-scheduler Run that already contains Node Runs but has no scheduler state fails explicitly instead of reconstructing tokens or rerunning predecessors; no compatibility adapter or in-flight Run migration is provided. Conditional branches and loop iterations execute sequentially; concurrent branch execution remains deferred. A durable queue such as BullMQ remains a later boundary for multi-instance execution, concurrent branches, or stronger leasing; the single-process runtime uses SQLite-backed suspension and continuation for human-gated nodes.
 
 A queued or running Run may be paused without a mid-invocation checkpoint. Pause transactionally marks the Run `paused`, moves a running active Node Run back to `queued`, preserves scheduler state, current node, and completed predecessor invocations, and aborts the in-memory request. Resume transactionally returns the Run to `queued` with its active Node Run still `queued` and re-enters the existing scheduler; the interrupted active invocation reruns from its beginning, while completed predecessors never rerun. `waiting_for_input` already provides durable human-gated suspension and cannot be paused. A paused Run is active but reversible execution state: it remains observable on Run SSE, survives restart, accepts cancellation, and prevents overlapping scheduled execution until it leaves `paused`; schedule recovery preserves the paused Run's existing schedule claim.
 
@@ -490,6 +492,20 @@ The detailed Run contract is read at two depths through the same routes. The Wor
 The workflow-level run endpoint is intentionally not part of the persisted-version contract; callers must select an explicit immutable workflow version.
 
 Production uses a same-origin `/api` route through the reverse proxy to simplify CORS and Server-Sent Events delivery.
+
+## Agent Team Implementation Direction
+
+On 2026-10-03, the user confirmed the combined BMAD + TEA and LangGraph.js direction and requested an implementation document. This is a planned capability; the request authorizes documentation, not runtime implementation, dependency installation, test execution, or service lifecycle operations. [Agent Team Implementation Plan](agent-team-implementation.md) records the proposed detailed contracts, milestones, and acceptance scenarios. Exact upstream versions and the persistence integration must be resolved in the first implementation milestone before their contracts are treated as implemented architecture.
+
+BMAD supplies development process content and role responsibilities. TEA supplies testing strategy, automation, and evidence traceability. LangGraph.js supplies Team execution ordering, checkpoints, and human-input suspension. WorkLite owns the product APIs, configuration snapshots, execution records, project context, Commands, Skill and MCP execution, model transport, and user interaction. Process content must be pinned and packaged with its required reference files; upstream skill commands are not treated as shell executables.
+
+The planned Team capability has an independent TeamRun boundary, with role configuration embedded in an immutable TeamVersion. It does not restore standalone user-managed Agent resources. Each TeamRun has exactly one LangGraph execution thread. Existing Workflow Runs continue to use their deterministic Workflow scheduler; a TeamRun is never advanced by both schedulers. This adds a second orchestration dependency and its maintenance cost, while preserving the existing Workflow graph and historical Run contracts without a compatibility adapter.
+
+The initial implementation targets one development-team process with planning, test design, optional implementation and test authoring, actual test execution, and independent review. Planning and review may execute independently where dependencies permit; writes to the same checkout execute sequentially. Team documents belong to TeamRun records in the initial scope, so the existing Workflow Artifact-production and Home Dashboard-eligibility rules remain applicable to their current resources.
+
+Team role invocations reuse the AI SDK-backed model loop and Portkey Gateway through a shared execution boundary. Team execution needs explicit project-directory context and selected file and command tools; those are implementation gaps rather than existing Workflow Agent capabilities. Checkpoints restore control flow, but command and tool attempt records must prevent recovery from blindly repeating completed effects. Project instructions and already-granted authorization determine whether a role may write files, generate tests, execute particular checks, or manage services.
+
+When Team APIs become available, the same implementation change must update Chat Bot guidance, the complete `worklite-platform` Skill package, typed contracts, workspace snapshot capability metadata, resource reference protections, and applicable repository conventions. The platform snapshot must advertise only implemented Team operations. Detailed page specifications belong in `ui-ux-design/` before UI implementation; the implementation plan does not establish a parallel page-specification directory.
 
 ## Real API Integration Increment
 
@@ -618,12 +634,12 @@ The MCP client, skill SDK, and observability code may begin inside applications 
 ## Deferred Capabilities
 
 - Port-level joining that merges several tokens into one invocation, including dynamic joins over an unknown number of runtime branches. Converging edges are permitted; each delivered token still produces its own invocation. A Node Type that iterates over an array inside one committed input, such as `typesafe/systemone-map@1`, is not a join: it consumes one token, runs inside one invocation, and commits one output.
-- Concurrent branch execution.
+- Concurrent branch execution in Workflow Runs.
 - Dynamic script-authored workflow orchestration as the primary Workflow model.
 - A third-party plugin marketplace or untrusted plugin execution.
 - Arbitrary user-supplied MCP `stdio` processes.
 - Resume from an arbitrary failed node.
-- Temporal or another durable workflow platform.
+- Temporal or another replacement runtime for Workflow Runs. The separate planned Agent Team capability uses the confirmed LangGraph.js direction above.
 - Multi-installation tenancy.
 - Binary Skill assets, archive upload, package validation, and immutable Skill publication.
 - Codex multi-account rotation, quota scheduling, Chat Completions translation, and WebSocket transport.
@@ -637,6 +653,19 @@ Workflows support a versioned portable JSON envelope for moving editable definit
 Import validates the envelope, structured edge conditions, and bounded-cycle constraints, resolves every Skill and MCP server reference against the destination workspace, and creates a new mutable draft. Missing or ambiguous references reject the entire import. Import never overwrites an existing workflow, publishes a version, or enables a schedule.
 
 ## Changelog
+
+### 2026-10-03 - Agent Team Implementation Direction
+
+- Recorded the user-confirmed combination of BMAD and TEA process content with LangGraph.js Team execution, and linked the detailed implementation plan.
+- Distinguished the planned TeamRun and embedded Team role configuration from the implemented Workflow scheduler, Workflow Agent nodes, Artifact production, and Home eligibility.
+- Identified process packaging, shared execution tools, project-directory context, checkpoint recovery, and platform knowledge synchronization as implementation work rather than current capabilities.
+- Kept this change documentation-only; detailed contracts and dependency versions require the first implementation milestone, and no runtime or historical Workflow data is changed.
+
+### 2026-09-26 - Atomic Artifact Node Completion
+
+- Commit an Artifact row together with its successful NodeRun result and scheduler state so a failed node completion cannot leave an Artifact detached from the committed invocation.
+- Publish `artifact.created` only after the transaction succeeds.
+- Reuse the existing tables and API contract; no data migration is required.
 
 ### 2026-09-23 - Per-Element TypeSafe Evaluation
 
