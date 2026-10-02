@@ -28,7 +28,7 @@ The selected BMAD source is `BMAD-METHOD` tag `v6.12.0`, commit `05bfbd46d00766e
 - Test Designer uses the TEA test-design skill, instructions, and workflow.
 - Developer uses the BMAD developer skill and implementation step of `bmad-build-auto`.
 - Reviewer uses the BMAD code-review workflow and its four step files.
-- Test Author has no upstream entry point in this P0 package; a pinned TEA automation workflow is deferred.
+- Test Author uses the TEA automation skill, instructions, and workflow.
 - Test Runner is implemented through WorkLite Commands rather than imported upstream process content.
 
-The TEA knowledge files and templates included beneath its workflow directory are the selected reference closure for the Test Designer. The BMAD reference and review-prompt files included beneath each selected skill are the reference closure for their corresponding roles.
+The complete file set beneath each selected TEA workflow directory is that workflow's direct reference closure. This intentionally preserves duplicate knowledge files across the test-design and automation workflows instead of adding a cross-workflow path adapter. The BMAD reference and review-prompt files included beneath each selected skill are the reference closure for their corresponding roles.

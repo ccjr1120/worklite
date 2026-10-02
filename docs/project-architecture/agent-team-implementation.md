@@ -107,6 +107,8 @@ The trusted process package lives under `packages/team-runtime/processes/bmad-te
 
 The package must preserve the instruction steps and reference knowledge required by the selected processes. A shortened role prompt alone is not adoption of BMAD or TEA. Upstream relative references, configuration variables, output paths, and requests for user input must be mapped explicitly to WorkLite project context, run documents, and pending-input records.
 
+The selected role workflows are the TEA `bmad-testarch-test-design` workflow for Test Designer and the TEA `bmad-testarch-automate` workflow for Test Author. The automation workflow's `SKILL.md` resolves sibling files from its own workflow root, so WorkLite imports its complete directory as the direct reference closure. Overlapping knowledge may duplicate the Test Designer package, but no cross-workflow path adapter or shared-reference compatibility layer is introduced. Test Runner remains backed by WorkLite Commands and does not receive an upstream TEA entry point.
+
 WorkLite's existing Skill storage accepts `SKILL.md` plus textual `scripts/` and `references/` files. Importing a complete upstream installation into that shape is not currently supported. P0 must establish the selected package's actual reference closure, produce a supported textual package, and provide a way for the Agent to read its referenced files on demand. Process package discovery must not imply execution of an arbitrary upstream script.
 
 Read-only roles receive textual process instructions and the specific reference reader they need. They do not receive the unrestricted terminal Skill. A project Agent receives only the file, command, Skill, and MCP tools declared for its role and effective execution scope.
@@ -339,4 +341,5 @@ References were consulted on 2026-10-03. They support the selected mechanisms; t
 - Integrated the internal LangGraph runtime with persistent checkpoints, WorkLite projection reconciliation, pause/answer/retry behavior, and journal-backed isolated Agent invocations; Agent Team remains unavailable through public APIs and platform surfaces.
 - Captured root target-project instructions with each TeamRun, captured the pinned BMAD/TEA reference closure in each TeamVersion and exposed it through a role-scoped read-only tool, materialized immutable Team documents under the run's managed output directory, and made cancellation settle waiting task attempts.
 - Added persisted cumulative exact-command grants, structured pending-input grants, checkpoint/task-state propagation, pre-launch `bash` enforcement, and exclusion of executable Skill scripts from Team roles.
+- Captured the pinned TEA `bmad-testarch-automate` workflow and its complete direct reference closure for the Test Author role; Test Runner remains WorkLite Commands-owned.
 - No test execution, build, type check, server lifecycle operation, or deployment-profile access has been performed.
