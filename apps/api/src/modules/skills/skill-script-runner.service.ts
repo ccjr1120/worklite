@@ -40,7 +40,7 @@ export class SkillScriptRunnerService {
       const execution = options?.reserveCommand
         ? await this.commands.createWithReservation(command, options.cwd ?? '', options.reserveCommand)
         : options?.cwd
-          ? await this.commands.createWithReservation(command, options.cwd, async () => undefined)
+          ? await this.commands.createWithReservation(command, options.cwd, () => undefined)
           : await this.commands.create({ command });
       void this.commands.waitForCompletion(execution.id).then(
         () => rm(root, { recursive: true, force: true }).catch(() => undefined),

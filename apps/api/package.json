@@ -21,6 +21,7 @@
     "@worklite/contracts": "workspace:*",
     "@worklite/db": "workspace:*",
     "@worklite/model-gateway": "workspace:*",
+    "@worklite/team-runtime": "workspace:*",
     "@worklite/workflow-engine": "workspace:*",
     "better-sqlite3": "^12.4.1",
     "drizzle-orm": "^0.45.2",

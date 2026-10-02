@@ -67,7 +67,7 @@ export type AgentInvocationOperationJournal = {
     request: { taskKey: string; operationKey: string; toolName: string; inputFingerprint: string },
     commandId?: string,
     transaction?: Database,
-  ): Promise<AgentInvocationOperationRecord>;
+  ): AgentInvocationOperationRecord;
   completeOperation(operationKey: string, result: unknown, commandId?: string): Promise<AgentInvocationOperationRecord>;
   markOperationUncertain(operationKey: string, reason: string): Promise<AgentInvocationOperationRecord>;
   failOperation(operationKey: string, reason: string): Promise<AgentInvocationOperationRecord>;
@@ -227,8 +227,8 @@ export class IsolatedAgentInvocationService {
     }
 
     let reserved = false;
-    const reserveCommand: CommandReservation = async (transaction, commandId) => {
-      await request.operation!.journal.reserveOperation(journalRequest, commandId, transaction);
+    const reserveCommand: CommandReservation = (transaction, commandId) => {
+      request.operation!.journal.reserveOperation(journalRequest, commandId, transaction);
       reserved = true;
     };
     let effect: ToolEffectResult;
@@ -236,7 +236,7 @@ export class IsolatedAgentInvocationService {
       if (call.toolName === 'skill_script' || isBuiltinTool(call.toolName)) {
         effect = await this.runToolEffect(request, assignedSkills, mcpTools, selectedBuiltinToolNames, call, reserveCommand);
       } else {
-        await request.operation.journal.reserveOperation(journalRequest);
+        request.operation.journal.reserveOperation(journalRequest);
         reserved = true;
         effect = await this.runToolEffect(request, assignedSkills, mcpTools, selectedBuiltinToolNames, call);
       }

@@ -70,7 +70,7 @@ export class BuiltinAgentToolsService {
       return this.commands.createWithReservation(command, options.cwd, options.reserveCommand);
     }
     return options?.cwd
-      ? this.commands.createWithReservation(command, options.cwd, async () => undefined)
+      ? this.commands.createWithReservation(command, options.cwd, () => undefined)
       : this.commands.create({ command });
   }
 }

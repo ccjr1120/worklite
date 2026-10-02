@@ -80,6 +80,9 @@ importers:
       '@worklite/model-gateway':
         specifier: workspace:*
         version: link:../../packages/model-gateway
+      '@worklite/team-runtime':
+        specifier: workspace:*
+        version: link:../../packages/team-runtime
       '@worklite/workflow-engine':
         specifier: workspace:*
         version: link:../../packages/workflow-engine

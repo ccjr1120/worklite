@@ -1,0 +1,1316 @@
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { createHash, randomUUID } from 'node:crypto';
+import { dirname, isAbsolute, resolve } from 'node:path';
+import { and, asc, desc, eq, inArray, ne } from 'drizzle-orm';
+import type {
+  AgentTeamCriterionAssessment,
+  AgentTeamDocumentView,
+  AgentTeamMode,
+  AgentTeamPendingInputView,
+  AgentTeamRole,
+  AgentTeamRunEvent,
+  AgentTeamRunEventType,
+  AgentTeamRunOutcome,
+  AgentTeamRunStatus,
+  AgentTeamRunView,
+  AgentTeamTaskAttemptStatus,
+  AgentTeamTaskAttemptView,
+  AnswerAgentTeamRunRequest,
+  CreateAgentTeamRunRequest,
+} from '@worklite/contracts';
+import {
+  agentTeamDocuments,
+  agentTeamPendingInputs,
+  agentTeamRunEvents,
+  agentTeamRuns,
+  agentTeamTaskAttempts,
+  agentTeams,
+  agentTeamVersions,
+  type AgentTeamRun,
+  type AgentTeamVersion,
+  type Database,
+  type StoredAgentTeamRoleConfiguration,
+  type StoredAgentTeamVersionSnapshot,
+} from '@worklite/db';
+import {
+  Command,
+  createSqliteCheckpointer,
+  createTeamGraph,
+  getBmadTeaProcessManifest,
+  isInterrupted,
+  readBmadTeaProcessFile,
+  toGraphResult,
+  type AgentTeamDocument,
+  type AgentTeamGraphResult,
+  type AgentTeamGraphState,
+  type AgentTeamTaskRequest,
+  type AgentTeamTaskResult,
+} from '@worklite/team-runtime';
+import { DATABASE } from '../../infrastructure/database.module';
+import { IsolatedAgentInvocationService, type AgentInvocationOperationJournal } from '../agents/isolated-agent-invocation.service';
+import { AgentTeamOperationJournalService } from './agent-team-operation-journal.service';
+import { WorkspaceResourcesService } from '../teams/team-resources.service';
+
+const BUILT_IN_TEAM_ID = 'agent_team_bmad_tea';
+const PROCESS_ID = 'bmad-tea';
+const PROCESS_VERSION = '1';
+const ROLE_TOOL_NAMES: Record<AgentTeamRole, readonly string[]> = {
+  planner: ['read', 'glob', 'grep'],
+  test_designer: ['read', 'glob', 'grep'],
+  developer: ['bash', 'read', 'write', 'glob', 'grep'],
+  test_author: ['read', 'write', 'glob', 'grep'],
+  test_runner: ['bash', 'read', 'write', 'glob', 'grep'],
+  reviewer: ['read', 'glob', 'grep'],
+};
+const ROLE_INSTRUCTIONS: Record<AgentTeamRole, string> = {
+  planner: 'Clarify the software goal, preserve the user intent, inspect the authorized project context, and produce an implementation plan that downstream roles can execute.',
+  test_designer: 'Translate the intent and plan into a test design with explicit evidence requirements. State what each planned check can and cannot establish.',
+  developer: 'Implement the smallest direct change that satisfies the intent and authorized plan. Preserve repository instructions and report changes and gaps accurately.',
+  test_author: 'Author only the tests required by the confirmed test design and authorized execution scope.',
+  test_runner: 'Execute the declared checks through the available command tool, preserve their exact evidence, and distinguish command success from criterion completion.',
+  reviewer: 'Independently assess the implementation and test evidence against the original intent. Request scoped repair only when concrete evidence shows a defect.',
+};
+const TASK_ROLES: Array<[RegExp, AgentTeamRole]> = [
+  [/^repair_test_authoring_/, 'test_author'],
+  [/^repair_test_execution_/, 'test_runner'],
+  [/^repair_review_/, 'reviewer'],
+  [/^repair_/, 'developer'],
+  [/^planning$/, 'planner'],
+  [/^test_design$/, 'test_designer'],
+  [/^development$/, 'developer'],
+  [/^test_authoring$/, 'test_author'],
+  [/^test_execution$/, 'test_runner'],
+  [/^review$/, 'reviewer'],
+];
+
+type Checkpointer = ReturnType<typeof createSqliteCheckpointer>;
+type RawTaskOutput = {
+  status?: unknown;
+  documents?: unknown;
+  unresolvedIssues?: unknown;
+  commandIds?: unknown;
+  criterionAssessments?: unknown;
+  repairRequest?: unknown;
+  pendingInput?: unknown;
+};
+
+@Injectable()
+export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
+  private readonly checkpointer: Checkpointer;
+  private readonly executions = new Map<string, Promise<void>>();
+  private shuttingDown = false;
+  private readonly abortControllers = new Map<string, AbortController>();
+
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    private readonly config: ConfigService,
+    private readonly invocations: IsolatedAgentInvocationService,
+    private readonly resources: WorkspaceResourcesService,
+    private readonly operations: AgentTeamOperationJournalService,
+  ) {
+    this.checkpointer = createSqliteCheckpointer(this.checkpointPath());
+  }
+
+  async onModuleInit(): Promise<void> {
+    await this.initializeBuiltInTeam();
+    await this.recoverRuns();
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    this.shuttingDown = true;
+    for (const controller of this.abortControllers.values()) controller.abort();
+    await Promise.allSettled([...this.executions.values()]);
+    this.checkpointer.db.close();
+  }
+
+  async createRun(workspaceId: string, request: CreateAgentTeamRunRequest): Promise<AgentTeamRunView> {
+    const intent = request?.intent?.trim();
+    const projectDirectory = request?.projectDirectory?.trim();
+    const mode = request?.mode;
+    if (!intent) throw new BadRequestException('A TeamRun intent is required.');
+    if (!projectDirectory || !isAbsolute(projectDirectory)) {
+      throw new BadRequestException('An absolute project directory is required.');
+    }
+    if (mode !== 'plan_only' && mode !== 'validate_existing' && mode !== 'implement_and_validate') {
+      throw new BadRequestException('A supported TeamRun mode is required.');
+    }
+
+    const [team] = await this.db.select().from(agentTeams)
+      .where(and(eq(agentTeams.id, BUILT_IN_TEAM_ID), eq(agentTeams.workspaceId, workspaceId)))
+      .limit(1);
+    if (!team) throw new NotFoundException('The built-in Agent Team was not found.');
+
+    const runId = `atrun_${randomUUID()}`;
+    const versionId = `atver_${randomUUID()}`;
+    const snapshot = await this.createVersionSnapshot(team.roles);
+    await this.db.transaction((transaction) => {
+      const [latest] = transaction.select({ version: agentTeamVersions.version })
+        .from(agentTeamVersions)
+        .where(eq(agentTeamVersions.teamId, team.id))
+        .orderBy(desc(agentTeamVersions.version))
+        .limit(1)
+        .all();
+      transaction.insert(agentTeamVersions).values({
+        id: versionId,
+        workspaceId,
+        teamId: team.id,
+        version: (latest?.version ?? 0) + 1,
+        snapshot,
+      }).run();
+      transaction.insert(agentTeamRuns).values({
+        id: runId,
+        workspaceId,
+        teamId: team.id,
+        teamVersionId: versionId,
+        status: 'queued',
+        intent,
+        projectDirectory: resolve(projectDirectory),
+        mode,
+        scopeRevision: 1,
+        langGraphThreadId: `atthread_${runId}`,
+      }).run();
+      this.appendEvent(transaction as unknown as Database, runId, 'run.status', { status: 'queued' });
+    });
+
+    this.scheduleExecution(runId, {
+      runId,
+      intent,
+      mode,
+      projectDirectory: resolve(projectDirectory),
+      scopeRevision: 1,
+    });
+    return this.getRunView(runId);
+  }
+
+  async getRunView(runId: string): Promise<AgentTeamRunView> {
+    const run = await this.getRun(runId);
+    const [version] = await this.db.select().from(agentTeamVersions)
+      .where(eq(agentTeamVersions.id, run.teamVersionId))
+      .limit(1);
+    if (!version) throw new NotFoundException('The Agent Team version was not found.');
+    const [taskRows, documentRows, pendingRows] = await Promise.all([
+      this.db.select().from(agentTeamTaskAttempts)
+        .where(eq(agentTeamTaskAttempts.runId, runId))
+        .orderBy(asc(agentTeamTaskAttempts.createdAt), asc(agentTeamTaskAttempts.attemptIndex)),
+      this.db.select().from(agentTeamDocuments)
+        .where(eq(agentTeamDocuments.runId, runId))
+        .orderBy(asc(agentTeamDocuments.createdAt), asc(agentTeamDocuments.key), asc(agentTeamDocuments.revision)),
+      this.db.select().from(agentTeamPendingInputs)
+        .where(eq(agentTeamPendingInputs.runId, runId))
+        .orderBy(asc(agentTeamPendingInputs.createdAt)),
+    ]);
+    return {
+      id: run.id,
+      teamId: run.teamId,
+      teamVersion: { id: version.id, version: version.version, createdAt: version.createdAt.toISOString() },
+      status: run.status,
+      intent: run.intent,
+      projectDirectory: run.projectDirectory,
+      mode: run.mode,
+      scopeRevision: run.scopeRevision,
+      desiredControlState: run.desiredControlState,
+      tasks: taskRows.map(toTaskAttemptView),
+      documents: documentRows.map(toDocumentView),
+      pendingInputs: pendingRows.map(toPendingInputView),
+      outcome: isRunOutcome(run.outcome) ? run.outcome : null,
+      createdAt: run.createdAt.toISOString(),
+      updatedAt: run.updatedAt.toISOString(),
+      finishedAt: run.finishedAt?.toISOString() ?? null,
+    };
+  }
+
+  async answer(runId: string, request: AnswerAgentTeamRunRequest): Promise<AgentTeamRunView> {
+    const run = await this.getRun(runId);
+    if (run.status !== 'waiting_for_input') throw new BadRequestException('The Agent Team run is not waiting for input.');
+    if (request?.pendingInputId !== request?.pendingInputId?.trim() || !request.pendingInputId) {
+      throw new BadRequestException('A pending input id is required.');
+    }
+    if (typeof request.answer !== 'string' || !request.answer.trim()) {
+      throw new BadRequestException('A pending input answer is required.');
+    }
+    if (request.scopeRevision !== run.scopeRevision) {
+      throw new BadRequestException('The pending input scope revision is stale.');
+    }
+
+    const now = new Date();
+    const accepted = await this.db.transaction((transaction) => {
+      const rows = transaction.update(agentTeamPendingInputs).set({
+        status: 'answered',
+        answer: request.answer,
+        answeredAt: now,
+        updatedAt: now,
+      }).where(and(
+        eq(agentTeamPendingInputs.id, request.pendingInputId),
+        eq(agentTeamPendingInputs.runId, runId),
+        eq(agentTeamPendingInputs.scopeRevision, run.scopeRevision),
+        eq(agentTeamPendingInputs.status, 'pending'),
+      )).returning().all();
+      if (rows.length === 0) return false;
+      transaction.update(agentTeamRuns).set({
+        status: 'running',
+        desiredControlState: 'none',
+        updatedAt: now,
+      }).where(and(eq(agentTeamRuns.id, runId), eq(agentTeamRuns.status, 'waiting_for_input'))).run();
+      this.appendEvent(transaction as unknown as Database, runId, 'input.answered', {
+        pendingInputId: request.pendingInputId,
+        answer: request.answer,
+      });
+      return true;
+    });
+    if (!accepted) throw new BadRequestException('The pending input is no longer active.');
+
+    this.scheduleExecution(runId, new Command({ resume: request.answer }));
+    return this.getRunView(runId);
+  }
+
+  async pause(runId: string): Promise<AgentTeamRunView> {
+    const run = await this.getRun(runId);
+    if (run.status === 'paused') return this.getRunView(runId);
+    if (run.status === 'waiting_for_input' || (run.status === 'queued' && !this.executions.has(runId))) {
+      await this.setRunStatus(runId, 'paused');
+    } else if (run.status === 'queued' || run.status === 'running') {
+      await this.requestPause(runId);
+    } else {
+      throw new BadRequestException('A completed Agent Team run cannot be paused.');
+    }
+    return this.getRunView(runId);
+  }
+
+  async resume(runId: string): Promise<AgentTeamRunView> {
+    const run = await this.getRun(runId);
+    if (run.status !== 'paused') throw new BadRequestException('Only a paused Agent Team run can be resumed.');
+    const input = await this.resumeInput(run);
+    await this.setRunStatus(runId, 'running');
+    this.scheduleExecution(runId, input);
+    return this.getRunView(runId);
+  }
+
+  async cancel(runId: string): Promise<AgentTeamRunView> {
+    const run = await this.getRun(runId);
+    if (isTerminalRunStatus(run.status)) return this.getRunView(runId);
+    const now = new Date();
+    const accepted = await this.db.transaction((transaction) => {
+      const requested = transaction.update(agentTeamRuns).set({
+        desiredControlState: 'cancel_requested',
+        updatedAt: now,
+      }).where(and(
+        eq(agentTeamRuns.id, runId),
+        ne(agentTeamRuns.status, 'succeeded'),
+        ne(agentTeamRuns.status, 'failed'),
+        ne(agentTeamRuns.status, 'cancelled'),
+      )).returning().all();
+      if (requested.length === 0) return false;
+      transaction.update(agentTeamPendingInputs).set({ status: 'cancelled', updatedAt: now })
+        .where(and(eq(agentTeamPendingInputs.runId, runId), eq(agentTeamPendingInputs.status, 'pending'))).run();
+      this.appendEvent(transaction as unknown as Database, runId, 'run.status', { status: 'cancel_requested' });
+      return true;
+    });
+    if (!accepted) return this.getRunView(runId);
+
+    this.abortControllers.get(runId)?.abort();
+    if (!this.executions.has(runId)) await this.finishCancelledRun(runId);
+    return this.getRunView(runId);
+  }
+
+  async retry(runId: string, taskKey: string): Promise<AgentTeamRunView> {
+    const run = await this.getRun(runId);
+    if (run.status !== 'failed') throw new BadRequestException('Only a failed Agent Team run can be retried.');
+    const [failed] = await this.db.select().from(agentTeamTaskAttempts)
+      .where(and(
+        eq(agentTeamTaskAttempts.runId, runId),
+        eq(agentTeamTaskAttempts.taskKey, taskKey),
+        eq(agentTeamTaskAttempts.status, 'failed'),
+        eq(agentTeamTaskAttempts.active, true),
+      ))
+      .orderBy(desc(agentTeamTaskAttempts.attemptIndex))
+      .limit(1);
+    if (!failed) throw new BadRequestException('The failed active Agent Team task was not found.');
+
+    const now = new Date();
+    await this.db.transaction((transaction) => {
+      transaction.update(agentTeamTaskAttempts).set({ active: false, updatedAt: now })
+        .where(and(
+          eq(agentTeamTaskAttempts.runId, runId),
+          eq(agentTeamTaskAttempts.taskKey, taskKey),
+          eq(agentTeamTaskAttempts.active, true),
+        )).run();
+      transaction.update(agentTeamRuns).set({
+        status: 'running',
+        desiredControlState: 'none',
+        updatedAt: now,
+        finishedAt: null,
+      }).where(and(eq(agentTeamRuns.id, runId), eq(agentTeamRuns.status, 'failed'))).run();
+      this.appendEvent(transaction as unknown as Database, runId, 'run.status', { status: 'running' });
+    });
+
+    this.scheduleExecution(runId, null);
+    return this.getRunView(runId);
+  }
+
+  private async initializeBuiltInTeam(): Promise<void> {
+    const [existing] = await this.db.select({ id: agentTeams.id }).from(agentTeams)
+      .where(and(eq(agentTeams.id, BUILT_IN_TEAM_ID), eq(agentTeams.workspaceId, 'workspace_personal')))
+      .limit(1);
+    if (existing) return;
+
+    const manifest = getBmadTeaProcessManifest();
+    const roles = (Object.keys(ROLE_INSTRUCTIONS) as AgentTeamRole[]).map((role) => ({
+      role,
+      publicModelId: '',
+      instructions: ROLE_INSTRUCTIONS[role],
+      entryPoints: manifest.entryPoints[role] ?? [],
+      skills: [],
+      mcpServers: [],
+      toolNames: [...ROLE_TOOL_NAMES[role]],
+    }));
+    await this.db.insert(agentTeams).values({
+      id: BUILT_IN_TEAM_ID,
+      workspaceId: 'workspace_personal',
+      name: 'WorkLite Software Team',
+      description: 'Built-in BMAD and TEA software development team.',
+      processId: PROCESS_ID,
+      processVersion: PROCESS_VERSION,
+      roles,
+    }).onConflictDoNothing().run();
+  }
+
+  private async createVersionSnapshot(
+    configuredRoles: StoredAgentTeamRoleConfiguration[],
+  ): Promise<StoredAgentTeamVersionSnapshot> {
+    return {
+      processId: PROCESS_ID,
+      processVersion: PROCESS_VERSION,
+      roles: await Promise.all(configuredRoles.map(async (role) => {
+        const entryPointContent = await Promise.all(role.entryPoints.map((path) => readBmadTeaProcessFile(path)));
+        return {
+          ...role,
+          instructions: [role.instructions, ...entryPointContent].filter(Boolean).join('\n\n---\n\n'),
+        };
+      })),
+      recipeDefaults: { maxRepairRounds: 2 },
+    };
+  }
+
+  private async recoverRuns(): Promise<void> {
+    const runs = await this.db.select().from(agentTeamRuns)
+      .where(inArray(agentTeamRuns.status, ['queued', 'running']))
+      .orderBy(asc(agentTeamRuns.createdAt));
+    for (const run of runs) {
+      if (run.desiredControlState === 'cancel_requested') {
+        await this.failActiveAttempts(run.id, 'cancelled', 'The Agent Team run was cancelled.');
+        await this.finishCancelledRun(run.id);
+        continue;
+      }
+      if (run.status === 'queued') {
+        if (run.desiredControlState === 'pause_requested') {
+          await this.setRunStatus(run.id, 'paused');
+        } else {
+          this.scheduleExecution(run.id, initialGraphInput(run));
+        }
+        continue;
+      }
+      if (!this.executions.has(run.id)) await this.reconcileInterruptedRun(run);
+    }
+  }
+
+  private async resumeInput(run: AgentTeamRun): Promise<AgentTeamGraphState | null> {
+    const version = await this.getVersion(run);
+    const graph = this.createGraph(run, version);
+    const snapshot = await graph.getState({ configurable: { thread_id: run.langGraphThreadId } });
+    const state = snapshot.values as AgentTeamGraphState | undefined;
+    return isUsableGraphState(state, run) ? null : initialGraphInput(run);
+  }
+
+  private async reconcileInterruptedRun(run: AgentTeamRun): Promise<void> {
+    if (run.desiredControlState === 'pause_requested') {
+      await this.setRunStatus(run.id, 'paused', undefined, 'none');
+      return;
+    }
+
+    const version = await this.getVersion(run);
+    const graph = this.createGraph(run, version);
+    const snapshot = await graph.getState({ configurable: { thread_id: run.langGraphThreadId } });
+    const state = snapshot.values as AgentTeamGraphState | undefined;
+    const validState = isUsableGraphState(state, run);
+    if (validState) await this.reconcileProjection(run, state);
+    const interrupted = snapshot.tasks.some((task) => task.interrupts.length > 0);
+    if (interrupted) {
+      const answeredInput = validState && state?.pendingInput
+        ? await this.findAnsweredInput(run.id, state.pendingInput.id)
+        : undefined;
+      if (answeredInput) {
+        await this.setRunStatus(run.id, 'running', undefined, 'none');
+        this.scheduleExecution(run.id, new Command({ resume: answeredInput }));
+        return;
+      }
+      await this.setRunStatus(run.id, 'waiting_for_input');
+      return;
+    }
+    if (!validState || snapshot.next.length === 0) {
+      if (!validState) {
+        await this.failStaleAttempts(run.id, 'The Agent Team checkpoint was missing or empty.');
+        await this.setRunStatus(run.id, 'failed');
+        return;
+      }
+      await this.finishSuccessfulRun(run.id, toGraphResult(state));
+      return;
+    }
+
+    await this.failStaleAttempts(run.id, 'The Agent Team process was interrupted before the task settled.');
+    this.scheduleExecution(run.id, null);
+  }
+
+  private async reconcileProjection(run: AgentTeamRun, state: AgentTeamGraphState): Promise<void> {
+    this.db.transaction((transaction) => {
+      for (const [documentIndex, document] of (state.documents ?? []).entries()) {
+        const revision = nextDocumentRevision(state.documents ?? [], document, documentIndex);
+        const [existing] = transaction.select({ id: agentTeamDocuments.id })
+          .from(agentTeamDocuments)
+          .where(and(
+            eq(agentTeamDocuments.runId, run.id),
+            eq(agentTeamDocuments.key, document.key),
+            eq(agentTeamDocuments.revision, revision),
+          ))
+          .limit(1).all();
+        if (existing) continue;
+        const attemptId = ensureProjectionAttempt(transaction as unknown as Database, run, document.producingTaskKey);
+        transaction.insert(agentTeamDocuments).values({
+          id: `atdoc_${randomUUID()}`,
+          workspaceId: run.workspaceId,
+          runId: run.id,
+          taskAttemptId: attemptId,
+          key: document.key,
+          revision,
+          title: document.title,
+          content: document.content,
+          upstreamDocumentKeys: document.upstreamDocumentKeys,
+        }).run();
+        this.appendEvent(transaction as unknown as Database, run.id, 'document.committed', {
+          taskKey: document.producingTaskKey,
+          documentKey: document.key,
+          revision,
+        });
+      }
+    });
+  }
+
+  private scheduleExecution(runId: string, input: AgentTeamGraphState | Command | null): void {
+    if (this.shuttingDown || this.executions.has(runId)) return;
+    const execution = this.executeGraph(runId, input)
+      .catch(async (error) => {
+        await this.handleGraphFailure(runId, error);
+      })
+      .finally(() => {
+        this.executions.delete(runId);
+        this.abortControllers.delete(runId);
+      });
+    this.executions.set(runId, execution);
+    void execution;
+  }
+
+  private async executeGraph(runId: string, input: AgentTeamGraphState | Command | null): Promise<void> {
+    const run = await this.getRun(runId);
+    const version = await this.getVersion(run);
+    const graph = this.createGraph(run, version);
+    const controller = new AbortController();
+    this.abortControllers.set(runId, controller);
+    await this.setRunStatus(runId, 'running');
+    let finalState: AgentTeamGraphState | undefined;
+    let sawInterrupt = false;
+    let pauseAtBoundary = false;
+    try {
+      const stream = await graph.stream(input, {
+        configurable: { thread_id: run.langGraphThreadId },
+        signal: controller.signal,
+      });
+      for await (const chunk of stream) {
+        if (isInterrupted(chunk)) {
+          sawInterrupt = true;
+          continue;
+        }
+        finalState = chunk as AgentTeamGraphState;
+        if (await this.getDesiredControlState(runId) === 'pause_requested') {
+          const snapshot = await graph.getState({ configurable: { thread_id: run.langGraphThreadId } });
+          if (snapshot.next.length > 0) {
+            pauseAtBoundary = true;
+            break;
+          }
+        }
+      }
+    } finally {
+      this.abortControllers.delete(runId);
+    }
+
+    if (pauseAtBoundary) {
+      await this.setRunStatus(runId, 'paused', undefined, 'none');
+      return;
+    }
+    if (sawInterrupt) {
+      const desiredControlState = await this.getDesiredControlState(runId);
+      if (desiredControlState === 'cancel_requested') {
+        await this.failActiveAttempts(runId, 'cancelled', 'The Agent Team run was cancelled.');
+        await this.finishCancelledRun(runId);
+        return;
+      }
+      if (desiredControlState === 'pause_requested') {
+        await this.setRunStatus(runId, 'paused', undefined, 'none');
+        return;
+      }
+      await this.setRunStatus(runId, 'waiting_for_input');
+      return;
+    }
+    await this.finishSuccessfulRun(runId, toGraphResult(finalState ?? initialGraphState(run)));
+  }
+
+  private createGraph(run: AgentTeamRun, version: AgentTeamVersion) {
+    return createTeamGraph({
+      executeTask: async (request) => this.executeTask(run.workspaceId, version, request),
+    }, this.checkpointer, {
+      maxRepairRounds: version.snapshot.recipeDefaults.maxRepairRounds,
+    });
+  }
+
+  private async executeTask(
+    workspaceId: string,
+    version: AgentTeamVersion,
+    request: AgentTeamTaskRequest,
+  ): Promise<AgentTeamTaskResult> {
+    const run = await this.getRun(request.runId);
+    const role = version.snapshot.roles.find((item) => item.role === request.role);
+    if (!role) throw new Error(`Agent Team role ${request.role} was not captured by this version.`);
+    const attempt = await this.prepareTaskAttempt(run, request);
+    if (attempt.status === 'completed' || attempt.status === 'waiting_for_input') {
+      return attempt.result as AgentTeamTaskResult;
+    }
+
+    const controller = this.abortControllers.get(request.runId);
+    const signal = controller?.signal ?? new AbortController().signal;
+    const commandIds = new Set<string>();
+    const scopedJournal = this.operations.forAttempt({
+      workspaceId,
+      runId: request.runId,
+      taskAttemptId: attempt.id,
+    });
+    const operationJournal: AgentInvocationOperationJournal = {
+      ...scopedJournal,
+      findOperation: async (operationKey) => {
+        const record = await scopedJournal.findOperation(operationKey);
+        recordCompletedCommand(record, commandIds);
+        return record;
+      },
+      completeOperation: async (operationKey, result, commandId) => {
+        const record = await scopedJournal.completeOperation(operationKey, result, commandId);
+        recordCompletedCommand(record, commandIds);
+        return record;
+      },
+    };
+    const output = await this.invocations.execute({
+      workspaceId,
+      publicModelId: role.publicModelId,
+      systemPrompt: taskSystemPrompt(role.instructions),
+      context: taskContext(request),
+      skills: role.skills,
+      mcpRuntimes: await this.resources.workflowMcpRuntimes(workspaceId, role.mcpServers.map((server) => server.id)),
+      builtinToolNames: role.toolNames,
+      role: request.role,
+      projectDirectory: request.projectDirectory,
+      signal,
+      jsonOutput: true,
+      correlation: { source: 'team', teamRunId: request.runId, teamTaskAttemptId: attempt.id },
+      limits: { maxToolResultChars: 100_000 },
+      operation: { taskKey: request.taskKey, journal: operationJournal },
+      onTextDelta: (delta) => this.appendEvent(this.db, request.runId, 'task.delta', {
+        taskAttemptId: attempt.id,
+        taskKey: request.taskKey,
+        delta,
+      }),
+      onSkillScript: (activity) => {
+        commandIds.add(activity.commandExecutionId);
+      },
+      onBuiltinTool: (activity) => {
+        commandIds.add(activity.commandExecutionId);
+      },
+    });
+
+    const parsed = parseTaskOutput(output, request.taskKey);
+    if (parsed.status === 'waiting_for_input') {
+      return this.finishWaitingAttempt(request, workspaceId, attempt.id, parsed);
+    }
+    const result: Extract<AgentTeamTaskResult, { status: 'completed' }> = {
+      ...parsed,
+      commandIds: [...commandIds],
+    };
+    return this.finishCompletedAttempt(request, workspaceId, attempt.id, result);
+  }
+
+  private async prepareTaskAttempt(
+    run: AgentTeamRun,
+    request: AgentTeamTaskRequest,
+  ): Promise<{ id: string; status: AgentTeamTaskAttemptStatus; result: unknown }> {
+    const inputFingerprint = fingerprint(request);
+    const [existing] = await this.db.select().from(agentTeamTaskAttempts)
+      .where(and(eq(agentTeamTaskAttempts.runId, run.id), eq(agentTeamTaskAttempts.taskKey, request.taskKey)))
+      .orderBy(desc(agentTeamTaskAttempts.attemptIndex))
+      .limit(1);
+    if (existing?.active && existing.status === 'completed') {
+      if (existing.inputFingerprint !== inputFingerprint) {
+        throw new Error(`Agent Team task ${request.taskKey} produced a result for different input.`);
+      }
+      return { id: existing.id, status: 'completed', result: existing.result };
+    }
+
+    if (existing?.active && existing.status === 'waiting_for_input' && !request.answer) {
+      return { id: existing.id, status: existing.status, result: existing.result };
+    }
+
+    const now = new Date();
+    if (existing?.active && existing.status === 'waiting_for_input') {
+      const resumedInput = { initial: existing.inputRevision, resumedWith: request };
+      const [resumed] = await this.db.update(agentTeamTaskAttempts).set({
+        status: 'running',
+        inputRevision: resumedInput,
+        inputFingerprint,
+        result: null,
+        error: null,
+        finishedAt: null,
+        startedAt: existing.startedAt ?? now,
+        updatedAt: now,
+      }).where(and(eq(agentTeamTaskAttempts.id, existing.id), eq(agentTeamTaskAttempts.status, 'waiting_for_input')))
+        .returning();
+      if (resumed) return { id: resumed.id, status: resumed.status, result: resumed.result };
+    }
+    if (existing?.active && existing.status === 'running') {
+      throw new Error(`Agent Team task ${request.taskKey} is already running.`);
+    }
+
+    const attemptId = `atask_${randomUUID()}`;
+    const [created] = await this.db.insert(agentTeamTaskAttempts).values({
+      id: attemptId,
+      workspaceId: run.workspaceId,
+      runId: run.id,
+      taskKey: request.taskKey,
+      attemptIndex: (existing?.attemptIndex ?? 0) + 1,
+      role: request.role,
+      status: 'running',
+      inputRevision: request,
+      inputFingerprint,
+      startedAt: now,
+    }).returning();
+    this.appendEvent(this.db, run.id, 'task.started', {
+      taskAttemptId: attemptId,
+      taskKey: request.taskKey,
+      role: request.role,
+      attemptIndex: created.attemptIndex,
+    });
+    return { id: created.id, status: created.status, result: created.result };
+  }
+
+  private finishWaitingAttempt(
+    request: AgentTeamTaskRequest,
+    workspaceId: string,
+    attemptId: string,
+    result: Extract<AgentTeamTaskResult, { status: 'waiting_for_input' }>,
+  ): Promise<AgentTeamTaskResult> {
+    const now = new Date();
+    const pendingInputId = `atinput_${randomUUID()}`;
+    const persistedResult: Extract<AgentTeamTaskResult, { status: 'waiting_for_input' }> = {
+      status: 'waiting_for_input',
+      pendingInput: {
+        id: pendingInputId,
+        question: result.pendingInput.question,
+        scopeRevision: request.scopeRevision,
+      },
+    };
+    this.db.transaction((transaction) => {
+      const [desired] = transaction.select({ desiredControlState: agentTeamRuns.desiredControlState })
+        .from(agentTeamRuns)
+        .where(eq(agentTeamRuns.id, request.runId))
+        .limit(1).all();
+      if (desired?.desiredControlState === 'cancel_requested') {
+        throw new DOMException('The Agent Team run was cancelled.', 'AbortError');
+      }
+      const updated = transaction.update(agentTeamTaskAttempts).set({
+        status: 'waiting_for_input',
+        result: persistedResult,
+        finishedAt: now,
+        updatedAt: now,
+      }).where(and(
+        eq(agentTeamTaskAttempts.id, attemptId),
+        eq(agentTeamTaskAttempts.status, 'running'),
+      )).returning().all();
+      if (updated.length === 0) throw new Error('The Agent Team task attempt is no longer running.');
+      transaction.insert(agentTeamPendingInputs).values({
+        id: pendingInputId,
+        workspaceId,
+        runId: request.runId,
+        taskAttemptId: attemptId,
+        question: persistedResult.pendingInput.question,
+        scopeRevision: request.scopeRevision,
+        status: 'pending',
+      }).run();
+      this.appendEvent(transaction as unknown as Database, request.runId, 'task.waiting', {
+        taskAttemptId: attemptId,
+        taskKey: request.taskKey,
+        pendingInputId,
+      });
+      this.appendEvent(transaction as unknown as Database, request.runId, 'input.requested', {
+        pendingInputId,
+        question: persistedResult.pendingInput.question,
+        scopeRevision: request.scopeRevision,
+      });
+    });
+    return Promise.resolve(persistedResult);
+  }
+
+  private finishCompletedAttempt(
+    request: AgentTeamTaskRequest,
+    workspaceId: string,
+    attemptId: string,
+    result: Extract<AgentTeamTaskResult, { status: 'completed' }>,
+  ): Promise<AgentTeamTaskResult> {
+    const now = new Date();
+    this.db.transaction((transaction) => {
+      const [desired] = transaction.select({ desiredControlState: agentTeamRuns.desiredControlState })
+        .from(agentTeamRuns)
+        .where(eq(agentTeamRuns.id, request.runId))
+        .limit(1).all();
+      if (desired?.desiredControlState === 'cancel_requested') {
+        throw new DOMException('The Agent Team run was cancelled.', 'AbortError');
+      }
+      const updated = transaction.update(agentTeamTaskAttempts).set({
+        status: 'completed',
+        result,
+        error: null,
+        finishedAt: now,
+        updatedAt: now,
+      }).where(and(
+        eq(agentTeamTaskAttempts.id, attemptId),
+        eq(agentTeamTaskAttempts.status, 'running'),
+      )).returning().all();
+      if (updated.length === 0) throw new Error('The Agent Team task attempt is no longer running.');
+      for (const document of result.documents) {
+        const [latest] = transaction.select({ revision: agentTeamDocuments.revision })
+          .from(agentTeamDocuments)
+          .where(and(eq(agentTeamDocuments.runId, request.runId), eq(agentTeamDocuments.key, document.key)))
+          .orderBy(desc(agentTeamDocuments.revision))
+          .limit(1).all();
+        const revision = (latest?.revision ?? 0) + 1;
+        transaction.insert(agentTeamDocuments).values({
+          id: `atdoc_${randomUUID()}`,
+          workspaceId,
+          runId: request.runId,
+          taskAttemptId: attemptId,
+          key: document.key,
+          revision,
+          title: document.title,
+          content: document.content,
+          upstreamDocumentKeys: document.upstreamDocumentKeys,
+        }).run();
+        this.appendEvent(transaction as unknown as Database, request.runId, 'document.committed', {
+          taskAttemptId: attemptId,
+          taskKey: request.taskKey,
+          documentKey: document.key,
+          revision,
+        });
+      }
+      this.appendEvent(transaction as unknown as Database, request.runId, 'task.completed', {
+        taskAttemptId: attemptId,
+        taskKey: request.taskKey,
+        result,
+      });
+    });
+    return Promise.resolve(result);
+  }
+
+  private async requestPause(runId: string): Promise<void> {
+    await this.db.update(agentTeamRuns).set({
+      desiredControlState: 'pause_requested',
+      updatedAt: new Date(),
+    }).where(eq(agentTeamRuns.id, runId)).run();
+    await this.appendEvent(this.db, runId, 'run.status', { status: 'pause_requested' });
+  }
+
+  private async findAnsweredInput(
+    runId: string,
+    pendingInputId: string,
+  ): Promise<string | undefined> {
+    const [row] = await this.db.select({ answer: agentTeamPendingInputs.answer })
+      .from(agentTeamPendingInputs)
+      .where(and(
+        eq(agentTeamPendingInputs.id, pendingInputId),
+        eq(agentTeamPendingInputs.runId, runId),
+        eq(agentTeamPendingInputs.status, 'answered'),
+      ))
+      .limit(1);
+    return row?.answer ?? undefined;
+  }
+
+  private async getDesiredControlState(
+    runId: string,
+  ): Promise<AgentTeamRunView['desiredControlState'] | undefined> {
+    const [row] = await this.db.select({ desiredControlState: agentTeamRuns.desiredControlState })
+      .from(agentTeamRuns)
+      .where(eq(agentTeamRuns.id, runId))
+      .limit(1);
+    return row?.desiredControlState;
+  }
+
+  private async handleGraphFailure(runId: string, error: unknown): Promise<void> {
+    const [run] = await this.db.select().from(agentTeamRuns).where(eq(agentTeamRuns.id, runId)).limit(1);
+    if (!run) return;
+    if (run.desiredControlState === 'cancel_requested') {
+      await this.failActiveAttempts(runId, 'cancelled', 'The Agent Team run was cancelled.');
+      await this.finishCancelledRun(runId);
+      return;
+    }
+    const reason = this.shuttingDown && isAbortError(error)
+      ? 'The Agent Team process was interrupted by API shutdown.'
+      : formatError(error);
+    await this.failActiveAttempts(runId, 'failed', reason);
+    await this.setRunStatus(runId, 'failed');
+  }
+
+  private async failActiveAttempts(
+    runId: string,
+    status: 'failed' | 'cancelled',
+    reason: string,
+  ): Promise<void> {
+    const now = new Date();
+    const rows = await this.db.update(agentTeamTaskAttempts).set({
+      status,
+      error: reason,
+      finishedAt: now,
+      updatedAt: now,
+    }).where(and(eq(agentTeamTaskAttempts.runId, runId), eq(agentTeamTaskAttempts.active, true), eq(agentTeamTaskAttempts.status, 'running')))
+      .returning();
+    for (const row of rows) {
+      await this.appendEvent(this.db, runId, status === 'cancelled' ? 'task.failed' : 'task.failed', {
+        taskAttemptId: row.id,
+        taskKey: row.taskKey,
+        error: reason,
+        cancelled: status === 'cancelled',
+      });
+    }
+  }
+
+  private async failStaleAttempts(runId: string, reason: string): Promise<void> {
+    const now = new Date();
+    await this.db.transaction((transaction) => {
+      const rows = transaction.select()
+        .from(agentTeamTaskAttempts)
+        .where(and(
+          eq(agentTeamTaskAttempts.runId, runId),
+          eq(agentTeamTaskAttempts.active, true),
+          eq(agentTeamTaskAttempts.status, 'running'),
+        ))
+        .orderBy(desc(agentTeamTaskAttempts.attemptIndex)).all();
+      for (const row of rows) {
+        if (row.result !== null && row.result !== undefined) continue;
+        transaction.update(agentTeamTaskAttempts).set({
+          status: 'failed',
+          error: reason,
+          finishedAt: now,
+          updatedAt: now,
+        }).where(eq(agentTeamTaskAttempts.id, row.id)).run();
+        this.appendEvent(transaction as unknown as Database, runId, 'task.failed', {
+          taskAttemptId: row.id,
+          taskKey: row.taskKey,
+          error: reason,
+        });
+      }
+    });
+  }
+
+  private async finishSuccessfulRun(runId: string, result: AgentTeamGraphResult): Promise<void> {
+    const outcome: AgentTeamRunOutcome = {
+      summary: result.mode === 'plan_only'
+        ? 'Planning and test design completed.'
+        : result.mode === 'validate_existing'
+          ? 'Existing implementation validation completed.'
+          : 'Implementation and validation completed.',
+      unresolvedIssues: [...result.unresolvedIssues],
+      criterionAssessments: [...result.criterionAssessments],
+    };
+    const now = new Date();
+    const committed = this.db.transaction((transaction) => {
+      const [desired] = transaction.select({ desiredControlState: agentTeamRuns.desiredControlState })
+        .from(agentTeamRuns)
+        .where(eq(agentTeamRuns.id, runId))
+        .limit(1).all();
+      if (desired?.desiredControlState === 'cancel_requested') return false;
+      const rows = transaction.update(agentTeamRuns).set({
+        status: 'succeeded',
+        outcome,
+        desiredControlState: 'none',
+        updatedAt: now,
+        finishedAt: now,
+      }).where(and(
+        eq(agentTeamRuns.id, runId),
+        ne(agentTeamRuns.desiredControlState, 'cancel_requested'),
+      )).returning().all();
+      if (rows.length === 0) return false;
+      this.appendEvent(transaction as unknown as Database, runId, 'run.status', { status: 'succeeded', outcome });
+      return true;
+    });
+    if (committed || await this.getDesiredControlState(runId) !== 'cancel_requested') return;
+    await this.failActiveAttempts(runId, 'cancelled', 'The Agent Team run was cancelled.');
+    await this.finishCancelledRun(runId);
+  }
+
+  private async finishCancelledRun(runId: string): Promise<void> {
+    const now = new Date();
+    await this.db.update(agentTeamPendingInputs).set({ status: 'cancelled', updatedAt: now })
+      .where(and(eq(agentTeamPendingInputs.runId, runId), eq(agentTeamPendingInputs.status, 'pending'))).run();
+    await this.setRunStatus(runId, 'cancelled', undefined, 'none');
+  }
+
+  private async setRunStatus(
+    runId: string,
+    status: AgentTeamRunStatus,
+    outcome?: AgentTeamRunOutcome,
+    desiredControlState?: AgentTeamRunView['desiredControlState'],
+  ): Promise<void> {
+    const now = new Date();
+    const [row] = await this.db.update(agentTeamRuns).set({
+      status,
+      updatedAt: now,
+      finishedAt: isTerminalRunStatus(status) ? now : null,
+      ...(outcome === undefined ? {} : { outcome }),
+      ...(desiredControlState === undefined ? {} : { desiredControlState }),
+    }).where(eq(agentTeamRuns.id, runId)).returning();
+    if (row) await this.appendEvent(this.db, runId, 'run.status', { status, ...(outcome ? { outcome } : {}) });
+  }
+
+  private async getVersion(run: AgentTeamRun): Promise<AgentTeamVersion> {
+    const [version] = await this.db.select().from(agentTeamVersions)
+      .where(eq(agentTeamVersions.id, run.teamVersionId))
+      .limit(1);
+    if (!version) throw new NotFoundException('The Agent Team version was not found.');
+    return version;
+  }
+
+  private async getRun(runId: string): Promise<AgentTeamRun> {
+    const [run] = await this.db.select().from(agentTeamRuns).where(eq(agentTeamRuns.id, runId)).limit(1);
+    if (!run) throw new NotFoundException('Agent Team run not found.');
+    return run;
+  }
+
+  private appendEvent(
+    db: Database,
+    runId: string,
+    type: AgentTeamRunEventType,
+    payload: unknown,
+  ): void {
+    const [latest] = db.select({ sequence: agentTeamRunEvents.sequence })
+      .from(agentTeamRunEvents)
+      .where(eq(agentTeamRunEvents.runId, runId))
+      .orderBy(desc(agentTeamRunEvents.sequence))
+      .limit(1).all();
+    db.insert(agentTeamRunEvents).values({
+      runId,
+      sequence: (latest?.sequence ?? 0) + 1,
+      type,
+      payload,
+    }).run();
+  }
+
+  private checkpointPath(): string {
+    const configuredSqlitePath = this.config.get<string>('SQLITE_PATH') ?? '../../.data/worklite.db';
+    const sqlitePath = isAbsolute(configuredSqlitePath)
+      ? configuredSqlitePath
+      : resolve(process.cwd(), configuredSqlitePath);
+    const profileDataDirectory = dirname(sqlitePath);
+    return this.config.get<string>('AGENT_TEAM_CHECKPOINT_PATH')
+      ?? resolve(profileDataDirectory, 'agent-teams', 'checkpoints.sqlite');
+  }
+}
+
+function initialGraphInput(run: AgentTeamRun): AgentTeamGraphState {
+  return {
+    runId: run.id,
+    intent: run.intent,
+    mode: run.mode,
+    projectDirectory: run.projectDirectory,
+    scopeRevision: run.scopeRevision,
+    documents: [],
+    unresolvedIssues: [],
+    commandIds: [],
+    criterionAssessments: [],
+    pendingInput: null,
+    activeTaskKey: null,
+    taskAnswers: {},
+    taskPendingInputIds: {},
+    repairRound: 0,
+    repairInstruction: null,
+    repairRequest: undefined,
+    continueRepair: false,
+  };
+}
+
+function initialGraphState(run: AgentTeamRun): AgentTeamGraphState {
+  return initialGraphInput(run);
+}
+
+function ensureProjectionAttempt(
+  db: Database,
+  run: AgentTeamRun,
+  taskKey: string,
+): string {
+  const [existing] = db.select().from(agentTeamTaskAttempts)
+    .where(and(eq(agentTeamTaskAttempts.runId, run.id), eq(agentTeamTaskAttempts.taskKey, taskKey)))
+    .orderBy(desc(agentTeamTaskAttempts.attemptIndex))
+    .limit(1).all();
+  const now = new Date();
+  if (existing) {
+    if (existing.status === 'running') {
+      db.update(agentTeamTaskAttempts).set({
+        status: 'completed',
+        result: { status: 'completed', documents: [], unresolvedIssues: [], commandIds: [], criterionAssessments: [] },
+        error: null,
+        finishedAt: now,
+        updatedAt: now,
+      }).where(and(eq(agentTeamTaskAttempts.id, existing.id), eq(agentTeamTaskAttempts.status, 'running'))).run();
+    }
+    return existing.id;
+  }
+
+  const id = `atask_${randomUUID()}`;
+  db.insert(agentTeamTaskAttempts).values({
+    id,
+    workspaceId: run.workspaceId,
+    runId: run.id,
+    taskKey,
+    attemptIndex: 1,
+    role: roleForTaskKey(taskKey),
+    status: 'completed',
+    inputRevision: { source: 'langgraph-checkpoint', taskKey },
+    inputFingerprint: fingerprint({ source: 'langgraph-checkpoint', runId: run.id, taskKey }),
+    result: { status: 'completed', documents: [], unresolvedIssues: [], commandIds: [], criterionAssessments: [] },
+    startedAt: now,
+    finishedAt: now,
+  }).run();
+  return id;
+}
+
+function nextDocumentRevision(
+  documents: readonly AgentTeamDocument[],
+  document: AgentTeamDocument,
+  throughIndex: number,
+): number {
+  let revision = 0;
+  for (let index = 0; index <= throughIndex; index += 1) {
+    if (documents[index]?.key === document.key) revision += 1;
+  }
+  return revision;
+}
+
+function taskSystemPrompt(instructions: string): string {
+  return `${instructions}
+
+You are executing one WorkLite Agent Team task. Use tools only when the captured role configuration and project authorization permit them. Return exactly one JSON object.
+
+When more user input is required, return:
+{"status":"waiting_for_input","question":"One specific question"}
+
+Otherwise return:
+{"status":"completed","documents":[{"key":"stable-document-key","title":"Document title","content":"Document content","upstreamDocumentKeys":["optional-upstream-key"]}],"unresolvedIssues":["specific unresolved issue"],"criterionAssessments":[{"criterion":"criterion","assessment":"met|unmet|not_verified","evidence":["evidence reference"]}]}
+
+The reviewer may add "repairRequest":{"taskKey":"development","instruction":"specific repair instruction"}. Do not invent command ids; WorkLite records actual command evidence.`;
+}
+
+function taskContext(request: AgentTeamTaskRequest): unknown {
+  return {
+    task: {
+      key: request.taskKey,
+      role: request.role,
+      mode: request.mode,
+      scopeRevision: request.scopeRevision,
+      ...(request.pendingInputId ? { pendingInputId: request.pendingInputId } : {}),
+      ...(request.answer ? { answer: request.answer } : {}),
+      ...(request.repairInstruction ? { repairInstruction: request.repairInstruction } : {}),
+    },
+    intent: request.intent,
+    projectDirectory: request.projectDirectory,
+    upstreamDocuments: request.upstream,
+  };
+}
+
+function parseTaskOutput(output: string, taskKey: string): AgentTeamTaskResult {
+  let value: RawTaskOutput;
+  try {
+    value = JSON.parse(output) as RawTaskOutput;
+  } catch {
+    throw new Error('The Agent Team role returned invalid JSON.');
+  }
+  if (value?.status === 'waiting_for_input') {
+    const question = typeof (value.pendingInput as { question?: unknown } | undefined)?.question === 'string'
+      ? ((value.pendingInput as { question: string }).question).trim()
+      : undefined;
+    if (!question) throw new Error('The Agent Team input request has no question.');
+    return {
+      status: 'waiting_for_input',
+      pendingInput: { id: `placeholder_${randomUUID()}`, question, scopeRevision: 0 },
+    };
+  }
+  if (value?.status !== 'completed') throw new Error('The Agent Team role returned an unsupported task status.');
+  return {
+    status: 'completed',
+    documents: parseDocuments(value.documents, taskKey),
+    unresolvedIssues: parseStrings(value.unresolvedIssues, 'unresolved issue'),
+    commandIds: [],
+    criterionAssessments: parseAssessments(value.criterionAssessments),
+    repairRequest: parseRepairRequest(value.repairRequest),
+  };
+}
+
+function parseDocuments(value: unknown, taskKey: string): AgentTeamDocument[] {
+  if (!Array.isArray(value)) throw new Error('The Agent Team role returned no document list.');
+  return value.map((item) => {
+    const document = item as Partial<AgentTeamDocument>;
+    if (typeof document.key !== 'string' || !document.key.trim()) throw new Error('A Team document key is required.');
+    if (typeof document.title !== 'string' || !document.title.trim()) throw new Error('A Team document title is required.');
+    if (typeof document.content !== 'string') throw new Error('Team document content must be text.');
+    return {
+      key: document.key.trim(),
+      title: document.title.trim(),
+      content: document.content,
+      producingTaskKey: taskKey,
+      upstreamDocumentKeys: Array.isArray(document.upstreamDocumentKeys)
+        ? document.upstreamDocumentKeys.filter((key): key is string => typeof key === 'string')
+        : [],
+    };
+  });
+}
+
+function parseStrings(value: unknown, field: string): string[] {
+  if (!Array.isArray(value)) throw new Error(`The Agent Team role returned no ${field} list.`);
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
+function parseAssessments(value: unknown): AgentTeamCriterionAssessment[] {
+  if (!Array.isArray(value)) throw new Error('The Agent Team role returned no criterion assessment list.');
+  return value.map((item) => {
+    const assessment = item as Partial<AgentTeamCriterionAssessment>;
+    if (typeof assessment.criterion !== 'string' || !assessment.criterion.trim()) {
+      throw new Error('A criterion assessment criterion is required.');
+    }
+    if (assessment.assessment !== 'met' && assessment.assessment !== 'unmet' && assessment.assessment !== 'not_verified') {
+      throw new Error('A criterion assessment value is unsupported.');
+    }
+    return {
+      criterion: assessment.criterion.trim(),
+      assessment: assessment.assessment,
+      evidence: Array.isArray(assessment.evidence)
+        ? assessment.evidence.filter((item): item is string => typeof item === 'string')
+        : [],
+    };
+  });
+}
+
+function parseRepairRequest(value: unknown): Extract<AgentTeamTaskResult, { status: 'completed' }>['repairRequest'] {
+  if (value === undefined || value === null) return undefined;
+  const request = value as { taskKey?: unknown; instruction?: unknown };
+  if (request.taskKey !== 'development' || typeof request.instruction !== 'string' || !request.instruction.trim()) {
+    throw new Error('The reviewer returned an invalid repair request.');
+  }
+  return { taskKey: 'development', instruction: request.instruction.trim() };
+}
+
+function toTaskAttemptView(row: typeof agentTeamTaskAttempts.$inferSelect): AgentTeamTaskAttemptView {
+  return {
+    id: row.id,
+    taskKey: row.taskKey,
+    attemptIndex: row.attemptIndex,
+    role: row.role,
+    status: row.status,
+    inputFingerprint: row.inputFingerprint,
+    result: row.result,
+    error: row.error,
+    retryable: row.status === 'failed' && row.active,
+    createdAt: row.createdAt.toISOString(),
+    startedAt: row.startedAt?.toISOString() ?? null,
+    finishedAt: row.finishedAt?.toISOString() ?? null,
+  };
+}
+
+function toDocumentView(row: typeof agentTeamDocuments.$inferSelect): AgentTeamDocumentView {
+  return {
+    id: row.id,
+    runId: row.runId,
+    taskAttemptId: row.taskAttemptId,
+    key: row.key,
+    revision: row.revision,
+    title: row.title,
+    content: row.content,
+    upstreamDocumentKeys: row.upstreamDocumentKeys,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function toPendingInputView(row: typeof agentTeamPendingInputs.$inferSelect): AgentTeamPendingInputView {
+  return {
+    id: row.id,
+    runId: row.runId,
+    taskAttemptId: row.taskAttemptId,
+    question: row.question,
+    scopeRevision: row.scopeRevision,
+    status: row.status,
+    createdAt: row.createdAt.toISOString(),
+    answeredAt: row.answeredAt?.toISOString() ?? null,
+  };
+}
+
+function isRunOutcome(value: unknown): value is AgentTeamRunOutcome {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const outcome = value as Partial<AgentTeamRunOutcome>;
+  return typeof outcome.summary === 'string' && Array.isArray(outcome.unresolvedIssues) && Array.isArray(outcome.criterionAssessments);
+}
+
+function isTerminalRunStatus(status: AgentTeamRunStatus): boolean {
+  return status === 'succeeded' || status === 'failed' || status === 'cancelled';
+}
+
+function isUsableGraphState(value: unknown, run: AgentTeamRun): value is AgentTeamGraphState {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const state = value as Partial<AgentTeamGraphState>;
+  return state.runId === run.id &&
+    state.intent === run.intent &&
+    state.mode === run.mode &&
+    state.projectDirectory === run.projectDirectory &&
+    state.scopeRevision === run.scopeRevision &&
+    Array.isArray(state.documents) &&
+    Array.isArray(state.unresolvedIssues) &&
+    Array.isArray(state.commandIds) &&
+    Array.isArray(state.criterionAssessments);
+}
+
+function recordCompletedCommand(
+  record: { status: string; commandId?: string } | undefined,
+  commandIds: Set<string>,
+): void {
+  if (record?.status === 'completed' && record.commandId) commandIds.add(record.commandId);
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : 'The Agent Team task failed.';
+}
+
+function roleForTaskKey(taskKey: string): AgentTeamRole {
+  return TASK_ROLES.find(([pattern]) => pattern.test(taskKey))?.[1] ?? 'reviewer';
+}
+
+function fingerprint(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}

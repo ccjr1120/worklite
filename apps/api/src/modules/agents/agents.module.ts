@@ -11,5 +11,5 @@ import { IsolatedAgentInvocationService } from './isolated-agent-invocation.serv
 import { McpServersModule } from '../mcp-servers/mcp-servers.module';
 import { PluginsModule } from '../plugins/plugins.module';
 
-@Module({ imports: [WorkspaceModule, SkillsModule, CommandsModule, McpServersModule, forwardRef(() => PluginsModule)], controllers: [AgentsController], providers: [AgentsService, AgentExecutionsService, McpRuntimeService, BuiltinAgentToolsService, IsolatedAgentInvocationService], exports: [AgentsService, AgentExecutionsService] })
+@Module({ imports: [WorkspaceModule, SkillsModule, CommandsModule, McpServersModule, forwardRef(() => PluginsModule)], controllers: [AgentsController], providers: [AgentsService, AgentExecutionsService, McpRuntimeService, BuiltinAgentToolsService, IsolatedAgentInvocationService], exports: [AgentsService, AgentExecutionsService, IsolatedAgentInvocationService] })
 export class AgentsModule {}

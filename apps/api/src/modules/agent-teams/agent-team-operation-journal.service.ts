@@ -38,7 +38,7 @@ export type AgentTeamScopedOperationJournal = {
     request: AgentTeamOperationReservation,
     commandId?: string,
     transaction?: Database,
-  ): Promise<AgentTeamOperationRecordView>;
+  ): AgentTeamOperationRecordView;
   completeOperation(operationKey: string, result: unknown, commandId?: string): Promise<AgentTeamOperationRecordView>;
   markOperationUncertain(operationKey: string, reason: string): Promise<AgentTeamOperationRecordView>;
   failOperation(operationKey: string, reason: string): Promise<AgentTeamOperationRecordView>;
@@ -68,15 +68,15 @@ export class AgentTeamOperationJournalService {
     return row ? toRecord(row, operationKey) : undefined;
   }
 
-  private async reserveOperation(
+  private reserveOperation(
     scope: AgentTeamOperationScope,
     request: AgentTeamOperationReservation,
     commandId: string | undefined,
     transaction: Database | undefined,
-  ): Promise<AgentTeamOperationRecordView> {
+  ): AgentTeamOperationRecordView {
     const db = transaction ?? this.db;
     const logicalKey = logicalOperationKey(request);
-    const [row] = await db.insert(agentTeamOperations).values({
+    const [row] = db.insert(agentTeamOperations).values({
       key: persistedKey(scope, logicalKey),
       workspaceId: scope.workspaceId,
       runId: scope.runId,
@@ -87,7 +87,7 @@ export class AgentTeamOperationJournalService {
       inputFingerprint: request.inputFingerprint,
       status: 'reserved',
       commandId: commandId ?? null,
-    }).returning();
+    }).returning().all();
     return toRecord(row, logicalKey);
   }
 
@@ -106,7 +106,7 @@ export class AgentTeamOperationJournalService {
         updatedAt: new Date(),
       })
       .where(operationScopeFilter(scope, operationKey))
-      .returning();
+      .returning().all();
     if (!row) throw new NotFoundException(`Agent Team operation ${operationKey} was not found.`);
     return toRecord(row, operationKey);
   }
@@ -120,7 +120,7 @@ export class AgentTeamOperationJournalService {
     const [row] = await this.db.update(agentTeamOperations)
       .set({ status, result: null, failureReason: reason, updatedAt: new Date() })
       .where(operationScopeFilter(scope, operationKey))
-      .returning();
+      .returning().all();
     if (!row) throw new NotFoundException(`Agent Team operation ${operationKey} was not found.`);
     return toRecord(row, operationKey);
   }

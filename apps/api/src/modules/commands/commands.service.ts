@@ -10,7 +10,7 @@ import { DATABASE } from '../../infrastructure/database.module';
 
 type CommandEventListener = (event: CommandEventView) => void;
 
-export type CommandReservation = (transaction: Database, commandId: string) => Promise<void> | void;
+export type CommandReservation = (transaction: Database, commandId: string) => void;
 
 @Injectable()
 export class CommandsService {
@@ -48,9 +48,9 @@ export class CommandsService {
   ): Promise<CommandExecutionView> {
     const id = `cmd_${randomUUID()}`;
     const workingDirectory = resolve(cwd ?? process.cwd());
-    await this.db.transaction(async (transaction) => {
+    this.db.transaction((transaction) => {
       transaction.insert(commandExecutions).values({ id, command, cwd: workingDirectory, status: 'queued' }).run();
-      await reservation?.(transaction as unknown as Database, id);
+      reservation?.(transaction as unknown as Database, id);
     });
     await this.persistEvent(id, 'lifecycle', 'Command queued.');
     return this.dispatch(id, stdinInput);

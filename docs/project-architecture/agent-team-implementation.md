@@ -330,4 +330,5 @@ References were consulted on 2026-10-03. They support the selected mechanisms; t
 - Added the Team persistence schema, Gateway Team correlation, three-mode execution graph, shared isolated Agent invocation boundary, role-filtered built-in tools, project-scoped Commands, and the database-backed operation journal.
 - Command creation and operation reservation now commit in one API database transaction before process launch. Completed semantic operations can be replayed without re-running their effects; uncertain operations require a recovery decision.
 - Agent Team remains unavailable through public APIs and platform surfaces. Chat Bot, `worklite-platform`, snapshot capability metadata, and reference protections remain unchanged until those routes become visible.
+- Integrated the internal LangGraph runtime with persistent checkpoints, WorkLite projection reconciliation, pause/answer/retry behavior, and journal-backed isolated Agent invocations; Agent Team remains unavailable through public APIs and platform surfaces.
 - No test execution, build, type check, server lifecycle operation, or deployment-profile access has been performed.
