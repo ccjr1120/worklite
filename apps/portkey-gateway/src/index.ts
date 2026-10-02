@@ -117,6 +117,7 @@ app.get('/worklite/request-logs', (c) => {
       model: c.req.query('model'),
       statusClass: statusClass === 'success' || statusClass === 'client_error' || statusClass === 'server_error' ? statusClass : undefined,
       workflowRunId: c.req.query('workflowRunId'),
+      teamRunId: c.req.query('teamRunId'),
       limit: c.req.query('limit') ? Number(c.req.query('limit')) : undefined,
       cursor: c.req.query('cursor'),
     }));

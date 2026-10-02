@@ -161,6 +161,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     if (query.model?.trim()) search.set('model', query.model.trim());
     if (query.statusClass) search.set('statusClass', query.statusClass);
     if (query.workflowRunId?.trim()) search.set('workflowRunId', query.workflowRunId.trim());
+    if (query.teamRunId?.trim()) search.set('teamRunId', query.teamRunId.trim());
     if (query.limit) search.set('limit', String(query.limit));
     if (query.cursor?.trim()) search.set('cursor', query.cursor.trim());
     const suffix = search.size > 0 ? `?${search.toString()}` : '';

@@ -137,6 +137,9 @@ export async function systemOnePassthrough(request: Request, provider: GatewayPr
         source: correlation(request, 'x-worklite-log-source'),
         workflowRunId: correlation(request, 'x-worklite-workflow-run-id'),
         nodeRunId: correlation(request, 'x-worklite-node-run-id'),
+        teamRunId: correlation(request, 'x-worklite-team-run-id'),
+        teamTaskAttemptId: correlation(request, 'x-worklite-team-task-attempt-id'),
+        teamOperationKey: correlation(request, 'x-worklite-team-operation-key'),
         request: requestBody,
         response: capture,
       });

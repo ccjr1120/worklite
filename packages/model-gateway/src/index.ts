@@ -35,9 +35,12 @@ export type GatewayAgentMessage =
 export type GatewayToolResultOutput = { type: 'text' | 'error-text'; value: string };
 
 export type GatewayCorrelation = {
-  source: 'agent' | 'workflow';
+  source: 'agent' | 'workflow' | 'team';
   workflowRunId?: string;
   nodeRunId?: string;
+  teamRunId?: string;
+  teamTaskAttemptId?: string;
+  teamOperationKey?: string;
 };
 
 export type GenerateAgentStepRequest = {
@@ -679,6 +682,9 @@ function correlationHeaders(correlation: GatewayCorrelation | undefined): Record
     'x-worklite-log-source': correlation.source,
     ...(correlation.workflowRunId ? { 'x-worklite-workflow-run-id': correlation.workflowRunId } : {}),
     ...(correlation.nodeRunId ? { 'x-worklite-node-run-id': correlation.nodeRunId } : {}),
+    ...(correlation.teamRunId ? { 'x-worklite-team-run-id': correlation.teamRunId } : {}),
+    ...(correlation.teamTaskAttemptId ? { 'x-worklite-team-task-attempt-id': correlation.teamTaskAttemptId } : {}),
+    ...(correlation.teamOperationKey ? { 'x-worklite-team-operation-key': correlation.teamOperationKey } : {}),
   };
 }
 

@@ -29,6 +29,7 @@ export class PortkeyGatewayController {
     @Query('model') model?: string,
     @Query('statusClass') statusClass?: string,
     @Query('workflowRunId') workflowRunId?: string,
+    @Query('teamRunId') teamRunId?: string,
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
   ): Promise<GatewayRequestLogList> {
@@ -39,6 +40,7 @@ export class PortkeyGatewayController {
       model,
       statusClass: statusClass === 'success' || statusClass === 'client_error' || statusClass === 'server_error' ? statusClass : undefined,
       workflowRunId,
+      teamRunId,
       limit: limit ? Number(limit) : undefined,
       cursor,
     });

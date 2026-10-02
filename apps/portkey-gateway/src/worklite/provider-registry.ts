@@ -131,6 +131,9 @@ function getDatabase(): BetterSqlite3.Database {
       source TEXT,
       workflow_run_id TEXT,
       node_run_id TEXT,
+      team_run_id TEXT,
+      team_task_attempt_id TEXT,
+      team_operation_key TEXT,
       prompt_tokens INTEGER,
       completion_tokens INTEGER,
       total_tokens INTEGER,
@@ -141,9 +144,26 @@ function getDatabase(): BetterSqlite3.Database {
     CREATE INDEX IF NOT EXISTS gateway_request_logs_occurred_idx ON gateway_request_logs(occurred_at);
     CREATE INDEX IF NOT EXISTS gateway_request_logs_provider_model_idx ON gateway_request_logs(provider_name, model);
     CREATE INDEX IF NOT EXISTS gateway_request_logs_workflow_run_idx ON gateway_request_logs(workflow_run_id);
+    CREATE INDEX IF NOT EXISTS gateway_request_logs_team_run_idx ON gateway_request_logs(team_run_id);
   `);
+  addMissingRequestLogColumns(database);
   pruneRequestLogs(database);
   return database;
+}
+
+function addMissingRequestLogColumns(database: BetterSqlite3.Database): void {
+  const columns = new Set(database.prepare('PRAGMA table_info(gateway_request_logs)').all().map((column) => (column as { name: string }).name));
+  const additions: Array<[string, string]> = [
+    ['team_run_id', 'TEXT'],
+    ['team_task_attempt_id', 'TEXT'],
+    ['team_operation_key', 'TEXT'],
+  ];
+  for (const [name, type] of additions) {
+    if (!columns.has(name)) database.prepare(`ALTER TABLE gateway_request_logs ADD COLUMN ${name} ${type}`).run();
+  }
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS gateway_request_logs_team_run_idx ON gateway_request_logs(team_run_id);
+  `);
 }
 
 const REQUEST_LOG_RETENTION_DAYS = 3;
@@ -486,6 +506,9 @@ type GatewayRequestLogRow = {
   source: string | null;
   workflow_run_id: string | null;
   node_run_id: string | null;
+  team_run_id: string | null;
+  team_task_attempt_id: string | null;
+  team_operation_key: string | null;
   prompt_tokens: number | null;
   completion_tokens: number | null;
   total_tokens: number | null;
@@ -505,6 +528,9 @@ export function recordRequestLog(input: {
   source?: string | null;
   workflowRunId?: string | null;
   nodeRunId?: string | null;
+  teamRunId?: string | null;
+  teamTaskAttemptId?: string | null;
+  teamOperationKey?: string | null;
   promptTokens?: number | null;
   completionTokens?: number | null;
   totalTokens?: number | null;
@@ -513,7 +539,7 @@ export function recordRequestLog(input: {
 }): string {
   const database = getDatabase();
   const id = input.id?.trim() || `glog_${randomUUID()}`;
-  database.prepare(`INSERT INTO gateway_request_logs (id, occurred_at, provider_name, model, endpoint, status, duration_ms, streaming, source, workflow_run_id, node_run_id, prompt_tokens, completion_tokens, total_tokens, request_body, response_kind, response_body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+  database.prepare(`INSERT INTO gateway_request_logs (id, occurred_at, provider_name, model, endpoint, status, duration_ms, streaming, source, workflow_run_id, node_run_id, team_run_id, team_task_attempt_id, team_operation_key, prompt_tokens, completion_tokens, total_tokens, request_body, response_kind, response_body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     id,
     Date.now(),
     input.provider || 'Unknown',
@@ -525,6 +551,9 @@ export function recordRequestLog(input: {
     input.source ?? null,
     input.workflowRunId ?? null,
     input.nodeRunId ?? null,
+    input.teamRunId ?? null,
+    input.teamTaskAttemptId ?? null,
+    input.teamOperationKey ?? null,
     input.promptTokens ?? null,
     input.completionTokens ?? null,
     input.totalTokens ?? null,
@@ -584,6 +613,9 @@ function requestLogListItem(row: GatewayRequestLogRow) {
     source: row.source,
     workflowRunId: row.workflow_run_id,
     nodeRunId: row.node_run_id,
+    teamRunId: row.team_run_id,
+    teamTaskAttemptId: row.team_task_attempt_id,
+    teamOperationKey: row.team_operation_key,
     promptTokens: row.prompt_tokens,
     completionTokens: row.completion_tokens,
     totalTokens: row.total_tokens,
@@ -597,6 +629,7 @@ export function requestLogs(query: GatewayTimeRangeQuery & {
   model?: string;
   statusClass?: string;
   workflowRunId?: string;
+  teamRunId?: string;
   limit?: number;
   cursor?: string;
 }) {
@@ -622,6 +655,10 @@ export function requestLogs(query: GatewayTimeRangeQuery & {
   if (query.workflowRunId?.trim()) {
     conditions.push('workflow_run_id = ?');
     values.push(query.workflowRunId.trim());
+  }
+  if (query.teamRunId?.trim()) {
+    conditions.push('team_run_id = ?');
+    values.push(query.teamRunId.trim());
   }
   if (query.statusClass === 'success') conditions.push('status >= 200 AND status < 400');
   if (query.statusClass === 'client_error') conditions.push('status >= 400 AND status < 500');

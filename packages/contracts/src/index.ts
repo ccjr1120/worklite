@@ -848,7 +848,7 @@ export type TestModelProviderRequest = {
   model: string;
 };
 
-export type GatewayRequestLogSource = 'agent' | 'workflow' | 'provider_test' | 'proxy';
+export type GatewayRequestLogSource = 'agent' | 'workflow' | 'team' | 'provider_test' | 'proxy';
 
 export type GatewayRequestLogStatusClass = 'success' | 'client_error' | 'server_error';
 
@@ -864,6 +864,9 @@ export type GatewayRequestLogListItem = {
   source: GatewayRequestLogSource | null;
   workflowRunId: string | null;
   nodeRunId: string | null;
+  teamRunId: string | null;
+  teamTaskAttemptId: string | null;
+  teamOperationKey: string | null;
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
@@ -885,6 +888,7 @@ export type GatewayRequestLogQuery = GatewayTimeRange & {
   model?: string;
   statusClass?: GatewayRequestLogStatusClass;
   workflowRunId?: string;
+  teamRunId?: string;
   limit?: number;
   cursor?: string;
 };
@@ -1021,4 +1025,171 @@ export type WorkflowScheduleView = {
   lastStatus: RunStatus | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AgentTeamRole =
+  | 'planner'
+  | 'test_designer'
+  | 'developer'
+  | 'test_author'
+  | 'test_runner'
+  | 'reviewer';
+
+export type AgentTeamMode = 'plan_only' | 'validate_existing' | 'implement_and_validate';
+
+export type AgentTeamRoleConfiguration = {
+  role: AgentTeamRole;
+  publicModelId: string;
+  instructions: string;
+  entryPoints: string[];
+  skillIds: string[];
+  mcpServerIds: string[];
+  toolNames: string[];
+};
+
+export type AgentTeamView = {
+  id: string;
+  name: string;
+  description: string;
+  processId: string;
+  processVersion: string;
+  roles: AgentTeamRoleConfiguration[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AgentTeamVersionMetadata = {
+  id: string;
+  version: number;
+  createdAt: string;
+};
+
+export type AgentTeamTaskAttemptStatus =
+  | 'running'
+  | 'waiting_for_input'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export type AgentTeamTaskAttemptView = {
+  id: string;
+  taskKey: string;
+  attemptIndex: number;
+  role: AgentTeamRole;
+  status: AgentTeamTaskAttemptStatus;
+  inputFingerprint: string;
+  result: unknown;
+  error: string | null;
+  retryable: boolean;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+};
+
+export type AgentTeamDocumentView = {
+  id: string;
+  runId: string;
+  taskAttemptId: string;
+  key: string;
+  revision: number;
+  title: string;
+  content: string;
+  upstreamDocumentKeys: string[];
+  createdAt: string;
+};
+
+export type AgentTeamPendingInputView = {
+  id: string;
+  runId: string;
+  taskAttemptId: string;
+  question: string;
+  scopeRevision: number;
+  status: 'pending' | 'answered' | 'cancelled';
+  createdAt: string;
+  answeredAt: string | null;
+};
+
+export type AgentTeamRunStatus =
+  | 'queued'
+  | 'running'
+  | 'waiting_for_input'
+  | 'paused'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled';
+
+export type AgentTeamCriterionAssessment = {
+  criterion: string;
+  assessment: 'met' | 'unmet' | 'not_verified';
+  evidence: string[];
+};
+
+export type AgentTeamRunOutcome = {
+  summary: string;
+  unresolvedIssues: string[];
+  criterionAssessments: AgentTeamCriterionAssessment[];
+};
+
+export type AgentTeamRunView = {
+  id: string;
+  teamId: string;
+  teamVersion: AgentTeamVersionMetadata;
+  status: AgentTeamRunStatus;
+  intent: string;
+  projectDirectory: string;
+  mode: AgentTeamMode;
+  scopeRevision: number;
+  desiredControlState: 'none' | 'pause_requested' | 'cancel_requested';
+  tasks: AgentTeamTaskAttemptView[];
+  documents: AgentTeamDocumentView[];
+  pendingInputs: AgentTeamPendingInputView[];
+  outcome: AgentTeamRunOutcome | null;
+  createdAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
+};
+
+export type AgentTeamRunEventType =
+  | 'run.status'
+  | 'task.started'
+  | 'task.delta'
+  | 'task.waiting'
+  | 'task.completed'
+  | 'task.failed'
+  | 'document.committed'
+  | 'operation.updated'
+  | 'input.requested'
+  | 'input.answered'
+  | 'run.outcome';
+
+export type AgentTeamRunEvent = {
+  runId: string;
+  sequence: number;
+  type: AgentTeamRunEventType;
+  payload: unknown;
+  createdAt: string;
+};
+
+export type UpdateAgentTeamRequest = {
+  roles?: AgentTeamRoleConfiguration[];
+};
+
+export type CreateAgentTeamRunRequest = {
+  intent: string;
+  projectDirectory: string;
+  mode: AgentTeamMode;
+};
+
+export type CreateAgentTeamRunResponse = {
+  run: AgentTeamRunView;
+};
+
+export type AnswerAgentTeamRunRequest = {
+  pendingInputId: string;
+  scopeRevision: number;
+  answer: string;
+};
+
+export type AgentTeamRunActionResponse = {
+  run: AgentTeamRunView;
 };

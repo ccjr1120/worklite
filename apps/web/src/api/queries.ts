@@ -138,7 +138,7 @@ export function usePortkeyGatewayStatsQuery(range: GatewayTimeRange) {
 
 export function useGatewayRequestLogsQuery(query: GatewayRequestLogQuery) {
   return useQuery({
-    queryKey: ['gateway-request-logs', query.from ?? '', query.to ?? '', query.provider ?? '', query.model ?? '', query.statusClass ?? '', query.workflowRunId ?? ''] as const,
+    queryKey: ['gateway-request-logs', query.from ?? '', query.to ?? '', query.provider ?? '', query.model ?? '', query.statusClass ?? '', query.workflowRunId ?? '', query.teamRunId ?? ''] as const,
     queryFn: () => api.gatewayRequestLogs(query),
     refetchInterval: 30_000,
   });
