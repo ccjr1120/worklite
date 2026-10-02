@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import type { AgentTeamRole } from '@worklite/contracts';
+import type { AgentTeamOperationRecoveryDecision, AgentTeamRole } from '@worklite/contracts';
 import {
   createModelGateway,
   type GatewayCorrelation,
@@ -59,18 +59,28 @@ export type AgentInvocationOperationRecord = {
   status: 'reserved' | 'completed' | 'uncertain' | 'failed';
   commandId?: string;
   result?: unknown;
+  failureReason?: string;
+  recoveryDecision?: AgentTeamOperationRecoveryDecision;
 };
 
 export type AgentInvocationOperationJournal = {
   findOperation(operationKey: string): Promise<AgentInvocationOperationRecord | undefined>;
+  findReplayOperation(taskKey: string, replayOperationKey: string): Promise<AgentInvocationOperationRecord | undefined>;
   reserveOperation(
-    request: { taskKey: string; operationKey: string; toolName: string; inputFingerprint: string },
+    request: {
+      taskKey: string;
+      operationKey: string;
+      toolName: string;
+      inputFingerprint: string;
+      pendingResult?: unknown;
+    },
     commandId?: string,
     transaction?: Database,
   ): AgentInvocationOperationRecord;
   completeOperation(operationKey: string, result: unknown, commandId?: string): Promise<AgentInvocationOperationRecord>;
   markOperationUncertain(operationKey: string, reason: string): Promise<AgentInvocationOperationRecord>;
   failOperation(operationKey: string, reason: string): Promise<AgentInvocationOperationRecord>;
+  attachReplayCommand(operationKey: string, commandId: string, transaction?: Database): AgentInvocationOperationRecord;
 };
 
 export type IsolatedAgentInvocationRequest = {
@@ -102,7 +112,11 @@ export type IsolatedAgentInvocationRequest = {
 };
 
 export class AgentInvocationRecoveryRequiredError extends Error {
-  constructor(readonly reason: string) {
+  constructor(
+    readonly reason: string,
+    readonly operationKey: string,
+    readonly commandId?: string,
+  ) {
     super(reason);
     this.name = 'AgentInvocationRecoveryRequiredError';
   }
@@ -215,52 +229,112 @@ export class IsolatedAgentInvocationService {
       ? { skillId: call.skillId, scriptPath: call.scriptPath, arguments: call.arguments }
       : { input: call.input };
     const inputFingerprint = stableInputFingerprint({ toolName: call.toolName, ...semanticInput });
-    const operationKey = `${call.toolName}:${inputFingerprint}`;
-    const key = `${request.operation.taskKey}:${operationKey}`;
-    const journalRequest = {
-      taskKey: request.operation.taskKey,
-      operationKey,
-      toolName: call.toolName,
-      inputFingerprint,
-    };
-    const existing = await request.operation.journal.findOperation(key);
+    const taskKey = request.operation.taskKey;
+    const baseOperationKey = `${call.toolName}:${inputFingerprint}`;
+    const existing = await request.operation.journal.findOperation(`${taskKey}:${baseOperationKey}`);
+    let dispatchOperationKey = baseOperationKey;
+    let replayOperation = false;
+
     if (existing) {
-      if (
-        existing.taskKey !== journalRequest.taskKey ||
-        existing.operationKey !== operationKey ||
-        existing.inputFingerprint !== inputFingerprint
-      ) {
-        throw new Error(`Operation ${key} was persisted for different input.`);
+      assertOperationMatches(existing, taskKey, baseOperationKey, call.toolName, inputFingerprint);
+      if (isCompletedToolResult(existing, call)) return existing.result.output;
+
+      let target = existing;
+      while (target.recoveryDecision?.type === 'replay') {
+        const replayKey = target.recoveryDecision.replayOperationKey;
+        const replay = await request.operation.journal.findReplayOperation(taskKey, replayKey);
+        if (!replay) {
+          dispatchOperationKey = replayKey;
+          replayOperation = true;
+          break;
+        }
+        assertOperationMatches(replay, taskKey, replayKey, call.toolName, inputFingerprint);
+        if (isCompletedToolResult(replay, call)) return replay.result.output;
+        target = replay;
       }
-      if (existing.status !== 'completed' || !isPersistedToolResult(existing.result, call)) {
-        throw new AgentInvocationRecoveryRequiredError(`Operation ${key} requires a recovery decision before it can continue.`);
+
+      if (!replayOperation) {
+        if (target.status === 'failed') {
+          throw new Error(`Operation ${target.key} has already failed.`);
+        }
+        throw new AgentInvocationRecoveryRequiredError(
+          `Operation ${target.key} requires a recovery decision before it can continue.`,
+          target.key,
+          target.commandId,
+        );
       }
-      return existing.result.output;
     }
 
-    let reserved = false;
-    const reserveCommand: CommandReservation = (transaction, commandId) => {
-      request.operation!.journal.reserveOperation(journalRequest, commandId, transaction);
-      reserved = true;
+    const journalRequest = {
+      taskKey,
+      operationKey: dispatchOperationKey,
+      toolName: call.toolName,
+      inputFingerprint,
+      pendingResult: { call },
     };
+    const dispatchKey = `${taskKey}:${dispatchOperationKey}`;
+    const commandBackedTool = call.toolName === 'skill_script' ||
+      (isBuiltinTool(call.toolName) && call.toolName !== 'process_reference');
+    let operationReserved = false;
+    let effectDispatched = false;
+    const reserveCommand: CommandReservation | undefined = commandBackedTool
+      ? (transaction, commandId) => {
+        if (replayOperation) {
+          request.operation!.journal.attachReplayCommand(dispatchKey, commandId, transaction);
+        } else {
+          request.operation!.journal.reserveOperation(journalRequest, commandId, transaction);
+        }
+        operationReserved = true;
+      }
+      : undefined;
+
     let effect: ToolEffectResult;
     try {
-      if (call.toolName === 'skill_script' || isBuiltinTool(call.toolName)) {
-        effect = await this.runToolEffect(request, assignedSkills, mcpTools, selectedBuiltinToolNames, call, reserveCommand);
+      if (commandBackedTool) {
+        if (!replayOperation) {
+          effect = await this.runToolEffect(request, assignedSkills, mcpTools, selectedBuiltinToolNames, call, reserveCommand);
+        } else {
+          await request.operation.journal.reserveOperation(journalRequest);
+          operationReserved = true;
+          effect = await this.runToolEffect(
+            request,
+            assignedSkills,
+            mcpTools,
+            selectedBuiltinToolNames,
+            call,
+            reserveCommand,
+          );
+        }
+        effectDispatched = true;
       } else {
-        request.operation.journal.reserveOperation(journalRequest);
-        reserved = true;
-        effect = await this.runToolEffect(request, assignedSkills, mcpTools, selectedBuiltinToolNames, call);
+        await request.operation.journal.reserveOperation(journalRequest);
+        operationReserved = true;
+        effectDispatched = true;
+        effect = await this.runToolEffect(
+          request,
+          assignedSkills,
+          mcpTools,
+          selectedBuiltinToolNames,
+          call,
+          replayOperation ? reserveCommand : undefined,
+        );
       }
       if (effect.cancelled) throw new Error(`Tool ${call.toolName} was cancelled.`);
       const persisted: PersistedToolResult = { call, output: effect.output, ...(effect.commandId ? { commandId: effect.commandId } : {}) };
-      await request.operation.journal.completeOperation(key, persisted, effect.commandId);
+      await request.operation.journal.completeOperation(dispatchKey, persisted, effect.commandId);
       return effect.output;
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'The tool effect has an unknown state.';
-      if (reserved) {
-        await request.operation.journal.markOperationUncertain(key, reason);
-        throw new AgentInvocationRecoveryRequiredError(`Operation ${key} requires a recovery decision before it can continue.`);
+      if (effectDispatched) {
+        const uncertain = await request.operation.journal.markOperationUncertain(dispatchKey, reason);
+        throw new AgentInvocationRecoveryRequiredError(
+          `Operation ${dispatchKey} requires a recovery decision before it can continue.`,
+          dispatchKey,
+          uncertain.commandId,
+        );
+      }
+      if (operationReserved) {
+        await request.operation.journal.failOperation(dispatchKey, reason);
       }
       throw error;
     }
@@ -423,6 +497,30 @@ function isPersistedToolResult(value: unknown, call: WorkflowAgentToolCall): val
     !!candidate.output &&
     (candidate.output.type === 'text' || candidate.output.type === 'error-text') &&
     typeof candidate.output.value === 'string';
+}
+
+function assertOperationMatches(
+  record: AgentInvocationOperationRecord,
+  taskKey: string,
+  operationKey: string,
+  toolName: string,
+  inputFingerprint: string,
+): void {
+  if (
+    record.taskKey !== taskKey ||
+    record.operationKey !== operationKey ||
+    record.toolName !== toolName ||
+    record.inputFingerprint !== inputFingerprint
+  ) {
+    throw new Error(`Operation ${taskKey}:${operationKey} was persisted for different input.`);
+  }
+}
+
+function isCompletedToolResult(
+  record: AgentInvocationOperationRecord,
+  call: WorkflowAgentToolCall,
+): record is AgentInvocationOperationRecord & { result: PersistedToolResult } {
+  return record.status === 'completed' && isPersistedToolResult(record.result, call);
 }
 
 function stableStringify(value: unknown): string {

@@ -1067,6 +1067,7 @@ export type AgentTeamVersionMetadata = {
 export type AgentTeamTaskAttemptStatus =
   | 'running'
   | 'waiting_for_input'
+  | 'waiting_for_recovery'
   | 'completed'
   | 'failed'
   | 'cancelled';
@@ -1102,11 +1103,36 @@ export type AgentTeamPendingInputView = {
   id: string;
   runId: string;
   taskAttemptId: string;
+  kind: 'question' | 'operation_recovery';
   question: string;
+  operationKey: string | null;
   scopeRevision: number;
   status: 'pending' | 'answered' | 'cancelled';
   createdAt: string;
   answeredAt: string | null;
+};
+
+export type AgentTeamOperationStatus = 'reserved' | 'completed' | 'uncertain' | 'failed';
+
+export type AgentTeamOperationRecoveryDecision =
+  | { type: 'adopt_command' }
+  | { type: 'mark_failed' }
+  | { type: 'replay'; replayOperationKey: string };
+
+export type AgentTeamOperationView = {
+  key: string;
+  runId: string;
+  taskAttemptId: string;
+  taskKey: string;
+  operationKey: string;
+  toolName: string;
+  inputFingerprint: string;
+  status: AgentTeamOperationStatus;
+  commandId: string | null;
+  failureReason: string | null;
+  recoveryDecision: AgentTeamOperationRecoveryDecision | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type AgentTeamRunStatus =
@@ -1144,6 +1170,7 @@ export type AgentTeamRunView = {
   tasks: AgentTeamTaskAttemptView[];
   documents: AgentTeamDocumentView[];
   pendingInputs: AgentTeamPendingInputView[];
+  operations: AgentTeamOperationView[];
   outcome: AgentTeamRunOutcome | null;
   createdAt: string;
   updatedAt: string;
@@ -1191,6 +1218,11 @@ export type AnswerAgentTeamRunRequest = {
   scopeRevision: number;
   answer: string;
   authorizedCommands?: string[];
+};
+
+export type RecoverAgentTeamOperationRequest = {
+  operationKey: string;
+  decision: 'adopt_command' | 'mark_failed' | 'replay';
 };
 
 export type AgentTeamRunActionResponse = {

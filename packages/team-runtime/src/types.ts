@@ -102,6 +102,11 @@ export type AgentTeamGraphResult = AgentTeamRunRequest & {
 
 export type AgentTeamOperationStatus = 'reserved' | 'completed' | 'uncertain' | 'failed';
 
+export type AgentTeamOperationRecoveryDecision =
+  | { type: 'adopt_command' }
+  | { type: 'mark_failed' }
+  | { type: 'replay'; replayOperationKey: string };
+
 export type AgentTeamOperationRecord = {
   key: string;
   taskKey: string;
@@ -112,6 +117,7 @@ export type AgentTeamOperationRecord = {
   commandId?: string;
   result?: unknown;
   failureReason?: string;
+  recoveryDecision?: AgentTeamOperationRecoveryDecision;
 };
 
 export type AgentTeamOperationRequest = {

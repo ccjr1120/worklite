@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
+import type { AgentTeamOperationRecoveryDecision } from '@worklite/contracts';
 import {
   agentTeamOperations,
   type AgentTeamOperation,
@@ -23,6 +24,7 @@ export type AgentTeamOperationRecordView = {
   commandId?: string;
   result?: unknown;
   failureReason?: string;
+  recoveryDecision?: AgentTeamOperationRecoveryDecision;
 };
 
 export type AgentTeamOperationReservation = {
@@ -30,10 +32,12 @@ export type AgentTeamOperationReservation = {
   operationKey: string;
   toolName: string;
   inputFingerprint: string;
+  pendingResult?: unknown;
 };
 
 export type AgentTeamScopedOperationJournal = {
   findOperation(operationKey: string): Promise<AgentTeamOperationRecordView | undefined>;
+  findReplayOperation(taskKey: string, replayOperationKey: string): Promise<AgentTeamOperationRecordView | undefined>;
   reserveOperation(
     request: AgentTeamOperationReservation,
     commandId?: string,
@@ -42,6 +46,7 @@ export type AgentTeamScopedOperationJournal = {
   completeOperation(operationKey: string, result: unknown, commandId?: string): Promise<AgentTeamOperationRecordView>;
   markOperationUncertain(operationKey: string, reason: string): Promise<AgentTeamOperationRecordView>;
   failOperation(operationKey: string, reason: string): Promise<AgentTeamOperationRecordView>;
+  attachReplayCommand(operationKey: string, commandId: string, transaction?: Database): AgentTeamOperationRecordView;
 };
 
 @Injectable()
@@ -51,10 +56,12 @@ export class AgentTeamOperationJournalService {
   forAttempt(scope: AgentTeamOperationScope): AgentTeamScopedOperationJournal {
     return {
       findOperation: (operationKey) => this.findOperation(scope, operationKey),
+      findReplayOperation: (taskKey, replayOperationKey) => this.findOperation(scope, `${taskKey}:${replayOperationKey}`),
       reserveOperation: (request, commandId, transaction) => this.reserveOperation(scope, request, commandId, transaction),
       completeOperation: (operationKey, result, commandId) => this.completeOperation(scope, operationKey, result, commandId),
       markOperationUncertain: (operationKey, reason) => this.updateFailure(scope, operationKey, 'uncertain', reason),
       failOperation: (operationKey, reason) => this.updateFailure(scope, operationKey, 'failed', reason),
+      attachReplayCommand: (operationKey, commandId, transaction) => this.attachReplayCommand(scope, operationKey, commandId, transaction),
     };
   }
 
@@ -87,6 +94,7 @@ export class AgentTeamOperationJournalService {
       inputFingerprint: request.inputFingerprint,
       status: 'reserved',
       commandId: commandId ?? null,
+      result: request.pendingResult ?? null,
     }).returning().all();
     return toRecord(row, logicalKey);
   }
@@ -118,8 +126,31 @@ export class AgentTeamOperationJournalService {
     reason: string,
   ): Promise<AgentTeamOperationRecordView> {
     const [row] = await this.db.update(agentTeamOperations)
-      .set({ status, result: null, failureReason: reason, updatedAt: new Date() })
+      .set({
+        status,
+        failureReason: reason,
+        recoveryDecision: null,
+        recoveryDecidedAt: null,
+        updatedAt: new Date(),
+      })
       .where(operationScopeFilter(scope, operationKey))
+      .returning().all();
+    if (!row) throw new NotFoundException(`Agent Team operation ${operationKey} was not found.`);
+    return toRecord(row, operationKey);
+  }
+
+  private attachReplayCommand(
+    scope: AgentTeamOperationScope,
+    operationKey: string,
+    commandId: string,
+    transaction: Database | undefined,
+  ): AgentTeamOperationRecordView {
+    const db = transaction ?? this.db;
+    const [row] = db.update(agentTeamOperations).set({ commandId, updatedAt: new Date() })
+      .where(and(
+        operationScopeFilter(scope, operationKey),
+        eq(agentTeamOperations.status, 'reserved'),
+      ))
       .returning().all();
     if (!row) throw new NotFoundException(`Agent Team operation ${operationKey} was not found.`);
     return toRecord(row, operationKey);
@@ -150,7 +181,8 @@ function toRecord(row: AgentTeamOperation, logicalKey: string): AgentTeamOperati
     inputFingerprint: row.inputFingerprint,
     status: row.status,
     ...(row.commandId ? { commandId: row.commandId } : {}),
-    ...(row.status === 'completed' ? { result: row.result } : {}),
+    ...(row.result === null ? {} : { result: row.result }),
     ...(row.failureReason ? { failureReason: row.failureReason } : {}),
+    ...(row.recoveryDecision ? { recoveryDecision: row.recoveryDecision } : {}),
   };
 }

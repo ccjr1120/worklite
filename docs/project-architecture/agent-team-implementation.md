@@ -194,6 +194,16 @@ The exact-command grant set is carried in LangGraph state and every task request
 
 MCP side effects with an unknown completion state follow the same recovery-decision rule. Provider retries before committed tool effects retain the current transport behavior. Automatic restart recovery does not authorize a service restart, deployment, or new external action.
 
+Uncertain-operation recovery is a structured decision, never prose. The run exposes one durable operation-recovery input keyed by the stable operation identity, and the active task attempt uses the `waiting_for_recovery` projection. The accepted decisions are:
+
+| Decision | Behavior |
+| --- | --- |
+| `adopt_command` | Resolve only the Command already linked to that operation. A terminal `succeeded` or `failed` Command supplies authoritative bounded tool output and completes the operation; no process is dispatched. Nonterminal or cancelled Commands remain recoverable. |
+| `mark_failed` | Persist a known operation failure, answer the recovery input, settle the active attempt as non-retryable for that operation, and fail the run without replay. |
+| `replay` | Persist a separate replay operation under the same task and semantic input, preserving the original uncertain operation and its Command link. The replay runs only because of this explicit decision and still passes exact-command authorization. |
+
+A replay operation receives its own stable key and Command linkage. If that replay itself becomes uncertain, it receives its own recovery input; recovery never mutates the original outcome into an assumed success. Completed operation results remain replayable only when task, operation, tool, and semantic input fingerprint all match.
+
 TEA has its own file-based workflow progress conventions. WorkLite must map the selected process's continuation prompts and outputs onto Team state rather than run competing automatic-resume systems. Confirm the pinned TEA workflow's interactive and headless behavior in P0. [TEA test design](https://bmad-code-org.github.io/bmad-method-test-architecture-enterprise/how-to/workflows/run-test-design/).
 
 ## 9. Testing Evidence and Completion
@@ -227,6 +237,7 @@ Run creation and pending-input answers expose the exact command grant set explic
 | `GET /agent-team-runs/:runId` | Read current run, task, document, and assessment state |
 | `GET /agent-team-runs/:runId/events` | Read live and replayed SSE events |
 | `POST /agent-team-runs/:runId/answer` | Answer the current pending input |
+| `POST /agent-team-runs/:runId/operations/:operationKey/recovery` | Resolve the current uncertain operation with one structured decision |
 | `POST /agent-team-runs/:runId/pause` | Request a pause at the next stable boundary |
 | `POST /agent-team-runs/:runId/resume` | Continue a paused run |
 | `POST /agent-team-runs/:runId/cancel` | Cancel active and pending work |
@@ -342,4 +353,5 @@ References were consulted on 2026-10-03. They support the selected mechanisms; t
 - Captured root target-project instructions with each TeamRun, captured the pinned BMAD/TEA reference closure in each TeamVersion and exposed it through a role-scoped read-only tool, materialized immutable Team documents under the run's managed output directory, and made cancellation settle waiting task attempts.
 - Added persisted cumulative exact-command grants, structured pending-input grants, checkpoint/task-state propagation, pre-launch `bash` enforcement, and exclusion of executable Skill scripts from Team roles.
 - Captured the pinned TEA `bmad-testarch-automate` workflow and its complete direct reference closure for the Test Author role; Test Runner remains WorkLite Commands-owned.
+- Added the structured uncertain-operation recovery contract: durable operation inputs, authoritative terminal-Command adoption, explicit failure, and separately keyed explicit replay operations that never bypass exact-command authorization.
 - No test execution, build, type check, server lifecycle operation, or deployment-profile access has been performed.

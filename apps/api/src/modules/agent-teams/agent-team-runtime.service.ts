@@ -10,11 +10,13 @@ import { ConfigService } from '@nestjs/config';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { and, asc, desc, eq, inArray, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import type {
   AgentTeamCriterionAssessment,
   AgentTeamDocumentView,
   AgentTeamMode,
+  AgentTeamOperationRecoveryDecision,
+  AgentTeamOperationView,
   AgentTeamPendingInputView,
   AgentTeamRole,
   AgentTeamRunEvent,
@@ -26,9 +28,11 @@ import type {
   AgentTeamTaskAttemptView,
   AnswerAgentTeamRunRequest,
   CreateAgentTeamRunRequest,
+  RecoverAgentTeamOperationRequest,
 } from '@worklite/contracts';
 import {
   agentTeamDocuments,
+  agentTeamOperations,
   agentTeamPendingInputs,
   agentTeamRunEvents,
   agentTeamRuns,
@@ -36,6 +40,7 @@ import {
   agentTeams,
   agentTeamVersions,
   type AgentTeamRun,
+  type AgentTeamOperation,
   type AgentTeamVersion,
   type Database,
   type StoredAgentTeamRoleConfiguration,
@@ -58,13 +63,19 @@ import {
   type AgentTeamTaskResult,
 } from '@worklite/team-runtime';
 import { DATABASE } from '../../infrastructure/database.module';
-import { IsolatedAgentInvocationService, type AgentInvocationOperationJournal } from '../agents/isolated-agent-invocation.service';
+import {
+  AgentInvocationRecoveryRequiredError,
+  IsolatedAgentInvocationService,
+  type AgentInvocationOperationJournal,
+} from '../agents/isolated-agent-invocation.service';
 import { AgentTeamOperationJournalService } from './agent-team-operation-journal.service';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
+import { CommandsService } from '../commands/commands.service';
 
 const BUILT_IN_TEAM_ID = 'agent_team_bmad_tea';
 const PROCESS_ID = 'bmad-tea';
 const PROCESS_VERSION = '1';
+const MAX_TOOL_RESULT_CHARS = 100_000;
 const ROLE_TOOL_NAMES: Record<AgentTeamRole, readonly string[]> = {
   planner: ['read', 'glob', 'grep', 'process_reference'],
   test_designer: ['read', 'glob', 'grep', 'process_reference'],
@@ -118,6 +129,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     private readonly invocations: IsolatedAgentInvocationService,
     private readonly resources: WorkspaceResourcesService,
     private readonly operations: AgentTeamOperationJournalService,
+    private readonly commands: CommandsService,
   ) {
     this.checkpointer = createSqliteCheckpointer(this.checkpointPath());
   }
@@ -212,7 +224,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       .where(eq(agentTeamVersions.id, run.teamVersionId))
       .limit(1);
     if (!version) throw new NotFoundException('The Agent Team version was not found.');
-    const [taskRows, documentRows, pendingRows] = await Promise.all([
+    const [taskRows, documentRows, pendingRows, operationRows] = await Promise.all([
       this.db.select().from(agentTeamTaskAttempts)
         .where(eq(agentTeamTaskAttempts.runId, runId))
         .orderBy(asc(agentTeamTaskAttempts.createdAt), asc(agentTeamTaskAttempts.attemptIndex)),
@@ -222,6 +234,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       this.db.select().from(agentTeamPendingInputs)
         .where(eq(agentTeamPendingInputs.runId, runId))
         .orderBy(asc(agentTeamPendingInputs.createdAt)),
+      this.db.select().from(agentTeamOperations)
+        .where(eq(agentTeamOperations.runId, runId))
+        .orderBy(asc(agentTeamOperations.createdAt), asc(agentTeamOperations.key)),
     ]);
     return {
       id: run.id,
@@ -237,6 +252,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       tasks: taskRows.map(toTaskAttemptView),
       documents: documentRows.map(toDocumentView),
       pendingInputs: pendingRows.map(toPendingInputView),
+      operations: operationRows.map(toOperationView),
       outcome: isRunOutcome(run.outcome) ? run.outcome : null,
       createdAt: run.createdAt.toISOString(),
       updatedAt: run.updatedAt.toISOString(),
@@ -249,6 +265,17 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (run.status !== 'waiting_for_input') throw new BadRequestException('The Agent Team run is not waiting for input.');
     if (request?.pendingInputId !== request?.pendingInputId?.trim() || !request.pendingInputId) {
       throw new BadRequestException('A pending input id is required.');
+    }
+    const [pendingInput] = await this.db.select({ kind: agentTeamPendingInputs.kind })
+      .from(agentTeamPendingInputs)
+      .where(and(
+        eq(agentTeamPendingInputs.id, request.pendingInputId),
+        eq(agentTeamPendingInputs.runId, runId),
+      ))
+      .limit(1);
+    if (!pendingInput) throw new BadRequestException('The pending input was not found.');
+    if (pendingInput.kind === 'operation_recovery') {
+      throw new BadRequestException('Operation recovery inputs are resolved through operation recovery.');
     }
     if (typeof request.answer !== 'string' || !request.answer.trim()) {
       throw new BadRequestException('A pending input answer is required.');
@@ -289,6 +316,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       }).where(and(eq(agentTeamRuns.id, runId), eq(agentTeamRuns.status, 'waiting_for_input'))).run();
       this.appendEvent(transaction as unknown as Database, runId, 'input.answered', {
         pendingInputId: request.pendingInputId,
+        kind: 'question',
         answer: request.answer,
         ...(grantedCommands.length > 0 ? { authorizedCommands: grantedCommands } : {}),
       });
@@ -299,6 +327,160 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     this.scheduleExecution(runId, new Command({
       resume: pendingInputAnswer(request.answer, authorizedCommands),
     }));
+    return this.getRunView(runId);
+  }
+
+  async recover(runId: string, request: RecoverAgentTeamOperationRequest): Promise<AgentTeamRunView> {
+    const operationKey = request?.operationKey?.trim();
+    if (!operationKey || request.operationKey !== operationKey) {
+      throw new BadRequestException('A stable Agent Team operation key is required.');
+    }
+    const decision = request?.decision;
+    if (decision !== 'adopt_command' && decision !== 'mark_failed' && decision !== 'replay') {
+      throw new BadRequestException('A supported operation recovery decision is required.');
+    }
+
+    const run = await this.getRun(runId);
+    if (run.status !== 'waiting_for_input') {
+      throw new BadRequestException('The Agent Team run is not waiting for operation recovery.');
+    }
+    const [operation] = await this.db.select().from(agentTeamOperations)
+      .where(and(
+        eq(agentTeamOperations.key, `${runId}:${operationKey}`),
+        eq(agentTeamOperations.runId, runId),
+      ))
+      .limit(1);
+    if (!operation || operation.status !== 'uncertain' || operation.recoveryDecision) {
+      throw new BadRequestException('The Agent Team operation is not awaiting recovery.');
+    }
+    const [pendingInput] = await this.db.select().from(agentTeamPendingInputs)
+      .where(and(
+        eq(agentTeamPendingInputs.runId, runId),
+        eq(agentTeamPendingInputs.kind, 'operation_recovery'),
+        eq(agentTeamPendingInputs.operationKey, operationKey),
+        eq(agentTeamPendingInputs.status, 'pending'),
+      ))
+      .orderBy(desc(agentTeamPendingInputs.createdAt))
+      .limit(1);
+    if (!pendingInput || pendingInput.taskAttemptId !== operation.taskAttemptId) {
+      throw new BadRequestException('The operation recovery input is no longer active.');
+    }
+
+    let adoptedResult: unknown;
+    if (decision === 'adopt_command') {
+      if (!operation.commandId) {
+        throw new BadRequestException('The uncertain operation has no linked Command to adopt.');
+      }
+      const command = await this.commands.get(operation.commandId);
+      if (command.status !== 'succeeded' && command.status !== 'failed') {
+        throw new BadRequestException('Only a terminal succeeded or failed Command can be adopted.');
+      }
+      const call = persistedToolCall(operation.result);
+      if (!call) {
+        throw new BadRequestException('The uncertain operation has no persisted tool call to adopt.');
+      }
+      const output = await this.commands.output(command.id);
+      adoptedResult = {
+        call,
+        output: {
+          type: command.status === 'succeeded' ? 'text' : 'error-text',
+          value: boundedToolResult(output, MAX_TOOL_RESULT_CHARS),
+        },
+        commandId: command.id,
+      };
+    }
+
+    const replayOperationKey = decision === 'replay'
+      ? await this.nextReplayOperationKey(operation)
+      : undefined;
+    const now = new Date();
+    const recoveryDecision: AgentTeamOperationRecoveryDecision = decision === 'adopt_command'
+      ? { type: 'adopt_command' }
+      : decision === 'mark_failed'
+        ? { type: 'mark_failed' }
+        : { type: 'replay', replayOperationKey: replayOperationKey! };
+
+    const committed = this.db.transaction((transaction) => {
+      const updatedRun = transaction.update(agentTeamRuns).set({
+        status: decision === 'mark_failed' ? 'failed' : 'running',
+        desiredControlState: 'none',
+        updatedAt: now,
+        finishedAt: decision === 'mark_failed' ? now : null,
+      }).where(and(
+        eq(agentTeamRuns.id, runId),
+        eq(agentTeamRuns.status, 'waiting_for_input'),
+      )).returning().all();
+      if (updatedRun.length === 0) throw new BadRequestException('The Agent Team run is no longer waiting for input.');
+
+      const updatedOperation = transaction.update(agentTeamOperations).set({
+        ...(decision === 'adopt_command'
+          ? { status: 'completed' as const, result: adoptedResult, failureReason: null }
+          : {}),
+        ...(decision === 'mark_failed'
+          ? { status: 'failed' as const, failureReason: operation.failureReason ?? 'The uncertain operation was marked failed.' }
+          : {}),
+        recoveryDecision,
+        recoveryDecidedAt: now,
+        updatedAt: now,
+      }).where(and(
+        eq(agentTeamOperations.key, operation.key),
+        eq(agentTeamOperations.status, 'uncertain'),
+        isNull(agentTeamOperations.recoveryDecision),
+      )).returning().all();
+      if (updatedOperation.length === 0) throw new BadRequestException('The Agent Team operation is no longer awaiting recovery.');
+
+      const answeredInput = transaction.update(agentTeamPendingInputs).set({
+        status: 'answered',
+        answer: decision,
+        answeredAt: now,
+        updatedAt: now,
+      }).where(and(
+        eq(agentTeamPendingInputs.id, pendingInput.id),
+        eq(agentTeamPendingInputs.status, 'pending'),
+      )).returning().all();
+      if (answeredInput.length === 0) throw new BadRequestException('The operation recovery input is no longer active.');
+
+      const supersededAttemptReason = decision === 'adopt_command'
+        ? 'The uncertain operation was resolved by adopting its linked Command in a new task attempt.'
+        : decision === 'replay'
+          ? 'The uncertain operation was explicitly replayed in a new task attempt.'
+          : operation.failureReason ?? 'The uncertain operation was marked failed.';
+      const updatedAttempt = transaction.update(agentTeamTaskAttempts).set({
+        status: 'failed',
+        active: false,
+        error: supersededAttemptReason,
+        finishedAt: now,
+        updatedAt: now,
+      }).where(and(
+        eq(agentTeamTaskAttempts.id, operation.taskAttemptId),
+        eq(agentTeamTaskAttempts.status, 'waiting_for_recovery'),
+      )).returning().all();
+      if (updatedAttempt.length === 0) throw new BadRequestException('The operation recovery task attempt is no longer waiting.');
+
+      this.appendEvent(transaction as unknown as Database, runId, 'operation.updated', {
+        operationKey,
+        status: decision === 'adopt_command' ? 'completed' : decision === 'mark_failed' ? 'failed' : 'uncertain',
+        recoveryDecision,
+      });
+      this.appendEvent(transaction as unknown as Database, runId, 'input.answered', {
+        pendingInputId: pendingInput.id,
+        kind: 'operation_recovery',
+        decision,
+      });
+      this.appendEvent(transaction as unknown as Database, runId, 'task.failed', {
+        taskAttemptId: operation.taskAttemptId,
+        taskKey: operation.taskKey,
+        error: supersededAttemptReason,
+        recoveryDecision: decision,
+      });
+      this.appendEvent(transaction as unknown as Database, runId, 'run.status', {
+        status: decision === 'mark_failed' ? 'failed' : 'running',
+      });
+      return true;
+    });
+    if (!committed) throw new BadRequestException('The operation recovery decision was not committed.');
+
+    if (decision !== 'mark_failed') this.scheduleExecution(runId, null);
     return this.getRunView(runId);
   }
 
@@ -318,6 +500,10 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   async resume(runId: string): Promise<AgentTeamRunView> {
     const run = await this.getRun(runId);
     if (run.status !== 'paused') throw new BadRequestException('Only a paused Agent Team run can be resumed.');
+    if (await this.hasPendingOperationRecovery(runId)) {
+      await this.setRunStatus(runId, 'waiting_for_input');
+      return this.getRunView(runId);
+    }
     const input = await this.resumeInput(run);
     await this.setRunStatus(runId, 'running');
     this.scheduleExecution(runId, input);
@@ -473,13 +659,59 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     return isUsableGraphState(state, run) ? null : this.initialGraphInput(run);
   }
 
+  private async hasPendingOperationRecovery(runId: string): Promise<boolean> {
+    const [pending] = await this.db.select({ id: agentTeamPendingInputs.id })
+      .from(agentTeamPendingInputs)
+      .where(and(
+        eq(agentTeamPendingInputs.runId, runId),
+        eq(agentTeamPendingInputs.kind, 'operation_recovery'),
+        eq(agentTeamPendingInputs.status, 'pending'),
+      ))
+      .limit(1);
+    return pending !== undefined;
+  }
+
+  private async nextReplayOperationKey(operation: AgentTeamOperation): Promise<string> {
+    const rows = await this.db.select({ operationKey: agentTeamOperations.operationKey })
+      .from(agentTeamOperations)
+      .where(and(
+        eq(agentTeamOperations.runId, operation.runId),
+        eq(agentTeamOperations.taskKey, operation.taskKey),
+        eq(agentTeamOperations.toolName, operation.toolName),
+        eq(agentTeamOperations.inputFingerprint, operation.inputFingerprint),
+      ));
+    const prefix = `${operation.toolName}:${operation.inputFingerprint}:replay_`;
+    const replayCount = rows
+      .map((row) => row.operationKey.startsWith(prefix) ? Number(row.operationKey.slice(prefix.length)) : 0)
+      .filter((index) => Number.isInteger(index) && index > 0)
+      .reduce((maximum, index) => Math.max(maximum, index), 0);
+    return `${prefix}${replayCount + 1}`;
+  }
+
   private initialGraphInput(run: AgentTeamRun): AgentTeamGraphState {
     return initialGraphState(run, this.runOutputDirectory(run.id));
   }
 
   private async reconcileInterruptedRun(run: AgentTeamRun): Promise<void> {
+    const interruptedOperation = await this.findInterruptedOperation(run.id);
     if (run.desiredControlState === 'pause_requested') {
+      if (interruptedOperation) {
+        await this.exposeOperationRecovery(
+          run.id,
+          interruptedOperation.key.slice(run.id.length + 1),
+          interruptedOperation.failureReason ?? 'The Agent Team process was interrupted before the operation settled.',
+        );
+      }
       await this.setRunStatus(run.id, 'paused', undefined, 'none');
+      return;
+    }
+    if (interruptedOperation) {
+      await this.exposeOperationRecovery(
+        run.id,
+        interruptedOperation.key.slice(run.id.length + 1),
+        interruptedOperation.failureReason ?? 'The Agent Team process was interrupted before the operation settled.',
+      );
+      await this.setRunStatus(run.id, 'waiting_for_input');
       return;
     }
 
@@ -667,6 +899,11 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         recordCompletedCommand(record, commandIds);
         return record;
       },
+      findReplayOperation: async (taskKey, replayOperationKey) => {
+        const record = await scopedJournal.findReplayOperation(taskKey, replayOperationKey);
+        recordCompletedCommand(record, commandIds);
+        return record;
+      },
       completeOperation: async (operationKey, result, commandId) => {
         const record = await scopedJournal.completeOperation(operationKey, result, commandId);
         recordCompletedCommand(record, commandIds);
@@ -736,6 +973,10 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         throw new Error(`Agent Team task ${request.taskKey} produced a result for different input.`);
       }
       return { id: existing.id, status: 'completed', result: existing.result };
+    }
+
+    if (existing?.active && existing.status === 'waiting_for_recovery') {
+      throw new Error(`Agent Team task ${request.taskKey} is waiting for operation recovery.`);
     }
 
     if (existing?.active && existing.status === 'waiting_for_input' && !request.answer) {
@@ -823,6 +1064,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         workspaceId,
         runId: request.runId,
         taskAttemptId: attemptId,
+        kind: 'question',
         question: persistedResult.pendingInput.question,
         scopeRevision: request.scopeRevision,
         status: 'pending',
@@ -831,9 +1073,11 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         taskAttemptId: attemptId,
         taskKey: request.taskKey,
         pendingInputId,
+        kind: 'question',
       });
       this.appendEvent(transaction as unknown as Database, request.runId, 'input.requested', {
         pendingInputId,
+        kind: 'question',
         question: persistedResult.pendingInput.question,
         scopeRevision: request.scopeRevision,
       });
@@ -939,6 +1183,116 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     return row?.desiredControlState;
   }
 
+  private async findInterruptedOperation(runId: string): Promise<AgentTeamOperation | undefined> {
+    const rows = await this.db.select({ operation: agentTeamOperations })
+      .from(agentTeamOperations)
+      .innerJoin(agentTeamTaskAttempts, eq(agentTeamOperations.taskAttemptId, agentTeamTaskAttempts.id))
+      .where(and(
+        eq(agentTeamOperations.runId, runId),
+        inArray(agentTeamOperations.status, ['reserved', 'uncertain']),
+        isNull(agentTeamOperations.recoveryDecision),
+        eq(agentTeamTaskAttempts.active, true),
+        inArray(agentTeamTaskAttempts.status, ['running', 'waiting_for_recovery']),
+      ))
+      .orderBy(desc(agentTeamOperations.createdAt))
+      .limit(1);
+    return rows[0]?.operation;
+  }
+
+  private async exposeOperationRecovery(
+    runId: string,
+    operationKey: string,
+    reason: string,
+  ): Promise<boolean> {
+    const [operation] = await this.db.select().from(agentTeamOperations)
+      .where(and(
+        eq(agentTeamOperations.key, `${runId}:${operationKey}`),
+        eq(agentTeamOperations.runId, runId),
+      ))
+      .limit(1);
+    if (!operation || operation.recoveryDecision || operation.status === 'completed' || operation.status === 'failed') {
+      return false;
+    }
+    const [existingInput] = await this.db.select().from(agentTeamPendingInputs)
+      .where(and(
+        eq(agentTeamPendingInputs.runId, runId),
+        eq(agentTeamPendingInputs.kind, 'operation_recovery'),
+        eq(agentTeamPendingInputs.operationKey, operationKey),
+      ))
+      .orderBy(desc(agentTeamPendingInputs.createdAt))
+      .limit(1);
+    if (existingInput?.status !== 'pending' && existingInput) return false;
+
+    const now = new Date();
+    const pendingInputId = existingInput?.id ?? `atinput_${randomUUID()}`;
+    const question = `Operation ${operationKey} has an uncertain effect. Choose adopt_command, mark_failed, or replay.`;
+    return this.db.transaction((transaction) => {
+      const updatedRun = transaction.update(agentTeamRuns).set({
+        status: 'waiting_for_input',
+        updatedAt: now,
+      }).where(and(
+        eq(agentTeamRuns.id, runId),
+        eq(agentTeamRuns.status, 'running'),
+      )).returning().all();
+      if (updatedRun.length === 0) throw new Error('The Agent Team run is no longer running.');
+
+      const updatedOperation = transaction.update(agentTeamOperations).set({
+        status: 'uncertain',
+        failureReason: reason,
+        updatedAt: now,
+      }).where(and(
+        eq(agentTeamOperations.key, operation.key),
+        isNull(agentTeamOperations.recoveryDecision),
+      )).returning().all();
+      if (updatedOperation.length === 0) throw new Error('The Agent Team operation was already recovered.');
+
+      const updatedAttempt = transaction.update(agentTeamTaskAttempts).set({
+        status: 'waiting_for_recovery',
+        finishedAt: now,
+        updatedAt: now,
+      }).where(and(
+        eq(agentTeamTaskAttempts.id, operation.taskAttemptId),
+        inArray(agentTeamTaskAttempts.status, ['running', 'waiting_for_recovery']),
+      )).returning().all();
+      if (updatedAttempt.length === 0) throw new Error('The Agent Team task attempt is no longer active.');
+
+      if (!existingInput) {
+        transaction.insert(agentTeamPendingInputs).values({
+          id: pendingInputId,
+          workspaceId: operation.workspaceId,
+          runId,
+          taskAttemptId: operation.taskAttemptId,
+          kind: 'operation_recovery',
+          question,
+          operationKey,
+          scopeRevision: updatedRun[0].scopeRevision,
+          status: 'pending',
+        }).run();
+      }
+
+      this.appendEvent(transaction as unknown as Database, runId, 'operation.updated', {
+        operationKey,
+        status: 'uncertain',
+      });
+      this.appendEvent(transaction as unknown as Database, runId, 'task.waiting', {
+        taskAttemptId: operation.taskAttemptId,
+        taskKey: operation.taskKey,
+        pendingInputId,
+        kind: 'operation_recovery',
+        operationKey,
+      });
+      this.appendEvent(transaction as unknown as Database, runId, 'input.requested', {
+        pendingInputId,
+        kind: 'operation_recovery',
+        question,
+        operationKey,
+        scopeRevision: updatedRun[0].scopeRevision,
+      });
+      this.appendEvent(transaction as unknown as Database, runId, 'run.status', { status: 'waiting_for_input' });
+      return true;
+    });
+  }
+
   private async handleGraphFailure(runId: string, error: unknown): Promise<void> {
     const [run] = await this.db.select().from(agentTeamRuns).where(eq(agentTeamRuns.id, runId)).limit(1);
     if (!run) return;
@@ -946,6 +1300,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       await this.failActiveAttempts(runId, 'cancelled', 'The Agent Team run was cancelled.');
       await this.finishCancelledRun(runId);
       return;
+    }
+    if (error instanceof AgentInvocationRecoveryRequiredError) {
+      if (await this.exposeOperationRecovery(run.id, error.operationKey, error.reason)) return;
     }
     const reason = this.shuttingDown && isAbortError(error)
       ? 'The Agent Team process was interrupted by API shutdown.'
@@ -968,7 +1325,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     }).where(and(
       eq(agentTeamTaskAttempts.runId, runId),
       eq(agentTeamTaskAttempts.active, true),
-      inArray(agentTeamTaskAttempts.status, ['running', 'waiting_for_input']),
+      inArray(agentTeamTaskAttempts.status, ['running', 'waiting_for_input', 'waiting_for_recovery']),
     ))
       .returning();
     for (const row of rows) {
@@ -1429,11 +1786,31 @@ function toPendingInputView(row: typeof agentTeamPendingInputs.$inferSelect): Ag
     id: row.id,
     runId: row.runId,
     taskAttemptId: row.taskAttemptId,
+    kind: row.kind,
     question: row.question,
+    operationKey: row.operationKey,
     scopeRevision: row.scopeRevision,
     status: row.status,
     createdAt: row.createdAt.toISOString(),
     answeredAt: row.answeredAt?.toISOString() ?? null,
+  };
+}
+
+function toOperationView(row: typeof agentTeamOperations.$inferSelect): AgentTeamOperationView {
+  return {
+    key: row.key.startsWith(`${row.runId}:`) ? row.key.slice(row.runId.length + 1) : row.key,
+    runId: row.runId,
+    taskAttemptId: row.taskAttemptId,
+    taskKey: row.taskKey,
+    operationKey: row.operationKey,
+    toolName: row.toolName,
+    inputFingerprint: row.inputFingerprint,
+    status: row.status,
+    commandId: row.commandId,
+    failureReason: row.failureReason,
+    recoveryDecision: row.recoveryDecision,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
@@ -1501,6 +1878,18 @@ function isAbortError(error: unknown): boolean {
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : 'The Agent Team task failed.';
+}
+
+function boundedToolResult(value: string, maxChars: number): string {
+  return value.length > maxChars
+    ? `${value.slice(0, maxChars)}\n[Tool output truncated; use available evidence and report gaps.]`
+    : value;
+}
+
+function persistedToolCall(value: unknown): unknown | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const candidate = (value as { call?: unknown }).call;
+  return candidate && typeof candidate === 'object' && !Array.isArray(candidate) ? candidate : undefined;
 }
 
 function roleForTaskKey(taskKey: string): AgentTeamRole {

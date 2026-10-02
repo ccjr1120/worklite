@@ -365,6 +365,11 @@ export type StoredAgentTeamRole =
 
 export type StoredAgentTeamMode = 'plan_only' | 'validate_existing' | 'implement_and_validate';
 
+export type StoredAgentTeamOperationRecoveryDecision =
+  | { type: 'adopt_command' }
+  | { type: 'mark_failed' }
+  | { type: 'replay'; replayOperationKey: string };
+
 export type StoredAgentTeamSkillSnapshot = {
   id: string;
   name: string;
@@ -453,7 +458,7 @@ export const agentTeamTaskAttempts = sqliteTable('agent_team_task_attempts', {
   taskKey: text('task_key').notNull(),
   attemptIndex: integer('attempt_index').notNull(),
   role: text('role').$type<StoredAgentTeamRole>().notNull(),
-  status: text('status').$type<'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled'>().notNull().default('running'),
+  status: text('status').$type<'running' | 'waiting_for_input' | 'waiting_for_recovery' | 'completed' | 'failed' | 'cancelled'>().notNull().default('running'),
   inputRevision: text('input_revision', { mode: 'json' }).$type<unknown>().notNull(),
   inputFingerprint: text('input_fingerprint').notNull(),
   result: text('result', { mode: 'json' }).$type<unknown>(),
@@ -496,7 +501,9 @@ export const agentTeamPendingInputs = sqliteTable('agent_team_pending_inputs', {
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   runId: text('run_id').notNull().references(() => agentTeamRuns.id, { onDelete: 'cascade' }),
   taskAttemptId: text('task_attempt_id').notNull().references(() => agentTeamTaskAttempts.id, { onDelete: 'cascade' }),
+  kind: text('kind').$type<'question' | 'operation_recovery'>().notNull().default('question'),
   question: text('question').notNull(),
+  operationKey: text('operation_key'),
   scopeRevision: integer('scope_revision').notNull(),
   status: text('status').$type<'pending' | 'answered' | 'cancelled'>().notNull().default('pending'),
   answer: text('answer'),
@@ -518,6 +525,8 @@ export const agentTeamOperations = sqliteTable('agent_team_operations', {
   commandId: text('command_id').references(() => commandExecutions.id, { onDelete: 'set null' }),
   result: text('result', { mode: 'json' }).$type<unknown>(),
   failureReason: text('failure_reason'),
+  recoveryDecision: text('recovery_decision', { mode: 'json' }).$type<StoredAgentTeamOperationRecoveryDecision>(),
+  recoveryDecidedAt: integer('recovery_decided_at', { mode: 'timestamp_ms' }),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 }, (table) => [
