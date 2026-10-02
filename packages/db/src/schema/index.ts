@@ -436,6 +436,7 @@ export const agentTeamRuns = sqliteTable('agent_team_runs', {
   projectDirectory: text('project_directory').notNull(),
   projectInstructions: text('project_instructions', { mode: 'json' }).$type<StoredAgentTeamProjectInstructionFile[]>().notNull().default([]),
   mode: text('mode').$type<StoredAgentTeamMode>().notNull(),
+  authorizedCommands: text('authorized_commands', { mode: 'json' }).$type<string[]>().notNull().default([]),
   scopeRevision: integer('scope_revision').notNull().default(1),
   desiredControlState: text('desired_control_state').$type<'none' | 'pause_requested' | 'cancel_requested'>().notNull().default('none'),
   langGraphThreadId: text('lang_graph_thread_id').notNull().unique(),

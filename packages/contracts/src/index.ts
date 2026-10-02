@@ -1138,6 +1138,7 @@ export type AgentTeamRunView = {
   intent: string;
   projectDirectory: string;
   mode: AgentTeamMode;
+  authorizedCommands: string[];
   scopeRevision: number;
   desiredControlState: 'none' | 'pause_requested' | 'cancel_requested';
   tasks: AgentTeamTaskAttemptView[];
@@ -1178,6 +1179,7 @@ export type CreateAgentTeamRunRequest = {
   intent: string;
   projectDirectory: string;
   mode: AgentTeamMode;
+  authorizedCommands?: string[];
 };
 
 export type CreateAgentTeamRunResponse = {
@@ -1188,6 +1190,7 @@ export type AnswerAgentTeamRunRequest = {
   pendingInputId: string;
   scopeRevision: number;
   answer: string;
+  authorizedCommands?: string[];
 };
 
 export type AgentTeamRunActionResponse = {

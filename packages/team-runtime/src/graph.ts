@@ -20,6 +20,10 @@ const teamState = Annotation.Root({
   projectDirectory: Annotation<string>(),
   outputDirectory: Annotation<string>(),
   scopeRevision: Annotation<number>(),
+  authorizedCommands: Annotation<readonly string[]>({
+    reducer: (left, right) => [...new Set([...left, ...right])],
+    default: () => [],
+  }),
   projectInstructions: Annotation<readonly AgentTeamProjectInstructionFile[]>({
     reducer: (_left, right) => right,
     default: () => [],
@@ -117,6 +121,7 @@ async function executeTask(
     projectDirectory: state.projectDirectory,
     outputDirectory: state.outputDirectory,
     scopeRevision: state.scopeRevision,
+    authorizedCommands: state.authorizedCommands,
     projectInstructions: state.projectInstructions,
     upstream: state.documents,
     pendingInputId: state.pendingInput?.id ?? (state.taskAnswers[taskKey] ? state.taskPendingInputIds[taskKey] : undefined),
@@ -133,7 +138,8 @@ function inputNode() {
     return {
       pendingInput: null,
       activeTaskKey: null,
-      taskAnswers: { [state.activeTaskKey]: answer },
+      taskAnswers: { [state.activeTaskKey]: answer.answer },
+      authorizedCommands: answer.authorizedCommands,
     };
   };
 }
@@ -193,8 +199,8 @@ export function createTeamGraph(delegate: AgentTeamGraphDelegate, checkpointer: 
   return graph.compile({ checkpointer });
 }
 
-export function requestTeamInput(pendingInput: AgentTeamPendingInput): string {
-  return interrupt<AgentTeamPendingInput, string>(pendingInput);
+export function requestTeamInput(pendingInput: AgentTeamPendingInput): AgentTeamPendingInputAnswer {
+  return interrupt<AgentTeamPendingInput, AgentTeamPendingInputAnswer>(pendingInput);
 }
 
 export function toGraphResult(state: AgentTeamGraphState): AgentTeamGraphResult {
@@ -205,6 +211,7 @@ export function toGraphResult(state: AgentTeamGraphState): AgentTeamGraphResult 
     projectDirectory: state.projectDirectory,
     outputDirectory: state.outputDirectory,
     scopeRevision: state.scopeRevision,
+    authorizedCommands: state.authorizedCommands,
     projectInstructions: state.projectInstructions,
     documents: state.documents,
     unresolvedIssues: state.unresolvedIssues,

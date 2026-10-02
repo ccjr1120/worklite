@@ -505,6 +505,8 @@ The initial implementation targets one development-team process with planning, t
 
 Team role invocations reuse the AI SDK-backed model loop and Portkey Gateway through a shared execution boundary with explicit project-directory context and selected file, process-reference, and command tools. Checkpoints restore control flow while command and tool-attempt records prevent recovery from blindly repeating completed effects. Project instructions and already-granted authorization determine whether a role may write files, generate tests, execute particular checks, or manage services.
 
+Command execution is authorized by exact command strings, not by prose in a prompt. A TeamRun persists a cumulative grant set; run creation may seed it, and a pending-input answer may grant one or more additional exact commands only through a structured response field. The natural-language answer itself never grants command execution. The runtime carries the grant set through LangGraph state into each task, and the `bash` tool input must equal a persisted command exactly after input trimming before Commands reserves or creates an execution. Mode text, role instructions, model output, and recovery replay cannot enlarge the set. A plan-only run has an empty grant set. In this first boundary, executable Skill scripts are not exposed to Team roles because their generated temporary invocation command cannot be represented truthfully as a user-authorized exact command; captured Skill instructions remain available.
+
 When Team APIs become available, the same implementation change must update Chat Bot guidance, the complete `worklite-platform` Skill package, typed contracts, workspace snapshot capability metadata, resource reference protections, and applicable repository conventions. The platform snapshot must advertise only implemented Team operations. Detailed page specifications belong in `ui-ux-design/` before UI implementation; the implementation plan does not establish a parallel page-specification directory.
 
 ## Real API Integration Increment
@@ -660,6 +662,7 @@ Import validates the envelope, structured edge conditions, and bounded-cycle con
 - Distinguished the planned TeamRun and embedded Team role configuration from the implemented Workflow scheduler, Workflow Agent nodes, Artifact production, and Home eligibility.
 - Identified process packaging, shared execution tools, project-directory context, checkpoint recovery, and platform knowledge synchronization as implementation work rather than current capabilities.
 - Added the approved internal implementation increments without exposing Team APIs: pinned process packaging, Team persistence, isolated role invocation, effect journaling, LangGraph checkpoints and recovery, captured project instructions, role-scoped process references, and managed run output.
+- Required exact-string command authorization for Team `bash` execution, made pending-input command grants structured and cumulative, persisted the grant set on each TeamRun, and excluded executable Skill scripts from Team roles until their full command can be represented and authorized exactly.
 - Kept Chat Bot, `worklite-platform`, snapshot capability metadata, and reference protections unchanged until public Team operations are implemented together.
 
 ### 2026-09-26 - Atomic Artifact Node Completion

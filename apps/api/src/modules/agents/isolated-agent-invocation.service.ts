@@ -83,6 +83,7 @@ export type IsolatedAgentInvocationRequest = {
   builtinToolNames?: readonly string[];
   role?: AgentTeamRole;
   projectDirectory?: string;
+  authorizedCommands?: readonly string[];
   processReferencePaths?: readonly string[];
   readProcessReference?: (path: string) => Promise<string>;
   signal: AbortSignal;
@@ -135,9 +136,11 @@ export class IsolatedAgentInvocationService {
       ...skill,
       instructions: skill.instructions ?? skill.files.find((file) => file.path === 'SKILL.md')?.content ?? '',
     }));
-    const availableSkillScripts = assignedSkills.flatMap((skill) => skill.files
-      .filter((file) => file.path.startsWith('scripts/') && file.content.startsWith('#!'))
-      .map((file) => ({ skillId: skill.id, skillName: skill.name, path: file.path })));
+    const availableSkillScripts = request.role && request.projectDirectory
+      ? []
+      : assignedSkills.flatMap((skill) => skill.files
+        .filter((file) => file.path.startsWith('scripts/') && file.content.startsWith('#!'))
+        .map((file) => ({ skillId: skill.id, skillName: skill.name, path: file.path })));
     const skillInstructions = assignedSkills
       .map((skill) => `## ${skill.name}\n${skill.instructions.trim()}`)
       .filter((value) => value.trim())
@@ -161,6 +164,7 @@ export class IsolatedAgentInvocationService {
           `- Work in ${request.projectDirectory} unless a tool explicitly receives another server-authorized path.`,
           '- Follow the project instructions and any unresolved authorization limits.',
           '- The selected execution mode does not override either constraint.',
+          '- Execute bash only with a command exactly listed in authorizedCommands.',
         ].join('\n')
         : '',
       request.role && request.processReferencePaths?.length
@@ -202,6 +206,7 @@ export class IsolatedAgentInvocationService {
     call: WorkflowAgentToolCall,
   ): Promise<WorkflowAgentToolResult> {
     this.validateProcessReference(request, call);
+    this.validateTeamToolAuthorization(request, call);
     if (!request.operation) {
       return (await this.runToolEffect(request, assignedSkills, mcpTools, selectedBuiltinToolNames, call)).output;
     }
@@ -278,6 +283,9 @@ export class IsolatedAgentInvocationService {
     }
 
     if (call.toolName === 'skill_script') {
+      if (request.role && request.projectDirectory) {
+        throw new BadRequestException('Executable Skill scripts are unavailable for Agent Team invocations.');
+      }
       const skill = assignedSkills.find((item) => item.id === call.skillId);
       const script = skill?.files.find((file) => file.path === call.scriptPath && file.path.startsWith('scripts/') && file.content.startsWith('#!'));
       if (!skill || !script) throw new BadRequestException('The isolated Agent requested an unavailable Skill script.');
@@ -367,6 +375,17 @@ export class IsolatedAgentInvocationService {
     return { output: { type: 'text', value: boundedToolResult(value, request.limits?.maxToolResultChars) } };
   }
 
+  private validateTeamToolAuthorization(
+    request: IsolatedAgentInvocationRequest,
+    call: WorkflowAgentToolCall,
+  ): void {
+    if (!request.role || !request.projectDirectory || call.toolName !== 'bash') return;
+    const command = requiredString((call.input as { command?: unknown } | null)?.command, 'command');
+    if (!request.authorizedCommands?.includes(command)) {
+      throw new BadRequestException('The exact shell command is not authorized for this Agent Team run.');
+    }
+  }
+
   private validateProcessReference(
     request: IsolatedAgentInvocationRequest,
     call: WorkflowAgentToolCall,
@@ -380,6 +399,11 @@ export class IsolatedAgentInvocationService {
       throw new BadRequestException('The requested process reference is unavailable.');
     }
   }
+}
+
+function requiredString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !value.trim()) throw new BadRequestException(`${field} is required.`);
+  return value.trim();
 }
 
 function isBuiltinTool(name: string): boolean {

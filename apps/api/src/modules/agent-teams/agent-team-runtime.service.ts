@@ -47,6 +47,7 @@ import {
   createTeamGraph,
   getBmadTeaProcessManifest,
   isInterrupted,
+  type AgentTeamPendingInputAnswer,
   type AgentTeamProjectInstructionFile,
   readBmadTeaProcessFile,
   toGraphResult,
@@ -144,6 +145,10 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (mode !== 'plan_only' && mode !== 'validate_existing' && mode !== 'implement_and_validate') {
       throw new BadRequestException('A supported TeamRun mode is required.');
     }
+    const authorizedCommands = normalizeAuthorizedCommands(request?.authorizedCommands);
+    if (mode === 'plan_only' && authorizedCommands.length > 0) {
+      throw new BadRequestException('Plan-only Agent Team runs cannot authorize commands.');
+    }
 
     const runId = `atrun_${randomUUID()}`;
     const versionId = `atver_${randomUUID()}`;
@@ -180,6 +185,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         projectDirectory: resolvedProjectDirectory,
         projectInstructions,
         mode,
+        authorizedCommands,
         scopeRevision: 1,
         langGraphThreadId: `atthread_${runId}`,
       }).run();
@@ -193,6 +199,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       mode,
       projectDirectory: resolvedProjectDirectory,
       outputDirectory,
+      authorizedCommands,
       scopeRevision: 1,
       projectInstructions,
     });
@@ -224,6 +231,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       intent: run.intent,
       projectDirectory: run.projectDirectory,
       mode: run.mode,
+      authorizedCommands: run.authorizedCommands,
       scopeRevision: run.scopeRevision,
       desiredControlState: run.desiredControlState,
       tasks: taskRows.map(toTaskAttemptView),
@@ -248,9 +256,13 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (request.scopeRevision !== run.scopeRevision) {
       throw new BadRequestException('The pending input scope revision is stale.');
     }
+    const grantedCommands = normalizeAuthorizedCommands(request?.authorizedCommands);
+    if (run.mode === 'plan_only' && grantedCommands.length > 0) {
+      throw new BadRequestException('Plan-only Agent Team runs cannot authorize commands.');
+    }
 
     const now = new Date();
-    const accepted = await this.db.transaction((transaction) => {
+    const authorizedCommands = await this.db.transaction((transaction) => {
       const rows = transaction.update(agentTeamPendingInputs).set({
         status: 'answered',
         answer: request.answer,
@@ -262,21 +274,31 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         eq(agentTeamPendingInputs.scopeRevision, run.scopeRevision),
         eq(agentTeamPendingInputs.status, 'pending'),
       )).returning().all();
-      if (rows.length === 0) return false;
+      if (rows.length === 0) return null;
+      const [currentRun] = transaction.select({ authorizedCommands: agentTeamRuns.authorizedCommands })
+        .from(agentTeamRuns)
+        .where(eq(agentTeamRuns.id, runId))
+        .limit(1)
+        .all();
+      const nextCommands = mergeAuthorizedCommands(currentRun?.authorizedCommands ?? [], grantedCommands);
       transaction.update(agentTeamRuns).set({
         status: 'running',
         desiredControlState: 'none',
+        authorizedCommands: nextCommands,
         updatedAt: now,
       }).where(and(eq(agentTeamRuns.id, runId), eq(agentTeamRuns.status, 'waiting_for_input'))).run();
       this.appendEvent(transaction as unknown as Database, runId, 'input.answered', {
         pendingInputId: request.pendingInputId,
         answer: request.answer,
+        ...(grantedCommands.length > 0 ? { authorizedCommands: grantedCommands } : {}),
       });
-      return true;
+      return nextCommands;
     });
-    if (!accepted) throw new BadRequestException('The pending input is no longer active.');
+    if (!authorizedCommands) throw new BadRequestException('The pending input is no longer active.');
 
-    this.scheduleExecution(runId, new Command({ resume: request.answer }));
+    this.scheduleExecution(runId, new Command({
+      resume: pendingInputAnswer(request.answer, authorizedCommands),
+    }));
     return this.getRunView(runId);
   }
 
@@ -470,7 +492,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const interrupted = snapshot.tasks.some((task) => task.interrupts.length > 0);
     if (interrupted) {
       const answeredInput = validState && state?.pendingInput
-        ? await this.findAnsweredInput(run.id, state.pendingInput.id)
+        ? await this.findAnsweredInput(run, state.pendingInput.id)
         : undefined;
       if (answeredInput) {
         await this.setRunStatus(run.id, 'running', undefined, 'none');
@@ -661,6 +683,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       builtinToolNames: role.toolNames,
       role: request.role,
       projectDirectory: request.projectDirectory,
+      authorizedCommands: request.authorizedCommands,
       processReferencePaths: role.processReferences ?? [],
       readProcessReference: (path) => this.readCapturedProcessFile(version, path),
       signal,
@@ -890,18 +913,20 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async findAnsweredInput(
-    runId: string,
+    run: AgentTeamRun,
     pendingInputId: string,
-  ): Promise<string | undefined> {
+  ): Promise<AgentTeamPendingInputAnswer | undefined> {
     const [row] = await this.db.select({ answer: agentTeamPendingInputs.answer })
       .from(agentTeamPendingInputs)
       .where(and(
         eq(agentTeamPendingInputs.id, pendingInputId),
-        eq(agentTeamPendingInputs.runId, runId),
+        eq(agentTeamPendingInputs.runId, run.id),
         eq(agentTeamPendingInputs.status, 'answered'),
       ))
       .limit(1);
-    return row?.answer ?? undefined;
+    return row?.answer === undefined
+      ? undefined
+      : pendingInputAnswer(row.answer, run.authorizedCommands);
   }
 
   private async getDesiredControlState(
@@ -1146,6 +1171,7 @@ function initialGraphState(run: AgentTeamRun, outputDirectory: string): AgentTea
     projectDirectory: run.projectDirectory,
     outputDirectory,
     scopeRevision: run.scopeRevision,
+    authorizedCommands: run.authorizedCommands,
     projectInstructions: run.projectInstructions,
     documents: [],
     unresolvedIssues: [],
@@ -1235,7 +1261,7 @@ function taskSystemPrompt(instructions: string): string {
 
 You are executing one WorkLite Agent Team task. Use tools only when the captured role configuration and project authorization permit them. Return exactly one JSON object.
 
-Follow the captured project instructions supplied in the task context, and discover additional applicable AGENTS.md or AGENTS_WORKFLOW.md files before changing or assessing project files. If a project rule or missing user decision requires explicit authorization for an action, return the waiting_for_input response instead of taking that action. Map the process package's project root to projectDirectory and its process output location to outputDirectory. Use process_reference only with one of the exact pinned paths listed in the system prompt. The output directory is managed by WorkLite: return documents in JSON rather than writing planning output there directly.
+Follow the captured project instructions supplied in the task context, and discover additional applicable AGENTS.md or AGENTS_WORKFLOW.md files before changing or assessing project files. If a project rule or missing user decision requires explicit authorization for an action, return the waiting_for_input response instead of taking that action. If a required shell command is not present verbatim in authorizedCommands, return the waiting_for_input response instead of calling bash. Map the process package's project root to projectDirectory and its process output location to outputDirectory. Use process_reference only with one of the exact pinned paths listed in the system prompt. The output directory is managed by WorkLite: return documents in JSON rather than writing planning output there directly.
 
 When more user input is required, return:
 {"status":"waiting_for_input","question":"One specific question"}
@@ -1261,6 +1287,7 @@ function taskContext(request: AgentTeamTaskRequest): unknown {
     projectDirectory: request.projectDirectory,
     outputDirectory: request.outputDirectory,
     authorization: modeAuthorization(request.mode),
+    authorizedCommands: request.authorizedCommands,
     projectInstructions: request.projectInstructions,
     upstreamDocuments: request.upstream,
   };
@@ -1431,6 +1458,7 @@ function isUsableGraphState(value: unknown, run: AgentTeamRun): value is AgentTe
     Array.isArray(state.projectInstructions) &&
     JSON.stringify(state.projectInstructions) === JSON.stringify(run.projectInstructions) &&
     state.scopeRevision === run.scopeRevision &&
+    Array.isArray(state.authorizedCommands) &&
     Array.isArray(state.documents) &&
     Array.isArray(state.unresolvedIssues) &&
     Array.isArray(state.commandIds) &&
@@ -1442,6 +1470,29 @@ function recordCompletedCommand(
   commandIds: Set<string>,
 ): void {
   if (record?.status === 'completed' && record.commandId) commandIds.add(record.commandId);
+}
+
+function normalizeAuthorizedCommands(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new BadRequestException('Authorized commands must be an array.');
+  const commands = value.map((command) => {
+    if (typeof command !== 'string' || !command.trim()) {
+      throw new BadRequestException('Each authorized command must be a non-empty string.');
+    }
+    return command.trim();
+  });
+  if (new Set(commands).size !== commands.length) {
+    throw new BadRequestException('Authorized commands must be unique.');
+  }
+  return commands;
+}
+
+function mergeAuthorizedCommands(left: readonly string[], right: readonly string[]): string[] {
+  return [...new Set([...left, ...right])];
+}
+
+function pendingInputAnswer(answer: string, authorizedCommands: readonly string[]): AgentTeamPendingInputAnswer {
+  return { answer, authorizedCommands };
 }
 
 function isAbortError(error: unknown): boolean {

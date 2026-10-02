@@ -42,6 +42,8 @@ The first release provides one built-in software-development team with configura
 
 Mode selection expresses intent. The effective execution scope must also account for project instructions and authorization already supplied in the conversation. Selecting a mode cannot override a repository rule that requires explicit authorization for a particular command or action.
 
+Command authorization is a structured exact-string grant set on the TeamRun. A run may start with grants supplied by the caller, and a pending-input answer may add one or more exact commands only through its structured authorization field. Prose in the answer, mode selection, role instructions, or generated output never grants a command. Plan-only runs do not accept command grants.
+
 The initial process uses ordered task execution and serialized project writes. Independent reading and assessment tasks may be added as parallel branches after the basic execution and recovery behavior is established. General team builders, unrestricted Agent-to-Agent discussion, recursive team creation, parallel repository writes, automatic branches or worktrees, commit and deployment automation, additional languages for the runtime, and a new plugin marketplace are outside the first release.
 
 ## 4. Default Team Process
@@ -150,7 +152,7 @@ A new `AgentTeamsModule` should use `apps/api/src/modules/agent-teams/`. The exi
 | --- | --- |
 | Team | Saved configuration for the initial built-in team, including role assignments |
 | TeamVersion | Immutable snapshot created when a run starts: process version, role instructions, public model IDs, selected Skill contents, MCP references and selected tool names, and recipe defaults |
-| TeamRun | User intent, project directory, mode, scope revisions, desired control state, outcome summary, and LangGraph thread reference |
+| TeamRun | User intent, project directory, mode, cumulative exact-command grants, scope revisions, desired control state, outcome summary, and LangGraph thread reference |
 | Team task attempt | Stable logical task key, attempt index, input revisions, attempt result, operation references, and lifecycle timestamps |
 | Team document | Immutable textual output revision, its producing task attempt, and its upstream document references |
 | TeamRun event | Monotonic run-local sequence, immutable event payload, and replay metadata |
@@ -186,6 +188,8 @@ Agent nodes can make several tool calls. Journaling only the entire Agent result
 
 The internal journal contract uses a stable semantic input fingerprint and does not use the provider-generated tool-call id as the operation identity. Replay is allowed only when the task, operation, tool, and input fingerprint match; a new provider tool-call id may represent the same persisted operation. A command that finishes with a nonzero exit status is a known effect and retains its error output. Cancellation, abort, or an unknown completion state becomes an explicit recovery decision rather than automatic replay.
 
+The exact-command grant set is carried in LangGraph state and every task request. Before the journal reserves a `bash` operation, the runtime compares the trimmed tool input with the grant set and rejects every command that is not an exact member. The check happens before Commands creates or reserves the process, so recovery cannot replay an unauthorized effect. Grants remain cumulative for the life of the run. Team roles do not receive executable Skill scripts in this increment because their generated temporary invocation command cannot be presented as an exact user-authorized string; Skill instructions can still be captured and supplied.
+
 MCP side effects with an unknown completion state follow the same recovery-decision rule. Provider retries before committed tool effects retain the current transport behavior. Automatic restart recovery does not authorize a service restart, deployment, or new external action.
 
 TEA has its own file-based workflow progress conventions. WorkLite must map the selected process's continuation prompts and outputs onto Team state rather than run competing automatic-resume systems. Confirm the pinned TEA workflow's interactive and headless behavior in P0. [TEA test design](https://bmad-code-org.github.io/bmad-method-test-architecture-enterprise/how-to/workflows/run-test-design/).
@@ -209,6 +213,8 @@ Review feedback creates specific, scoped tasks. It does not silently delete fail
 ## 10. Proposed API and Event Contract
 
 These routes are proposed and unavailable today. Names use `agent-teams` to distinguish Agent collaboration from workspace naming in existing services. General Team creation and deletion are outside the first built-in-template scope.
+
+Run creation and pending-input answers expose the exact command grant set explicitly. An answer can include both text and zero or more exact commands; only the structured command list changes executable authorization.
 
 | Route | Purpose |
 | --- | --- |
@@ -332,4 +338,5 @@ References were consulted on 2026-10-03. They support the selected mechanisms; t
 - Agent Team remains unavailable through public APIs and platform surfaces. Chat Bot, `worklite-platform`, snapshot capability metadata, and reference protections remain unchanged until those routes become visible.
 - Integrated the internal LangGraph runtime with persistent checkpoints, WorkLite projection reconciliation, pause/answer/retry behavior, and journal-backed isolated Agent invocations; Agent Team remains unavailable through public APIs and platform surfaces.
 - Captured root target-project instructions with each TeamRun, captured the pinned BMAD/TEA reference closure in each TeamVersion and exposed it through a role-scoped read-only tool, materialized immutable Team documents under the run's managed output directory, and made cancellation settle waiting task attempts.
+- Added persisted cumulative exact-command grants, structured pending-input grants, checkpoint/task-state propagation, pre-launch `bash` enforcement, and exclusion of executable Skill scripts from Team roles.
 - No test execution, build, type check, server lifecycle operation, or deployment-profile access has been performed.

@@ -120,6 +120,13 @@
       "when": 1790972900937,
       "tag": "0017_agent_team_project_context",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1790973781281,
+      "tag": "0018_agent_team_command_authorization",
+      "breakpoints": true
     }
   ]
 }
