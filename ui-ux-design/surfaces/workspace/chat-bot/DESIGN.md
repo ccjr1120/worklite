@@ -208,9 +208,7 @@ Keyboard focus remains in the editable composer after cancellation, session sele
 
 ## Coverage Status
 
-Pending verification
-
-The previous verification was 2026-09-23. The newly added Agent Team starter requires source-level coverage review before this specification can again claim verification.
+Source-level audit: 2026-10-03. The direct Agent Team starter matches this specification in source: it is a navigation link to the built-in Team, does not call the composer selection handler, and does not dispatch a Team Run. Differences found: yes—the unresolved differences below remain from the earlier implementation; no browser, accessibility-tool, runtime, or acceptance verification was performed for this audit.
 
 - The transcript does not expose an `aria-live` region for streaming updates. Working, cancelled, queued, and failure blocks use `role="status"` and `role="alert"`, which announce on mount, but the incremental assistant response itself is not announced, so the restrained live-region requirement in this specification is unmet.
 - `/resume` lists only the executions this browser archived, capped at `HISTORY_LIMIT`, because the API exposes no route that lists a given Agent's executions. A conversation the reader remembers can therefore be absent from the selector, and the cap is not surfaced. A server-side execution list is required to close this.
@@ -220,6 +218,10 @@ The previous verification was 2026-09-23. The newly added Agent Team starter req
 - The queue is browser-session state and is intentionally not persisted, so a reload drops unsent entries without telling the reader they existed.
 
 ## Changelog
+
+### 2026-10-03
+
+- Added the direct Agent Team starter and recorded a source-level coverage audit; existing Chat Bot accessibility and execution-history differences remain open.
 
 ### 2026-09-21 - Interaction pass
 

@@ -1,5 +1,14 @@
 import type {
   AgentView,
+  AgentTeamView,
+  UpdateAgentTeamRequest,
+  CreateAgentTeamRunRequest,
+  CreateAgentTeamRunResponse,
+  AgentTeamRunView,
+  AgentTeamRunEvent,
+  AnswerAgentTeamRunRequest,
+  RecoverAgentTeamOperationRequest,
+  AgentTeamRunActionResponse,
   AgentExecutionView,
   AnswerAgentQuestionRequest,
   CreateRunRequest,
@@ -210,6 +219,18 @@ export const api = {
     return apiGet<GatewayRequestLogList>(`/api/portkey-gateway/request-logs${suffix}`);
   },
   gatewayRequestLog: (requestLogId: string) => apiGet<GatewayRequestLogDetail>(`/api/portkey-gateway/request-logs/${encodeURIComponent(requestLogId)}`),
+  agentTeams: () => apiGet<AgentTeamView[]>('/api/agent-teams'),
+  agentTeam: (teamId: string) => apiGet<AgentTeamView>(`/api/agent-teams/${encodeURIComponent(teamId)}`),
+  updateAgentTeam: (teamId: string, input: UpdateAgentTeamRequest) => apiPatch<AgentTeamView>(`/api/agent-teams/${encodeURIComponent(teamId)}`, input),
+  createAgentTeamRun: (teamId: string, input: CreateAgentTeamRunRequest) => apiPost<CreateAgentTeamRunResponse>(`/api/agent-teams/${encodeURIComponent(teamId)}/runs`, input),
+  agentTeamRun: (runId: string) => apiGet<AgentTeamRunView>(`/api/agent-team-runs/${encodeURIComponent(runId)}`),
+  agentTeamRunEventsUrl: (runId: string) => `/api/agent-team-runs/${encodeURIComponent(runId)}/events`,
+  answerAgentTeamRun: (runId: string, input: AnswerAgentTeamRunRequest) => apiPost<AgentTeamRunActionResponse>(`/api/agent-team-runs/${encodeURIComponent(runId)}/answer`, input),
+  recoverAgentTeamOperation: (runId: string, operationKey: string, input: RecoverAgentTeamOperationRequest) => apiPost<AgentTeamRunActionResponse>(`/api/agent-team-runs/${encodeURIComponent(runId)}/operations/${encodeURIComponent(operationKey)}/recovery`, input),
+  pauseAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/agent-team-runs/${encodeURIComponent(runId)}/pause`),
+  resumeAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/agent-team-runs/${encodeURIComponent(runId)}/resume`),
+  cancelAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/agent-team-runs/${encodeURIComponent(runId)}/cancel`),
+  retryAgentTeamTask: (runId: string, taskKey: string) => apiPost<AgentTeamRunActionResponse>(`/api/agent-team-runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskKey)}/retry`),
   runs: (_workspace?: string) => apiGet<RunView[]>('/api/runs'),
   run: (_workspace: string | undefined, runId: string) => apiGet<RunView>(`/api/runs/${encodeURIComponent(runId)}`),
   runEventsUrl: (runId: string) => `/api/runs/${encodeURIComponent(runId)}/events`,
@@ -254,4 +275,19 @@ export function parseRunProgressEvent(value: string): RunProgressEvent {
     throw new Error('The workflow run event stream returned an invalid event.');
   }
   return event as RunProgressEvent;
+}
+
+export function parseAgentTeamRunEvent(value: string): AgentTeamRunEvent {
+  const event = JSON.parse(value) as Partial<AgentTeamRunEvent>;
+  if (
+    typeof event.runId !== 'string'
+    || typeof event.sequence !== 'number'
+    || typeof event.type !== 'string'
+    || !event.payload
+    || typeof event.payload !== 'object'
+    || typeof event.createdAt !== 'string'
+  ) {
+    throw new Error('The Agent Team run event stream returned an invalid event.');
+  }
+  return event as AgentTeamRunEvent;
 }

@@ -1,5 +1,5 @@
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Home, KeyRound, Puzzle, ScrollText, Settings, Workflow } from 'lucide-react';
+import { Home, KeyRound, Puzzle, ScrollText, Settings, UsersRound, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { focusRingInset } from '@/components/ui/interaction';
@@ -14,6 +14,7 @@ const navigationGroups = [
     items: [
       { id: 'home', labelKey: 'nav.home', to: '/home', icon: Home },
       { id: 'workflows', labelKey: 'nav.workflows', to: '/workflows', icon: Workflow },
+      { id: 'agentTeam', labelKey: 'nav.agentTeam', to: '/agent-teams/agent_team_bmad_tea', icon: UsersRound },
     ],
   },
   {
@@ -41,6 +42,7 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
   function primaryActive(id: (typeof navigationGroups)[number]['items'][number]['id'], to: string) {
     if (id === 'settings') return pathname.startsWith('/settings');
     if (id === 'workflows') return ['/workflows', '/artifacts'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+    if (id === 'agentTeam') return ['/agent-teams', '/agent-team-runs'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
     return pathname === to || pathname.startsWith(`${to}/`);
   }
 

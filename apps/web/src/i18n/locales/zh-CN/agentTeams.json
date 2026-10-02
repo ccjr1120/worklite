@@ -1,0 +1,190 @@
+{
+  "title": "Agent Team",
+  "team": {
+    "updated": "配置已保存",
+    "save": "保存团队配置",
+    "saving": "正在保存团队配置",
+    "saveFailed": "无法保存团队配置",
+    "process": "流程",
+    "roles": "角色配置",
+    "processId": "流程 ID",
+    "processVersion": "流程版本"
+  },
+  "run": {
+    "title": "启动执行",
+    "loading": "正在加载 Agent Team 执行",
+    "loadFailed": "无法加载 Agent Team 执行",
+    "intent": "执行意图",
+    "intentPlaceholder": "描述要完成的软件工作…",
+    "projectDirectory": "项目目录",
+    "projectDirectoryPlaceholder": "/absolute/path/to/project",
+    "mode": "执行模式",
+    "start": "启动执行",
+    "starting": "正在启动执行",
+    "startFailed": "无法启动执行",
+    "commands": "精确命令授权",
+    "commandsPlaceholder": "每行一条完整命令",
+    "commandsHint": "命令必须逐字匹配；仅计划模式不可授权命令。",
+    "modeValue": {
+      "plan_only": "仅计划",
+      "validate_existing": "验证现有实现",
+      "implement_and_validate": "实现并验证"
+    },
+    "status": {
+      "queued": "排队中",
+      "running": "运行中",
+      "waiting_for_input": "等待输入",
+      "waiting_for_recovery": "等待操作恢复",
+      "paused": "已暂停",
+      "succeeded": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消",
+      "reserved": "已预留",
+      "completed": "已完成",
+      "uncertain": "结果不确定",
+      "cancelling": "取消中"
+    },
+    "desiredControl": {
+      "none": "无控制请求",
+      "pause_requested": "暂停请求中",
+      "cancel_requested": "取消请求中"
+    },
+    "version": "团队版本",
+    "project": "项目目录",
+    "noCommands": "未授权命令",
+    "scopeRevision": "授权范围版本",
+    "detail": {
+      "title": "Agent Team 执行"
+    },
+    "unavailable": {
+      "title": "Agent Team 执行不可用",
+      "description": "此执行不存在，或当前工作区无法访问。"
+    }
+  },
+  "tasks": {
+    "title": "任务",
+    "empty": "暂无任务记录。",
+    "attempt": "第 {{count}} 次尝试",
+    "result": "任务结果 JSON",
+    "retry": "重试任务",
+    "retrying": "正在重试任务",
+    "retryFailed": "无法重试任务"
+  },
+  "input": {
+    "title": "等待回答",
+    "answer": "提交回答",
+    "answering": "正在提交回答",
+    "answerFailed": "无法提交回答",
+    "answerPlaceholder": "输入完整回答…",
+    "commands": "追加精确命令授权"
+  },
+  "recovery": {
+    "title": "操作恢复",
+    "operation": "操作",
+    "adopt_command": "采用已结束命令",
+    "mark_failed": "标记为失败",
+    "replay": "重新执行",
+    "submit": "提交恢复决策",
+    "submitting": "正在提交恢复决策",
+    "failed": "无法提交恢复决策",
+    "decision": "恢复决策"
+  },
+  "output": {
+    "title": "成员输出",
+    "empty": "暂无输出。",
+    "reconnecting": "事件流正在重新连接"
+  },
+  "documents": {
+    "title": "团队文档",
+    "empty": "暂无团队文档。",
+    "revision": "修订 {{count}}",
+    "key": "文档键",
+    "upstreamKeys": "上游文档键",
+    "noUpstreamKeys": "无上游文档键",
+    "content": "文档内容"
+  },
+  "operations": {
+    "title": "操作与命令证据",
+    "empty": "暂无操作记录。",
+    "command": "命令",
+    "exitCode": "退出码",
+    "output": "命令输出",
+    "loadFailed": "无法加载命令证据。",
+    "noCommand": "未关联命令"
+  },
+  "outcome": {
+    "title": "执行结果",
+    "summary": "总结",
+    "unresolved": "未解决问题",
+    "criteria": "验收评估",
+    "evidence": "证据",
+    "assessment": {
+      "met": "已满足",
+      "unmet": "未满足",
+      "not_verified": "未验证"
+    },
+    "empty": "执行尚未产生结果。",
+    "noUnresolved": "没有未解决问题。",
+    "noEvidence": "没有证据。"
+  },
+  "controls": {
+    "pause": "暂停",
+    "pausing": "正在请求暂停",
+    "resume": "继续",
+    "resuming": "正在请求继续",
+    "cancel": "取消执行",
+    "cancelling": "正在请求取消",
+    "cancelTitle": "取消此 Agent Team 执行？",
+    "cancelDescription": "将停止后续工作；已产生的项目更改和团队文档不会被回滚。",
+    "cancelConfirm": "确认取消",
+    "failed": "无法更新执行状态"
+  },
+  "model": {
+    "default": "使用团队默认模型",
+    "label": "公开模型"
+  },
+  "instructions": {
+    "label": "角色指令"
+  },
+  "entryPoints": {
+    "label": "流程入口",
+    "placeholder": "每行一个流程路径"
+  },
+  "skills": {
+    "label": "Skills",
+    "empty": "暂无可用 Skill。"
+  },
+  "mcpServers": {
+    "label": "MCP 服务器",
+    "empty": "暂无可用 MCP 服务器。"
+  },
+  "tools": {
+    "label": "角色工具"
+  },
+  "role": {
+    "planner": "Planner",
+    "test_designer": "Test Designer",
+    "developer": "Developer",
+    "test_author": "Test Author",
+    "test_runner": "Test Runner",
+    "reviewer": "Reviewer"
+  },
+  "loading": "正在加载 Agent Team",
+  "loadFailed": "无法加载 Agent Team",
+  "unavailable": {
+    "title": "Agent Team 不可用",
+    "description": "此团队不存在，或当前工作区无法访问。"
+  },
+  "openTeam": "打开团队配置",
+  "resources": {
+    "providers": "模型提供商",
+    "skills": "Skills",
+    "mcpServers": "MCP 服务器",
+    "loadFailed": "无法加载此角色配置资源。"
+  },
+  "metadata": {
+    "title": "执行信息",
+    "status": "状态",
+    "taskKey": "任务键"
+  }
+}

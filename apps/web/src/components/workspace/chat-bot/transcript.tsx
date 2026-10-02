@@ -208,6 +208,15 @@ function StarterPane({ onSelect }: { onSelect: (prompt: string) => void }) {
             <span className="mt-1 block text-[13px] leading-5 text-muted-foreground">{t(`starters.${starter}.description`)}</span>
           </button>
         ))}
+        <Link
+          to="/agent-teams/$teamId"
+          params={{ teamId: 'agent_team_bmad_tea' }}
+          className={cn('min-h-[72px] rounded-md border border-border bg-surface p-3 text-left hover:border-foreground/20 hover:bg-surface-subtle', surfaceInteraction, focusRing)}
+          aria-label={t('starters.agentTeam.open')}
+        >
+          <span className="block text-sm font-medium">{t('starters.agentTeam.title')}</span>
+          <span className="mt-1 block text-[13px] leading-5 text-muted-foreground">{t('starters.agentTeam.description')}</span>
+        </Link>
       </div>
     </div>
   );

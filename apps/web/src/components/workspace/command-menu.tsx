@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router';
-import { Home, KeyRound, MessageSquareText, Plus, Puzzle, ScrollText, Workflow } from 'lucide-react';
+import { Home, KeyRound, MessageSquareText, Plus, Puzzle, ScrollText, UsersRound, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   CommandDialog,
@@ -36,6 +36,9 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
           </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/plugins' }))}>
             <Puzzle className="size-4" /> {t('nav.plugins')}
+          </CommandItem>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/agent-teams/$teamId', params: { teamId: 'agent_team_bmad_tea' } }))}>
+            <UsersRound className="size-4" /> {t('nav.agentTeam')}
           </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/model-providers', search: { tab: 'providers' } }))}>
             <KeyRound className="size-4" /> {t('nav.modelProviders')}

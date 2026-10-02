@@ -8,6 +8,8 @@ export const workflowsQueryKey = () => ['workflows'] as const;
 export const runsQueryKey = () => ['runs'] as const;
 export const mcpServersQueryKey = () => ['mcp-servers'] as const;
 export const artifactsQueryKey = () => ['artifacts'] as const;
+export const agentTeamQueryKey = (teamId: string) => ['agent-team', teamId] as const;
+export const agentTeamRunQueryKey = (runId: string) => ['agent-team-run', runId] as const;
 
 export function useWorkflowsQuery(workspace?: string, options?: { refetchInterval?: number | false }) {
   return useQuery({ queryKey: workflowsQueryKey(), queryFn: () => api.workflows(workspace), refetchInterval: options?.refetchInterval });
@@ -98,6 +100,22 @@ export function useSkillsQuery(workspace?: string) {
 
 export function useSkillQuery(workspace: string | undefined, skillId: string) {
   return useQuery({ queryKey: ['skill', skillId] as const, queryFn: () => api.skill(workspace, skillId), enabled: Boolean(skillId && skillId !== 'new') });
+}
+
+export function useAgentTeamQuery(workspace: string | undefined, teamId: string) {
+  return useQuery({ queryKey: agentTeamQueryKey(teamId), queryFn: () => api.agentTeam(teamId), enabled: Boolean(workspace && teamId) });
+}
+
+export function useAgentTeamRunQuery(workspace: string | undefined, runId: string) {
+  return useQuery({
+    queryKey: agentTeamRunQueryKey(runId),
+    queryFn: () => api.agentTeamRun(runId),
+    enabled: Boolean(workspace && runId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'succeeded' || status === 'failed' || status === 'cancelled' ? false : 3_000;
+    },
+  });
 }
 
 export function useMcpServersQuery(workspace?: string) {

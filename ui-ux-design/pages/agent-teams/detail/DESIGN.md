@@ -66,13 +66,13 @@ The Team query owns configuration freshness. No manual refresh control is introd
 | Key | Category |
 | --- | --- |
 | `agentTeams:title` | State |
-| `agentTeams:team.fallback` | State |
-| `agentTeams:team.updated` | Constraint |
-| `agentTeams:team.unsaved` | State |
+| `agentTeams:team.updated` | State |
 | `agentTeams:team.save` | Action |
 | `agentTeams:team.saving` | State |
 | `agentTeams:team.saveFailed` | Recovery |
 | `agentTeams:team.process` | State |
+| `agentTeams:team.processId` | State |
+| `agentTeams:team.processVersion` | State |
 | `agentTeams:team.roles` | State |
 | `agentTeams:run.title` | State |
 | `agentTeams:run.intent` | Constraint |
@@ -80,22 +80,22 @@ The Team query owns configuration freshness. No manual refresh control is introd
 | `agentTeams:run.projectDirectory` | Constraint |
 | `agentTeams:run.projectDirectoryPlaceholder` | Constraint |
 | `agentTeams:run.mode` | Constraint |
+| `agentTeams:run.modeValue.*` | State |
 | `agentTeams:run.start` | Action |
 | `agentTeams:run.starting` | State |
 | `agentTeams:run.startFailed` | Recovery |
 | `agentTeams:run.commands` | Constraint |
 | `agentTeams:run.commandsPlaceholder` | Constraint |
 | `agentTeams:run.commandsHint` | Constraint |
-| `agentTeams:run.planOnly` | Action |
-| `agentTeams:run.validateExisting` | Action |
-| `agentTeams:run.implementAndValidate` | Action |
 | `agentTeams:model.default` | Action |
 | `agentTeams:model.label` | Constraint |
 | `agentTeams:instructions.label` | Constraint |
 | `agentTeams:entryPoints.label` | Constraint |
 | `agentTeams:entryPoints.placeholder` | Constraint |
 | `agentTeams:skills.label` | Constraint |
+| `agentTeams:skills.empty` | State |
 | `agentTeams:mcpServers.label` | Constraint |
+| `agentTeams:mcpServers.empty` | State |
 | `agentTeams:tools.label` | Constraint |
 | `agentTeams:role.planner` | State |
 | `agentTeams:role.test_designer` | State |
@@ -107,6 +107,10 @@ The Team query owns configuration freshness. No manual refresh control is introd
 | `agentTeams:loadFailed` | Recovery |
 | `agentTeams:unavailable.title` | State |
 | `agentTeams:unavailable.description` | Recovery |
+| `agentTeams:resources.providers` | State |
+| `agentTeams:resources.skills` | State |
+| `agentTeams:resources.mcpServers` | State |
+| `agentTeams:resources.loadFailed` | Recovery |
 
 ## Accessibility
 
@@ -114,10 +118,11 @@ The Start and Save forms use labelled fields and submit natively with `Enter`. R
 
 ## Coverage Status
 
-Pending verification
+Source-level audit: 2026-10-03. Differences found: none in the source-level comparison of route, action, state, copy, token, responsive, and accessibility structure. This was not a browser, accessibility-tool, runtime, or acceptance verification.
 
 ## Changelog
 
 ### 2026-10-03
 
 - Added the direct built-in Team detail specification, including one-activation run creation, one-activation Team save, role configuration, exact command grants, and no Team creation or deletion.
+- Recorded implementation copy for process identifiers, resource failures, and empty Skill and MCP selections, and recorded the source-level coverage audit.

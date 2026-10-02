@@ -2,7 +2,7 @@
 
 Date: 2026-10-03
 
-Status: The BMAD + TEA and LangGraph.js technology direction is confirmed and implementation has started. The P3 public REST/SSE boundary is implemented for the one built-in Team, and its direct Team and Team Run Web interfaces are specified for implementation. Team creation/deletion remains unavailable. Later milestones remain implementation requirements, and normal repository verification and service-lifecycle rules still apply.
+Status: The BMAD + TEA and LangGraph.js technology direction is confirmed and implementation has started. The P3 public REST/SSE boundary is implemented for the one built-in Team, and its direct Team and Team Run Web interfaces are implemented. Team creation/deletion remains unavailable, and runtime acceptance remains outstanding. Later milestones remain implementation requirements, and normal repository verification and service-lifecycle rules still apply.
 
 Architecture authority: [Project Architecture](README.md#agent-team-implementation-direction). Applicable working rules: [AGENTS.md](../../AGENTS.md) and [AGENTS_WORKFLOW.md](../../AGENTS_WORKFLOW.md).
 
@@ -345,7 +345,14 @@ References were consulted on 2026-10-03. They support the selected mechanisms; t
 
 - Approved the direct built-in Team detail and Team Run detail routes, the workspace navigation family, and the Chat Bot navigation starter.
 - Recorded the page contracts before Web implementation, including one-action Start and Save, replayable Run observation, structured authorization and recovery, and bounded evidence presentation.
-- No acceptance Run, test, build, type check, server lifecycle operation, or deployment-profile access is authorized by this documentation change.
+- Implemented the direct Team detail route and feature, including role configuration and one-action Start and Save flows.
+- Implemented the direct Team Run detail route and feature, including pending input, structured recovery, task retry, and independent lifecycle controls.
+- Implemented Agent Team workspace navigation and the Chat Bot navigation starter.
+- Stopped Team Run polling when the latest Run snapshot is terminal.
+- Implemented Team Run SSE persisted replay and live observation.
+- Implemented linked Command evidence replay.
+- Recorded the source-level design coverage audit.
+- No acceptance Run, test, type check, lint, build, browser check, HTTP request, server lifecycle operation, or deployment-profile access was performed for this Web increment.
 
 ### 2026-10-03
 

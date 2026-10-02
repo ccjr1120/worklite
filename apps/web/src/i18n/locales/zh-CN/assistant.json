@@ -21,6 +21,11 @@
       "title": "创建 Workflow",
       "description": "创建 Workflow 草稿并打开编辑器。",
       "prompt": "创建一个用于每日汇总客户反馈的 Workflow 草稿。"
+    },
+    "agentTeam": {
+      "title": "启动 Agent Team",
+      "description": "配置软件团队并发起授权执行。",
+      "open": "打开 Agent Team"
     }
   },
   "composer": {

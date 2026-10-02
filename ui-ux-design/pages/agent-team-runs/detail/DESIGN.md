@@ -67,6 +67,7 @@ The page distinguishes execution status from criterion assessment. `succeeded` i
 
 | Key | Category |
 | --- | --- |
+| `agentTeams:title` | State |
 | `agentTeams:run.detail.title` | State |
 | `agentTeams:run.loading` | State |
 | `agentTeams:run.loadFailed` | Recovery |
@@ -74,8 +75,13 @@ The page distinguishes execution status from criterion assessment. `succeeded` i
 | `agentTeams:run.unavailable.description` | Recovery |
 | `agentTeams:run.status.*` | State |
 | `agentTeams:run.desiredControl.*` | State |
+| `agentTeams:metadata.title` | State |
+| `agentTeams:metadata.status` | State |
+| `agentTeams:metadata.taskKey` | State |
 | `agentTeams:run.version` | State |
+| `agentTeams:run.mode` | Constraint |
 | `agentTeams:run.modeValue.*` | State |
+| `agentTeams:run.intent` | Constraint |
 | `agentTeams:run.project` | State |
 | `agentTeams:run.commands` | Constraint |
 | `agentTeams:run.noCommands` | State |
@@ -95,8 +101,9 @@ The page distinguishes execution status from criterion assessment. `succeeded` i
 | `agentTeams:input.commands` | Constraint |
 | `agentTeams:recovery.title` | State |
 | `agentTeams:recovery.operation` | State |
-| `agentTeams:recovery.adoptCommand` | Action |
-| `agentTeams:recovery.markFailed` | Action |
+| `agentTeams:recovery.decision` | Constraint |
+| `agentTeams:recovery.adopt_command` | Action |
+| `agentTeams:recovery.mark_failed` | Action |
 | `agentTeams:recovery.replay` | Action |
 | `agentTeams:recovery.submit` | Action |
 | `agentTeams:recovery.submitting` | State |
@@ -107,19 +114,34 @@ The page distinguishes execution status from criterion assessment. `succeeded` i
 | `agentTeams:documents.title` | State |
 | `agentTeams:documents.empty` | State |
 | `agentTeams:documents.revision` | State |
+| `agentTeams:documents.key` | State |
+| `agentTeams:documents.upstreamKeys` | State |
+| `agentTeams:documents.noUpstreamKeys` | State |
+| `agentTeams:documents.content` | State |
 | `agentTeams:operations.title` | State |
 | `agentTeams:operations.empty` | State |
 | `agentTeams:operations.command` | State |
+| `agentTeams:operations.noCommand` | State |
 | `agentTeams:operations.exitCode` | State |
 | `agentTeams:operations.output` | State |
+| `agentTeams:operations.loadFailed` | Recovery |
 | `agentTeams:outcome.title` | State |
+| `agentTeams:outcome.empty` | State |
 | `agentTeams:outcome.summary` | State |
 | `agentTeams:outcome.unresolved` | State |
+| `agentTeams:outcome.noUnresolved` | State |
 | `agentTeams:outcome.criteria` | State |
 | `agentTeams:outcome.evidence` | State |
+| `agentTeams:outcome.noEvidence` | State |
 | `agentTeams:outcome.assessment.met` | State |
 | `agentTeams:outcome.assessment.unmet` | State |
 | `agentTeams:outcome.assessment.not_verified` | State |
+| `agentTeams:role.planner` | State |
+| `agentTeams:role.test_designer` | State |
+| `agentTeams:role.developer` | State |
+| `agentTeams:role.test_author` | State |
+| `agentTeams:role.test_runner` | State |
+| `agentTeams:role.reviewer` | State |
 | `agentTeams:controls.pause` | Action |
 | `agentTeams:controls.pausing` | State |
 | `agentTeams:controls.resume` | Action |
@@ -131,6 +153,7 @@ The page distinguishes execution status from criterion assessment. `succeeded` i
 | `agentTeams:controls.cancelConfirm` | Action |
 | `agentTeams:controls.failed` | Recovery |
 | `agentTeams:openTeam` | Action |
+| `common:actions.cancel` | Action |
 
 ## Accessibility
 
@@ -138,10 +161,11 @@ The heading hierarchy moves from Run title to section titles. Controls are nativ
 
 ## Coverage Status
 
-Pending verification
+Source-level audit: 2026-10-03. Differences found: none in the source-level comparison of route, observation, mutation, replay, evidence, copy, token, responsive, and accessibility structure. This was not a browser, accessibility-tool, runtime, acceptance, or real-Run verification.
 
 ## Changelog
 
 ### 2026-10-03
 
 - Added the Team Run detail specification for replayable observation, structured pending input, operation recovery, bounded evidence, independent lifecycle controls, and distinct completion versus assessment state.
+- Recorded implementation metadata, evidence, empty-state, and recovery copy, and recorded the source-level coverage audit.
