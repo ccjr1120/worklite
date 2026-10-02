@@ -14,6 +14,11 @@ export type AgentTeamPendingInput = {
   scopeRevision: number;
 };
 
+export type AgentTeamProjectInstructionFile = {
+  path: string;
+  content: string;
+};
+
 export type AgentTeamCriterionAssessment = {
   criterion: string;
   assessment: 'met' | 'unmet' | 'not_verified';
@@ -40,7 +45,9 @@ export type AgentTeamTaskRequest = {
   intent: string;
   mode: AgentTeamMode;
   projectDirectory: string;
+  outputDirectory: string;
   scopeRevision: number;
+  projectInstructions: readonly AgentTeamProjectInstructionFile[];
   upstream: readonly AgentTeamDocument[];
   pendingInputId?: string;
   answer?: string;
@@ -74,7 +81,9 @@ export type AgentTeamRunRequest = {
   intent: string;
   mode: AgentTeamMode;
   projectDirectory: string;
+  outputDirectory: string;
   scopeRevision: number;
+  projectInstructions: readonly AgentTeamProjectInstructionFile[];
 };
 
 export type AgentTeamGraphResult = AgentTeamRunRequest & {

@@ -8,7 +8,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomUUID } from 'node:crypto';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { and, asc, desc, eq, inArray, ne } from 'drizzle-orm';
 import type {
   AgentTeamCriterionAssessment,
@@ -46,6 +47,7 @@ import {
   createTeamGraph,
   getBmadTeaProcessManifest,
   isInterrupted,
+  type AgentTeamProjectInstructionFile,
   readBmadTeaProcessFile,
   toGraphResult,
   type AgentTeamDocument,
@@ -63,12 +65,12 @@ const BUILT_IN_TEAM_ID = 'agent_team_bmad_tea';
 const PROCESS_ID = 'bmad-tea';
 const PROCESS_VERSION = '1';
 const ROLE_TOOL_NAMES: Record<AgentTeamRole, readonly string[]> = {
-  planner: ['read', 'glob', 'grep'],
-  test_designer: ['read', 'glob', 'grep'],
-  developer: ['bash', 'read', 'write', 'glob', 'grep'],
-  test_author: ['read', 'write', 'glob', 'grep'],
+  planner: ['read', 'glob', 'grep', 'process_reference'],
+  test_designer: ['read', 'glob', 'grep', 'process_reference'],
+  developer: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference'],
+  test_author: ['read', 'write', 'glob', 'grep', 'process_reference'],
   test_runner: ['bash', 'read', 'write', 'glob', 'grep'],
-  reviewer: ['read', 'glob', 'grep'],
+  reviewer: ['read', 'glob', 'grep', 'process_reference'],
 };
 const ROLE_INSTRUCTIONS: Record<AgentTeamRole, string> = {
   planner: 'Clarify the software goal, preserve the user intent, inspect the authorized project context, and produce an implementation plan that downstream roles can execute.',
@@ -143,13 +145,16 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('A supported TeamRun mode is required.');
     }
 
+    const runId = `atrun_${randomUUID()}`;
+    const versionId = `atver_${randomUUID()}`;
+    const resolvedProjectDirectory = resolve(projectDirectory);
+    const projectInstructions = await this.readProjectInstructions(resolvedProjectDirectory);
+    const outputDirectory = this.runOutputDirectory(runId);
     const [team] = await this.db.select().from(agentTeams)
       .where(and(eq(agentTeams.id, BUILT_IN_TEAM_ID), eq(agentTeams.workspaceId, workspaceId)))
       .limit(1);
     if (!team) throw new NotFoundException('The built-in Agent Team was not found.');
 
-    const runId = `atrun_${randomUUID()}`;
-    const versionId = `atver_${randomUUID()}`;
     const snapshot = await this.createVersionSnapshot(team.roles);
     await this.db.transaction((transaction) => {
       const [latest] = transaction.select({ version: agentTeamVersions.version })
@@ -172,7 +177,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         teamVersionId: versionId,
         status: 'queued',
         intent,
-        projectDirectory: resolve(projectDirectory),
+        projectDirectory: resolvedProjectDirectory,
+        projectInstructions,
         mode,
         scopeRevision: 1,
         langGraphThreadId: `atthread_${runId}`,
@@ -180,12 +186,15 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       this.appendEvent(transaction as unknown as Database, runId, 'run.status', { status: 'queued' });
     });
 
+    await mkdir(outputDirectory, { recursive: true });
     this.scheduleExecution(runId, {
       runId,
       intent,
       mode,
-      projectDirectory: resolve(projectDirectory),
+      projectDirectory: resolvedProjectDirectory,
+      outputDirectory,
       scopeRevision: 1,
+      projectInstructions,
     });
     return this.getRunView(runId);
   }
@@ -316,7 +325,10 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (!accepted) return this.getRunView(runId);
 
     this.abortControllers.get(runId)?.abort();
-    if (!this.executions.has(runId)) await this.finishCancelledRun(runId);
+    if (!this.executions.has(runId)) {
+      await this.failActiveAttempts(runId, 'cancelled', 'The Agent Team run was cancelled.');
+      await this.finishCancelledRun(runId);
+    }
     return this.getRunView(runId);
   }
 
@@ -385,13 +397,22 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   private async createVersionSnapshot(
     configuredRoles: StoredAgentTeamRoleConfiguration[],
   ): Promise<StoredAgentTeamVersionSnapshot> {
+    const manifest = getBmadTeaProcessManifest();
+    const processFiles = await Promise.all(manifest.files.map(async (file) => ({
+      path: file.path,
+      content: await readBmadTeaProcessFile(file.path),
+    })));
     return {
       processId: PROCESS_ID,
       processVersion: PROCESS_VERSION,
+      processFiles,
       roles: await Promise.all(configuredRoles.map(async (role) => {
         const entryPointContent = await Promise.all(role.entryPoints.map((path) => readBmadTeaProcessFile(path)));
+        const processReferences = processReferencePaths(role.role, manifest);
         return {
           ...role,
+          publicModelId: role.publicModelId.trim() || this.config.get<string>('AGENT_TEAM_DEFAULT_PUBLIC_MODEL_ID')?.trim() || '',
+          processReferences,
           instructions: [role.instructions, ...entryPointContent].filter(Boolean).join('\n\n---\n\n'),
         };
       })),
@@ -413,7 +434,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         if (run.desiredControlState === 'pause_requested') {
           await this.setRunStatus(run.id, 'paused');
         } else {
-          this.scheduleExecution(run.id, initialGraphInput(run));
+          await mkdir(this.runOutputDirectory(run.id), { recursive: true });
+          this.scheduleExecution(run.id, this.initialGraphInput(run));
         }
         continue;
       }
@@ -426,7 +448,11 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const graph = this.createGraph(run, version);
     const snapshot = await graph.getState({ configurable: { thread_id: run.langGraphThreadId } });
     const state = snapshot.values as AgentTeamGraphState | undefined;
-    return isUsableGraphState(state, run) ? null : initialGraphInput(run);
+    return isUsableGraphState(state, run) ? null : this.initialGraphInput(run);
+  }
+
+  private initialGraphInput(run: AgentTeamRun): AgentTeamGraphState {
+    return initialGraphState(run, this.runOutputDirectory(run.id));
   }
 
   private async reconcileInterruptedRun(run: AgentTeamRun): Promise<void> {
@@ -469,6 +495,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async reconcileProjection(run: AgentTeamRun, state: AgentTeamGraphState): Promise<void> {
+    const materializedDocuments: Array<{ document: AgentTeamDocument; revision: number }> = [];
     this.db.transaction((transaction) => {
       for (const [documentIndex, document] of (state.documents ?? []).entries()) {
         const revision = nextDocumentRevision(state.documents ?? [], document, documentIndex);
@@ -480,8 +507,14 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
             eq(agentTeamDocuments.revision, revision),
           ))
           .limit(1).all();
+        materializedDocuments.push({ document, revision });
         if (existing) continue;
-        const attemptId = ensureProjectionAttempt(transaction as unknown as Database, run, document.producingTaskKey);
+        const attemptId = ensureProjectionAttempt(
+          transaction as unknown as Database,
+          run,
+          document.producingTaskKey,
+          state.documents ?? [],
+        );
         transaction.insert(agentTeamDocuments).values({
           id: `atdoc_${randomUUID()}`,
           workspaceId: run.workspaceId,
@@ -500,6 +533,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         });
       }
     });
+    await this.materializeDocuments(run.id, materializedDocuments);
   }
 
   private scheduleExecution(runId: string, input: AgentTeamGraphState | Command | null): void {
@@ -567,7 +601,12 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       await this.setRunStatus(runId, 'waiting_for_input');
       return;
     }
-    await this.finishSuccessfulRun(runId, toGraphResult(finalState ?? initialGraphState(run)));
+    const documents = finalState?.documents ?? [];
+    await this.materializeDocuments(runId, documents.map((document, index) => ({
+      document,
+      revision: nextDocumentRevision(documents, document, index),
+    })));
+    await this.finishSuccessfulRun(runId, toGraphResult(finalState ?? this.initialGraphInput(run)));
   }
 
   private createGraph(run: AgentTeamRun, version: AgentTeamVersion) {
@@ -622,6 +661,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       builtinToolNames: role.toolNames,
       role: request.role,
       projectDirectory: request.projectDirectory,
+      processReferencePaths: role.processReferences ?? [],
+      readProcessReference: (path) => this.readCapturedProcessFile(version, path),
       signal,
       jsonOutput: true,
       correlation: { source: 'team', teamRunId: request.runId, teamTaskAttemptId: attempt.id },
@@ -644,11 +685,18 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (parsed.status === 'waiting_for_input') {
       return this.finishWaitingAttempt(request, workspaceId, attempt.id, parsed);
     }
+    validateUpstreamDocuments(parsed.documents, request.upstream);
     const result: Extract<AgentTeamTaskResult, { status: 'completed' }> = {
       ...parsed,
       commandIds: [...commandIds],
     };
     return this.finishCompletedAttempt(request, workspaceId, attempt.id, result);
+  }
+
+  private async readCapturedProcessFile(version: AgentTeamVersion, path: string): Promise<string> {
+    const file = version.snapshot.processFiles.find((candidate) => candidate.path === path);
+    if (!file) throw new Error(`Process reference ${path} was not captured by this Team version.`);
+    return file.content;
   }
 
   private async prepareTaskAttempt(
@@ -777,6 +825,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     result: Extract<AgentTeamTaskResult, { status: 'completed' }>,
   ): Promise<AgentTeamTaskResult> {
     const now = new Date();
+    const materializedDocuments: Array<{ document: AgentTeamDocument; revision: number }> = [];
     this.db.transaction((transaction) => {
       const [desired] = transaction.select({ desiredControlState: agentTeamRuns.desiredControlState })
         .from(agentTeamRuns)
@@ -803,6 +852,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           .orderBy(desc(agentTeamDocuments.revision))
           .limit(1).all();
         const revision = (latest?.revision ?? 0) + 1;
+        materializedDocuments.push({ document, revision });
         transaction.insert(agentTeamDocuments).values({
           id: `atdoc_${randomUUID()}`,
           workspaceId,
@@ -827,7 +877,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         result,
       });
     });
-    return Promise.resolve(result);
+    await this.materializeDocuments(request.runId, materializedDocuments);
+    return result;
   }
 
   private async requestPause(runId: string): Promise<void> {
@@ -889,7 +940,11 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       error: reason,
       finishedAt: now,
       updatedAt: now,
-    }).where(and(eq(agentTeamTaskAttempts.runId, runId), eq(agentTeamTaskAttempts.active, true), eq(agentTeamTaskAttempts.status, 'running')))
+    }).where(and(
+      eq(agentTeamTaskAttempts.runId, runId),
+      eq(agentTeamTaskAttempts.active, true),
+      inArray(agentTeamTaskAttempts.status, ['running', 'waiting_for_input']),
+    ))
       .returning();
     for (const row of rows) {
       await this.appendEvent(this.db, runId, status === 'cancelled' ? 'task.failed' : 'task.failed', {
@@ -1031,15 +1086,67 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     return this.config.get<string>('AGENT_TEAM_CHECKPOINT_PATH')
       ?? resolve(profileDataDirectory, 'agent-teams', 'checkpoints.sqlite');
   }
+
+  private runOutputDirectory(runId: string): string {
+    return resolve(dirname(this.checkpointPath()), 'runs', runId);
+  }
+
+  private async readProjectInstructions(projectDirectory: string): Promise<AgentTeamProjectInstructionFile[]> {
+    const paths = ['AGENTS.md', 'AGENTS_WORKFLOW.md'];
+    return Promise.all(paths.map(async (path) => {
+      try {
+        return { path, content: await readFile(join(projectDirectory, path), 'utf8') };
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw error;
+      }
+    })).then((files) => files.filter((file): file is AgentTeamProjectInstructionFile => file !== null));
+  }
+
+  private async materializeDocuments(
+    runId: string,
+    documents: ReadonlyArray<{ document: AgentTeamDocument; revision: number }>,
+  ): Promise<void> {
+    if (documents.length === 0) return;
+    const outputDirectory = this.runOutputDirectory(runId);
+    await mkdir(outputDirectory, { recursive: true });
+    await Promise.all(documents.map(({ document, revision }) => writeFile(
+      join(outputDirectory, documentFileName(document.key, revision)),
+      document.content,
+      'utf8',
+    )));
+  }
 }
 
-function initialGraphInput(run: AgentTeamRun): AgentTeamGraphState {
+function processReferencePaths(
+  role: AgentTeamRole,
+  manifest: ReturnType<typeof getBmadTeaProcessManifest>,
+): string[] {
+  const prefixes = role === 'test_designer' || role === 'test_author'
+    ? ['upstream/tea/', 'licenses/']
+    : ['upstream/bmad/', 'licenses/'];
+  return manifest.files
+    .map((file) => file.path)
+    .filter((path) => prefixes.some((prefix) => path.startsWith(prefix)));
+}
+
+function documentFileName(key: string, revision: number): string {
+  const safeKey = key
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^\.+/, '')
+    .slice(0, 80) || 'document';
+  return `${revision}-${createHash('sha256').update(key).digest('hex').slice(0, 8)}-${safeKey}.md`;
+}
+
+function initialGraphState(run: AgentTeamRun, outputDirectory: string): AgentTeamGraphState {
   return {
     runId: run.id,
     intent: run.intent,
     mode: run.mode,
     projectDirectory: run.projectDirectory,
+    outputDirectory,
     scopeRevision: run.scopeRevision,
+    projectInstructions: run.projectInstructions,
     documents: [],
     unresolvedIssues: [],
     commandIds: [],
@@ -1055,14 +1162,11 @@ function initialGraphInput(run: AgentTeamRun): AgentTeamGraphState {
   };
 }
 
-function initialGraphState(run: AgentTeamRun): AgentTeamGraphState {
-  return initialGraphInput(run);
-}
-
 function ensureProjectionAttempt(
   db: Database,
   run: AgentTeamRun,
   taskKey: string,
+  documents: readonly AgentTeamDocument[],
 ): string {
   const [existing] = db.select().from(agentTeamTaskAttempts)
     .where(and(eq(agentTeamTaskAttempts.runId, run.id), eq(agentTeamTaskAttempts.taskKey, taskKey)))
@@ -1070,14 +1174,22 @@ function ensureProjectionAttempt(
     .limit(1).all();
   const now = new Date();
   if (existing) {
-    if (existing.status === 'running') {
+    if (existing.status !== 'completed') {
+      const previousResult = existing.result as Partial<Extract<AgentTeamTaskResult, { status: 'completed' }>> | null;
+      const result = {
+        status: 'completed' as const,
+        documents: documents.filter((document) => document.producingTaskKey === taskKey),
+        unresolvedIssues: Array.isArray(previousResult?.unresolvedIssues) ? previousResult.unresolvedIssues : [],
+        commandIds: Array.isArray(previousResult?.commandIds) ? previousResult.commandIds : [],
+        criterionAssessments: Array.isArray(previousResult?.criterionAssessments) ? previousResult.criterionAssessments : [],
+      };
       db.update(agentTeamTaskAttempts).set({
         status: 'completed',
-        result: { status: 'completed', documents: [], unresolvedIssues: [], commandIds: [], criterionAssessments: [] },
+        result,
         error: null,
         finishedAt: now,
         updatedAt: now,
-      }).where(and(eq(agentTeamTaskAttempts.id, existing.id), eq(agentTeamTaskAttempts.status, 'running'))).run();
+      }).where(eq(agentTeamTaskAttempts.id, existing.id)).run();
     }
     return existing.id;
   }
@@ -1093,7 +1205,13 @@ function ensureProjectionAttempt(
     status: 'completed',
     inputRevision: { source: 'langgraph-checkpoint', taskKey },
     inputFingerprint: fingerprint({ source: 'langgraph-checkpoint', runId: run.id, taskKey }),
-    result: { status: 'completed', documents: [], unresolvedIssues: [], commandIds: [], criterionAssessments: [] },
+    result: {
+      status: 'completed',
+      documents: documents.filter((document) => document.producingTaskKey === taskKey),
+      unresolvedIssues: [],
+      commandIds: [],
+      criterionAssessments: [],
+    },
     startedAt: now,
     finishedAt: now,
   }).run();
@@ -1117,6 +1235,8 @@ function taskSystemPrompt(instructions: string): string {
 
 You are executing one WorkLite Agent Team task. Use tools only when the captured role configuration and project authorization permit them. Return exactly one JSON object.
 
+Follow the captured project instructions supplied in the task context, and discover additional applicable AGENTS.md or AGENTS_WORKFLOW.md files before changing or assessing project files. If a project rule or missing user decision requires explicit authorization for an action, return the waiting_for_input response instead of taking that action. Map the process package's project root to projectDirectory and its process output location to outputDirectory. Use process_reference only with one of the exact pinned paths listed in the system prompt. The output directory is managed by WorkLite: return documents in JSON rather than writing planning output there directly.
+
 When more user input is required, return:
 {"status":"waiting_for_input","question":"One specific question"}
 
@@ -1139,8 +1259,17 @@ function taskContext(request: AgentTeamTaskRequest): unknown {
     },
     intent: request.intent,
     projectDirectory: request.projectDirectory,
+    outputDirectory: request.outputDirectory,
+    authorization: modeAuthorization(request.mode),
+    projectInstructions: request.projectInstructions,
     upstreamDocuments: request.upstream,
   };
+}
+
+function modeAuthorization(mode: AgentTeamMode): string {
+  if (mode === 'plan_only') return 'Read the declared project. Do not modify project files or execute commands.';
+  if (mode === 'validate_existing') return 'Read the declared project and run only checks authorized by the user and project instructions. Do not modify project files or author new tests.';
+  return 'Read and modify the declared project only within the confirmed implementation scope, and run only checks authorized by the user and project instructions.';
 }
 
 function parseTaskOutput(output: string, taskKey: string): AgentTeamTaskResult {
@@ -1188,6 +1317,19 @@ function parseDocuments(value: unknown, taskKey: string): AgentTeamDocument[] {
         : [],
     };
   });
+}
+
+function validateUpstreamDocuments(
+  documents: readonly AgentTeamDocument[],
+  upstream: readonly AgentTeamDocument[],
+): void {
+  const availableKeys = new Set(upstream.map((document) => document.key));
+  for (const document of documents) {
+    const missingKey = document.upstreamDocumentKeys.find((key) => !availableKeys.has(key));
+    if (missingKey) {
+      throw new Error(`Team document ${document.key} references unknown upstream document ${missingKey}.`);
+    }
+  }
 }
 
 function parseStrings(value: unknown, field: string): string[] {
@@ -1285,6 +1427,9 @@ function isUsableGraphState(value: unknown, run: AgentTeamRun): value is AgentTe
     state.intent === run.intent &&
     state.mode === run.mode &&
     state.projectDirectory === run.projectDirectory &&
+    typeof state.outputDirectory === 'string' &&
+    Array.isArray(state.projectInstructions) &&
+    JSON.stringify(state.projectInstructions) === JSON.stringify(run.projectInstructions) &&
     state.scopeRevision === run.scopeRevision &&
     Array.isArray(state.documents) &&
     Array.isArray(state.unresolvedIssues) &&

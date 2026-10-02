@@ -83,6 +83,8 @@ export type IsolatedAgentInvocationRequest = {
   builtinToolNames?: readonly string[];
   role?: AgentTeamRole;
   projectDirectory?: string;
+  processReferencePaths?: readonly string[];
+  readProcessReference?: (path: string) => Promise<string>;
   signal: AbortSignal;
   onTextDelta?: (delta: string) => void | Promise<void>;
   onModelRound?: (round: WorkflowAgentRound) => void | Promise<void>;
@@ -144,9 +146,10 @@ export class IsolatedAgentInvocationService {
     const requestedBuiltinToolNames = request.role && request.builtinToolNames
       ? selectBuiltinToolNames(request.role, request.builtinToolNames)
       : request.builtinToolNames ?? [];
-    const builtinDefinitions = request.role
+    const builtinDefinitions = (request.role
       ? this.builtinTools.toolDefinitions(requestedBuiltinToolNames)
-      : this.builtinTools.toolDefinitions(request.builtinToolNames ? requestedBuiltinToolNames : undefined);
+      : this.builtinTools.toolDefinitions(request.builtinToolNames ? requestedBuiltinToolNames : undefined))
+      .filter((definition) => request.role || definition.name !== 'process_reference');
     const effectiveSystemPrompt = [
       request.systemPrompt.trim(),
       skillInstructions ? `Assigned Skill instructions:\n\n${skillInstructions}` : '',
@@ -159,6 +162,9 @@ export class IsolatedAgentInvocationService {
           '- Follow the project instructions and any unresolved authorization limits.',
           '- The selected execution mode does not override either constraint.',
         ].join('\n')
+        : '',
+      request.role && request.processReferencePaths?.length
+        ? `Pinned process reference paths available through process_reference:\n${request.processReferencePaths.join('\n')}`
         : '',
     ].filter(Boolean).join('\n\n');
 
@@ -195,6 +201,7 @@ export class IsolatedAgentInvocationService {
     selectedBuiltinToolNames: ReadonlySet<string>,
     call: WorkflowAgentToolCall,
   ): Promise<WorkflowAgentToolResult> {
+    this.validateProcessReference(request, call);
     if (!request.operation) {
       return (await this.runToolEffect(request, assignedSkills, mcpTools, selectedBuiltinToolNames, call)).output;
     }
@@ -262,6 +269,14 @@ export class IsolatedAgentInvocationService {
     call: WorkflowAgentToolCall,
     reserveCommand?: CommandReservation,
   ): Promise<ToolEffectResult> {
+    if (call.toolName === 'process_reference') {
+      const value = await request.readProcessReference!(requiredString(
+        (call.input as { path?: unknown } | null)?.path,
+        'path',
+      ));
+      return { output: { type: 'text', value: boundedToolResult(value, request.limits?.maxToolResultChars) } };
+    }
+
     if (call.toolName === 'skill_script') {
       const skill = assignedSkills.find((item) => item.id === call.skillId);
       const script = skill?.files.find((file) => file.path === call.scriptPath && file.path.startsWith('scripts/') && file.content.startsWith('#!'));
@@ -350,6 +365,20 @@ export class IsolatedAgentInvocationService {
       status: 'succeeded',
     });
     return { output: { type: 'text', value: boundedToolResult(value, request.limits?.maxToolResultChars) } };
+  }
+
+  private validateProcessReference(
+    request: IsolatedAgentInvocationRequest,
+    call: WorkflowAgentToolCall,
+  ): void {
+    if (call.toolName !== 'process_reference') return;
+    if (!request.role || !request.projectDirectory) {
+      throw new BadRequestException('Process references are unavailable for this Agent invocation.');
+    }
+    const referencePath = requiredString((call.input as { path?: unknown } | null)?.path, 'path');
+    if (!request.processReferencePaths?.includes(referencePath) || !request.readProcessReference) {
+      throw new BadRequestException('The requested process reference is unavailable.');
+    }
   }
 }
 

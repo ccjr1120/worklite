@@ -14,7 +14,7 @@ The user-facing AI execution model is Workflow-first. Published Workflows are av
 
 Chat Bot can inspect the workspace and create Provider, Skill, MCP server, and Workflow drafts through assigned Skill scripts. Every script request is explicit, executes automatically after server validation, and remains subject to the same validation, secret-handling, publication, and audit rules as manual configuration.
 
-Agent Team is a planned software-development capability. Its confirmed implementation direction combines BMAD and TEA process content with a LangGraph.js execution runtime. The implementation plan is recorded in [Agent Team Implementation Plan](agent-team-implementation.md); the capability is not implemented or available through current platform APIs.
+Agent Team is an in-progress software-development capability. Its confirmed implementation direction combines BMAD and TEA process content with a LangGraph.js execution runtime. The implementation plan is recorded in [Agent Team Implementation Plan](agent-team-implementation.md); internal execution is being implemented but is intentionally unavailable through current platform APIs.
 
 ## Architectural Principles
 
@@ -495,15 +495,15 @@ Production uses a same-origin `/api` route through the reverse proxy to simplify
 
 ## Agent Team Implementation Direction
 
-On 2026-10-03, the user confirmed the combined BMAD + TEA and LangGraph.js direction and requested an implementation document. This is a planned capability; the request authorizes documentation, not runtime implementation, dependency installation, test execution, or service lifecycle operations. [Agent Team Implementation Plan](agent-team-implementation.md) records the proposed detailed contracts, milestones, and acceptance scenarios. Exact upstream versions and the persistence integration must be resolved in the first implementation milestone before their contracts are treated as implemented architecture.
+On 2026-10-03, the user confirmed the combined BMAD + TEA and LangGraph.js direction and authorized implementation. [Agent Team Implementation Plan](agent-team-implementation.md) records the approved contracts, milestones, and acceptance scenarios. Internal persistence, execution, checkpoints, effect journaling, project-context capture, and managed run output are in progress; public APIs and product surfaces remain intentionally unavailable until their contracts and platform knowledge are synchronized.
 
 BMAD supplies development process content and role responsibilities. TEA supplies testing strategy, automation, and evidence traceability. LangGraph.js supplies Team execution ordering, checkpoints, and human-input suspension. WorkLite owns the product APIs, configuration snapshots, execution records, project context, Commands, Skill and MCP execution, model transport, and user interaction. Process content must be pinned and packaged with its required reference files; upstream skill commands are not treated as shell executables.
 
-The planned Team capability has an independent TeamRun boundary, with role configuration embedded in an immutable TeamVersion. It does not restore standalone user-managed Agent resources. Each TeamRun has exactly one LangGraph execution thread. Existing Workflow Runs continue to use their deterministic Workflow scheduler; a TeamRun is never advanced by both schedulers. This adds a second orchestration dependency and its maintenance cost, while preserving the existing Workflow graph and historical Run contracts without a compatibility adapter.
+The Team capability has an independent TeamRun boundary, with role configuration embedded in an immutable TeamVersion. It does not restore standalone user-managed Agent resources. Each TeamRun has exactly one LangGraph execution thread. Existing Workflow Runs continue to use their deterministic Workflow scheduler; a TeamRun is never advanced by both schedulers. This adds a second orchestration dependency and its maintenance cost, while preserving the existing Workflow graph and historical Run contracts without a compatibility adapter.
 
 The initial implementation targets one development-team process with planning, test design, optional implementation and test authoring, actual test execution, and independent review. Planning and review may execute independently where dependencies permit; writes to the same checkout execute sequentially. Team documents belong to TeamRun records in the initial scope, so the existing Workflow Artifact-production and Home Dashboard-eligibility rules remain applicable to their current resources.
 
-Team role invocations reuse the AI SDK-backed model loop and Portkey Gateway through a shared execution boundary. Team execution needs explicit project-directory context and selected file and command tools; those are implementation gaps rather than existing Workflow Agent capabilities. Checkpoints restore control flow, but command and tool attempt records must prevent recovery from blindly repeating completed effects. Project instructions and already-granted authorization determine whether a role may write files, generate tests, execute particular checks, or manage services.
+Team role invocations reuse the AI SDK-backed model loop and Portkey Gateway through a shared execution boundary with explicit project-directory context and selected file, process-reference, and command tools. Checkpoints restore control flow while command and tool-attempt records prevent recovery from blindly repeating completed effects. Project instructions and already-granted authorization determine whether a role may write files, generate tests, execute particular checks, or manage services.
 
 When Team APIs become available, the same implementation change must update Chat Bot guidance, the complete `worklite-platform` Skill package, typed contracts, workspace snapshot capability metadata, resource reference protections, and applicable repository conventions. The platform snapshot must advertise only implemented Team operations. Detailed page specifications belong in `ui-ux-design/` before UI implementation; the implementation plan does not establish a parallel page-specification directory.
 
@@ -659,7 +659,8 @@ Import validates the envelope, structured edge conditions, and bounded-cycle con
 - Recorded the user-confirmed combination of BMAD and TEA process content with LangGraph.js Team execution, and linked the detailed implementation plan.
 - Distinguished the planned TeamRun and embedded Team role configuration from the implemented Workflow scheduler, Workflow Agent nodes, Artifact production, and Home eligibility.
 - Identified process packaging, shared execution tools, project-directory context, checkpoint recovery, and platform knowledge synchronization as implementation work rather than current capabilities.
-- Kept this change documentation-only; detailed contracts and dependency versions require the first implementation milestone, and no runtime or historical Workflow data is changed.
+- Added the approved internal implementation increments without exposing Team APIs: pinned process packaging, Team persistence, isolated role invocation, effect journaling, LangGraph checkpoints and recovery, captured project instructions, role-scoped process references, and managed run output.
+- Kept Chat Bot, `worklite-platform`, snapshot capability metadata, and reference protections unchanged until public Team operations are implemented together.
 
 ### 2026-09-26 - Atomic Artifact Node Completion
 

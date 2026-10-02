@@ -377,11 +377,17 @@ export type StoredAgentTeamMcpServerSnapshot = {
   allowedToolNames: string[];
 };
 
+export type StoredAgentTeamProjectInstructionFile = {
+  path: string;
+  content: string;
+};
+
 export type StoredAgentTeamRoleConfiguration = {
   role: StoredAgentTeamRole;
   publicModelId: string;
   instructions: string;
   entryPoints: string[];
+  processReferences?: string[];
   skills: StoredAgentTeamSkillSnapshot[];
   mcpServers: StoredAgentTeamMcpServerSnapshot[];
   toolNames: string[];
@@ -395,6 +401,7 @@ export type StoredAgentTeamVersionSnapshot = {
   processId: string;
   processVersion: string;
   roles: StoredAgentTeamRoleConfiguration[];
+  processFiles: Array<{ path: string; content: string }>;
   recipeDefaults: StoredAgentTeamRecipeDefaults;
 };
 
@@ -427,6 +434,7 @@ export const agentTeamRuns = sqliteTable('agent_team_runs', {
   status: text('status').$type<'queued' | 'running' | 'waiting_for_input' | 'paused' | 'succeeded' | 'failed' | 'cancelled'>().notNull().default('queued'),
   intent: text('intent').notNull(),
   projectDirectory: text('project_directory').notNull(),
+  projectInstructions: text('project_instructions', { mode: 'json' }).$type<StoredAgentTeamProjectInstructionFile[]>().notNull().default([]),
   mode: text('mode').$type<StoredAgentTeamMode>().notNull(),
   scopeRevision: integer('scope_revision').notNull().default(1),
   desiredControlState: text('desired_control_state').$type<'none' | 'pause_requested' | 'cancel_requested'>().notNull().default('none'),

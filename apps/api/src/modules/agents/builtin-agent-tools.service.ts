@@ -6,12 +6,12 @@ import { CommandsService, type CommandReservation } from '../commands/commands.s
 type BuiltinExecution = { execution: CommandExecutionView; output: string };
 type StartOptions = { cwd?: string; reserveCommand?: CommandReservation };
 
-const READ_ONLY_TOOL_NAMES = ['read', 'glob', 'grep'];
+const READ_ONLY_TOOL_NAMES = ['read', 'glob', 'grep', 'process_reference'];
 const ROLE_ALLOWED_TOOL_NAMES: Record<AgentTeamRole, readonly string[]> = {
   planner: READ_ONLY_TOOL_NAMES,
   test_designer: READ_ONLY_TOOL_NAMES,
-  developer: ['bash', 'read', 'write', 'glob', 'grep'],
-  test_author: ['read', 'write', 'glob', 'grep'],
+  developer: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference'],
+  test_author: ['read', 'write', 'glob', 'grep', 'process_reference'],
   test_runner: ['bash', 'read', 'write', 'glob', 'grep'],
   reviewer: READ_ONLY_TOOL_NAMES,
 };
@@ -27,6 +27,7 @@ const definitions: GatewayToolDefinition[] = [
   { name: 'write', description: 'Write UTF-8 text to a file.', inputSchema: { type: 'object', additionalProperties: false, required: ['path', 'content'], properties: { path: { type: 'string' }, content: { type: 'string' } } } },
   { name: 'glob', description: 'Find files matching a glob pattern.', inputSchema: { type: 'object', additionalProperties: false, required: ['pattern'], properties: { pattern: { type: 'string' } } } },
   { name: 'grep', description: 'Search files with a regular expression.', inputSchema: { type: 'object', additionalProperties: false, required: ['pattern'], properties: { pattern: { type: 'string' }, path: { type: 'string' } } } },
+  { name: 'process_reference', description: 'Read a file from the pinned Agent Team process package.', inputSchema: { type: 'object', additionalProperties: false, required: ['path'], properties: { path: { type: 'string' } } } },
 ];
 
 @Injectable()
@@ -63,6 +64,7 @@ export class BuiltinAgentToolsService {
       case 'write': command = `node -e ${shellQuote("require('fs').writeFileSync(process.argv[1], Buffer.from(process.argv[2], 'base64'))")} ${shellQuote(requiredString(args?.path, 'path'))} ${shellQuote(Buffer.from(requiredString(args?.content, 'content'), 'utf8').toString('base64'))}`; break;
       case 'glob': command = `find . -type f -name ${shellQuote(requiredString(args?.pattern, 'pattern'))}`; break;
       case 'grep': command = `rg --line-number --no-heading -- ${shellQuote(requiredString(args?.pattern, 'pattern'))} ${shellQuote(typeof args?.path === 'string' && args.path.trim() ? args.path.trim() : '.')}`; break;
+      case 'process_reference': throw new BadRequestException('Process references are read directly by the isolated Agent invocation.');
       default: throw new BadRequestException('Unknown built-in Agent tool.');
     }
     if (options?.reserveCommand) {
