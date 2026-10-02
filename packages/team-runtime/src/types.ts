@@ -107,7 +107,7 @@ export type AgentTeamOperationRequest = {
 
 export type AgentTeamOperationJournal = {
   findOperation(operationKey: string): Promise<AgentTeamOperationRecord | undefined>;
-  reserveOperation(request: AgentTeamOperationRequest): Promise<AgentTeamOperationRecord>;
+  reserveOperation(request: AgentTeamOperationRequest, commandId?: string): Promise<AgentTeamOperationRecord>;
   completeOperation(operationKey: string, result: unknown, commandId?: string): Promise<AgentTeamOperationRecord>;
   markOperationUncertain(operationKey: string, reason: string): Promise<AgentTeamOperationRecord>;
   failOperation(operationKey: string, reason: string): Promise<AgentTeamOperationRecord>;

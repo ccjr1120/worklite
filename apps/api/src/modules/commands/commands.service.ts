@@ -2,12 +2,15 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from '@nes
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
+import { resolve } from 'node:path';
 import { and, asc, desc, eq, gt } from 'drizzle-orm';
 import type { CommandExecutionEvent as CommandEventView, CommandExecutionView, CreateCommandRequest } from '@worklite/contracts';
 import { commandExecutionEvents, commandExecutions, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 
 type CommandEventListener = (event: CommandEventView) => void;
+
+export type CommandReservation = (transaction: Database, commandId: string) => Promise<void> | void;
 
 @Injectable()
 export class CommandsService {
@@ -32,19 +35,34 @@ export class CommandsService {
     return this.createInternal(command, input);
   }
 
-  private async createInternal(command: string, stdinInput?: string): Promise<CommandExecutionView> {
+  async createWithReservation(command: string, cwd: string, reservation: CommandReservation): Promise<CommandExecutionView> {
+    if (!command.trim()) throw new BadRequestException('A command is required.');
+    return this.createInternal(command, undefined, cwd, reservation);
+  }
 
+  private async createInternal(
+    command: string,
+    stdinInput?: string,
+    cwd?: string,
+    reservation?: CommandReservation,
+  ): Promise<CommandExecutionView> {
     const id = `cmd_${randomUUID()}`;
-    const cwd = process.cwd();
-    await this.db.insert(commandExecutions).values({ id, command, cwd, status: 'queued' });
+    const workingDirectory = resolve(cwd ?? process.cwd());
+    await this.db.transaction(async (transaction) => {
+      transaction.insert(commandExecutions).values({ id, command, cwd: workingDirectory, status: 'queued' }).run();
+      await reservation?.(transaction as unknown as Database, id);
+    });
     await this.persistEvent(id, 'lifecycle', 'Command queued.');
+    return this.dispatch(id, stdinInput);
+  }
 
+  private dispatch(commandId: string, stdinInput?: string): Promise<CommandExecutionView> {
     const completion = Promise.resolve()
-      .then(() => this.execute(id))
-      .finally(() => this.completionPromises.delete(id));
-    this.completionPromises.set(id, completion);
-    if (stdinInput !== undefined) this.pendingStdin.set(id, stdinInput);
-    return this.get(id);
+      .then(() => this.execute(commandId))
+      .finally(() => this.completionPromises.delete(commandId));
+    this.completionPromises.set(commandId, completion);
+    if (stdinInput !== undefined) this.pendingStdin.set(commandId, stdinInput);
+    return this.get(commandId);
   }
 
   async executeAndWait(command: string): Promise<{ execution: CommandExecutionView; output: string }> {
@@ -140,7 +158,7 @@ export class CommandsService {
     const stdinInput = this.pendingStdin.get(commandId);
     this.pendingStdin.delete(commandId);
     const child = spawn('/bin/sh', ['-lc', claimed.command], {
-      cwd: process.cwd(),
+      cwd: claimed.cwd,
       env: process.env,
       detached: true,
       stdio: [stdinInput === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],

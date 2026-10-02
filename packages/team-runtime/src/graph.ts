@@ -46,6 +46,10 @@ const teamState = Annotation.Root({
     reducer: (left, right) => ({ ...left, ...right }),
     default: () => ({}),
   }),
+  taskPendingInputIds: Annotation<Record<string, string>>({
+    reducer: (left, right) => ({ ...left, ...right }),
+    default: () => ({}),
+  }),
   repairRound: Annotation<number>({
     reducer: (_left, right) => right,
     default: () => 0,
@@ -79,7 +83,11 @@ function completedResultUpdate(result: Extract<AgentTeamTaskResult, { status: 'c
 }
 
 function waitingResultUpdate(result: Extract<AgentTeamTaskResult, { status: 'waiting_for_input' }>, taskKey: string): Partial<AgentTeamGraphState> {
-  return { pendingInput: result.pendingInput, activeTaskKey: taskKey };
+  return {
+    pendingInput: result.pendingInput,
+    activeTaskKey: taskKey,
+    taskPendingInputIds: { [taskKey]: result.pendingInput.id },
+  };
 }
 
 function taskResultUpdate(result: AgentTeamTaskResult, taskKey: string): Partial<AgentTeamGraphState> {
@@ -103,7 +111,7 @@ async function executeTask(
     projectDirectory: state.projectDirectory,
     scopeRevision: state.scopeRevision,
     upstream: state.documents,
-    pendingInputId: state.pendingInput?.id,
+    pendingInputId: state.pendingInput?.id ?? (state.taskAnswers[taskKey] ? state.taskPendingInputIds[taskKey] : undefined),
     answer: state.taskAnswers[taskKey],
     repairInstruction: role === 'developer' && taskKey.startsWith('repair_') ? state.repairInstruction ?? undefined : undefined,
   };
@@ -137,13 +145,16 @@ export function createTeamGraph(delegate: AgentTeamGraphDelegate, checkpointer: 
     .addNode('test_runner_input', inputNode())
     .addNode('reviewer', async (state) => {
       const result = await executeTask(state, delegate, 'reviewer', state.repairInstruction ? `repair_review_${state.repairRound}` : 'review');
-      const repairRequest = result.repairRequest ?? undefined;
-      const repairAccepted = Boolean(repairRequest) && state.repairRound < maxRepairRounds;
+      const requestedRepair = result.repairRequest;
+      if (requestedRepair && (requestedRepair.taskKey !== 'development' || !requestedRepair.instruction.trim())) {
+        throw new Error('The reviewer requested an invalid repair target.');
+      }
+      const repairAccepted = Boolean(requestedRepair) && state.repairRound < maxRepairRounds;
       return {
         ...result,
         repairRound: repairAccepted ? state.repairRound + 1 : state.repairRound,
-        repairInstruction: repairAccepted ? repairRequest?.instruction ?? null : state.repairInstruction,
-        repairRequest,
+        repairInstruction: repairAccepted ? requestedRepair?.instruction ?? null : null,
+        repairRequest: requestedRepair,
         continueRepair: repairAccepted,
       };
     })
@@ -155,9 +166,9 @@ export function createTeamGraph(delegate: AgentTeamGraphDelegate, checkpointer: 
       (state) => (state.mode === 'validate_existing' ? 'test_designer' : 'planner'),
       ['planner', 'test_designer'],
     )
-    .addConditionalEdges('planner', (state) => (state.pendingInput ? 'planner_input' : state.mode === 'plan_only' ? 'test_designer' : 'developer'), ['planner_input', 'test_designer', 'developer'])
+    .addConditionalEdges('planner', (state) => (state.pendingInput ? 'planner_input' : 'test_designer'), ['planner_input', 'test_designer'])
     .addEdge('planner_input', 'planner')
-    .addConditionalEdges('test_designer', (state) => (state.pendingInput ? 'test_designer_input' : state.mode === 'plan_only' ? END : state.mode === 'validate_existing' ? 'test_runner' : 'test_author'), ['test_designer_input', END, 'test_runner', 'test_author'])
+    .addConditionalEdges('test_designer', (state) => (state.pendingInput ? 'test_designer_input' : state.mode === 'plan_only' ? END : state.mode === 'validate_existing' ? 'test_runner' : 'developer'), ['test_designer_input', END, 'test_runner', 'developer'])
     .addEdge('test_designer_input', 'test_designer')
     .addConditionalEdges('developer', (state) => (state.pendingInput ? 'developer_input' : 'test_author'), ['developer_input', 'test_author'])
     .addEdge('developer_input', 'developer')

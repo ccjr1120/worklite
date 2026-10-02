@@ -180,9 +180,11 @@ LangGraph resumes an interrupted node by entering that node again; code precedin
 | A command was dispatched but its effect is uncertain | Surface a recovery decision; do not automatically replay it |
 | Service restarts | Recover completed and suspended state from checkpoints and the effect journal; reconcile active attempts before continuing |
 
-Each actual tool invocation needs an operation key beneath its task attempt and a persisted link to its Command or MCP invocation. Protect command creation and its operation link in one application transaction before launching the process. Otherwise a crash between command creation and link persistence can leave an execution that recovery cannot identify.
+Each actual tool invocation needs an operation key beneath its logical Team task, with the producing task attempt and its Command or MCP invocation persisted on that row. Protect command creation and its operation link in one application transaction before launching the process. Otherwise a crash between command creation and link persistence can leave an execution that recovery cannot identify.
 
 Agent nodes can make several tool calls. Journaling only the entire Agent result is insufficient: a tool may have already edited a file before a later model request fails. Persist tool results and sufficient model-loop continuation state before advancing the loop. Deterministic replay reuses completed operations; it must not attach a previous result to a newly generated call with different arguments.
+
+The internal journal contract uses a stable semantic input fingerprint and does not use the provider-generated tool-call id as the operation identity. Replay is allowed only when the task, operation, tool, and input fingerprint match; a new provider tool-call id may represent the same persisted operation. A command that finishes with a nonzero exit status is a known effect and retains its error output. Cancellation, abort, or an unknown completion state becomes an explicit recovery decision rather than automatic replay.
 
 MCP side effects with an unknown completion state follow the same recovery-decision rule. Provider retries before committed tool effects retain the current transport behavior. Automatic restart recovery does not authorize a service restart, deployment, or new external action.
 
@@ -325,4 +327,7 @@ References were consulted on 2026-10-03. They support the selected mechanisms; t
 - Created the documentation-only implementation proposal for the confirmed BMAD + TEA and LangGraph.js direction.
 - Recorded the first-release scope, role handoffs, process packaging, shared runtime gaps, persistence ownership, effect recovery, proposed API, milestones, and planned acceptance scenarios.
 - Initial implementation work pinned and packaged the selected BMAD and TEA process content, added the LangGraph runtime package, and defined the first Planner-to-Test-Designer graph and durable input/interruption boundary.
+- Added the Team persistence schema, Gateway Team correlation, three-mode execution graph, shared isolated Agent invocation boundary, role-filtered built-in tools, project-scoped Commands, and the database-backed operation journal.
+- Command creation and operation reservation now commit in one API database transaction before process launch. Completed semantic operations can be replayed without re-running their effects; uncertain operations require a recovery decision.
+- Agent Team remains unavailable through public APIs and platform surfaces. Chat Bot, `worklite-platform`, snapshot capability metadata, and reference protections remain unchanged until those routes become visible.
 - No test execution, build, type check, server lifecycle operation, or deployment-profile access has been performed.

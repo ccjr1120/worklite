@@ -4,13 +4,14 @@ import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { AgentExecutionErrorCode, AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, WorkflowNodeActivityDetail, WorkliteNavigationTarget, WorkliteScriptResult } from '@worklite/contracts';
 import { agentExecutionEvents, agentExecutions, agentVersions, agents, agentSkills, agentSubSessions, agentToolCalls, auditLogs, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
-import { createModelGateway, ModelGatewayError, type GatewayAgentMessage, type GatewayToolResultOutput, type WorkflowAgentToolCall, type WorkflowAgentToolResult } from '@worklite/model-gateway';
+import { createModelGateway, ModelGatewayError, type GatewayAgentMessage, type GatewayToolResultOutput } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { WorkspaceService } from '../teams/teams.service';
 import { McpRuntimeService } from './mcp-runtime.service';
 import { BuiltinAgentToolsService } from './builtin-agent-tools.service';
+import { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
 import { CODEX_CLI_AGENT_ID, CODEX_CLI_PLUGIN_ID, PluginsService } from '../plugins/plugins.service';
 import { CommandsService } from '../commands/commands.service';
 
@@ -67,6 +68,7 @@ export class AgentExecutionsService {
     private readonly mcpRuntime: McpRuntimeService,
     private readonly builtinTools: BuiltinAgentToolsService,
     private readonly commands: CommandsService,
+    private readonly invocations: IsolatedAgentInvocationService,
     private readonly plugins: PluginsService,
   ) {}
 
@@ -146,73 +148,24 @@ export class AgentExecutionsService {
     if (skillRows.length !== selectedSkillIds.length) throw new NotFoundException('A Workflow Agent Skill is no longer available.');
     const files = selectedSkillIds.length === 0 ? [] : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, selectedSkillIds));
     const assignedSkills = skillRows.map((skill) => ({ ...skill, files: files.filter((file) => file.skillId === skill.id).map(({ path, content }) => ({ path, content })) }));
-    const availableSkillScripts = assignedSkills.flatMap((skill) => skill.files.filter((file) => file.path.startsWith('scripts/') && file.content.startsWith('#!')).map((file) => ({ skillId: skill.id, skillName: skill.name, path: file.path })));
-    const skillInstructions = assignedSkills.map((skill) => `## ${skill.name}\n${skill.instructions.trim()}`).filter((value) => value.trim()).join('\n\n');
-    const scriptList = availableSkillScripts.map((script) => `- Skill ${script.skillName} (${script.skillId}): ${script.path}`).join('\n');
-    const effectiveSystemPrompt = [
-      systemPrompt.trim(),
-      skillInstructions ? `Assigned Skill instructions:\n\n${skillInstructions}` : '',
-      availableSkillScripts.length > 0 ? 'Skill scripts execute immediately without user approval.' : '',
-      scriptList ? `Assigned executable Skill scripts:\n${scriptList}\nUse skill_script only with an exact listed Skill id and script path.` : '',
-    ].filter(Boolean).join('\n\n');
-    const runtime = await this.resources.publicModelRuntime(workspaceId, model);
     const mcpRuntimes = await this.resources.workflowMcpRuntimes(workspaceId, requestedMcpServerIds);
-    const mcpTools = await this.mcpRuntime.discover(mcpRuntimes, signal);
-    const contextText = typeof context === 'string' ? context : JSON.stringify(context);
-    const maxRounds = Math.min(limits?.maxToolRounds ?? MAX_WORKFLOW_TOOL_ROUNDS, MAX_WORKFLOW_TOOL_ROUNDS);
-    const result = await createModelGateway().runWorkflowAgent({
-      provider: runtime.provider,
-      model: runtime.model,
-      systemPrompt: effectiveSystemPrompt,
-      initialUserContent: contextText?.trim() ? contextText : 'No workflow input was provided.',
-      jsonOutput,
-      correlation: correlation ? { source: 'workflow', ...correlation } : undefined,
-      skillScripts: availableSkillScripts,
-      mcpTools,
-      maxToolRounds: maxRounds,
-      maxToolCalls: limits?.maxToolCalls,
-      abortSignal: signal,
+    return this.invocations.execute({
+      workspaceId,
+      publicModelId: model,
+      systemPrompt,
+      context,
+      skills: assignedSkills,
+      mcpRuntimes,
+      builtinToolNames: [],
+      signal,
       onTextDelta,
       onModelRound: activity ? async (round) => activity({ phase: 'model.round', ...round }) : undefined,
-      executeTool: async (call: WorkflowAgentToolCall): Promise<WorkflowAgentToolResult> => {
-        if (call.toolName === 'skill_script') {
-          const skill = assignedSkills.find((item) => item.id === call.skillId);
-          const script = skill?.files.find((file) => file.path === call.scriptPath && file.path.startsWith('scripts/') && file.content.startsWith('#!'));
-          if (!skill || !script) throw new BadRequestException('The Workflow Agent requested an unavailable Skill script.');
-          const started = await this.skillScripts.start(skill.files, script.path, call.arguments ?? []);
-          const cancel = () => { void this.skillScripts.cancel(started.id).catch(() => undefined); };
-          signal.addEventListener('abort', cancel, { once: true });
-          try {
-            const completed = await this.skillScripts.wait(started.id);
-            signal.throwIfAborted();
-            const succeeded = completed.execution.status === 'succeeded';
-            const fullValue = completed.output || (succeeded ? 'Skill script completed without output.' : `Skill script failed with exit code ${completed.execution.exitCode ?? 'unknown'}.`);
-            const value = limits?.maxToolResultChars && fullValue.length > limits.maxToolResultChars
-              ? `${fullValue.slice(0, limits.maxToolResultChars)}\n[Tool output truncated; use available evidence and report gaps.]`
-              : fullValue;
-            await activity?.({ phase: 'skill.script', skillId: skill.id, skillName: skill.name, scriptPath: call.scriptPath ?? '', arguments: call.arguments ?? [], commandExecutionId: started.id, exitCode: completed.execution.exitCode ?? null, status: succeeded ? 'succeeded' : 'failed' });
-            return { type: succeeded ? 'text' : 'error-text', value };
-          } finally {
-            signal.removeEventListener('abort', cancel);
-          }
-        }
-        const mcpTool = mcpTools.find((tool) => tool.name === call.toolName);
-        const mcpRuntime = mcpTool ? mcpRuntimes.find((item) => item.id === mcpTool.serverId) : undefined;
-        if (!mcpTool || !mcpRuntime) throw new BadRequestException('The Workflow Agent requested an unavailable MCP tool.');
-        let value: string;
-        try {
-          value = await this.mcpRuntime.call(mcpRuntime, mcpTool.remoteName, call.input, signal);
-        } catch (error) {
-          await activity?.({ phase: 'mcp.call', serverId: mcpRuntime.id, toolName: mcpTool.remoteName, input: call.input, result: error instanceof Error ? error.message : 'The MCP tool call failed.', status: 'failed' });
-          throw error;
-        }
-        await activity?.({ phase: 'mcp.call', serverId: mcpRuntime.id, toolName: mcpTool.remoteName, input: call.input, result: value, status: 'succeeded' });
-        return { type: 'text', value };
-      },
+      onSkillScript: activity ? async (detail) => activity({ phase: 'skill.script', ...detail }) : undefined,
+      onMcpCall: activity ? async (detail) => activity({ phase: 'mcp.call', ...detail }) : undefined,
+      jsonOutput,
+      correlation: correlation ? { source: 'workflow', ...correlation } : undefined,
+      limits,
     });
-    const output = result.text.trim();
-    if (!output) throw new Error('The Workflow Agent node returned an empty response.');
-    return output;
   }
 
   async get(request: Request, workspaceSlug: string, agentId: string, executionId: string): Promise<AgentExecutionView> {

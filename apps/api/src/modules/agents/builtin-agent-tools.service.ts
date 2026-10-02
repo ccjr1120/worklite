@@ -1,9 +1,25 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import type { GatewayToolDefinition } from '@worklite/model-gateway';
-import type { CommandExecutionView } from '@worklite/contracts';
-import { CommandsService } from '../commands/commands.service';
+import type { AgentTeamRole, CommandExecutionView } from '@worklite/contracts';
+import { CommandsService, type CommandReservation } from '../commands/commands.service';
 
 type BuiltinExecution = { execution: CommandExecutionView; output: string };
+type StartOptions = { cwd?: string; reserveCommand?: CommandReservation };
+
+const READ_ONLY_TOOL_NAMES = ['read', 'glob', 'grep'];
+const ROLE_ALLOWED_TOOL_NAMES: Record<AgentTeamRole, readonly string[]> = {
+  planner: READ_ONLY_TOOL_NAMES,
+  test_designer: READ_ONLY_TOOL_NAMES,
+  developer: ['bash', 'read', 'write', 'glob', 'grep'],
+  test_author: ['read', 'write', 'glob', 'grep'],
+  test_runner: ['bash', 'read', 'write', 'glob', 'grep'],
+  reviewer: READ_ONLY_TOOL_NAMES,
+};
+
+export function selectBuiltinToolNames(role: AgentTeamRole, requestedToolNames: readonly string[]): string[] {
+  const allowed = new Set(ROLE_ALLOWED_TOOL_NAMES[role]);
+  return [...new Set(requestedToolNames)].filter((name) => allowed.has(name));
+}
 
 const definitions: GatewayToolDefinition[] = [
   { name: 'bash', description: 'Run a shell command and return combined output.', inputSchema: { type: 'object', additionalProperties: false, required: ['command'], properties: { command: { type: 'string' } } } },
@@ -17,17 +33,28 @@ const definitions: GatewayToolDefinition[] = [
 export class BuiltinAgentToolsService {
   constructor(private readonly commands: CommandsService) {}
 
-  toolDefinitions(): readonly GatewayToolDefinition[] {
-    return definitions;
+  toolDefinitions(toolNames?: readonly string[]): readonly GatewayToolDefinition[] {
+    if (toolNames === undefined) return definitions;
+    const selected = new Set(toolNames);
+    return definitions.filter((definition) => selected.has(definition.name));
   }
 
-  async execute(name: string, input: unknown): Promise<BuiltinExecution> {
-    const execution = await this.start(name, input);
+  async execute(name: string, input: unknown, options?: StartOptions): Promise<BuiltinExecution> {
+    const execution = await this.start(name, input, options);
     const completed = await this.commands.waitForCompletion(execution.id);
     return { execution: completed, output: await this.commands.output(execution.id) };
   }
 
-  async start(name: string, input: unknown): Promise<CommandExecutionView> {
+  async wait(commandId: string): Promise<BuiltinExecution> {
+    const execution = await this.commands.waitForCompletion(commandId);
+    return { execution, output: await this.commands.output(commandId) };
+  }
+
+  cancel(commandId: string): Promise<CommandExecutionView> {
+    return this.commands.cancel(commandId);
+  }
+
+  async start(name: string, input: unknown, options?: StartOptions): Promise<CommandExecutionView> {
     const args = asRecord(input);
     let command: string;
     switch (name) {
@@ -38,7 +65,13 @@ export class BuiltinAgentToolsService {
       case 'grep': command = `rg --line-number --no-heading -- ${shellQuote(requiredString(args?.pattern, 'pattern'))} ${shellQuote(typeof args?.path === 'string' && args.path.trim() ? args.path.trim() : '.')}`; break;
       default: throw new BadRequestException('Unknown built-in Agent tool.');
     }
-    return this.commands.create({ command });
+    if (options?.reserveCommand) {
+      if (!options.cwd) throw new BadRequestException('A project directory is required for journaled built-in Agent tools.');
+      return this.commands.createWithReservation(command, options.cwd, options.reserveCommand);
+    }
+    return options?.cwd
+      ? this.commands.createWithReservation(command, options.cwd, async () => undefined)
+      : this.commands.create({ command });
   }
 }
 

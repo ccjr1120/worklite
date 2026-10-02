@@ -104,6 +104,7 @@ export type RunWorkflowAgentRequest = {
   jsonOutput?: boolean;
   correlation?: GatewayCorrelation;
   skillScripts: Array<{ skillId: string; skillName: string; path: string }>;
+  builtinTools?: readonly GatewayToolDefinition[];
   mcpTools: readonly GatewayToolDefinition[];
   maxToolRounds: number;
   maxToolCalls?: number;
@@ -313,6 +314,15 @@ export class AiSdkModelGateway implements ModelGateway {
     const tools: Record<string, unknown> = {
       ...(request.skillScripts.length > 0 ? { skill_script: skillScript } : {}),
     };
+    for (const definition of request.builtinTools ?? []) {
+      if (!definition.name || tools[definition.name]) continue;
+      tools[definition.name] = tool({
+        description: definition.description,
+        strict: useResponses ? false : undefined,
+        inputSchema: jsonSchema<Record<string, unknown>>(definition.inputSchema as never),
+        execute: (input, { toolCallId }) => executeManagedTool(toolCallId, { toolName: definition.name, input }),
+      });
+    }
     for (const definition of request.mcpTools) {
       if (!definition.name || tools[definition.name]) continue;
       tools[definition.name] = tool({

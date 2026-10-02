@@ -4,15 +4,16 @@ import { chmod, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import type { CommandExecutionView } from '@worklite/contracts';
-import { CommandsService } from '../commands/commands.service';
+import { CommandsService, type CommandReservation } from '../commands/commands.service';
 
 type PackageFile = { path: string; content: string };
+type StartOptions = { cwd?: string; reserveCommand?: CommandReservation };
 
 @Injectable()
 export class SkillScriptRunnerService {
   constructor(private readonly commands: CommandsService) {}
 
-  async start(files: PackageFile[], scriptPath: string, argumentsValue: string[]): Promise<CommandExecutionView> {
+  async start(files: PackageFile[], scriptPath: string, argumentsValue: string[], options?: StartOptions): Promise<CommandExecutionView> {
     const invocationId = `skill_run_${randomUUID()}`;
     const root = join(tmpdir(), 'worklite-skill-runs', invocationId);
     const resolvedRoot = resolve(root);
@@ -34,7 +35,13 @@ export class SkillScriptRunnerService {
 
       const executable = resolve(root, scriptPath);
       await chmod(executable, 0o700);
-      const execution = await this.commands.create({ command: [executable, ...argumentsValue].map(shellQuote).join(' ') });
+      const command = [executable, ...argumentsValue].map(shellQuote).join(' ');
+      if (options?.reserveCommand && !options.cwd) throw new BadRequestException('A project directory is required for journaled Skill scripts.');
+      const execution = options?.reserveCommand
+        ? await this.commands.createWithReservation(command, options.cwd ?? '', options.reserveCommand)
+        : options?.cwd
+          ? await this.commands.createWithReservation(command, options.cwd, async () => undefined)
+          : await this.commands.create({ command });
       void this.commands.waitForCompletion(execution.id).then(
         () => rm(root, { recursive: true, force: true }).catch(() => undefined),
         () => rm(root, { recursive: true, force: true }).catch(() => undefined),

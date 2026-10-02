@@ -7,8 +7,9 @@ import { AgentsService } from './agents.service';
 import { AgentExecutionsService } from './agent-executions.service';
 import { McpRuntimeService } from './mcp-runtime.service';
 import { BuiltinAgentToolsService } from './builtin-agent-tools.service';
+import { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
 import { McpServersModule } from '../mcp-servers/mcp-servers.module';
 import { PluginsModule } from '../plugins/plugins.module';
 
-@Module({ imports: [WorkspaceModule, SkillsModule, CommandsModule, McpServersModule, forwardRef(() => PluginsModule)], controllers: [AgentsController], providers: [AgentsService, AgentExecutionsService, McpRuntimeService, BuiltinAgentToolsService], exports: [AgentsService, AgentExecutionsService] })
+@Module({ imports: [WorkspaceModule, SkillsModule, CommandsModule, McpServersModule, forwardRef(() => PluginsModule)], controllers: [AgentsController], providers: [AgentsService, AgentExecutionsService, McpRuntimeService, BuiltinAgentToolsService, IsolatedAgentInvocationService], exports: [AgentsService, AgentExecutionsService] })
 export class AgentsModule {}

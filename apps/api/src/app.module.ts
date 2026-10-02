@@ -16,6 +16,7 @@ import { UsageModule } from './modules/usage/usage.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { CommandsModule } from './modules/commands/commands.module';
 import { PluginsModule } from './modules/plugins/plugins.module';
+import { AgentTeamsModule } from './modules/agent-teams/agent-teams.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { PluginsModule } from './modules/plugins/plugins.module';
     DatabaseModule,
     CommandsModule,
     PluginsModule,
+    AgentTeamsModule,
     WorkspaceModule,
     HomeModule,
     AgentsModule,
