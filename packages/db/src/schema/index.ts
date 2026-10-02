@@ -354,6 +354,168 @@ export const agentMcpServers = sqliteTable('agent_mcp_servers', {
   mcpServerId: text('mcp_server_id').notNull().references(() => mcpServers.id, { onDelete: 'cascade' }),
 }, (table) => [primaryKey({ columns: [table.agentId, table.mcpServerId] })]);
 
+
+export type StoredAgentTeamRole =
+  | 'planner'
+  | 'test_designer'
+  | 'developer'
+  | 'test_author'
+  | 'test_runner'
+  | 'reviewer';
+
+export type StoredAgentTeamMode = 'plan_only' | 'validate_existing' | 'implement_and_validate';
+
+export type StoredAgentTeamSkillSnapshot = {
+  id: string;
+  name: string;
+  files: Array<{ path: string; content: string }>;
+};
+
+export type StoredAgentTeamMcpServerSnapshot = {
+  id: string;
+  name: string;
+  allowedToolNames: string[];
+};
+
+export type StoredAgentTeamRoleConfiguration = {
+  role: StoredAgentTeamRole;
+  publicModelId: string;
+  instructions: string;
+  entryPoints: string[];
+  skills: StoredAgentTeamSkillSnapshot[];
+  mcpServers: StoredAgentTeamMcpServerSnapshot[];
+  toolNames: string[];
+};
+
+export type StoredAgentTeamRecipeDefaults = {
+  maxRepairRounds: number;
+};
+
+export type StoredAgentTeamVersionSnapshot = {
+  processId: string;
+  processVersion: string;
+  roles: StoredAgentTeamRoleConfiguration[];
+  recipeDefaults: StoredAgentTeamRecipeDefaults;
+};
+
+export const agentTeams = sqliteTable('agent_teams', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description').notNull(),
+  processId: text('process_id').notNull(),
+  processVersion: text('process_version').notNull(),
+  roles: text('roles', { mode: 'json' }).$type<StoredAgentTeamRoleConfiguration[]>().notNull().default([]),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (table) => [unique().on(table.workspaceId, table.name)]);
+
+export const agentTeamVersions = sqliteTable('agent_team_versions', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  teamId: text('team_id').notNull().references(() => agentTeams.id, { onDelete: 'restrict' }),
+  version: integer('version').notNull(),
+  snapshot: text('snapshot', { mode: 'json' }).$type<StoredAgentTeamVersionSnapshot>().notNull(),
+  createdAt: timestamp('created_at'),
+}, (table) => [unique().on(table.teamId, table.version)]);
+
+export const agentTeamRuns = sqliteTable('agent_team_runs', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  teamId: text('team_id').notNull().references(() => agentTeams.id, { onDelete: 'restrict' }),
+  teamVersionId: text('team_version_id').notNull().references(() => agentTeamVersions.id, { onDelete: 'restrict' }),
+  status: text('status').$type<'queued' | 'running' | 'waiting_for_input' | 'paused' | 'succeeded' | 'failed' | 'cancelled'>().notNull().default('queued'),
+  intent: text('intent').notNull(),
+  projectDirectory: text('project_directory').notNull(),
+  mode: text('mode').$type<StoredAgentTeamMode>().notNull(),
+  scopeRevision: integer('scope_revision').notNull().default(1),
+  desiredControlState: text('desired_control_state').$type<'none' | 'pause_requested' | 'cancel_requested'>().notNull().default('none'),
+  langGraphThreadId: text('lang_graph_thread_id').notNull().unique(),
+  outcome: text('outcome', { mode: 'json' }).$type<unknown>(),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+  finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
+}, (table) => [index('agent_team_runs_workspace_created_idx').on(table.workspaceId, table.createdAt)]);
+
+export const agentTeamTaskAttempts = sqliteTable('agent_team_task_attempts', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  runId: text('run_id').notNull().references(() => agentTeamRuns.id, { onDelete: 'cascade' }),
+  taskKey: text('task_key').notNull(),
+  attemptIndex: integer('attempt_index').notNull(),
+  role: text('role').$type<StoredAgentTeamRole>().notNull(),
+  status: text('status').$type<'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled'>().notNull().default('running'),
+  inputRevision: text('input_revision', { mode: 'json' }).$type<unknown>().notNull(),
+  inputFingerprint: text('input_fingerprint').notNull(),
+  result: text('result', { mode: 'json' }).$type<unknown>(),
+  error: text('error'),
+  active: integer('active', { mode: 'boolean' }).notNull().default(true),
+  createdAt: timestamp('created_at'),
+  startedAt: integer('started_at', { mode: 'timestamp_ms' }),
+  finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
+}, (table) => [
+  unique().on(table.runId, table.taskKey, table.attemptIndex),
+  index('agent_team_task_attempts_run_task_idx').on(table.runId, table.taskKey),
+]);
+
+export const agentTeamDocuments = sqliteTable('agent_team_documents', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  runId: text('run_id').notNull().references(() => agentTeamRuns.id, { onDelete: 'cascade' }),
+  taskAttemptId: text('task_attempt_id').notNull().references(() => agentTeamTaskAttempts.id, { onDelete: 'restrict' }),
+  key: text('key').notNull(),
+  revision: integer('revision').notNull(),
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  upstreamDocumentKeys: text('upstream_document_keys', { mode: 'json' }).$type<string[]>().notNull().default([]),
+  createdAt: timestamp('created_at'),
+}, (table) => [
+  unique().on(table.runId, table.key, table.revision),
+  index('agent_team_documents_run_idx').on(table.runId, table.createdAt),
+]);
+
+export const agentTeamRunEvents = sqliteTable('agent_team_run_events', {
+  runId: text('run_id').notNull().references(() => agentTeamRuns.id, { onDelete: 'cascade' }),
+  sequence: integer('sequence').notNull(),
+  type: text('type').$type<'run.status' | 'task.started' | 'task.delta' | 'task.waiting' | 'task.completed' | 'task.failed' | 'document.committed' | 'operation.updated' | 'input.requested' | 'input.answered' | 'run.outcome'>().notNull(),
+  payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(),
+  createdAt: timestamp('created_at'),
+}, (table) => [primaryKey({ columns: [table.runId, table.sequence] })]);
+
+export const agentTeamPendingInputs = sqliteTable('agent_team_pending_inputs', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  runId: text('run_id').notNull().references(() => agentTeamRuns.id, { onDelete: 'cascade' }),
+  taskAttemptId: text('task_attempt_id').notNull().references(() => agentTeamTaskAttempts.id, { onDelete: 'cascade' }),
+  question: text('question').notNull(),
+  scopeRevision: integer('scope_revision').notNull(),
+  status: text('status').$type<'pending' | 'answered' | 'cancelled'>().notNull().default('pending'),
+  answer: text('answer'),
+  createdAt: timestamp('created_at'),
+  answeredAt: integer('answered_at', { mode: 'timestamp_ms' }),
+  updatedAt: timestamp('updated_at'),
+}, (table) => [index('agent_team_pending_inputs_run_status_idx').on(table.runId, table.status)]);
+
+export const agentTeamOperations = sqliteTable('agent_team_operations', {
+  key: text('key').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  runId: text('run_id').notNull().references(() => agentTeamRuns.id, { onDelete: 'cascade' }),
+  taskAttemptId: text('task_attempt_id').notNull().references(() => agentTeamTaskAttempts.id, { onDelete: 'cascade' }),
+  taskKey: text('task_key').notNull(),
+  operationKey: text('operation_key').notNull(),
+  toolName: text('tool_name').notNull(),
+  inputFingerprint: text('input_fingerprint').notNull(),
+  status: text('status').$type<'reserved' | 'completed' | 'uncertain' | 'failed'>().notNull().default('reserved'),
+  commandId: text('command_id').references(() => commandExecutions.id, { onDelete: 'set null' }),
+  result: text('result', { mode: 'json' }).$type<unknown>(),
+  failureReason: text('failure_reason'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (table) => [
+  index('agent_team_operations_run_idx').on(table.runId, table.taskKey),
+  unique().on(table.runId, table.taskKey, table.operationKey),
+]);
+
 export const modelProviders = sqliteTable('model_providers', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), baseURL: text('base_url'), protocol: text('protocol').$type<'openai/chat' | 'openai/responses' | 'anthropic/messages' | 'codex/responses'>().notNull().default('openai/chat'), status: text('status').$type<'connected' | 'unconfigured' | 'invalid'>().notNull().default('unconfigured'), maskedKey: text('masked_key').notNull().default(''), models: text('models', { mode: 'json' }).$type<string[]>().notNull().default([]), apiKey: text('api_key'), headers: text('headers'), updatedAt: timestamp('updated_at'),
 });
@@ -389,5 +551,13 @@ export type AgentToolCall = typeof agentToolCalls.$inferSelect;
 export type ScheduledAgentTask = typeof scheduledAgentTasks.$inferSelect;
 export type McpServer = typeof mcpServers.$inferSelect;
 export type ModelProvider = typeof modelProviders.$inferSelect;
+export type AgentTeam = typeof agentTeams.$inferSelect;
+export type AgentTeamVersion = typeof agentTeamVersions.$inferSelect;
+export type AgentTeamRun = typeof agentTeamRuns.$inferSelect;
+export type AgentTeamTaskAttempt = typeof agentTeamTaskAttempts.$inferSelect;
+export type AgentTeamDocument = typeof agentTeamDocuments.$inferSelect;
+export type AgentTeamRunEvent = typeof agentTeamRunEvents.$inferSelect;
+export type AgentTeamPendingInput = typeof agentTeamPendingInputs.$inferSelect;
+export type AgentTeamOperation = typeof agentTeamOperations.$inferSelect;
 export type Artifact = typeof artifacts.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;
