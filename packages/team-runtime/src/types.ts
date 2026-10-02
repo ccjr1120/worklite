@@ -14,6 +14,17 @@ export type AgentTeamPendingInput = {
   scopeRevision: number;
 };
 
+export type AgentTeamCriterionAssessment = {
+  criterion: string;
+  assessment: 'met' | 'unmet' | 'not_verified';
+  evidence: string[];
+};
+
+export type AgentTeamRepairRequest = {
+  taskKey: string;
+  instruction: string;
+};
+
 export type AgentTeamDocument = {
   key: string;
   title: string;
@@ -33,6 +44,7 @@ export type AgentTeamTaskRequest = {
   upstream: readonly AgentTeamDocument[];
   pendingInputId?: string;
   answer?: string;
+  repairInstruction?: string;
 };
 
 export type AgentTeamTaskResult =
@@ -40,6 +52,9 @@ export type AgentTeamTaskResult =
       status: 'completed';
       documents: AgentTeamDocument[];
       unresolvedIssues: string[];
+      commandIds: string[];
+      criterionAssessments: AgentTeamCriterionAssessment[];
+      repairRequest?: AgentTeamRepairRequest;
     }
   | {
       status: 'waiting_for_input';
@@ -48,6 +63,10 @@ export type AgentTeamTaskResult =
 
 export type AgentTeamGraphDelegate = {
   executeTask(request: AgentTeamTaskRequest): Promise<AgentTeamTaskResult>;
+};
+
+export type AgentTeamGraphOptions = {
+  maxRepairRounds?: number;
 };
 
 export type AgentTeamRunRequest = {
@@ -61,6 +80,8 @@ export type AgentTeamRunRequest = {
 export type AgentTeamGraphResult = AgentTeamRunRequest & {
   documents: readonly AgentTeamDocument[];
   unresolvedIssues: readonly string[];
+  commandIds: readonly string[];
+  criterionAssessments: readonly AgentTeamCriterionAssessment[];
 };
 
 export type AgentTeamOperationStatus = 'reserved' | 'completed' | 'uncertain' | 'failed';
