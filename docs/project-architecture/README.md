@@ -664,7 +664,7 @@ Import validates the envelope, structured edge conditions, and bounded-cycle con
 
 - Made uncertain-effect recovery take precedence over terminal cancellation so aborting a dispatched command cannot hide its recovery decision.
 - Preserved operation-recovery inputs across cancellation requests and restart reconciliation; a later structured recovery decision settles the effect and supersedes the pending cancellation request when continuing.
-- Kept the public REST/SSE contracts, typed operation-decision contract, and recovery route unchanged.
+- Kept the public REST/SSE contracts, typed operation-decision contract, and recovery route unchanged while synchronizing Chat Bot guidance, the complete `worklite-platform` Skill package, and platform snapshot capability metadata.
 
 ### 2026-10-03 - Agent Team Web Interface
 

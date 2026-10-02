@@ -348,6 +348,7 @@ References were consulted on 2026-10-03. They support the selected mechanisms; t
 - Made an uncertain tool effect take precedence over cancellation when an abort leaves its completion state unknown.
 - Preserved pending operation-recovery inputs when cancellation is requested and allowed restart reconciliation to expose interrupted operations despite a pending cancellation.
 - Kept the existing three structured decisions and public recovery contract; adoption or replay supersedes the pending cancellation request, while explicit failure settles without replay.
+- Synchronized Chat Bot guidance, the complete `worklite-platform` Skill package, and platform snapshot capability metadata with the clarified cancellation behavior.
 - No test, type check, lint, build, browser check, HTTP request, Team Run, server lifecycle operation, or deployment-profile access was performed.
 
 ### 2026-10-03 - Structured handoff implementation

@@ -569,6 +569,11 @@ export class WorkspaceResourcesService {
           events: { persisted: true, replay: 'Last-Event-ID', live: 'server-sent events' },
           commandAuthorization: 'cumulative exact command strings',
           recoveryDecisions: ['adopt_command', 'mark_failed', 'replay'],
+          uncertainOperationRecovery: {
+            cancellationPreservesRecoveryInput: true,
+            adoptionOrReplaySupersedesPendingCancellation: true,
+            markFailedSettlesWithoutReplay: true,
+          },
           capturedVersions: 'role model, instruction, Skill, MCP, and process configuration',
         },
         workflow: {
