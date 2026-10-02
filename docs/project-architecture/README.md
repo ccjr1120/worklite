@@ -14,7 +14,7 @@ The user-facing AI execution model is Workflow-first. Published Workflows are av
 
 Chat Bot can inspect the workspace and create Provider, Skill, MCP server, and Workflow drafts through assigned Skill scripts. Every script request is explicit, executes automatically after server validation, and remains subject to the same validation, secret-handling, publication, and audit rules as manual configuration.
 
-Agent Team is an in-progress software-development capability. Its confirmed implementation direction combines BMAD and TEA process content with a LangGraph.js execution runtime. The implementation plan is recorded in [Agent Team Implementation Plan](agent-team-implementation.md); internal execution is being implemented but is intentionally unavailable through current platform APIs.
+Agent Team is an in-progress software-development capability. Its confirmed implementation direction combines BMAD and TEA process content with a LangGraph.js execution runtime. The implementation plan is recorded in [Agent Team Implementation Plan](agent-team-implementation.md). The public REST and replayable Server-Sent Event boundary is available; the first release has one built-in Team and no Team creation or deletion API. No dedicated Agent Team Web UI is claimed until a separately designed UI increment introduces it.
 
 ## Architectural Principles
 
@@ -495,7 +495,7 @@ Production uses a same-origin `/api` route through the reverse proxy to simplify
 
 ## Agent Team Implementation Direction
 
-On 2026-10-03, the user confirmed the combined BMAD + TEA and LangGraph.js direction and authorized implementation. [Agent Team Implementation Plan](agent-team-implementation.md) records the approved contracts, milestones, and acceptance scenarios. Internal persistence, execution, checkpoints, effect journaling, project-context capture, and managed run output are in progress; public APIs and product surfaces remain intentionally unavailable until their contracts and platform knowledge are synchronized.
+On 2026-10-03, the user confirmed the combined BMAD + TEA and LangGraph.js direction and authorized implementation. [Agent Team Implementation Plan](agent-team-implementation.md) records the approved contracts, milestones, and acceptance scenarios. Internal persistence, execution, checkpoints, effect journaling, project-context capture, managed run output, Team configuration, Run creation/control, persisted Run events, operation recovery, and their public REST/SSE routes are implemented. Chat Bot, `worklite-platform`, typed contracts, snapshot metadata, and reference protections are synchronized in the same boundary. Team creation and deletion remain outside the first built-in-template scope, and no Web UI is introduced in this API increment.
 
 BMAD supplies development process content and role responsibilities. TEA supplies testing strategy, automation, and evidence traceability. LangGraph.js supplies Team execution ordering, checkpoints, and human-input suspension. WorkLite owns the product APIs, configuration snapshots, execution records, project context, Commands, Skill and MCP execution, model transport, and user interaction. Process content must be pinned and packaged with its required reference files; upstream skill commands are not treated as shell executables.
 
@@ -511,7 +511,7 @@ Command execution is authorized by exact command strings, not by prose in a prom
 
 An operation whose effect is uncertain settles the active task attempt in a distinct `waiting_for_recovery` projection and exposes one durable operation-recovery input keyed by the stable operation identity. The structured decision is one of: adopt the terminal Command record already linked to the operation, mark the operation failed without replay, or create one explicitly authorized replay operation. Adopting a Command reads its authoritative status and output and never dispatches again; a queued, running, cancelling, or cancelled Command remains recoverable. A replay is a new operation row beneath the same logical task and semantic input, preserves the original uncertain record, and still requires the exact-command grant for `bash`. No restart, retry, pause, resume, or prose answer implicitly replays an uncertain effect.
 
-When Team APIs become available, the same implementation change must update Chat Bot guidance, the complete `worklite-platform` Skill package, typed contracts, workspace snapshot capability metadata, resource reference protections, and applicable repository conventions. The platform snapshot must advertise only implemented Team operations. Detailed page specifications belong in `ui-ux-design/` before UI implementation; the implementation plan does not establish a parallel page-specification directory.
+The public Team API boundary is implemented without a dedicated Web UI. Its implementation change updates Chat Bot guidance, the complete `worklite-platform` Skill package, typed contracts, workspace snapshot capability metadata, resource reference protections, and applicable repository conventions together. The platform snapshot advertises only implemented Team operations. Detailed page specifications belong in `ui-ux-design/` before UI implementation; the implementation plan does not establish a parallel page-specification directory.
 
 ## Real API Integration Increment
 
@@ -669,7 +669,8 @@ Import validates the envelope, structured edge conditions, and bounded-cycle con
 - Required exact-string command authorization for Team `bash` execution, made pending-input command grants structured and cumulative, persisted the grant set on each TeamRun, and excluded executable Skill scripts from Team roles until their full command can be represented and authorized exactly.
 - Imported the complete pinned TEA `bmad-testarch-automate` workflow directory as Test Author's direct reference closure; Test Runner remains backed by WorkLite Commands rather than upstream process content.
 - Defined durable Agent Team operation recovery: uncertain effects expose a structured pending decision, terminal linked Commands can be adopted without replay, explicit failures settle without replay, and any replay is a separately authorized new operation while the original uncertain record remains immutable.
-- Kept Chat Bot, `worklite-platform`, snapshot capability metadata, and reference protections unchanged until public Team operations are implemented together.
+- Kept Chat Bot, `worklite-platform`, snapshot capability metadata, and reference protections unchanged until public Team operations were implemented together.
+- Implemented the P3 public Team boundary: one built-in Team is readable and configurable, Runs are workspace-scoped and controllable, persisted Run events replay from `Last-Event-ID` before live delivery, operation recovery is addressable by its operation key, and platform guidance, scripts, snapshot metadata, and Skill/MCP reference protections expose only these implemented operations. Team creation/deletion and a dedicated Web UI remain unavailable.
 
 ### 2026-09-26 - Atomic Artifact Node Completion
 

@@ -33,6 +33,7 @@ TypeSafe Workflow node output retains object state fields alongside the upstream
 For per-element typed evaluation use \`typesafe/systemone-map@1\`: same \`model\`, \`questions\`, and required \`state\` input, plus a required \`config.itemsPath\` addressing an array inside that state, an optional \`config.contextPath\` for shared context, an optional positive \`config.concurrency\`, and an optional \`config.rank\` of \`path\`, \`order\`, \`limit\`, and \`minimum\`. It sends one upstream request per element with state \`{ item, context }\`, commits \`results\` as those elements with their typed \`answers\` merged in, and applies \`rank\` as deterministic server-side ordering and truncation. Iteration stays inside one node invocation, so it is not a port-level join and produces one NodeRun. Use it for reranking, per-candidate screening, and per-claim checks instead of asking one call to judge a whole array.
 Use worklite/branch@1 for reusable JSON routing: it requires a value input, passes the original JSON through output, and takes only the first matching outgoing condition edge in definition order, or the first fallback edge when none matches. Its paths can target any JSON producer, such as $.articleType or a typed answer path exposed by the current upstream node.
 Workflow Run lifecycle supports pause for queued or running Runs via POST /runs/:runId/pause and resume for paused Runs via POST /runs/:runId/resume. Pause has no checkpoint inside the active invocation: resume reruns that invocation from its start without rerunning successful predecessors, does not pause waiting_for_input Runs, keeps the event stream open, survives restart as paused, remains cancellable, and blocks overlapping scheduled execution.
+Agent Team operations are available only through the assigned worklite-platform scripts. There is one built-in Team; Team creation and deletion are unavailable, and there is no Agent Team Web route. Runs can answer pending input, pause, resume, cancel, recover an uncertain operation, and retry the server-declared failed active task. Command execution requires exact-string authorization supplied through structured script fields.
 Never ask the user to paste API keys, tokens, passwords, or other secrets into conversation or script arguments. Provider credentials must be entered in the dedicated secure form.
 Before claiming a platform operation completed, wait for the script result. Keep responses concise and practical.`;
 
@@ -41,6 +42,8 @@ const WORKLITE_PLATFORM_SKILL_MD = `# worklite-platform
 Use the exact scripts in this package for WorkLite platform operations.
 
 Use \`scripts/inspect-workspace.mjs\` before answering questions about configured resources or Workflow capabilities. Creation, settings, and navigation scripts accept exactly one JSON object argument. Every valid Agent script call executes automatically after server validation. Provider scripts never accept credentials; direct the user to the secure Provider form after creation.
+
+Agent Team is API-only in this release. Use \`scripts/inspect-agent-teams.mjs\` and \`scripts/inspect-agent-team.mjs\` for current Team configuration, then the dedicated update, Run, answer, recovery, and control scripts. There is one built-in Team, Team creation and deletion are unavailable, and no Agent Team Web route should be claimed. Inspect the current Run before continuing it and grant Commands only as exact strings in structured script fields.
 
 The development profile uses Web port \`3390\`, API port \`3391\`, and Portkey Gateway port \`3392\`. The local deployment profile remains on Web port \`23390\`, API port \`23391\`, and Portkey Gateway port \`23392\`. Previous development ports have no compatibility listeners or redirects.
 Model Provider drafts require an explicit protocol selection. Supported protocols are \`openai/chat\`, \`openai/responses\`, \`anthropic/messages\`, \`codex/responses\`, and \`typesafe/systemone\`; do not invent or default another protocol. System One exchanges typed \`state\` and \`questions\` for typed \`answers\`, has no model-discovery endpoint, and cannot run a Workflow Agent node. It can be used through the dedicated \`typesafe/systemone@1\` Workflow node, which stores a public model id and typed questions, accepts JSON state, retains object state fields, and exposes typed answers. Its connection test uses a typed state/question payload and returns typed answers; it is not a chat test. Existing \`deepseek/chat\` records are not migrated or aliased.
@@ -141,6 +144,17 @@ export function stringArray(value, field, maxItems, maxLength) {
   return [...new Set(value.map((item) => item.trim()))];
 }
 
+export function authorizedCommands(value) {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error('authorizedCommands must be an array.');
+  const commands = value.map((command) => {
+    if (typeof command !== 'string' || !command.trim()) throw new Error('Every authorized command must be a non-empty string.');
+    return command.trim();
+  });
+  if (new Set(commands).size !== commands.length) throw new Error('Authorized commands must be unique.');
+  return commands;
+}
+
 export function packageFiles(value) {
   if (!Array.isArray(value) || value.length === 0 || value.length > 100) throw new Error('files must be a non-empty package file array.');
   return value.map((file) => {
@@ -227,6 +241,117 @@ if (!current.draft || typeof current.draft.revisionId !== 'string') throw new Er
 const resource = await call('/workflows/' + encodeURIComponent(workflowId) + '/draft/operations', { method: 'POST', body: { baseRevisionId: current.draft.revisionId, plan: raw.plan, source: 'assistant', sourceInstruction } });
 print({ worklite: { type: 'resource', resourceType: 'workflow', id: resource.id, route: '/workflows/' + encodeURIComponent(resource.id) }, data: resource });
 `],
+  ['scripts/inspect-agent-teams.mjs', `#!/usr/bin/env node
+import { call, noInput, print } from './lib.mjs';
+noInput();
+const data = await call('/agent-teams');
+print({ worklite: { type: 'agent-teams' }, data });
+`],
+  ['scripts/inspect-agent-team.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, print, requiredString } from './lib.mjs';
+const raw = input();
+exactKeys(raw, ['teamId']);
+const teamId = requiredString(raw.teamId, 'teamId', 240);
+const data = await call('/agent-teams/' + encodeURIComponent(teamId));
+print({ worklite: { type: 'agent-team', id: data.id }, data });
+`],
+  ['scripts/update-agent-team.mjs', `#!/usr/bin/env node
+import { boundedString, call, exactKeys, input, oneOf, print, requiredString, stringArray } from './lib.mjs';
+const roleValues = ['planner', 'test_designer', 'developer', 'test_author', 'test_runner', 'reviewer'];
+function roleConfigurations(value) {
+  if (!Array.isArray(value) || value.length !== roleValues.length) throw new Error('roles must contain every supported Agent Team role exactly once.');
+  return value.map((role) => {
+    if (!role || typeof role !== 'object' || Array.isArray(role)) throw new Error('Every Agent Team role configuration must be an object.');
+    exactKeys(role, ['role', 'publicModelId', 'instructions', 'entryPoints', 'skillIds', 'mcpServerIds', 'toolNames']);
+    return {
+      role: oneOf(role.role, 'role', roleValues),
+      publicModelId: boundedString(role.publicModelId, 'publicModelId', 240),
+      instructions: requiredString(role.instructions, 'instructions', 100000),
+      entryPoints: stringArray(role.entryPoints, 'entryPoints', 100, 240),
+      skillIds: stringArray(role.skillIds, 'skillIds', 100, 240),
+      mcpServerIds: stringArray(role.mcpServerIds, 'mcpServerIds', 100, 240),
+      toolNames: stringArray(role.toolNames, 'toolNames', 100, 240),
+    };
+  });
+}
+const raw = input();
+exactKeys(raw, ['teamId', 'roles']);
+const roles = roleConfigurations(raw.roles);
+const roleSet = new Set(roles.map((role) => role.role));
+if (roleSet.size !== roles.length) throw new Error('roles must contain every supported Agent Team role exactly once.');
+const teamId = requiredString(raw.teamId, 'teamId', 240);
+const data = await call('/agent-teams/' + encodeURIComponent(teamId), { method: 'PATCH', body: { roles } });
+print({ worklite: { type: 'agent-team', id: data.id }, data });
+`],
+  ['scripts/start-agent-team-run.mjs', `#!/usr/bin/env node
+import { authorizedCommands, call, exactKeys, input, oneOf, print, requiredString } from './lib.mjs';
+const raw = input();
+exactKeys(raw, ['teamId', 'intent', 'projectDirectory', 'mode', 'authorizedCommands']);
+const body = {
+  intent: requiredString(raw.intent, 'intent', 100000),
+  projectDirectory: requiredString(raw.projectDirectory, 'projectDirectory', 4096),
+  mode: oneOf(raw.mode, 'mode', ['plan_only', 'validate_existing', 'implement_and_validate']),
+};
+const commands = authorizedCommands(raw.authorizedCommands);
+if (commands !== undefined) body.authorizedCommands = commands;
+const teamId = requiredString(raw.teamId, 'teamId', 240);
+const result = await call('/agent-teams/' + encodeURIComponent(teamId) + '/runs', { method: 'POST', body });
+print({ worklite: { type: 'agent-team-run', id: result.run.id }, data: result.run });
+`],
+  ['scripts/inspect-agent-team-run.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, print, requiredString } from './lib.mjs';
+const raw = input();
+exactKeys(raw, ['runId']);
+const runId = requiredString(raw.runId, 'runId', 240);
+const data = await call('/agent-team-runs/' + encodeURIComponent(runId));
+print({ worklite: { type: 'agent-team-run', id: data.id }, data });
+`],
+  ['scripts/answer-agent-team-run.mjs', `#!/usr/bin/env node
+import { authorizedCommands, call, exactKeys, input, print, requiredString, text } from './lib.mjs';
+const raw = input();
+exactKeys(raw, ['runId', 'pendingInputId', 'scopeRevision', 'answer', 'authorizedCommands']);
+if (!Number.isInteger(raw.scopeRevision) || raw.scopeRevision < 1) throw new Error('scopeRevision must be a positive integer.');
+const body = {
+  pendingInputId: requiredString(raw.pendingInputId, 'pendingInputId', 240),
+  scopeRevision: raw.scopeRevision,
+  answer: text(raw.answer, 'answer', 100000),
+};
+const commands = authorizedCommands(raw.authorizedCommands);
+if (commands !== undefined) body.authorizedCommands = commands;
+const runId = requiredString(raw.runId, 'runId', 240);
+const result = await call('/agent-team-runs/' + encodeURIComponent(runId) + '/answer', { method: 'POST', body });
+print({ worklite: { type: 'agent-team-run-action', action: 'answer', runId: result.run.id }, data: result.run });
+`],
+  ['scripts/recover-agent-team-operation.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, oneOf, print, requiredString } from './lib.mjs';
+const raw = input();
+exactKeys(raw, ['runId', 'operationKey', 'decision']);
+const body = {
+  operationKey: requiredString(raw.operationKey, 'operationKey', 1000),
+  decision: oneOf(raw.decision, 'decision', ['adopt_command', 'mark_failed', 'replay']),
+};
+const runId = requiredString(raw.runId, 'runId', 240);
+const path = '/agent-team-runs/' + encodeURIComponent(runId) + '/operations/' + encodeURIComponent(body.operationKey) + '/recovery';
+const result = await call(path, { method: 'POST', body });
+print({ worklite: { type: 'agent-team-run-action', action: 'recover', runId: result.run.id }, data: result.run });
+`],
+  ['scripts/control-agent-team-run.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, oneOf, print, requiredString } from './lib.mjs';
+const raw = input();
+exactKeys(raw, ['runId', 'action', 'taskKey']);
+const runId = requiredString(raw.runId, 'runId', 240);
+const action = oneOf(raw.action, 'action', ['pause', 'resume', 'cancel', 'retry']);
+let path;
+if (action === 'pause') path = '/agent-team-runs/' + encodeURIComponent(runId) + '/pause';
+if (action === 'resume') path = '/agent-team-runs/' + encodeURIComponent(runId) + '/resume';
+if (action === 'cancel') path = '/agent-team-runs/' + encodeURIComponent(runId) + '/cancel';
+if (action === 'retry') {
+  const taskKey = requiredString(raw.taskKey, 'taskKey', 240);
+  path = '/agent-team-runs/' + encodeURIComponent(runId) + '/tasks/' + encodeURIComponent(taskKey) + '/retry';
+}
+const result = await call(path, { method: 'POST', body: {} });
+print({ worklite: { type: 'agent-team-run-action', action, runId: result.run.id }, data: result.run });
+`],
   ['scripts/update-settings.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, oneOf, print } from './lib.mjs';
 const raw = input();
@@ -254,6 +379,19 @@ print({ worklite: action });
 - create-mcp-server.mjs: { "name": string, "endpoint": string }
 - create-workflow.mjs: { "name": string }. Creates a Workflow draft and returns its resource route.
 - edit-workflow.mjs: { "workflowId": string, "sourceInstruction": string, "plan": WorkflowPlan }. Fetches the current draft revision and applies a server-normalized assistant plan. Timer and Dashboard configuration belongs in the Workflow graph, not in a standalone script. For TypeSafe calls, use \`typesafe/systemone@1\` with public \`config.model\`, immutable \`config.questions\`, and a required \`state\` input; do not include credentials, base URLs, or Provider ids. For editorial publishing, set JSON reviewer \`passthroughKeys\` to the original writer fields, keep the review response verdict-only, and connect its output through required \`worklite/approved-article@1.context\` before Article Artifact or WeChat. Apply collector \`maxToolCalls\`, \`maxToolRounds\`, and \`maxToolResultChars\` in its Agent config.
+
+## Agent Team operation contract
+
+- inspect-agent-teams.mjs: no arguments. Reads the one available built-in Team.
+- inspect-agent-team.mjs: \`{ "teamId": string }\`.
+- update-agent-team.mjs: \`{ "teamId": string, "roles": AgentTeamRoleConfiguration[] }\`. All six roles are required exactly once. Each role object has exactly \`role\`, \`publicModelId\`, \`instructions\`, \`entryPoints\`, \`skillIds\`, \`mcpServerIds\`, and \`toolNames\`; inspect the current Team and platform snapshot for supported values. An empty \`publicModelId\` allows the configured Team default.
+- start-agent-team-run.mjs: \`{ "teamId": string, "intent": string, "projectDirectory": string, "mode": "plan_only" | "validate_existing" | "implement_and_validate", "authorizedCommands"?: string[] }\`. Commands are exact strings and \`plan_only\` cannot grant Commands.
+- inspect-agent-team-run.mjs: \`{ "runId": string }\`. Inspect the Run before answering, recovering, controlling, or retrying it.
+- answer-agent-team-run.mjs: \`{ "runId": string, "pendingInputId": string, "scopeRevision": positive integer, "answer": string, "authorizedCommands"?: string[] }\`. Only the structured command list changes executable authorization.
+- recover-agent-team-operation.mjs: \`{ "runId": string, "operationKey": string, "decision": "adopt_command" | "mark_failed" | "replay" }\`. The operation key must identify the current uncertain operation.
+- control-agent-team-run.mjs: \`{ "runId": string, "action": "pause" | "resume" | "cancel" | "retry", "taskKey"?: string }\`. \`taskKey\` is required only for \`retry\`, and retry is valid only for the failed active task the Run marks retryable.
+
+Team creation and deletion are unavailable. A started Run captures an immutable TeamVersion. Skills and MCP servers referenced by active Team configuration or captured versions cannot be deleted. Run events are persisted and replay over the API's Server-Sent Event endpoint from \`Last-Event-ID\`; scripts inspect the persisted Run state rather than claiming to consume a live stream.
 
 ## Provider proxy capability contract
 

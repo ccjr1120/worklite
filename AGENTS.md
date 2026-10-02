@@ -84,7 +84,8 @@ Gateway transport observability is its own `/logs` destination, not part of Prov
 
 Whenever WorkLite product architecture, resource relationships, supported Workflow nodes, or platform operations change, update the built-in Chat Bot prompt and `worklite-platform` Skill knowledge, contracts, scripts, and platform snapshot capability metadata in the same change.
 
-Chat Bot remains protected and is not user-deletable. Workflow Agent configuration is deleted with its owning Workflow version; there is no standalone Agent deletion flow. Skills and MCP servers cannot be deleted while referenced by an Agent or Workflow. Artifacts are independently permanently deletable. Runs, immutable versions, logs, and built-in resources are not independently deletable.
+Agent Team is a public API capability for one built-in Team. Team creation, Team deletion, and a dedicated Agent Team Web UI are not part of this boundary. Starting a Run captures an immutable TeamVersion, Commands require exact-string authorization, and Skills or MCP servers cannot be deleted while referenced by active Team configuration or a captured TeamVersion.
+Chat Bot remains protected and is not user-deletable. Workflow Agent configuration is deleted with its owning Workflow version; there is no standalone Agent deletion flow. Skills and MCP servers cannot be deleted while referenced by an Agent, Workflow, or Agent Team. Artifacts are independently permanently deletable. Runs, immutable versions, logs, and built-in resources are not independently deletable.
 
 The Portkey Gateway integration is a unified OpenAI-compatible entry point. Callers do not provide a Provider id separately; public model ids use the `<providerName>/<modelId>` namespace and the Gateway dispatches by the unique Provider name. Provider ids remain internal record keys and must not appear in public model ids. The local Gateway has no separate inbound API key unless a later architecture change explicitly adds one.
 

@@ -2,7 +2,7 @@
 
 Date: 2026-10-03
 
-Status: The BMAD + TEA and LangGraph.js technology direction is confirmed and implementation has started. Agent Team is not yet available through product APIs. The detailed contracts remain implementation requirements, and normal repository verification and service-lifecycle rules still apply.
+Status: The BMAD + TEA and LangGraph.js technology direction is confirmed and implementation has started. The P3 public REST/SSE boundary is implemented for the one built-in Team; Team creation/deletion and a dedicated Web UI remain unavailable. Later milestones remain implementation requirements, and normal repository verification and service-lifecycle rules still apply.
 
 Architecture authority: [Project Architecture](README.md#agent-team-implementation-direction). Applicable working rules: [AGENTS.md](../../AGENTS.md) and [AGENTS_WORKFLOW.md](../../AGENTS_WORKFLOW.md).
 
@@ -222,9 +222,9 @@ A completed TeamRun can report unmet or unverified criteria. Its execution statu
 
 Review feedback creates specific, scoped tasks. It does not silently delete failing tests, relax assertions, change frozen criteria, or authorize additional tools. Preserve evidence throughout repairs. Report extraction should retain links to complete outputs rather than introduce a small tool-result truncation limit that destroys evidence.
 
-## 10. Proposed API and Event Contract
+## 10. Public API and Event Contract
 
-These routes are proposed and unavailable today. Names use `agent-teams` to distinguish Agent collaboration from workspace naming in existing services. General Team creation and deletion are outside the first built-in-template scope.
+The following routes are implemented. Names use `agent-teams` to distinguish Agent collaboration from workspace naming in existing services. General Team creation and deletion are outside the first built-in-template scope, and no dedicated Web route is introduced by this API increment.
 
 Run creation and pending-input answers expose the exact command grant set explicitly. An answer can include both text and zero or more exact commands; only the structured command list changes executable authorization.
 
@@ -287,8 +287,8 @@ Total planning estimate: 15-21 working days. Exact dependency versions, SQLite i
 - [ ] P1 implements restart, pause, cancellation, and failed-task continuation behavior.
 - [ ] P2 implements one end-to-end recipe with real testing evidence.
 - [ ] P3 documents page behavior before UI implementation.
-- [ ] P3 updates Chat Bot, platform Skill files, contracts, scripts, and capability metadata together.
-- [ ] P3 extends Skill and MCP reference protections to Team configurations and captured versions.
+- [x] P3 updates Chat Bot, platform Skill files, contracts, scripts, and capability metadata together.
+- [x] P3 extends Skill and MCP reference protections to Team configurations and captured versions.
 - [ ] P4 records authorized acceptance results and the baseline comparison.
 
 ## 13. Planned Acceptance Scenarios
@@ -342,6 +342,9 @@ References were consulted on 2026-10-03. They support the selected mechanisms; t
 ## 16. Change Record
 
 ### 2026-10-03
+
+- Implemented the P3 public boundary: built-in Team listing, detail, and validated role updates; workspace-scoped Run creation, detail, persisted event replay with live SSE delivery, answers, operation recovery, pause, resume, cancel, and active-task retry.
+- Synchronized typed contracts, Chat Bot guidance, the complete `worklite-platform` Skill package, snapshot capability metadata, and active/captured Skill and MCP reference protections with the implemented Team operations.
 
 - Created the documentation-only implementation proposal for the confirmed BMAD + TEA and LangGraph.js direction.
 - Recorded the first-release scope, role handoffs, process packaging, shared runtime gaps, persistence ownership, effect recovery, proposed API, milestones, and planned acceptance scenarios.

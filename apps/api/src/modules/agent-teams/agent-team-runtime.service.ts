@@ -10,7 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { and, asc, desc, eq, inArray, isNull, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, ne } from 'drizzle-orm';
 import type {
   AgentTeamCriterionAssessment,
   AgentTeamDocumentView,
@@ -69,29 +69,17 @@ import {
   type AgentInvocationOperationJournal,
 } from '../agents/isolated-agent-invocation.service';
 import { AgentTeamOperationJournalService } from './agent-team-operation-journal.service';
+import {
+  AGENT_TEAM_PROCESS_ID,
+  AGENT_TEAM_PROCESS_VERSION,
+  AGENT_TEAM_ROLE_INSTRUCTIONS,
+  AGENT_TEAM_ROLE_TOOL_NAMES,
+  BUILT_IN_AGENT_TEAM_ID,
+} from './agent-team-configuration';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { CommandsService } from '../commands/commands.service';
 
-const BUILT_IN_TEAM_ID = 'agent_team_bmad_tea';
-const PROCESS_ID = 'bmad-tea';
-const PROCESS_VERSION = '1';
 const MAX_TOOL_RESULT_CHARS = 100_000;
-const ROLE_TOOL_NAMES: Record<AgentTeamRole, readonly string[]> = {
-  planner: ['read', 'glob', 'grep', 'process_reference'],
-  test_designer: ['read', 'glob', 'grep', 'process_reference'],
-  developer: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference'],
-  test_author: ['read', 'write', 'glob', 'grep', 'process_reference'],
-  test_runner: ['bash', 'read', 'write', 'glob', 'grep'],
-  reviewer: ['read', 'glob', 'grep', 'process_reference'],
-};
-const ROLE_INSTRUCTIONS: Record<AgentTeamRole, string> = {
-  planner: 'Clarify the software goal, preserve the user intent, inspect the authorized project context, and produce an implementation plan that downstream roles can execute.',
-  test_designer: 'Translate the intent and plan into a test design with explicit evidence requirements. State what each planned check can and cannot establish.',
-  developer: 'Implement the smallest direct change that satisfies the intent and authorized plan. Preserve repository instructions and report changes and gaps accurately.',
-  test_author: 'Author only the tests required by the confirmed test design and authorized execution scope.',
-  test_runner: 'Execute the declared checks through the available command tool, preserve their exact evidence, and distinguish command success from criterion completion.',
-  reviewer: 'Independently assess the implementation and test evidence against the original intent. Request scoped repair only when concrete evidence shows a defect.',
-};
 const TASK_ROLES: Array<[RegExp, AgentTeamRole]> = [
   [/^repair_test_authoring_/, 'test_author'],
   [/^repair_test_execution_/, 'test_runner'],
@@ -106,6 +94,8 @@ const TASK_ROLES: Array<[RegExp, AgentTeamRole]> = [
 ];
 
 type Checkpointer = ReturnType<typeof createSqliteCheckpointer>;
+type AgentTeamDatabaseTransaction = Parameters<Parameters<Database['transaction']>[0]>[0];
+type AgentTeamEventListener = (event: AgentTeamRunEvent) => void;
 type RawTaskOutput = {
   status?: unknown;
   documents?: unknown;
@@ -122,6 +112,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   private readonly executions = new Map<string, Promise<void>>();
   private shuttingDown = false;
   private readonly abortControllers = new Map<string, AbortController>();
+  private readonly eventListeners = new Set<AgentTeamEventListener>();
+  private readonly transactionEvents = new Map<object, AgentTeamRunEvent[]>();
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
@@ -168,12 +160,12 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const projectInstructions = await this.readProjectInstructions(resolvedProjectDirectory);
     const outputDirectory = this.runOutputDirectory(runId);
     const [team] = await this.db.select().from(agentTeams)
-      .where(and(eq(agentTeams.id, BUILT_IN_TEAM_ID), eq(agentTeams.workspaceId, workspaceId)))
+      .where(and(eq(agentTeams.id, BUILT_IN_AGENT_TEAM_ID), eq(agentTeams.workspaceId, workspaceId)))
       .limit(1);
     if (!team) throw new NotFoundException('The built-in Agent Team was not found.');
 
     const snapshot = await this.createVersionSnapshot(team.roles);
-    await this.db.transaction((transaction) => {
+    await this.transaction((transaction) => {
       const [latest] = transaction.select({ version: agentTeamVersions.version })
         .from(agentTeamVersions)
         .where(eq(agentTeamVersions.teamId, team.id))
@@ -201,7 +193,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         scopeRevision: 1,
         langGraphThreadId: `atthread_${runId}`,
       }).run();
-      this.appendEvent(transaction as unknown as Database, runId, 'run.status', { status: 'queued' });
+      this.appendEvent(transaction, runId, 'run.status', { status: 'queued' });
     });
 
     await mkdir(outputDirectory, { recursive: true });
@@ -218,8 +210,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     return this.getRunView(runId);
   }
 
-  async getRunView(runId: string): Promise<AgentTeamRunView> {
-    const run = await this.getRun(runId);
+  async getRunView(runId: string, workspaceId?: string): Promise<AgentTeamRunView> {
+    const run = await this.getRun(runId, workspaceId);
     const [version] = await this.db.select().from(agentTeamVersions)
       .where(eq(agentTeamVersions.id, run.teamVersionId))
       .limit(1);
@@ -260,6 +252,28 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  async getRunEvents(runId: string, workspaceId?: string, afterSequence = 0): Promise<AgentTeamRunEvent[]> {
+    await this.getRun(runId, workspaceId);
+    const rows = await this.db.select().from(agentTeamRunEvents)
+      .where(and(
+        eq(agentTeamRunEvents.runId, runId),
+        gt(agentTeamRunEvents.sequence, afterSequence),
+      ))
+      .orderBy(asc(agentTeamRunEvents.sequence));
+    return rows.map((row) => ({
+      runId: row.runId,
+      sequence: row.sequence,
+      type: row.type,
+      payload: row.payload,
+      createdAt: row.createdAt.toISOString(),
+    }));
+  }
+
+  subscribe(listener: AgentTeamEventListener): () => void {
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
+  }
+
   async answer(runId: string, request: AnswerAgentTeamRunRequest): Promise<AgentTeamRunView> {
     const run = await this.getRun(runId);
     if (run.status !== 'waiting_for_input') throw new BadRequestException('The Agent Team run is not waiting for input.');
@@ -289,7 +303,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     }
 
     const now = new Date();
-    const authorizedCommands = await this.db.transaction((transaction) => {
+    const authorizedCommands = await this.transaction((transaction) => {
       const rows = transaction.update(agentTeamPendingInputs).set({
         status: 'answered',
         answer: request.answer,
@@ -314,7 +328,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         authorizedCommands: nextCommands,
         updatedAt: now,
       }).where(and(eq(agentTeamRuns.id, runId), eq(agentTeamRuns.status, 'waiting_for_input'))).run();
-      this.appendEvent(transaction as unknown as Database, runId, 'input.answered', {
+      this.appendEvent(transaction, runId, 'input.answered', {
         pendingInputId: request.pendingInputId,
         kind: 'question',
         answer: request.answer,
@@ -400,7 +414,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         ? { type: 'mark_failed' }
         : { type: 'replay', replayOperationKey: replayOperationKey! };
 
-    const committed = this.db.transaction((transaction) => {
+    const committed = await this.transaction((transaction) => {
       const updatedRun = transaction.update(agentTeamRuns).set({
         status: decision === 'mark_failed' ? 'failed' : 'running',
         desiredControlState: 'none',
@@ -457,23 +471,23 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       )).returning().all();
       if (updatedAttempt.length === 0) throw new BadRequestException('The operation recovery task attempt is no longer waiting.');
 
-      this.appendEvent(transaction as unknown as Database, runId, 'operation.updated', {
+      this.appendEvent(transaction, runId, 'operation.updated', {
         operationKey,
         status: decision === 'adopt_command' ? 'completed' : decision === 'mark_failed' ? 'failed' : 'uncertain',
         recoveryDecision,
       });
-      this.appendEvent(transaction as unknown as Database, runId, 'input.answered', {
+      this.appendEvent(transaction, runId, 'input.answered', {
         pendingInputId: pendingInput.id,
         kind: 'operation_recovery',
         decision,
       });
-      this.appendEvent(transaction as unknown as Database, runId, 'task.failed', {
+      this.appendEvent(transaction, runId, 'task.failed', {
         taskAttemptId: operation.taskAttemptId,
         taskKey: operation.taskKey,
         error: supersededAttemptReason,
         recoveryDecision: decision,
       });
-      this.appendEvent(transaction as unknown as Database, runId, 'run.status', {
+      this.appendEvent(transaction, runId, 'run.status', {
         status: decision === 'mark_failed' ? 'failed' : 'running',
       });
       return true;
@@ -514,7 +528,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const run = await this.getRun(runId);
     if (isTerminalRunStatus(run.status)) return this.getRunView(runId);
     const now = new Date();
-    const accepted = await this.db.transaction((transaction) => {
+    const accepted = await this.transaction((transaction) => {
       const requested = transaction.update(agentTeamRuns).set({
         desiredControlState: 'cancel_requested',
         updatedAt: now,
@@ -527,7 +541,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       if (requested.length === 0) return false;
       transaction.update(agentTeamPendingInputs).set({ status: 'cancelled', updatedAt: now })
         .where(and(eq(agentTeamPendingInputs.runId, runId), eq(agentTeamPendingInputs.status, 'pending'))).run();
-      this.appendEvent(transaction as unknown as Database, runId, 'run.status', { status: 'cancel_requested' });
+      this.appendEvent(transaction, runId, 'run.status', { status: 'cancel_requested' });
       return true;
     });
     if (!accepted) return this.getRunView(runId);
@@ -555,7 +569,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (!failed) throw new BadRequestException('The failed active Agent Team task was not found.');
 
     const now = new Date();
-    await this.db.transaction((transaction) => {
+    await this.transaction((transaction) => {
       transaction.update(agentTeamTaskAttempts).set({ active: false, updatedAt: now })
         .where(and(
           eq(agentTeamTaskAttempts.runId, runId),
@@ -568,7 +582,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         updatedAt: now,
         finishedAt: null,
       }).where(and(eq(agentTeamRuns.id, runId), eq(agentTeamRuns.status, 'failed'))).run();
-      this.appendEvent(transaction as unknown as Database, runId, 'run.status', { status: 'running' });
+      this.appendEvent(transaction, runId, 'run.status', { status: 'running' });
     });
 
     this.scheduleExecution(runId, null);
@@ -577,27 +591,27 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   private async initializeBuiltInTeam(): Promise<void> {
     const [existing] = await this.db.select({ id: agentTeams.id }).from(agentTeams)
-      .where(and(eq(agentTeams.id, BUILT_IN_TEAM_ID), eq(agentTeams.workspaceId, 'workspace_personal')))
+      .where(and(eq(agentTeams.id, BUILT_IN_AGENT_TEAM_ID), eq(agentTeams.workspaceId, 'workspace_personal')))
       .limit(1);
     if (existing) return;
 
     const manifest = getBmadTeaProcessManifest();
-    const roles = (Object.keys(ROLE_INSTRUCTIONS) as AgentTeamRole[]).map((role) => ({
+    const roles = (Object.keys(AGENT_TEAM_ROLE_INSTRUCTIONS) as AgentTeamRole[]).map((role) => ({
       role,
       publicModelId: '',
-      instructions: ROLE_INSTRUCTIONS[role],
+      instructions: AGENT_TEAM_ROLE_INSTRUCTIONS[role],
       entryPoints: manifest.entryPoints[role] ?? [],
       skills: [],
       mcpServers: [],
-      toolNames: [...ROLE_TOOL_NAMES[role]],
+      toolNames: [...AGENT_TEAM_ROLE_TOOL_NAMES[role]],
     }));
     await this.db.insert(agentTeams).values({
-      id: BUILT_IN_TEAM_ID,
+      id: BUILT_IN_AGENT_TEAM_ID,
       workspaceId: 'workspace_personal',
       name: 'WorkLite Software Team',
       description: 'Built-in BMAD and TEA software development team.',
-      processId: PROCESS_ID,
-      processVersion: PROCESS_VERSION,
+      processId: AGENT_TEAM_PROCESS_ID,
+      processVersion: AGENT_TEAM_PROCESS_VERSION,
       roles,
     }).onConflictDoNothing().run();
   }
@@ -611,8 +625,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       content: await readBmadTeaProcessFile(file.path),
     })));
     return {
-      processId: PROCESS_ID,
-      processVersion: PROCESS_VERSION,
+      processId: AGENT_TEAM_PROCESS_ID,
+      processVersion: AGENT_TEAM_PROCESS_VERSION,
       processFiles,
       roles: await Promise.all(configuredRoles.map(async (role) => {
         const entryPointContent = await Promise.all(role.entryPoints.map((path) => readBmadTeaProcessFile(path)));
@@ -750,7 +764,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   private async reconcileProjection(run: AgentTeamRun, state: AgentTeamGraphState): Promise<void> {
     const materializedDocuments: Array<{ document: AgentTeamDocument; revision: number }> = [];
-    this.db.transaction((transaction) => {
+    await this.transaction((transaction) => {
       for (const [documentIndex, document] of (state.documents ?? []).entries()) {
         const revision = nextDocumentRevision(state.documents ?? [], document, documentIndex);
         const [existing] = transaction.select({ id: agentTeamDocuments.id })
@@ -764,7 +778,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         materializedDocuments.push({ document, revision });
         if (existing) continue;
         const attemptId = ensureProjectionAttempt(
-          transaction as unknown as Database,
+          transaction,
           run,
           document.producingTaskKey,
           state.documents ?? [],
@@ -780,7 +794,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           content: document.content,
           upstreamDocumentKeys: document.upstreamDocumentKeys,
         }).run();
-        this.appendEvent(transaction as unknown as Database, run.id, 'document.committed', {
+        this.appendEvent(transaction, run.id, 'document.committed', {
           taskKey: document.producingTaskKey,
           documentKey: document.key,
           revision,
@@ -916,7 +930,13 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       systemPrompt: taskSystemPrompt(role.instructions),
       context: taskContext(request),
       skills: role.skills,
-      mcpRuntimes: await this.resources.workflowMcpRuntimes(workspaceId, role.mcpServers.map((server) => server.id)),
+      mcpRuntimes: (await this.resources.workflowMcpRuntimes(workspaceId, role.mcpServers.map((server) => server.id)))
+        .map((runtime) => {
+          const snapshot = role.mcpServers.find((server) => server.id === runtime.id);
+          return snapshot
+            ? { ...runtime, name: snapshot.name, allowedTools: snapshot.allowedToolNames }
+            : runtime;
+        }),
       builtinToolNames: role.toolNames,
       role: request.role,
       projectDirectory: request.projectDirectory,
@@ -1041,7 +1061,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         scopeRevision: request.scopeRevision,
       },
     };
-    this.db.transaction((transaction) => {
+    await this.transaction((transaction) => {
       const [desired] = transaction.select({ desiredControlState: agentTeamRuns.desiredControlState })
         .from(agentTeamRuns)
         .where(eq(agentTeamRuns.id, request.runId))
@@ -1069,13 +1089,13 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         scopeRevision: request.scopeRevision,
         status: 'pending',
       }).run();
-      this.appendEvent(transaction as unknown as Database, request.runId, 'task.waiting', {
+      this.appendEvent(transaction, request.runId, 'task.waiting', {
         taskAttemptId: attemptId,
         taskKey: request.taskKey,
         pendingInputId,
         kind: 'question',
       });
-      this.appendEvent(transaction as unknown as Database, request.runId, 'input.requested', {
+      this.appendEvent(transaction, request.runId, 'input.requested', {
         pendingInputId,
         kind: 'question',
         question: persistedResult.pendingInput.question,
@@ -1093,7 +1113,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   ): Promise<AgentTeamTaskResult> {
     const now = new Date();
     const materializedDocuments: Array<{ document: AgentTeamDocument; revision: number }> = [];
-    this.db.transaction((transaction) => {
+    await this.transaction((transaction) => {
       const [desired] = transaction.select({ desiredControlState: agentTeamRuns.desiredControlState })
         .from(agentTeamRuns)
         .where(eq(agentTeamRuns.id, request.runId))
@@ -1131,14 +1151,14 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           content: document.content,
           upstreamDocumentKeys: document.upstreamDocumentKeys,
         }).run();
-        this.appendEvent(transaction as unknown as Database, request.runId, 'document.committed', {
+        this.appendEvent(transaction, request.runId, 'document.committed', {
           taskAttemptId: attemptId,
           taskKey: request.taskKey,
           documentKey: document.key,
           revision,
         });
       }
-      this.appendEvent(transaction as unknown as Database, request.runId, 'task.completed', {
+      this.appendEvent(transaction, request.runId, 'task.completed', {
         taskAttemptId: attemptId,
         taskKey: request.taskKey,
         result,
@@ -1226,7 +1246,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const now = new Date();
     const pendingInputId = existingInput?.id ?? `atinput_${randomUUID()}`;
     const question = `Operation ${operationKey} has an uncertain effect. Choose adopt_command, mark_failed, or replay.`;
-    return this.db.transaction((transaction) => {
+    return this.transaction((transaction) => {
       const updatedRun = transaction.update(agentTeamRuns).set({
         status: 'waiting_for_input',
         updatedAt: now,
@@ -1270,25 +1290,25 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         }).run();
       }
 
-      this.appendEvent(transaction as unknown as Database, runId, 'operation.updated', {
+      this.appendEvent(transaction, runId, 'operation.updated', {
         operationKey,
         status: 'uncertain',
       });
-      this.appendEvent(transaction as unknown as Database, runId, 'task.waiting', {
+      this.appendEvent(transaction, runId, 'task.waiting', {
         taskAttemptId: operation.taskAttemptId,
         taskKey: operation.taskKey,
         pendingInputId,
         kind: 'operation_recovery',
         operationKey,
       });
-      this.appendEvent(transaction as unknown as Database, runId, 'input.requested', {
+      this.appendEvent(transaction, runId, 'input.requested', {
         pendingInputId,
         kind: 'operation_recovery',
         question,
         operationKey,
         scopeRevision: updatedRun[0].scopeRevision,
       });
-      this.appendEvent(transaction as unknown as Database, runId, 'run.status', { status: 'waiting_for_input' });
+      this.appendEvent(transaction, runId, 'run.status', { status: 'waiting_for_input' });
       return true;
     });
   }
@@ -1340,7 +1360,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   private async failStaleAttempts(runId: string, reason: string): Promise<void> {
     const now = new Date();
-    await this.db.transaction((transaction) => {
+    await this.transaction((transaction) => {
       const rows = transaction.select()
         .from(agentTeamTaskAttempts)
         .where(and(
@@ -1357,7 +1377,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           finishedAt: now,
           updatedAt: now,
         }).where(eq(agentTeamTaskAttempts.id, row.id)).run();
-        this.appendEvent(transaction as unknown as Database, runId, 'task.failed', {
+        this.appendEvent(transaction, runId, 'task.failed', {
           taskAttemptId: row.id,
           taskKey: row.taskKey,
           error: reason,
@@ -1377,7 +1397,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       criterionAssessments: [...result.criterionAssessments],
     };
     const now = new Date();
-    const committed = this.db.transaction((transaction) => {
+    const committed = await this.transaction((transaction) => {
       const [desired] = transaction.select({ desiredControlState: agentTeamRuns.desiredControlState })
         .from(agentTeamRuns)
         .where(eq(agentTeamRuns.id, runId))
@@ -1394,7 +1414,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         ne(agentTeamRuns.desiredControlState, 'cancel_requested'),
       )).returning().all();
       if (rows.length === 0) return false;
-      this.appendEvent(transaction as unknown as Database, runId, 'run.status', { status: 'succeeded', outcome });
+      this.appendEvent(transaction, runId, 'run.status', { status: 'succeeded', outcome });
       return true;
     });
     if (committed || await this.getDesiredControlState(runId) !== 'cancel_requested') return;
@@ -1434,14 +1454,38 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     return version;
   }
 
-  private async getRun(runId: string): Promise<AgentTeamRun> {
-    const [run] = await this.db.select().from(agentTeamRuns).where(eq(agentTeamRuns.id, runId)).limit(1);
+  private async getRun(runId: string, workspaceId?: string): Promise<AgentTeamRun> {
+    const [run] = await this.db.select().from(agentTeamRuns)
+      .where(workspaceId
+        ? and(eq(agentTeamRuns.id, runId), eq(agentTeamRuns.workspaceId, workspaceId))
+        : eq(agentTeamRuns.id, runId))
+      .limit(1);
     if (!run) throw new NotFoundException('Agent Team run not found.');
     return run;
   }
 
+  private async transaction<T>(
+    operation: (transaction: AgentTeamDatabaseTransaction) => T | Promise<T>,
+  ): Promise<T> {
+    const events: AgentTeamRunEvent[] = [];
+    let transaction: AgentTeamDatabaseTransaction | undefined;
+    try {
+      const result = await this.db.transaction((candidate) => {
+        transaction = candidate;
+        this.transactionEvents.set(candidate, events);
+        return operation(candidate);
+      });
+      if (transaction) this.transactionEvents.delete(transaction);
+      this.publishEvents(events);
+      return result;
+    } catch (error) {
+      if (transaction) this.transactionEvents.delete(transaction);
+      throw error;
+    }
+  }
+
   private appendEvent(
-    db: Database,
+    db: Database | AgentTeamDatabaseTransaction,
     runId: string,
     type: AgentTeamRunEventType,
     payload: unknown,
@@ -1451,12 +1495,32 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       .where(eq(agentTeamRunEvents.runId, runId))
       .orderBy(desc(agentTeamRunEvents.sequence))
       .limit(1).all();
+    const sequence = (latest?.sequence ?? 0) + 1;
+    const createdAt = new Date();
     db.insert(agentTeamRunEvents).values({
       runId,
-      sequence: (latest?.sequence ?? 0) + 1,
+      sequence,
       type,
       payload,
+      createdAt,
     }).run();
+    const event: AgentTeamRunEvent = {
+      runId,
+      sequence,
+      type,
+      payload,
+      createdAt: createdAt.toISOString(),
+    };
+    const pending = this.transactionEvents.get(db);
+    if (pending) pending.push(event);
+    else this.publishEvents([event]);
+  }
+
+  private publishEvents(events: readonly AgentTeamRunEvent[]): void {
+    if (events.length === 0) return;
+    for (const listener of this.eventListeners) {
+      for (const event of events) listener(event);
+    }
   }
 
   private checkpointPath(): string {
@@ -1546,7 +1610,7 @@ function initialGraphState(run: AgentTeamRun, outputDirectory: string): AgentTea
 }
 
 function ensureProjectionAttempt(
-  db: Database,
+  db: Database | AgentTeamDatabaseTransaction,
   run: AgentTeamRun,
   taskKey: string,
   documents: readonly AgentTeamDocument[],

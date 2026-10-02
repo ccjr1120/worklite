@@ -25,8 +25,10 @@ import type {
   WorkspaceSettingsView,
 } from '@worklite/contracts';
 import {
-  artifacts,
   agentMcpServers,
+  agentTeams,
+  agentTeamVersions,
+  artifacts,
   agentSkills,
   agents,
   auditLogs,
@@ -49,6 +51,7 @@ import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from './teams.service';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
 import { McpClientService } from '../mcp-servers/mcp-client.service';
+import { AGENT_TEAM_ROLES, BUILT_IN_AGENT_TEAM_ID } from '../agent-teams/agent-team-configuration';
 
 function maskSecret(value: string): string {
   return value.length > 4 ? `****${value.slice(-4)}` : '****';
@@ -294,6 +297,7 @@ export class WorkspaceResourcesService {
     const [assignment] = await this.db.select({ agentId: agentSkills.agentId }).from(agentSkills).where(eq(agentSkills.skillId, skillId)).limit(1);
     if (assignment) throw new BadRequestException('Remove this Skill from every Agent before deleting it.');
     if (await this.workflowResourceIsReferenced(team.id, 'skillIds', skillId)) throw new BadRequestException('Remove this Skill from every Workflow draft and published version before deleting it.');
+    if (await this.agentTeamResourceIsReferenced(team.id, 'skills', skillId)) throw new BadRequestException('Remove this Skill from every Agent Team configuration and captured Team version before deleting it.');
     await this.db.delete(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id)));
   }
 
@@ -408,6 +412,7 @@ export class WorkspaceResourcesService {
     const [assignment] = await this.db.select({ agentId: agentMcpServers.agentId }).from(agentMcpServers).where(eq(agentMcpServers.mcpServerId, serverId)).limit(1);
     if (assignment) throw new BadRequestException('Remove this MCP server from every Agent before deleting it.');
     if (await this.workflowResourceIsReferenced(team.id, 'mcpServerIds', serverId)) throw new BadRequestException('Remove this MCP server from every Workflow draft and published version before deleting it.');
+    if (await this.agentTeamResourceIsReferenced(team.id, 'mcpServers', serverId)) throw new BadRequestException('Remove this MCP server from every Agent Team configuration and captured Team version before deleting it.');
     await this.db.delete(mcpServers).where(and(eq(mcpServers.id, serverId), eq(mcpServers.workspaceId, team.id)));
   }
 
@@ -485,11 +490,12 @@ export class WorkspaceResourcesService {
 
   async platformSnapshot(request: Request, workspaceSlug: string) {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [providerRows, skillRows, mcpRows, workflowRows, scheduleRows, settingsRows, officialAccountRows] = await Promise.all([
+    const [providerRows, skillRows, mcpRows, workflowRows, agentTeamRows, scheduleRows, settingsRows, officialAccountRows] = await Promise.all([
       this.providers(request, workspaceSlug),
       this.db.select().from(skills).where(and(eq(skills.workspaceId, workspace.id), ne(skills.id, CHAT_BOT_PLATFORM_SKILL_ID))).orderBy(skills.name),
       this.db.select().from(mcpServers).where(eq(mcpServers.workspaceId, workspace.id)).orderBy(mcpServers.name),
       this.db.select().from(workflows).where(eq(workflows.workspaceId, workspace.id)).orderBy(workflows.name),
+      this.db.select().from(agentTeams).where(eq(agentTeams.workspaceId, workspace.id)).orderBy(agentTeams.name),
       this.db.select().from(workflowSchedules).where(eq(workflowSchedules.workspaceId, workspace.id)),
       this.db.select().from(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspace.id)).limit(1),
       this.db.select({ id: wechatOfficialAccounts.id, displayName: wechatOfficialAccounts.displayName, status: wechatOfficialAccounts.status }).from(wechatOfficialAccounts).where(eq(wechatOfficialAccounts.workspaceId, workspace.id)),
@@ -501,7 +507,7 @@ export class WorkspaceResourcesService {
     return {
       workspace: { id: workspace.id, slug: workspace.slug, name: workspace.name },
       capabilities: {
-        supportedResourceOperations: ['inspect workspace resources', 'inspect Workflow capabilities', 'navigate to known WorkLite pages', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server draft', 'create Workflow draft', 'edit Workflow draft from a logical plan', 'change appearance', 'change language'],
+        supportedResourceOperations: ['inspect workspace resources', 'inspect Workflow capabilities', 'inspect and configure Agent Teams', 'start and continue Agent Team Runs', 'navigate to known WorkLite pages', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server draft', 'create Workflow draft', 'edit Workflow draft from a logical plan', 'change appearance', 'change language'],
         modelProviderProxy: {
           protocols: ['openai/chat', 'openai/responses', 'anthropic/messages', 'codex/responses', 'typesafe/systemone'],
           requiresExplicitProtocol: true,
@@ -534,6 +540,35 @@ export class WorkspaceResourcesService {
             workflowNodeVersion: '1',
             imageEdits: false,
           },
+        },
+        agentTeam: {
+          available: true,
+          teamCreation: false,
+          teamDeletion: false,
+          webRoute: null,
+          builtInTeamId: BUILT_IN_AGENT_TEAM_ID,
+          roles: [...AGENT_TEAM_ROLES],
+          modes: ['plan_only', 'validate_existing', 'implement_and_validate'],
+          teamRoutes: {
+            list: 'GET /agent-teams',
+            detail: 'GET /agent-teams/:teamId',
+            update: 'PATCH /agent-teams/:teamId',
+            createRun: 'POST /agent-teams/:teamId/runs',
+          },
+          runRoutes: {
+            detail: 'GET /agent-team-runs/:runId',
+            events: 'GET /agent-team-runs/:runId/events',
+            answer: 'POST /agent-team-runs/:runId/answer',
+            recoverOperation: 'POST /agent-team-runs/:runId/operations/:operationKey/recovery',
+            pause: 'POST /agent-team-runs/:runId/pause',
+            resume: 'POST /agent-team-runs/:runId/resume',
+            cancel: 'POST /agent-team-runs/:runId/cancel',
+            retryTask: 'POST /agent-team-runs/:runId/tasks/:taskKey/retry',
+          },
+          events: { persisted: true, replay: 'Last-Event-ID', live: 'server-sent events' },
+          commandAuthorization: 'cumulative exact command strings',
+          recoveryDecisions: ['adopt_command', 'mark_failed', 'replay'],
+          capturedVersions: 'role model, instruction, Skill, MCP, and process configuration',
         },
         workflow: {
           primaryService: true,
@@ -591,6 +626,13 @@ export class WorkspaceResourcesService {
         transport: server.transport,
         allowedToolCount: server.allowedTools,
         version: server.version,
+      })),
+      agentTeams: agentTeamRows.map((team) => ({
+        id: team.id,
+        name: team.name,
+        description: team.description,
+        processId: team.processId,
+        processVersion: team.processVersion,
       })),
       workflows: workflowRows.map((workflow) => {
         const schedule = scheduleRows.find((candidate) => candidate.workflowId === workflow.id);
@@ -770,6 +812,19 @@ export class WorkspaceResourcesService {
       const ids = (node.config as Record<string, unknown>)[field];
       return Array.isArray(ids) && ids.includes(resourceId);
     }));
+  }
+
+  private async agentTeamResourceIsReferenced(
+    workspaceId: string,
+    field: 'skills' | 'mcpServers',
+    resourceId: string,
+  ): Promise<boolean> {
+    const [teamRows, versionRows] = await Promise.all([
+      this.db.select({ roles: agentTeams.roles }).from(agentTeams).where(eq(agentTeams.workspaceId, workspaceId)),
+      this.db.select({ snapshot: agentTeamVersions.snapshot }).from(agentTeamVersions).where(eq(agentTeamVersions.workspaceId, workspaceId)),
+    ]);
+    return [...teamRows, ...versionRows.map((row) => ({ roles: row.snapshot.roles }))]
+      .some(({ roles }) => roles.some((role) => role[field].some((resource) => resource.id === resourceId)));
   }
 
   async usage(request: Request, workspaceSlug: string): Promise<UsageRow[]> {
