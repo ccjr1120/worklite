@@ -2,7 +2,7 @@
 
 Date: 2026-10-03
 
-Status: The BMAD + TEA and LangGraph.js technology direction is confirmed and implementation has started. The P3 public REST/SSE boundary is implemented for the one built-in Team; Team creation/deletion and a dedicated Web UI remain unavailable. Later milestones remain implementation requirements, and normal repository verification and service-lifecycle rules still apply.
+Status: The BMAD + TEA and LangGraph.js technology direction is confirmed and implementation has started. The P3 public REST/SSE boundary is implemented for the one built-in Team, and its direct Team and Team Run Web interfaces are specified for implementation. Team creation/deletion remains unavailable. Later milestones remain implementation requirements, and normal repository verification and service-lifecycle rules still apply.
 
 Architecture authority: [Project Architecture](README.md#agent-team-implementation-direction). Applicable working rules: [AGENTS.md](../../AGENTS.md) and [AGENTS_WORKFLOW.md](../../AGENTS_WORKFLOW.md).
 
@@ -224,7 +224,7 @@ Review feedback creates specific, scoped tasks. It does not silently delete fail
 
 ## 10. Public API and Event Contract
 
-The following routes are implemented. Names use `agent-teams` to distinguish Agent collaboration from workspace naming in existing services. General Team creation and deletion are outside the first built-in-template scope, and no dedicated Web route is introduced by this API increment.
+The following API routes are implemented. Names use `agent-teams` to distinguish Agent collaboration from workspace naming in existing services. General Team creation and deletion are outside the first built-in-template scope. The Web increment exposes the built-in Team through `/agent-teams/:teamId` and each resulting Run through `/agent-team-runs/:runId`; it adds no Team collection or Team management route.
 
 Run creation and pending-input answers expose the exact command grant set explicitly. An answer can include both text and zero or more exact commands; only the structured command list changes executable authorization.
 
@@ -263,7 +263,7 @@ The user's request to explore independently of the current visual system is reta
 - `ui-ux-design/pages/agent-team-runs/detail/DESIGN.md` for observing and continuing work.
 - The existing Chat Bot surface specification for its Team entry and run links.
 
-Routes and layouts are proposal items until those designs are agreed. A future `DESIGN.md` must record actual implementation coverage; this document does not create an unaudited coverage placeholder.
+The two page designs are now approved under those paths. Their Coverage Status fields remain verification results and must be updated only after source-level implementation review.
 
 ## 12. Delivery Milestones
 
@@ -286,7 +286,7 @@ Total planning estimate: 15-21 working days. Exact dependency versions, SQLite i
 - [ ] P1 exposes shared invocation with captured instructions and explicit role tools.
 - [ ] P1 implements restart, pause, cancellation, and failed-task continuation behavior.
 - [ ] P2 implements one end-to-end recipe with real testing evidence.
-- [ ] P3 documents page behavior before UI implementation.
+- [x] P3 documents page behavior before UI implementation.
 - [x] P3 updates Chat Bot, platform Skill files, contracts, scripts, and capability metadata together.
 - [x] P3 extends Skill and MCP reference protections to Team configurations and captured versions.
 - [ ] P4 records authorized acceptance results and the baseline comparison.
@@ -340,6 +340,12 @@ References were consulted on 2026-10-03. They support the selected mechanisms; t
 - [LangGraph.js multi-Agent code examples](https://github.com/langchain-ai/langgraphjs/blob/93dfc54bdd8613fdd79eaaa16a7a747f72d3706f/docs/docs/concepts/multi_agent.md): repository-backed graph, supervisor, and state-handoff examples read through authenticated `gh` during the initial research. This reference is not a selected dependency version.
 
 ## 16. Change Record
+
+### 2026-10-03 - Web interface increment
+
+- Approved the direct built-in Team detail and Team Run detail routes, the workspace navigation family, and the Chat Bot navigation starter.
+- Recorded the page contracts before Web implementation, including one-action Start and Save, replayable Run observation, structured authorization and recovery, and bounded evidence presentation.
+- No acceptance Run, test, build, type check, server lifecycle operation, or deployment-profile access is authorized by this documentation change.
 
 ### 2026-10-03
 

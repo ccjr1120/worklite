@@ -34,6 +34,7 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 - Providers: [Model providers and Portkey Gateway](pages/model-providers/DESIGN.md), including the dedicated Codex Account Pool
 - Logs: [Gateway statistics and request logs](pages/logs/DESIGN.md), including the shared time range
 - Workflows: [List](pages/workflows/list/DESIGN.md), [Editor](pages/workflows/editor/DESIGN.md), [Versions](pages/workflows/versions/DESIGN.md)
+- Agent Teams: [Detail](pages/agent-teams/detail/DESIGN.md), [Run detail](pages/agent-team-runs/detail/DESIGN.md)
 - Runs: [Detail](pages/runs/detail/DESIGN.md), [Node logs](surfaces/workflow-run/node-logs/DESIGN.md)
 - Skills: [List](pages/skills/list/DESIGN.md), [Editor](pages/skills/editor/DESIGN.md)
 - MCP servers: [List](pages/mcp-servers/list/DESIGN.md), [Configuration](pages/mcp-servers/configuration/DESIGN.md)
@@ -47,6 +48,8 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 /home
 /model-providers
 /logs
+/agent-teams/:teamId
+/agent-team-runs/:runId
 /workflows/{new,:workflowId,:workflowId/versions}
 /skills/{new,:skillId}
 /mcp-servers/{new,:serverId}
@@ -65,7 +68,7 @@ The `/model-providers` page is the top-level Providers destination. It uses page
 
 `/logs` is the top-level Logs destination for Gateway transport observability. It uses page-level tabs for Statistics and Requests over one shared time range. Providers configures what the Gateway dispatches to; Logs reads what it did.
 
-`/runs/:runId` is a Run log-reading destination reached from a Workflow's Run records dialog, not a top-level collection. There is no Run list route: Runs are reached through their Workflow. Provider request observability is not a Settings page: `/settings` keeps the WorkLite-owned Usage and Audit Log read models, which are business records over Runs and resource mutations rather than Gateway transport records.
+`/agent-teams/:teamId` is the direct destination for the one built-in Agent Team; there is no Team collection, creation, or deletion route. `/agent-team-runs/:runId` is its immutable-version run destination reached from Team run creation, not a top-level collection. `/runs/:runId` is a Workflow Run log-reading destination reached from a Workflow's Run records dialog, not a top-level collection. There is no Run list route: Runs are reached through their Workflow. Provider request observability is not a Settings page: `/settings` keeps the WorkLite-owned Usage and Audit Log read models, which are business records over Runs and resource mutations rather than Gateway transport records.
 
 ## Shared Component Inventory
 
@@ -84,6 +87,11 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-10-03
+
+- Added the direct built-in Agent Team and Team Run detail routes and specifications, including structured authorization, recovery, replayable observation, and the Chat Bot navigation starter.
+
 
 ### 2026-09-24 - Run execution graph
 

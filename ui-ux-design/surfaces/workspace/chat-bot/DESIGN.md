@@ -23,7 +23,7 @@
 
 ## Purpose
 
-Configure WorkLite through a guided conversation: create providers, Skills, MCP servers, and Workflow drafts, and dispatch work to published Workflows.
+Configure WorkLite through a guided conversation: create providers, Skills, MCP servers, and Workflow drafts, dispatch work to published Workflows, and open the built-in Agent Team for software-development work.
 
 ## Primary Task
 
@@ -32,6 +32,8 @@ Send a request and read its result. Action budget: one — submit the composer. 
 Dispatching to a published Workflow costs two actions — select the mention, then submit — because the target is a value the product cannot resolve and only one mention is permitted per task.
 
 Submitting while a turn is running enqueues the message rather than refusing it. Each queued message costs one action, because each states a separate goal; the queue removes the wait between them rather than combining them into one request.
+
+The Agent Team starter is one navigation action to the built-in Team detail route. It does not populate the composer or claim that Chat Bot has dispatched a Team run; Team authorization and execution state remain on the Team route.
 
 ## Layout
 
@@ -109,7 +111,7 @@ Completed resource scripts show their returned resource route as a normal link. 
 
 When no provider or model is bound, the composer is replaced with one keyboard-accessible inline configuration panel. Once configured, the composer supports ordinary Chat Bot messages and `@` mentions for published Workflows only.
 
-Before the first message, compact task starters may populate requests for Provider, Skill, MCP server, or Workflow creation without fabricating a proposal. The expanded header identifies Chat Bot, shows the current Agent execution status, and provides an icon-only minimize control. A reconnecting execution shows that state separately from the server-owned execution status. A compact diagnostics disclosure may show the safe execution identifier and last-updated time without exposing provider or host secrets.
+Before the first message, compact task starters may populate requests for Provider, Skill, MCP server, or Workflow creation without fabricating a proposal. The Agent Team starter navigates directly to the built-in Team instead of creating a Chat Bot message. The expanded header identifies Chat Bot, shows the current Agent execution status, and provides an icon-only minimize control. A reconnecting execution shows that state separately from the server-owned execution status. A compact diagnostics disclosure may show the safe execution identifier and last-updated time without exposing provider or host secrets.
 
 Workflow Run entries use the same transcript surface: the user input, a compact queued or running state, completion or failure feedback, and successful Artifact cards with direct detail actions. Workflow Run state is never merged into Agent execution state and never exposes a second execution control.
 
@@ -153,6 +155,7 @@ Also define unconfigured, submitting, working, executing script, cancelling, can
 | `assistant:starters.*.title` | Action |
 | `assistant:starters.*.description` | Constraint |
 | `assistant:starters.*.prompt` | Action |
+| `assistant:starters.agentTeam.open` | Action |
 | `assistant:minimized.minimize` | Action |
 | `assistant:commands.menuLabel` | State |
 | `assistant:commands.empty` | State |
@@ -205,7 +208,9 @@ Keyboard focus remains in the editable composer after cancellation, session sele
 
 ## Coverage Status
 
-Verified 2026-09-23 against the implementation files listed above. Differences found:
+Pending verification
+
+The previous verification was 2026-09-23. The newly added Agent Team starter requires source-level coverage review before this specification can again claim verification.
 
 - The transcript does not expose an `aria-live` region for streaming updates. Working, cancelled, queued, and failure blocks use `role="status"` and `role="alert"`, which announce on mount, but the incremental assistant response itself is not announced, so the restrained live-region requirement in this specification is unmet.
 - `/resume` lists only the executions this browser archived, capped at `HISTORY_LIMIT`, because the API exposes no route that lists a given Agent's executions. A conversation the reader remembers can therefore be absent from the selector, and the cap is not surfaced. A server-side execution list is required to close this.
