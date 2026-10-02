@@ -543,14 +543,18 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       )).returning().all();
       if (requested.length === 0) return false;
       transaction.update(agentTeamPendingInputs).set({ status: 'cancelled', updatedAt: now })
-        .where(and(eq(agentTeamPendingInputs.runId, runId), eq(agentTeamPendingInputs.status, 'pending'))).run();
+        .where(and(
+          eq(agentTeamPendingInputs.runId, runId),
+          eq(agentTeamPendingInputs.status, 'pending'),
+          ne(agentTeamPendingInputs.kind, 'operation_recovery'),
+        )).run();
       this.appendEvent(transaction, runId, 'run.status', { status: 'cancel_requested' });
       return true;
     });
     if (!accepted) return this.getRunView(runId);
 
     this.abortControllers.get(runId)?.abort();
-    if (!this.executions.has(runId)) {
+    if (!this.executions.has(runId) && !(await this.hasPendingOperationRecovery(runId))) {
       await this.failActiveAttempts(runId, 'cancelled', 'The Agent Team run was cancelled.');
       await this.finishCancelledRun(runId);
     }
@@ -650,7 +654,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       .where(inArray(agentTeamRuns.status, ['queued', 'running']))
       .orderBy(asc(agentTeamRuns.createdAt));
     for (const run of runs) {
-      if (run.desiredControlState === 'cancel_requested') {
+      if (run.desiredControlState === 'cancel_requested' && !(await this.findInterruptedOperation(run.id))) {
         await this.failActiveAttempts(run.id, 'cancelled', 'The Agent Team run was cancelled.');
         await this.finishCancelledRun(run.id);
         continue;
@@ -1323,13 +1327,13 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   private async handleGraphFailure(runId: string, error: unknown): Promise<void> {
     const [run] = await this.db.select().from(agentTeamRuns).where(eq(agentTeamRuns.id, runId)).limit(1);
     if (!run) return;
+    if (error instanceof AgentInvocationRecoveryRequiredError) {
+      if (await this.exposeOperationRecovery(run.id, error.operationKey, error.reason)) return;
+    }
     if (run.desiredControlState === 'cancel_requested') {
       await this.failActiveAttempts(runId, 'cancelled', 'The Agent Team run was cancelled.');
       await this.finishCancelledRun(runId);
       return;
-    }
-    if (error instanceof AgentInvocationRecoveryRequiredError) {
-      if (await this.exposeOperationRecovery(run.id, error.operationKey, error.reason)) return;
     }
     const reason = this.shuttingDown && isAbortError(error)
       ? 'The Agent Team process was interrupted by API shutdown.'

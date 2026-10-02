@@ -192,6 +192,8 @@ The internal journal contract uses a stable semantic input fingerprint and does 
 
 The exact-command grant set is carried in LangGraph state and every task request. Before the journal reserves a `bash` operation, the runtime compares the trimmed tool input with the grant set and rejects every command that is not an exact member. The check happens before Commands creates or reserves the process, so recovery cannot replay an unauthorized effect. Grants remain cumulative for the life of the run. Team roles do not receive executable Skill scripts in this increment because their generated temporary invocation command cannot be presented as an exact user-authorized string; Skill instructions can still be captured and supplied.
 
+Cancellation and uncertain completion can coincide. A cancellation request still aborts active model and MCP work and cancels linked Commands, but it does not cancel an operation-recovery input or terminalize the Run before that uncertain effect is surfaced. The structured recovery decision settles the effect; adoption or replay supersedes the pending cancellation request, while marking the operation failed allows the Run to finish without replay.
+
 MCP side effects with an unknown completion state follow the same recovery-decision rule. Provider retries before committed tool effects retain the current transport behavior. Automatic restart recovery does not authorize a service restart, deployment, or new external action.
 
 Uncertain-operation recovery is a structured decision, never prose. The run exposes one durable operation-recovery input keyed by the stable operation identity, and the active task attempt uses the `waiting_for_recovery` projection. The accepted decisions are:
@@ -340,6 +342,13 @@ References were consulted on 2026-10-03. They support the selected mechanisms; t
 - [LangGraph.js multi-Agent code examples](https://github.com/langchain-ai/langgraphjs/blob/93dfc54bdd8613fdd79eaaa16a7a747f72d3706f/docs/docs/concepts/multi_agent.md): repository-backed graph, supervisor, and state-handoff examples read through authenticated `gh` during the initial research. This reference is not a selected dependency version.
 
 ## 16. Change Record
+
+### 2026-10-03 - Cancellation recovery correction
+
+- Made an uncertain tool effect take precedence over cancellation when an abort leaves its completion state unknown.
+- Preserved pending operation-recovery inputs when cancellation is requested and allowed restart reconciliation to expose interrupted operations despite a pending cancellation.
+- Kept the existing three structured decisions and public recovery contract; adoption or replay supersedes the pending cancellation request, while explicit failure settles without replay.
+- No test, type check, lint, build, browser check, HTTP request, Team Run, server lifecycle operation, or deployment-profile access was performed.
 
 ### 2026-10-03 - Structured handoff implementation
 
