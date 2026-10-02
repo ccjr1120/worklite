@@ -1,0 +1,718 @@
+{
+  "schemaVersion": 1,
+  "packageId": "bmad-tea@1",
+  "description": "Textual BMAD and TEA process assets for the WorkLite built-in software development team.",
+  "transformPolicy": "Files under upstream/ and licenses/ are byte-for-byte imports. WorkLite interpretation is defined only by this manifest and WORKLITE-PROCESS.md.",
+  "sources": {
+    "bmad": {
+      "pathPrefix": "upstream/bmad",
+      "sourcePathPrefix": "src/",
+      "repository": "https://github.com/bmad-code-org/BMAD-METHOD",
+      "tag": "v6.12.0",
+      "tagObjectSha": "b28fef564f2c48ac20d969bcccaf2fc08d503afb",
+      "commitSha": "05bfbd46d00766ec88eb9b42e76be2c575d64d7b",
+      "license": "MIT terms with BMad trademark notice",
+      "licensePath": "licenses/BMAD-METHOD-LICENSE.txt"
+    },
+    "tea": {
+      "pathPrefix": "upstream/tea",
+      "sourcePathPrefix": "src/",
+      "repository": "https://github.com/bmad-code-org/bmad-method-test-architecture-enterprise",
+      "tag": "v1.27.2",
+      "tagObjectSha": "fa068c614f9642aad62f060c0b1c2e9956506fb5",
+      "commitSha": "d99ad29c62697c152e3393351406686d5bcd323c",
+      "license": "MIT terms with BMad trademark notice",
+      "licensePath": "licenses/bmad-method-test-architecture-enterprise-LICENSE.txt"
+    }
+  },
+  "files": [
+    {
+      "path": "upstream/bmad/bmm-skills/agents/bmad-agent-architect/SKILL.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/agents/bmad-agent-architect/SKILL.md",
+      "sha256": "dcedd59cea2aa2d9dac0efda0d62824f624dbd80164280306ef830fcc7822f16"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/agents/bmad-agent-architect/customize.toml",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/agents/bmad-agent-architect/customize.toml",
+      "sha256": "bd0ebb48faeab1e6f709d0291a13d33003484a597ed2b9c90f221b2345513b06"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/agents/bmad-agent-dev/SKILL.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/agents/bmad-agent-dev/SKILL.md",
+      "sha256": "0bc44690f0dc7fdeaabd763efd3ead4b2e8bb8b3a8d5437140605a544b39bb1f"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/agents/bmad-agent-dev/customize.toml",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/agents/bmad-agent-dev/customize.toml",
+      "sha256": "ab52d8840427e10d5956b592c34e63edc77ebdafd7b54ce60da11cf67ed72ced"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/agents/bmad-agent-pm/SKILL.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/agents/bmad-agent-pm/SKILL.md",
+      "sha256": "e38fe9aa923f3e4c885aad87d32d34afa6f1a5952ff9697a656f85378f9e9a04"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/agents/bmad-agent-pm/customize.toml",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/agents/bmad-agent-pm/customize.toml",
+      "sha256": "4613c72cfe3bc3143bd50c5732bce464c21c7266fe7dd930bc659c54e7315b39"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-build-auto/SKILL.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-build-auto/SKILL.md",
+      "sha256": "ea798a5f7df3b11eb73555a54fc0516c70d8f98739bd7857d968297b26f6ef94"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-build-auto/compile-epic-context.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-build-auto/compile-epic-context.md",
+      "sha256": "64d13b41974cfa0dfc1de64b6fbd8365e9b99f91c7c98f0ee1a9fbd018f324ca"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-build-auto/customize.toml",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-build-auto/customize.toml",
+      "sha256": "31417a8239f213c00621bb9016c3099631ae7ef03731ce5be209a5668a5730ee"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-build-auto/references/claims-check.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-build-auto/references/claims-check.md",
+      "sha256": "50ea17cb89a78ef815286dde2dabfd09f1dc9841d07a10857f88b39ab7b9bd2a"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-build-auto/references/deletion-check.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-build-auto/references/deletion-check.md",
+      "sha256": "0f1f124e4e957147e89164a272b10bedc694ad0d9ad2618c8610ac74ee9cb0da"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-build-auto/review-prompts/edge-case-hunter.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-build-auto/review-prompts/edge-case-hunter.md",
+      "sha256": "8fc046af1cbf4ecc928207cec75e29c3c260adb86cc7da77537ade3b3a3b9448"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-build-auto/review-prompts/verification-gap.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-build-auto/review-prompts/verification-gap.md",
+      "sha256": "45ab0b8c4c56c5c055c97a293a8591a67e256d0b1a2058ce1f093cd866be8d03"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-build-auto/spec-template.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-build-auto/spec-template.md",
+      "sha256": "59a046df2773ec05af0688823d17238bfde2bb54c0c3b3eff6acec4856f1eb7a"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-build-auto/step-01-clarify-and-route.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-build-auto/step-01-clarify-and-route.md",
+      "sha256": "50674ecef3b4b7a26b993685c9a79ccd87b00b2255d51b6b9c13ed32aa6d1ffa"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-build-auto/step-02-plan.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-build-auto/step-02-plan.md",
+      "sha256": "a08e303c10f88dbfce88c55044757ec5059afe338793eb414e1ddb0b7c324625"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-build-auto/step-03-implement.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-build-auto/step-03-implement.md",
+      "sha256": "0dc9c9634eca148baaec03e7d154840a14101f92492b7ab469625bf13b4e2ab5"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-build-auto/step-04-review.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-build-auto/step-04-review.md",
+      "sha256": "c5530c50c89f197720275b83466b382f896fa27a0bba30d4b75c6af162148cdf"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-build-auto/workflow.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-build-auto/workflow.md",
+      "sha256": "611f429206029a903ec9433ccdfd9b186fbafc6dc95da0a21fbcdf5965ad25ea"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-code-review/SKILL.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-code-review/SKILL.md",
+      "sha256": "c6aad905fb70b76f88db76550f0de3b9170ea99099c0b592c6c3609bf3c05218"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-code-review/customize.toml",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-code-review/customize.toml",
+      "sha256": "282d9483ccb74acab1efb965ce10ebd6206a61da94da245a705a6358dbf0dc2e"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-code-review/references/claims-check.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-code-review/references/claims-check.md",
+      "sha256": "7be5d35dd90a1950addc2062acdf8669026b239117efe1e398da1e8161cfa6f9"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-code-review/references/deletion-check.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-code-review/references/deletion-check.md",
+      "sha256": "0f1f124e4e957147e89164a272b10bedc694ad0d9ad2618c8610ac74ee9cb0da"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-code-review/review-prompts/edge-case-hunter.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-code-review/review-prompts/edge-case-hunter.md",
+      "sha256": "5f4572d57340b4c0d155f33454d644a44af101cd7fd02a01591be68a4ebb8b7f"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-code-review/review-prompts/verification-gap.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-code-review/review-prompts/verification-gap.md",
+      "sha256": "06f6184d7d94c808970d0146cdc4585dfd66b94a7b7ab2988277fb6fc4208508"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-code-review/steps/step-01-gather-context.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-code-review/steps/step-01-gather-context.md",
+      "sha256": "51941fd52406cf075ac9172cdcbeebefe85df91ea818ad8ec723724de67a1831"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-code-review/steps/step-02-review.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-code-review/steps/step-02-review.md",
+      "sha256": "f2b8e654cf595746656d9861c4ac722f65b02939c53900f4f6d8b24988b2155a"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-code-review/steps/step-03-triage.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-code-review/steps/step-03-triage.md",
+      "sha256": "337ac3ad2cd8cabb34f4e47c8778cfd703f919753573dd9d708b7218fd5de684"
+    },
+    {
+      "path": "upstream/bmad/bmm-skills/ship/bmad-code-review/steps/step-04-present.md",
+      "upstream": "bmad",
+      "sourcePath": "src/bmm-skills/ship/bmad-code-review/steps/step-04-present.md",
+      "sha256": "a9619f7df9b9112c0e42ee71a362f73dfa38ef6dff7b403975dbd6d2480a8d9f"
+    },
+    {
+      "path": "licenses/BMAD-METHOD-LICENSE.txt",
+      "upstream": "bmad",
+      "sourcePath": "LICENSE",
+      "sha256": "0aa79baf6328b4a1e694ce10a12ffc36d7666554da128dff0e8fcda0fc536a66"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/SKILL.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/SKILL.md",
+      "sha256": "82c76fcafc36db03b1448d680f1b93ebe7149e8755045dbf182983b9560dc885"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/checklist.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/checklist.md",
+      "sha256": "0bb568aab36022c871ca6fc54c1ac2636911a85272ed6073d0c3db7db40ca709"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/customize.toml",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/customize.toml",
+      "sha256": "1005e632a0a9ac176e99c32c49cf82067df84992f0e1fe7541e594704f1d5732"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/instructions.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/instructions.md",
+      "sha256": "12f69b8730f15da16cad6b1bb3a82970e759ea9928f23bc4b4e400c7e5850634"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/adr-quality-readiness-checklist.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/adr-quality-readiness-checklist.md",
+      "sha256": "a8129b16c3b2afbc1f58fe5edc73dc8f1291c172c6ca009d92f1947bef1a237e"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/api-request.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/api-request.md",
+      "sha256": "28ef34b911b6d9cde3cb06367ecb6686f893236ed8f67975eaf6737f44f6e698"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/api-testing-patterns.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/api-testing-patterns.md",
+      "sha256": "5753ac9095991fec29f51f78a4152d7a39b6ba8a80f36f13413a50ef1c19c16d"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/auth-session.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/auth-session.md",
+      "sha256": "3b2ba3cdd58cf3decb3d427623ed43e070ff926b1c45abc0e7d0823ea3b85b1f"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/burn-in.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/burn-in.md",
+      "sha256": "6ad6b4fb23c9de2085c40e45defc782511b31ba7a0b85fdd6046265048ad17b2"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/ci-burn-in.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/ci-burn-in.md",
+      "sha256": "224795cba3b6c5cfe6f4c85e6f99ade801d84a9f6edbff164a8b27fcc52370b1"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/component-tdd.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/component-tdd.md",
+      "sha256": "265907160c95c8d7b2e9c05304665b68f3267b817920fff8afb131ec04184edb"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/confidence-gate.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/confidence-gate.md",
+      "sha256": "99df7e3ff38b6dd69f1c08de85b0d586aa9ac2dc1a33fcd4db682a78af4b4b67"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/contract-testing.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/contract-testing.md",
+      "sha256": "da8ceb53fab22cd80270e3317a9fc7683b901c6303ac32a40022d7105f871f80"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/data-factories.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/data-factories.md",
+      "sha256": "036572ce6222b98829c681c9c2cebc54fa89d670356e4bc7d50e402af91f587d"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/email-auth.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/email-auth.md",
+      "sha256": "157996b68a3232f62a6911dd2cd336ca159098cf2210f991ae3e961f27eabc2c"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/error-handling.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/error-handling.md",
+      "sha256": "c941031c7535eb111d0afe53385b68b9f12d1478dea96c44c2b66d0267b8f1ce"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/evidence-integrity.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/evidence-integrity.md",
+      "sha256": "864c16573a53b459b8a26c8cae26fc131d9de5056522157a65cf823348a46920"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/feature-flags.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/feature-flags.md",
+      "sha256": "7e46668d5049933dbb5d60096dd2c3800605582dd4198523b10b4d02586c97dc"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/file-utils.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/file-utils.md",
+      "sha256": "7d1092930118fb160b9c0a4a48c398d9b08bb909d1e2432662d8e81e1e3b0087"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/fixture-architecture.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/fixture-architecture.md",
+      "sha256": "c0c62381e7a0385fe0d8b59861a3756994d3bbc673e4605ded9607d5217c7e55"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/fixtures-composition.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/fixtures-composition.md",
+      "sha256": "cd62666b34894c4130bc0da73503fc24b820094e8a4c3ec2a70a16700d77af5a"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/intercept-network-call.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/intercept-network-call.md",
+      "sha256": "ac8213cc28a9f9c452a6fb419356dd1d66ce495d7f29d188fcb1bb51456ba869"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/library-integration-mandate.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/library-integration-mandate.md",
+      "sha256": "aa3f037ee82b93733bac6e9e7851836f215e2bc9980c24933aa3d5885a12941d"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/log.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/log.md",
+      "sha256": "ef73615ce4535d4571567191ee9dc382cb87fd1eb75d3ee7e62f8f5dc9ca4c46"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/maestro-flows.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/maestro-flows.md",
+      "sha256": "02b1fff0e463708db474310792fd88a98dc425c621bac9cb3b7b7f1fbd47c3d3"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/mobile-ci-device-lab.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/mobile-ci-device-lab.md",
+      "sha256": "0d992898bd8e1b1d047285097047bc5078528f2d3f6e6c2f61e6339cca71454e"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/mobile-test-strategy.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/mobile-test-strategy.md",
+      "sha256": "d16495f50c2832acae9b5b0cb3c3b3443d2b7625dc3205076367834c66c7072c"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/network-error-monitor.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/network-error-monitor.md",
+      "sha256": "e450d5db937dbc709f0ff7ba292f813cd8c0e7d8a0126b8580521210cf38e548"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/network-first.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/network-first.md",
+      "sha256": "2920e58e145626f5505bcb75e263dbd0e6ac79a8c4c2ec138f5329e06a6ac014"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/network-recorder.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/network-recorder.md",
+      "sha256": "f86bd52defea901fcf2c3bc2ba78dcb97047e30a49e552a5935bc8452851d33c"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/nfr-criteria.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/nfr-criteria.md",
+      "sha256": "77a3a4711aea7a1efb3d4fe82a6842f53d761eeb3a909fd94e97182f781c8ee9"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/overview.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/overview.md",
+      "sha256": "eb9415d849698671b6fb763740d7b58ef9886911da895110da1ac73e2122c7e4"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pact-broker-webhooks.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pact-broker-webhooks.md",
+      "sha256": "7a54a5d1976e899508467468ed848beee66367f218470811528e9742f1d8daff"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pact-consumer-di.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pact-consumer-di.md",
+      "sha256": "8da93042ab11ad2e59ae8e37d44567d7bfec77760bb72467bde0d03987ebadce"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pact-consumer-framework-setup.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pact-consumer-framework-setup.md",
+      "sha256": "d514f2ee87f6ba64da407881bcb251bc41371794b2e0cfc488d179f380d21d28"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pact-mcp.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pact-mcp.md",
+      "sha256": "77f7a9fa2ee04f6cdd2af2f654602179f30008505c22e8ba9711e423ff61fc4e"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pactjs-utils-consumer-helpers.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pactjs-utils-consumer-helpers.md",
+      "sha256": "de0efb6edd92e9e8f731132d02280c4edee882c3b58a9a1b37a027e95986b2ca"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pactjs-utils-mandate.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pactjs-utils-mandate.md",
+      "sha256": "74b1dae511c46a2c3255f20b3a7405226ed7eceb47246d809f4388520e7ba529"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pactjs-utils-overview.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pactjs-utils-overview.md",
+      "sha256": "7403189c1388e3a4186b90d998b6042561ab73f80b5130cb4c787ca07b5d2ef9"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pactjs-utils-provider-verifier.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pactjs-utils-provider-verifier.md",
+      "sha256": "1c882c7ce145d7e9d12e6c39306947f7ab9897ad27633b638975502ea51431fd"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pactjs-utils-request-filter.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pactjs-utils-request-filter.md",
+      "sha256": "ca3aa1b6e6b4caa7aa63882b3803bf252f359af32374082c7148095468b1c020"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pactjs-utils-zod-to-pact.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/pactjs-utils-zod-to-pact.md",
+      "sha256": "a02b0859122ef4f720818ea78a149799202d0baf7852936f05a2f5d0c49935a8"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/playwright-cli.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/playwright-cli.md",
+      "sha256": "42be3dd79dd2e3afdef70b6901f765aaeed59ccbc6367533135092ea9cd41c9e"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/playwright-config.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/playwright-config.md",
+      "sha256": "6f7cbf42be005165f68d50090bf0e86227cd401b8e0119ad9e65e7cb2a05644e"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/playwright-utils-mandate.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/playwright-utils-mandate.md",
+      "sha256": "d59b1a6e29d6b39dbf0dbf5e7b5f8d007a90cd979d47e437661a6fd85d8a73ed"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/probability-impact.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/probability-impact.md",
+      "sha256": "3a73880070a9a1508a3058c7744aaf6b7fb78c844fe368ed6478e59e719cad10"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/recurse.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/recurse.md",
+      "sha256": "cf6e8fa4f0d40098004b36b79262773ae1ebe058a8275b3a6ec3ec4b9c1f6e8c"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/risk-governance.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/risk-governance.md",
+      "sha256": "c496ab24883085dcc178493632fe61fa6b1617c16aa70e186befd587faccda77"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/selective-testing.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/selective-testing.md",
+      "sha256": "99f72ba9117ecfdc8be51346b12d610bfd6e48ea6b6310575c7be7d0766cb5fd"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/selector-resilience.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/selector-resilience.md",
+      "sha256": "baab01dce68b97e87b27036b207ce10b7429a3e111cead0f1662ab726ec355ca"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/test-healing-patterns.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/test-healing-patterns.md",
+      "sha256": "612df5155306376f011f7e1f5da5d660d1c1bec5aca9697e5a3bcefe505399d1"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/test-levels-framework.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/test-levels-framework.md",
+      "sha256": "22b76acf805447f5968178e1a8c48f7e7e0d65965f1fe70a8f0f2a765ed0a216"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/test-priorities-matrix.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/test-priorities-matrix.md",
+      "sha256": "45dc87b018586c439d451b7b22c476e4ec70e8cd0ee28e9136dd2eac9fe34bef"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/test-quality.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/test-quality.md",
+      "sha256": "d29d97571514d0c191200ed25047a0a5f68c23eeb8a99a4d0dfeff2c33d12fa9"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/timing-debugging.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/timing-debugging.md",
+      "sha256": "fe0a57f14f154fe0acd898a90ca930197c8ddfb72761ab872c68fe13e669c361"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/visual-debugging.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/visual-debugging.md",
+      "sha256": "4c40d5173d5b933d650884c4206f7e12aea77e7ca6fc0eb22770865b55e6522d"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/webhook-module-setup.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/webhook-module-setup.md",
+      "sha256": "87dd6d7eb4dfd45691ccbb876a0bdf0b8a8b8622351be7539b8fb80504068048"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/webhook-providers.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/webhook-providers.md",
+      "sha256": "a71ba2c09c45541d4d262c4db85fb9b2aeb021bb09779c65454a5ed3bd546c63"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/webhook-risk-guidance.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/webhook-risk-guidance.md",
+      "sha256": "ff8a5b79d3d4e5b9a98eaf346e7efcf685e40bf012e1a8a3e5e1b6c3635be26f"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/webhook-template-matchers.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/webhook-template-matchers.md",
+      "sha256": "abf92e617b194199439c60fafe68cb0481b48e9ef09f69c01c8a424429a6009f"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/webhook-testing-fundamentals.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/webhook-testing-fundamentals.md",
+      "sha256": "cc1778b9aa95cb6fe00cfbb2115a2238636f71513cf159b7c02cbb3e091541c3"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/webhook-timeout-error.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/webhook-timeout-error.md",
+      "sha256": "98313793aac3314653d3e1f543bd6136206132e7cfb9ecb4bea3417587b6d09b"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/knowledge/webhook-waiting-querying.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/knowledge/webhook-waiting-querying.md",
+      "sha256": "d914f3cfa9b3cfbd94fd0d3d057a7b578764cf37cdfc1b29278e03c88c3b06c5"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/tea-index.csv",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/tea-index.csv",
+      "sha256": "5fb1e2bbe2c7053135a6281b3535a14b71ac5ba159f763f45f8dc3f0564c2932"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/resources/test-design-epic-3.example.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/resources/test-design-epic-3.example.md",
+      "sha256": "c53824cc9c3a2dc79d3dcedf53b56dc70b7d0b5c6a6fae5a6f78b1c8c1399b22"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/steps-c/step-01-detect-mode.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/steps-c/step-01-detect-mode.md",
+      "sha256": "bde46fb32a38b34af13521ec7213969e0f680487e9670290c554e59625f2bb16"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/steps-c/step-01b-resume.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/steps-c/step-01b-resume.md",
+      "sha256": "d75ad5d432f19ad27d01c199e3810faea64aef2cb23f6c3e1deba81cbf29d84b"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/steps-c/step-02-load-context.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/steps-c/step-02-load-context.md",
+      "sha256": "678ebd0fe600c5a1acf9b4515f93e98d35ad8f83cf107c7dfbff32b4d5a2d14d"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/steps-c/step-03-risk-and-testability.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/steps-c/step-03-risk-and-testability.md",
+      "sha256": "6fb3c5db7d6c509c9f1f2d640ad62f19936d9544ec4e39b78cbe4981135815bc"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/steps-c/step-04-coverage-plan.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/steps-c/step-04-coverage-plan.md",
+      "sha256": "214f753393634d66798a8da2c3cf036bbb9c6dbcff6d11232ea2562d3495aaf3"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/steps-c/step-05-generate-output.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/steps-c/step-05-generate-output.md",
+      "sha256": "8407b79c600af4c68677ecaad84480bfa55068a021403137a5d30d41f67bc74c"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/steps-e/step-01-assess.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/steps-e/step-01-assess.md",
+      "sha256": "3b6b684b315dcb484e36fa5edadbd3b6e7c82d0b848a3a850ea528335254b9c2"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/steps-e/step-02-apply-edit.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/steps-e/step-02-apply-edit.md",
+      "sha256": "e91adf57c17b5d8f984fe4a1fc1090910ee0a6bb31e81dae19af8ca06e406e0a"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/steps-v/step-01-validate.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/steps-v/step-01-validate.md",
+      "sha256": "bd5dbff51e9f1740e410d1e0c161886e37195ffdf3632d429f12d804f7e8b1e2"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/test-design-architecture-template.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/test-design-architecture-template.md",
+      "sha256": "5a20da93f6f17713a429e6b24fc4a1ed16667bb4b1830d517c3dbd2eb630c89d"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/test-design-handoff-template.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/test-design-handoff-template.md",
+      "sha256": "ce1dd24dd95244e4a511bef74a3a7cb10e5620a3a137195a31608f81ac7e7b1b"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/test-design-qa-template.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/test-design-qa-template.md",
+      "sha256": "65177a5ef6e6ef72cf161c5ed1fe6bf1d2bfb499b1803c76973f1dc7958850cd"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/test-design-template.md",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/test-design-template.md",
+      "sha256": "c38a19deb8b97cab1e5671f1253d57ea3212a63694f5cb8faba984906ae64803"
+    },
+    {
+      "path": "upstream/tea/workflows/testarch/bmad-testarch-test-design/workflow.yaml",
+      "upstream": "tea",
+      "sourcePath": "src/workflows/testarch/bmad-testarch-test-design/workflow.yaml",
+      "sha256": "28e61166a437ccef0a3e72e8860bdee446d92e2e6dea3e0330b34b52a12c2a0b"
+    },
+    {
+      "path": "licenses/bmad-method-test-architecture-enterprise-LICENSE.txt",
+      "upstream": "tea",
+      "sourcePath": "LICENSE",
+      "sha256": "d63b6198ba078d9494407eb94e2d86adf6350195301bb5ded4ba24e36bce8b55"
+    }
+  ],
+  "entryPoints": {
+    "planner": [
+      "upstream/bmad/bmm-skills/agents/bmad-agent-pm/SKILL.md",
+      "upstream/bmad/bmm-skills/agents/bmad-agent-architect/SKILL.md",
+      "upstream/bmad/bmm-skills/ship/bmad-build-auto/step-01-clarify-and-route.md",
+      "upstream/bmad/bmm-skills/ship/bmad-build-auto/step-02-plan.md"
+    ],
+    "test_designer": [
+      "upstream/tea/workflows/testarch/bmad-testarch-test-design/SKILL.md",
+      "upstream/tea/workflows/testarch/bmad-testarch-test-design/instructions.md",
+      "upstream/tea/workflows/testarch/bmad-testarch-test-design/workflow.yaml"
+    ],
+    "developer": [
+      "upstream/bmad/bmm-skills/agents/bmad-agent-dev/SKILL.md",
+      "upstream/bmad/bmm-skills/ship/bmad-build-auto/step-03-implement.md"
+    ],
+    "reviewer": [
+      "upstream/bmad/bmm-skills/ship/bmad-code-review/SKILL.md",
+      "upstream/bmad/bmm-skills/ship/bmad-code-review/steps/step-01-gather-context.md",
+      "upstream/bmad/bmm-skills/ship/bmad-code-review/steps/step-02-review.md",
+      "upstream/bmad/bmm-skills/ship/bmad-code-review/steps/step-03-triage.md",
+      "upstream/bmad/bmm-skills/ship/bmad-code-review/steps/step-04-present.md"
+    ]
+  },
+  "deferredEntryPoints": {
+    "test_author": "A pinned TEA automation workflow is not included in this P0 package.",
+    "test_runner": "The WorkLite Commands execution path supplies this role; no upstream process entry point is imported."
+  }
+}

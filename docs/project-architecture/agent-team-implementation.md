@@ -2,7 +2,7 @@
 
 Date: 2026-10-03
 
-Status: The BMAD + TEA and LangGraph.js technology direction is confirmed. The detailed contracts below are an implementation proposal. Agent Team is not implemented. This document does not authorize code changes, dependency installation, verification commands, or service lifecycle operations.
+Status: The BMAD + TEA and LangGraph.js technology direction is confirmed and implementation has started. Agent Team is not yet available through product APIs. The detailed contracts remain implementation requirements, and normal repository verification and service-lifecycle rules still apply.
 
 Architecture authority: [Project Architecture](README.md#agent-team-implementation-direction). Applicable working rules: [AGENTS.md](../../AGENTS.md) and [AGENTS_WORKFLOW.md](../../AGENTS_WORKFLOW.md).
 
@@ -99,9 +99,9 @@ Accepted requirements and scope have explicit revisions. If requirements change,
 
 ## 5. BMAD and TEA Process Packaging
 
-P0 must select concrete BMAD and TEA releases, inspect their source using authenticated `gh`, record their licenses, and identify the exact files needed by each selected workflow. Repository access became unavailable during this planning session, so BMAD and TEA source revisions have not been verified or pinned here. No release number, commit hash, or supported-file list is invented.
+P0 pinned BMAD `v6.12.0` (annotated tag object `b28fef564f2c48ac20d969bcccaf2fc08d503afb`, commit `05bfbd46d00766ec88eb9b42e76be2c575d64d7b`) and TEA `v1.27.2` (annotated tag object `fa068c614f9642aad62f060c0b1c2e9956506fb5`, commit `d99ad29c62697c152e3393351406686d5bcd323c`). Both repositories provide MIT license terms with a BMad trademark notice. The selected runtime versions are `@langchain/langgraph@1.4.18`, `@langchain/langgraph-checkpoint-sqlite@1.0.4`, and `@langchain/core@1.1.48`.
 
-The proposed trusted process package lives under `packages/team-runtime/processes/bmad-tea/`. Its manifest records the upstream repository and release or commit, imported files and digests, license notices, WorkLite transformations, and selected workflow entry points. Updates are explicit dependency changes; an active run never follows an upstream branch or silently switches process versions.
+The trusted process package lives under `packages/team-runtime/processes/bmad-tea/`. Its manifest records the upstream repository, tag object and commit, imported files and SHA-256 digests, license notices, WorkLite transformations, and selected workflow entry points. Updates are explicit dependency changes; an active run never follows an upstream branch or silently switches process versions.
 
 The package must preserve the instruction steps and reference knowledge required by the selected processes. A shortened role prompt alone is not adoption of BMAD or TEA. Upstream relative references, configuration variables, output paths, and requests for user input must be mapped explicitly to WorkLite project context, run documents, and pending-input records.
 
@@ -324,4 +324,5 @@ References were consulted on 2026-10-03. They support the selected mechanisms; t
 
 - Created the documentation-only implementation proposal for the confirmed BMAD + TEA and LangGraph.js direction.
 - Recorded the first-release scope, role handoffs, process packaging, shared runtime gaps, persistence ownership, effect recovery, proposed API, milestones, and planned acceptance scenarios.
-- No runtime implementation, dependency installation, test execution, build, type check, or service lifecycle operation was performed.
+- Initial implementation work pinned and packaged the selected BMAD and TEA process content, added the LangGraph runtime package, and defined the first Planner-to-Test-Designer graph and durable input/interruption boundary.
+- No test execution, build, type check, server lifecycle operation, or deployment-profile access has been performed.
