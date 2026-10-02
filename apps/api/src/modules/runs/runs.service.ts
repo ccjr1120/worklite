@@ -26,6 +26,13 @@ import { WechatOfficialAccountService } from '../plugins/wechat-official-account
 import { PortkeyGatewayService } from '../model-providers/portkey-gateway.service';
 
 type RunListener = (event: RunProgressEvent) => void;
+type PreparedArtifactNode = {
+  record: typeof artifacts.$inferInsert;
+  id: string;
+  name: string;
+  type: 'text' | 'markdown' | 'json';
+  output: unknown;
+};
 
 class RunCancelledError extends Error {
   constructor() {
@@ -512,6 +519,7 @@ export class RunsService {
         const attempts = node.errorPolicy === 'retry' ? 2 : 1;
         let output: unknown;
         let artifactIds: string[] = [];
+        let artifactToPersist: PreparedArtifactNode | null = null;
         let failure: unknown;
         for (let attempt = 0; attempt < attempts; attempt += 1) {
           try {
@@ -539,9 +547,9 @@ export class RunsService {
               return;
             }
             await this.assertActive(runId, abortController.signal);
-            const artifact = await this.createArtifactNode(run, node, result.output);
-            output = artifact ? artifact.output : result.output;
-            artifactIds = artifact ? [artifact.id] : [];
+            artifactToPersist = this.prepareArtifactNode(run, node, result.output);
+            output = artifactToPersist ? artifactToPersist.output : result.output;
+            artifactIds = artifactToPersist ? [artifactToPersist.id] : [];
             failure = null;
             break;
           } catch (error) {
@@ -578,10 +586,12 @@ export class RunsService {
         delete state.active;
         const finishedAt = new Date();
         await this.db.transaction((transaction) => {
+          if (artifactToPersist) transaction.insert(artifacts).values(artifactToPersist.record).run();
           const [updatedNodeRun] = transaction.update(workflowNodeRuns).set({ status: 'succeeded', output: sanitizeWorkflowImages(output), artifactIds, finishedAt }).where(and(eq(workflowNodeRuns.id, nodeRunId), eq(workflowNodeRuns.status, 'running'))).returning().all();
           const [updatedRun] = transaction.update(workflowRuns).set({ executionState: state as StoredWorkflowExecutionState, updatedAt: finishedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.status, 'running'))).returning().all();
           if (!updatedNodeRun || !updatedRun) throw new RunCancelledError();
         });
+        if (artifactToPersist) await this.publish(runId, 'artifact.created', { artifactId: artifactToPersist.id, nodeId: node.id, name: artifactToPersist.name, type: artifactToPersist.type });
         await this.publish(runId, 'node.completed', { nodeId: node.id, nodeRunId, output: sanitizeWorkflowImages(output), artifactIds });
       }
 
@@ -688,7 +698,7 @@ export class RunsService {
     return true;
   }
 
-  private async createArtifactNode(run: typeof workflowRuns.$inferSelect, node: StoredWorkflowNode, output: unknown): Promise<{ id: string; output: unknown } | null> {
+  private prepareArtifactNode(run: typeof workflowRuns.$inferSelect, node: StoredWorkflowNode, output: unknown): PreparedArtifactNode | null {
     if (node.type !== 'worklite/artifact') return null;
     const config = asRecord(node.config);
     if (!config || typeof config.name !== 'string' || !config.name.trim()) throw new Error('Artifact node requires a name and supported artifact type.');
@@ -697,9 +707,8 @@ export class RunsService {
     const content = typeof output === 'string' ? output : JSON.stringify(output ?? '');
     const name = config.name.trim();
     const id = `art_${randomUUID()}`;
-    await this.db.insert(artifacts).values({ id, workspaceId: run.workspaceId, workflowId: run.workflowId, runId: run.id, name, type, size: `${Buffer.byteLength(content, 'utf8')} B`, content });
-    await this.publish(run.id, 'artifact.created', { artifactId: id, nodeId: node.id, name, type });
-    return { id, output: { type: 'artifact', artifactId: id, name, artifactType: type } };
+    const record: typeof artifacts.$inferInsert = { id, workspaceId: run.workspaceId, workflowId: run.workflowId, runId: run.id, name, type, size: `${Buffer.byteLength(content, 'utf8')} B`, content };
+    return { record, id, name, type, output: { type: 'artifact', artifactId: id, name, artifactType: type } };
   }
 
   private async toView(run: typeof workflowRuns.$inferSelect, workflow: typeof workflows.$inferSelect, version: typeof workflowVersions.$inferSelect, workspaceSlug: string, initiator: string, details: boolean): Promise<RunView> {
