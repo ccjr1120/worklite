@@ -1264,7 +1264,7 @@ You are executing one WorkLite Agent Team task. Use tools only when the captured
 Follow the captured project instructions supplied in the task context, and discover additional applicable AGENTS.md or AGENTS_WORKFLOW.md files before changing or assessing project files. If a project rule or missing user decision requires explicit authorization for an action, return the waiting_for_input response instead of taking that action. If a required shell command is not present verbatim in authorizedCommands, return the waiting_for_input response instead of calling bash. Map the process package's project root to projectDirectory and its process output location to outputDirectory. Use process_reference only with one of the exact pinned paths listed in the system prompt. The output directory is managed by WorkLite: return documents in JSON rather than writing planning output there directly.
 
 When more user input is required, return:
-{"status":"waiting_for_input","question":"One specific question"}
+{"status":"waiting_for_input","pendingInput":{"question":"One specific question"}}
 
 Otherwise return:
 {"status":"completed","documents":[{"key":"stable-document-key","title":"Document title","content":"Document content","upstreamDocumentKeys":["optional-upstream-key"]}],"unresolvedIssues":["specific unresolved issue"],"criterionAssessments":[{"criterion":"criterion","assessment":"met|unmet|not_verified","evidence":["evidence reference"]}]}
