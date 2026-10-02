@@ -341,6 +341,15 @@ References were consulted on 2026-10-03. They support the selected mechanisms; t
 
 ## 16. Change Record
 
+### 2026-10-03 - Structured handoff implementation
+
+- Passed each role invocation a structured task definition containing its stable key, role, goal, dependency keys, input-document content fingerprints, expected result kind, and acceptance-criterion references.
+- Required and parsed changed-file paths and explicit assigned-work completion in every completed task result while retaining document and command evidence.
+- Preserved completed task-result evidence in graph checkpoints and required it when reconciling checkpoint projections.
+- Typed the public task-result contract and surfaced changed files and assigned-work completion directly in the Team Run detail interface.
+- Updated the Run detail design in the same change and recorded its source-level coverage audit.
+- No test, type check, lint, build, browser check, HTTP request, Team Run, server lifecycle operation, or deployment-profile access was performed.
+
 ### 2026-10-03 - Source-level implementation audit
 
 - Confirmed the pinned process manifest records BMAD `v6.12.0` and TEA `v1.27.2`, their repositories, tag and commit object hashes, licenses, byte-for-byte source paths and SHA-256 digests, role entry points, and the Commands-owned deferral of the Test Runner role.

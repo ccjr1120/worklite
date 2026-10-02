@@ -31,7 +31,7 @@ Understand and continue the current run. Reading costs no action: the persisted 
 
 ## Layout
 
-The page uses the full Workspace page width with a `1200px` maximum. The heading and execution controls are followed by immutable TeamVersion metadata, mode, intent, project directory, command grants, and scope revision. The main desktop grid places active work — pending input or recovery, then task attempts — in a wider primary column and documents, operations, and criterion assessments in a supporting column. Columns stack below `1024px`. The live member output occupies a fixed reading column with its own bounded scroll region; documents and command evidence use disclosures with bounded preformatted regions rather than expanding the page.
+The page uses the full Workspace page width with a `1200px` maximum. The heading and execution controls are followed by immutable TeamVersion metadata, mode, intent, project directory, command grants, and scope revision. The main desktop grid places active work — pending input or recovery, then task attempts — in a wider primary column and documents, operations, and criterion assessments in a supporting column. Each completed task attempt exposes its changed-file list and assigned-work completion before the raw result JSON disclosure. Columns stack below `1024px`. The live member output occupies a fixed reading column with its own bounded scroll region; documents and command evidence use disclosures with bounded preformatted regions rather than expanding the page.
 
 ## Interaction Contract
 
@@ -59,7 +59,7 @@ SSE transport failure is shown as a reconnecting state, not a run failure. The p
 | Error | Load failures use the shared recoverable error state. Mutation failures are control-local alerts and never replace durable Run data. |
 | Busy | Every action control owns its spinner and disabled state; no full-page blocking overlay is used. |
 | Offline | SSE shows a reconnecting cue, React Query retries the persisted snapshot, and completed durable sections remain readable. |
-| Long content | Member output, documents, task result JSON, and command output use bounded scroll or disclosure regions. Output is never silently truncated. |
+| Long content | Member output, documents, changed-file lists, task result JSON, and command output use bounded scroll or disclosure regions. Output is never silently truncated. |
 
 The page distinguishes execution status from criterion assessment. `succeeded` is only the Run completion state; criterion values remain `met`, `unmet`, or `not_verified` with their evidence.
 
@@ -89,6 +89,11 @@ The page distinguishes execution status from criterion assessment. `succeeded` i
 | `agentTeams:tasks.title` | State |
 | `agentTeams:tasks.empty` | State |
 | `agentTeams:tasks.attempt` | State |
+| `agentTeams:tasks.changedFiles` | State |
+| `agentTeams:tasks.noChangedFiles` | State |
+| `agentTeams:tasks.assignedWork` | State |
+| `agentTeams:tasks.assignedWorkCompleted` | State |
+| `agentTeams:tasks.assignedWorkNotCompleted` | State |
 | `agentTeams:tasks.result` | State |
 | `agentTeams:tasks.retry` | Action |
 | `agentTeams:tasks.retrying` | State |
@@ -157,13 +162,17 @@ The page distinguishes execution status from criterion assessment. `succeeded` i
 
 ## Accessibility
 
-The heading hierarchy moves from Run title to section titles. Controls are native buttons with visible text and shared focus rings; only the copy-id control is icon-independent and remains labelled by its value. Live output, reconnecting, queued, working, waiting, and paused states use polite status regions; failures use alerts. Every status includes a text label in addition to color. Recovery is a labelled radio group, so arrow keys move between the three decisions and the decision remains visible if submission fails. Disclosure summaries and preformatted regions are keyboard reachable, and focus is not moved after SSE updates. Cancel uses a labelled dialog and returns focus to its invoking pattern on close.
+The heading hierarchy moves from Run title to section titles. Controls are native buttons with visible text and shared focus rings; only the copy-id control is icon-independent and remains labelled by its value. Live output, reconnecting, queued, working, waiting, and paused states use polite status regions; failures use alerts. Every status includes a text label in addition to color. Recovery is a labelled radio group, so arrow keys move between the three decisions and the decision remains visible if submission fails. Changed-file lists use list semantics and the assigned-work summary uses a description list, so assistive technology announces the evidence relationships. Disclosure summaries and preformatted regions are keyboard reachable, and focus is not moved after SSE updates. Cancel uses a labelled dialog and returns focus to its invoking pattern on close.
 
 ## Coverage Status
 
-Source-level audit: 2026-10-03. Differences found: none in the source-level comparison of route, observation, mutation, replay, evidence, copy, token, responsive, and accessibility structure. This was not a browser, accessibility-tool, runtime, acceptance, or real-Run verification.
+Source-level audit: 2026-10-03, updated for structured task evidence. Differences found: none in the source-level comparison of route, observation, mutation, replay, evidence, copy, token, responsive, and accessibility structure. This was not a browser, accessibility-tool, runtime, acceptance, or real-Run verification.
 
 ## Changelog
+
+### 2026-10-03 - Structured task evidence
+
+- Added changed-file and assigned-work completion evidence to completed task attempts while retaining raw result JSON as a secondary disclosure.
 
 ### 2026-10-03
 

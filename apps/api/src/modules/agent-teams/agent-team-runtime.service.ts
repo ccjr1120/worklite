@@ -26,6 +26,7 @@ import type {
   AgentTeamRunView,
   AgentTeamTaskAttemptStatus,
   AgentTeamTaskAttemptView,
+  AgentTeamTaskResult as AgentTeamTaskResultView,
   AnswerAgentTeamRunRequest,
   CreateAgentTeamRunRequest,
   RecoverAgentTeamOperationRequest,
@@ -101,6 +102,8 @@ type RawTaskOutput = {
   documents?: unknown;
   unresolvedIssues?: unknown;
   commandIds?: unknown;
+  changedFiles?: unknown;
+  completedAssignedWork?: unknown;
   criterionAssessments?: unknown;
   repairRequest?: unknown;
   pendingInput?: unknown;
@@ -782,6 +785,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           run,
           document.producingTaskKey,
           state.documents ?? [],
+          state.taskResults[document.producingTaskKey],
         );
         transaction.insert(agentTeamDocuments).values({
           id: `atdoc_${randomUUID()}`,
@@ -891,8 +895,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     request: AgentTeamTaskRequest,
   ): Promise<AgentTeamTaskResult> {
     const run = await this.getRun(request.runId);
-    const role = version.snapshot.roles.find((item) => item.role === request.role);
-    if (!role) throw new Error(`Agent Team role ${request.role} was not captured by this version.`);
+    const { role: taskRole, taskKey } = request.taskDefinition;
+    const role = version.snapshot.roles.find((item) => item.role === taskRole);
+    if (!role) throw new Error(`Agent Team role ${taskRole} was not captured by this version.`);
     const attempt = await this.prepareTaskAttempt(run, request);
     if (attempt.status === 'completed' || attempt.status === 'waiting_for_input') {
       return attempt.result as AgentTeamTaskResult;
@@ -938,7 +943,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
             : runtime;
         }),
       builtinToolNames: role.toolNames,
-      role: request.role,
+      role: taskRole,
       projectDirectory: request.projectDirectory,
       authorizedCommands: request.authorizedCommands,
       processReferencePaths: role.processReferences ?? [],
@@ -947,10 +952,10 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       jsonOutput: true,
       correlation: { source: 'team', teamRunId: request.runId, teamTaskAttemptId: attempt.id },
       limits: { maxToolResultChars: 100_000 },
-      operation: { taskKey: request.taskKey, journal: operationJournal },
+      operation: { taskKey, journal: operationJournal },
       onTextDelta: (delta) => this.appendEvent(this.db, request.runId, 'task.delta', {
         taskAttemptId: attempt.id,
-        taskKey: request.taskKey,
+        taskKey,
         delta,
       }),
       onSkillScript: (activity) => {
@@ -961,7 +966,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    const parsed = parseTaskOutput(output, request.taskKey);
+    const parsed = parseTaskOutput(output, taskKey);
     if (parsed.status === 'waiting_for_input') {
       return this.finishWaitingAttempt(request, workspaceId, attempt.id, parsed);
     }
@@ -984,19 +989,20 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     request: AgentTeamTaskRequest,
   ): Promise<{ id: string; status: AgentTeamTaskAttemptStatus; result: unknown }> {
     const inputFingerprint = fingerprint(request);
+    const { role, taskKey } = request.taskDefinition;
     const [existing] = await this.db.select().from(agentTeamTaskAttempts)
-      .where(and(eq(agentTeamTaskAttempts.runId, run.id), eq(agentTeamTaskAttempts.taskKey, request.taskKey)))
+      .where(and(eq(agentTeamTaskAttempts.runId, run.id), eq(agentTeamTaskAttempts.taskKey, taskKey)))
       .orderBy(desc(agentTeamTaskAttempts.attemptIndex))
       .limit(1);
     if (existing?.active && existing.status === 'completed') {
       if (existing.inputFingerprint !== inputFingerprint) {
-        throw new Error(`Agent Team task ${request.taskKey} produced a result for different input.`);
+        throw new Error(`Agent Team task ${taskKey} produced a result for different input.`);
       }
       return { id: existing.id, status: 'completed', result: existing.result };
     }
 
     if (existing?.active && existing.status === 'waiting_for_recovery') {
-      throw new Error(`Agent Team task ${request.taskKey} is waiting for operation recovery.`);
+      throw new Error(`Agent Team task ${taskKey} is waiting for operation recovery.`);
     }
 
     if (existing?.active && existing.status === 'waiting_for_input' && !request.answer) {
@@ -1020,7 +1026,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       if (resumed) return { id: resumed.id, status: resumed.status, result: resumed.result };
     }
     if (existing?.active && existing.status === 'running') {
-      throw new Error(`Agent Team task ${request.taskKey} is already running.`);
+      throw new Error(`Agent Team task ${taskKey} is already running.`);
     }
 
     const attemptId = `atask_${randomUUID()}`;
@@ -1028,9 +1034,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       id: attemptId,
       workspaceId: run.workspaceId,
       runId: run.id,
-      taskKey: request.taskKey,
+      taskKey,
       attemptIndex: (existing?.attemptIndex ?? 0) + 1,
-      role: request.role,
+      role,
       status: 'running',
       inputRevision: request,
       inputFingerprint,
@@ -1038,8 +1044,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     }).returning();
     this.appendEvent(this.db, run.id, 'task.started', {
       taskAttemptId: attemptId,
-      taskKey: request.taskKey,
-      role: request.role,
+      taskKey: request.taskDefinition.taskKey,
+      role: request.taskDefinition.role,
       attemptIndex: created.attemptIndex,
     });
     return { id: created.id, status: created.status, result: created.result };
@@ -1091,7 +1097,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       }).run();
       this.appendEvent(transaction, request.runId, 'task.waiting', {
         taskAttemptId: attemptId,
-        taskKey: request.taskKey,
+        taskKey: request.taskDefinition.taskKey,
         pendingInputId,
         kind: 'question',
       });
@@ -1111,6 +1117,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     attemptId: string,
     result: Extract<AgentTeamTaskResult, { status: 'completed' }>,
   ): Promise<AgentTeamTaskResult> {
+    const { taskKey } = request.taskDefinition;
     const now = new Date();
     const materializedDocuments: Array<{ document: AgentTeamDocument; revision: number }> = [];
     await this.transaction((transaction) => {
@@ -1153,14 +1160,14 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         }).run();
         this.appendEvent(transaction, request.runId, 'document.committed', {
           taskAttemptId: attemptId,
-          taskKey: request.taskKey,
+          taskKey,
           documentKey: document.key,
           revision,
         });
       }
       this.appendEvent(transaction, request.runId, 'task.completed', {
         taskAttemptId: attemptId,
-        taskKey: request.taskKey,
+        taskKey,
         result,
       });
     });
@@ -1598,6 +1605,7 @@ function initialGraphState(run: AgentTeamRun, outputDirectory: string): AgentTea
     unresolvedIssues: [],
     commandIds: [],
     criterionAssessments: [],
+    taskResults: {},
     pendingInput: null,
     activeTaskKey: null,
     taskAnswers: {},
@@ -1614,6 +1622,7 @@ function ensureProjectionAttempt(
   run: AgentTeamRun,
   taskKey: string,
   documents: readonly AgentTeamDocument[],
+  taskResult: Extract<AgentTeamTaskResult, { status: 'completed' }> | undefined,
 ): string {
   const [existing] = db.select().from(agentTeamTaskAttempts)
     .where(and(eq(agentTeamTaskAttempts.runId, run.id), eq(agentTeamTaskAttempts.taskKey, taskKey)))
@@ -1623,13 +1632,11 @@ function ensureProjectionAttempt(
   if (existing) {
     if (existing.status !== 'completed') {
       const previousResult = existing.result as Partial<Extract<AgentTeamTaskResult, { status: 'completed' }>> | null;
-      const result = {
-        status: 'completed' as const,
-        documents: documents.filter((document) => document.producingTaskKey === taskKey),
-        unresolvedIssues: Array.isArray(previousResult?.unresolvedIssues) ? previousResult.unresolvedIssues : [],
-        commandIds: Array.isArray(previousResult?.commandIds) ? previousResult.commandIds : [],
-        criterionAssessments: Array.isArray(previousResult?.criterionAssessments) ? previousResult.criterionAssessments : [],
-      };
+      const result = projectedTaskResult(
+        taskResult,
+        previousResult,
+        documents.filter((document) => document.producingTaskKey === taskKey),
+      );
       db.update(agentTeamTaskAttempts).set({
         status: 'completed',
         result,
@@ -1652,17 +1659,32 @@ function ensureProjectionAttempt(
     status: 'completed',
     inputRevision: { source: 'langgraph-checkpoint', taskKey },
     inputFingerprint: fingerprint({ source: 'langgraph-checkpoint', runId: run.id, taskKey }),
-    result: {
-      status: 'completed',
-      documents: documents.filter((document) => document.producingTaskKey === taskKey),
-      unresolvedIssues: [],
-      commandIds: [],
-      criterionAssessments: [],
-    },
+    result: projectedTaskResult(
+      taskResult,
+      null,
+      documents.filter((document) => document.producingTaskKey === taskKey),
+    ),
     startedAt: now,
     finishedAt: now,
   }).run();
   return id;
+}
+
+function projectedTaskResult(
+  taskResult: Extract<AgentTeamTaskResult, { status: 'completed' }> | undefined,
+  previousResult: Partial<Extract<AgentTeamTaskResult, { status: 'completed' }>> | null,
+  documents: AgentTeamDocument[],
+): Extract<AgentTeamTaskResult, { status: 'completed' }> {
+  if (taskResult) return { ...taskResult, documents };
+  return {
+    status: 'completed',
+    documents,
+    unresolvedIssues: Array.isArray(previousResult?.unresolvedIssues) ? previousResult.unresolvedIssues : [],
+    commandIds: Array.isArray(previousResult?.commandIds) ? previousResult.commandIds : [],
+    changedFiles: Array.isArray(previousResult?.changedFiles) ? previousResult.changedFiles : [],
+    completedAssignedWork: previousResult?.completedAssignedWork === true,
+    criterionAssessments: Array.isArray(previousResult?.criterionAssessments) ? previousResult.criterionAssessments : [],
+  };
 }
 
 function nextDocumentRevision(
@@ -1688,16 +1710,15 @@ When more user input is required, return:
 {"status":"waiting_for_input","pendingInput":{"question":"One specific question"}}
 
 Otherwise return:
-{"status":"completed","documents":[{"key":"stable-document-key","title":"Document title","content":"Document content","upstreamDocumentKeys":["optional-upstream-key"]}],"unresolvedIssues":["specific unresolved issue"],"criterionAssessments":[{"criterion":"criterion","assessment":"met|unmet|not_verified","evidence":["evidence reference"]}]}
+{"status":"completed","documents":[{"key":"stable-document-key","title":"Document title","content":"Document content","upstreamDocumentKeys":["optional-upstream-key"]}],"unresolvedIssues":["specific unresolved issue"],"changedFiles":["path/to/changed/file"],"completedAssignedWork":true,"criterionAssessments":[{"criterion":"criterion","assessment":"met|unmet|not_verified","evidence":["evidence reference"]}]}
 
-The reviewer may add "repairRequest":{"taskKey":"development","instruction":"specific repair instruction"}. Do not invent command ids; WorkLite records actual command evidence.`;
+Use an empty changedFiles array when the task changed no project files. Set completedAssignedWork to false only when the assigned work remains incomplete, and record the reason in unresolvedIssues. The reviewer may add "repairRequest":{"taskKey":"development","instruction":"specific repair instruction"}. Do not invent command ids; WorkLite records actual command evidence.`;
 }
 
 function taskContext(request: AgentTeamTaskRequest): unknown {
   return {
     task: {
-      key: request.taskKey,
-      role: request.role,
+      ...request.taskDefinition,
       mode: request.mode,
       scopeRevision: request.scopeRevision,
       ...(request.pendingInputId ? { pendingInputId: request.pendingInputId } : {}),
@@ -1738,11 +1759,16 @@ function parseTaskOutput(output: string, taskKey: string): AgentTeamTaskResult {
     };
   }
   if (value?.status !== 'completed') throw new Error('The Agent Team role returned an unsupported task status.');
+  if (typeof value.completedAssignedWork !== 'boolean') {
+    throw new Error('The Agent Team role did not report assigned-work completion.');
+  }
   return {
     status: 'completed',
     documents: parseDocuments(value.documents, taskKey),
     unresolvedIssues: parseStrings(value.unresolvedIssues, 'unresolved issue'),
     commandIds: [],
+    changedFiles: parseStrings(value.changedFiles, 'changed file'),
+    completedAssignedWork: value.completedAssignedWork,
     criterionAssessments: parseAssessments(value.criterionAssessments),
     repairRequest: parseRepairRequest(value.repairRequest),
   };
@@ -1822,7 +1848,7 @@ function toTaskAttemptView(row: typeof agentTeamTaskAttempts.$inferSelect): Agen
     role: row.role,
     status: row.status,
     inputFingerprint: row.inputFingerprint,
-    result: row.result,
+    result: row.result as AgentTeamTaskResultView | null,
     error: row.error,
     retryable: row.status === 'failed' && row.active,
     createdAt: row.createdAt.toISOString(),
@@ -1903,7 +1929,9 @@ function isUsableGraphState(value: unknown, run: AgentTeamRun): value is AgentTe
     Array.isArray(state.documents) &&
     Array.isArray(state.unresolvedIssues) &&
     Array.isArray(state.commandIds) &&
-    Array.isArray(state.criterionAssessments);
+    Array.isArray(state.criterionAssessments) &&
+    typeof state.taskResults === 'object' &&
+    state.taskResults !== null;
 }
 
 function recordCompletedCommand(

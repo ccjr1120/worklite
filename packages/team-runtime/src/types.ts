@@ -43,10 +43,24 @@ export type AgentTeamDocument = {
   upstreamDocumentKeys: string[];
 };
 
-export type AgentTeamTaskRequest = {
-  runId: string;
+export type AgentTeamInputDocumentVersion = {
+  key: string;
+  contentFingerprint: string;
+};
+
+export type AgentTeamTaskDefinition = {
   taskKey: string;
   role: AgentTeamRole;
+  goal: string;
+  dependencyKeys: readonly string[];
+  inputDocumentVersions: readonly AgentTeamInputDocumentVersion[];
+  expectedResultKind: string;
+  acceptanceCriterionReferences: readonly string[];
+};
+
+export type AgentTeamTaskRequest = {
+  runId: string;
+  taskDefinition: AgentTeamTaskDefinition;
   intent: string;
   mode: AgentTeamMode;
   projectDirectory: string;
@@ -66,6 +80,8 @@ export type AgentTeamTaskResult =
       documents: AgentTeamDocument[];
       unresolvedIssues: string[];
       commandIds: string[];
+      changedFiles: string[];
+      completedAssignedWork: boolean;
       criterionAssessments: AgentTeamCriterionAssessment[];
       repairRequest?: AgentTeamRepairRequest;
     }

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Annotation, END, START, StateGraph, interrupt, type BaseCheckpointSaver } from '@langchain/langgraph';
 import type {
   AgentTeamCriterionAssessment,
@@ -9,6 +10,7 @@ import type {
   AgentTeamProjectInstructionFile,
   AgentTeamRole,
   AgentTeamRunRequest,
+  AgentTeamTaskDefinition,
   AgentTeamTaskRequest,
   AgentTeamTaskResult,
 } from './types';
@@ -43,6 +45,10 @@ const teamState = Annotation.Root({
   criterionAssessments: Annotation<readonly AgentTeamCriterionAssessment[]>({
     reducer: (left, right) => [...left, ...right],
     default: () => [],
+  }),
+  taskResults: Annotation<Record<string, Extract<AgentTeamTaskResult, { status: 'completed' }>>>({
+    reducer: (left, right) => ({ ...left, ...right }),
+    default: () => ({}),
   }),
   pendingInput: Annotation<AgentTeamPendingInput | null>({
     reducer: (_left, right) => right,
@@ -101,9 +107,86 @@ function waitingResultUpdate(result: Extract<AgentTeamTaskResult, { status: 'wai
 }
 
 function taskResultUpdate(result: AgentTeamTaskResult, taskKey: string): Partial<AgentTeamGraphState> {
-  return result.status === 'waiting_for_input'
-    ? waitingResultUpdate(result, taskKey)
-    : completedResultUpdate(result);
+  if (result.status === 'waiting_for_input') return waitingResultUpdate(result, taskKey);
+  return {
+    ...completedResultUpdate(result),
+    taskResults: { [taskKey]: result },
+  };
+}
+
+function taskDefinition(
+  state: AgentTeamGraphState,
+  role: AgentTeamRole,
+  taskKey: string,
+): AgentTeamTaskDefinition {
+  const isRepair = taskKey.startsWith('repair_');
+  const dependencyKeys = taskDependencies(role, state.mode, isRepair);
+  return {
+    taskKey,
+    role,
+    goal: taskGoal(role, isRepair, state.repairInstruction),
+    dependencyKeys,
+    inputDocumentVersions: state.documents.map((document) => ({
+      key: document.key,
+      contentFingerprint: contentFingerprint(document.content),
+    })),
+    expectedResultKind: expectedResultKind(role),
+    acceptanceCriterionReferences: state.criterionAssessments.map(
+      (assessment) => assessment.criterion,
+    ),
+  };
+}
+
+function taskDependencies(
+  role: AgentTeamRole,
+  mode: AgentTeamRunRequest['mode'],
+  isRepair: boolean,
+): string[] {
+  if (role === 'planner') return [];
+  if (role === 'test_designer') return mode === 'validate_existing' ? [] : ['planning'];
+  if (role === 'developer') return ['test_design', ...(isRepair ? ['review'] : [])];
+  if (role === 'test_author') {
+    return ['test_design', 'development', ...(isRepair ? ['review'] : [])];
+  }
+  if (role === 'test_runner') {
+    return [
+      ...(mode === 'validate_existing' ? ['test_design'] : ['test_authoring']),
+      ...(isRepair ? ['review'] : []),
+    ];
+  }
+  return ['test_execution'];
+}
+
+function taskGoal(
+  role: AgentTeamRole,
+  isRepair: boolean,
+  repairInstruction: string | null,
+): string {
+  const goals: Record<AgentTeamRole, string> = {
+    planner: 'Clarify the requested outcome, constraints, acceptance criteria, and implementation tasks.',
+    test_designer: 'Design acceptance-linked scenarios, risks, environments, and proposed checks.',
+    developer: 'Implement only the authorized scoped change and report the actual repository result.',
+    test_author: 'Author only authorized tests for the implemented behavior using the existing framework.',
+    test_runner: 'Run only authorized checks and report their actual outcomes and evidence.',
+    reviewer: 'Independently assess changed files and test evidence against the acceptance criteria.',
+  };
+  return isRepair ? `${goals[role]} Repair instruction: ${repairInstruction ?? ''}` : goals[role];
+}
+
+function expectedResultKind(role: AgentTeamRole): string {
+  const kinds: Record<AgentTeamRole, string> = {
+    planner: 'implementation_plan',
+    test_designer: 'test_design',
+    developer: 'implementation_record',
+    test_author: 'test_automation_record',
+    test_runner: 'execution_evidence',
+    reviewer: 'review_assessment',
+  };
+  return kinds[role];
+}
+
+function contentFingerprint(content: string): string {
+  return createHash('sha256').update(content).digest('hex');
 }
 
 async function executeTask(
@@ -114,8 +197,7 @@ async function executeTask(
 ): Promise<Partial<AgentTeamGraphState>> {
   const request: AgentTeamTaskRequest = {
     runId: state.runId,
-    taskKey,
-    role,
+    taskDefinition: taskDefinition(state, role, taskKey),
     intent: state.intent,
     mode: state.mode,
     projectDirectory: state.projectDirectory,

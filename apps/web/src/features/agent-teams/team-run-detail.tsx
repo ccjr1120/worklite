@@ -361,7 +361,8 @@ function TaskPanel({
     }
   }
 
-  const result = task.result === undefined ? '' : JSON.stringify(task.result, null, 2);
+  const completedResult = task.result?.status === 'completed' ? task.result : null;
+  const result = JSON.stringify(task.result, null, 2);
 
   return (
     <article className="min-w-0 rounded-lg border border-border bg-surface p-4">
@@ -372,7 +373,38 @@ function TaskPanel({
         <span className="text-[13px] text-muted-foreground">{t('tasks.attempt', { count: task.attemptIndex })}</span>
       </div>
       {task.error ? <p className="mt-2 text-[13px] text-danger" role="alert">{task.error}</p> : null}
-      {task.result !== undefined ? <div className="mt-3"><ContentDisclosure summary={t('tasks.result')} content={result} /></div> : null}
+      {completedResult ? (
+        <dl className="mt-3 space-y-2 text-[13px]">
+          <div>
+            <dt className="text-xs text-muted-foreground">{t('tasks.changedFiles')}</dt>
+            <dd className="mt-1">
+              {completedResult.changedFiles.length > 0 ? (
+                <ul className="max-h-40 space-y-1 overflow-y-auto">
+                  {completedResult.changedFiles.map((file) => (
+                    <li key={file} className="font-mono text-xs break-all">{file}</li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="text-xs text-muted-foreground">{t('tasks.noChangedFiles')}</span>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-muted-foreground">{t('tasks.assignedWork')}</dt>
+            <dd
+              className={cn(
+                'mt-1 text-xs',
+                completedResult.completedAssignedWork ? 'text-success' : 'text-warning',
+              )}
+            >
+              {completedResult.completedAssignedWork
+                ? t('tasks.assignedWorkCompleted')
+                : t('tasks.assignedWorkNotCompleted')}
+            </dd>
+          </div>
+        </dl>
+      ) : null}
+      <div className="mt-3"><ContentDisclosure summary={t('tasks.result')} content={result} /></div>
       {canRetry ? (
         <div className="mt-3">
           <Button type="button" variant="secondary" size="compact" disabled={retrying} onClick={() => void retry()}>

@@ -1079,7 +1079,7 @@ export type AgentTeamTaskAttemptView = {
   role: AgentTeamRole;
   status: AgentTeamTaskAttemptStatus;
   inputFingerprint: string;
-  result: unknown;
+  result: AgentTeamTaskResult | null;
   error: string | null;
   retryable: boolean;
   createdAt: string;
@@ -1149,6 +1149,37 @@ export type AgentTeamCriterionAssessment = {
   assessment: 'met' | 'unmet' | 'not_verified';
   evidence: string[];
 };
+
+export type AgentTeamTaskResultDocument = {
+  key: string;
+  title: string;
+  content: string;
+  producingTaskKey: string;
+  upstreamDocumentKeys: string[];
+};
+
+export type AgentTeamTaskResult =
+  | {
+      status: 'completed';
+      documents: AgentTeamTaskResultDocument[];
+      unresolvedIssues: string[];
+      commandIds: string[];
+      changedFiles: string[];
+      completedAssignedWork: boolean;
+      criterionAssessments: AgentTeamCriterionAssessment[];
+      repairRequest?: {
+        taskKey: string;
+        instruction: string;
+      };
+    }
+  | {
+      status: 'waiting_for_input';
+      pendingInput: {
+        id: string;
+        question: string;
+        scopeRevision: number;
+      };
+    };
 
 export type AgentTeamRunOutcome = {
   summary: string;

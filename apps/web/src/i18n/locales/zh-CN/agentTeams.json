@@ -68,7 +68,12 @@
     "result": "任务结果 JSON",
     "retry": "重试任务",
     "retrying": "正在重试任务",
-    "retryFailed": "无法重试任务"
+    "retryFailed": "无法重试任务",
+    "changedFiles": "变更文件",
+    "noChangedFiles": "无变更文件",
+    "assignedWork": "分配工作",
+    "assignedWorkCompleted": "已完成",
+    "assignedWorkNotCompleted": "未完成"
   },
   "input": {
     "title": "等待回答",
