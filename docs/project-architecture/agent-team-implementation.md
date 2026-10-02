@@ -281,10 +281,10 @@ Total planning estimate: 15-21 working days. Exact dependency versions, SQLite i
 
 ### Milestone Checklist
 
-- [ ] P0 records verified upstream releases, licenses, source files, and supported entry points.
-- [ ] P0 settles checkpoint storage and the effect-journal integration.
-- [ ] P1 exposes shared invocation with captured instructions and explicit role tools.
-- [ ] P1 implements restart, pause, cancellation, and failed-task continuation behavior.
+- [x] P0 records verified upstream releases, licenses, source files, and supported entry points.
+- [x] P0 settles checkpoint storage and the effect-journal integration.
+- [x] P1 exposes shared invocation with captured instructions and explicit role tools.
+- [x] P1 implements restart, pause, cancellation, and failed-task continuation behavior.
 - [ ] P2 implements one end-to-end recipe with real testing evidence.
 - [x] P3 documents page behavior before UI implementation.
 - [x] P3 updates Chat Bot, platform Skill files, contracts, scripts, and capability metadata together.
@@ -340,6 +340,20 @@ References were consulted on 2026-10-03. They support the selected mechanisms; t
 - [LangGraph.js multi-Agent code examples](https://github.com/langchain-ai/langgraphjs/blob/93dfc54bdd8613fdd79eaaa16a7a747f72d3706f/docs/docs/concepts/multi_agent.md): repository-backed graph, supervisor, and state-handoff examples read through authenticated `gh` during the initial research. This reference is not a selected dependency version.
 
 ## 16. Change Record
+
+### 2026-10-03 - Source-level implementation audit
+
+- Confirmed the pinned process manifest records BMAD `v6.12.0` and TEA `v1.27.2`, their repositories, tag and commit object hashes, licenses, byte-for-byte source paths and SHA-256 digests, role entry points, and the Commands-owned deferral of the Test Runner role.
+- Confirmed the pinned LangGraph dependencies use a persistent SQLite checkpointer at `<profile-data>/agent-teams/checkpoints.sqlite`, with `AGENT_TEAM_CHECKPOINT_PATH` as the explicit path override.
+- Confirmed the default graph routes `plan_only`, `validate_existing`, and `implement_and_validate` distinctly, carries immutable documents and command evidence between roles, routes validation directly from test design to execution, and bounds reviewer-triggered repairs to the captured recipe default.
+- Confirmed command creation and operation reservation commit in one API database transaction before process launch, and operation identity is scoped by task, operation key, tool, and semantic input fingerprint rather than a provider tool-call identifier.
+- Confirmed role invocation carries the public model id, captured instructions, Skill contents and MCP references, explicit built-in tools, project context, exact command grants, process-reference reader, abort signal, Team correlation, and operation journal; role tool sets remain restricted by fixed allowlists and executable Skill scripts remain excluded.
+- Confirmed startup run recovery, restart reconciliation of queued and running Runs, answered-input continuation on the same LangGraph thread, stable-boundary pause, cancellation that settles active attempts, and retry limited to the failed active task attempt without rolling back successful work.
+- Confirmed Skill and MCP deletion checks reject references from Agent assignments, Workflow drafts and published versions, current Agent Team configurations, and captured Agent Team versions.
+- Confirmed Team model calls carry Team Run, task-attempt, and operation correlation through the Gateway; Provider headers cannot override internal `x-worklite-*` values, logs expose Team correlation, and Team Run filtering remains available with absolute ranges and request-log retention truncation.
+- Confirmed the schema and migrations provide immutable Team versions, one LangGraph thread per Run, unique task-attempt and document-revision identities, monotonic run-local events, pending recovery records, and one operation identity per Run, task, and operation key.
+- Corrected stale platform guidance and capability metadata after the Web increment: direct built-in Team and Team Run Web routes are now advertised, while Chat Bot script operations, the navigation-only starter, the one-built-in-Team limit, and the absence of Team creation and deletion remain accurate.
+- This was a source inspection, not runtime acceptance. No Team Run, test, type check, lint, build, browser check, HTTP request, diagnostic script, server lifecycle operation, or deployment-profile access was performed.
 
 ### 2026-10-03 - Web interface increment
 
