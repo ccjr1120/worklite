@@ -2,7 +2,7 @@
 
 Date: 2026-10-03
 
-Status: The BMAD + TEA and LangGraph.js technology direction is confirmed and implementation has started. The P3 public REST/SSE boundary is implemented for the one built-in Team, and its direct Team and Team Run Web interfaces are implemented. Team creation/deletion remains unavailable, and runtime acceptance remains outstanding. Later milestones remain implementation requirements, and normal repository verification and service-lifecycle rules still apply.
+Status: The BMAD + TEA and LangGraph.js technology direction is confirmed and implemented through the authorized P2 runtime acceptance and P4 release assessment. The P3 public REST/SSE boundary is implemented for the one built-in Team, and its direct Team and Team Run Web interfaces are implemented. Team creation/deletion remains unavailable. The acceptance report below covers the authorized scenarios only; scenarios not listed as executed remain implementation requirements, and normal repository verification and service-lifecycle rules still apply.
 
 Architecture authority: [Project Architecture](README.md#agent-team-implementation-direction). Applicable working rules: [AGENTS.md](../../AGENTS.md) and [AGENTS_WORKFLOW.md](../../AGENTS_WORKFLOW.md).
 
@@ -287,15 +287,15 @@ Total planning estimate: 15-21 working days. Exact dependency versions, SQLite i
 - [x] P0 settles checkpoint storage and the effect-journal integration.
 - [x] P1 exposes shared invocation with captured instructions and explicit role tools.
 - [x] P1 implements restart, pause, cancellation, and failed-task continuation behavior.
-- [ ] P2 implements one end-to-end recipe with real testing evidence.
+- [x] P2 implements one end-to-end recipe with real testing evidence.
 - [x] P3 documents page behavior before UI implementation.
 - [x] P3 updates Chat Bot, platform Skill files, contracts, scripts, and capability metadata together.
 - [x] P3 extends Skill and MCP reference protections to Team configurations and captured versions.
-- [ ] P4 records authorized acceptance results and the baseline comparison.
+- [x] P4 records authorized acceptance results and the baseline comparison.
 
 ## 13. Planned Acceptance Scenarios
 
-The following are future checks. None has been run by this documentation change. Writing or executing tests remains subject to explicit authorization under the repository's current rules.
+The following checks describe the planned acceptance surface. On 2026-10-03, explicit authorization covered the isolated slugify fixture, development-profile services, browser replay, local API requests, real model calls, exactly `node --test` as the shell check, one planning rerun, one implementation run, one `validate_existing` run, and one single-Agent baseline. Other scenarios remain unexecuted and still require explicit authorization under the repository's current rules.
 
 | Scenario | Required observable result |
 | --- | --- |
@@ -317,6 +317,71 @@ The following are future checks. None has been run by this documentation change.
 | Repository instruction limits | Unapproved test commands, branches, worktrees, and service operations are not performed |
 
 Compare a representative set of identical tasks against the existing single-Agent path. Record evidence-supported criterion completion, user interventions, elapsed time, model token usage where reported, missing requirements, and false success claims. Agree on acceptable tradeoffs from those results rather than assume more Agents improve every task.
+
+### 13.1 Authorized Runtime Acceptance - 2026-10-03
+
+This report records the authorized development-profile acceptance only. It used Web `3390`, API `3391`, Gateway `3392`, and the isolated fixture `.data/agent-team-acceptance/`. Deployment ports and `.data/deployment/` were not accessed. The only authorized shell command was `node --test`; no repository test, type-check, lint, build, or diagnostic command was run outside the Team evidence below.
+
+#### Run inventory
+
+| Run | Mode and version | Result | Wall-clock interval | Interventions |
+| --- | --- | --- | --- | --- |
+| `atrun_00aac854-b263-4265-86c5-4c2ce71e957b` | `plan_only` | Failed after both roles completed | `03:26:47.000Z`-`03:31:58.392Z` | None; preserved as terminalization evidence |
+| `atrun_03428c16-d729-4fcd-a0d0-fcf871dbf038` | `plan_only`, `atver_c32cf417-8c9c-45a2-9077-e35fa6f6c161` | Succeeded | `03:37:08.000Z`-`03:49:29.564Z` (12m 21.564s) | One manual Test Designer retry |
+| `atrun_e4fa5810-628a-4ecf-9cf6-ed62ae3b1e39` | `implement_and_validate`, `atver_e57ec531-3aec-4b26-a359-36a1085b91f8` | Succeeded | `03:51:33.000Z`-`04:12:52.963Z` (21m 19.963s) | One manual Test Runner retry and one manual Reviewer retry |
+| `atrun_8e93bcb7-e38a-41d3-b095-e864385fddae` | `validate_existing`, `atver_c6cc120d-633a-469e-bebe-0fb1e65f3559` | Succeeded | `04:14:08.000Z`-`04:25:37.327Z` (11m 29.327s) | One manual Reviewer retry |
+| `aex_4421dc1a-77cc-46eb-81db-b87ba1759404` | Single-Agent baseline | Completed without tools | `04:15:47.000Z`-`04:16:06.835Z` (19.835s) | None |
+
+The first planning Run produced both documents but failed to terminalize the Run. The successful rerun completed Planner at `03:38:22.695Z`; its first Test Designer attempt failed at `03:41:07.235Z`, and retry attempt 2 completed at `03:49:29.503Z`.
+
+The implementation Run completed Planning, Test Design, Development, and Test Authoring, then needed finite retries after parse failures: Test Execution attempt 1 failed at `04:04:24.055Z` and attempt 2 completed at `04:09:40.851Z`; Review attempt 1 failed at `04:10:53.308Z` and attempt 2 completed at `04:12:52.941Z`. It changed only `src/text.js` and `test/text.test.js`, preserved `normalizeTitle` byte-for-byte, and added one focused `slugify` test block with four assertions. The fixture inventory remained `AGENTS.md`, `AGENTS_WORKFLOW.md`, `package.json`, `src/text.js`, and `test/text.test.js`; no dependency, script, tooling, or extra file was added.
+
+The validation Run completed Test Design at `04:16:50.862Z` and Test Execution at `04:17:42.721Z`. Review attempt 1 failed at `04:21:25.827Z` because it requested a `test_execution` document repair although the result contract accepts only a `development` repair target. Retry attempt 2 completed at `04:25:37.284Z` with no repair request. It made no project change, authored no test, and independently corroborated the two-test/five-assertion fixture inventory and recorded execution output.
+
+#### Exact command and execution evidence
+
+| Command | Run | Execution | Result |
+| --- | --- | --- | --- |
+| `cmd_3d55c3ef-7cb8-4092-be09-33c2aa81ecfb` | Implementation | `node --test` in `.data/agent-team-acceptance`, `04:03:44.025Z`-`04:03:44.092Z` | Exit `0`; tests 2, pass 2, fail 0 |
+| `cmd_e6a3fa7f-34b1-4cf5-9c48-dd123bf3a73a` | Validation | `node --test` in `.data/agent-team-acceptance`, `04:17:07.162Z`-`04:17:07.253Z` | Exit `0`; tests 2, pass 2, fail 0 |
+
+Both outputs named `normalizeTitle trims and collapses whitespace` and `slugify lowercases, strips punctuation, and hyphenates`. The implementation retry did not rerun the completed check; it reused Command `cmd_3d55c3ef-7cb8-4092-be09-33c2aa81ecfb`. Reviewer roles had no shell tool and explicitly relied on the recorded Command evidence plus independent read/search corroboration rather than claiming a new execution.
+
+Read, glob, and grep operations are also represented as Command records because they pass through the WorkLite evidence journal. They are not shell checks and must not be counted as executions of the exact authorized command. The planning document wording that "no commands" ran is therefore imprecise: read-only tools did execute, but no shell check or project mutation occurred.
+
+#### Gateway usage and baseline
+
+Gateway logs were queried with explicit absolute ranges and `teamRunId`. Usage for the original failed planning Run is intentionally omitted because its request details were lost to the Gateway migration defect and cannot be inferred.
+
+| Execution | Requests | Prompt tokens | Completion tokens | Total tokens |
+| --- | ---: | ---: | ---: | ---: |
+| Planning rerun `atrun_03428c16-d729-4fcd-a0d0-fcf871dbf038` | 16 | 219,728 | 36,018 | 255,746 |
+| Implementation `atrun_e4fa5810-628a-4ecf-9cf6-ed62ae3b1e39` | 46 | 607,582 | 71,587 | 679,169 |
+| Validation `atrun_8e93bcb7-e38a-41d3-b095-e864385fddae` | 13 | 122,392 | 49,306 | 171,698 |
+| Successful Team total | 75 | 949,702 | 156,911 | 1,106,613 |
+
+Representative correlated Gateway records include `glog_cb09cd7f-6527-4fdd-b94c-c33c6f95ca75`, `glog_67861f30-f3b0-48a8-9bf5-0ee6f9752796`, `glog_60acfafa-ef05-46ed-9eca-020147221897`, `glog_4e12b13a-9077-4ecf-9f16-817c2a25c689`, and validation retry record `glog_0dab472f-8745-4d45-8953-edaf379ba06f`.
+
+The single-Agent baseline used one Gateway request (`glog_61c06f78-ab1e-45bc-a5c4-a7279dde3ed6`), 4,730 prompt tokens, 1,299 completion tokens, and 6,029 total tokens in 3,884ms; execution time was 19.835s. It made no tool calls, did not inspect or modify files, produced inline implementation and tests, stated that it did not run `node --test`, and made no false verification claim. Its proposal was broader than the Team result: it built `slugify` on `normalizeTitle`, proposed five test blocks rather than the minimal two-test suite, and added examples beyond the four requested categories. The Team output was more tightly scoped and execution-backed but required substantially more time, tokens, and three manual retries across the implementation and validation Runs.
+
+#### Defects found and corrections loaded
+
+Acceptance exposed several startup and runtime defects. The API Webpack externals now bundle `@worklite/team-runtime`; nonexistent `agent_team_task_attempts.updatedAt` writes were removed; attempt-completion helpers are awaited; initial Run input is rebuilt from the complete persisted Run; BMAD/TEA process assets resolve from process-relative candidates; the Gateway Team index is created only after missing request-log columns are added; and completed graph state is read with `graph.getState(...)` instead of treating a partial stream chunk as the final state.
+
+A confirmed JSON extraction defect also caused successful raw model responses containing a completed task object to fail as "unsupported task status". The model could emit invalid JSON text inside a document string, including an invalid `\-` escape. Exact top-level parsing failed, and the old scanner returned the first parseable nested object, which lacked the task status. The extractor now skips an invalid complete top-level candidate as a whole rather than falling back to a nested object. This mechanism was confirmed in inspected implementation responses; it is not claimed for every earlier failure whose raw response was not inspected.
+
+Two evidence-quality defects remain visible but were not expanded in this authorized scope:
+
+- The validation reviewer's first response asked to correct a `test_execution` managed document. The contract only permits `development` repairs, so the Run correctly failed the attempt and a second attempt completed without a repair. This reveals a prompt/schema mismatch for documentation-only findings.
+- The Run-level outcome accumulates every role's unresolved issues and duplicate criterion assessments. Validation therefore retains Test Design's earlier "not executed" and `not_verified` entries beside later execution and review assessments that mark the same criteria met. The final review resolves the evidence, but the aggregated outcome is confusing and should be redesigned before broader release.
+
+#### Browser replay
+
+A headless Playwright check loaded the implementation Run page three times. Body text was stable across all loads at 462,270 characters. Observed requests included persisted replay for `/api/agent-team-runs/atrun_e4fa5810-628a-4ecf-9cf6-ed62ae3b1e39/events` and linked Command streams including `/api/commands/cmd_3d55c3ef-7cb8-4092-be09-33c2aa81ecfb/events`. This establishes terminal-state rendering and persisted SSE replay consistency without re-executing the Run.
+
+#### Acceptance conclusion
+
+P2 is satisfied for the authorized end-to-end recipe: the Team planned, designed, implemented, authored a focused test, executed the exact authorized command, and produced traceable independent assessments. P4 is satisfied for this sample: completion, interventions, elapsed time, usage, false-success behavior, and recovery are recorded and compared with a single-Agent baseline. This is not a claim that the unexecuted scenarios in the table above have passed or that the two evidence-quality defects have been fixed.
 
 ## 14. Architecture and Operational Handoff
 
@@ -342,6 +407,13 @@ References were consulted on 2026-10-03. They support the selected mechanisms; t
 - [LangGraph.js multi-Agent code examples](https://github.com/langchain-ai/langgraphjs/blob/93dfc54bdd8613fdd79eaaa16a7a747f72d3706f/docs/docs/concepts/multi_agent.md): repository-backed graph, supervisor, and state-handoff examples read through authenticated `gh` during the initial research. This reference is not a selected dependency version.
 
 ## 16. Change Record
+
+### 2026-10-03 - Authorized runtime acceptance
+
+- Completed the authorized development-profile planning rerun, implementation Run, existing-feature validation Run, exact `node --test` checks, and single-Agent baseline comparison.
+- Recorded Run, Task, Command, Gateway, fixture-change, retry, replay, and token-usage evidence in the acceptance report.
+- Marked P2 and P4 complete for the authorized sample while keeping unexecuted scenarios and two evidence-quality defects explicit.
+- No deployment-profile resource was accessed, and no repository verification command beyond the authorized Team command was run.
 
 ### 2026-10-03 - Cancellation recovery correction
 
