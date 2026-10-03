@@ -422,6 +422,62 @@ export const agentTeams = sqliteTable('agent_teams', {
   updatedAt: timestamp('updated_at'),
 }, (table) => [unique().on(table.workspaceId, table.name)]);
 
+
+export type StoredAgentTeamIntakeStatus = 'queued' | 'collecting' | 'starting' | 'started' | 'failed';
+
+export const agentTeamConversations = sqliteTable('agent_team_conversations', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  teamId: text('team_id').notNull().references(() => agentTeams.id, { onDelete: 'cascade' }),
+  latestProjectDirectory: text('latest_project_directory'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (table) => [unique().on(table.workspaceId, table.teamId)]);
+
+export const agentTeamIntakes = sqliteTable('agent_team_intakes', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  conversationId: text('conversation_id').notNull().references(() => agentTeamConversations.id, { onDelete: 'cascade' }),
+  submissionId: text('submission_id').notNull(),
+  goal: text('goal'),
+  projectDirectory: text('project_directory'),
+  mode: text('mode').$type<StoredAgentTeamMode>(),
+  unresolvedField: text('unresolved_field').$type<'goal' | 'projectDirectory' | 'mode'>(),
+  status: text('status').$type<StoredAgentTeamIntakeStatus>().notNull().default('collecting'),
+  runId: text('run_id').references(() => agentTeamRuns.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (table) => [
+  unique().on(table.conversationId, table.submissionId),
+  index('agent_team_intakes_conversation_status_idx').on(table.conversationId, table.status),
+]);
+
+export const agentTeamConversationMessages = sqliteTable('agent_team_conversation_messages', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  conversationId: text('conversation_id').notNull().references(() => agentTeamConversations.id, { onDelete: 'cascade' }),
+  sequence: integer('sequence').notNull(),
+  intakeId: text('intake_id').references(() => agentTeamIntakes.id, { onDelete: 'set null' }),
+  runId: text('run_id').references(() => agentTeamRuns.id, { onDelete: 'set null' }),
+  speaker: text('speaker').$type<'user' | 'coordinator' | 'member' | 'system'>().notNull(),
+  kind: text('kind').$type<'task_request' | 'coordinator_question' | 'answer' | 'run_answer' | 'note' | 'member_question' | 'status' | 'file_delivery' | 'delivery_failed' | 'run_state'>().notNull(),
+  payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(),
+  deduplicationKey: text('deduplication_key'),
+  createdAt: timestamp('created_at'),
+}, (table) => [
+  primaryKey({ columns: [table.conversationId, table.sequence] }),
+  unique().on(table.conversationId, table.deduplicationKey),
+  index('agent_team_conversation_messages_run_idx').on(table.runId),
+]);
+
+export const agentTeamConversationEvents = sqliteTable('agent_team_conversation_events', {
+  conversationId: text('conversation_id').notNull().references(() => agentTeamConversations.id, { onDelete: 'cascade' }),
+  sequence: integer('sequence').notNull(),
+  type: text('type').$type<'message' | 'intake.updated' | 'run.state'>().notNull(),
+  payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(),
+  createdAt: timestamp('created_at'),
+}, (table) => [primaryKey({ columns: [table.conversationId, table.sequence] })]);
+
 export const agentTeamVersions = sqliteTable('agent_team_versions', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
@@ -482,6 +538,8 @@ export const agentTeamDocuments = sqliteTable('agent_team_documents', {
   title: text('title').notNull(),
   content: text('content').notNull(),
   upstreamDocumentKeys: text('upstream_document_keys', { mode: 'json' }).$type<string[]>().notNull().default([]),
+  deliveryStatus: text('delivery_status').$type<'pending' | 'delivered' | 'failed'>().notNull().default('pending'),
+  deliveryError: text('delivery_error'),
   createdAt: timestamp('created_at'),
 }, (table) => [
   unique().on(table.runId, table.key, table.revision),
@@ -491,7 +549,7 @@ export const agentTeamDocuments = sqliteTable('agent_team_documents', {
 export const agentTeamRunEvents = sqliteTable('agent_team_run_events', {
   runId: text('run_id').notNull().references(() => agentTeamRuns.id, { onDelete: 'cascade' }),
   sequence: integer('sequence').notNull(),
-  type: text('type').$type<'run.status' | 'task.started' | 'task.delta' | 'task.waiting' | 'task.completed' | 'task.failed' | 'document.committed' | 'operation.updated' | 'input.requested' | 'input.answered' | 'run.outcome'>().notNull(),
+  type: text('type').$type<'run.status' | 'task.started' | 'task.delta' | 'task.waiting' | 'task.completed' | 'task.failed' | 'document.committed' | 'document.delivered' | 'document.delivery_failed' | 'operation.updated' | 'input.requested' | 'input.answered' | 'run.outcome'>().notNull(),
   payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(),
   createdAt: timestamp('created_at'),
 }, (table) => [primaryKey({ columns: [table.runId, table.sequence] })]);
@@ -571,6 +629,10 @@ export type McpServer = typeof mcpServers.$inferSelect;
 export type ModelProvider = typeof modelProviders.$inferSelect;
 export type AgentTeam = typeof agentTeams.$inferSelect;
 export type AgentTeamVersion = typeof agentTeamVersions.$inferSelect;
+export type AgentTeamConversation = typeof agentTeamConversations.$inferSelect;
+export type AgentTeamIntake = typeof agentTeamIntakes.$inferSelect;
+export type AgentTeamConversationMessage = typeof agentTeamConversationMessages.$inferSelect;
+export type AgentTeamConversationEvent = typeof agentTeamConversationEvents.$inferSelect;
 export type AgentTeamRun = typeof agentTeamRuns.$inferSelect;
 export type AgentTeamTaskAttempt = typeof agentTeamTaskAttempts.$inferSelect;
 export type AgentTeamDocument = typeof agentTeamDocuments.$inferSelect;

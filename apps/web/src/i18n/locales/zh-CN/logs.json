@@ -33,7 +33,11 @@
     "input": "输入",
     "output": "输出",
     "total": "总计",
-    "unavailable": "不可用"
+    "unavailable": "不可用",
+    "viewRequests": "查看请求",
+    "viewRequestsForModel": "查看 {{provider}} / {{model}} 的请求",
+    "noMatchesTitle": "没有符合筛选条件的统计",
+    "noMatchesDescription": "清除筛选条件以查看此时间范围内的其他模型。"
   },
   "requests": {
     "title": "请求日志",
@@ -61,6 +65,8 @@
       "duration": "耗时"
     },
     "loadMore": "加载更多",
+    "showAll": "显示全部请求",
+    "openProvider": "打开提供商详情",
     "copied": "已复制",
     "copyRequest": "复制请求内容",
     "copyResponse": "复制响应内容",

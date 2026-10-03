@@ -737,8 +737,13 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
           <div>
             <dt className="text-muted-foreground">{t('run.version')}</dt>
             <dd className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
-              <Link to="/agent-teams/$teamId" params={{ teamId: run.teamId }} className="font-medium text-brand hover:underline">
-                {t('openTeam')}
+              <Link
+                to="/agent-teams/$teamId"
+                params={{ teamId: run.teamId }}
+                search={run.originatingConversationId ? { tab: 'conversation' } : { tab: 'configuration' }}
+                className="font-medium text-brand hover:underline"
+              >
+                {run.originatingConversationId ? t('openConversation') : t('openTeam')}
               </Link>
               <CopyableId value={run.teamVersion.id} />
               <span className="font-mono tabular-nums">v{run.teamVersion.version}</span>

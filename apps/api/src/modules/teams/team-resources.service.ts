@@ -507,7 +507,7 @@ export class WorkspaceResourcesService {
     return {
       workspace: { id: workspace.id, slug: workspace.slug, name: workspace.name },
       capabilities: {
-        supportedResourceOperations: ['inspect workspace resources', 'inspect Workflow capabilities', 'inspect and configure Agent Teams', 'start and continue Agent Team Runs', 'navigate to known WorkLite pages', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server draft', 'create Workflow draft', 'edit Workflow draft from a logical plan', 'change appearance', 'change language'],
+        supportedResourceOperations: ['inspect workspace resources', 'inspect Workflow capabilities', 'inspect and configure Agent Teams', 'inspect Agent Team conversations and documents', 'continue Agent Team Runs', 'navigate to known WorkLite pages', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server draft', 'create Workflow draft', 'edit Workflow draft from a logical plan', 'change appearance', 'change language'],
         modelProviderProxy: {
           protocols: ['openai/chat', 'openai/responses', 'anthropic/messages', 'codex/responses', 'typesafe/systemone'],
           requiresExplicitProtocol: true,
@@ -546,6 +546,8 @@ export class WorkspaceResourcesService {
           teamCreation: false,
           teamDeletion: false,
           webRoute: `/agent-teams/${BUILT_IN_AGENT_TEAM_ID}`,
+          webDefaultTab: 'conversation',
+          chatBotDispatchesRuns: false,
           runWebRoute: '/agent-team-runs/:runId',
           builtInTeamId: BUILT_IN_AGENT_TEAM_ID,
           roles: [...AGENT_TEAM_ROLES],
@@ -555,6 +557,22 @@ export class WorkspaceResourcesService {
             detail: 'GET /agent-teams/:teamId',
             update: 'PATCH /agent-teams/:teamId',
             createRun: 'POST /agent-teams/:teamId/runs',
+            conversation: 'GET /agent-teams/:teamId/conversation',
+            sendConversationMessage: 'POST /agent-teams/:teamId/conversation/messages',
+            conversationEvents: 'GET /agent-teams/:teamId/conversation/events',
+          },
+          conversation: {
+            owner: 'Team',
+            coordinatorMention: 'coordinator',
+            intake: 'durable deterministic goal, directory, and mode collection',
+            automaticRunCreation: 'conversation-origin Run starts exactly once after complete intake',
+            queuedRequests: 'one active task per Team; later Coordinator requests queue',
+            eventReplay: 'Last-Event-ID',
+            chatBotAccess: 'read-only inspection and Web navigation; no message sending',
+          },
+          documentRoutes: {
+            detail: 'GET /agent-team-documents/:documentId',
+            download: 'GET /agent-team-documents/:documentId/download',
           },
           runRoutes: {
             detail: 'GET /agent-team-runs/:runId',
@@ -567,6 +585,7 @@ export class WorkspaceResourcesService {
             retryTask: 'POST /agent-team-runs/:runId/tasks/:taskKey/retry',
           },
           events: { persisted: true, replay: 'Last-Event-ID', live: 'server-sent events' },
+          directRunCreationApi: true,
           commandAuthorization: 'cumulative exact command strings',
           recoveryDecisions: ['adopt_command', 'mark_failed', 'replay'],
           uncertainOperationRecovery: {

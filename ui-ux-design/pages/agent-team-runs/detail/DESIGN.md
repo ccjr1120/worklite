@@ -4,7 +4,7 @@
 
 `/agent-team-runs/:runId`
 
-The route is a direct run destination reached from Team run creation. It is not a top-level Run collection because the first release has no Team Run list API.
+The route is a direct immutable-evidence destination reached from its originating Team conversation or a retained Run link. It is not a top-level Run collection because the first release has no Team Run list API.
 
 ## Design Source
 
@@ -45,7 +45,7 @@ The page uses the full Workspace page width with a `1200px` maximum. The heading
 | Cancel | Cancel opens the shared destructive confirmation pattern, then shows local progress. Cancellation remains visible until active work settles. |
 | Retry failed task | Only a server-declared retryable active task renders Retry. Its control shows local progress and sends that task key. Successful predecessors are never rerun by the UI. |
 | Read command evidence | An operation with a linked Command loads its command, status, exit code, and bounded replayed output through the existing Command query and event stream. |
-| Open Team | The TeamVersion link returns to the immutable Team's configuration route without changing run state. |
+| Open Team | The TeamVersion link returns to the originating Team conversation when that link is available, otherwise the direct Team route, without changing run state. |
 
 SSE transport failure is shown as a reconnecting state, not a run failure. The persisted Run query remains the recovery path if the stream cannot reconnect.
 
@@ -158,6 +158,7 @@ The page distinguishes execution status from criterion assessment. `succeeded` i
 | `agentTeams:controls.cancelConfirm` | Action |
 | `agentTeams:controls.failed` | Recovery |
 | `agentTeams:openTeam` | Action |
+| `agentTeams:openConversation` | Action |
 | `common:actions.cancel` | Action |
 
 ## Accessibility
@@ -166,9 +167,13 @@ The heading hierarchy moves from Run title to section titles. Controls are nativ
 
 ## Coverage Status
 
-Source-level audit: 2026-10-03, updated for structured task evidence. Differences found: none in the source-level comparison of route, observation, mutation, replay, evidence, copy, token, responsive, and accessibility structure. This was not a browser, accessibility-tool, runtime, acceptance, or real-Run verification.
+Source-level audit: 2026-10-03. The source selects the Conversation tab and `openConversation` label when `run.originatingConversationId` is present; direct-origin Runs return to the Configuration tab with `openTeam`. No other difference was found in the source-level comparison of route, observation, mutation, replay, evidence, copy, token, responsive, and accessibility structure. Only source review occurred; no browser, accessibility-tool, runtime, acceptance, or real-Run verification was performed.
 
 ## Changelog
+
+### 2026-10-03 - Conversation origin
+
+- Defined the Run route as immutable execution evidence with a return link to the originating Team conversation when that link exists.
 
 ### 2026-10-03 - Structured task evidence
 

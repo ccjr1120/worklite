@@ -33,7 +33,7 @@ TypeSafe Workflow node output retains object state fields alongside the upstream
 For per-element typed evaluation use \`typesafe/systemone-map@1\`: same \`model\`, \`questions\`, and required \`state\` input, plus a required \`config.itemsPath\` addressing an array inside that state, an optional \`config.contextPath\` for shared context, an optional positive \`config.concurrency\`, and an optional \`config.rank\` of \`path\`, \`order\`, \`limit\`, and \`minimum\`. It sends one upstream request per element with state \`{ item, context }\`, commits \`results\` as those elements with their typed \`answers\` merged in, and applies \`rank\` as deterministic server-side ordering and truncation. Iteration stays inside one node invocation, so it is not a port-level join and produces one NodeRun. Use it for reranking, per-candidate screening, and per-claim checks instead of asking one call to judge a whole array.
 Use worklite/branch@1 for reusable JSON routing: it requires a value input, passes the original JSON through output, and takes only the first matching outgoing condition edge in definition order, or the first fallback edge when none matches. Its paths can target any JSON producer, such as $.articleType or a typed answer path exposed by the current upstream node.
 Workflow Run lifecycle supports pause for queued or running Runs via POST /runs/:runId/pause and resume for paused Runs via POST /runs/:runId/resume. Pause has no checkpoint inside the active invocation: resume reruns that invocation from its start without rerunning successful predecessors, does not pause waiting_for_input Runs, keeps the event stream open, survives restart as paused, remains cancellable, and blocks overlapping scheduled execution.
-Chat Bot Agent Team operations use the assigned worklite-platform scripts. WorkLite also provides direct built-in Team and Team Run Web routes; the Chat Bot starter only navigates to the Team route and does not extend @ Workflow dispatch. There is one built-in Team, and Team creation and deletion are unavailable. Runs can answer pending input, pause, resume, cancel, recover an uncertain operation, and retry the server-declared failed active task. Command execution requires exact-string authorization supplied through structured script fields. Cancellation preserves an uncertain operation's recovery input; adoption or replay supersedes the pending cancellation request, while marking the operation failed settles it without replay.
+Agent Team has one durable Team-owned Coordinator conversation at the direct Team route; Conversation is the default Web tab and Configuration is separate. Chat Bot can inspect Team, Run, conversation, and document state with assigned scripts and can continue an existing Run with the structured answer, recovery, and control scripts, but it never sends a Team conversation message and never starts or dispatches a Team Run. The Chat Bot Team starter only navigates to the Team route; @ remains Workflow dispatch. There is one built-in Team, and Team creation and deletion are unavailable. In the Team conversation, a Coordinator mention starts deterministic intake and complete information creates exactly one Run. Plain prose never grants Commands. Command execution requires exact-string authorization supplied through structured script fields. Runs can answer pending input, pause, resume, cancel, recover an uncertain operation, and retry the server-declared failed active task. Cancellation preserves an uncertain operation's recovery input; adoption or replay supersedes the pending cancellation request, while marking the operation failed settles it without replay.
 Never ask the user to paste API keys, tokens, passwords, or other secrets into conversation or script arguments. Provider credentials must be entered in the dedicated secure form.
 Before claiming a platform operation completed, wait for the script result. Keep responses concise and practical.`;
 
@@ -43,7 +43,7 @@ Use the exact scripts in this package for WorkLite platform operations.
 
 Use \`scripts/inspect-workspace.mjs\` before answering questions about configured resources or Workflow capabilities. Creation, settings, and navigation scripts accept exactly one JSON object argument. Every valid Agent script call executes automatically after server validation. Provider scripts never accept credentials; direct the user to the secure Provider form after creation.
 
-Use \`scripts/inspect-agent-teams.mjs\` and \`scripts/inspect-agent-team.mjs\` for current Team configuration, then the dedicated update, Run, answer, recovery, and control scripts. WorkLite also provides direct built-in Team and Team Run Web routes; do not claim a Team collection, creation, or deletion route. There is one built-in Team. Inspect the current Run before continuing it and grant Commands only as exact strings in structured script fields. If cancellation leaves an operation uncertain, use the structured recovery decision rather than assuming cancellation resolved its effect.
+Use \`scripts/inspect-agent-teams.mjs\`, \`scripts/inspect-agent-team.mjs\`, \`scripts/inspect-agent-team-conversation.mjs\`, and \`scripts/inspect-agent-team-document.mjs\` for current Team state. Use the Team update script only for configuration and the Run answer, recovery, and control scripts only to continue an existing Run. Chat Bot never sends a Team conversation message and never starts or dispatches a Team Run; direct the user to the built-in Team's Conversation tab for Coordinator intake. The Team conversation replays persisted events from \`Last-Event-ID\`, and its documents have detail and download routes. There is one built-in Team and no Team collection, creation, or deletion capability. Inspect the current Run before continuing it and grant Commands only as exact strings in structured script fields. If cancellation leaves an operation uncertain, use the structured recovery decision rather than assuming cancellation resolved its effect.
 
 The development profile uses Web port \`3390\`, API port \`3391\`, and Portkey Gateway port \`3392\`. The local deployment profile remains on Web port \`23390\`, API port \`23391\`, and Portkey Gateway port \`23392\`. Previous development ports have no compatibility listeners or redirects.
 Model Provider drafts require an explicit protocol selection. Supported protocols are \`openai/chat\`, \`openai/responses\`, \`anthropic/messages\`, \`codex/responses\`, and \`typesafe/systemone\`; do not invent or default another protocol. System One exchanges typed \`state\` and \`questions\` for typed \`answers\`, has no model-discovery endpoint, and cannot run a Workflow Agent node. It can be used through the dedicated \`typesafe/systemone@1\` Workflow node, which stores a public model id and typed questions, accepts JSON state, retains object state fields, and exposes typed answers. Its connection test uses a typed state/question payload and returns typed answers; it is not a chat test. Existing \`deepseek/chat\` records are not migrated or aliased.
@@ -283,20 +283,21 @@ const teamId = requiredString(raw.teamId, 'teamId', 240);
 const data = await call('/agent-teams/' + encodeURIComponent(teamId), { method: 'PATCH', body: { roles } });
 print({ worklite: { type: 'agent-team', id: data.id }, data });
 `],
-  ['scripts/start-agent-team-run.mjs', `#!/usr/bin/env node
-import { authorizedCommands, call, exactKeys, input, oneOf, print, requiredString } from './lib.mjs';
+  ['scripts/inspect-agent-team-conversation.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, print, requiredString } from './lib.mjs';
 const raw = input();
-exactKeys(raw, ['teamId', 'intent', 'projectDirectory', 'mode', 'authorizedCommands']);
-const body = {
-  intent: requiredString(raw.intent, 'intent', 100000),
-  projectDirectory: requiredString(raw.projectDirectory, 'projectDirectory', 4096),
-  mode: oneOf(raw.mode, 'mode', ['plan_only', 'validate_existing', 'implement_and_validate']),
-};
-const commands = authorizedCommands(raw.authorizedCommands);
-if (commands !== undefined) body.authorizedCommands = commands;
+exactKeys(raw, ['teamId']);
 const teamId = requiredString(raw.teamId, 'teamId', 240);
-const result = await call('/agent-teams/' + encodeURIComponent(teamId) + '/runs', { method: 'POST', body });
-print({ worklite: { type: 'agent-team-run', id: result.run.id }, data: result.run });
+const data = await call('/agent-teams/' + encodeURIComponent(teamId) + '/conversation');
+print({ worklite: { type: 'agent-team-conversation', id: data.id, teamId: data.teamId }, data });
+`],
+  ['scripts/inspect-agent-team-document.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, print, requiredString } from './lib.mjs';
+const raw = input();
+exactKeys(raw, ['documentId']);
+const documentId = requiredString(raw.documentId, 'documentId', 240);
+const data = await call('/agent-team-documents/' + encodeURIComponent(documentId));
+print({ worklite: { type: 'agent-team-document', id: data.id, runId: data.runId }, data });
 `],
   ['scripts/inspect-agent-team-run.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print, requiredString } from './lib.mjs';
@@ -385,13 +386,14 @@ print({ worklite: action });
 - inspect-agent-teams.mjs: no arguments. Reads the one available built-in Team.
 - inspect-agent-team.mjs: \`{ "teamId": string }\`.
 - update-agent-team.mjs: \`{ "teamId": string, "roles": AgentTeamRoleConfiguration[] }\`. All six roles are required exactly once. Each role object has exactly \`role\`, \`publicModelId\`, \`instructions\`, \`entryPoints\`, \`skillIds\`, \`mcpServerIds\`, and \`toolNames\`; inspect the current Team and platform snapshot for supported values. An empty \`publicModelId\` allows the configured Team default.
-- start-agent-team-run.mjs: \`{ "teamId": string, "intent": string, "projectDirectory": string, "mode": "plan_only" | "validate_existing" | "implement_and_validate", "authorizedCommands"?: string[] }\`. Commands are exact strings and \`plan_only\` cannot grant Commands.
+- inspect-agent-team-conversation.mjs: \`{ "teamId": string }\`. Reads the durable Coordinator conversation snapshot; its Server-Sent Event route replays persisted events from \`Last-Event-ID\`. Chat Bot does not send conversation messages.
+- inspect-agent-team-document.mjs: \`{ "documentId": string }\`. Reads one immutable Team document revision; the separate download route exports its delivered Markdown file.
 - inspect-agent-team-run.mjs: \`{ "runId": string }\`. Inspect the Run before answering, recovering, controlling, or retrying it.
 - answer-agent-team-run.mjs: \`{ "runId": string, "pendingInputId": string, "scopeRevision": positive integer, "answer": string, "authorizedCommands"?: string[] }\`. Only the structured command list changes executable authorization.
 - recover-agent-team-operation.mjs: \`{ "runId": string, "operationKey": string, "decision": "adopt_command" | "mark_failed" | "replay" }\`. The operation key must identify the current uncertain operation.
 - control-agent-team-run.mjs: \`{ "runId": string, "action": "pause" | "resume" | "cancel" | "retry", "taskKey"?: string }\`. \`taskKey\` is required only for \`retry\`, and retry is valid only for the failed active task the Run marks retryable. Cancellation preserves a pending uncertain-operation recovery input; adoption or replay supersedes the pending cancellation request, while \`mark_failed\` settles the effect without replay.
 
-Team creation and deletion are unavailable. A started Run captures an immutable TeamVersion. Skills and MCP servers referenced by active Team configuration or captured versions cannot be deleted. Run events are persisted and replay over the API's Server-Sent Event endpoint from \`Last-Event-ID\`; scripts inspect the persisted Run state rather than claiming to consume a live stream.
+Team creation and deletion are unavailable. Every started Run captures an immutable TeamVersion. Chat Bot has no Team Run start script and must navigate the user to the Team Conversation instead. Skills and MCP servers referenced by active Team configuration or captured versions cannot be deleted. Run and conversation events are persisted and replay over their Server-Sent Event endpoints from \`Last-Event-ID\`; scripts inspect persisted snapshots rather than claiming to consume a live stream.
 
 ## Provider proxy capability contract
 

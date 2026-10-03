@@ -1,4 +1,4 @@
-import { ChevronDown, Clipboard, LoaderCircle } from 'lucide-react';
+import { ChevronDown, Clipboard, KeyRound, LoaderCircle } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { GatewayRequestLogList, GatewayRequestLogListItem, GatewayRequestLogStatusClass, ModelProviderView } from '@worklite/contracts';
@@ -72,7 +72,7 @@ function CapturedBody({ label, body, copyLabel }: { label: string; body: string;
   );
 }
 
-function RequestLogRow({ item, expanded, onToggle, locale }: { item: GatewayRequestLogListItem; expanded: boolean; onToggle: () => void; locale: AppLocale }) {
+function RequestLogRow({ item, expanded, onToggle, locale, onOpenProvider }: { item: GatewayRequestLogListItem; expanded: boolean; onToggle: () => void; locale: AppLocale; onOpenProvider?: (provider: string) => void }) {
   const { t } = useTranslation('logs');
   const detailQuery = useGatewayRequestLogQuery(expanded ? item.id : undefined);
   const detail = detailQuery.data;
@@ -103,6 +103,7 @@ function RequestLogRow({ item, expanded, onToggle, locale }: { item: GatewayRequ
             {item.source ? <span className="font-mono">{item.source}</span> : null}
             {item.workflowRunId ? <span className="font-mono">{t('requests.correlatedRun', { id: item.workflowRunId })}</span> : null}
             {item.totalTokens !== null ? <span className="tabular-nums">{t('statistics.total')}: {item.totalTokens}</span> : null}
+            {onOpenProvider ? <Button type="button" variant="ghost" size="compact" className="ml-auto" onClick={() => onOpenProvider(item.provider)}><KeyRound className="size-4" aria-hidden="true" />{t('requests.openProvider')}</Button> : null}
           </div>
           {detailQuery.isLoading ? (
             <div role="status" aria-busy="true" className="mt-2 grid gap-2">
@@ -131,14 +132,18 @@ function RequestLogRow({ item, expanded, onToggle, locale }: { item: GatewayRequ
   );
 }
 
-function GatewayRequestLogs({ from, to, providers, filters, onFiltersChange }: { from: string; to: string; providers: ModelProviderView[]; filters: RequestLogFilters; onFiltersChange: (next: RequestLogFilters) => void }) {
+function GatewayRequestLogs({ from, to, providers, filters, onFiltersChange, focusedRequestId, onFocusedRequestClear, onOpenProvider, lockProvider = false }: { from: string; to: string; providers: ModelProviderView[]; filters: RequestLogFilters; onFiltersChange: (next: RequestLogFilters) => void; focusedRequestId?: string; onFocusedRequestClear?: () => void; onOpenProvider?: (provider: string) => void; lockProvider?: boolean }) {
   const { t } = useTranslation(['logs', 'common']);
   const { locale } = useLocale();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [pages, setPages] = useState<GatewayRequestLogList[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
   const logsQuery = useGatewayRequestLogsQuery({ ...filters, from, to });
+  const focusedQuery = useGatewayRequestLogQuery(focusedRequestId);
   const hasFilters = Boolean(filters.provider || filters.model || filters.statusClass || filters.workflowRunId);
+  const availableModels = filters.provider
+    ? providers.find((provider) => provider.name === filters.provider)?.models ?? []
+    : [...new Set(providers.flatMap((provider) => provider.models))].sort();
 
   // Accumulated pages describe the previous query, so a new range or filter
   // discards them rather than appending results from a different question.
@@ -147,7 +152,13 @@ function GatewayRequestLogs({ from, to, providers, filters, onFiltersChange }: {
     setExpandedId(null);
   }, [from, to, filters.provider, filters.model, filters.statusClass, filters.workflowRunId]);
 
-  const items = useMemo(() => [...(logsQuery.data?.items ?? []), ...pages.flatMap((page) => page.items)], [logsQuery.data, pages]);
+  useEffect(() => {
+    setExpandedId(focusedRequestId ?? null);
+  }, [focusedRequestId]);
+
+  const items = useMemo(() => focusedRequestId
+    ? focusedQuery.data ? [focusedQuery.data] : []
+    : [...(logsQuery.data?.items ?? []), ...pages.flatMap((page) => page.items)], [focusedRequestId, focusedQuery.data, logsQuery.data, pages]);
   const nextCursor = pages.at(-1)?.nextCursor ?? logsQuery.data?.nextCursor ?? null;
   const retainedFrom = logsQuery.data?.retainedFrom;
   // Statistics answer the whole range; details only reach back three days. Saying
@@ -177,12 +188,16 @@ function GatewayRequestLogs({ from, to, providers, filters, onFiltersChange }: {
         ) : null}
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Select value={filters.provider ?? 'all'} onValueChange={(value) => onFiltersChange({ ...filters, provider: value === 'all' ? undefined : value })}>
+        {!lockProvider ? <Select value={filters.provider ?? 'all'} onValueChange={(value) => onFiltersChange({ ...filters, provider: value === 'all' ? undefined : value, model: undefined })}>
           <SelectTrigger className="w-[190px]" aria-label={t('requests.filters.provider')}><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{t('requests.filters.provider')}</SelectItem>
             {providers.map((provider) => <SelectItem key={provider.id} value={provider.name}>{provider.name}</SelectItem>)}
           </SelectContent>
+        </Select> : null}
+        <Select value={filters.model ?? 'all'} onValueChange={(value) => onFiltersChange({ ...filters, model: value === 'all' ? undefined : value })}>
+          <SelectTrigger className="w-[220px]" aria-label={t('requests.filters.model')}><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value="all">{t('requests.filters.model')}</SelectItem>{availableModels.map((model) => <SelectItem key={model} value={model}>{model}</SelectItem>)}</SelectContent>
         </Select>
         <Select value={filters.statusClass ?? 'all'} onValueChange={(value) => onFiltersChange({ ...filters, statusClass: value === 'all' ? undefined : value as GatewayRequestLogStatusClass })}>
           <SelectTrigger className="w-[190px]" aria-label={t('requests.filters.statusClass')}><SelectValue /></SelectTrigger>
@@ -201,15 +216,18 @@ function GatewayRequestLogs({ from, to, providers, filters, onFiltersChange }: {
         {hasFilters ? (
           <Button type="button" variant="ghost" size="compact" onClick={() => onFiltersChange({})}>{t('common:actions.clearFilters')}</Button>
         ) : null}
+        {focusedRequestId && onFocusedRequestClear ? <Button type="button" variant="ghost" size="compact" onClick={onFocusedRequestClear}>{t('requests.showAll')}</Button> : null}
       </div>
 
       <div className="mt-4">
-        {logsQuery.isLoading ? (
+        {focusedRequestId && focusedQuery.isError ? (
+          <ErrorState title={t('requests.title')} description={t('requests.detailError')} onAction={() => void focusedQuery.refetch()} />
+        ) : focusedRequestId && focusedQuery.isLoading || (!focusedRequestId && logsQuery.isLoading) ? (
           <div role="status" aria-busy="true" aria-live="polite" className="grid gap-2">
             <span className="sr-only">{t('requests.title')}</span>
             {Array.from({ length: 5 }, (_, index) => <Skeleton key={index} className="h-12 w-full rounded-md" />)}
           </div>
-        ) : logsQuery.isError ? (
+        ) : !focusedRequestId && logsQuery.isError ? (
           <ErrorState title={t('requests.title')} description={t('requests.error')} onAction={() => void logsQuery.refetch()} />
         ) : items.length === 0 ? (
           hasFilters
@@ -225,10 +243,11 @@ function GatewayRequestLogs({ from, to, providers, filters, onFiltersChange }: {
                   expanded={expandedId === item.id}
                   onToggle={() => setExpandedId(expandedId === item.id ? null : item.id)}
                   locale={locale}
+                  onOpenProvider={onOpenProvider}
                 />
               ))}
             </ul>
-            {nextCursor ? (
+            {!focusedRequestId && nextCursor ? (
               <div className="mt-3">
                 <Button type="button" variant="secondary" size="compact" onClick={() => void loadMore()} disabled={loadingMore}>
                   {loadingMore ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : null}

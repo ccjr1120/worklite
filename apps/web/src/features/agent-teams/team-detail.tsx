@@ -18,11 +18,12 @@ import { SaveIndicator } from '@/components/save-indicator';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Field } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
+import { TeamConversation } from './team-conversation';
 import { queryClient } from '@/lib/query-client';
 
 const TEAM_MODEL_SENTINEL = '__team_default__';
@@ -35,8 +36,6 @@ const ROLE_TOOLS: Record<AgentTeamRole, string[]> = {
   test_runner: ['bash', 'read', 'write', 'glob', 'grep'],
   reviewer: ['read', 'glob', 'grep', 'process_reference'],
 };
-const MODES = ['plan_only', 'validate_existing', 'implement_and_validate'] as const;
-
 function toDraftRoles(roles: readonly AgentTeamRoleConfiguration[]): AgentTeamRoleConfiguration[] {
   const byRole = new Map(roles.map((role) => [role.role, role]));
   return ROLE_ORDER.map((role) => {
@@ -69,14 +68,7 @@ function toPersistedRoles(roles: readonly AgentTeamRoleConfiguration[]): AgentTe
   });
 }
 
-function commandLines(value: string): string[] {
-  return value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
-export function TeamDetailPage({ teamId }: { teamId: string }) {
+export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversation' | 'configuration' }) {
   const { t } = useTranslation('agentTeams');
   const navigate = useNavigate();
   const workspaceSlug = 'personal';
@@ -91,12 +83,6 @@ export function TeamDetailPage({ teamId }: { teamId: string }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const draftRevisionRef = useRef(0);
-  const [intent, setIntent] = useState('');
-  const [projectDirectory, setProjectDirectory] = useState('');
-  const [mode, setMode] = useState<'plan_only' | 'validate_existing' | 'implement_and_validate'>('plan_only');
-  const [commands, setCommands] = useState('');
-  const [starting, setStarting] = useState(false);
-  const [startError, setStartError] = useState('');
 
   useEffect(() => {
     if (!teamQuery.data || draftTeamId === teamQuery.data.id) return;
@@ -151,26 +137,6 @@ export function TeamDetailPage({ teamId }: { teamId: string }) {
     }
   }
 
-  async function startRun(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (starting) return;
-    setStarting(true);
-    setStartError('');
-    try {
-      const started = await api.createAgentTeamRun(teamId, {
-        intent,
-        projectDirectory,
-        mode,
-        authorizedCommands: mode === 'plan_only' ? [] : commandLines(commands),
-      });
-      await navigate({ to: '/agent-team-runs/$runId', params: { runId: started.run.id } });
-    } catch (error: unknown) {
-      setStartError(error instanceof Error ? error.message : t('run.startFailed'));
-    } finally {
-      setStarting(false);
-    }
-  }
-
   if (teamQuery.isLoading) {
     return (
       <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
@@ -218,8 +184,8 @@ export function TeamDetailPage({ teamId }: { teamId: string }) {
     <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
       <WorkspaceChrome
         crumbs={[{ label: t('title') }, { label: team.name }]}
-        status={<SaveIndicator state={saveState} />}
-        actions={
+        status={tab === 'configuration' ? <SaveIndicator state={saveState} /> : undefined}
+        actions={tab === 'configuration' ? (
           <div className="flex flex-col items-end gap-1">
             <Button type="submit" form="agent-team-configuration" size="compact" disabled={saving}>
               {saving ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}
@@ -227,86 +193,55 @@ export function TeamDetailPage({ teamId }: { teamId: string }) {
             </Button>
             {saveError ? <p className="text-[13px] text-danger" role="alert">{saveError}</p> : null}
           </div>
-        }
+        ) : undefined}
       />
       <PageHeading title={team.name} description={team.description} />
-      {resourceErrors.length > 0 ? (
-        <div className="mt-4 space-y-3">
-          {resourceErrors.map((resource) => (
-            <ErrorState
-              key={resource.label}
-              title={resource.label}
-              description={t('resources.loadFailed')}
-              onAction={() => void resource.refetch()}
-            />
-          ))}
-        </div>
-      ) : null}
-      <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <form className="min-w-0 space-y-4 rounded-lg border border-border bg-surface p-4" onSubmit={startRun}>
-          <h2 className="text-sm font-semibold">{t('run.title')}</h2>
-          <Field label={t('run.intent')} htmlFor="agent-team-intent">
-            <Textarea
-              id="agent-team-intent"
-              value={intent}
-              placeholder={t('run.intentPlaceholder')}
-              onChange={(event) => setIntent(event.target.value)}
-            />
-          </Field>
-          <Field label={t('run.projectDirectory')} htmlFor="agent-team-directory">
-            <Input
-              id="agent-team-directory"
-              value={projectDirectory}
-              placeholder={t('run.projectDirectoryPlaceholder')}
-              onChange={(event) => setProjectDirectory(event.target.value)}
-            />
-          </Field>
-          <Field label={t('run.mode')} htmlFor="agent-team-mode">
-            <Select value={mode} onValueChange={(value) => setMode(value as typeof mode)}>
-              <SelectTrigger id="agent-team-mode">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {MODES.map((item) => (
-                  <SelectItem key={item} value={item}>
-                    {t(`run.modeValue.${item}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label={t('run.commands')} htmlFor="agent-team-commands" hint={t('run.commandsHint')}>
-            <Textarea
-              id="agent-team-commands"
-              className="min-h-20"
-              value={commands}
-              placeholder={t('run.commandsPlaceholder')}
-              onChange={(event) => setCommands(event.target.value)}
-            />
-          </Field>
-          <div className="flex flex-col gap-2">
-            <Button type="submit" disabled={starting}>
-              {starting ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}
-              {starting ? t('run.starting') : t('run.start')}
-            </Button>
-            {startError ? <p className="text-[13px] text-danger" role="alert">{startError}</p> : null}
-          </div>
-        </form>
-        <aside className="min-w-0 rounded-lg border border-border bg-surface p-4">
-          <h2 className="text-sm font-semibold">{t('team.process')}</h2>
-          <dl className="mt-3 space-y-3 text-[13px]">
-            <div>
-              <dt className="text-muted-foreground">{t('team.processId')}</dt>
-              <dd className="mt-1 font-mono break-all">{team.processId}</dd>
+      <Tabs
+        className="mt-6"
+        value={tab}
+        onValueChange={(value) => {
+          if (value !== 'conversation' && value !== 'configuration') return;
+          void navigate({
+            to: '/agent-teams/$teamId',
+            params: { teamId },
+            search: { tab: value },
+          });
+        }}
+      >
+        <TabsList aria-label={t('title')}>
+          <TabsTrigger value="conversation">{t('conversation.tab')}</TabsTrigger>
+          <TabsTrigger value="configuration">{t('configuration.tab')}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="conversation" className="min-h-[560px]">
+          <TeamConversation teamId={teamId} />
+        </TabsContent>
+        <TabsContent value="configuration">
+          {resourceErrors.length > 0 ? (
+            <div className="space-y-3">
+              {resourceErrors.map((resource) => (
+                <ErrorState
+                  key={resource.label}
+                  title={resource.label}
+                  description={t('resources.loadFailed')}
+                  onAction={() => void resource.refetch()}
+                />
+              ))}
             </div>
-            <div>
-              <dt className="text-muted-foreground">{t('team.processVersion')}</dt>
-              <dd className="mt-1 font-mono break-all">{team.processVersion}</dd>
-            </div>
-          </dl>
-        </aside>
-      </div>
-      <form id="agent-team-configuration" className="mt-6 space-y-4" onSubmit={saveTeam}>
+          ) : null}
+          <section className="min-w-0 rounded-lg border border-border bg-surface p-4" aria-labelledby="agent-team-process">
+            <h2 id="agent-team-process" className="text-sm font-semibold">{t('team.process')}</h2>
+            <dl className="mt-3 grid gap-3 text-[13px] sm:grid-cols-2">
+              <div>
+                <dt className="text-muted-foreground">{t('team.processId')}</dt>
+                <dd className="mt-1 font-mono break-all">{team.processId}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">{t('team.processVersion')}</dt>
+                <dd className="mt-1 font-mono break-all">{team.processVersion}</dd>
+              </div>
+            </dl>
+          </section>
+        <form id="agent-team-configuration" className="mt-4 space-y-4" onSubmit={saveTeam}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-semibold">{t('team.roles')}</h2>
           {saveNotice ? <p role="status">{saveNotice}</p> : null}
@@ -411,7 +346,9 @@ export function TeamDetailPage({ teamId }: { teamId: string }) {
             </div>
           </article>
         ))}
-      </form>
+        </form>
+      </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { Bot, ChevronDown, Copy, GripVertical, KeyRound, LoaderCircle, LogIn, Pencil, Plus, RefreshCw, Trash2, Upload, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { BarChart3, Bot, ChevronDown, Copy, GripVertical, KeyRound, LoaderCircle, LogIn, Pencil, Plus, RefreshCw, ScrollText, Trash2, Upload, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitWindow, DiscoverModelProviderRequest, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayStatus, SystemOneTestInput } from '@worklite/contracts';
@@ -30,11 +30,16 @@ import { formatDateTime, formatList } from '@/i18n/format';
 import { useLocale } from '@/components/locale-provider';
 import type { AppLocale } from '@/i18n/locale';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { GatewayStatistics } from '@/features/logs/gateway-statistics';
+import { GatewayRequestLogs, type RequestLogFilters } from '@/features/logs/request-logs';
+
+type ProviderActivity = { provider: ModelProviderView; from: string; to: string; model?: string; statusClass?: RequestLogFilters['statusClass'] };
 
 const MODEL_PROVIDER_TABS = ['providers', 'codex'] as const;
 type ModelProviderTab = (typeof MODEL_PROVIDER_TABS)[number];
 type ModelProvidersSearch = {
   tab: ModelProviderTab;
+  provider?: string;
 };
 
 function isModelProviderTab(value: unknown): value is ModelProviderTab {
@@ -44,6 +49,7 @@ function isModelProviderTab(value: unknown): value is ModelProviderTab {
 export const Route = createFileRoute('/model-providers')({
   validateSearch: (search: Record<string, unknown>): ModelProvidersSearch => ({
     tab: isModelProviderTab(search.tab) ? search.tab : 'providers',
+    provider: typeof search.provider === 'string' && search.provider.trim() ? search.provider.trim() : undefined,
   }),
   component: ModelProvidersPage,
 });
@@ -191,10 +197,12 @@ function ModelProvidersPage() {
   const { t } = useTranslation(['settings', 'common']);
   const { locale } = useLocale();
   const workspaceSlug = 'personal';
-  const { tab: view } = Route.useSearch();
+  const { tab: view, provider: requestedProvider } = Route.useSearch();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [testDialog, setTestDialog] = useState<ProviderTestDialog | null>(null);
+  const [providerActivity, setProviderActivity] = useState<ProviderActivity | null>(null);
+  const [providerActivityTab, setProviderActivityTab] = useState<'statistics' | 'requests'>('statistics');
   const [dialog, setDialog] = useState<ProviderDialog | null>(null);
   const [deleteProvider, setDeleteProvider] = useState<ModelProviderView | null>(null);
   const [name, setName] = useState('');
@@ -216,6 +224,8 @@ function ModelProvidersPage() {
   const codexAuthQuery = useCodexAuthQuery();
   const codexUsageQuery = useCodexAccountUsagesQuery(view === 'codex');
   const [codexAuthBusy, setCodexAuthBusy] = useState(false);
+  const [busyCodexAccountIds, setBusyCodexAccountIds] = useState<Set<string>>(() => new Set());
+  const [codexAccountErrors, setCodexAccountErrors] = useState<Record<string, string>>({});
   const codexImportRef = useRef<HTMLInputElement>(null);
   const items = useMemo(
     () => modelProviders.filter((provider) => `${provider.name} ${provider.models.join(' ')}`.toLowerCase().includes(search.toLowerCase())),
@@ -228,6 +238,19 @@ function ModelProvidersPage() {
     if (!isModelProviderTab(value)) return;
     void navigate({ to: '/model-providers', search: (current) => ({ ...current, tab: value }) });
   }
+
+  const openProviderActivity = useCallback((provider: ModelProviderView) => {
+    const to = new Date().toISOString();
+    setProviderActivity({ provider, from: new Date(Date.now() - 24 * 60 * 60 * 1_000).toISOString(), to });
+    setProviderActivityTab('statistics');
+  }, []);
+
+  useEffect(() => {
+    if (!requestedProvider || isLoading || isError) return;
+    const provider = modelProviders.find((item) => item.name === requestedProvider);
+    if (provider) openProviderActivity(provider);
+    void navigate({ to: '/model-providers', search: (current) => ({ ...current, provider: undefined }), replace: true });
+  }, [requestedProvider, isLoading, isError, modelProviders, navigate, openProviderActivity]);
 
   useEffect(() => {
     if (codexAuthQuery.data?.status === 'connected' || codexAuthQuery.data?.status === 'disconnected' || codexAuthQuery.data?.status === 'error') {
@@ -266,24 +289,27 @@ function ModelProvidersPage() {
   }
 
   async function setCodexAccountEnabled(accountId: string, enabled: boolean) {
-    setCodexAuthBusy(true);
+    setBusyCodexAccountIds((current) => new Set(current).add(accountId));
+    setCodexAccountErrors((current) => ({ ...current, [accountId]: '' }));
     try { await api.updateCodexAccount(accountId, enabled); await codexAuthQuery.refetch(); await codexUsageQuery.refetch(); await queryClient.invalidateQueries({ queryKey: ['model-providers'] }); }
-    catch (error) { toast.error(error instanceof Error ? error.message : t('providers.gateway.codex.updateFailed')); }
-    finally { setCodexAuthBusy(false); }
+    catch (error) { setCodexAccountErrors((current) => ({ ...current, [accountId]: error instanceof Error ? error.message : t('providers.gateway.codex.updateFailed') })); }
+    finally { setBusyCodexAccountIds((current) => { const next = new Set(current); next.delete(accountId); return next; }); }
   }
 
   async function refreshCodexAccount(accountId: string) {
-    setCodexAuthBusy(true);
+    setBusyCodexAccountIds((current) => new Set(current).add(accountId));
+    setCodexAccountErrors((current) => ({ ...current, [accountId]: '' }));
     try { await api.refreshCodexAccount(accountId); await codexAuthQuery.refetch(); await codexUsageQuery.refetch(); toast.success(t('providers.gateway.codex.refreshed')); }
-    catch (error) { toast.error(error instanceof Error ? error.message : t('providers.gateway.codex.refreshFailed')); }
-    finally { setCodexAuthBusy(false); }
+    catch (error) { setCodexAccountErrors((current) => ({ ...current, [accountId]: error instanceof Error ? error.message : t('providers.gateway.codex.refreshFailed') })); }
+    finally { setBusyCodexAccountIds((current) => { const next = new Set(current); next.delete(accountId); return next; }); }
   }
 
   async function deleteCodexAccount(accountId: string) {
-    setCodexAuthBusy(true);
+    setBusyCodexAccountIds((current) => new Set(current).add(accountId));
+    setCodexAccountErrors((current) => ({ ...current, [accountId]: '' }));
     try { await api.deleteCodexAccount(accountId); await codexAuthQuery.refetch(); await codexUsageQuery.refetch(); await queryClient.invalidateQueries({ queryKey: ['model-providers'] }); toast.success(t('providers.gateway.codex.removed')); }
-    catch (error) { toast.error(error instanceof Error ? error.message : t('providers.gateway.codex.removeFailed')); }
-    finally { setCodexAuthBusy(false); }
+    catch (error) { setCodexAccountErrors((current) => ({ ...current, [accountId]: error instanceof Error ? error.message : t('providers.gateway.codex.removeFailed') })); }
+    finally { setBusyCodexAccountIds((current) => { const next = new Set(current); next.delete(accountId); return next; }); }
   }
 
 
@@ -461,14 +487,13 @@ function ModelProvidersPage() {
       <PageHeading title={t('providers.title')} description={t('providers.description')} />
       <Tabs value={view} onValueChange={changeView} className="mt-6">
         <TabsList aria-label={t('providers.views.label')}>
-          <TabsTrigger value="providers">{t('providers.views.providers')}</TabsTrigger>
+              <TabsTrigger value="providers">{t('providers.views.providers')}</TabsTrigger>
           <TabsTrigger value="codex">{t('providers.views.codex')}</TabsTrigger>
         </TabsList>
         <TabsContent value="providers">
       <GatewayPanel
         gateway={gatewayQuery.data}
         providers={modelProviders}
-        auth={codexAuthQuery.data}
         t={(key) => t(key as never)}
       />
       <section aria-labelledby="model-providers-section-title">
@@ -497,8 +522,11 @@ function ModelProvidersPage() {
               <CollectionHeader className="min-w-[900px] [&>span]:whitespace-nowrap" columns={[t('providers.columns.provider'), t('providers.columns.status'), t('providers.columns.models'), t('providers.columns.credential'), t('providers.columns.actions')]} />
               {items.map((provider) => (
                 <CollectionRow key={provider.id} className="min-w-[900px] [&>span]:whitespace-nowrap">
-                  <span className="flex min-w-0 items-center gap-2 font-medium"><KeyRound className="size-4 shrink-0 text-brand" aria-hidden="true" /><span className="min-w-0 truncate"><span className="block truncate">{provider.name}</span><span className="block text-xs font-normal text-muted-foreground">{provider.protocol}</span></span></span>
-                  <StatusBadge status={provider.status} />
+                  <button type="button" onClick={() => openProviderActivity(provider)} aria-label={t('providers.openActivity', { provider: provider.name })} className="flex min-w-0 items-center gap-2 rounded-sm text-left font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45">
+                    <KeyRound className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <span className="min-w-0 truncate"><span className="block truncate">{provider.name}</span><span className="block text-xs font-normal text-muted-foreground">{provider.protocol}</span></span>
+                  </button>
+                  {provider.status === 'connected' ? <span className="text-xs text-muted-foreground">{t('providers.configured')}</span> : <StatusBadge status={provider.status} />}
                   <span className="truncate text-[13px] text-muted-foreground">{formatList(provider.models, locale) || t('common:empty.dash')}</span>
                   <span className="min-w-0 text-[13px] text-muted-foreground"><span className="block font-mono">{provider.maskedKey || t('common:empty.dash')}</span>{provider.headerNames.length ? <span className="block truncate">{t('providers.headerNames', { names: provider.headerNames.join(', ') })}</span> : null}</span>
                   <div className="flex items-center justify-end gap-1">
@@ -526,9 +554,59 @@ function ModelProvidersPage() {
       </section>
         </TabsContent>
         <TabsContent value="codex">
-          <CodexAccountPool auth={codexAuthQuery.data} usage={codexUsageQuery.data} usageLoading={codexUsageQuery.isLoading} usageError={codexUsageQuery.isError} authBusy={codexAuthBusy} onLogin={() => void startCodexAuth()} importRef={codexImportRef} onImport={(file) => void importCodexAccounts(file)} onToggleAccount={(accountId, enabled) => void setCodexAccountEnabled(accountId, enabled)} onRefreshAccount={(accountId) => void refreshCodexAccount(accountId)} onDeleteAccount={(accountId) => void deleteCodexAccount(accountId)} locale={locale} t={(key) => t(key as never)} />
+          <CodexAccountPool auth={codexAuthQuery.data} usage={codexUsageQuery.data} usageLoading={codexUsageQuery.isLoading} usageError={codexUsageQuery.isError} authBusy={codexAuthBusy} busyAccountIds={busyCodexAccountIds} accountErrors={codexAccountErrors} onLogin={() => void startCodexAuth()} importRef={codexImportRef} onImport={(file) => void importCodexAccounts(file)} onToggleAccount={(accountId, enabled) => void setCodexAccountEnabled(accountId, enabled)} onRefreshAccount={(accountId) => void refreshCodexAccount(accountId)} onDeleteAccount={(accountId) => void deleteCodexAccount(accountId)} locale={locale} t={(key) => t(key as never)} />
         </TabsContent>
       </Tabs>
+
+      <Dialog open={Boolean(providerActivity)} onOpenChange={(open) => !open && setProviderActivity(null)}>
+        <DialogContent className="max-h-[90vh] max-w-6xl overflow-y-auto">
+          <DialogHeader>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <DialogTitle>{providerActivity?.provider.name}</DialogTitle>
+                <DialogDescription>{providerActivity?.provider.protocol} · {t('providers.activity.last24h')}</DialogDescription>
+              </div>
+              {providerActivity ? <div className="flex items-center gap-2">{providerActivity.provider.status === 'connected' ? <span className="text-xs text-muted-foreground">{t('providers.configured')}</span> : <StatusBadge status={providerActivity.provider.status} />}{providerActivity.provider.name === 'codex' && providerActivity.provider.protocol === 'codex/responses' ? null : <Button type="button" variant="secondary" size="compact" onClick={() => { const provider = providerActivity.provider; setProviderActivity(null); openEdit(provider); }}><Pencil className="size-4" aria-hidden="true" />{t('providers.edit')}</Button>}</div> : null}
+            </div>
+          </DialogHeader>
+          {providerActivity ? <>
+            {providerActivity.provider.models.length ? <div className="flex flex-wrap gap-1.5" aria-label={t('providers.models')}>
+              {providerActivity.provider.models.map((model) => <span key={model} className="max-w-full truncate rounded-md border border-border bg-surface-subtle px-2 py-1 font-mono text-xs">{model}</span>)}
+            </div> : null}
+            <Tabs value={providerActivityTab} onValueChange={(value) => { if (value === 'statistics' || value === 'requests') setProviderActivityTab(value); }}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <TabsList>
+                  <TabsTrigger value="statistics"><BarChart3 className="size-4" aria-hidden="true" />{t('providers.activity.statistics')}</TabsTrigger>
+                  <TabsTrigger value="requests"><ScrollText className="size-4" aria-hidden="true" />{t('providers.activity.requests')}</TabsTrigger>
+                </TabsList>
+                <Button type="button" variant="ghost" size="compact" onClick={() => {
+                  const activity = providerActivity;
+                  setProviderActivity(null);
+                  void navigate({ to: '/logs', search: { tab: 'statistics', from: activity.from, to: activity.to, provider: activity.provider.name, model: activity.model } });
+                }}>{t('providers.activity.openLogs')}</Button>
+              </div>
+              <TabsContent value="statistics">
+                <GatewayStatistics
+                  from={providerActivity.from}
+                  to={providerActivity.to}
+                  filters={{ provider: providerActivity.provider.name }}
+                  onViewRequests={(_, model) => { setProviderActivity((current) => current ? { ...current, model } : current); setProviderActivityTab('requests'); }}
+                />
+              </TabsContent>
+              <TabsContent value="requests">
+                <GatewayRequestLogs
+                  from={providerActivity.from}
+                  to={providerActivity.to}
+                  providers={[providerActivity.provider]}
+                  filters={{ provider: providerActivity.provider.name, model: providerActivity.model, statusClass: providerActivity.statusClass }}
+                  onFiltersChange={(next: RequestLogFilters) => setProviderActivity((current) => current ? { ...current, model: next.model, statusClass: next.statusClass } : current)}
+                  lockProvider
+                />
+              </TabsContent>
+            </Tabs>
+          </> : null}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(dialog)} onOpenChange={(open) => !open && closeProviderDialog()}>
         <DialogContent className="max-w-2xl">
@@ -603,8 +681,8 @@ function ModelProvidersPage() {
                 <div className="mt-3 flex items-center gap-2 text-muted-foreground"><LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /><span className="sr-only">{t('providers.waitingReplyAccessible')}</span><span aria-hidden="true" className="tabular-nums">{t('providers.waitingReply', { seconds: testDialog.elapsedSeconds })}</span></div>
               ) : testDialog.status === 'success' ? (
                 <div aria-live="polite"><pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">{formatTestValue(testDialog.result.protocol === 'typesafe/systemone' ? testDialog.result.output : {})}</pre><p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></div>
-              ) : (
-                <><p role="alert" className="mt-3 break-words text-danger">{testDialog.message}</p>{testDialog.requestLogId ? <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2"><Button type="button" variant="ghost" size="compact" onClick={() => { const provider = testDialog.provider.name; setTestDialog(null); void navigate({ to: '/logs', search: { tab: 'requests', range: '24h', provider } }); }}>{t('providers.viewRequestLog')}</Button></div> : null}<p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></>
+                ) : (
+                  <><p role="alert" className="mt-3 break-words text-danger">{testDialog.message}</p>{testDialog.requestLogId ? <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2"><Button type="button" variant="ghost" size="compact" onClick={() => { const provider = testDialog.provider.name; const model = testDialog.model; const requestLogId = testDialog.requestLogId; setTestDialog(null); void navigate({ to: '/logs', search: { tab: 'requests', range: '24h', provider, model, requestLogId } }); }}>{t('providers.viewRequestLog')}</Button></div> : null}<p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></>
               )}
             </div>
           </div> : <div className="flex min-h-52 flex-col gap-5 py-2">
@@ -623,7 +701,7 @@ function ModelProvidersPage() {
                 ) : testDialog.status === 'success' ? (
                   <div aria-live="polite"><p className="whitespace-pre-wrap break-words">{testDialog.result.protocol === 'typesafe/systemone' ? '' : testDialog.result.response}</p><p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></div>
                 ) : (
-                  <><p role="alert" className="break-words text-danger">{testDialog.message}</p>{testDialog.requestLogId ? <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2"><Button type="button" variant="ghost" size="compact" onClick={() => { const provider = testDialog.provider.name; setTestDialog(null); void navigate({ to: '/logs', search: { tab: 'requests', range: '24h', provider } }); }}>{t('providers.viewRequestLog')}</Button></div> : null}<p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></>
+                  <><p role="alert" className="break-words text-danger">{testDialog.message}</p>{testDialog.requestLogId ? <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2"><Button type="button" variant="ghost" size="compact" onClick={() => { const provider = testDialog.provider.name; const model = testDialog.model; const requestLogId = testDialog.requestLogId; setTestDialog(null); void navigate({ to: '/logs', search: { tab: 'requests', range: '24h', provider, model, requestLogId } }); }}>{t('providers.viewRequestLog')}</Button></div> : null}<p className="mt-3 border-t border-border pt-2 text-xs tabular-nums text-muted-foreground">{t('providers.testDuration', { seconds: testDialog.elapsedSeconds })}</p></>
                 )}
               </div>
             </div>
@@ -648,7 +726,7 @@ function ModelProvidersPage() {
   );
 }
 
-function GatewayPanel({ gateway, providers, auth, t }: { gateway?: { port: number; host: string; status: PortkeyGatewayStatus; error: string | null }; providers: ModelProviderView[]; auth?: CodexAuthStatus; t: (key: string) => string }) {
+function GatewayPanel({ gateway, providers, t }: { gateway?: { port: number; host: string; status: PortkeyGatewayStatus; error: string | null }; providers: ModelProviderView[]; t: (key: string) => string }) {
   const status = gateway?.status ?? 'starting';
   const running = status === 'running';
   const publicBaseUrl = `${typeof window === 'undefined' ? '' : window.location.origin}/api/portkey-gateway/v1`;
@@ -660,11 +738,6 @@ function GatewayPanel({ gateway, providers, auth, t }: { gateway?: { port: numbe
     <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-base font-semibold">{t('providers.gateway.title')}</h2><p className="mt-1 text-[13px] text-muted-foreground">{t('providers.gateway.description')}</p></div><div className="shrink-0"><p className="text-xs font-medium text-muted-foreground">{t('providers.gateway.status')}</p><div className="mt-1"><StatusBadge status={running ? 'gateway_running' : status} /></div></div></div>
     <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground"><span><span className="font-medium">{t('providers.gateway.port')}:</span> <code className="font-mono text-foreground">{gateway?.port ?? 3392}</code></span><span className="font-mono">{gateway ? `http://${gateway.host}:${gateway.port}` : t('providers.gateway.loading')}</span></div>
     {gateway?.error ? <p className="text-[13px] text-danger" role="alert">{gateway.error}</p> : null}
-    <div className="mt-4 border-t border-border pt-4">
-      <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-sm font-semibold">{t('providers.gateway.codex.title')}</h3><p className="mt-1 text-[13px] text-muted-foreground">{t('providers.gateway.codex.description')}</p></div><StatusBadge status={auth?.status === 'connected' ? 'connected' : auth?.status === 'login_pending' ? 'pending' : auth?.status === 'error' ? 'invalid' : 'unconfigured'} /></div>
-      {auth?.error ? <p className="mt-2 text-[13px] text-danger" role="alert">{auth.error}</p> : null}
-      <p className="mt-3 text-[13px] text-muted-foreground">{t('providers.gateway.codex.manageInPool')}</p>
-    </div>
     <details className="group mt-4 border-t border-border pt-3"><summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold marker:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40">{t('providers.gateway.integrationTitle')}<ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" /></summary><p className="mt-2 text-[13px] text-muted-foreground">{t('providers.gateway.integrationDescription')}</p><div className="mt-3 grid gap-3 lg:grid-cols-2"><GatewayCodeBlock label={t('providers.gateway.baseURL')} value={publicBaseUrl} copyLabel={t('providers.gateway.copyBaseURL')} onCopy={copyValue} /><GatewayCodeBlock label={t('providers.gateway.example')} value={configExample} copyLabel={t('providers.gateway.copyExample')} onCopy={copyValue} /></div></details>
   </section>;
 }
@@ -678,6 +751,8 @@ type CodexAccountPoolProps = {
   usageLoading: boolean;
   usageError: boolean;
   authBusy: boolean;
+  busyAccountIds: Set<string>;
+  accountErrors: Record<string, string>;
   onLogin: () => void;
   importRef: RefObject<HTMLInputElement | null>;
   onImport: (file: File) => void;
@@ -688,12 +763,18 @@ type CodexAccountPoolProps = {
   t: (key: string) => string;
 };
 
-function CodexAccountPool({ auth, usage, usageLoading, usageError, authBusy, onLogin, importRef, onImport, onToggleAccount, onRefreshAccount, onDeleteAccount, locale, t }: CodexAccountPoolProps) {
+function CodexAccountPool({ auth, usage, usageLoading, usageError, authBusy, busyAccountIds, accountErrors, onLogin, importRef, onImport, onToggleAccount, onRefreshAccount, onDeleteAccount, locale, t }: CodexAccountPoolProps) {
   const usageByAccountId = new Map((usage?.accounts ?? []).map((item) => [item.accountId, item]));
   const accounts = auth?.accounts ?? [];
+  const enabledAccounts = accounts.filter((account) => account.enabled).length;
+  const authStatus = auth?.status === 'connected' ? 'connected' : auth?.status === 'login_pending' ? 'pending' : auth?.status === 'error' ? 'invalid' : 'unconfigured';
   return <section className="space-y-5" aria-labelledby="codex-account-pool-title">
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div><h2 id="codex-account-pool-title" className="text-base font-semibold">{t('providers.codexPool.title')}</h2><p className="mt-1 text-[13px] text-muted-foreground">{t('providers.codexPool.description')}</p></div>
+      <div><h2 id="codex-account-pool-title" className="text-base font-semibold">{t('providers.codexPool.title')}</h2><div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-muted-foreground">
+        <StatusBadge status={authStatus} />
+        <span>{t('providers.codexPool.authMethod')}: {auth?.authMethod === 'oauth' ? t('providers.codexPool.oauth') : auth?.authMethod === 'environment' ? t('providers.codexPool.environment') : t('common:empty.dash')}</span>
+        <span>{t('providers.codexPool.enabledAccounts', { enabled: enabledAccounts, total: accounts.length })}</span>
+      </div></div>
       <div className="flex flex-wrap gap-2">
         <Button size="compact" onClick={onLogin} disabled={authBusy}><LogIn className="size-4" />{auth?.status === 'login_pending' ? t('providers.gateway.codex.loginPending') : t('providers.gateway.codex.addAccount')}</Button>
         <input ref={importRef} className="sr-only" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) onImport(file); }} />
@@ -706,14 +787,14 @@ function CodexAccountPool({ auth, usage, usageLoading, usageError, authBusy, onL
     {accounts.length === 0 ? <EmptyState title={t('providers.codexPool.emptyTitle')} description={t('providers.codexPool.emptyDescription')} /> : <div className="grid gap-4 xl:grid-cols-2">
       {accounts.map((account) => {
         const accountUsage = usageByAccountId.get(account.id);
-        return <CodexAccountCard key={account.id} account={account} usage={accountUsage} authBusy={authBusy} locale={locale} t={t} onToggle={onToggleAccount} onRefresh={onRefreshAccount} onDelete={onDeleteAccount} />;
+        return <CodexAccountCard key={account.id} account={account} usage={accountUsage} authBusy={authBusy} accountBusy={busyAccountIds.has(account.id)} actionError={accountErrors[account.id]} locale={locale} t={t} onToggle={onToggleAccount} onRefresh={onRefreshAccount} onDelete={onDeleteAccount} />;
       })}
     </div>}
     {usage?.fetchedAt ? <p className="text-xs text-muted-foreground">{t('providers.codexPool.fetchedAt')}: {formatDateTime(usage.fetchedAt, locale)}</p> : null}
   </section>;
 }
 
-function CodexAccountCard({ account, usage, authBusy, locale, t, onToggle, onRefresh, onDelete }: { account: CodexAuthStatus['accounts'][number]; usage?: CodexAccountUsageSnapshot['accounts'][number]; authBusy: boolean; locale: AppLocale; t: (key: string) => string; onToggle: (accountId: string, enabled: boolean) => void; onRefresh: (accountId: string) => void; onDelete: (accountId: string) => void }) {
+function CodexAccountCard({ account, usage, authBusy, accountBusy, actionError, locale, t, onToggle, onRefresh, onDelete }: { account: CodexAuthStatus['accounts'][number]; usage?: CodexAccountUsageSnapshot['accounts'][number]; authBusy: boolean; accountBusy: boolean; actionError?: string; locale: AppLocale; t: (key: string) => string; onToggle: (accountId: string, enabled: boolean) => void; onRefresh: (accountId: string) => void; onDelete: (accountId: string) => void }) {
   const status = usage?.status ?? account.status;
   const statusBadge = status === 'disabled' ? 'disabled' : status === 'expired' ? 'invalid' : status === 'error' ? 'error' : status === 'unavailable' ? 'missing' : status === 'connected' ? 'connected' : 'unconfigured';
   const accountLabel = account.email || account.name;
@@ -731,13 +812,14 @@ function CodexAccountCard({ account, usage, authBusy, locale, t, onToggle, onRef
     </div>
     {account.error ? <p className="mt-3 text-xs text-danger" role="alert">{account.error}</p> : null}
     {usage?.error ? <p className="mt-3 text-xs text-danger" role="alert">{usage.error}</p> : null}
+    {actionError ? <p className="mt-3 text-xs text-danger" role="alert">{actionError}</p> : null}
     <div className="mt-4 grid gap-3 sm:grid-cols-2">
       <CodexQuotaWindow title={t('providers.codexPool.primary')} window={usage?.primary ?? null} locale={locale} t={t} />
       <CodexQuotaWindow title={t('providers.codexPool.secondary')} window={usage?.secondary ?? null} locale={locale} t={t} />
     </div>
     <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
-      <div className="flex items-center gap-2"><span className="text-xs text-muted-foreground">{account.enabled ? t('providers.gateway.codex.enabled') : t('providers.gateway.codex.disabled')}</span><Switch checked={account.enabled} disabled={authBusy} aria-label={`${account.enabled ? t('providers.gateway.codex.disable') : t('providers.gateway.codex.enable')} ${accountLabel}`} onCheckedChange={(enabled) => onToggle(account.id, enabled)} /></div>
-      <div className="flex items-center gap-1"><Button variant="ghost" size="icon" aria-label={`${t('providers.gateway.codex.refresh')} ${accountLabel}`} onClick={() => onRefresh(account.id)} disabled={authBusy || !account.enabled}><RefreshCw className="size-4" /></Button><Button variant="ghost" size="icon" aria-label={`${t('providers.gateway.codex.remove')} ${accountLabel}`} onClick={() => onDelete(account.id)} disabled={authBusy}><Trash2 className="size-4" /></Button></div>
+      <div className="flex items-center gap-2"><span className="text-xs text-muted-foreground">{accountBusy ? t('providers.gateway.codex.updating') : account.enabled ? t('providers.gateway.codex.enabled') : t('providers.gateway.codex.disabled')}</span><Switch checked={account.enabled} disabled={authBusy || accountBusy} aria-label={`${account.enabled ? t('providers.gateway.codex.disable') : t('providers.gateway.codex.enable')} ${accountLabel}`} onCheckedChange={(enabled) => onToggle(account.id, enabled)} /></div>
+      <div className="flex items-center gap-1"><Button variant="ghost" size="icon" aria-label={`${t('providers.gateway.codex.refresh')} ${accountLabel}`} onClick={() => onRefresh(account.id)} disabled={authBusy || accountBusy || !account.enabled}>{accountBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" /> : <RefreshCw className="size-4" />}</Button><Button variant="ghost" size="icon" aria-label={`${t('providers.gateway.codex.remove')} ${accountLabel}`} onClick={() => onDelete(account.id)} disabled={authBusy || accountBusy}><Trash2 className="size-4" /></Button></div>
     </div>
     {usage?.fetchedAt ? <p className="mt-2 text-right text-xs text-muted-foreground">{t('providers.codexPool.fetchedAt')}: {formatDateTime(usage.fetchedAt, locale)}</p> : null}
   </article>;

@@ -2,7 +2,7 @@
 
 Date: 2026-10-03
 
-Status: The BMAD + TEA and LangGraph.js technology direction is confirmed and implemented through the authorized P2 runtime acceptance and P4 release assessment. The P3 public REST/SSE boundary is implemented for the one built-in Team, and its direct Team and Team Run Web interfaces are implemented. Team creation/deletion remains unavailable. The acceptance report below covers the authorized scenarios only; scenarios not listed as executed remain implementation requirements, and normal repository verification and service-lifecycle rules still apply.
+Status: The BMAD + TEA and LangGraph.js technology direction is confirmed and implemented through the authorized P2 runtime acceptance and P4 release assessment. The public REST/SSE boundary is implemented for the one built-in Team, including the durable Team conversation and managed-file delivery boundary; its direct Team and Team Run Web interfaces are also implemented. Team creation/deletion remains unavailable. The acceptance report below covers the authorized scenarios only; scenarios not listed as executed remain implementation requirements, and normal repository verification and service-lifecycle rules still apply.
 
 Architecture authority: [Project Architecture](README.md#agent-team-implementation-direction). Applicable working rules: [AGENTS.md](../../AGENTS.md) and [AGENTS_WORKFLOW.md](../../AGENTS_WORKFLOW.md).
 
@@ -235,8 +235,13 @@ Run creation and pending-input answers expose the exact command grant set explic
 | `GET /agent-teams` | Read available team configuration |
 | `GET /agent-teams/:teamId` | Read role and process configuration |
 | `PATCH /agent-teams/:teamId` | Save supported role configuration |
+| `GET /agent-teams/:teamId/conversation` | Read durable Team conversation and intake state |
+| `POST /agent-teams/:teamId/conversation/messages` | Submit a Coordinator mention, answer, or pending request idempotently |
+| `GET /agent-teams/:teamId/conversation/events` | Read live and replayed conversation SSE events |
 | `POST /agent-teams/:teamId/runs` | Capture TeamVersion and create a run atomically |
 | `GET /agent-team-runs/:runId` | Read current run, task, document, and assessment state |
+| `GET /agent-team-documents/:documentId` | Read one immutable Team document and delivery metadata |
+| `GET /agent-team-documents/:documentId/download` | Download the materialized Team document file |
 | `GET /agent-team-runs/:runId/events` | Read live and replayed SSE events |
 | `POST /agent-team-runs/:runId/answer` | Answer the current pending input |
 | `POST /agent-team-runs/:runId/operations/:operationKey/recovery` | Resolve the current uncertain operation with one structured decision |
@@ -245,17 +250,17 @@ Run creation and pending-input answers expose the exact command grant set explic
 | `POST /agent-team-runs/:runId/cancel` | Cancel active and pending work |
 | `POST /agent-team-runs/:runId/tasks/:taskKey/retry` | Retry the server-declared failed active task |
 
-Run creation supplies intent, project directory, mode, and existing scope authorization. The API returns a run identifier immediately. Pending-input responses identify the current question and accepted scope revision; stale answers cannot resume a different pending operation.
+Run creation supplies intent, project directory, mode, and existing scope authorization. The API returns a run identifier immediately. Pending-input responses identify the current question and accepted scope revision; stale answers cannot resume a different pending operation. One Run is active at a time: a direct-origin active Run blocks a completed conversation intake as a queued request and that intake resumes automatically when the Run settles. A direct-origin Run's answers and evidence remain on the immutable Run record and are not projected into the Team conversation transcript.
 
 Proposed Run states are `queued`, `running`, `waiting_for_input`, `paused`, `succeeded`, `failed`, and `cancelled`. A pause request remains a visible pending control state until the current attempt settles. Graph completion yields `succeeded`; infrastructure or task execution failure yields `failed`. Final criterion assessments remain separate.
 
-Events cover run state, task attempts, streamed member output, document commits, command links, input requests, and final assessments. Persist events before publishing them; replay uses `Last-Event-ID`. A public snapshot exposes typed Team state, not raw LangGraph checkpoints.
+Events cover run state, task attempts, streamed member output, document commits and delivery, command links, input requests, and final assessments. Persist Run and conversation events before publishing them; replay uses browser-managed `Last-Event-ID`, and the conversation stream sends replayed persisted events in sequence before live events. A public snapshot exposes typed Team state, not raw LangGraph checkpoints. Conversation events own intake and chat projection before and after Run creation, but reference authoritative Run events rather than duplicating task deltas, JSON results, command output, or document bodies. `document.committed` proves immutable database commitment; `document.delivered` is emitted only after managed-file materialization succeeds, and `document.delivery_failed` is a distinct materialization failure that does not rerun the producing role. Document detail and download retry materialization of the immutable document before serving it.
 
 Team model requests need TeamRun and task-attempt correlation in Gateway transport logs. Extend the existing internal metadata path and credential-safe log filters rather than invent Workflow Run IDs for Team calls. Gateway request bodies retain their current three-day retention; durable Team activity survives independently.
 
 ## 11. Product Entry and Documentation Boundaries
 
-Submitting an idea starts authorized planning. A returned execution proposal lists the planned changes, tests, and commands. When additional authorization is required, one activation grants that scope and continues the suspended run. Already-granted authorization is reused; the user does not approve each role transition.
+Submitting a Coordinator mention starts durable intake. The server deterministically gathers the goal, an absolute local project directory, and mode, then creates one authorized Run automatically. A still-valid remembered directory is reused silently; natural-language replies never grant commands. After creation, the conversation shows concise states, member questions, delivered filenames, and links to immutable Run evidence. A returned execution proposal lists the planned changes, tests, and commands. When additional authorization is required, one activation grants that scope and continues the suspended run. Already-granted authorization is reused; the user does not approve each role transition.
 
 The Team surface presents the goal, current work, task dependencies, member results, generated documents, changed files, and real test evidence. Progress is attached to the active work or control, and server events update state without a manual refresh. The first release uses a supplied team recipe; users do not need to construct a graph before starting.
 
@@ -276,7 +281,7 @@ Estimates assume one developer familiar with WorkLite. They are planning estimat
 | P0: Pin and prove integration | Inspect upstream source and licenses; pin process and runtime versions; map process references; prototype existing model, tool, checkpoint, and interruption paths | A recorded dependency manifest, one Planner-to-Test-Designer handoff, durable pending input, and a demonstrated completed-command replay strategy | 2-3 days |
 | P1: Build shared execution and persistence | Extract isolated role invocation; add project context, effect journaling, continuation state, Team records, and persistent checkpoint integration | One ordered run resumes with preserved completed work and correctly handles uncertain effects | 4-6 days |
 | P2: Deliver the default process | Implement the three modes, selected BMAD and TEA workflows, evidence handoff, independent review, and finite repairs | A small real change and an existing-feature validation run produce traceable assessments | 4-5 days |
-| P3: Add APIs and product interaction | Implement typed APIs, SSE observation, team configuration, run detail, and Chat Bot integration after page specifications | The user can plan, authorize scoped execution, inspect evidence, and continue without manually moving role outputs | 3-4 days |
+| P3: Add APIs and product interaction | Implement typed APIs, SSE observation, durable Team conversation, file delivery, team configuration, run detail, and Chat Bot integration after page specifications | The user can plan, authorize scoped execution, inspect evidence, and continue without manually moving role outputs | 3-4 days |
 | P4: Assess the release | Execute explicitly authorized acceptance checks and compare representative tasks with a single-Agent baseline | An evidence report covering completion, intervention, time, usage, false success claims, and recovery behavior | 2-3 days |
 
 Total planning estimate: 15-21 working days. Exact dependency versions, SQLite integration, and process reference packaging are P0 decisions. If their resolution changes the documented architecture, return to architecture discussion before proceeding.
@@ -407,6 +412,13 @@ References were consulted on 2026-10-03. They support the selected mechanisms; t
 - [LangGraph.js multi-Agent code examples](https://github.com/langchain-ai/langgraphjs/blob/93dfc54bdd8613fdd79eaaa16a7a747f72d3706f/docs/docs/concepts/multi_agent.md): repository-backed graph, supervisor, and state-handoff examples read through authenticated `gh` during the initial research. This reference is not a selected dependency version.
 
 ## 16. Change Record
+
+### 2026-10-03 - Team conversation and file delivery
+
+- Added the Team-owned durable conversation boundary: one built-in Team context, idempotent intakes keyed by stable submission ids, ordered messages, and replayable conversation events.
+- Defined deterministic Coordinator intake and silent reuse of the latest still-valid local project directory, while retaining exact-string command authorization.
+- Added document delivery events and detail/download routes after managed-file materialization; detail and download can redeliver a failed managed file without rerunning its producing role, preserving immutable document commitment and Team Run ownership.
+- Kept existing Run mutation/recovery APIs authoritative while allowing Chat Bot scripts to inspect state and continue existing Runs; the Chat Bot Team entry remains navigation-only for new work and never sends conversation messages or starts/dispatches Team Runs.
 
 ### 2026-10-03 - Authorized runtime acceptance
 

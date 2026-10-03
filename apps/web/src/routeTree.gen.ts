@@ -14,9 +14,9 @@ import { Route as HomeRouteImport } from './routes/home'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as ModelProvidersRouteImport } from './routes/model-providers'
 import { Route as SettingsRouteRouteImport } from './routes/settings/route'
-import { Route as ArtifactsArtifactIdRouteImport } from './routes/artifacts/$artifactId'
 import { Route as AgentTeamRunsRunIdRouteImport } from './routes/agent-team-runs/$runId'
 import { Route as AgentTeamsTeamIdRouteImport } from './routes/agent-teams/$teamId'
+import { Route as ArtifactsArtifactIdRouteImport } from './routes/artifacts/$artifactId'
 import { Route as McpServersIndexRouteImport } from './routes/mcp-servers/index'
 import { Route as McpServersServerIdRouteImport } from './routes/mcp-servers/$serverId'
 import { Route as PluginsIndexRouteImport } from './routes/plugins/index'
@@ -57,11 +57,6 @@ const SettingsRouteRoute = SettingsRouteRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ArtifactsArtifactIdRoute = ArtifactsArtifactIdRouteImport.update({
-  id: '/artifacts/$artifactId',
-  path: '/artifacts/$artifactId',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AgentTeamRunsRunIdRoute = AgentTeamRunsRunIdRouteImport.update({
   id: '/agent-team-runs/$runId',
   path: '/agent-team-runs/$runId',
@@ -70,6 +65,11 @@ const AgentTeamRunsRunIdRoute = AgentTeamRunsRunIdRouteImport.update({
 const AgentTeamsTeamIdRoute = AgentTeamsTeamIdRouteImport.update({
   id: '/agent-teams/$teamId',
   path: '/agent-teams/$teamId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ArtifactsArtifactIdRoute = ArtifactsArtifactIdRouteImport.update({
+  id: '/artifacts/$artifactId',
+  path: '/artifacts/$artifactId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const McpServersIndexRoute = McpServersIndexRouteImport.update({
@@ -150,9 +150,9 @@ export interface FileRoutesByFullPath {
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
-  '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/agent-team-runs/$runId': typeof AgentTeamRunsRunIdRoute
   '/agent-teams/$teamId': typeof AgentTeamsTeamIdRoute
+  '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -173,9 +173,9 @@ export interface FileRoutesByTo {
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
-  '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/agent-team-runs/$runId': typeof AgentTeamRunsRunIdRoute
   '/agent-teams/$teamId': typeof AgentTeamsTeamIdRoute
+  '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -198,9 +198,9 @@ export interface FileRoutesById {
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
-  '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/agent-team-runs/$runId': typeof AgentTeamRunsRunIdRoute
   '/agent-teams/$teamId': typeof AgentTeamsTeamIdRoute
+  '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -224,9 +224,9 @@ export interface FileRouteTypes {
     | '/home'
     | '/logs'
     | '/model-providers'
-    | '/artifacts/$artifactId'
     | '/agent-team-runs/$runId'
     | '/agent-teams/$teamId'
+    | '/artifacts/$artifactId'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
     | '/runs/$runId'
@@ -247,9 +247,9 @@ export interface FileRouteTypes {
     | '/home'
     | '/logs'
     | '/model-providers'
-    | '/artifacts/$artifactId'
     | '/agent-team-runs/$runId'
     | '/agent-teams/$teamId'
+    | '/artifacts/$artifactId'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
     | '/runs/$runId'
@@ -271,9 +271,9 @@ export interface FileRouteTypes {
     | '/home'
     | '/logs'
     | '/model-providers'
-    | '/artifacts/$artifactId'
     | '/agent-team-runs/$runId'
     | '/agent-teams/$teamId'
+    | '/artifacts/$artifactId'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
     | '/runs/$runId'
@@ -296,9 +296,9 @@ export interface RootRouteChildren {
   HomeRoute: typeof HomeRoute
   LogsRoute: typeof LogsRoute
   ModelProvidersRoute: typeof ModelProvidersRoute
-  ArtifactsArtifactIdRoute: typeof ArtifactsArtifactIdRoute
   AgentTeamRunsRunIdRoute: typeof AgentTeamRunsRunIdRoute
   AgentTeamsTeamIdRoute: typeof AgentTeamsTeamIdRoute
+  ArtifactsArtifactIdRoute: typeof ArtifactsArtifactIdRoute
   McpServersServerIdRoute: typeof McpServersServerIdRoute
   PluginsPluginIdRoute: typeof PluginsPluginIdRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
@@ -347,13 +347,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/artifacts/$artifactId': {
-      id: '/artifacts/$artifactId'
-      path: '/artifacts/$artifactId'
-      fullPath: '/artifacts/$artifactId'
-      preLoaderRoute: typeof ArtifactsArtifactIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/agent-team-runs/$runId': {
       id: '/agent-team-runs/$runId'
       path: '/agent-team-runs/$runId'
@@ -366,6 +359,13 @@ declare module '@tanstack/react-router' {
       path: '/agent-teams/$teamId'
       fullPath: '/agent-teams/$teamId'
       preLoaderRoute: typeof AgentTeamsTeamIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/artifacts/$artifactId': {
+      id: '/artifacts/$artifactId'
+      path: '/artifacts/$artifactId'
+      fullPath: '/artifacts/$artifactId'
+      preLoaderRoute: typeof ArtifactsArtifactIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/mcp-servers/': {
@@ -504,9 +504,9 @@ const rootRouteChildren: RootRouteChildren = {
   HomeRoute: HomeRoute,
   LogsRoute: LogsRoute,
   ModelProvidersRoute: ModelProvidersRoute,
-  ArtifactsArtifactIdRoute: ArtifactsArtifactIdRoute,
   AgentTeamRunsRunIdRoute: AgentTeamRunsRunIdRoute,
   AgentTeamsTeamIdRoute: AgentTeamsTeamIdRoute,
+  ArtifactsArtifactIdRoute: ArtifactsArtifactIdRoute,
   McpServersServerIdRoute: McpServersServerIdRoute,
   PluginsPluginIdRoute: PluginsPluginIdRoute,
   RunsRunIdRoute: RunsRunIdRoute,

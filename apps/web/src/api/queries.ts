@@ -9,7 +9,9 @@ export const runsQueryKey = () => ['runs'] as const;
 export const mcpServersQueryKey = () => ['mcp-servers'] as const;
 export const artifactsQueryKey = () => ['artifacts'] as const;
 export const agentTeamQueryKey = (teamId: string) => ['agent-team', teamId] as const;
+export const agentTeamConversationQueryKey = (teamId: string) => ['agent-team-conversation', teamId] as const;
 export const agentTeamRunQueryKey = (runId: string) => ['agent-team-run', runId] as const;
+export const agentTeamDocumentQueryKey = (documentId: string) => ['agent-team-document', documentId] as const;
 
 export function useWorkflowsQuery(workspace?: string, options?: { refetchInterval?: number | false }) {
   return useQuery({ queryKey: workflowsQueryKey(), queryFn: () => api.workflows(workspace), refetchInterval: options?.refetchInterval });
@@ -104,6 +106,22 @@ export function useSkillQuery(workspace: string | undefined, skillId: string) {
 
 export function useAgentTeamQuery(workspace: string | undefined, teamId: string) {
   return useQuery({ queryKey: agentTeamQueryKey(teamId), queryFn: () => api.agentTeam(teamId), enabled: Boolean(workspace && teamId) });
+}
+
+export function useAgentTeamConversationQuery(workspace: string | undefined, teamId: string) {
+  return useQuery({
+    queryKey: agentTeamConversationQueryKey(teamId),
+    queryFn: () => api.agentTeamConversation(teamId),
+    enabled: Boolean(workspace && teamId),
+  });
+}
+
+export function useAgentTeamDocumentQuery(workspace: string | undefined, documentId: string | null) {
+  return useQuery({
+    queryKey: agentTeamDocumentQueryKey(documentId ?? ''),
+    queryFn: () => api.agentTeamDocument(documentId as string),
+    enabled: Boolean(workspace && documentId),
+  });
 }
 
 export function useAgentTeamRunQuery(workspace: string | undefined, runId: string) {

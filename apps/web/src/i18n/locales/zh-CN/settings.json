@@ -16,6 +16,14 @@
       "credential": "凭据",
       "actions": "操作"
     },
+    "configured": "已配置",
+    "activity": {
+      "statistics": "统计",
+      "requests": "请求",
+      "last24h": "最近 24 小时",
+      "openLogs": "在日志中查看"
+    },
+    "openActivity": "查看 {{provider}} 的表现和请求",
     "empty": {
       "title": "还没有模型提供商",
       "description": "添加 Provider，使 Chat Bot 和 Workflow Agent 节点可以使用模型。"
@@ -105,9 +113,6 @@
       "copyExample": "复制示例",
       "copied": "已复制",
       "codex": {
-        "title": "Codex 订阅",
-        "description": "Manage the Codex account pool used by codex/responses providers.",
-        "manageInPool": "请在独立的 Codex 账号池页签中管理账号。",
         "login": "使用 ChatGPT 登录",
         "loginPending": "等待登录",
         "loginStarted": "已开始 Codex 登录",
@@ -127,6 +132,7 @@
         "removeFailed": "Codex account removal failed.",
         "enabled": "Enabled",
         "disabled": "Disabled",
+        "updating": "正在更新...",
         "enable": "Enable",
         "disable": "Disable",
         "concurrency": "Concurrency",
@@ -136,7 +142,10 @@
     },
     "codexPool": {
       "title": "Codex 账号池",
-      "description": "管理 Codex 账号并查看每个账号的剩余余量。用量每分钟自动刷新。",
+      "authMethod": "登录方式",
+      "oauth": "ChatGPT 登录",
+      "environment": "环境令牌",
+      "enabledAccounts": "已启用 {{enabled}} / {{total}} 个账号",
       "primary": "主要余量",
       "secondary": "次要余量",
       "remaining": "剩余",
@@ -145,7 +154,7 @@
       "fetchedAt": "获取时间",
       "accountId": "账号 ID",
       "plan": "套餐",
-      "expiresAt": "到期时间",
+      "expiresAt": "凭证到期时间",
       "quotaUnavailable": "余量不可用",
       "usageError": "部分账号余量加载失败，其他账号仍可用。",
       "loading": "正在加载账号余量...",

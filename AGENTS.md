@@ -1,19 +1,3 @@
-# Project Language Policy
-
-All files in this project must be written entirely in English.
-
-This requirement applies to all project content, including:
-
-- Source code identifiers, comments, and user-facing text
-- Documentation and examples
-- Configuration files and metadata
-- Tests, fixtures, snapshots, and mock data
-- Commit-related templates and automation messages stored in the repository
-
-Do not add non-English text unless it is required as test data for functionality that explicitly handles other languages. In that case, keep the exception minimal and document its purpose in English.
-
-When editing an existing file, preserve or improve compliance with this policy in the affected area.
-
 ## Required AI Workflow
 
 Before starting any task, read `AGENTS_WORKFLOW.md` and follow the applicable workflow defined there. Do not begin work directly without using that workflow.
@@ -84,7 +68,7 @@ Gateway transport observability is its own `/logs` destination, not part of Prov
 
 Whenever WorkLite product architecture, resource relationships, supported Workflow nodes, or platform operations change, update the built-in Chat Bot prompt and `worklite-platform` Skill knowledge, contracts, scripts, and platform snapshot capability metadata in the same change.
 
-Agent Team is a public API and direct Web capability for one built-in Team. The direct Team and Team Run detail routes exist for that Team; there is no Team collection, creation, or deletion route or API. Chat Bot exposes only a navigation starter to the Team route and does not dispatch Team Runs. Starting a Run captures an immutable TeamVersion, Commands require exact-string authorization, and Skills or MCP servers cannot be deleted while referenced by active Team configuration or a captured TeamVersion.
+Agent Team is a public API and direct Web capability for one built-in Team. The direct Team and Team Run detail routes exist for that Team; there is no Team collection, creation, or deletion route or API. The Team conversation is durable, its Server-Sent Event stream replays persisted events from `Last-Event-ID`, and one active Run is the limit even when a direct-origin Run is active; later conversation requests queue and resume when it settles. Direct-origin Run answers remain Run evidence and are not projected into the Team transcript. Chat Bot may inspect Team, Run, conversation, and document state and continue an existing Run with structured scripts, but never sends a Team conversation message and never starts or dispatches a Team Run; its Team starter only navigates. Starting a Run captures an immutable TeamVersion, Commands require exact-string authorization, and Skills or MCP servers cannot be deleted while referenced by active Team configuration or a captured TeamVersion. A Team document's immutable commitment is separate from managed-file delivery; document detail and download may retry delivery without rerunning the producing role.
 Chat Bot remains protected and is not user-deletable. Workflow Agent configuration is deleted with its owning Workflow version; there is no standalone Agent deletion flow. Skills and MCP servers cannot be deleted while referenced by an Agent, Workflow, or Agent Team. Artifacts are independently permanently deletable. Runs, immutable versions, logs, and built-in resources are not independently deletable.
 
 The Portkey Gateway integration is a unified OpenAI-compatible entry point. Callers do not provide a Provider id separately; public model ids use the `<providerName>/<modelId>` namespace and the Gateway dispatches by the unique Provider name. Provider ids remain internal record keys and must not appear in public model ids. The local Gateway has no separate inbound API key unless a later architecture change explicitly adds one.

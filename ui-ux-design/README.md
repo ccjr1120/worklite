@@ -64,11 +64,11 @@ The root route opens Home. `/settings/` opens Appearance. Route layouts and redi
 
 There is no `/onboarding` route family. First use is a server-derived sequence inside Home, so a separate browser-state onboarding flow would duplicate it with a less reliable completion signal.
 
-The `/model-providers` page is the top-level Providers destination. It uses page-level tabs for Model Providers and the dedicated Codex Account Pool; the Gateway summary remains on the Model Providers view.
+The `/model-providers` page is the top-level Providers destination. It uses page-level tabs for Model Providers and the dedicated Codex Account Pool; the Gateway summary remains on the Model Providers view. Activating a Provider opens its scoped statistics and recent requests in a detail dialog, while Codex authorization and account summaries live together in the pool view.
 
-`/logs` is the top-level Logs destination for Gateway transport observability. It uses page-level tabs for Statistics and Requests over one shared time range. Providers configures what the Gateway dispatches to; Logs reads what it did.
+`/logs` is the top-level Logs destination for Gateway transport observability. It uses page-level tabs for Statistics and Requests over one shared time range. Provider and model filters scope both views, model breakdowns open their matching requests, and failed Provider tests can focus the exact captured request. Providers configures what the Gateway dispatches to; Logs reads what it did.
 
-`/agent-teams/:teamId` is the direct destination for the one built-in Agent Team; there is no Team collection, creation, or deletion route. `/agent-team-runs/:runId` is its immutable-version run destination reached from Team run creation, not a top-level collection. `/runs/:runId` is a Workflow Run log-reading destination reached from a Workflow's Run records dialog, not a top-level collection. There is no Run list route: Runs are reached through their Workflow. Provider request observability is not a Settings page: `/settings` keeps the WorkLite-owned Usage and Audit Log read models, which are business records over Runs and resource mutations rather than Gateway transport records.
+`/agent-teams/:teamId` is the direct destination for the one built-in Agent Team and defaults to its Team-owned Coordinator conversation, with Configuration in a validated top tab; there is no Team collection, creation, or deletion route. Conversation transport replays persisted events with `Last-Event-ID`, and a failed managed Team document can be redelivered through its detail or download route without rerunning its producing role. `/agent-team-runs/:runId` is its immutable-version evidence destination reached from the conversation or a retained Run link, not a top-level collection; direct-origin Run answers remain Run evidence and are not projected into the Team transcript. `/runs/:runId` is a Workflow Run log-reading destination reached from a Workflow's Run records dialog, not a top-level collection. There is no Run list route: Runs are reached through their Workflow. Provider request observability is not a Settings page: `/settings` keeps the WorkLite-owned Usage and Audit Log read models, which are business records over Runs and resource mutations rather than Gateway transport records.
 
 ## Shared Component Inventory
 
@@ -87,6 +87,17 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-10-03 - Provider and model observability
+
+- Added Provider-scoped activity details and consolidated the Codex account summary with its pool.
+- Added shared Provider/model statistics filters, model-to-request drill-down, and exact request focus from Provider tests.
+
+### 2026-10-03
+
+- Made the Agent Team Conversation the default direct Team experience and moved role setup to a Configuration tab.
+- Added durable Coordinator intake, automatic Run creation, concise conversation execution state, delivered Team document files, contextual viewing, download, and a conversation-origin return link on Run evidence.
+- Removed the form-first Team launch behavior without retaining a compatibility alias.
 
 ### 2026-10-03
 

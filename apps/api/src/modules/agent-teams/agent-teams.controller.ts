@@ -1,17 +1,23 @@
 import { BadRequestException, Body, Controller, Get, Header, Headers, Param, Patch, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type {
+  AgentTeamConversationEvent,
   AgentTeamRunEvent,
   AnswerAgentTeamRunRequest,
   CreateAgentTeamRunRequest,
   RecoverAgentTeamOperationRequest,
+  SendAgentTeamConversationMessageRequest,
   UpdateAgentTeamRequest,
 } from '@worklite/contracts';
+import { AgentTeamConversationService } from './agent-team-conversation.service';
 import { AgentTeamsService } from './agent-teams.service';
 
 @Controller('agent-teams')
 export class AgentTeamsController {
-  constructor(private readonly teams: AgentTeamsService) {}
+  constructor(
+    private readonly teams: AgentTeamsService,
+    private readonly conversations: AgentTeamConversationService,
+  ) {}
 
   @Get()
   list(@Req() request: Request) {
@@ -26,6 +32,64 @@ export class AgentTeamsController {
   @Patch(':teamId')
   update(@Req() request: Request, @Param('teamId') teamId: string, @Body() body: UpdateAgentTeamRequest) {
     return this.teams.update(request, 'personal', teamId, body);
+  }
+
+  @Get(':teamId/conversation/events')
+  @Header('Cache-Control', 'no-cache, no-transform')
+  async conversationEvents(
+    @Req() request: Request,
+    @Param('teamId') teamId: string,
+    @Headers('last-event-id') lastEventId: string | undefined,
+    @Res() response: Response,
+  ): Promise<void> {
+    const afterSequence = parseLastEventId(lastEventId);
+    const conversation = await this.conversations.getConversation(request, 'personal', teamId);
+    response.status(200);
+    response.setHeader('Content-Type', 'text/event-stream');
+    response.setHeader('Connection', 'keep-alive');
+    response.setHeader('X-Accel-Buffering', 'no');
+    response.flushHeaders();
+    let lastSequence = afterSequence;
+    let replaying = true;
+    let closed = false;
+    const pending: AgentTeamConversationEvent[] = [];
+    const send = (event: AgentTeamConversationEvent) => {
+      if (closed || event.conversationId !== conversation.id || event.sequence <= lastSequence) return;
+      lastSequence = event.sequence;
+      response.write(`id: ${event.sequence}\ndata: ${JSON.stringify(event)}\n\n`);
+    };
+    const unsubscribe = this.conversations.subscribe((event) => {
+      if (event.conversationId !== conversation.id) return;
+      if (replaying) pending.push(event);
+      else send(event);
+    });
+    const heartbeat = setInterval(() => response.write(': keep-alive\n\n'), 15_000);
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      clearInterval(heartbeat);
+      unsubscribe();
+    };
+    request.once('close', cleanup);
+    const replay = await this.conversations.eventsForConversation(conversation.id, afterSequence);
+    replay.forEach(send);
+    replaying = false;
+    pending.sort((left, right) => left.sequence - right.sequence).forEach(send);
+  }
+
+  @Get(':teamId/conversation')
+  conversation(@Req() request: Request, @Param('teamId') teamId: string) {
+    return this.conversations.getConversation(request, 'personal', teamId);
+  }
+
+  @Post(':teamId/conversation/messages')
+  sendConversationMessage(
+    @Req() request: Request,
+    @Param('teamId') teamId: string,
+    @Body() body: SendAgentTeamConversationMessageRequest,
+  ) {
+    return this.conversations.sendMessage(request, 'personal', teamId, body)
+      .then((conversation) => ({ conversation }));
   }
 
   @Post(':teamId/runs')
@@ -127,6 +191,28 @@ export class AgentTeamRunsController {
   @Post(':runId/tasks/:taskKey/retry')
   retry(@Req() request: Request, @Param('runId') runId: string, @Param('taskKey') taskKey: string) {
     return this.teams.retry(request, 'personal', runId, taskKey).then((run) => ({ run }));
+  }
+}
+
+@Controller('agent-team-documents')
+export class AgentTeamDocumentsController {
+  constructor(private readonly conversations: AgentTeamConversationService) {}
+
+  @Get(':documentId')
+  get(@Req() request: Request, @Param('documentId') documentId: string) {
+    return this.conversations.getDocument(request, 'personal', documentId);
+  }
+
+  @Get(':documentId/download')
+  async download(
+    @Req() request: Request,
+    @Param('documentId') documentId: string,
+    @Res() response: Response,
+  ): Promise<void> {
+    const document = await this.conversations.downloadDocument(request, 'personal', documentId);
+    response.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    response.setHeader('Content-Disposition', `attachment; filename="${document.fileName}"`);
+    response.send(document.content);
   }
 }
 

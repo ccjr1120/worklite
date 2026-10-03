@@ -24,6 +24,7 @@ type LogsSearch = {
   model?: string;
   statusClass?: GatewayRequestLogStatusClass;
   workflowRunId?: string;
+  requestLogId?: string;
 };
 
 function isLogsTab(value: unknown): value is LogsTab {
@@ -43,19 +44,21 @@ function optionalInstant(value: unknown): string | undefined {
 
 export const Route = createFileRoute('/logs')({
   validateSearch: (search: Record<string, unknown>): LogsSearch => {
+    const tab = isLogsTab(search.tab) ? search.tab : 'statistics';
     const from = optionalInstant(search.from);
     const to = optionalInstant(search.to);
     // A custom range needs both instants in order, so a half-specified or
     // inverted pair resolves to the default preset instead of an undefined range.
     const custom = from && to && from <= to ? { from, to } : {};
     return {
-      tab: isLogsTab(search.tab) ? search.tab : 'statistics',
+      tab,
       range: isRangePreset(search.range) ? search.range : 'from' in custom ? undefined : '24h',
       ...custom,
       provider: optionalSearchText(search.provider),
       model: optionalSearchText(search.model),
-      statusClass: REQUEST_LOG_STATUS_CLASSES.includes(search.statusClass as GatewayRequestLogStatusClass) ? search.statusClass as GatewayRequestLogStatusClass : undefined,
-      workflowRunId: optionalSearchText(search.workflowRunId),
+      statusClass: tab === 'requests' && REQUEST_LOG_STATUS_CLASSES.includes(search.statusClass as GatewayRequestLogStatusClass) ? search.statusClass as GatewayRequestLogStatusClass : undefined,
+      workflowRunId: tab === 'requests' ? optionalSearchText(search.workflowRunId) : undefined,
+      requestLogId: tab === 'requests' ? optionalSearchText(search.requestLogId) : undefined,
     };
   },
   component: LogsPage,
@@ -76,15 +79,15 @@ function LogsPage() {
 
   function changeTab(value: string) {
     if (!isLogsTab(value)) return;
-    void navigate({ to: '/logs', search: { ...search, tab: value } });
+    void navigate({ to: '/logs', search: { ...search, tab: value, requestLogId: value === 'statistics' ? undefined : search.requestLogId } });
   }
 
   function changeRange(next: LogsTimeRange) {
     void navigate({
       to: '/logs',
       search: next.kind === 'preset'
-        ? { ...search, range: next.preset, from: undefined, to: undefined }
-        : { ...search, range: undefined, from: next.from, to: next.to },
+        ? { ...search, range: next.preset, from: undefined, to: undefined, requestLogId: undefined }
+        : { ...search, range: undefined, from: next.from, to: next.to, requestLogId: undefined },
     });
   }
 
@@ -97,8 +100,17 @@ function LogsPage() {
         model: next.model,
         statusClass: next.statusClass,
         workflowRunId: next.workflowRunId,
+        requestLogId: undefined,
       },
     });
+  }
+
+  function changeStatisticsFilters(next: { provider?: string; model?: string }) {
+    void navigate({ to: '/logs', search: { ...search, ...next, provider: next.provider, model: next.model, requestLogId: undefined } });
+  }
+
+  function viewModelRequests(provider: string, model: string) {
+    void navigate({ to: '/logs', search: { ...search, tab: 'requests', provider, model, requestLogId: undefined } });
   }
 
   return (
@@ -114,7 +126,13 @@ function LogsPage() {
           <TabsTrigger value="requests"><ScrollText className="size-4" aria-hidden="true" />{t('logs:views.requests')}</TabsTrigger>
         </TabsList>
         <TabsContent value="statistics">
-          <GatewayStatistics from={resolved.from} to={resolved.to} />
+          <GatewayStatistics
+            from={resolved.from}
+            to={resolved.to}
+            filters={{ provider: search.provider, model: search.model }}
+            onFiltersChange={changeStatisticsFilters}
+            onViewRequests={viewModelRequests}
+          />
         </TabsContent>
         <TabsContent value="requests">
           <GatewayRequestLogs
@@ -123,6 +141,9 @@ function LogsPage() {
             providers={providers}
             filters={{ provider: search.provider, model: search.model, statusClass: search.statusClass, workflowRunId: search.workflowRunId }}
             onFiltersChange={changeFilters}
+            focusedRequestId={search.requestLogId}
+            onFocusedRequestClear={() => void navigate({ to: '/logs', search: { ...search, requestLogId: undefined } })}
+            onOpenProvider={(provider) => void navigate({ to: '/model-providers', search: { tab: 'providers', provider } })}
           />
         </TabsContent>
       </Tabs>

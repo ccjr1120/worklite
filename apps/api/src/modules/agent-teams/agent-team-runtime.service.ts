@@ -32,7 +32,9 @@ import type {
   RecoverAgentTeamOperationRequest,
 } from '@worklite/contracts';
 import {
+  agentTeamConversations,
   agentTeamDocuments,
+  agentTeamIntakes,
   agentTeamOperations,
   agentTeamPendingInputs,
   agentTeamRunEvents,
@@ -96,6 +98,7 @@ const TASK_ROLES: Array<[RegExp, AgentTeamRole]> = [
 
 type Checkpointer = ReturnType<typeof createSqliteCheckpointer>;
 type AgentTeamDatabaseTransaction = Parameters<Parameters<Database['transaction']>[0]>[0];
+type AgentTeamRunOrigin = { intakeId: string; conversationId: string };
 type AgentTeamEventListener = (event: AgentTeamRunEvent) => void;
 type RawTaskOutput = {
   status?: unknown;
@@ -117,6 +120,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   private readonly abortControllers = new Map<string, AbortController>();
   private readonly eventListeners = new Set<AgentTeamEventListener>();
   private readonly transactionEvents = new Map<object, AgentTeamRunEvent[]>();
+  private readonly documentDeliveries = new Map<string, Promise<void>>();
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
@@ -141,7 +145,11 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     this.checkpointer.db.close();
   }
 
-  async createRun(workspaceId: string, request: CreateAgentTeamRunRequest): Promise<AgentTeamRunView> {
+  async createRun(
+    workspaceId: string,
+    request: CreateAgentTeamRunRequest,
+    origin?: AgentTeamRunOrigin,
+  ): Promise<AgentTeamRunView> {
     const intent = request?.intent?.trim();
     const projectDirectory = request?.projectDirectory?.trim();
     const mode = request?.mode;
@@ -168,7 +176,18 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (!team) throw new NotFoundException('The built-in Agent Team was not found.');
 
     const snapshot = await this.createVersionSnapshot(team.roles);
+    const now = new Date();
     await this.transaction((transaction) => {
+      const [activeRun] = transaction.select({ id: agentTeamRuns.id })
+        .from(agentTeamRuns)
+        .where(and(
+          eq(agentTeamRuns.teamId, team.id),
+          inArray(agentTeamRuns.status, ['queued', 'running', 'waiting_for_input', 'paused']),
+        ))
+        .limit(1)
+        .all();
+      if (activeRun) throw new BadRequestException('The Agent Team already has an active Run.');
+
       const [latest] = transaction.select({ version: agentTeamVersions.version })
         .from(agentTeamVersions)
         .where(eq(agentTeamVersions.teamId, team.id))
@@ -196,6 +215,25 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         scopeRevision: 1,
         langGraphThreadId: `atthread_${runId}`,
       }).run();
+      if (origin) {
+        const linkedIntakes = transaction.update(agentTeamIntakes).set({
+          runId,
+          unresolvedField: null,
+          updatedAt: now,
+        }).where(and(
+          eq(agentTeamIntakes.id, origin.intakeId),
+          eq(agentTeamIntakes.workspaceId, workspaceId),
+          eq(agentTeamIntakes.conversationId, origin.conversationId),
+          isNull(agentTeamIntakes.runId),
+        )).returning({ id: agentTeamIntakes.id }).all();
+        if (linkedIntakes.length !== 1) {
+          throw new NotFoundException('The Agent Team conversation intake was not found.');
+        }
+        transaction.update(agentTeamConversations).set({
+          latestProjectDirectory: resolvedProjectDirectory,
+          updatedAt: now,
+        }).where(eq(agentTeamConversations.id, origin.conversationId)).run();
+      }
       this.appendEvent(transaction, runId, 'run.status', { status: 'queued' });
     });
 
@@ -204,8 +242,17 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     return this.getRunView(runId);
   }
 
+  async deliverRunDocuments(runId: string, workspaceId?: string): Promise<void> {
+    if (workspaceId) await this.getRun(runId, workspaceId);
+    await this.deliverDocuments(runId);
+  }
+
   async getRunView(runId: string, workspaceId?: string): Promise<AgentTeamRunView> {
     const run = await this.getRun(runId, workspaceId);
+    const [origin] = await this.db.select({ conversationId: agentTeamIntakes.conversationId })
+      .from(agentTeamIntakes)
+      .where(eq(agentTeamIntakes.runId, runId))
+      .limit(1);
     const [version] = await this.db.select().from(agentTeamVersions)
       .where(eq(agentTeamVersions.id, run.teamVersionId))
       .limit(1);
@@ -237,6 +284,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       desiredControlState: run.desiredControlState,
       tasks: taskRows.map(toTaskAttemptView),
       documents: documentRows.map(toDocumentView),
+      originatingConversationId: origin?.conversationId ?? null,
       pendingInputs: pendingRows.map(toPendingInputView),
       operations: operationRows.map(toOperationView),
       outcome: isRunOutcome(run.outcome) ? run.outcome : null,
@@ -760,7 +808,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async reconcileProjection(run: AgentTeamRun, state: AgentTeamGraphState): Promise<void> {
-    const materializedDocuments: Array<{ document: AgentTeamDocument; revision: number }> = [];
     await this.transaction((transaction) => {
       for (const [documentIndex, document] of (state.documents ?? []).entries()) {
         const revision = nextDocumentRevision(state.documents ?? [], document, documentIndex);
@@ -772,7 +819,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
             eq(agentTeamDocuments.revision, revision),
           ))
           .limit(1).all();
-        materializedDocuments.push({ document, revision });
         if (existing) continue;
         const attemptId = ensureProjectionAttempt(
           transaction,
@@ -799,7 +845,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         });
       }
     });
-    await this.materializeDocuments(run.id, materializedDocuments);
+    await this.deliverDocuments(run.id);
   }
 
   private scheduleExecution(runId: string, input: AgentTeamGraphState | Command | null): void {
@@ -868,10 +914,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const snapshot = await graph.getState({ configurable: { thread_id: run.langGraphThreadId } });
     const completedState = snapshot.values as AgentTeamGraphState;
     const documents = completedState.documents ?? [];
-    await this.materializeDocuments(runId, documents.map((document, index) => ({
-      document,
-      revision: nextDocumentRevision(documents, document, index),
-    })));
+    await this.deliverDocuments(runId);
     await this.finishSuccessfulRun(runId, toGraphResult(completedState));
   }
 
@@ -1111,7 +1154,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   ): Promise<AgentTeamTaskResult> {
     const { taskKey } = request.taskDefinition;
     const now = new Date();
-    const materializedDocuments: Array<{ document: AgentTeamDocument; revision: number }> = [];
     await this.transaction((transaction) => {
       const [desired] = transaction.select({ desiredControlState: agentTeamRuns.desiredControlState })
         .from(agentTeamRuns)
@@ -1137,7 +1179,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           .orderBy(desc(agentTeamDocuments.revision))
           .limit(1).all();
         const revision = (latest?.revision ?? 0) + 1;
-        materializedDocuments.push({ document, revision });
         transaction.insert(agentTeamDocuments).values({
           id: `atdoc_${randomUUID()}`,
           workspaceId,
@@ -1162,7 +1203,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         result,
       });
     });
-    await this.materializeDocuments(request.runId, materializedDocuments);
+    await this.deliverDocuments(request.runId);
     return result;
   }
 
@@ -1544,18 +1585,77 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     })).then((files) => files.filter((file): file is AgentTeamProjectInstructionFile => file !== null));
   }
 
-  private async materializeDocuments(
-    runId: string,
-    documents: ReadonlyArray<{ document: AgentTeamDocument; revision: number }>,
-  ): Promise<void> {
+  private deliverDocuments(runId: string): Promise<void> {
+    const previous = this.documentDeliveries.get(runId) ?? Promise.resolve();
+    const delivery = previous
+      .catch(() => undefined)
+      .then(() => this.deliverDocumentsNow(runId));
+    this.documentDeliveries.set(runId, delivery);
+    void delivery.finally(() => {
+      if (this.documentDeliveries.get(runId) === delivery) this.documentDeliveries.delete(runId);
+    });
+    return delivery;
+  }
+
+  private async deliverDocumentsNow(runId: string): Promise<void> {
+    const documents = await this.db.select().from(agentTeamDocuments)
+      .where(eq(agentTeamDocuments.runId, runId))
+      .orderBy(asc(agentTeamDocuments.createdAt), asc(agentTeamDocuments.key), asc(agentTeamDocuments.revision));
     if (documents.length === 0) return;
     const outputDirectory = this.runOutputDirectory(runId);
-    await mkdir(outputDirectory, { recursive: true });
-    await Promise.all(documents.map(({ document, revision }) => writeFile(
-      join(outputDirectory, documentFileName(document.key, revision)),
-      document.content,
-      'utf8',
-    )));
+    try {
+      await mkdir(outputDirectory, { recursive: true });
+      await Promise.all(documents.map((document) => writeFile(
+        join(outputDirectory, agentTeamDocumentFileName(document.key, document.revision)),
+        document.content,
+        'utf8',
+      )));
+      await this.transaction((transaction) => {
+        for (const document of documents) {
+          const delivered = transaction.update(agentTeamDocuments).set({
+            deliveryStatus: 'delivered',
+            deliveryError: null,
+          }).where(and(
+            eq(agentTeamDocuments.id, document.id),
+            ne(agentTeamDocuments.deliveryStatus, 'delivered'),
+          )).returning().all();
+          if (delivered.length > 0) {
+            this.appendEvent(transaction, runId, 'document.delivered', {
+              documentId: document.id,
+              taskAttemptId: document.taskAttemptId,
+              taskKey: taskKeyForDocument(transaction, document.taskAttemptId),
+              documentKey: document.key,
+              revision: document.revision,
+              fileName: agentTeamDocumentFileName(document.key, document.revision),
+            });
+          }
+        }
+      });
+    } catch (error) {
+      const reason = formatError(error);
+      await this.transaction((transaction) => {
+        for (const document of documents) {
+          const failed = transaction.update(agentTeamDocuments).set({
+            deliveryStatus: 'failed',
+            deliveryError: reason,
+          }).where(and(
+            eq(agentTeamDocuments.id, document.id),
+            ne(agentTeamDocuments.deliveryStatus, 'delivered'),
+          )).returning().all();
+          if (failed.length > 0) {
+            this.appendEvent(transaction, runId, 'document.delivery_failed', {
+              documentId: document.id,
+              taskAttemptId: document.taskAttemptId,
+              taskKey: taskKeyForDocument(transaction, document.taskAttemptId),
+              documentKey: document.key,
+              revision: document.revision,
+              fileName: agentTeamDocumentFileName(document.key, document.revision),
+              error: reason,
+            });
+          }
+        }
+      }).catch(() => undefined);
+    }
   }
 }
 
@@ -1571,7 +1671,7 @@ function processReferencePaths(
     .filter((path) => prefixes.some((prefix) => path.startsWith(prefix)));
 }
 
-function documentFileName(key: string, revision: number): string {
+export function agentTeamDocumentFileName(key: string, revision: number): string {
   const safeKey = key
     .replace(/[^A-Za-z0-9._-]+/g, '-')
     .replace(/^\.+/, '')
@@ -1854,6 +1954,9 @@ function toDocumentView(row: typeof agentTeamDocuments.$inferSelect): AgentTeamD
     title: row.title,
     content: row.content,
     upstreamDocumentKeys: row.upstreamDocumentKeys,
+    deliveryStatus: row.deliveryStatus,
+    deliveryError: row.deliveryError,
+    fileName: agentTeamDocumentFileName(row.key, row.revision),
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -1969,6 +2072,17 @@ function persistedToolCall(value: unknown): unknown | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const candidate = (value as { call?: unknown }).call;
   return candidate && typeof candidate === 'object' && !Array.isArray(candidate) ? candidate : undefined;
+}
+
+function taskKeyForDocument(
+  db: Database | AgentTeamDatabaseTransaction,
+  taskAttemptId: string,
+): string | null {
+  const [attempt] = db.select({ taskKey: agentTeamTaskAttempts.taskKey })
+    .from(agentTeamTaskAttempts)
+    .where(eq(agentTeamTaskAttempts.id, taskAttemptId))
+    .limit(1).all();
+  return attempt?.taskKey ?? null;
 }
 
 function roleForTaskKey(taskKey: string): AgentTeamRole {

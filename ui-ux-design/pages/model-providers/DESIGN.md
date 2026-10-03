@@ -17,13 +17,13 @@
 
 Configure the upstream model providers the local Portkey Gateway dispatches to and manage the Codex account pool.
 
-Gateway request metrics and captured request details are read at [Logs](../logs/DESIGN.md), not here. This page owns what the Gateway dispatches to; that one owns what it did.
+Provider configuration stays here; Provider-specific performance and request details open in context on this page and link to [Logs](../logs/DESIGN.md) for the full investigation.
 
 ## Primary Task
 
-Confirm that a configured provider actually answers. Action budget: two — open `Test`, then explicitly activate `Run test`.
+Inspect or test a provider from its row. Opening provider details costs one action; a resolvable connection test starts from its existing `Test` action.
 
-Opening the test dialog never sends a request. The dialog shows the Provider name, a model list, and an explicit `Run test` action. A remembered model or the first configured model may be selected by default, but the request starts only after the user activates the test action.
+If no model can be resolved, choose one and activate `Run test`. A remembered valid model or the only configured model starts immediately.
 
 Creating or editing a provider costs two actions — fill the form, then save — because the configuration is a set of values the product cannot resolve and a save writes credentials.
 
@@ -31,9 +31,9 @@ Creating or editing a provider costs two actions — fill the form, then save �
 
 Fluid collection width up to `1440px`. Providers is a top-level workspace destination: it is not part of the Agent resource tabs and does not use the Settings local navigation.
 
-Two page-level tabs use the `tab` URL Search parameter with `providers` and `codex` values. A missing or invalid value resolves to `providers`, and changing tabs updates the URL so refreshes and direct links restore the selected view.
+Two page-level tabs use the `tab` URL Search parameter with `providers` and `codex` values. A missing or invalid value resolves to `providers`, and changing tabs updates the URL so refreshes and direct links restore the selected view. An optional `provider` search parameter opens the matching provider detail from a request row and is cleared after the detail opens.
 
-The `providers` view is one continuous surface: the full-width Portkey Gateway summary first, then Gateway-managed provider administration. The `codex` view holds the account pool as one neutral card per account, two per row at `xl`.
+The `providers` view is one continuous surface: the full-width Portkey Gateway summary first, then Gateway-managed provider administration. Activating a Provider name opens its in-page detail dialog with provider-scoped statistics and requests, plus a link to the same filters in Logs. The `codex` view begins with Gateway Codex authorization and pool counts, then shows each account with its own plan, quota, and controls in one neutral card per account, two per row at `xl`.
 
 ## Interaction Contract
 
@@ -57,6 +57,8 @@ Manual entry is required rather than convenient: a protocol without model discov
 
 Provider deletion uses the shared named confirmation pattern: close before success feedback and refresh, retain visible errors on failure.
 
+Activating a Provider name or arriving from a request row opens its details. The Statistics tab shows that Provider's existing aggregate metrics for the last 24 hours; the Requests tab shows captured requests over the same period and keeps the Provider filter applied. The full Logs link carries the Provider and period into the Logs route. Provider status reports configuration readiness; request outcomes remain visible as separate observed activity.
+
 Provider CRUD, proxy, connection-test, and draft model-discovery requests use the `/api/portkey-gateway` prefix so every browser-facing request reaching the Gateway has one explicit route owner. Provider secrets are persisted by the Gateway and are never stored in WorkLite resource state. The protected WorkLite `gateway-provider` binding is internal and never appears on this page.
 
 When at least one Codex account is enabled and usable, the Gateway automatically supplies a `codex` Provider and its discovered model catalog. That Provider is not created by the form and exposes no edit or delete actions. When Codex is unconfigured, the automatic Provider is omitted from this page and from model selectors.
@@ -71,19 +73,19 @@ The test is read-only. Chat-compatible protocols send the fixed user message `�
 
 ### Portkey Gateway summary
 
-The full-width Gateway section shows the configured loopback listener, using development port `3392` by default, with current process status and credential-safe startup failure details. Gateway startup, shutdown, and unexpected-exit recovery are automatic; the section has no lifecycle mutation controls.
+The full-width Gateway section shows the configured loopback listener, using development port `3392` by default, with current process status and credential-safe startup failure details. Gateway startup, shutdown, and unexpected-exit recovery are automatic; the section has no lifecycle mutation controls. Codex authorization and account status belong to the Codex view rather than a second Gateway summary here.
 
 Integration details stay collapsed by default and include the `/v1` Base URL, no-key guidance, namespaced models, and a connection example. Model chips and the connection example use the actual `<providerName>/<modelId>` request value; internal Provider ids are never exposed as model prefixes. Copying the Base URL or the example reports `Copied` on the control that was activated.
 
 ### Codex account pool
 
-The pool shows one neutral card per account with email or name, masked ChatGPT account id, plan, enabled or disabled state, concurrency, priority, latest fetch time, expiry, and provider-reported primary and secondary remaining quota with reset times. Each quota row shows remaining percentage, used percentage, a progress bar, and the localized reset time; window names are never inferred from plan type. Progress stays neutral and uses text in addition to width in both themes. Tokens are never rendered.
+The pool header shows Gateway Codex authorization state, authentication method, and enabled versus total accounts. Each neutral account card shows email or name, masked ChatGPT account id, that account's plan, enabled or disabled state, concurrency, priority, latest fetch time, credential expiry, and provider-reported primary and secondary remaining quota with reset times. Each quota row shows remaining percentage, used percentage, a progress bar, and the localized reset time; window names are never inferred from plan type. Progress stays neutral and uses text in addition to width in both themes. Tokens are never rendered.
 
 `Add account` starts OAuth login: it opens the server-reported authorization URL and polls status without receiving tokens. Remote operators must use a secure tunnel for the registered localhost callback. `Import JSON` imports an account-export document. Each account has an accessible enable or disable switch and a removal action.
 
 Quota and token freshness are self-healing and expose no manual refresh control. `useCodexAccountUsagesQuery` refetches every 60 seconds while the `codex` view is active, and the Gateway independently refreshes the OAuth token of every enabled account on its own 60-second timer. The pool instead shows a quiet last-updated time derived from the usage snapshot's `fetchedAt`.
 
-Disabled accounts show persisted metadata without an upstream quota request. An individual usage error is shown on that account and never hides other accounts.
+Disabled accounts show persisted metadata without an upstream quota request. An individual usage error is shown on that account and never hides other accounts. Account mutations report progress and failure on the account or pool control that they affect.
 
 ## States
 
@@ -95,7 +97,7 @@ Disabled accounts show persisted metadata without an upstream quota request. An 
 | Error | Providers: `ErrorState` with a retry action. Gateway and Codex errors render as inline `role="alert"` text scoped to the affected section or account without hiding sibling content. |
 | Busy | Every mutation reports on the control that was activated. The test dialog owns its own waiting state; the row's `Test` control shows its pending label only for the provider being tested. |
 | Offline | Inherits `shared-states.md`. |
-| Long content | Provider table cells stay on one line with horizontal overflow on narrow layouts. Model tokens truncate individually. |
+| Long content | Provider table cells stay on one line with horizontal overflow on narrow layouts. Model tokens truncate individually. The provider detail dialog and request bodies scroll within bounded regions. |
 
 Define unconfigured, testing, connected, invalid credentials, unavailable provider, rate-limited, permission, and replacement-confirmation states. Changing configuration explains affected Agents or future Runs when known.
 
@@ -107,7 +109,7 @@ Define unconfigured, testing, connected, invalid credentials, unavailable provid
 | `settings:providers.description` | Constraint |
 | `settings:providers.create` | Action |
 | `settings:providers.search` | Action |
-| `settings:providers.columns.*` | State |
+| `settings:providers.columns.*` / `configured` | State |
 | `settings:providers.empty.title` | State |
 | `settings:providers.empty.description` | Recovery |
 | `settings:providers.noMatches.*` | State |
@@ -157,6 +159,8 @@ Define unconfigured, testing, connected, invalid credentials, unavailable provid
 | `settings:providers.loading` | State |
 | `settings:providers.loadFailed` | Recovery |
 | `settings:providers.views.*` | Action |
+| `settings:providers.openActivity` / `activity.statistics` / `requests` / `openLogs` | Action |
+| `settings:providers.activity.last24h` | State |
 | `settings:providers.gateway.title` | State |
 | `settings:providers.gateway.description` | Constraint |
 | `settings:providers.gateway.port` / `status` / `baseURL` / `apiKey` / `models` / `example` | State |
@@ -167,16 +171,14 @@ Define unconfigured, testing, connected, invalid credentials, unavailable provid
 | `settings:providers.gateway.copied` | State |
 | `settings:providers.gateway.integrationTitle` | Action |
 | `settings:providers.gateway.integrationDescription` | Constraint |
-| `settings:providers.gateway.codex.title` | State |
-| `settings:providers.gateway.codex.manageInPool` | Recovery |
 | `settings:providers.gateway.codex.login` / `addAccount` / `import` / `remove` / `enable` / `disable` | Action |
-| `settings:providers.gateway.codex.loginPending` / `enabled` / `disabled` / `concurrency` / `priority` / `unknownPlan` | State |
+| `settings:providers.gateway.codex.loginPending` / `enabled` / `disabled` / `updating` / `concurrency` / `priority` / `unknownPlan` | State |
 | `settings:providers.gateway.codex.loginStarted` / `imported` / `removed` | State |
 | `settings:providers.gateway.codex.loginFailed` / `importFailed` / `updateFailed` / `removeFailed` | Recovery |
 | `settings:providers.gateway.codex.noAccounts` | State |
 | `settings:providers.gateway.codex.used` / `resets` / `minutes` / `hours` / `days` | State |
 | `settings:providers.codexPool.title` | State |
-| `settings:providers.codexPool.primary` / `secondary` / `remaining` / `used` / `resets` / `fetchedAt` / `accountId` / `plan` / `expiresAt` | State |
+| `settings:providers.codexPool.authMethod` / `oauth` / `environment` / `enabledAccounts` / `primary` / `secondary` / `remaining` / `used` / `resets` / `fetchedAt` / `accountId` / `plan` / `expiresAt` | State |
 | `settings:providers.codexPool.quotaUnavailable` | State |
 | `settings:providers.codexPool.usageError` | Recovery |
 | `settings:providers.codexPool.loading` | State |
@@ -191,11 +193,11 @@ Removed keys:
 - `settings:providers.views.statistics` and `settings:providers.views.requestLogs`: the tabs they labelled are removed from this page.
 
 - `settings:providers.codexPool.refreshAll` and `settings:providers.gateway.codex.refresh`, `refreshed`, `refreshFailed`, `quotasRefreshed`, `quotasRefreshFailed`: their controls are removed because quota and token staleness are already observable and recovered automatically. Under `shared/copy-standards.md` automation debt, the labels and failure copy go with the controls.
-- `settings:providers.codexPool.description`: it restates the pool heading and then documents the one-minute refresh cadence, which is internal mechanics the reader cannot act on.
+- `settings:providers.gateway.codex.title`, `description`, and `manageInPool`: Codex authorization is now summarized directly in the account-pool view, so a second detached subscription section is unnecessary.
 - `settings:providers.testDescription` ("Select a model, then send the fixed read-only test message."): it describes the removed selection step.
 - `settings:providers.viewLogs` and the `traceId` copy beside it: the Diagnostic Logs page they opened is removed, and the correlated Gateway request log replaces the trace identifier.
 - `settings:providers.requestLogs.clearFilters`: the shared `common:actions.clearFilters` label is what the control renders.
-- `settings:providers.gateway.codex.description`, `rateLimitsLoading`, `rateLimitsUnavailable`, `rateLimitsEmpty`: the summary section delegates account management to the pool tab through `manageInPool`, and the rate-limit strings are unrendered leftovers from the pre-pool presentation.
+- `settings:providers.gateway.codex.rateLimitsLoading`, `rateLimitsUnavailable`, `rateLimitsEmpty`: these are unrendered leftovers from the pre-pool presentation.
 
 `settings:providers.description` is retained as a Constraint: write-only custom headers and the fact that a change affects future Agent runs but not published Workflow versions are both rules the interface does not otherwise show. It no longer claims credentials are write-only, which stopped being true for the API key.
 
@@ -209,7 +211,7 @@ Icon-only edit, delete, per-account, and copy controls carry accessible names; p
 
 ## Coverage Status
 
-Verified 2026-09-22 for the API key field's readability, the create and edit dialog's autocomplete behavior, and the `typesafe/systemone` protocol option; the observability entries carry over from the 2026-09-21 verification after those views moved to [Logs](../logs/DESIGN.md), and the remainder from the 2026-09-20 verification of the Providers and Codex views. Struck entries were resolved in the 2026-09-19 single-action pass.
+Verified 2026-10-03 for Provider activity details, the Codex summary placement, and existing Provider and Codex interactions. The latest comparison found no unresolved differences. Earlier resolved findings follow.
 
 - Resolved 2026-09-22: the edit dialog cleared the API key field, because the view carried only `maskedKey` and the stored key never reached the browser. The field now prefills from the record, so the existing reveal control can show the key being edited. This also re-enables `Fetch models` while editing, which was disabled by its empty-key guard for every saved provider except `codex/responses`. The obsolete `keepSecretPlaceholder` string was removed in the same change.
 - Resolved 2026-09-22: Provider name, Base URL, and the Headers JSON field carried no `autoComplete` attribute, so the browser offered unrelated history and saved-credential values for fields scoped to one upstream record. All three now disable it, matching the API key field and the transient chat composer.
@@ -230,6 +232,13 @@ Verified 2026-09-22 for the API key field's readability, the create and edit dia
 - ~~Protocol selection did not match the supported current contracts.~~ Resolved: `anthropic/messages` is available, `deepseek/chat` is removed, and a new provider draft starts without an implicit protocol.
 
 ## Changelog
+
+### 2026-10-03 - Provider activity and Codex context
+
+- Added provider-scoped statistics and requests to Provider details, with a link to the same Provider filter in Logs.
+- Opened a failed Provider test at its exact captured request in Logs.
+- Consolidated Codex authorization summary and account pool context in the Codex view.
+- Kept provider configuration status distinct from observed request outcomes.
 
 ### 2026-09-22 - TypeSafe Connection Test
 
