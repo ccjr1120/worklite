@@ -200,16 +200,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     });
 
     await mkdir(outputDirectory, { recursive: true });
-    this.scheduleExecution(runId, {
-      runId,
-      intent,
-      mode,
-      projectDirectory: resolvedProjectDirectory,
-      outputDirectory,
-      authorizedCommands,
-      scopeRevision: 1,
-      projectInstructions,
-    });
+    this.scheduleExecution(runId, this.initialGraphInput(await this.getRun(runId)));
     return this.getRunView(runId);
   }
 
@@ -467,7 +458,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         active: false,
         error: supersededAttemptReason,
         finishedAt: now,
-        updatedAt: now,
       }).where(and(
         eq(agentTeamTaskAttempts.id, operation.taskAttemptId),
         eq(agentTeamTaskAttempts.status, 'waiting_for_recovery'),
@@ -577,7 +567,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
     const now = new Date();
     await this.transaction((transaction) => {
-      transaction.update(agentTeamTaskAttempts).set({ active: false, updatedAt: now })
+      transaction.update(agentTeamTaskAttempts).set({ active: false })
         .where(and(
           eq(agentTeamTaskAttempts.runId, runId),
           eq(agentTeamTaskAttempts.taskKey, taskKey),
@@ -833,11 +823,10 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const controller = new AbortController();
     this.abortControllers.set(runId, controller);
     await this.setRunStatus(runId, 'running');
-    let finalState: AgentTeamGraphState | undefined;
     let sawInterrupt = false;
     let pauseAtBoundary = false;
     try {
-      const stream = await graph.stream(input, {
+      const stream = await graph.stream(input as Parameters<typeof graph.stream>[0], {
         configurable: { thread_id: run.langGraphThreadId },
         signal: controller.signal,
       });
@@ -846,7 +835,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           sawInterrupt = true;
           continue;
         }
-        finalState = chunk as AgentTeamGraphState;
         if (await this.getDesiredControlState(runId) === 'pause_requested') {
           const snapshot = await graph.getState({ configurable: { thread_id: run.langGraphThreadId } });
           if (snapshot.next.length > 0) {
@@ -877,12 +865,14 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       await this.setRunStatus(runId, 'waiting_for_input');
       return;
     }
-    const documents = finalState?.documents ?? [];
+    const snapshot = await graph.getState({ configurable: { thread_id: run.langGraphThreadId } });
+    const completedState = snapshot.values as AgentTeamGraphState;
+    const documents = completedState.documents ?? [];
     await this.materializeDocuments(runId, documents.map((document, index) => ({
       document,
       revision: nextDocumentRevision(documents, document, index),
     })));
-    await this.finishSuccessfulRun(runId, toGraphResult(finalState ?? this.initialGraphInput(run)));
+    await this.finishSuccessfulRun(runId, toGraphResult(completedState));
   }
 
   private createGraph(run: AgentTeamRun, version: AgentTeamVersion) {
@@ -1024,7 +1014,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         error: null,
         finishedAt: null,
         startedAt: existing.startedAt ?? now,
-        updatedAt: now,
       }).where(and(eq(agentTeamTaskAttempts.id, existing.id), eq(agentTeamTaskAttempts.status, 'waiting_for_input')))
         .returning();
       if (resumed) return { id: resumed.id, status: resumed.status, result: resumed.result };
@@ -1055,7 +1044,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     return { id: created.id, status: created.status, result: created.result };
   }
 
-  private finishWaitingAttempt(
+  private async finishWaitingAttempt(
     request: AgentTeamTaskRequest,
     workspaceId: string,
     attemptId: string,
@@ -1083,7 +1072,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         status: 'waiting_for_input',
         result: persistedResult,
         finishedAt: now,
-        updatedAt: now,
       }).where(and(
         eq(agentTeamTaskAttempts.id, attemptId),
         eq(agentTeamTaskAttempts.status, 'running'),
@@ -1115,7 +1103,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     return Promise.resolve(persistedResult);
   }
 
-  private finishCompletedAttempt(
+  private async finishCompletedAttempt(
     request: AgentTeamTaskRequest,
     workspaceId: string,
     attemptId: string,
@@ -1137,7 +1125,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         result,
         error: null,
         finishedAt: now,
-        updatedAt: now,
       }).where(and(
         eq(agentTeamTaskAttempts.id, attemptId),
         eq(agentTeamTaskAttempts.status, 'running'),
@@ -1199,7 +1186,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         eq(agentTeamPendingInputs.status, 'answered'),
       ))
       .limit(1);
-    return row?.answer === undefined
+    return row?.answer === undefined || row.answer === null
       ? undefined
       : pendingInputAnswer(row.answer, run.authorizedCommands);
   }
@@ -1280,7 +1267,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       const updatedAttempt = transaction.update(agentTeamTaskAttempts).set({
         status: 'waiting_for_recovery',
         finishedAt: now,
-        updatedAt: now,
       }).where(and(
         eq(agentTeamTaskAttempts.id, operation.taskAttemptId),
         inArray(agentTeamTaskAttempts.status, ['running', 'waiting_for_recovery']),
@@ -1352,7 +1338,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       status,
       error: reason,
       finishedAt: now,
-      updatedAt: now,
     }).where(and(
       eq(agentTeamTaskAttempts.runId, runId),
       eq(agentTeamTaskAttempts.active, true),
@@ -1386,7 +1371,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           status: 'failed',
           error: reason,
           finishedAt: now,
-          updatedAt: now,
         }).where(eq(agentTeamTaskAttempts.id, row.id)).run();
         this.appendEvent(transaction, runId, 'task.failed', {
           taskAttemptId: row.id,
@@ -1646,7 +1630,6 @@ function ensureProjectionAttempt(
         result,
         error: null,
         finishedAt: now,
-        updatedAt: now,
       }).where(eq(agentTeamTaskAttempts.id, existing.id)).run();
     }
     return existing.id;

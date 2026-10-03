@@ -144,7 +144,6 @@ function getDatabase(): BetterSqlite3.Database {
     CREATE INDEX IF NOT EXISTS gateway_request_logs_occurred_idx ON gateway_request_logs(occurred_at);
     CREATE INDEX IF NOT EXISTS gateway_request_logs_provider_model_idx ON gateway_request_logs(provider_name, model);
     CREATE INDEX IF NOT EXISTS gateway_request_logs_workflow_run_idx ON gateway_request_logs(workflow_run_id);
-    CREATE INDEX IF NOT EXISTS gateway_request_logs_team_run_idx ON gateway_request_logs(team_run_id);
   `);
   addMissingRequestLogColumns(database);
   pruneRequestLogs(database);

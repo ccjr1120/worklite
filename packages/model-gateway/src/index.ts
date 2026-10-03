@@ -569,11 +569,18 @@ function extractJsonText(text: string): string {
   if (exact !== null) return exact;
 
   const source = text.trim();
-  for (const [index, character] of source.split('').entries()) {
-    if (character !== '{' && character !== '[') continue;
+  let index = 0;
+  while (index < source.length) {
+    const opening = source[index];
+    if (opening !== '{' && opening !== '[') {
+      index += 1;
+      continue;
+    }
+
     let depth = 0;
     let inString = false;
     let escaped = false;
+    let closingIndex = -1;
     for (let end = index; end < source.length; end += 1) {
       const current = source[end];
       if (inString) {
@@ -587,12 +594,23 @@ function extractJsonText(text: string): string {
       else if (current === '}' || current === ']') {
         depth -= 1;
         if (depth === 0) {
-          const candidate = parse(source.slice(index, end + 1));
-          if (candidate !== null) return candidate;
+          closingIndex = end;
           break;
         }
       }
     }
+
+    if (closingIndex < 0) {
+      index += 1;
+      continue;
+    }
+
+    const candidate = parse(source.slice(index, closingIndex + 1));
+    if (candidate !== null) return candidate;
+
+    // Skip the complete candidate rather than retrying nested objects. A nested
+    // object is not the requested top-level JSON response even when it parses.
+    index = closingIndex + 1;
   }
 
   throw new Error('Agent JSON output requires valid JSON.');

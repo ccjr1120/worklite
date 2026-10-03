@@ -1,7 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { dirname, join, normalize, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, normalize, resolve } from 'node:path';
 
 export type BmadTeaProcessManifest = {
   schemaVersion: number;
@@ -31,8 +30,12 @@ export type BmadTeaProcessManifest = {
   deferredEntryPoints: Record<string, string>;
 };
 
-const moduleDirectory = dirname(fileURLToPath(import.meta.url));
-export const bmadTeaProcessDirectory = resolve(moduleDirectory, '../processes/bmad-tea');
+function resolveBmadTeaProcessDirectory(): string {
+  const rootCandidate = resolve(process.cwd(), 'packages/team-runtime/processes/bmad-tea');
+  const apiCandidate = resolve(process.cwd(), '../../packages/team-runtime/processes/bmad-tea');
+  return existsSync(rootCandidate) ? rootCandidate : apiCandidate;
+}
+export const bmadTeaProcessDirectory = resolveBmadTeaProcessDirectory();
 const manifestPath = join(bmadTeaProcessDirectory, 'worklite-manifest.json');
 
 export function getBmadTeaProcessManifest(): BmadTeaProcessManifest {

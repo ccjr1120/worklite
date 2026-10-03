@@ -7,6 +7,7 @@ import type {
   AgentTeamGraphOptions,
   AgentTeamGraphResult,
   AgentTeamPendingInput,
+  AgentTeamPendingInputAnswer,
   AgentTeamProjectInstructionFile,
   AgentTeamRole,
   AgentTeamRunRequest,
