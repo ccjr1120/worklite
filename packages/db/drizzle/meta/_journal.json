@@ -141,6 +141,27 @@
       "when": 1790976000000,
       "tag": "0020_agent_team_conversations",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1791062400000,
+      "tag": "0021_feishu_master_chat",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1791062460000,
+      "tag": "0022_chat_bot_capabilities",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1791062520000,
+      "tag": "0023_feishu_registration",
+      "breakpoints": true
     }
   ]
 }

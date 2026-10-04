@@ -17,14 +17,14 @@ import type { CommandReservation } from '../commands/commands.service';
 import { McpRuntimeService, type McpRuntimeTool } from './mcp-runtime.service';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
 
-export type AgentInvocationSkill = {
+type AgentInvocationSkill = {
   id: string;
   name: string;
   instructions?: string;
   files: Array<{ path: string; content: string }>;
 };
 
-export type AgentInvocationSkillActivity = {
+type AgentInvocationSkillActivity = {
   skillId: string;
   skillName: string;
   scriptPath: string;
@@ -34,7 +34,7 @@ export type AgentInvocationSkillActivity = {
   status: 'succeeded' | 'failed';
 };
 
-export type AgentInvocationMcpActivity = {
+type AgentInvocationMcpActivity = {
   serverId: string;
   toolName: string;
   input: unknown;
@@ -42,7 +42,7 @@ export type AgentInvocationMcpActivity = {
   status: 'succeeded' | 'failed';
 };
 
-export type AgentInvocationBuiltinActivity = {
+type AgentInvocationBuiltinActivity = {
   toolName: string;
   input: unknown;
   commandExecutionId: string;
@@ -83,7 +83,7 @@ export type AgentInvocationOperationJournal = {
   attachReplayCommand(operationKey: string, commandId: string, transaction?: Database): AgentInvocationOperationRecord;
 };
 
-export type IsolatedAgentInvocationRequest = {
+type IsolatedAgentInvocationRequest = {
   workspaceId: string;
   publicModelId: string;
   systemPrompt: string;

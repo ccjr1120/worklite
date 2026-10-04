@@ -1,3 +1,4 @@
+import { assertRuntimeAdmission, runtimeAdmissionClosed } from '../../infrastructure/runtime-upgrade-state';
 import {
   BadRequestException,
   Inject,
@@ -135,7 +136,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit(): Promise<void> {
     await this.initializeBuiltInTeam();
-    await this.recoverRuns();
+    if (!runtimeAdmissionClosed()) await this.recoverRuns();
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -150,6 +151,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     request: CreateAgentTeamRunRequest,
     origin?: AgentTeamRunOrigin,
   ): Promise<AgentTeamRunView> {
+    assertRuntimeAdmission();
     const intent = request?.intent?.trim();
     const projectDirectory = request?.projectDirectory?.trim();
     const mode = request?.mode;
@@ -538,6 +540,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (decision !== 'mark_failed') this.scheduleExecution(runId, null);
     return this.getRunView(runId);
   }
+
+  upgradeQuiescent(): boolean { return this.executions.size === 0; }
 
   async pause(runId: string): Promise<AgentTeamRunView> {
     const run = await this.getRun(runId);

@@ -29,20 +29,6 @@
     "saveFailed": "无法保存插件配置。",
     "verifying": "正在验证..."
   },
-  "wechat": {
-    "title": "微信 ClawBot",
-    "description": "通过 iLink Bot 传输将此 Codex 插件连接到微信。",
-    "login": "开始登录",
-    "disconnect": "断开连接",
-    "loginFailed": "无法开始微信登录。",
-    "disconnectFailed": "无法断开微信连接。",
-    "qrAlt": "微信登录二维码",
-    "openQrLink": "打开二维码链接",
-    "scan": "使用微信扫描此二维码以完成连接。",
-    "botId": "Bot ID",
-    "conversations": "已映射会话",
-    "notConnected": "未连接"
-  },
   "officialAccount": {
     "title": "公众号会话",
     "description": "连接工作流发布文章使用的账号。浏览器存储状态仅加密保存在 API 主机。",
@@ -55,5 +41,45 @@
     "account": "账号",
     "lastVerified": "最近验证",
     "never": "从未"
+  },
+  "feishu": {
+    "title": "飞书连接",
+    "openPlatform": "打开飞书开放平台",
+    "appId": "App ID",
+    "appSecret": "App Secret",
+    "allowedUserId": "允许使用的用户 Open ID",
+    "secretConfigured": "已配置；留空保留现有凭据",
+    "disconnect": "断开飞书连接",
+    "disconnectFailed": "无法断开飞书连接。",
+    "status": {
+      "disconnected": "未连接",
+      "connecting": "正在连接飞书",
+      "connected": "已连接飞书",
+      "error": "飞书连接失败"
+    },
+    "registration": {
+      "starting": "正在申请飞书应用注册",
+      "create": "扫码创建应用",
+      "replace": "扫码更换应用",
+      "cancel": "取消扫码",
+      "open": "打开飞书确认页面",
+      "qrAlt": "飞书应用创建确认二维码",
+      "constraint": "使用飞书扫码创建个人 Agent 应用。确认后自动保存凭证；未返回用户 Open ID 时需要补充绑定。",
+      "replaceConstraint": "扫码将创建新应用，并在确认后替换当前配置。等待或取消扫码时保留当前应用。",
+      "manual": "已有应用",
+      "platformRequirements": "启用机器人及消息权限，并将消息事件和卡片回调设为长连接接收，再按企业要求发布应用。凭证保存与连接状态分别显示。",
+      "requestFailed": "无法申请飞书应用注册，请重试。",
+      "cancelFailed": "无法取消扫码，请重试。",
+      "qrFailed": "无法显示二维码，请使用确认链接。",
+      "status": {
+        "pending": "等待飞书扫码确认",
+        "completed": "应用凭证和用户绑定已保存",
+        "needs_user_id": "应用凭证已保存。请补充这个应用下的用户 Open ID 并保存，完成绑定后开始连接。",
+        "denied": "已拒绝应用注册，可重新扫码。",
+        "expired": "二维码已过期",
+        "error": "应用注册失败，可重新扫码或配置已有应用。",
+        "cancelled": "已取消扫码"
+      }
+    }
   }
 }

@@ -48,14 +48,14 @@ export type WorkspaceView = {
 };
 
 export type PluginView = {
-  id: 'codex-cli-chat' | 'wechat-official-account';
+  id: 'codex-cli-chat' | 'feishu-bot' | 'wechat-official-account';
   name: string;
   description: string;
   command: string;
   enabled: boolean;
   status: 'available' | 'missing' | 'failed';
   updatedAt: string;
-  wechat: WechatConnectionView;
+  feishu?: FeishuConnectionView;
   officialAccount?: WechatOfficialAccountView;
 };
 
@@ -72,20 +72,106 @@ export type WechatOfficialAccountView = {
   updatedAt: string;
 };
 
-export type WechatConnectionStatus = 'disconnected' | 'qr_pending' | 'connected' | 'error';
+export type FeishuRegistrationView = {
+  id: string;
+  status: 'pending' | 'completed' | 'needs_user_id' | 'denied' | 'expired' | 'error' | 'cancelled';
+  verificationUrl: string | null;
+  expiresAt: string | null;
+  error: string | null;
+};
 
-export type WechatConnectionView = {
-  status: WechatConnectionStatus;
-  baseUrl: string;
-  botId: string | null;
-  qrCode: string | null;
+export type FeishuConnectionView = {
+  appId: string;
+  hasAppSecret: boolean;
+  allowedUserId: string;
+  status: 'disconnected' | 'connecting' | 'connected' | 'error';
   lastError: string | null;
-  conversationCount: number;
-  updatedAt: string;
+  registration: FeishuRegistrationView | null;
 };
 
 export type UpdatePluginRequest = {
-  command: string;
+  command?: string;
+  feishu?: { appId: string; appSecret?: string; allowedUserId: string };
+};
+
+export type ChatTarget =
+  | { kind: 'conversation' }
+  | { kind: 'team'; teamId: string; intakeSubmissionId?: string; intakeField?: 'goal' | 'projectDirectory' | 'mode' }
+  | { kind: 'workflow'; workflowId: string };
+
+export type ChatTaskReference =
+  | { kind: 'conversation'; executionId: string; afterMessageId: string | null; afterSequence: number; untilMessageId?: string | null; completionStatus?: string; completionError?: string | null }
+  | { kind: 'team'; teamId: string; intakeSubmissionId: string }
+  | { kind: 'workflow'; runId: string; workflowVersionId: string }
+  | { kind: 'upgrade'; jobId: string };
+
+export type DispatchChatRequest = {
+  submissionId: string;
+  message: string;
+  target: ChatTarget;
+  executionId?: string | null;
+  questionId?: string;
+};
+
+export type DispatchChatResponse = {
+  submissionId: string;
+  reference: ChatTaskReference;
+};
+
+export const CHAT_AGENT_ID = 'agt_system_helper_chat';
+
+export type ChatChannelView = {
+  id: string;
+  name: string;
+  builtIn: boolean;
+  presentation: string[];
+};
+
+export type ChatConversationSummary = {
+  id: string;
+  executionId: string | null;
+  title: string;
+  channel: string;
+  channelConversationId: string | null;
+  status: AgentExecutionStatus | 'queued' | 'task';
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ChatConversationList = {
+  items: ChatConversationSummary[];
+  nextCursor: string | null;
+};
+
+export type ChatConversationView = {
+  conversation: ChatConversationSummary;
+  execution: AgentExecutionView | null;
+  pendingReceipts: Array<{ id: string; text: string; status: 'queued' | 'failed'; error: string | null; createdAt: string }>;
+  submissions: ChatSubmissionView[];
+  channelDelivery: 'web' | 'connected' | 'disconnected' | 'unbound';
+};
+
+export type ChatSubmissionView = {
+  id: string;
+  origin: string;
+  executionId: string | null;
+  message: string;
+  reference: ChatTaskReference | null;
+  outputMessageId: string | null;
+  renderedCard: Record<string, unknown> | null;
+  settled: boolean;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ChatConversationRecords = {
+  conversation: ChatConversationSummary;
+  execution: AgentExecutionView | null;
+  events: AgentExecutionEvent[];
+  receipts: Array<{ id: string; payload: Record<string, unknown>; status: 'queued' | 'done' | 'failed'; error: string | null; createdAt: string }>;
+  submissions: ChatSubmissionView[];
+  deliveries: Array<{ id: string; messageId: string | null }>;
 };
 
 export type PluginTestResult = {
@@ -94,6 +180,7 @@ export type PluginTestResult = {
 };
 
 export type AgentView = {
+  chatConfiguration?: { revision: number; extensionPrompt: string };
   id: string;
   workspaceSlug: string;
   kind: 'system' | 'custom';
@@ -247,10 +334,13 @@ export type CreateAgentVersionRequest = Record<string, never>;
 
 export type UpdateAgentRequest = Partial<CreateAgentRequest> & {
   providerId?: string | null;
+  extensionPrompt?: string;
+  expectedConfigurationRevision?: number;
 };
 
 export type WorkliteNavigationTarget =
   | 'home'
+  | 'chat'
   | 'skills'
   | 'mcp-servers'
   | 'model-providers'
@@ -392,6 +482,7 @@ export type WorkliteScriptResult =
   | { type: 'resource'; resourceType: 'provider' | 'skill' | 'mcp-server' | 'workflow'; id: string; route: string }
   | { type: 'navigation'; target: WorkliteNavigationTarget; route: string }
   | { type: 'settings'; appearance: WorkspaceSettingsView['appearance'] }
+  | { type: 'dispatch'; submissionId: string; route: string }
   | { type: 'snapshot' };
 
 export type WorkflowNodePosition = {

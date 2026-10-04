@@ -16,12 +16,14 @@ import { UsageModule } from './modules/usage/usage.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { CommandsModule } from './modules/commands/commands.module';
 import { PluginsModule } from './modules/plugins/plugins.module';
+import { UpgradesModule } from './modules/upgrades/upgrades.module';
 import { AgentTeamsModule } from './modules/agent-teams/agent-teams.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     DatabaseModule,
+    UpgradesModule,
     CommandsModule,
     PluginsModule,
     AgentTeamsModule,

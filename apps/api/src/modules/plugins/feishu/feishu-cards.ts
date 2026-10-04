@@ -1,0 +1,65 @@
+import { createHash } from 'node:crypto';
+
+export type FeishuAction =
+  | { kind: 'upgrade'; jobId: string; releaseHash: string }
+  | { kind: 'intake'; teamId: string; intakeSubmissionId: string; field: 'goal' | 'projectDirectory' | 'mode'; answer?: string }
+  | { kind: 'answer'; runId: string; pendingInputId: string; scopeRevision: number }
+  | { kind: 'agent_answer'; executionId: string; questionId: string; answer?: string }
+  | { kind: 'control'; domain: 'team' | 'workflow' | 'conversation'; runId: string; action: 'pause' | 'resume' | 'cancel' | 'retry'; taskKey?: string }
+  | { kind: 'recovery'; runId: string; operationKey: string; decision: 'adopt_command' | 'mark_failed' | 'replay' }
+  | { kind: 'delivery' };
+
+export type CardButton = { label: string; action: FeishuAction };
+export type CardState = {
+  title: string;
+  status: string;
+  content: string;
+  replyContent?: string;
+  buttons: CardButton[];
+  conversation?: boolean;
+  question?: { text: string; action: FeishuAction; commands?: boolean; replyOnly?: boolean };
+  imageKey?: string;
+};
+export type SavedCard = {
+  card: Record<string, unknown>;
+  actions: Record<string, FeishuAction>;
+  content: string;
+  questionText?: string;
+  replyAction?: FeishuAction;
+};
+
+const text = (content: string) => ({ tag: 'plain_text', content });
+export function renderCard(submissionId: string, state: CardState): SavedCard {
+  const actions: Record<string, FeishuAction> = {};
+  const button = ({ label, action }: CardButton, form = false) => {
+    const key = createHash('sha256').update(JSON.stringify(action)).digest('hex');
+    actions[key] = action;
+    return {
+      tag: 'button', text: text(label), type: 'default',
+      ...(form ? { name: `submit_${key}`, form_action_type: 'submit' } : {}),
+      behaviors: [{ type: 'callback', value: { submissionId, actionKey: key } }],
+    };
+  };
+  const elements: Record<string, unknown>[] = [];
+  const content = [state.status, state.content].filter(Boolean).join('\n\n');
+  if (content) elements.push({ tag: 'markdown', content });
+  if (state.imageKey) elements.push({ tag: 'img', img_key: state.imageKey, alt: text('扫码完成当前任务') });
+  if (state.question) {
+    elements.push({ tag: 'markdown', content: state.question.text });
+    if (!state.question.replyOnly) elements.push({ tag: 'form', name: 'task_answer', elements: [
+      { tag: 'input', name: 'answer', input_type: 'multiline_text', label: text('回答'), placeholder: text('补充当前任务需要的信息'), required: true },
+      ...(state.question.commands ? [{ tag: 'input', name: 'commands', input_type: 'multiline_text', label: text('授权执行的完整命令（可选，每行一条）'), placeholder: text('只有在此明确提交的命令才会获得授权') }] : []),
+      button({ label: state.question.commands ? '提交回答与命令授权' : '提交回答', action: state.question.action }, true),
+    ] });
+  }
+  // JSON 2.0 places interactive components in columns rather than a legacy action container.
+  for (let index = 0; index < state.buttons.length; index += 3) {
+    elements.push({ tag: 'column_set', flex_mode: 'flow', columns: state.buttons.slice(index, index + 3).map((item) => ({ tag: 'column', width: 'weighted', weight: 1, elements: [button(item)] })) });
+  }
+  return { card: { schema: '2.0', config: { update_multi: true }, ...(!state.conversation ? { header: { title: text(state.title), template: 'grey' } } : {}), body: { elements } }, actions, content: state.replyContent ?? state.content, ...(state.question ? { replyAction: state.question.action, questionText: state.question.text } : {}) };
+}
+
+export const statusText: Record<string, string> = {
+  queued: '已排队', collecting: '等待补充信息', starting: '正在启动', started: '已启动', running: '正在执行', waiting_for_input: '等待你的回答',
+  paused: '已暂停', succeeded: '已完成', completed: '已完成', failed: '执行失败', cancelled: '已取消', timed_out: '执行超时',
+};

@@ -1,9 +1,9 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { AgentVersionView, AgentView, CreateAgentRequest, ModelProviderView, UpdateAgentRequest } from '@worklite/contracts';
-import { agentExecutions, agentMcpServers, agentVersions, agents, agentSkills, mcpServers, scheduledAgentTasks, skills, type Database } from '@worklite/db';
+import { agentExecutions, chatConfigurations, agentMcpServers, agentVersions, agents, agentSkills, mcpServers, scheduledAgentTasks, skills, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 
@@ -49,7 +49,12 @@ export class AgentsService {
     const gatewayNames = await this.gatewayProviderNames();
     const assignments = await this.loadAssignments(team.id, [row.agent.id]);
     const [latest] = await this.db.select({ id: agentVersions.id, version: agentVersions.version }).from(agentVersions).where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, team.id))).orderBy(desc(agentVersions.version)).limit(1);
-    return this.toView(row.agent, workspaceSlug, row.agent.providerId ? gatewayNames.get(row.agent.providerId) ?? null : null, assignments, latest);
+    const view = this.toView(row.agent, workspaceSlug, row.agent.providerId ? gatewayNames.get(row.agent.providerId) ?? null : null, assignments, latest);
+    if (agentId === 'agt_system_helper_chat') {
+      const [configuration] = await this.db.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
+      if (configuration) view.chatConfiguration = { revision: configuration.revision, extensionPrompt: configuration.extensionPrompt };
+    }
+    return view;
   }
 
   async create(request: Request, workspaceSlug: string, input: CreateAgentRequest): Promise<AgentView> {
@@ -125,28 +130,39 @@ export class AgentsService {
     if (!existing) throw new NotFoundException('Agent not found');
 
     if (existing.kind === 'system') {
-      if (Object.keys(input).some((key) => !['providerId', 'model', 'mcpServerIds'].includes(key))) throw new BadRequestException('Only the provider, model, and MCP servers can be changed for a built-in Agent.');
+
+      const isChat = existing.id === 'agt_system_helper_chat';
+      const fields = ['providerId', 'model', 'mcpServerIds', ...(isChat ? ['skillIds', 'extensionPrompt', 'expectedConfigurationRevision'] : [])];
+      if (Object.keys(input).some((key) => !fields.includes(key))) throw new BadRequestException('Unsupported built-in Agent configuration field.');
       const nextProviderId = input.providerId === undefined ? existing.providerId : input.providerId;
       const provider = await this.validateProvider(team.id, nextProviderId);
-      let model = '';
-      if (nextProviderId && provider) {
-        const requestedModel = input.model === undefined ? existing.model.trim() : input.model.trim();
-        if (requestedModel && !provider.models.includes(requestedModel)) throw new BadRequestException('The selected model is not configured for this provider.');
-        model = requestedModel || provider.models[0] || '';
-      }
-      const assignmentInput = await this.validateAssignments(team.id, undefined, input.mcpServerIds);
-      const [row] = await this.db.update(agents).set({ providerId: nextProviderId ?? null, model, updatedAt: new Date() }).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).returning();
-      if (!row) throw new NotFoundException('Agent not found');
-      const mcpServerIds = assignmentInput.mcpServerIds;
-      if (mcpServerIds !== undefined) {
-        await this.db.transaction(async (transaction) => {
+      const requestedModel = input.model === undefined ? existing.model.trim() : input.model.trim();
+      if (provider && requestedModel && !provider.models.includes(requestedModel)) throw new BadRequestException('The selected model is not configured for this provider.');
+      const model = provider ? requestedModel || provider.models[0] || '' : '';
+      if (input.extensionPrompt !== undefined && typeof input.extensionPrompt !== 'string') throw new BadRequestException('An extension prompt must be text.');
+      const selectedSkills = input.skillIds?.filter((id) => id !== WORKLITE_PLATFORM_SKILL_ID);
+      const selections = await this.validateAssignments(team.id, selectedSkills, input.mcpServerIds, true);
+      this.db.transaction((transaction) => {
+        const [previous] = transaction.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1).all();
+        if (isChat && input.expectedConfigurationRevision !== undefined && input.expectedConfigurationRevision !== previous?.revision) throw new ConflictException('Chat configuration changed; inspect the current revision before updating.');
+        transaction.update(agents).set({ providerId: nextProviderId ?? null, model, updatedAt: new Date() }).where(eq(agents.id, agentId)).run();
+        if (selections.mcpServerIds !== undefined) {
           transaction.delete(agentMcpServers).where(eq(agentMcpServers.agentId, agentId)).run();
-          if (mcpServerIds.length > 0) transaction.insert(agentMcpServers).values(mcpServerIds.map((mcpServerId) => ({ agentId, mcpServerId }))).run();
-        });
-      }
-      const assignments = await this.loadAssignments(team.id, [row.id]);
-      const [latest] = await this.db.select({ id: agentVersions.id, version: agentVersions.version }).from(agentVersions).where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, team.id))).orderBy(desc(agentVersions.version)).limit(1);
-      return this.toView(row, workspaceSlug, provider?.name ?? null, assignments, latest);
+          if (selections.mcpServerIds.length) transaction.insert(agentMcpServers).values(selections.mcpServerIds.map((mcpServerId) => ({ agentId, mcpServerId }))).run();
+        }
+        if (isChat && selections.skillIds !== undefined) {
+          transaction.delete(agentSkills).where(eq(agentSkills.agentId, agentId)).run();
+          transaction.insert(agentSkills).values([...selections.skillIds, WORKLITE_PLATFORM_SKILL_ID].map((skillId) => ({ agentId, skillId }))).run();
+        }
+        if (isChat) transaction.insert(chatConfigurations).values({
+          workspaceId: team.id, revision: (previous?.revision ?? 0) + 1,
+          extensionPrompt: input.extensionPrompt === undefined ? previous?.extensionPrompt ?? '' : input.extensionPrompt,
+          providerId: nextProviderId ?? null, model,
+          skillIds: transaction.select({ id: agentSkills.skillId }).from(agentSkills).where(eq(agentSkills.agentId, agentId)).all().map(({ id }) => id),
+          mcpServerIds: transaction.select({ id: agentMcpServers.mcpServerId }).from(agentMcpServers).where(eq(agentMcpServers.agentId, agentId)).all().map(({ id }) => id),
+        }).run();
+      });
+      return this.get(request, workspaceSlug, agentId);
     }
 
     const name = input.name === undefined ? existing.name : input.name.trim();
@@ -245,7 +261,7 @@ export class AgentsService {
         : Promise.resolve([]),
     ]);
     if (skillIds && skillRows.length !== skillIds.length) throw new BadRequestException('One or more selected Skills are not available in this workspace.');
-    if (skillRows.some((skill) => skill.id === WORKLITE_PLATFORM_SKILL_ID)) throw new BadRequestException('The worklite-platform Skill is reserved for Chat Bot.');
+    if (skillRows.some((skill) => skill.id === WORKLITE_PLATFORM_SKILL_ID)) throw new BadRequestException('The worklite-platform Skill is reserved for Chat.');
     if (mcpServerIds && mcpRows.length !== mcpServerIds.length) throw new BadRequestException('One or more selected MCP servers are not available in this workspace.');
     return { skillIds, mcpServerIds };
   }

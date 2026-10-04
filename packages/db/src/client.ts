@@ -23,7 +23,8 @@ fi
 exec /bin/sh -lc "$1"
 `;
 
-const CHAT_BOT_PROMPT = `You are Chat Bot, the WorkLite workspace assistant.
+const CHAT_PROMPT = `You are Chat, the WorkLite master conversation Agent for Web and Feishu. Understand the user goal, clarify missing information, dispatch to the built-in Agent Team or a published Workflow, and summarize progress and results. Honor explicit targets. Dispatch through scripts/dispatch-task.mjs, inspect Workflow runs with scripts/inspect-workflow-run.mjs, and control them with scripts/control-workflow-run.mjs. Task references bound to this conversation are supplied by the server; inspect them before repeating a request. Ordinary requests receive natural dialogue focused on the user’s goal. Recognize task intent from the current request and conversation, inspect current capabilities before choosing a target, and dispatch when the requested task and target are clear. Use ask_user with relevant options only when a material choice or missing information blocks this request; a multi-step plan is not required. Choices resume the current request and never select a mode for later messages. Feishu already presents queued and loading state, so focus your reply on the answer or the information the user needs to decide.
+Chat user capability extensions are separate from product knowledge. Use scripts/inspect-chat.mjs and scripts/update-chat.mjs to inspect and update its revision, extension prompt, model and Skill/MCP selections; keep the current revision as the update precondition. Current-turn answers and retries keep their captured capability snapshot; saved changes apply to the next user turn. When updating WorkLite project code, edit the original project root supplied in the workspace snapshot, never an immutable running release. Use scripts/propose-upgrade.mjs only after preparing the requested code changes and explaining the concrete changes. A verified user Feishu card confirms that exact release. Never execute upgrade-runner, installation, build, service-control or raw confirmation operations through host tools; the independent runner owns the authorized lifecycle. It drains work, uses isolated preflight before service replacement, backs up matching data, and restores the previous program and data if replacement fails. A short Feishu disconnect is possible. Use scripts/inspect-upgrade.mjs for results, and never replay an uncertain domain operation automatically.
 Use only assigned Skill scripts for platform inspection and operations. For product capability questions, rely on the assigned Skill knowledge and the current workspace snapshot. Never invent configured resources, models, MCP tools, script results, or platform capabilities.
 The development profile uses Web port 3390, API port 3391, and Portkey Gateway port 3392. The local deployment profile uses Web port 23390, API port 23391, and Portkey Gateway port 23392. Do not suggest compatibility listeners for previous development ports.
 Model Provider drafts require an explicit protocol selection. Supported protocols are \`openai/chat\`, \`openai/responses\`, \`anthropic/messages\`, \`codex/responses\`, and \`typesafe/systemone\`; do not invent or default another protocol. System One exchanges typed \`state\` and \`questions\` for typed \`answers\`, has no model-discovery endpoint, and cannot run a Workflow Agent node. It can be used through the dedicated \`typesafe/systemone@1\` Workflow node, which stores a public model id and typed questions, accepts JSON state, retains object state fields, and exposes typed answers. Its connection test uses a typed state/question payload and returns typed answers; it is not a chat test. Existing \`deepseek/chat\` records are not migrated or aliased.
@@ -33,7 +34,8 @@ TypeSafe Workflow node output retains object state fields alongside the upstream
 For per-element typed evaluation use \`typesafe/systemone-map@1\`: same \`model\`, \`questions\`, and required \`state\` input, plus a required \`config.itemsPath\` addressing an array inside that state, an optional \`config.contextPath\` for shared context, an optional positive \`config.concurrency\`, and an optional \`config.rank\` of \`path\`, \`order\`, \`limit\`, and \`minimum\`. It sends one upstream request per element with state \`{ item, context }\`, commits \`results\` as those elements with their typed \`answers\` merged in, and applies \`rank\` as deterministic server-side ordering and truncation. Iteration stays inside one node invocation, so it is not a port-level join and produces one NodeRun. Use it for reranking, per-candidate screening, and per-claim checks instead of asking one call to judge a whole array.
 Use worklite/branch@1 for reusable JSON routing: it requires a value input, passes the original JSON through output, and takes only the first matching outgoing condition edge in definition order, or the first fallback edge when none matches. Its paths can target any JSON producer, such as $.articleType or a typed answer path exposed by the current upstream node.
 Workflow Run lifecycle supports pause for queued or running Runs via POST /runs/:runId/pause and resume for paused Runs via POST /runs/:runId/resume. Pause has no checkpoint inside the active invocation: resume reruns that invocation from its start without rerunning successful predecessors, does not pause waiting_for_input Runs, keeps the event stream open, survives restart as paused, remains cancellable, and blocks overlapping scheduled execution.
-Agent Team has one durable Team-owned Coordinator conversation at the direct Team route; Conversation is the default Web tab and Configuration is separate. Chat Bot can inspect Team, Run, conversation, and document state with assigned scripts and can continue an existing Run with the structured answer, recovery, and control scripts, but it never sends a Team conversation message and never starts or dispatches a Team Run. The Chat Bot Team starter only navigates to the Team route; @ remains Workflow dispatch. There is one built-in Team, and Team creation and deletion are unavailable. In the Team conversation, a Coordinator mention starts deterministic intake and complete information creates exactly one Run. Plain prose never grants Commands. Command execution requires exact-string authorization supplied through structured script fields. Runs can answer pending input, pause, resume, cancel, recover an uncertain operation, and retry the server-declared failed active task. Cancellation preserves an uncertain operation's recovery input; adoption or replay supersedes the pending cancellation request, while marking the operation failed settles it without replay.
+Agent Team has one durable Team-owned Coordinator conversation at the direct Team route; Conversation is the default Web tab and Configuration is separate. Chat can inspect and continue Team Runs with the assigned scripts and can submit a new Team request through scripts/dispatch-task.mjs. That server boundary reuses durable Team conversation intake; it never bypasses missing-field collection, one-active-Run queuing, immutable version capture, or user command grants. The Chat Team starter only navigates to the Team route; @ remains Workflow dispatch. There is one built-in Team, and Team creation and deletion are unavailable. In the Team conversation, a Coordinator mention starts deterministic intake and complete information creates exactly one Run. Plain prose never grants Commands. Command execution requires exact-string authorization supplied by a user through the Team UI or a Feishu card; platform scripts must not manufacture grants from prose. Runs can answer pending input, pause, resume, cancel, recover an uncertain operation, and retry the server-declared failed active task. Cancellation preserves an uncertain operation's recovery input; adoption or replay supersedes the pending cancellation request, while marking the operation failed settles it without replay.
+Chat lives at /chat and owns Agent configuration, conversation and execution. Web and Feishu are communication channels. Feishu is the feishu-bot transport adapter configured at /chat?view=channels. It accepts text and card actions from one configured user in private chat, uses an outbound SDK connection, and delivers updated replies, task questions and controls, QR images, Team documents and Workflow Artifacts. It does not accept group, voice, image or file input. Direct users to Chat Channels to scan and create a Feishu PersonalAgent application: platform confirmation saves encrypted credentials automatically and binds the application-scoped open id when supplied. If it is missing, only that binding must be completed in the form before connection. Existing enterprise applications can be entered manually. Saved credentials do not prove bot usability; bot permissions, long-connection message/card subscriptions and publication still need platform setup. Registration is resumable across API restarts and suppressed during isolated upgrade preflight. Never launch registration, read registration secrets or ask for credentials through chat or scripts; application registration is separate from user OAuth. Web and Feishu conversations use the same Agent runtime; Chat lists all persisted histories and can inspect or continue a selected execution. Unrelated conversations are never automatically merged. A Web reply in a Feishu-bound conversation is also delivered through Feishu. The old floating Chat Bot and Home composer are removed. Future WeChat support requires a channel adapter and is not implemented.
 Never ask the user to paste API keys, tokens, passwords, or other secrets into conversation or script arguments. Provider credentials must be entered in the dedicated secure form.
 Before claiming a platform operation completed, wait for the script result. Keep responses concise and practical.`;
 
@@ -41,9 +43,13 @@ const WORKLITE_PLATFORM_SKILL_MD = `# worklite-platform
 
 Use the exact scripts in this package for WorkLite platform operations.
 
+Chat capability extensions persist separately from the built-in prompt. Inspect with scripts/inspect-chat.mjs; update with scripts/update-chat.mjs using the observed expectedConfigurationRevision. Every accepted turn captures capabilities, including Skill files and encrypted MCP definitions. Updates apply from the next turn. Use scripts/propose-upgrade.mjs to prepare a concrete immutable WorkLite release and scripts/inspect-upgrade.mjs to inspect its durable result. Only a real user action on the bound Feishu card authorizes compilation, isolated preflight, handoff, backup and service replacement. Never confirm an upgrade or run lifecycle commands through host tools. A managed installation is required before upgrades; it supplies the previous release for matched code/data rollback. Failed preflight leaves the current runtime running. Task recovery uses existing domain checkpoints, pause/resume and uncertain-operation decisions. Feishu may briefly disconnect and the same conversation receives the result after reconnect.
+
+Feishu uses the independent feishu-bot plugin configured at /plugins/feishu-bot. It accepts one allowed user’s private text and card actions, returns incremental reply cards, bound task questions and controls, QR images and committed files, and retains a separate transcript from Web. The secure plugin page supports QR application creation with automatic credential persistence and optional user open-id binding, plus manual existing-application configuration. Missing open id leaves the new app disconnected until the form completes its binding. Pending registration survives API restart; cancellation and manual save prevent an older result from replacing configuration. The page offers the current app console for bot permissions, long-connection message/card subscriptions and publication. Registration completion is separate from socket connection, and neither promises all bot operations work. This does not grant user OAuth access or alter local lark CLI credentials. Direct the user to that page; platform scripts do not start registration or read credentials. Group, voice, image and file input are unavailable. Every ordinary Feishu message enters master dialogue. Offer only current-request choices through ask_user when a material decision or missing information prevents proceeding; direct text or a card option answers the bound question. Clear task intent can dispatch directly. No persistent mode selection or fixed capability menu is presented. The same response card carries queued, thinking, responding or processing state, and successful ordinary replies show their content without a completion label. Reply to a task card to answer its domain question; exact-command grants still require the user’s task form.
+
 Use \`scripts/inspect-workspace.mjs\` before answering questions about configured resources or Workflow capabilities. Creation, settings, and navigation scripts accept exactly one JSON object argument. Every valid Agent script call executes automatically after server validation. Provider scripts never accept credentials; direct the user to the secure Provider form after creation.
 
-Use \`scripts/inspect-agent-teams.mjs\`, \`scripts/inspect-agent-team.mjs\`, \`scripts/inspect-agent-team-conversation.mjs\`, and \`scripts/inspect-agent-team-document.mjs\` for current Team state. Use the Team update script only for configuration and the Run answer, recovery, and control scripts only to continue an existing Run. Chat Bot never sends a Team conversation message and never starts or dispatches a Team Run; direct the user to the built-in Team's Conversation tab for Coordinator intake. The Team conversation replays persisted events from \`Last-Event-ID\`, and its documents have detail and download routes. There is one built-in Team and no Team collection, creation, or deletion capability. Inspect the current Run before continuing it and grant Commands only as exact strings in structured script fields. If cancellation leaves an operation uncertain, use the structured recovery decision rather than assuming cancellation resolved its effect.
+Use \`scripts/inspect-agent-teams.mjs\`, \`scripts/inspect-agent-team.mjs\`, \`scripts/inspect-agent-team-conversation.mjs\`, and \`scripts/inspect-agent-team-document.mjs\` for current Team state. Use the Team update script only for configuration and the Run answer, recovery, and control scripts to continue an existing Run. Use scripts/dispatch-task.mjs to submit a Team request through its existing intake or run a published Workflow. Dispatch has a server-provided stable submission id and parent conversation binding, so never call a raw Run creation endpoint. The Team conversation replays persisted events from \`Last-Event-ID\`, and its documents have detail and download routes. There is one built-in Team and no Team collection, creation, or deletion capability. Inspect the current Run before continuing it. User controls alone grant exact Commands; never infer grants or put them into script arguments. If cancellation leaves an operation uncertain, use the structured recovery decision rather than assuming cancellation resolved its effect.
 
 The development profile uses Web port \`3390\`, API port \`3391\`, and Portkey Gateway port \`3392\`. The local deployment profile remains on Web port \`23390\`, API port \`23391\`, and Portkey Gateway port \`23392\`. Previous development ports have no compatibility listeners or redirects.
 Model Provider drafts require an explicit protocol selection. Supported protocols are \`openai/chat\`, \`openai/responses\`, \`anthropic/messages\`, \`codex/responses\`, and \`typesafe/systemone\`; do not invent or default another protocol. System One exchanges typed \`state\` and \`questions\` for typed \`answers\`, has no model-discovery endpoint, and cannot run a Workflow Agent node. It can be used through the dedicated \`typesafe/systemone@1\` Workflow node, which stores a public model id and typed questions, accepts JSON state, retains object state fields, and exposes typed answers. Its connection test uses a typed state/question payload and returns typed answers; it is not a chat test. Existing \`deepseek/chat\` records are not migrated or aliased.
@@ -52,7 +58,7 @@ The unified Provider proxy supports Codex image generation at \`/api/portkey-gat
 
 The first-party Workflow node \`worklite/image@1\` wraps that capability. Its required \`prompt\` input accepts text, its model is fixed to \`codex/gpt-image-2\`, and its generated PNG remains internal to Run execution state. Public Run results, node logs, and events contain only an image summary; image output may connect only to \`wechat-official-account/publish@2.coverImage\`. Image edits and binary Artifacts remain unsupported.
 
-Workflow automation and Home are WorkLite's primary product services. Workflows are the only user-configurable execution capability; Chat Bot is the protected workspace entry for guided operations. A Workflow never selects or references a standalone Agent or Agent version; its Agent nodes own their configuration inside immutable Workflow versions. Home has no global Workflow data source. A Workflow appears on Home only when its latest published version contains its one \`worklite/dashboard\` node, and its selected board reads that node's object or object-array output from the latest successful Run of that version. Boards render the Dashboard layout's header, main, and footer elements; list elements define row titles through \`titleKey\` and their display fields, and board titles use the Workflow name. Eligible boards default to Uncategorized; users can move each board into at most one database-backed category, and those records only organize references. Platform-defined Workflow boards are removed. Workflow scheduling is represented by one first-party \`worklite/timer\` node. The first-party node types are Input, Timer, Agent, Choice Branch, TypeSafe System One, TypeSafe System One Map, Dashboard, Artifact, Artifact Query, Approved Article, and Image. The TypeSafe System One node is \`typesafe/systemone@1\`: it requires JSON \`state\`, stores a public Provider/model id and typed \`questions\`, forwards the response unchanged through the Gateway, and exposes typed \`answers\`; it is not an Agent node and has no Workflow-owned credentials. The Image node is \`worklite/image@1\`: it requires a text prompt, fixes the model to \`codex/gpt-image-2\`, returns generated PNG data only inside scheduler execution state, and public Run payloads expose summaries. Its output may connect only to WeChat v2 \`coverImage\`. The built-in \`wechat-official-account/publish\` node has immutable v1 versions that accept Markdown article and optional metadata, while v2 additionally requires a generated \`coverImage\`. Both versions save drafts or publish through a product-owned Playwright browser session. Draft mode succeeds once WeChat accepts the save and exposes a draft id in either the save response or the editor URL's appmsgid parameter; a rejected save reports WeChat's own status text, an accepted save with no exposed id reports that distinct condition, and non-WeChat article links are rendered in the final Related Links section rather than as body links. Login and final confirmation are durable pending actions with QR-only client payloads; completed predecessors are not rerun on resume, and a retried node reopens an existing draft instead of creating a second one. Enabled Timer nodes may use draft mode but cannot use publish mode. Workflow Agent nodes own prompts and Skill/MCP selections; their \`context\` input is optional and may combine one unbounded initial upstream edge with one bounded feedback edge; a Workflow Input edge remains unconditional and unbounded. Artifact nodes own Artifact creation, and Agent and WeChat nodes never create Artifacts.
+Workflow automation and Home are WorkLite's primary product services. Workflows own configurable automation and the built-in Agent Team owns collaborative execution; Chat is the protected master conversation entry. A Workflow never selects or references a standalone Agent or Agent version; its Agent nodes own their configuration inside immutable Workflow versions. Home has no global Workflow data source. A Workflow appears on Home only when its latest published version contains its one \`worklite/dashboard\` node, and its selected board reads that node's object or object-array output from the latest successful Run of that version. Boards render the Dashboard layout's header, main, and footer elements; list elements define row titles through \`titleKey\` and their display fields, and board titles use the Workflow name. Eligible boards default to Uncategorized; users can move each board into at most one database-backed category, and those records only organize references. Platform-defined Workflow boards are removed. Workflow scheduling is represented by one first-party \`worklite/timer\` node. The first-party node types are Input, Timer, Agent, Choice Branch, TypeSafe System One, TypeSafe System One Map, Dashboard, Artifact, Artifact Query, Approved Article, and Image. The TypeSafe System One node is \`typesafe/systemone@1\`: it requires JSON \`state\`, stores a public Provider/model id and typed \`questions\`, forwards the response unchanged through the Gateway, and exposes typed \`answers\`; it is not an Agent node and has no Workflow-owned credentials. The Image node is \`worklite/image@1\`: it requires a text prompt, fixes the model to \`codex/gpt-image-2\`, returns generated PNG data only inside scheduler execution state, and public Run payloads expose summaries. Its output may connect only to WeChat v2 \`coverImage\`. The built-in \`wechat-official-account/publish\` node has immutable v1 versions that accept Markdown article and optional metadata, while v2 additionally requires a generated \`coverImage\`. Both versions save drafts or publish through a product-owned Playwright browser session. Draft mode succeeds once WeChat accepts the save and exposes a draft id in either the save response or the editor URL's appmsgid parameter; a rejected save reports WeChat's own status text, an accepted save with no exposed id reports that distinct condition, and non-WeChat article links are rendered in the final Related Links section rather than as body links. Login and final confirmation are durable pending actions with QR-only client payloads; completed predecessors are not rerun on resume, and a retried node reopens an existing draft instead of creating a second one. Enabled Timer nodes may use draft mode but cannot use publish mode. Workflow Agent nodes own prompts and Skill/MCP selections; their \`context\` input is optional and may combine one unbounded initial upstream edge with one bounded feedback edge; a Workflow Input edge remains unconditional and unbounded. Artifact nodes own Artifact creation, and Agent and WeChat nodes never create Artifacts.
 
 The first-party \`worklite/branch@1\` Choice Branch node requires JSON on \`value\`, returns the unchanged value on \`output\`, and selects exactly one outgoing route: the first matching predicate in edge-definition order, or the first fallback when no predicate matches. It is reusable with any JSON-producing node and does not depend on a particular Provider protocol.
 
@@ -144,17 +150,6 @@ export function stringArray(value, field, maxItems, maxLength) {
   return [...new Set(value.map((item) => item.trim()))];
 }
 
-export function authorizedCommands(value) {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value)) throw new Error('authorizedCommands must be an array.');
-  const commands = value.map((command) => {
-    if (typeof command !== 'string' || !command.trim()) throw new Error('Every authorized command must be a non-empty string.');
-    return command.trim();
-  });
-  if (new Set(commands).size !== commands.length) throw new Error('Authorized commands must be unique.');
-  return commands;
-}
-
 export function packageFiles(value) {
   if (!Array.isArray(value) || value.length === 0 || value.length > 100) throw new Error('files must be a non-empty package file array.');
   return value.map((file) => {
@@ -187,9 +182,54 @@ export function print(value) {
 const WORKLITE_PLATFORM_FILES: Array<[string, string]> = [
   ['SKILL.md', WORKLITE_PLATFORM_SKILL_MD],
   ['scripts/lib.mjs', WORKLITE_PLATFORM_LIB_MJS],
+  ['scripts/inspect-chat.mjs', `#!/usr/bin/env node
+import { call, noInput, print } from './lib.mjs';
+noInput();
+const data = await call('/agents/agt_system_helper_chat');
+print({ worklite: { type: 'snapshot' }, data });
+`],
+  ['scripts/inspect-chat-conversations.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, print } from './lib.mjs';
+const raw = input(); exactKeys(raw, ['cursor', 'search', 'channel']);
+const query = new URLSearchParams();
+for (const key of ['cursor', 'search', 'channel']) if (typeof raw[key] === 'string' && raw[key]) query.set(key, raw[key]);
+const data = await call('/chat/conversations' + (query.size ? '?' + query.toString() : ''));
+print({ worklite: { type: 'snapshot' }, data });
+`],
+  ['scripts/inspect-chat-conversation.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, print, requiredString } from './lib.mjs';
+const raw = input(); exactKeys(raw, ['conversationId', 'records']);
+const id = requiredString(raw.conversationId, 'conversationId');
+const data = await call('/chat/conversations/' + encodeURIComponent(id) + (raw.records === true ? '/records' : ''));
+print({ worklite: { type: 'snapshot' }, data });
+`],
+  ['scripts/update-chat.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, print } from './lib.mjs';
+const body = input();
+exactKeys(body, ['expectedConfigurationRevision', 'extensionPrompt', 'providerId', 'model', 'skillIds', 'mcpServerIds']);
+if (!Number.isSafeInteger(body.expectedConfigurationRevision) || body.expectedConfigurationRevision < 1) throw new Error('Inspect the current Chat configuration revision before updating.');
+const data = await call('/agents/agt_system_helper_chat', { method: 'PATCH', body });
+print({ worklite: { type: 'snapshot' }, data });
+`],
+  ['scripts/propose-upgrade.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, print, requiredString } from './lib.mjs';
+const raw = input(); exactKeys(raw, ['summary']);
+const executionId = process.env.WORKLITE_CHAT_EXECUTION_ID;
+const submissionId = process.env.WORKLITE_CHAT_SUBMISSION_ID;
+if (!executionId || !submissionId) throw new Error('Upgrade proposals require a server-bound Chat turn.');
+const data = await call('/upgrades', { method: 'POST', body: { summary: requiredString(raw.summary, 'summary', 100000), executionId, submissionId } });
+print({ worklite: { type: 'snapshot' }, data });
+`],
+  ['scripts/inspect-upgrade.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, print, requiredString } from './lib.mjs';
+const raw = input(); exactKeys(raw, ['jobId']);
+const data = await call('/upgrades/' + encodeURIComponent(requiredString(raw.jobId, 'jobId', 240)));
+print({ worklite: { type: 'snapshot' }, data });
+`],
   ['scripts/inspect-workspace.mjs', `#!/usr/bin/env node
 import { call, noInput, print } from './lib.mjs';
 noInput();
+// Snapshot includes credential-safe Feishu setup capabilities; application registration belongs to its Web configuration page.
 const data = await call('/platform/snapshot');
 print({ worklite: { type: 'snapshot' }, data });
 `],
@@ -240,6 +280,42 @@ const current = await call('/workflows/' + encodeURIComponent(workflowId));
 if (!current.draft || typeof current.draft.revisionId !== 'string') throw new Error('The Workflow draft revision is unavailable.');
 const resource = await call('/workflows/' + encodeURIComponent(workflowId) + '/draft/operations', { method: 'POST', body: { baseRevisionId: current.draft.revisionId, plan: raw.plan, source: 'assistant', sourceInstruction } });
 print({ worklite: { type: 'resource', resourceType: 'workflow', id: resource.id, route: '/workflows/' + encodeURIComponent(resource.id) }, data: resource });
+`],
+  ['scripts/dispatch-task.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, oneOf, print, requiredString, text } from './lib.mjs';
+const raw = input();
+exactKeys(raw, ['message', 'target']);
+const target = raw.target;
+if (!target || typeof target !== 'object' || Array.isArray(target)) throw new Error('A target object is required.');
+const kind = oneOf(target.kind, 'target.kind', ['team', 'workflow']);
+exactKeys(target, kind === 'team' ? ['kind', 'teamId', 'intakeSubmissionId', 'intakeField'] : ['kind', 'workflowId']);
+// This target binds only this submission; later Feishu messages return to master dialogue.
+const normalized = kind === 'team' ? { kind, teamId: requiredString(target.teamId, 'teamId', 240) } : { kind, workflowId: requiredString(target.workflowId, 'workflowId', 240) };
+if (kind === 'team' && target.intakeSubmissionId) normalized.intakeSubmissionId = requiredString(target.intakeSubmissionId, 'intakeSubmissionId', 240);
+if (kind === 'team' && target.intakeField) normalized.intakeField = oneOf(target.intakeField, 'intakeField', ['goal', 'projectDirectory', 'mode']);
+const executionId = requiredString(process.env.WORKLITE_CHAT_EXECUTION_ID, 'server conversation context', 240);
+const submissionId = requiredString(process.env.WORKLITE_CHAT_SUBMISSION_ID, 'server submission context', 240);
+const data = await call('/chat/dispatch', { method: 'POST', body: { submissionId, executionId, message: text(raw.message, 'message', 100000), target: normalized } });
+const route = kind === 'team' ? '/agent-teams/' + encodeURIComponent(target.teamId) : '/workflows/' + encodeURIComponent(target.workflowId);
+print({ worklite: { type: 'dispatch', submissionId: data.submissionId, route }, data });
+`],
+  ['scripts/inspect-workflow-run.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, print, requiredString } from './lib.mjs';
+const raw = input();
+exactKeys(raw, ['runId']);
+const runId = requiredString(raw.runId, 'runId', 240);
+const data = await call('/runs/' + encodeURIComponent(runId));
+print({ worklite: { type: 'snapshot' }, data });
+`],
+  ['scripts/control-workflow-run.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, oneOf, print, requiredString } from './lib.mjs';
+const raw = input();
+exactKeys(raw, ['runId', 'action', 'nodeRunId']);
+const runId = requiredString(raw.runId, 'runId', 240);
+const action = oneOf(raw.action, 'action', ['pause', 'resume', 'cancel', 'retry']);
+const path = action === 'retry' ? '/runs/' + encodeURIComponent(runId) + '/nodes/' + encodeURIComponent(requiredString(raw.nodeRunId, 'nodeRunId', 240)) + '/retry' : '/runs/' + encodeURIComponent(runId) + '/' + action;
+const data = await call(path, { method: 'POST', body: {} });
+print({ worklite: { type: 'snapshot' }, data });
 `],
   ['scripts/inspect-agent-teams.mjs', `#!/usr/bin/env node
 import { call, noInput, print } from './lib.mjs';
@@ -308,17 +384,15 @@ const data = await call('/agent-team-runs/' + encodeURIComponent(runId));
 print({ worklite: { type: 'agent-team-run', id: data.id }, data });
 `],
   ['scripts/answer-agent-team-run.mjs', `#!/usr/bin/env node
-import { authorizedCommands, call, exactKeys, input, print, requiredString, text } from './lib.mjs';
+import { call, exactKeys, input, print, requiredString, text } from './lib.mjs';
 const raw = input();
-exactKeys(raw, ['runId', 'pendingInputId', 'scopeRevision', 'answer', 'authorizedCommands']);
+exactKeys(raw, ['runId', 'pendingInputId', 'scopeRevision', 'answer']);
 if (!Number.isInteger(raw.scopeRevision) || raw.scopeRevision < 1) throw new Error('scopeRevision must be a positive integer.');
 const body = {
   pendingInputId: requiredString(raw.pendingInputId, 'pendingInputId', 240),
   scopeRevision: raw.scopeRevision,
   answer: text(raw.answer, 'answer', 100000),
 };
-const commands = authorizedCommands(raw.authorizedCommands);
-if (commands !== undefined) body.authorizedCommands = commands;
 const runId = requiredString(raw.runId, 'runId', 240);
 const result = await call('/agent-team-runs/' + encodeURIComponent(runId) + '/answer', { method: 'POST', body });
 print({ worklite: { type: 'agent-team-run-action', action: 'answer', runId: result.run.id }, data: result.run });
@@ -367,7 +441,7 @@ print({ worklite: { type: 'settings', appearance: settings.appearance }, data: s
 import { call, exactKeys, input, oneOf, print } from './lib.mjs';
 const raw = input();
 exactKeys(raw, ['target']);
-const target = oneOf(raw.target, 'target', ['home', 'skills', 'mcp-servers', 'model-providers', 'logs', 'workflows', 'settings-appearance', 'settings-usage', 'settings-audit-log']);
+const target = oneOf(raw.target, 'target', ['home', 'chat', 'skills', 'mcp-servers', 'model-providers', 'logs', 'workflows', 'settings-appearance', 'settings-usage', 'settings-audit-log']);
 const action = await call('/navigation/resolve', { method: 'POST', body: { target } });
 print({ worklite: action });
 `],
@@ -381,19 +455,32 @@ print({ worklite: action });
 - create-workflow.mjs: { "name": string }. Creates a Workflow draft and returns its resource route.
 - edit-workflow.mjs: { "workflowId": string, "sourceInstruction": string, "plan": WorkflowPlan }. Fetches the current draft revision and applies a server-normalized assistant plan. Timer and Dashboard configuration belongs in the Workflow graph, not in a standalone script. For TypeSafe calls, use \`typesafe/systemone@1\` with public \`config.model\`, immutable \`config.questions\`, and a required \`state\` input; do not include credentials, base URLs, or Provider ids. For editorial publishing, set JSON reviewer \`passthroughKeys\` to the original writer fields, keep the review response verdict-only, and connect its output through required \`worklite/approved-article@1.context\` before Article Artifact or WeChat. Apply collector \`maxToolCalls\`, \`maxToolRounds\`, and \`maxToolResultChars\` in its Agent config.
 
+## Master conversation dispatch contract
+
+- dispatch-task.mjs: { "message": string, "target": { "kind": "team", "teamId": string, "intakeSubmissionId"?: string, "intakeField"?: "goal" | "projectDirectory" | "mode" } | { "kind": "workflow", "workflowId": string } }. Uses POST /chat/dispatch. The server supplies conversation and submission context; do not fabricate either. Team requests collect missing goal, directory and mode through existing intake; Workflow requests capture the latest published version. No draft execution or command grants.
+- inspect-workflow-run.mjs: { "runId": string }. Reads authoritative Workflow status, retryable node, pending action and Artifacts.
+- control-workflow-run.mjs: { "runId": string, "action": "pause" | "resume" | "cancel" | "retry", "nodeRunId"?: string }. Retry requires the one server-declared retryable node.
+- Web and Feishu reuse Chat configuration and server dispatch while retaining separate transcripts. Feishu receives text and task-bound card actions through an outbound connection. Default to natural dialogue. Use ask_user for a material unresolved task choice, with only relevant options from inspected resources; a plan is not required. Clear task requests dispatch directly. Feishu options answer the current question, never a future-message mode. Reply placeholders and progress update the same card; successful dialogue has no task header or completion label. Task-card replies and command forms remain bound to their authoritative pending input. Never request app credentials in chat.
+- Feishu setup belongs under Chat Channels at /chat?view=channels: QR application registration automatically persists App ID and encrypted App Secret and binds the returned application-scoped open id. Missing open id needs the secure form, and existing enterprise apps can be configured there manually. The server persists pending device state and clears it on completion or cancellation. Registration begin/cancel endpoints are Web configuration operations, not assigned Agent scripts. inspect-workspace.mjs exposes setup metadata only; it never returns credentials or a device confirmation link. Bot permissions, subscriptions and publication remain platform setup, and registration never substitutes for user OAuth.
+
 ## Agent Team operation contract
 
 - inspect-agent-teams.mjs: no arguments. Reads the one available built-in Team.
 - inspect-agent-team.mjs: \`{ "teamId": string }\`.
 - update-agent-team.mjs: \`{ "teamId": string, "roles": AgentTeamRoleConfiguration[] }\`. All six roles are required exactly once. Each role object has exactly \`role\`, \`publicModelId\`, \`instructions\`, \`entryPoints\`, \`skillIds\`, \`mcpServerIds\`, and \`toolNames\`; inspect the current Team and platform snapshot for supported values. An empty \`publicModelId\` allows the configured Team default.
-- inspect-agent-team-conversation.mjs: \`{ "teamId": string }\`. Reads the durable Coordinator conversation snapshot; its Server-Sent Event route replays persisted events from \`Last-Event-ID\`. Chat Bot does not send conversation messages.
+- Chat is the Web workspace at /chat. Web is built in; Feishu channel setup is under Channels. inspect-chat-conversations.mjs lists server history with optional search/channel/cursor; inspect-chat-conversation.mjs reads one conversation and optionally its complete saved records. Never imply unsaved historical platform envelopes exist.
+- inspect-chat.mjs: no input; reads protected Chat configuration and revision.
+- update-chat.mjs: \`{ "expectedConfigurationRevision": number, "extensionPrompt"?: string, "providerId"?: string|null, "model"?: string, "skillIds"?: string[], "mcpServerIds"?: string[] }\`; saves a new revision, effective for the next turn. The platform Skill is retained automatically.
+- propose-upgrade.mjs: \`{ "summary": string }\`; snapshots current project files into an immutable manifest and binds the proposal to server-provided conversation context. It does not confirm or switch services.
+- inspect-upgrade.mjs: \`{ "jobId": string }\`; reads release, phase and outcome without credentials or runner authorization tokens.
+- inspect-agent-team-conversation.mjs: \`{ "teamId": string }\`. Reads the durable Coordinator conversation snapshot; its Server-Sent Event route replays persisted events from \`Last-Event-ID\`. Chat dispatches through scripts/dispatch-task.mjs and the shared server intake boundary.
 - inspect-agent-team-document.mjs: \`{ "documentId": string }\`. Reads one immutable Team document revision; the separate download route exports its delivered Markdown file.
 - inspect-agent-team-run.mjs: \`{ "runId": string }\`. Inspect the Run before answering, recovering, controlling, or retrying it.
-- answer-agent-team-run.mjs: \`{ "runId": string, "pendingInputId": string, "scopeRevision": positive integer, "answer": string, "authorizedCommands"?: string[] }\`. Only the structured command list changes executable authorization.
+- answer-agent-team-run.mjs: \`{ "runId": string, "pendingInputId": string, "scopeRevision": positive integer, "answer": string }\`. The script never grants Commands. Exact commands must be submitted by the user through the Team page or Feishu card.
 - recover-agent-team-operation.mjs: \`{ "runId": string, "operationKey": string, "decision": "adopt_command" | "mark_failed" | "replay" }\`. The operation key must identify the current uncertain operation.
 - control-agent-team-run.mjs: \`{ "runId": string, "action": "pause" | "resume" | "cancel" | "retry", "taskKey"?: string }\`. \`taskKey\` is required only for \`retry\`, and retry is valid only for the failed active task the Run marks retryable. Cancellation preserves a pending uncertain-operation recovery input; adoption or replay supersedes the pending cancellation request, while \`mark_failed\` settles the effect without replay.
 
-Team creation and deletion are unavailable. Every started Run captures an immutable TeamVersion. Chat Bot has no Team Run start script and must navigate the user to the Team Conversation instead. Skills and MCP servers referenced by active Team configuration or captured versions cannot be deleted. Run and conversation events are persisted and replay over their Server-Sent Event endpoints from \`Last-Event-ID\`; scripts inspect persisted snapshots rather than claiming to consume a live stream.
+Team creation and deletion are unavailable. Every started Run captures an immutable TeamVersion. Chat starts Team intake through scripts/dispatch-task.mjs; the Team owns Run creation after complete information. Skills and MCP servers referenced by active Team configuration or captured versions cannot be deleted. Run and conversation events are persisted and replay over their Server-Sent Event endpoints from \`Last-Event-ID\`; scripts inspect persisted snapshots rather than claiming to consume a live stream.
 
 ## Provider proxy capability contract
 
@@ -444,7 +531,7 @@ Workflow Agent context is optional. An Agent context may receive one unbounded i
 Scheduling is part of the immutable Workflow graph through the first-party \`worklite/timer\` node. Home board eligibility is part of the immutable graph through the first-party \`worklite/dashboard\` node: use at most one, connect its required \`data\` input, configure a layout of header, main, and footer element arrays (text, count, metric, and list kinds, where list elements own a \`titleKey\` matching their display-field keys), publish, and produce a successful Run. A Workflow has at most one Timer, the minimum interval is 300 seconds, Timer changes activate after Publish, and overlapping scheduled runs are prevented. There is no standalone schedule mutation script or API; \`GET /workflows/:workflowId/schedule\` exposes read-only runtime status. Home has no global Workflow data source; platform-defined Workflow boards are removed, and only a published Dashboard-node Workflow with a successful Dashboard output can be selected. Home category assignment is a database-backed organization reference with Uncategorized as the presentation default and at most one category per board; no Workflow output is persisted and no standalone category script is provided.
 
 - update-settings.mjs: { "appearance"?: "system" | "light" | "dark" }
-- navigate.mjs: { "target": "home" | "skills" | "mcp-servers" | "model-providers" | "logs" | "workflows" | "settings-appearance" | "settings-usage" | "settings-audit-log" }
+- navigate.mjs: { "target": "home" | "chat" | "skills" | "mcp-servers" | "model-providers" | "logs" | "workflows" | "settings-appearance" | "settings-usage" | "settings-audit-log" }
 `],
 ];
 
@@ -600,6 +687,10 @@ export async function initializeDatabase(db: Database): Promise<void> {
       FROM workspaces WHERE workspaces.slug = 'personal'
       ON CONFLICT (id) DO UPDATE SET name = excluded.name, description = excluded.description;
     INSERT INTO plugins (id, workspace_id, name, description, command)
+      SELECT 'feishu-bot', workspaces.id, 'Feishu', 'Talk to Chat and dispatch Agent Team or published Workflow tasks.', ''
+      FROM workspaces WHERE workspaces.slug = 'personal'
+      ON CONFLICT (id) DO UPDATE SET name = excluded.name, description = excluded.description;
+    INSERT INTO plugins (id, workspace_id, name, description, command)
       SELECT 'wechat-official-account', workspaces.id, 'WeChat Official Account', 'Publish Workflow articles through a human-confirmed browser session.', 'node'
       FROM workspaces WHERE workspaces.slug = 'personal'
       ON CONFLICT (id) DO UPDATE SET name = excluded.name, description = excluded.description;
@@ -608,9 +699,9 @@ export async function initializeDatabase(db: Database): Promise<void> {
       FROM workspaces WHERE workspaces.slug = 'personal'
       ON CONFLICT (id) DO NOTHING;
     INSERT INTO agents (id, workspace_id, kind, name, responsibility, system_prompt, model)
-      SELECT 'agt_system_helper_chat', workspaces.id, 'system', 'Chat Bot', 'Configure workspace AI resources through guided conversation', '${CHAT_BOT_PROMPT.replaceAll("'", "''")}', ''
+      SELECT 'agt_system_helper_chat', workspaces.id, 'system', 'Chat', 'Handle dialogue and dispatch Agent Team or published Workflow tasks', '${CHAT_PROMPT.replaceAll("'", "''")}', ''
       FROM workspaces WHERE workspaces.slug = 'personal'
-      ON CONFLICT (id) DO UPDATE SET kind = 'system', name = 'Chat Bot', responsibility = 'Configure workspace AI resources through guided conversation', system_prompt = excluded.system_prompt;
+      ON CONFLICT (id) DO UPDATE SET kind = 'system', name = 'Chat', responsibility = 'Handle dialogue and dispatch Agent Team or published Workflow tasks', system_prompt = excluded.system_prompt;
     INSERT INTO agents (id, workspace_id, kind, name, responsibility, system_prompt, model)
       SELECT 'agt_codex_cli_chat', workspaces.id, 'system', 'Codex CLI Chat', 'Run conversations through the local Codex CLI', 'You are Codex CLI Chat. Answer the user request directly and concisely.', ''
       FROM workspaces WHERE workspaces.slug = 'personal'
@@ -648,4 +739,12 @@ export async function initializeDatabase(db: Database): Promise<void> {
     ON CONFLICT (skill_id, path) DO UPDATE SET content = excluded.content
   `);
   for (const file of WORKLITE_PLATFORM_FILES) upsertPlatformFile.run(...file);
+  db.$client.exec(`
+    INSERT INTO chat_bot_configurations (workspace_id, revision, extension_prompt, provider_id, model, skill_ids, mcp_server_ids)
+    SELECT a.workspace_id, 1, '', a.provider_id, a.model,
+      (SELECT json_group_array(skill_id) FROM agent_skills WHERE agent_id = a.id),
+      (SELECT json_group_array(mcp_server_id) FROM agent_mcp_servers WHERE agent_id = a.id)
+    FROM agents a WHERE a.id = 'agt_system_helper_chat'
+      AND NOT EXISTS (SELECT 1 FROM chat_bot_configurations c WHERE c.workspace_id = a.workspace_id);
+  `);
 }

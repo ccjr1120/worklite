@@ -15,6 +15,8 @@
 
 ## Purpose
 
+Communication channels are reached through Chat; Feishu is excluded from this collection.
+
 See which trusted workspace plugins are available and open one to configure its command.
 
 ## Primary Task

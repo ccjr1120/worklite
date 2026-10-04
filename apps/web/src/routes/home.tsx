@@ -26,14 +26,10 @@ import {
   useWorkflowsQuery,
 } from '@/api/queries';
 import { useLocale } from '@/components/locale-provider';
-import { CHAT_BOT_AGENT_ID } from '@/components/workspace/chat-bot';
+import { CHAT_AGENT_ID } from '@worklite/contracts';
 import { formatDateTime, formatNumber } from '@/i18n/format';
 import type { AppLocale } from '@/i18n/locale';
 import { cn } from '@/lib/utils';
-
-type HomeSearch = {
-  assistant?: 'open';
-};
 
 type HomeBoard = {
   workflow: WorkflowView;
@@ -47,9 +43,6 @@ type HomeBoardGroup = {
 };
 
 export const Route = createFileRoute('/home')({
-  validateSearch: (search: Record<string, unknown>): HomeSearch => ({
-    assistant: search.assistant === 'open' ? 'open' : undefined,
-  }),
   component: HomePage,
 });
 
@@ -57,7 +50,6 @@ function HomePage() {
   const { t } = useTranslation(['home', 'workspace', 'common']);
   const { locale } = useLocale();
   const workspaceKey = 'personal';
-  const search = Route.useSearch();
   const [newCategoryName, setNewCategoryName] = useState('');
   const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
   const [renamingCategoryId, setRenamingCategoryId] = useState<string | null>(null);
@@ -65,7 +57,7 @@ function HomePage() {
   const [deletingCategory, setDeletingCategory] = useState<HomeBoardCategoryView | null>(null);
   const [addingCategory, setAddingCategory] = useState<HomeBoardCategoryView | null>(null);
   const modelProvidersQuery = useModelProvidersQuery(workspaceKey);
-  const chatBotQuery = useAgentQuery(workspaceKey, CHAT_BOT_AGENT_ID);
+  const chatQuery = useAgentQuery(workspaceKey, CHAT_AGENT_ID);
   const workflowsQuery = useWorkflowsQuery(workspaceKey);
   const runsQuery = useRunsQuery(workspaceKey);
   const categoriesQuery = useHomeBoardPreferencesQuery(workspaceKey);
@@ -97,9 +89,9 @@ function HomePage() {
     return groups;
   }, [boards, boardCategories, categoriesQuery.data]);
 
-  const firstUseStateReady = modelProvidersQuery.isSuccess && chatBotQuery.isSuccess;
+  const firstUseStateReady = modelProvidersQuery.isSuccess && chatQuery.isSuccess;
   const providerConfigured = (modelProvidersQuery.data?.length ?? 0) > 0;
-  const chatBotConfigured = providerConfigured && Boolean(chatBotQuery.data?.providerId && chatBotQuery.data.model);
+  const chatConfigured = providerConfigured && Boolean(chatQuery.data?.providerId && chatQuery.data.model);
   const libraryUnavailable = workflowsQuery.isError || runsQuery.isError || categoriesQuery.isError;
   const categoriesBusy = createCategoryMutation.isPending || renameCategoryMutation.isPending || deleteCategoryMutation.isPending || assignBoardMutation.isPending;
   const categoryError = categoriesQuery.isError || createCategoryMutation.isError || renameCategoryMutation.isError || deleteCategoryMutation.isError || assignBoardMutation.isError;
@@ -138,8 +130,8 @@ function HomePage() {
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background">
       <WorkspaceChrome crumbs={[{ label: t('workspace:nav.home') }]} />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[1200px] px-6 pb-36 pt-6">
-          {firstUseStateReady && !chatBotConfigured ? <FirstUseGuide providerConfigured={providerConfigured} /> : null}
+        <div className="mx-auto w-full max-w-[1200px] px-6 pb-6 pt-6">
+          {firstUseStateReady && !chatConfigured ? <FirstUseGuide providerConfigured={providerConfigured} /> : null}
 
           <div className="mt-8">
             <PageHeading title={t('home:boards.title')} />
@@ -539,10 +531,10 @@ function FirstUseGuide({ providerConfigured }: { providerConfigured: boolean }) 
         </li>
         <li className={cn(rowClassName, !providerConfigured && 'bg-surface-subtle/50 text-muted-foreground')}>
           <span className={cn(markerClassName, providerConfigured ? 'bg-brand text-brand-foreground' : 'bg-surface-subtle text-muted-foreground')} aria-hidden="true">2</span>
-          <span className="min-w-0 flex-1 text-sm font-medium">{t('home:firstUse.configureChatBot')}</span>
+          <span className="min-w-0 flex-1 text-sm font-medium">{t('home:firstUse.configureChat')}</span>
           {providerConfigured ? (
             <Button size="compact" asChild>
-              <Link to="/home" search={{ assistant: 'open' }}>{t('common:actions.continue')}<ChevronRight /></Link>
+              <Link to="/chat" search={{ view: 'configuration' }}>{t('common:actions.continue')}<ChevronRight /></Link>
             </Button>
           ) : null}
         </li>

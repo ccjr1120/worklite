@@ -1,11 +1,12 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { spawnSync } from 'node:child_process';
-import { count, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type { PluginTestResult, PluginView, UpdatePluginRequest } from '@worklite/contracts';
-import { pluginWechatConversations, plugins, wechatOfficialAccounts, type Database } from '@worklite/db';
+import { feishuRegistrations, plugins, wechatOfficialAccounts, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 
+export const FEISHU_PLUGIN_ID = 'feishu-bot' as const;
 export const CODEX_CLI_PLUGIN_ID = 'codex-cli-chat' as const;
 export const CODEX_CLI_AGENT_ID = 'agt_codex_cli_chat' as const;
 
@@ -35,6 +36,20 @@ export class PluginsService {
   }
 
   async update(pluginId: string, input: UpdatePluginRequest): Promise<PluginView> {
+    if (pluginId === FEISHU_PLUGIN_ID) {
+      const config = input?.feishu;
+      if (!config?.appId?.trim() || !config.allowedUserId?.trim()) throw new BadRequestException('Feishu App ID and allowed user open id are required.');
+      const [row] = await this.db.select().from(plugins).where(eq(plugins.id, pluginId)).limit(1);
+      if (!row) throw new NotFoundException('Plugin not found.');
+      if (!config.appSecret?.trim() && (!row.feishuAppSecret || row.feishuAppId !== config.appId.trim())) throw new BadRequestException('A Feishu App Secret is required for this application.');
+      await this.db.update(plugins).set({
+        feishuAppId: config.appId.trim(), feishuAllowedUserId: config.allowedUserId.trim(),
+        ...(config.appSecret?.trim() ? { feishuAppSecret: encryptSecret(config.appSecret.trim()) } : {}),
+        feishuEnabled: true, feishuStatus: 'connecting', feishuLastError: null, updatedAt: new Date(),
+      }).where(eq(plugins.id, pluginId));
+      return this.get(pluginId);
+    }
+    if (pluginId !== CODEX_CLI_PLUGIN_ID) throw new BadRequestException('This plugin has no executable command configuration.');
     const command = this.normalizeCommand(input?.command);
     const [updated] = await this.db.update(plugins).set({ command, updatedAt: new Date() }).where(eq(plugins.id, pluginId)).returning();
     if (!updated) throw new NotFoundException('Plugin not found.');
@@ -42,29 +57,30 @@ export class PluginsService {
   }
 
   async test(pluginId: string): Promise<PluginTestResult> {
-    const command = await this.command(pluginId);
-    return this.probe(command);
+    if (pluginId !== CODEX_CLI_PLUGIN_ID) throw new BadRequestException('Only executable plugins support command testing.');
+    return this.probe(await this.command(pluginId));
   }
 
-  async updateWechat(pluginId: string, patch: Partial<typeof plugins.$inferInsert>): Promise<PluginView> {
-    const [updated] = await this.db.update(plugins).set({ ...patch, updatedAt: new Date() }).where(eq(plugins.id, pluginId)).returning();
-    if (!updated) throw new NotFoundException('Plugin not found.');
-    return this.toView(updated);
+  async feishuSecret() {
+    const [row] = await this.db.select().from(plugins).where(eq(plugins.id, FEISHU_PLUGIN_ID)).limit(1);
+    if (!row) throw new NotFoundException('Feishu plugin not found.');
+    return { ...row, appSecret: row.feishuAppSecret ? decryptSecret(row.feishuAppSecret) : null };
   }
 
-  async wechatSecret(pluginId: string): Promise<{ token: string | null; baseUrl: string }> {
-    const [row] = await this.db.select({ token: plugins.wechatToken, baseUrl: plugins.wechatBaseUrl }).from(plugins).where(eq(plugins.id, pluginId)).limit(1);
-    if (!row) throw new NotFoundException('Plugin not found.');
-    return { token: row.token ? decryptSecret(row.token) : null, baseUrl: row.baseUrl };
+  async updateFeishu(patch: Partial<typeof plugins.$inferInsert>): Promise<PluginView> {
+    await this.db.update(plugins).set({ ...patch, updatedAt: new Date() }).where(eq(plugins.id, FEISHU_PLUGIN_ID));
+    return this.get(FEISHU_PLUGIN_ID);
   }
 
   private async toView(row: typeof plugins.$inferSelect): Promise<PluginView> {
-    const availability = row.id === WECHAT_OFFICIAL_ACCOUNT_PLUGIN_ID
+    const availability = row.id !== CODEX_CLI_PLUGIN_ID
       ? { enabled: true, status: 'available' as const }
       : this.probe(row.command);
-    const [{ value: conversationCount }] = await this.db.select({ value: count() }).from(pluginWechatConversations).where(eq(pluginWechatConversations.pluginId, row.id));
     const [officialAccount] = row.id === WECHAT_OFFICIAL_ACCOUNT_PLUGIN_ID
       ? await this.db.select().from(wechatOfficialAccounts).where(eq(wechatOfficialAccounts.workspaceId, row.workspaceId)).limit(1)
+      : [];
+    const [registration] = row.id === FEISHU_PLUGIN_ID
+      ? await this.db.select().from(feishuRegistrations).where(eq(feishuRegistrations.pluginId, row.id)).limit(1)
       : [];
     return {
       id: row.id as PluginView['id'],
@@ -74,15 +90,15 @@ export class PluginsService {
       enabled: availability.enabled,
       status: availability.status,
       updatedAt: row.updatedAt.toISOString(),
-      wechat: {
-        status: row.wechatStatus,
-        baseUrl: row.wechatBaseUrl,
-        botId: row.wechatBotId,
-        qrCode: row.wechatQrCode,
-        lastError: row.wechatLastError,
-        conversationCount,
-        updatedAt: row.updatedAt.toISOString(),
-      },
+      feishu: row.id === FEISHU_PLUGIN_ID ? {
+        appId: row.feishuAppId, hasAppSecret: Boolean(row.feishuAppSecret),
+        allowedUserId: row.feishuAllowedUserId, status: row.feishuStatus, lastError: row.feishuLastError,
+        registration: registration ? {
+          id: registration.id, status: registration.status,
+          verificationUrl: registration.verificationUrl,
+          expiresAt: registration.expiresAt?.toISOString() ?? null, error: registration.error,
+        } : null,
+      } : undefined,
       officialAccount: officialAccount ? {
         id: officialAccount.id,
         displayName: officialAccount.displayName,
@@ -181,7 +197,7 @@ function decryptSecret(value: string): string {
   return Buffer.concat([decipher.update(Buffer.from(encryptedValue, 'base64url')), decipher.final()]).toString('utf8');
 }
 
-export const WECHAT_OFFICIAL_ACCOUNT_PLUGIN_ID = 'wechat-official-account' as const;
+const WECHAT_OFFICIAL_ACCOUNT_PLUGIN_ID = 'wechat-official-account' as const;
 export const WECHAT_OFFICIAL_ACCOUNT_ID = 'wechat_official_account_personal' as const;
 
 export { decryptSecret, encryptSecret };

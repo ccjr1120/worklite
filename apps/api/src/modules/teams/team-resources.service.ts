@@ -25,6 +25,7 @@ import type {
   WorkspaceSettingsView,
 } from '@worklite/contracts';
 import {
+  agentExecutions,
   agentMcpServers,
   agentTeams,
   agentTeamVersions,
@@ -77,7 +78,7 @@ function encryptSecret(value: string): string {
   return `${iv.toString('base64url')}.${tag.toString('base64url')}.${encrypted.toString('base64url')}`;
 }
 
-export function decryptSecret(value: string): string {
+function decryptSecret(value: string): string {
   const [ivValue, tagValue, encryptedValue] = value.split('.');
   if (!ivValue || !tagValue || !encryptedValue) throw new Error('Invalid encrypted secret');
   const key = createHash('sha256').update(process.env.SECRET_ENCRYPTION_KEY ?? 'worklite-development-secret').digest();
@@ -156,6 +157,7 @@ const MAX_SKILL_PACKAGE_BYTES = 1 * 1_024 * 1_024;
 
 const WORKLITE_NAVIGATION_ROUTES = {
   home: '/home',
+  chat: '/chat',
   skills: '/skills',
   'mcp-servers': '/mcp-servers',
   'model-providers': '/model-providers',
@@ -166,7 +168,7 @@ const WORKLITE_NAVIGATION_ROUTES = {
   'settings-audit-log': '/settings/audit-log',
 } as const satisfies Record<WorkliteNavigationTarget, string>;
 
-export const GATEWAY_PROVIDER_ID = 'gateway-provider';
+const GATEWAY_PROVIDER_ID = 'gateway-provider';
 const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 3392);
 const GATEWAY_PROVIDER_URL = `http://127.0.0.1:${GATEWAY_PORT}/worklite/providers`;
 
@@ -229,7 +231,7 @@ function providerConfig(row: typeof modelProviders.$inferSelect, apiKey: string)
   throw new BadRequestException('Unsupported model provider protocol.');
 }
 
-const CHAT_BOT_PLATFORM_SKILL_ID = 'sk_worklite_platform';
+const CHAT_PLATFORM_SKILL_ID = 'sk_worklite_platform';
 
 @Injectable()
 export class WorkspaceResourcesService {
@@ -242,7 +244,7 @@ export class WorkspaceResourcesService {
 
   async skills(request: Request, workspaceSlug: string): Promise<SkillView[]> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const rows = (await this.db.select().from(skills).where(eq(skills.workspaceId, team.id)).orderBy(desc(skills.updatedAt))).filter((row) => row.id !== CHAT_BOT_PLATFORM_SKILL_ID);
+    const rows = (await this.db.select().from(skills).where(eq(skills.workspaceId, team.id)).orderBy(desc(skills.updatedAt))).filter((row) => row.id !== CHAT_PLATFORM_SKILL_ID);
     const files = rows.length === 0 ? [] : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, rows.map((row) => row.id))).orderBy(asc(skillFiles.path));
     const bySkill = new Map<string, PackageFile[]>();
     for (const file of files) bySkill.set(file.skillId, [...(bySkill.get(file.skillId) ?? []), { path: file.path, content: file.content }]);
@@ -250,7 +252,7 @@ export class WorkspaceResourcesService {
   }
 
   async skill(request: Request, workspaceSlug: string, skillId: string): Promise<SkillView> {
-    if (skillId === CHAT_BOT_PLATFORM_SKILL_ID) throw new NotFoundException('Skill not found');
+    if (skillId === CHAT_PLATFORM_SKILL_ID) throw new NotFoundException('Skill not found');
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [row] = await this.db.select().from(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).limit(1);
     if (!row) throw new NotFoundException('Skill not found');
@@ -289,6 +291,11 @@ export class WorkspaceResourcesService {
     return skillView(row, workspaceSlug, files);
   }
 
+  private async activeChatCapabilityIsReferenced(workspaceId: string, field: 'skills' | 'mcpServers', id: string) {
+    const rows = await this.db.select({ snapshot: agentExecutions.capabilitySnapshot }).from(agentExecutions).where(and(eq(agentExecutions.workspaceId, workspaceId), inArray(agentExecutions.status, ['running', 'waiting_for_input'])));
+    return rows.some(({ snapshot }) => snapshot?.[field].some((resource) => resource.id === id));
+  }
+
   async deleteSkill(request: Request, workspaceSlug: string, skillId: string): Promise<void> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [existing] = await this.db.select().from(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).limit(1);
@@ -296,6 +303,7 @@ export class WorkspaceResourcesService {
     if (existing.source === 'built-in') throw new BadRequestException('Built-in Skills cannot be deleted.');
     const [assignment] = await this.db.select({ agentId: agentSkills.agentId }).from(agentSkills).where(eq(agentSkills.skillId, skillId)).limit(1);
     if (assignment) throw new BadRequestException('Remove this Skill from every Agent before deleting it.');
+    if (await this.activeChatCapabilityIsReferenced(team.id, 'skills', skillId)) throw new BadRequestException('This Skill is captured by an active Chat turn.');
     if (await this.workflowResourceIsReferenced(team.id, 'skillIds', skillId)) throw new BadRequestException('Remove this Skill from every Workflow draft and published version before deleting it.');
     if (await this.agentTeamResourceIsReferenced(team.id, 'skills', skillId)) throw new BadRequestException('Remove this Skill from every Agent Team configuration and captured Team version before deleting it.');
     await this.db.delete(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id)));
@@ -411,6 +419,7 @@ export class WorkspaceResourcesService {
     if (!existing) throw new NotFoundException('MCP server not found');
     const [assignment] = await this.db.select({ agentId: agentMcpServers.agentId }).from(agentMcpServers).where(eq(agentMcpServers.mcpServerId, serverId)).limit(1);
     if (assignment) throw new BadRequestException('Remove this MCP server from every Agent before deleting it.');
+    if (await this.activeChatCapabilityIsReferenced(team.id, 'mcpServers', serverId)) throw new BadRequestException('This MCP server is captured by an active Chat turn.');
     if (await this.workflowResourceIsReferenced(team.id, 'mcpServerIds', serverId)) throw new BadRequestException('Remove this MCP server from every Workflow draft and published version before deleting it.');
     if (await this.agentTeamResourceIsReferenced(team.id, 'mcpServers', serverId)) throw new BadRequestException('Remove this MCP server from every Agent Team configuration and captured Team version before deleting it.');
     await this.db.delete(mcpServers).where(and(eq(mcpServers.id, serverId), eq(mcpServers.workspaceId, team.id)));
@@ -492,7 +501,7 @@ export class WorkspaceResourcesService {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [providerRows, skillRows, mcpRows, workflowRows, agentTeamRows, scheduleRows, settingsRows, officialAccountRows] = await Promise.all([
       this.providers(request, workspaceSlug),
-      this.db.select().from(skills).where(and(eq(skills.workspaceId, workspace.id), ne(skills.id, CHAT_BOT_PLATFORM_SKILL_ID))).orderBy(skills.name),
+      this.db.select().from(skills).where(and(eq(skills.workspaceId, workspace.id), ne(skills.id, CHAT_PLATFORM_SKILL_ID))).orderBy(skills.name),
       this.db.select().from(mcpServers).where(eq(mcpServers.workspaceId, workspace.id)).orderBy(mcpServers.name),
       this.db.select().from(workflows).where(eq(workflows.workspaceId, workspace.id)).orderBy(workflows.name),
       this.db.select().from(agentTeams).where(eq(agentTeams.workspaceId, workspace.id)).orderBy(agentTeams.name),
@@ -507,7 +516,10 @@ export class WorkspaceResourcesService {
     return {
       workspace: { id: workspace.id, slug: workspace.slug, name: workspace.name },
       capabilities: {
-        supportedResourceOperations: ['inspect workspace resources', 'inspect Workflow capabilities', 'inspect and configure Agent Teams', 'inspect Agent Team conversations and documents', 'continue Agent Team Runs', 'navigate to known WorkLite pages', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server draft', 'create Workflow draft', 'edit Workflow draft from a logical plan', 'change appearance', 'change language'],
+        chatCapabilities: { configuration: 'revisioned user extensions', turnSnapshot: true, updatesApply: 'next user turn', configureRoute: 'PATCH /agents/agt_system_helper_chat' },
+        upgrades: { proposeRoute: 'POST /upgrades', inspectRoute: 'GET /upgrades/:id', confirmation: 'bound Feishu user card', requiresManagedBaseline: true, projectRoot: process.env.WORKLITE_PROJECT_ROOT ?? null, phases: ['awaiting_confirmation', 'authorized', 'preflighting', 'draining', 'frozen', 'switching', 'recovering', 'succeeded', 'rolled_back', 'failed'], uninterruptedIngress: false },
+        chat: { workspaceRoute: '/chat', channelsRoute: 'GET /chat/channels', conversationsRoute: 'GET /chat/conversations', conversationRoute: 'GET /chat/conversations/:id', recordsRoute: 'GET /chat/conversations/:id/records', channels: [{ id: 'web', builtIn: true, presentation: ['streaming', 'markdown', 'questions'] }, { id: 'feishu', builtIn: false, presentation: ['cards', 'forms', 'QR images', 'files'] }], histories: 'server-persisted; unrelated conversations remain separate', masterAgentId: 'agt_system_helper_chat', dispatchRoute: 'POST /chat/dispatch', targets: ['conversation', 'team', 'workflow'], workflowVersions: 'published only', externalPluginId: 'feishu-bot', mergeHistories: false, webAccess: 'inspect and continue selected persisted conversation', feishu: { privateChat: true, defaultTarget: 'conversation', persistentTargetSelection: false, choices: 'current pending Agent question; plan not required', replyProgress: 'queued placeholder, thinking, responding and processing in the same card', completedDialogue: 'content without task header or completion label', taskAnswers: 'reply to the task card or submit its form', groupChat: false, inbound: ['text', 'card actions'], outbound: ['updated response cards', 'task questions and controls', 'QR images', 'Team documents', 'Workflow Artifacts'], configurationRoute: '/chat?view=channels', applicationRegistration: { available: true, archetype: 'PersonalAgent', startRoute: 'POST /plugins/feishu-bot/feishu/registration', cancelRoute: 'DELETE /plugins/feishu-bot/feishu/registration', operator: 'user through Web configuration', automaticCredentialPersistence: true, userBinding: 'automatic when returned, otherwise manual', resumable: true, manualExistingApplication: true, platformSetup: ['bot capability', 'IM permissions', 'long-connection message and card subscriptions', 'publication'], userOAuth: false, runtimeCompatibility: 'requires authorized real integration' } } },
+        supportedResourceOperations: ['inspect Chat conversations and full saved records', 'inspect and update Chat capabilities', 'propose and inspect managed upgrades', 'inspect workspace resources', 'inspect Workflow capabilities', 'inspect and configure Agent Teams', 'inspect Agent Team conversations and documents', 'continue Agent Team Runs', 'dispatch Team intake and published Workflow tasks', 'navigate to known WorkLite pages', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server draft', 'create Workflow draft', 'edit Workflow draft from a logical plan', 'change appearance', 'change language'],
         modelProviderProxy: {
           protocols: ['openai/chat', 'openai/responses', 'anthropic/messages', 'codex/responses', 'typesafe/systemone'],
           requiresExplicitProtocol: true,
@@ -547,7 +559,7 @@ export class WorkspaceResourcesService {
           teamDeletion: false,
           webRoute: `/agent-teams/${BUILT_IN_AGENT_TEAM_ID}`,
           webDefaultTab: 'conversation',
-          chatBotDispatchesRuns: false,
+          chatDispatchesRuns: true,
           runWebRoute: '/agent-team-runs/:runId',
           builtInTeamId: BUILT_IN_AGENT_TEAM_ID,
           roles: [...AGENT_TEAM_ROLES],
@@ -568,7 +580,7 @@ export class WorkspaceResourcesService {
             automaticRunCreation: 'conversation-origin Run starts exactly once after complete intake',
             queuedRequests: 'one active task per Team; later Coordinator requests queue',
             eventReplay: 'Last-Event-ID',
-            chatBotAccess: 'read-only inspection and Web navigation; no message sending',
+            chatAccess: 'inspection, continuation and shared server intake dispatch; no model-authored command grants',
           },
           documentRoutes: {
             detail: 'GET /agent-team-documents/:documentId',

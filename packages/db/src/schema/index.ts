@@ -19,26 +19,79 @@ export const plugins = sqliteTable('plugins', {
   name: text('name').notNull(),
   description: text('description').notNull(),
   command: text('command').notNull().default('codex'),
-  wechatBaseUrl: text('wechat_base_url').notNull().default('https://ilinkai.weixin.qq.com'),
-  wechatToken: text('wechat_token'),
-  wechatBotId: text('wechat_bot_id'),
-  wechatStatus: text('wechat_status').$type<'disconnected' | 'qr_pending' | 'connected' | 'error'>().notNull().default('disconnected'),
-  wechatQrCode: text('wechat_qr_code'),
-  wechatQrKey: text('wechat_qr_key'),
-  wechatCursor: text('wechat_cursor').notNull().default(''),
-  wechatLastError: text('wechat_last_error'),
+  feishuAppId: text('feishu_app_id').notNull().default(''),
+  feishuAppSecret: text('feishu_app_secret'),
+  feishuAllowedUserId: text('feishu_allowed_user_id').notNull().default(''),
+  feishuEnabled: integer('feishu_enabled', { mode: 'boolean' }).notNull().default(false),
+  feishuStatus: text('feishu_status').$type<'disconnected' | 'connecting' | 'connected' | 'error'>().notNull().default('disconnected'),
+  feishuLastError: text('feishu_last_error'),
   updatedAt: timestamp('updated_at'),
 });
 
-export const pluginWechatConversations = sqliteTable('plugin_wechat_conversations', {
+export const feishuRegistrations = sqliteTable('feishu_registrations', {
+  pluginId: text('plugin_id').primaryKey().references(() => plugins.id, { onDelete: 'cascade' }),
+  id: text('id').notNull().unique(),
+  status: text('status').$type<'pending' | 'completed' | 'needs_user_id' | 'denied' | 'expired' | 'error' | 'cancelled'>().notNull(),
+  deviceCode: text('device_code'),
+  verificationUrl: text('verification_url'),
+  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }),
+  intervalSeconds: integer('interval_seconds').notNull().default(5),
+  nextPollAt: integer('next_poll_at', { mode: 'timestamp_ms' }),
+  error: text('error'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+});
+
+export type StoredChatTarget =
+  | { kind: 'conversation' }
+  | { kind: 'team'; teamId: string; intakeSubmissionId?: string; intakeField?: 'goal' | 'projectDirectory' | 'mode' }
+  | { kind: 'workflow'; workflowId: string };
+export type StoredChatTaskReference =
+  | { kind: 'conversation'; executionId: string; afterMessageId: string | null; afterSequence: number; untilMessageId?: string | null; completionStatus?: string; completionError?: string | null }
+  | { kind: 'team'; teamId: string; intakeSubmissionId: string }
+  | { kind: 'workflow'; runId: string; workflowVersionId: string }
+  | { kind: 'upgrade'; jobId: string };
+
+export const feishuChats = sqliteTable('feishu_chats', {
   id: text('id').primaryKey(),
-  pluginId: text('plugin_id').notNull().references(() => plugins.id, { onDelete: 'cascade' }),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   userId: text('user_id').notNull(),
-  contextToken: text('context_token'),
   executionId: text('execution_id'),
+  target: text('target', { mode: 'json' }).$type<StoredChatTarget>().notNull().default({ kind: 'conversation' }),
   updatedAt: timestamp('updated_at'),
-}, (table) => [unique().on(table.pluginId, table.userId)]);
+});
+
+export const chatSubmissions = sqliteTable('chat_submissions', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  chatId: text('chat_id').references(() => feishuChats.id, { onDelete: 'cascade' }),
+  executionId: text('execution_id'),
+  message: text('message').notNull(),
+  target: text('target', { mode: 'json' }).$type<StoredChatTarget>().notNull(),
+  reference: text('reference', { mode: 'json' }).$type<StoredChatTaskReference>(),
+  outputMessageId: text('output_message_id'),
+  renderedCard: text('rendered_card', { mode: 'json' }).$type<Record<string, unknown>>(),
+  deliveryFingerprint: text('delivery_fingerprint'),
+  settled: integer('settled', { mode: 'boolean' }).notNull().default(false),
+  error: text('error'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+});
+
+export const feishuEvents = sqliteTable('feishu_events', {
+  id: text('id').primaryKey(),
+  chatId: text('chat_id').notNull().references(() => feishuChats.id, { onDelete: 'cascade' }),
+  payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+  status: text('status').$type<'queued' | 'done' | 'failed'>().notNull().default('queued'),
+  error: text('error'),
+  createdAt: timestamp('created_at'),
+});
+
+export const feishuDeliveries = sqliteTable('feishu_deliveries', {
+  id: text('id').primaryKey(),
+  chatId: text('chat_id').notNull().references(() => feishuChats.id, { onDelete: 'cascade' }),
+  messageId: text('message_id'),
+});
 
 export const agents = sqliteTable('agents', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), kind: text('kind').$type<'system' | 'custom'>().notNull().default('custom'), name: text('name').notNull(), responsibility: text('responsibility').notNull(), model: text('model').notNull(), providerId: text('provider_id'),
@@ -306,11 +359,30 @@ export type StoredAgentPendingQuestion = {
 
 export type StoredWorkliteScriptResult =
   | { type: 'resource'; resourceType: 'provider' | 'skill' | 'mcp-server' | 'workflow'; id: string; route: string }
-  | { type: 'navigation'; target: 'home' | 'skills' | 'mcp-servers' | 'model-providers' | 'logs' | 'workflows' | 'settings-appearance' | 'settings-usage' | 'settings-audit-log'; route: string }
+  | { type: 'navigation'; target: 'home' | 'chat' | 'skills' | 'mcp-servers' | 'model-providers' | 'logs' | 'workflows' | 'settings-appearance' | 'settings-usage' | 'settings-audit-log'; route: string }
+  | { type: 'dispatch'; submissionId: string; route: string }
   | { type: 'settings'; appearance: 'system' | 'light' | 'dark' }
   | { type: 'snapshot' };
 
+export type StoredChatCapabilities = {
+  revision: number;
+  agent: { id: string; providerId: string | null; model: string; systemPrompt: string };
+  skills: Array<{ id: string; name: string; instructions: string; files: Array<{ path: string; content: string }> }>;
+  mcpServers: Array<{ id: string; name: string; endpoint: string; authSecret: string | null; allowedTools: string[] }>;
+};
+
+export const chatConfigurations = sqliteTable('chat_bot_configurations', {
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  revision: integer('revision').notNull(),
+  extensionPrompt: text('extension_prompt').notNull().default(''),
+  providerId: text('provider_id'), model: text('model').notNull(),
+  skillIds: text('skill_ids', { mode: 'json' }).$type<string[]>().notNull(),
+  mcpServerIds: text('mcp_server_ids', { mode: 'json' }).$type<string[]>().notNull(),
+  createdAt: timestamp('created_at'),
+}, (table) => [primaryKey({ columns: [table.workspaceId, table.revision] })]);
+
 export const agentExecutions = sqliteTable('agent_executions', {
+  capabilitySnapshot: text('capability_snapshot', { mode: 'json' }).$type<StoredChatCapabilities | null>(),
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }), status: text('status').$type<'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled'>().notNull().default('running'), phase: text('phase').$type<'model' | 'skill' | 'recovery'>().notNull().default('model'), errorCode: text('error_code').$type<'provider' | 'invalid_request' | 'invalid_tool_request' | 'incomplete_tool_request' | 'too_many_tool_calls' | 'skill' | 'mcp' | 'restarted' | 'internal'>(), modelMessages: text('model_messages', { mode: 'json' }).$type<StoredAgentModelMessage[]>().notNull().default([]), displayMessages: text('display_messages', { mode: 'json' }).$type<StoredAgentDisplayMessage[]>().notNull().default([]), plan: text('plan', { mode: 'json' }).$type<StoredAgentPlanStep[]>().notNull().default([]), pendingQuestion: text('pending_question', { mode: 'json' }).$type<StoredAgentPendingQuestion | null>(), contextDropped: integer('context_dropped').notNull().default(0), error: text('error'), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
 });
 

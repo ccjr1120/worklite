@@ -6,7 +6,7 @@ import type { AgentExecutionView, AgentToolCallView, RunView, WorkflowView } fro
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { focusRing, focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
+import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatDateTime } from '@/i18n/format';
@@ -17,7 +17,7 @@ type TranscriptMessage = AgentExecutionView['messages'][number];
 type TurnSegment = { kind: 'message'; item: TranscriptMessage } | { kind: 'tool'; item: AgentToolCallView };
 type Turn = { kind: 'user'; item: TranscriptMessage } | { kind: 'assistant'; segments: TurnSegment[] };
 
-// One Chat Bot turn is one identity block: every assistant message and Skill call
+// One Chat turn is one identity block: every assistant message and Skill call
 // between two user messages shares a single avatar and content column, so a turn that
 // answers, runs a script, and answers again does not read as three speakers.
 function groupTurns(execution: AgentExecutionView): Turn[] {
@@ -62,7 +62,7 @@ function AssistantTurn({ segments, working, markdownEnabled }: {
     <Message from="assistant" aria-label={t('speaker.assistant')}>
       <div className="flex w-full items-start gap-3">
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface">
-          <MessageSquareText className="size-4 text-brand" aria-hidden="true" />
+          <MessageSquareText className="size-4 text-muted-foreground" aria-hidden="true" />
         </span>
         <MessageContent className="min-w-0 flex-1 pt-0.5">
           {segments.map((segment) => segment.kind === 'message'
@@ -107,11 +107,12 @@ function TranscriptSkeleton() {
   );
 }
 
-function QuestionNote({ question }: { question: NonNullable<AgentExecutionView['pendingQuestion']> }) {
+function QuestionNote({ question, onAnswer, busy }: { question: NonNullable<AgentExecutionView['pendingQuestion']>; onAnswer: (answer: string) => void; busy: boolean }) {
+  const [selected, setSelected] = useState<string | null>(null);
   return (
     <div className="my-3 border-l-2 border-brand pl-3" role="status">
       <p className="text-sm font-medium">{question.question}</p>
-      {question.options.length > 0 ? <p className="mt-1 text-xs text-muted-foreground">{question.options.join(' · ')}</p> : null}
+      {question.options.length > 0 ? <div className="mt-2 flex flex-wrap gap-2">{question.options.map((option) => <Button key={option} type="button" variant="secondary" size="compact" disabled={busy} onClick={() => { setSelected(option); onAnswer(option); }}>{busy && selected === option ? <LoaderCircle className="size-3.5 motion-safe:animate-spin" /> : null}{option}</Button>)}</div> : null}
     </div>
   );
 }
@@ -155,7 +156,7 @@ function FailureNote({ execution, message, onRetry, retryDisabled, locale }: { e
   );
 }
 
-function QueueRows({ queued, paused, onRemove }: { queued: Array<{ id: string; text: string }>; paused: boolean; onRemove: (id: string) => void }) {
+function QueueRows({ queued, paused, sendingId, onRemove }: { queued: Array<{ id: string; text: string }>; paused: boolean; sendingId: string | null; onRemove: (id: string) => void }) {
   const { t } = useTranslation('assistant');
   if (queued.length === 0) return null;
   return (
@@ -168,8 +169,8 @@ function QueueRows({ queued, paused, onRemove }: { queued: Array<{ id: string; t
             <span className="min-w-0 flex-1 break-words text-[13px] leading-5">{item.text}</span>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button type="button" variant="ghost" size="icon-compact" aria-label={t('queue.remove')} onClick={() => onRemove(item.id)}>
-                  <X className="size-3.5" aria-hidden="true" />
+                <Button type="button" variant="ghost" size="icon-compact" aria-label={t('queue.remove')} disabled={sendingId === item.id} onClick={() => onRemove(item.id)}>
+                  {sendingId === item.id ? <LoaderCircle className="size-3.5 motion-safe:animate-spin" aria-hidden="true" /> : <X className="size-3.5" aria-hidden="true" />}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{t('queue.remove')}</TooltipContent>
@@ -182,46 +183,6 @@ function QueueRows({ queued, paused, onRemove }: { queued: Array<{ id: string; t
   );
 }
 
-function StarterPane({ onSelect }: { onSelect: (prompt: string) => void }) {
-  const { t } = useTranslation('assistant');
-  const starters = ['provider', 'skill', 'mcp', 'workflow'] as const;
-  return (
-    <div className="my-auto py-6">
-      <div className="mb-5 flex items-center gap-3">
-        <span className="flex size-9 items-center justify-center rounded-md border border-border bg-surface">
-          <MessageSquareText className="size-[18px] text-brand" aria-hidden="true" />
-        </span>
-        <div>
-          <p className="text-sm font-semibold">{t('starters.title')}</p>
-          <p className="mt-0.5 text-[13px] text-muted-foreground">{t('messages.welcome')}</p>
-        </div>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-2">
-        {starters.map((starter) => (
-          <button
-            key={starter}
-            type="button"
-            className={cn('min-h-[72px] rounded-md border border-border bg-surface p-3 text-left hover:border-foreground/20 hover:bg-surface-subtle', surfaceInteraction, focusRing)}
-            onClick={() => onSelect(t(`starters.${starter}.prompt`))}
-          >
-            <span className="block text-sm font-medium">{t(`starters.${starter}.title`)}</span>
-            <span className="mt-1 block text-[13px] leading-5 text-muted-foreground">{t(`starters.${starter}.description`)}</span>
-          </button>
-        ))}
-        <Link
-          to="/agent-teams/$teamId"
-          params={{ teamId: 'agent_team_bmad_tea' }}
-          className={cn('min-h-[72px] rounded-md border border-border bg-surface p-3 text-left hover:border-foreground/20 hover:bg-surface-subtle', surfaceInteraction, focusRing)}
-          aria-label={t('starters.agentTeam.open')}
-        >
-          <span className="block text-sm font-medium">{t('starters.agentTeam.title')}</span>
-          <span className="mt-1 block text-[13px] leading-5 text-muted-foreground">{t('starters.agentTeam.description')}</span>
-        </Link>
-      </div>
-    </div>
-  );
-}
-
 function WorkflowRunRow({ run, workflow, input }: { run: RunView; workflow: WorkflowView; input: string }) {
   const { t } = useTranslation('assistant');
   const statusKey = run.status === 'succeeded' ? 'completed' : run.status === 'timed_out' ? 'failed' : run.status;
@@ -230,7 +191,7 @@ function WorkflowRunRow({ run, workflow, input }: { run: RunView; workflow: Work
     <div className="my-3 rounded-md border border-border bg-surface-subtle p-3" role="status">
       <div className="flex items-start gap-3">
         <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface">
-          <Play className={cn('size-4 text-brand', (run.status === 'queued' || run.status === 'running') && 'motion-safe:animate-pulse')} aria-hidden="true" />
+          <Play className={cn('size-4 text-muted-foreground', (run.status === 'queued' || run.status === 'running') && 'text-brand motion-safe:animate-pulse')} aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -263,6 +224,8 @@ function ToolCallPanel({ call }: { call: AgentToolCallView }) {
   const [expanded, setExpanded] = useState(false);
   const finished = call.status === 'completed' || call.status === 'failed' || call.status === 'cancelled';
   const resource = call.result?.type === 'resource' ? call.result : null;
+  const dispatch = call.result?.type === 'dispatch' ? call.result : null;
+  const navigation = call.result?.type === 'navigation' ? call.result : null;
   const scriptName = call.scriptPath?.split('/').pop() || t('tool.script');
   const variant = call.status === 'completed' ? 'success' : call.status === 'running' ? 'brand' : call.status === 'cancelled' ? 'neutral' : 'danger';
   return (
@@ -303,6 +266,8 @@ function ToolCallPanel({ call }: { call: AgentToolCallView }) {
               <pre className="mt-1 max-h-40 overflow-auto rounded-md border border-border bg-background p-2.5 font-mono text-xs"><code>{call.output || t('tool.noOutput')}</code></pre>
             </div>
           ) : null}
+          {dispatch ? <Button asChild type="button" variant="link" size="sm" className="mt-2 h-auto px-0"><a href={dispatch.route}>{t('tool.openResource')}<ChevronRight className="size-3.5" aria-hidden="true" /></a></Button> : null}
+          {navigation ? <Button asChild type="button" variant="link" size="sm" className="mt-2 h-auto px-0"><a href={navigation.route}>{t('tool.openResource')}<ChevronRight className="size-3.5" aria-hidden="true" /></a></Button> : null}
           {resource ? (
             <Button asChild type="button" variant="link" size="sm" className="mt-2 h-auto px-0">
               <a href={resource.route}>{resource.resourceType === 'provider' ? t('tool.openSecureProvider') : t('tool.openResource')}<ChevronRight className="size-3.5" aria-hidden="true" /></a>
@@ -314,5 +279,4 @@ function ToolCallPanel({ call }: { call: AgentToolCallView }) {
   );
 }
 
-export { AssistantTurn, CancelledNote, FailureNote, groupTurns, QuestionNote, QueueRows, StarterPane, TranscriptSkeleton, UserMessage, WorkflowRunRow };
-export type { Turn };
+export { AssistantTurn, CancelledNote, FailureNote, groupTurns, QuestionNote, QueueRows, TranscriptSkeleton, UserMessage, WorkflowRunRow };

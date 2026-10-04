@@ -1,5 +1,5 @@
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Home, KeyRound, Puzzle, ScrollText, Settings, UsersRound, Workflow } from 'lucide-react';
+import { Home, MessageSquareText, KeyRound, Puzzle, ScrollText, Settings, UsersRound, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { focusRingInset } from '@/components/ui/interaction';
@@ -13,6 +13,7 @@ const navigationGroups = [
     labelKey: 'nav.workspace',
     items: [
       { id: 'home', labelKey: 'nav.home', to: '/home', icon: Home },
+      { id: 'chat', labelKey: 'nav.chat', to: '/chat', icon: MessageSquareText },
       { id: 'workflows', labelKey: 'nav.workflows', to: '/workflows', icon: Workflow },
       { id: 'agentTeam', labelKey: 'nav.agentTeam', to: '/agent-teams/agent_team_bmad_tea', icon: UsersRound },
     ],

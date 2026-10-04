@@ -1,41 +1,13 @@
 {
-  "title": "Chat Bot",
-  "starters": {
-    "title": "开始任务",
-    "provider": {
-      "title": "配置提供商",
-      "description": "创建不包含敏感信息的提供商草稿。",
-      "prompt": "为此工作区创建一个 OpenAI 模型提供商草稿，不要包含任何凭据。"
-    },
-    "skill": {
-      "title": "创建 Skill",
-      "description": "创建包含真实文件的 Skill 包。",
-      "prompt": "创建一个用于分流客户支持请求的 Skill，并包含必需的 SKILL.md 文件。"
-    },
-    "mcp": {
-      "title": "连接 MCP 服务器",
-      "description": "创建远程 MCP 服务器草稿。",
-      "prompt": "为客户数据工具创建一个远程 MCP 服务器草稿，不要包含认证密钥。"
-    },
-    "workflow": {
-      "title": "创建 Workflow",
-      "description": "创建 Workflow 草稿并打开编辑器。",
-      "prompt": "创建一个用于每日汇总客户反馈的 Workflow 草稿。"
-    },
-    "agentTeam": {
-      "title": "启动 Agent Team",
-      "description": "配置软件团队并发起授权执行。",
-      "open": "打开 Agent Team"
-    }
-  },
+  "title": "Chat",
   "composer": {
-    "label": "向 Chat Bot 发送消息",
+    "label": "向 Chat 发送消息",
     "placeholder": "询问 WorkLite，或输入 @ 运行已发布的 Workflow…",
     "send": "发送消息",
     "stop": "中断当前回复",
     "answerPlaceholder": "回答澄清问题...",
-    "loading": "正在加载 Chat Bot 配置",
-    "configure": "绑定模型提供商和模型后使用 Chat Bot"
+    "loading": "正在加载 Chat 配置",
+    "configure": "绑定模型提供商和模型后使用 Chat"
   },
   "queue": {
     "title": "排队中（{{count}}）",
@@ -45,23 +17,16 @@
   "transcript": {
     "scrollToEnd": "回到最新消息"
   },
-  "open": "打开 Chat Bot",
-  "minimized": {
-    "minimize": "最小化对话"
-  },
   "commands": {
     "menuLabel": "对话命令",
     "empty": "没有匹配的命令。",
     "logDescription": "仅将当前对话下载为 Markdown。",
-    "newDescription": "结束当前对话并开始一个新对话。",
-    "resumeDescription": "切换到已归档的服务端执行。"
-  },
-  "messages": {
-    "welcome": "选择一个任务，或描述你需要执行的工作区操作。"
+    "newDescription": "新建对话，保留当前记录。",
+    "resumeDescription": "切换到服务端保存的会话。"
   },
   "speaker": {
     "you": "你",
-    "assistant": "Chat Bot"
+    "assistant": "Chat"
   },
   "status": {
     "running": "执行中",
@@ -70,22 +35,29 @@
     "cancelled": "已中断",
     "failed": "失败",
     "reconnecting": "正在重新连接",
-    "queued": "Queued",
-    "paused": "已暂停"
+    "queued": "已排队",
+    "paused": "已暂停",
+    "task": "任务会话",
+    "succeeded": "已完成",
+    "collecting": "等待补充信息",
+    "starting": "正在启动",
+    "started": "已启动",
+    "waiting_for_recovery": "等待恢复决定",
+    "timed_out": "已超时"
   },
   "execution": {
     "loading": "正在加载服务端执行",
     "working": "正在处理...",
     "cancelled": "当前回复已中断。",
     "loadFailed": "无法加载已保存的执行。",
-    "requestFailed": "Chat Bot 无法完成此请求。",
-    "providerRequestFailed": "Chat Bot 无法完成当前轮次，请检查模型提供商配置后重试。",
+    "requestFailed": "Chat 无法完成此请求。",
+    "providerRequestFailed": "Chat 无法完成当前轮次，请检查模型提供商配置后重试。",
     "skillFailed": "Skill 脚本未能完成。",
     "incompleteSkillRequest": "模型返回了不完整的 Skill 请求，JSON 在请求完成前提前结束。",
     "invalidSkillRequest": "模型返回了无效的 Skill 请求，参数无法解析或不符合所需结构。",
     "cancelFailed": "无法中断当前回复。",
     "answerFailed": "无法提交澄清回答。",
-    "restarted": "Chat Bot 本轮完成前 API 已重启。请发送后续消息继续。",
+    "restarted": "Chat 本轮完成前 API 已重启。请发送后续消息继续。",
     "retry": "重试上一条请求",
     "diagnostics": "诊断信息",
     "id": "执行 ID",
@@ -100,13 +72,21 @@
     "remove": "移除 Workflow 提及"
   },
   "history": {
-    "title": "切换对话",
-    "description": "仅包含此浏览器归档的执行。",
-    "empty": "暂无已归档的执行。",
+    "title": "会话",
+    "description": "服务端保存的全部渠道会话。",
+    "empty": "暂无会话，直接发送消息开始。",
     "noMatch": "没有匹配的对话。",
-    "searchPlaceholder": "搜索已归档的对话…",
+    "searchPlaceholder": "搜索会话内容…",
     "untitled": "未命名对话",
-    "remove": "从本地历史中移除"
+    "new": "新对话",
+    "channel": "渠道",
+    "allChannels": "全部渠道",
+    "more": "加载更早的会话",
+    "loading": "正在加载会话",
+    "loadFailed": "无法加载会话记录。",
+    "retry": "重试",
+    "clear": "清除筛选",
+    "taskRecord": "此记录是一次任务提交，可打开任务详情继续处理，或新建对话。"
   },
   "tool": {
     "label": "Skill 脚本",
@@ -134,7 +114,7 @@
     }
   },
   "log": {
-    "title": "Chat Bot 对话",
+    "title": "Chat 对话",
     "generated": "生成时间",
     "executionId": "执行 ID",
     "phase": "阶段",
@@ -147,7 +127,7 @@
     "transcript": "对话记录",
     "noMessages": "当前对话中没有可用消息。",
     "user": "你",
-    "assistant": "Chat Bot",
+    "assistant": "Chat",
     "activity": "Skill 活动",
     "noActivity": "当前对话中没有 Skill 活动。",
     "skill": "Skill",
@@ -164,25 +144,74 @@
     }
   },
   "configuration": {
-    "title": "Chat Bot 配置",
+    "title": "Chat 配置",
     "description": "选择此工作区中已配置的模型。",
     "model": "提供商和模型",
     "placeholder": "选择已配置的模型",
     "saving": "保存中...",
     "mcpServers": "MCP 服务器",
-    "mcpServersHint": "选择 Chat Bot 可使用的 MCP 服务器。"
+    "mcpServersHint": "选择 Chat 可使用的 MCP 服务器。",
+    "prompt": "补充提示词",
+    "nextTurn": "离开输入框后保存，从下一轮对话生效。",
+    "skills": "Skills",
+    "builtIn": "内置",
+    "saveFailed": "配置未保存，请重试。",
+    "loadFailed": "无法加载配置。"
   },
   "panelTabs": {
-    "label": "Chat Bot 视图",
+    "label": "Chat 视图",
     "chat": "对话",
-    "configuration": "配置"
+    "configuration": "配置",
+    "channels": "Channels"
   },
   "workflowRun": {
-    "requestFailed": "The Workflow Run could not be created.",
-    "cancelFailed": "The Workflow Run could not be cancelled.",
-    "emptyInput": "No input",
+    "requestFailed": "无法创建 Workflow 执行。",
+    "cancelFailed": "无法取消 Workflow 执行。",
+    "emptyInput": "无输入",
     "currentStep": "当前节点：{{step}}",
     "waitingForConfirmation": "等待人工确认",
     "openRunHistory": "请打开该工作流的运行记录扫码确认。"
+  },
+  "channels": {
+    "feishuBound": "飞书会话 · 网页回复也会同步到飞书",
+    "waiting": "消息已接收，等待渠道开始处理。",
+    "webDescription": "直接在网页对话，支持流式回复、Markdown 和澄清选项。",
+    "openWeb": "打开对话",
+    "loadFailed": "无法加载渠道配置。",
+    "feishuUnbound": "飞书历史 · 当前渠道未绑定，回复仅在网页显示",
+    "feishuDisconnected": "飞书会话 · 渠道未连接，投递等待连接恢复",
+    "loading": "正在加载渠道配置"
+  },
+  "records": {
+    "title": "完整记录",
+    "download": "下载完整记录",
+    "copy": "复制",
+    "copied": "已复制",
+    "copyFailed": "复制失败，请直接选择正文复制。",
+    "loadFailed": "无法加载完整记录。",
+    "conversationId": "会话 ID",
+    "channelConversationId": "渠道会话 ID",
+    "submissions": "请求与任务绑定",
+    "channelEvents": "渠道收发事件",
+    "agentEvents": "Agent 执行事件",
+    "deliveries": "文件与图片投递标识",
+    "inbound": "接收",
+    "outbound": "发送",
+    "settled": "已结束",
+    "delivered": "已发送",
+    "pending": "待投递",
+    "openTask": "打开任务详情",
+    "taskLoadFailed": "无法加载关联任务。",
+    "retainedFields": "记录展示完整已保存字段。历史飞书原始回调中未保存的字段无法补回。",
+    "status": {
+      "queued": "待处理",
+      "done": "已处理",
+      "failed": "失败"
+    },
+    "accepted": "已提交",
+    "processing": "待处理",
+    "cancelTask": "取消执行",
+    "cancelFailed": "取消失败，请重试。",
+    "execution": "会话正文与工具调用"
   }
 }

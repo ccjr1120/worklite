@@ -8,13 +8,13 @@ import {
 } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 
-export type AgentTeamOperationScope = {
+type AgentTeamOperationScope = {
   workspaceId: string;
   runId: string;
   taskAttemptId: string;
 };
 
-export type AgentTeamOperationRecordView = {
+type AgentTeamOperationRecordView = {
   key: string;
   taskKey: string;
   operationKey: string;
@@ -27,7 +27,7 @@ export type AgentTeamOperationRecordView = {
   recoveryDecision?: AgentTeamOperationRecoveryDecision;
 };
 
-export type AgentTeamOperationReservation = {
+type AgentTeamOperationReservation = {
   taskKey: string;
   operationKey: string;
   toolName: string;
@@ -35,7 +35,7 @@ export type AgentTeamOperationReservation = {
   pendingResult?: unknown;
 };
 
-export type AgentTeamScopedOperationJournal = {
+type AgentTeamScopedOperationJournal = {
   findOperation(operationKey: string): Promise<AgentTeamOperationRecordView | undefined>;
   findReplayOperation(taskKey: string, replayOperationKey: string): Promise<AgentTeamOperationRecordView | undefined>;
   reserveOperation(

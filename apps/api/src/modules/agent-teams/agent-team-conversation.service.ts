@@ -1,3 +1,4 @@
+import { runtimeAdmissionClosed } from '../../infrastructure/runtime-upgrade-state';
 import {
   BadRequestException,
   Inject,
@@ -361,7 +362,7 @@ export class AgentTeamConversationService implements OnModuleInit, OnModuleDestr
         payload: { text: input.text, mentions: true },
         deduplicationKey: `send:${input.submissionId}`,
         createdAt: now,
-      }).returning();
+      }).returning().all();
       events.push(insertConversationEvent(transaction, input.conversation.id, 'message', toMessageView(message), now));
       transaction.update(agentTeamConversations).set({ updatedAt: now })
         .where(eq(agentTeamConversations.id, input.conversation.id)).run();
@@ -470,7 +471,7 @@ export class AgentTeamConversationService implements OnModuleInit, OnModuleDestr
   ): Promise<IntakeRow | null> {
     const now = new Date();
     const events: AgentTeamConversationEvent[] = [];
-    const [updated] = await this.db.transaction((transaction) => {
+    const updated = await this.db.transaction((transaction) => {
       const [row] = transaction.update(agentTeamIntakes).set({
         ...(field === 'goal' ? { goal: value } : {}),
         ...(field === 'projectDirectory' ? { projectDirectory: value } : {}),
@@ -481,7 +482,7 @@ export class AgentTeamConversationService implements OnModuleInit, OnModuleDestr
         eq(agentTeamIntakes.id, intake.id),
         eq(agentTeamIntakes.status, 'collecting'),
         eq(agentTeamIntakes.unresolvedField, field),
-      )).returning();
+      )).returning().all();
       if (row) {
         const [message] = transaction.insert(agentTeamConversationMessages).values({
           id: `atmsg_${randomUUID()}`,
@@ -495,7 +496,7 @@ export class AgentTeamConversationService implements OnModuleInit, OnModuleDestr
           payload: { field, text: value, mentions: false },
           deduplicationKey: `send:${submissionId}`,
           createdAt: now,
-        }).returning();
+        }).returning().all();
         events.push(insertConversationEvent(transaction, intake.conversationId, 'message', toMessageView(message), now));
         transaction.update(agentTeamConversations).set({ updatedAt: now })
           .where(eq(agentTeamConversations.id, intake.conversationId)).run();
@@ -561,7 +562,7 @@ export class AgentTeamConversationService implements OnModuleInit, OnModuleDestr
         payload: message.payload,
         deduplicationKey: message.deduplicationKey ?? null,
         createdAt: now,
-      }).returning();
+      }).returning().all();
       event = insertConversationEvent(transaction, conversationId, 'message', toMessageView(row), now);
       transaction.update(agentTeamConversations).set({ updatedAt: now })
         .where(eq(agentTeamConversations.id, conversationId)).run();
@@ -770,6 +771,7 @@ export class AgentTeamConversationService implements OnModuleInit, OnModuleDestr
   }
 
   private async resumeIntakes(conversationId: string): Promise<void> {
+    if (runtimeAdmissionClosed()) return;
     const starting = await this.db.select().from(agentTeamIntakes)
       .where(and(
         eq(agentTeamIntakes.conversationId, conversationId),

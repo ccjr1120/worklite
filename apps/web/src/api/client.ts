@@ -47,7 +47,6 @@ import type {
   TestModelProviderRequest,
   ModelProviderView,
   RunView,
-  RunProgressEvent,
   SkillView,
   UpdateSkillRequest,
   UsageRow,
@@ -61,11 +60,16 @@ import type {
   PortkeyGatewayView,
   CodexAccountUsageSnapshot,
   CodexAuthStatus,
-  CodexRateLimitSnapshot,
   PortkeyGatewayStats,
   PluginView,
   PluginTestResult,
   UpdatePluginRequest,
+  DispatchChatRequest,
+  DispatchChatResponse,
+  ChatChannelView,
+  ChatConversationList,
+  ChatConversationView,
+  ChatConversationRecords,
   WorkflowScheduleView,
   ImportWorkflowRequest,
   PortableWorkflowDocument,
@@ -107,23 +111,23 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   return JSON.parse(text) as T;
 }
 
-export function apiGet<T>(path: string): Promise<T> {
+function apiGet<T>(path: string): Promise<T> {
   return apiRequest<T>(path);
 }
 
-export function apiPost<T>(path: string, body?: unknown): Promise<T> {
+function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return apiRequest<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
 }
 
-export function apiPatch<T>(path: string, body: unknown): Promise<T> {
+function apiPatch<T>(path: string, body: unknown): Promise<T> {
   return apiRequest<T>(path, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
-export function apiPut<T>(path: string, body: unknown): Promise<T> {
+function apiPut<T>(path: string, body: unknown): Promise<T> {
   return apiRequest<T>(path, { method: 'PUT', body: JSON.stringify(body) });
 }
 
-export function apiDelete<T = void>(path: string): Promise<T> {
+function apiDelete<T = void>(path: string): Promise<T> {
   return apiRequest<T>(path, { method: 'DELETE' });
 }
 
@@ -132,8 +136,18 @@ export const api = {
   plugin: (pluginId: string) => apiGet<PluginView>(`/api/plugins/${encodeURIComponent(pluginId)}`),
   updatePlugin: (pluginId: string, input: UpdatePluginRequest) => apiPatch<PluginView>(`/api/plugins/${encodeURIComponent(pluginId)}`, input),
   testPlugin: (pluginId: string) => apiPost<PluginTestResult>(`/api/plugins/${encodeURIComponent(pluginId)}/test`),
-  startWechatLogin: (pluginId: string) => apiPost<PluginView['wechat']>(`/api/plugins/${encodeURIComponent(pluginId)}/wechat/login`),
-  disconnectWechat: (pluginId: string) => apiPost<PluginView['wechat']>(`/api/plugins/${encodeURIComponent(pluginId)}/wechat/disconnect`),
+  disconnectFeishu: () => apiPost<PluginView>('/api/plugins/feishu-bot/feishu/disconnect'),
+  startFeishuRegistration: () => apiPost<NonNullable<NonNullable<PluginView['feishu']>['registration']>>('/api/plugins/feishu-bot/feishu/registration'),
+  cancelFeishuRegistration: () => apiDelete<PluginView>('/api/plugins/feishu-bot/feishu/registration'),
+  dispatchChat: (input: DispatchChatRequest) => apiPost<DispatchChatResponse>('/api/chat/dispatch', input),
+  chatChannels: () => apiGet<ChatChannelView[]>('/api/chat/channels'),
+  chatConversations: (query: { cursor?: string; search?: string; channel?: string } = {}) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) if (value) search.set(key, value);
+    return apiGet<ChatConversationList>(`/api/chat/conversations${search.size ? `?${search}` : ''}`);
+  },
+  chatConversation: (id: string) => apiGet<ChatConversationView>(`/api/chat/conversations/${encodeURIComponent(id)}`),
+  chatConversationRecords: (id: string) => apiGet<ChatConversationRecords>(`/api/chat/conversations/${encodeURIComponent(id)}/records`),
   startOfficialAccountLogin: (pluginId: string) => apiPost<NonNullable<PluginView['officialAccount']>>(`/api/plugins/${encodeURIComponent(pluginId)}/official-account/login`),
   disconnectOfficialAccount: (pluginId: string) => apiPost<NonNullable<PluginView['officialAccount']>>(`/api/plugins/${encodeURIComponent(pluginId)}/official-account/disconnect`),
   command: (commandId: string) => apiGet<CommandExecutionView>(`/api/commands/${encodeURIComponent(commandId)}`),
@@ -152,7 +166,6 @@ export const api = {
   updateSettings: (input: UpdateWorkspaceSettingsRequest) => apiPatch<WorkspaceSettingsView>('/api/settings', input),
   portkeyGateway: () => apiGet<PortkeyGatewayView>('/api/portkey-gateway'),
   codexAuthStatus: () => apiGet<CodexAuthStatus>('/api/portkey-gateway/codex/auth/status'),
-  codexRateLimits: () => apiGet<CodexRateLimitSnapshot>('/api/portkey-gateway/codex/rate-limits'),
   codexAccountUsages: () => apiGet<CodexAccountUsageSnapshot>('/api/portkey-gateway/codex/accounts/usage'),
   startCodexLogin: () => apiPost<{ authorizationUrl: string; sessionId: string }>('/api/portkey-gateway/codex/auth/login'),
   importCodexAccounts: (input: unknown) => apiPost<CodexAuthStatus>('/api/portkey-gateway/codex/accounts/import', input),
@@ -283,19 +296,6 @@ export function parseAgentExecutionEvent(value: string): AgentExecutionEvent {
     throw new Error('The Agent event stream returned an invalid event.');
   }
   return event as AgentExecutionEvent;
-}
-
-export function parseRunProgressEvent(value: string): RunProgressEvent {
-  const event = JSON.parse(value) as Partial<RunProgressEvent>;
-  if (
-    typeof event.runId !== 'string'
-    || typeof event.sequence !== 'number'
-    || typeof event.type !== 'string'
-    || typeof event.occurredAt !== 'string'
-  ) {
-    throw new Error('The workflow run event stream returned an invalid event.');
-  }
-  return event as RunProgressEvent;
 }
 
 export function parseAgentTeamRunEvent(value: string): AgentTeamRunEvent {

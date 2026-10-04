@@ -1,3 +1,4 @@
+import { runtimeAdmissionClosed } from '../../infrastructure/runtime-upgrade-state';
 import { BadRequestException, Inject, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { and, eq, lte } from 'drizzle-orm';
@@ -19,6 +20,7 @@ export class WorkflowSchedulesService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
+    if (process.env.WORKLITE_PREFLIGHT === '1') return;
     this.timer = setInterval(() => void this.tick(), 10_000);
     this.timer.unref();
     void this.recoverAndTick();
@@ -92,6 +94,7 @@ export class WorkflowSchedulesService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async tick(): Promise<void> {
+    if (runtimeAdmissionClosed()) return;
     const due = await this.db.select().from(workflowSchedules).where(and(
       eq(workflowSchedules.enabled, true),
       eq(workflowSchedules.running, false),

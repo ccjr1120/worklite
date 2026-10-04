@@ -1,9 +1,32 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
 import type { AssignHomeBoardRequest, CreateHomeBoardCategoryRequest, GatewayRequestLogQuery, GatewayTimeRange, UpdateHomeBoardCategoryRequest } from '@worklite/contracts';
 
 export const workflowScheduleQueryKey = (workflowId: string) => ['workflow-schedule', workflowId] as const;
 export const pluginsQueryKey = () => ['plugins'] as const;
+export const chatConversationsQueryKey = ['chat-conversations'] as const;
+
+export function useChatChannelsQuery() {
+  return useQuery({ queryKey: ['chat-channels'], queryFn: api.chatChannels });
+}
+
+export function useChatConversationsQuery(search = '', channel = '') {
+  return useInfiniteQuery({
+    queryKey: [...chatConversationsQueryKey, search, channel],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => api.chatConversations({ cursor: pageParam, search, channel }),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+    refetchInterval: 5_000,
+  });
+}
+
+export function useChatConversationQuery(id: string | null) {
+  return useQuery({ queryKey: ['chat-conversation', id], queryFn: () => api.chatConversation(id!), enabled: Boolean(id), refetchInterval: 5_000 });
+}
+
+export function useChatConversationRecordsQuery(id: string | null) {
+  return useQuery({ queryKey: ['chat-conversation-records', id], queryFn: () => api.chatConversationRecords(id!), enabled: Boolean(id), refetchInterval: 5_000 });
+}
 export const workflowsQueryKey = () => ['workflows'] as const;
 export const runsQueryKey = () => ['runs'] as const;
 export const mcpServersQueryKey = () => ['mcp-servers'] as const;
@@ -11,7 +34,7 @@ export const artifactsQueryKey = () => ['artifacts'] as const;
 export const agentTeamQueryKey = (teamId: string) => ['agent-team', teamId] as const;
 export const agentTeamConversationQueryKey = (teamId: string) => ['agent-team-conversation', teamId] as const;
 export const agentTeamRunQueryKey = (runId: string) => ['agent-team-run', runId] as const;
-export const agentTeamDocumentQueryKey = (documentId: string) => ['agent-team-document', documentId] as const;
+const agentTeamDocumentQueryKey = (documentId: string) => ['agent-team-document', documentId] as const;
 
 export function useWorkflowsQuery(workspace?: string, options?: { refetchInterval?: number | false }) {
   return useQuery({ queryKey: workflowsQueryKey(), queryFn: () => api.workflows(workspace), refetchInterval: options?.refetchInterval });
@@ -20,7 +43,6 @@ export function useWorkflowsQuery(workspace?: string, options?: { refetchInterva
 export function useAgentQuery(workspace: string | undefined, agentId: string) {
   return useQuery({ queryKey: ['agent', agentId] as const, queryFn: () => api.agent(workspace, agentId), enabled: Boolean(agentId && agentId !== 'new') });
 }
-
 
 export function useWorkflowScheduleQuery(workspace: string | undefined, workflowId: string) {
   return useQuery({
@@ -31,16 +53,15 @@ export function useWorkflowScheduleQuery(workspace: string | undefined, workflow
   });
 }
 
-
 export function usePluginsQuery() {
   return useQuery({ queryKey: pluginsQueryKey(), queryFn: api.plugins, staleTime: 30_000 });
 }
 
 export function usePluginQuery(pluginId: string) {
-  return useQuery({ queryKey: ['plugin', pluginId] as const, queryFn: () => api.plugin(pluginId), enabled: Boolean(pluginId), refetchInterval: pluginId === 'codex-cli-chat' || pluginId === 'wechat-official-account' ? 2_000 : false });
+  return useQuery({ queryKey: ['plugin', pluginId] as const, queryFn: () => api.plugin(pluginId), enabled: Boolean(pluginId), refetchInterval: pluginId === 'feishu-bot' || pluginId === 'wechat-official-account' ? 2_000 : false });
 }
 
-export const homeBoardPreferencesQueryKey = ['home-board-preferences'] as const;
+const homeBoardPreferencesQueryKey = ['home-board-preferences'] as const;
 
 export function useHomeBoardPreferencesQuery(workspace?: string) {
   return useQuery({ queryKey: homeBoardPreferencesQueryKey, queryFn: () => api.homeBoardPreferences(workspace) });
@@ -156,10 +177,6 @@ export function useCodexAuthQuery() {
   return useQuery({ queryKey: ['codex-auth'] as const, queryFn: api.codexAuthStatus, refetchInterval: 2_000 });
 }
 
-export function useCodexRateLimitsQuery(enabled: boolean) {
-  return useQuery({ queryKey: ['codex-rate-limits'] as const, queryFn: api.codexRateLimits, enabled, refetchInterval: 60_000 });
-}
-
 export function useCodexAccountUsagesQuery(enabled: boolean) {
   return useQuery({ queryKey: ['codex-account-usages'] as const, queryFn: api.codexAccountUsages, enabled, refetchInterval: 60_000 });
 }
@@ -186,10 +203,6 @@ export function useGatewayRequestLogQuery(requestLogId?: string) {
     queryFn: () => api.gatewayRequestLog(requestLogId as string),
     enabled: Boolean(requestLogId),
   });
-}
-
-export function useArtifactsQuery(workspace?: string) {
-  return useQuery({ queryKey: artifactsQueryKey(), queryFn: () => api.artifacts(workspace) });
 }
 
 export function useArtifactQuery(workspace: string | undefined, artifactId: string) {

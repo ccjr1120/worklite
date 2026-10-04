@@ -12,23 +12,22 @@
 ## Implementation
 
 - `apps/web/src/routes/home.tsx`
-- `apps/web/src/components/workspace/agent-chat.tsx`
 
 ## Purpose
 
-Read the current output of every published Workflow Dashboard board, and reach Chat Bot without leaving the page.
+Read the current output of every published Workflow Dashboard board, and reach Chat through workspace navigation.
 
 ## Primary Task
 
 Read a board's latest output. Action budget: zero — every eligible board renders its own content on arrival, and no board opens a detail view.
 
-Two secondary intents cost one action each: opening an item in a new tab by activating its row, and opening Chat Bot by focusing the composer. Organizing boards into categories is deliberate configuration work rather than the page's primary task; its dialogs are budgeted separately below.
+Two secondary intents cost one action each: opening an item in a new tab by activating its row, and opening Chat through its navigation destination. Organizing boards into categories is deliberate configuration work rather than the page's primary task; its dialogs are budgeted separately below.
 
 ## Layout
 
 Centered content up to `1200px`. The board library fills the content region, grouped into category sections with custom categories first and Uncategorized last. Boards render two per row on desktop and one per row below `md`.
 
-A persistent single-line Chat Bot composer sits at the bottom center of the content region. Board content reserves enough bottom space that the composer never obscures its final rows. The expanded conversation panel rises above the composer, capped at `1200px` by approximately `680px` with at least `24px` desktop outer space; the board list stays mounted beneath it with its scroll position preserved.
+Home has no embedded conversation or floating composer. First-use model binding navigates to the Chat Configuration view.
 
 ## Interaction Contract
 
@@ -54,19 +53,15 @@ Creating a category costs two actions — name it, then create — because the n
 
 Category loading, mutation, and failure states stay local and never remove unaffected boards. Organization controls remain neutral and quiet.
 
-### Embedded Chat Bot
+### Chat navigation
 
-Focusing the composer expands the conversation panel without waiting for a submission. Clicking outside, pressing `Escape`, using the icon-only minimize control, or navigating to another page closes the panel without cancelling work or clearing the conversation.
-
-The minimized dock retains the composer and, after the first request, a compact status summary such as preparing, tool calls in progress, needs review, completed, or failed. The summary carries a non-color cue and reopens the current conversation. Completion does not automatically minimize the panel.
-
-Command search may open or focus Chat Bot through the same Home state. Chat Bot is not a separate sidebar item. Transcript, Skill-call, and session behavior are specified in `../../surfaces/workspace/chat-bot/DESIGN.md`.
+Chat is a first-level destination at `/chat`. Home mounts no conversation surface; command search navigates to that page. Conversation, channel and configuration behavior are specified in `../chat/workspace/DESIGN.md`.
 
 ### First use
 
-The first-use sequence is optional and resumable, with visible progress and one primary outcome per step. It shows two steps: configure at least one Model Provider, then bind a Provider and model to the protected Chat Bot Agent. The current step owns the primary action; completed steps remain visible but quiet while the sequence is incomplete.
+The first-use sequence is optional and resumable, with visible progress and one primary outcome per step. It shows two steps: configure at least one Model Provider, then bind a Provider and model to the protected Chat Agent. The current step owns the primary action; completed steps remain visible but quiet while the sequence is incomplete.
 
-Completion derives from persisted server resources rather than browser preferences. The guide does not appear until both the Provider and Chat Bot queries have resolved successfully, and it disappears as soon as both steps are complete. There is no account or team setup step, and creating a Workflow Agent node, creating a Workflow, or running and inspecting a Workflow are not first-use steps.
+Completion derives from persisted server resources rather than browser preferences. The guide does not appear until both the Provider and Chat queries have resolved successfully, and it disappears as soon as both steps are complete. There is no account or team setup step, and creating a Workflow Agent node, creating a Workflow, or running and inspecting a Workflow are not first-use steps.
 
 ## States
 
@@ -136,6 +131,8 @@ Run status uses the shared status badge with a non-color cue. First-use step mar
 
 ## Coverage Status
 
+Source comparison: 2026-10-04. Home no longer mounts or reserves space for a composer. First-use binding opens `/chat?view=configuration`; the old assistant search state is removed. Runtime, type and browser checks were not run. The earlier board findings below remain outside this change.
+
 Checked 2026-09-23 against `apps/web/src/routes/home.tsx` and the deployed Workflow Dashboard output shape. The deployed list output includes a top-level `url` property although its Dashboard layout omits a configured URL field; Home now resolves that shape. Remaining differences found:
 
 - The category-level error banner is driven by one combined `categoryError` flag covering the categories query and all four mutations, so a failed assignment inside the add dialog also paints the page-level banner while the dialog shows its own copy of the same message.
@@ -146,6 +143,10 @@ Checked 2026-09-23 against `apps/web/src/routes/home.tsx` and the deployed Workf
 - The board-card pagination `nav` uses the page indicator string as its accessible name, which names the current state rather than the control group.
 
 ## Changelog
+
+### 2026-10-04 - Dedicated Chat
+
+- Removed the embedded chat and moved first-use model binding to the dedicated Chat Configuration view.
 
 ### 2026-09-23 - Workflow output links
 

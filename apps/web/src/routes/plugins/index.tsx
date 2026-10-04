@@ -24,7 +24,8 @@ function PluginListPage() {
   const { locale } = useLocale();
   const [search, setSearch] = useState('');
   const { data: plugins = [], isLoading, isError, refetch } = usePluginsQuery();
-  const items = useMemo(() => plugins.filter((plugin) => `${plugin.name} ${plugin.description} ${plugin.command}`.toLowerCase().includes(search.toLowerCase())), [plugins, search]);
+  const visiblePlugins = plugins.filter((plugin) => plugin.id !== 'feishu-bot');
+  const items = useMemo(() => plugins.filter((plugin) => plugin.id !== 'feishu-bot').filter((plugin) => `${plugin.name} ${plugin.description} ${plugin.command}`.toLowerCase().includes(search.toLowerCase())), [plugins, search]);
 
   return (
     <div className="mx-auto w-full max-w-[1440px] px-6 py-6">
@@ -32,7 +33,7 @@ function PluginListPage() {
       <PageHeading title={tPlugins('title')} />
       <CollectionToolbar className="mt-6" search={search} onSearchChange={setSearch} placeholder={tPlugins('search')} />
       <div className="mt-4">
-        {isLoading ? <CollectionLoading label={tPlugins('loading')} columns={[tPlugins('columns.plugin'), tPlugins('columns.command'), tPlugins('columns.availability'), tPlugins('columns.updated')]} headerClassName="grid-cols-[2fr_2fr_1fr_1fr]" rowClassName="grid-cols-1 md:grid-cols-[2fr_2fr_1fr_1fr]" /> : isError ? <ErrorState title={tPlugins('title')} description={tPlugins('loadFailed')} onAction={() => void refetch()} /> : plugins.length === 0 ? (
+        {isLoading ? <CollectionLoading label={tPlugins('loading')} columns={[tPlugins('columns.plugin'), tPlugins('columns.command'), tPlugins('columns.availability'), tPlugins('columns.updated')]} headerClassName="grid-cols-[2fr_2fr_1fr_1fr]" rowClassName="grid-cols-1 md:grid-cols-[2fr_2fr_1fr_1fr]" /> : isError ? <ErrorState title={tPlugins('title')} description={tPlugins('loadFailed')} onAction={() => void refetch()} /> : visiblePlugins.length === 0 ? (
           <EmptyState title={tPlugins('empty.title')} description={tPlugins('empty.description')} />
         ) : items.length === 0 ? (
           <EmptyState title={tPlugins('noMatches.title')} description={tPlugins('noMatches.description', { search })} actionLabel={tCommon('actions.clearFilters')} onAction={() => setSearch('')} />

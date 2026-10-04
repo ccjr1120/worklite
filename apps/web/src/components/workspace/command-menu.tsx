@@ -28,6 +28,7 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
       <CommandList>
         <CommandEmpty>{t('command.empty')}</CommandEmpty>
         <CommandGroup heading={t('command.navigation')}>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/chat' }))}><MessageSquareText className="size-4" />{t('nav.chat')}</CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/home' }))}>
             <Home className="size-4" /> {t('nav.home')}
           </CommandItem>
@@ -49,11 +50,6 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
         </CommandGroup>
         <CommandSeparator />
         <CommandGroup heading={t('command.create')}>
-          <CommandItem
-            onSelect={() => closeAndGo(() => void navigate({ to: '/home', search: { assistant: 'open' } }))}
-          >
-            <MessageSquareText className="size-4" /> {t('command.openAssistant')}
-          </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/workflows/$workflowId', params: { workflowId: 'new' } }))}>
             <Plus className="size-4" /> {t('command.createWorkflow')}
           </CommandItem>

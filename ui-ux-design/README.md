@@ -30,7 +30,7 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 ## Page and Surface Specifications
 
 - [Home](pages/home/DESIGN.md), including the server-derived first-use sequence
-- [Workspace Chat Bot](surfaces/workspace/chat-bot/DESIGN.md)
+- [Chat](pages/chat/workspace/DESIGN.md), including direct Web conversation, Channels and full persisted evidence
 - Providers: [Model providers and Portkey Gateway](pages/model-providers/DESIGN.md), including the dedicated Codex Account Pool
 - Logs: [Gateway statistics and request logs](pages/logs/DESIGN.md), including the shared time range
 - Workflows: [List](pages/workflows/list/DESIGN.md), [Editor](pages/workflows/editor/DESIGN.md), [Versions](pages/workflows/versions/DESIGN.md)
@@ -38,7 +38,8 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 - Runs: [Detail](pages/runs/detail/DESIGN.md), [Node logs](surfaces/workflow-run/node-logs/DESIGN.md)
 - Skills: [List](pages/skills/list/DESIGN.md), [Editor](pages/skills/editor/DESIGN.md)
 - MCP servers: [List](pages/mcp-servers/list/DESIGN.md), [Configuration](pages/mcp-servers/configuration/DESIGN.md)
-- Plugins: [List](pages/plugins/list/DESIGN.md), [Configuration](pages/plugins/configuration/DESIGN.md)
+- Plugins: [List](pages/plugins/list/DESIGN.md), [Configuration](pages/plugins/configuration/DESIGN.md), excluding communication-channel setup, which lives in Chat
+- External chat: [Feishu](surfaces/external-chat/feishu/DESIGN.md), including capability updates and release-bound upgrade confirmation
 - Artifacts: [Run artifacts](surfaces/workflow-run/artifacts/DESIGN.md), [Details](pages/artifacts/details/DESIGN.md)
 - Settings: [Usage](pages/settings/usage/DESIGN.md), [Audit log](pages/settings/audit-log/DESIGN.md), [Appearance](pages/settings/appearance/DESIGN.md)
 
@@ -46,6 +47,7 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 
 ```text
 /home
+/chat
 /model-providers
 /logs
 /agent-teams/:teamId
@@ -72,7 +74,7 @@ The `/model-providers` page is the top-level Providers destination. It uses page
 
 ## Shared Component Inventory
 
-Theme provider and appearance selector; application shell; router pending and error boundaries; sidebar; context bar; personal preferences menu; command menu; shell-level Chat Bot with plugin picker; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; fixed-scale HTML/SVG Workflow diagram with a bottom inspector dock and contextual floating node picker; read-only Run execution graph with node state, edge traversal, chronological trace, and node detail dock; workflow run history dialog; node log entry with payload and activity disclosure; plugin configuration; viewers for captured request bodies, run output and artifacts; skeletons, errors, offline banner.
+Theme provider and appearance selector; application shell; router pending and error boundaries; sidebar; context bar; personal preferences menu; command menu; Chat workspace with channel-aware conversation browser; shared streaming Markdown response renderer; page heading; form controls and messages; status badge; search, filters, object rows and tables; dialogs and sheets; save indicator; inspector; resizable log panel; fixed-scale HTML/SVG Workflow diagram with a bottom inspector dock and contextual floating node picker; read-only Run execution graph with node state, edge traversal, chronological trace, and node detail dock; workflow run history dialog; node log entry with payload and activity disclosure; plugin configuration; viewers for captured request bodies, run output and artifacts; skeletons, errors, offline banner.
 
 Domain-neutral reusable components belong in the shared UI package. Feature composition remains near its feature. Abstract only demonstrated repeated patterns.
 
@@ -87,6 +89,21 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-10-04 - Chat workspace
+
+- Replaced the embedded Chat Bot specification with the `/chat` page, Web channel, Feishu channel configuration, server-owned conversation history and complete stored evidence.
+
+### 2026-10-04
+
+- Refined Feishu chat to natural dialogue with current-question options, same-card loading and no persistent mode menu.
+
+- Added Feishu external-chat specification, independent plugin configuration, and shared Chat Bot task dispatch.
+
+### 2026-10-03 - Agent Team interaction and role configuration
+
+- Embedded the default removable Coordinator target in the Team composer and collapsed empty contextual side space.
+- Reworked role settings into a compact model-first list with provider-grouped choices and role-local advanced disclosure.
 
 ### 2026-10-03 - Provider and model observability
 

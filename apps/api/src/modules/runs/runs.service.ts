@@ -1,3 +1,4 @@
+import { assertRuntimeAdmission } from '../../infrastructure/runtime-upgrade-state';
 import { Lexer } from 'marked';
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -40,6 +41,8 @@ class RunCancelledError extends Error {
     this.name = 'RunCancelledError';
   }
 }
+
+type RunAcceptance = { runId: string; accept: (transaction: Parameters<Parameters<Database['transaction']>[0]>[0]) => void };
 
 @Injectable()
 export class RunsService {
@@ -327,19 +330,25 @@ export class RunsService {
     return () => this.listeners.delete(listener);
   }
 
-  async createForVersion(request: Request, workflowVersionId: string, input: CreateRunRequest): Promise<{ runId: string }> {
+  async createForVersion(request: Request, workflowVersionId: string, input: CreateRunRequest, acceptance?: RunAcceptance): Promise<{ runId: string }> {
     const workspace = await this.workspaces.getWorkspace(request, 'personal');
     const [version] = await this.db.select({ version: workflowVersions, workflow: workflows })
       .from(workflowVersions)
       .innerJoin(workflows, eq(workflowVersions.workflowId, workflows.id))
       .where(and(eq(workflowVersions.id, workflowVersionId), eq(workflowVersions.workspaceId, workspace.id), eq(workflowVersions.published, true))).limit(1);
     if (!version) throw new NotFoundException('Published workflow version not found');
-    return this.createScheduledRun(version.workflow.workspaceId, version.workflow.id, workflowVersionId, input?.input ?? null);
+    return this.createScheduledRun(version.workflow.workspaceId, version.workflow.id, workflowVersionId, input?.input ?? null, acceptance);
   }
 
-  async createScheduledRun(workspaceId: string, workflowId: string, workflowVersionId: string, input: unknown): Promise<{ runId: string }> {
-    const runId = `run_${randomUUID()}`;
-    await this.db.insert(workflowRuns).values({ id: runId, workspaceId, workflowId, workflowVersionId, input: sanitizeWorkflowImages(input ?? null), status: 'queued' });
+  async createScheduledRun(workspaceId: string, workflowId: string, workflowVersionId: string, input: unknown, acceptance?: RunAcceptance): Promise<{ runId: string }> {
+    assertRuntimeAdmission();
+    const runId = acceptance?.runId ?? `run_${randomUUID()}`;
+    let created = false;
+    this.db.transaction((transaction) => {
+      created = transaction.insert(workflowRuns).values({ id: runId, workspaceId, workflowId, workflowVersionId, input: sanitizeWorkflowImages(input ?? null), status: 'queued' }).onConflictDoNothing().run().changes > 0;
+      acceptance?.accept(transaction);
+    });
+    if (!created) return { runId };
     await this.publish(runId, 'run.status', { status: 'queued' });
     this.schedule(runId);
     return { runId };
@@ -361,6 +370,8 @@ export class RunsService {
     if (!workflow || !version) throw new NotFoundException('Run dependencies not found');
     return this.toView(run, workflow, version, workspaceSlug, 'You', true);
   }
+
+  upgradeQuiescent(): boolean { return this.activeRuns.size === 0; }
 
   async pause(request: Request, workspaceSlug: string, runId: string): Promise<RunView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);

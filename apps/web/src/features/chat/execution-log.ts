@@ -105,7 +105,7 @@ function downloadExecutionLog(execution: AgentExecutionView, labels: ExecutionLo
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `worklite-chat-bot-${generatedAt.toISOString().replaceAll(':', '-')}.md`;
+  link.download = `worklite-chat-${generatedAt.toISOString().replaceAll(':', '-')}.md`;
   document.body.append(link);
   link.click();
   link.remove();
@@ -113,4 +113,3 @@ function downloadExecutionLog(execution: AgentExecutionView, labels: ExecutionLo
 }
 
 export { downloadExecutionLog };
-export type { ExecutionLogLabels };

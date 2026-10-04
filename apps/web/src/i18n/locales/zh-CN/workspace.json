@@ -4,7 +4,6 @@
     "workspace": "工作区",
     "capabilities": "能力",
     "configuration": "配置",
-    "assistant": "Chat Bot",
     "manage": "管理",
     "workflows": "工作流",
     "agentTeam": "Agent Team",
@@ -15,7 +14,8 @@
     "logs": "日志",
     "usage": "用量",
     "settings": "设置",
-    "title": "导航"
+    "title": "导航",
+    "chat": "Chat"
   },
   "command": {
     "title": "命令菜单",
@@ -25,7 +25,6 @@
     "create": "创建",
     "recent": "最近",
     "createWorkflow": "创建工作流",
-    "openAssistant": "Open Chat Bot",
     "open": "打开命令菜单",
     "search": "搜索"
   },

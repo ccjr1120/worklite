@@ -78,7 +78,7 @@ function Composer({
             <PromptInputTextarea
               className="min-w-32 basis-40 border-0 bg-transparent px-1 focus:border-transparent focus:ring-0"
               id="assistant-message"
-              name="chat-bot-message"
+              name="chat-message"
               autoComplete="off"
               value={draft}
               onValueChange={onDraftChange}
