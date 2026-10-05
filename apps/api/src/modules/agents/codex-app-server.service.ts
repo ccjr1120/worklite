@@ -234,7 +234,8 @@ class CodexAppServerSession {
     }
     if (message.method === 'item/started' || message.method === 'item/completed') {
       if (message.method === 'item/completed' && params.item?.type === 'agentMessage' && typeof params.item.text === 'string') this.text = params.item.text;
-      this.eventQueue = this.eventQueue.then(() => this.activity(`codex.${message.method.replace('/', '_')}`, params.item)).catch((error) => this.fail(error));
+      const activityType = `codex.${message.method.replace('/', '_')}`;
+      this.eventQueue = this.eventQueue.then(() => this.activity(activityType, params.item)).catch((error) => this.fail(error));
     }
     if (message.method === 'turn/completed') {
       if (this.questionOutput) this.finish(this.questionOutput);

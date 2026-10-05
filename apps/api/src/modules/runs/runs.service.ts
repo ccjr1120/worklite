@@ -403,7 +403,7 @@ export class RunsService {
     const resumedRun = await this.db.transaction((transaction) => {
       const [currentRun] = transaction.select().from(workflowRuns)
         .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id)))
-        .limit(1);
+        .limit(1).all();
       if (!currentRun || !runResumable(currentRun)) return null;
       const [updatedRun] = transaction.update(workflowRuns)
         .set({
