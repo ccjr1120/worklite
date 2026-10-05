@@ -72,4 +72,3 @@ function WorkspaceChrome({
 }
 
 export { WorkspaceChrome };
-export type { Crumb };

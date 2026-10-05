@@ -725,6 +725,7 @@ export type RunView = {
   input?: unknown;
   result?: unknown;
   hasArtifactNode: boolean;
+  resumable: boolean;
   nodeRuns?: WorkflowNodeRunView[];
   artifacts?: ArtifactView[];
   pendingAction?: WorkflowPendingActionView | null;
@@ -1153,6 +1154,7 @@ export type AgentTeamVersionMetadata = {
   id: string;
   version: number;
   createdAt: string;
+  developerExecution?: { kind: 'codex_app_server'; commandArguments: string[] };
 };
 
 export type AgentTeamTaskAttemptStatus =
@@ -1297,6 +1299,7 @@ export type AgentTeamRunView = {
   originatingConversationId: string | null;
   pendingInputs: AgentTeamPendingInputView[];
   operations: AgentTeamOperationView[];
+  activities: AgentTeamRunEvent[];
   outcome: AgentTeamRunOutcome | null;
   createdAt: string;
   updatedAt: string;
@@ -1306,6 +1309,7 @@ export type AgentTeamRunView = {
 export type AgentTeamRunEventType =
   | 'run.status'
   | 'task.started'
+  | 'task.activity'
   | 'task.delta'
   | 'task.waiting'
   | 'task.completed'

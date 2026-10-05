@@ -2,12 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-export type McpConnectionConfig = {
+type McpConnectionConfig = {
   endpoint: string;
   authToken?: string;
 };
 
-export type McpDiscoveredTool = {
+type McpDiscoveredTool = {
   name: string;
   description?: string;
   inputSchema: Record<string, unknown>;

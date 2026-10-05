@@ -477,6 +477,7 @@ export type StoredAgentTeamRecipeDefaults = {
 export type StoredAgentTeamVersionSnapshot = {
   processId: string;
   processVersion: string;
+  developerExecution: { kind: 'codex_app_server'; commandArguments: string[] };
   roles: StoredAgentTeamRoleConfiguration[];
   processFiles: Array<{ path: string; content: string }>;
   recipeDefaults: StoredAgentTeamRecipeDefaults;
@@ -621,7 +622,7 @@ export const agentTeamDocuments = sqliteTable('agent_team_documents', {
 export const agentTeamRunEvents = sqliteTable('agent_team_run_events', {
   runId: text('run_id').notNull().references(() => agentTeamRuns.id, { onDelete: 'cascade' }),
   sequence: integer('sequence').notNull(),
-  type: text('type').$type<'run.status' | 'task.started' | 'task.delta' | 'task.waiting' | 'task.completed' | 'task.failed' | 'document.committed' | 'document.delivered' | 'document.delivery_failed' | 'operation.updated' | 'input.requested' | 'input.answered' | 'run.outcome'>().notNull(),
+  type: text('type').$type<'run.status' | 'task.started' | 'task.activity' | 'task.delta' | 'task.waiting' | 'task.completed' | 'task.failed' | 'document.committed' | 'document.delivered' | 'document.delivery_failed' | 'operation.updated' | 'input.requested' | 'input.answered' | 'run.outcome'>().notNull(),
   payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(),
   createdAt: timestamp('created_at'),
 }, (table) => [primaryKey({ columns: [table.runId, table.sequence] })]);

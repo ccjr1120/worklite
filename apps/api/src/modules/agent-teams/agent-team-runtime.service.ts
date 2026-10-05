@@ -259,7 +259,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       .where(eq(agentTeamVersions.id, run.teamVersionId))
       .limit(1);
     if (!version) throw new NotFoundException('The Agent Team version was not found.');
-    const [taskRows, documentRows, pendingRows, operationRows] = await Promise.all([
+    const [taskRows, documentRows, pendingRows, operationRows, activityRows] = await Promise.all([
       this.db.select().from(agentTeamTaskAttempts)
         .where(eq(agentTeamTaskAttempts.runId, runId))
         .orderBy(asc(agentTeamTaskAttempts.createdAt), asc(agentTeamTaskAttempts.attemptIndex)),
@@ -272,11 +272,14 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       this.db.select().from(agentTeamOperations)
         .where(eq(agentTeamOperations.runId, runId))
         .orderBy(asc(agentTeamOperations.createdAt), asc(agentTeamOperations.key)),
+      this.db.select().from(agentTeamRunEvents)
+        .where(and(eq(agentTeamRunEvents.runId, runId), eq(agentTeamRunEvents.type, 'task.activity')))
+        .orderBy(asc(agentTeamRunEvents.sequence)),
     ]);
     return {
       id: run.id,
       teamId: run.teamId,
-      teamVersion: { id: version.id, version: version.version, createdAt: version.createdAt.toISOString() },
+      teamVersion: { id: version.id, version: version.version, createdAt: version.createdAt.toISOString(), developerExecution: version.snapshot.developerExecution },
       status: run.status,
       intent: run.intent,
       projectDirectory: run.projectDirectory,
@@ -289,6 +292,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       originatingConversationId: origin?.conversationId ?? null,
       pendingInputs: pendingRows.map(toPendingInputView),
       operations: operationRows.map(toOperationView),
+      activities: activityRows.map((row) => ({ runId: row.runId, sequence: row.sequence, type: row.type, payload: row.payload, createdAt: row.createdAt.toISOString() })),
       outcome: isRunOutcome(run.outcome) ? run.outcome : null,
       createdAt: run.createdAt.toISOString(),
       updatedAt: run.updatedAt.toISOString(),
@@ -677,6 +681,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       processId: AGENT_TEAM_PROCESS_ID,
       processVersion: AGENT_TEAM_PROCESS_VERSION,
       processFiles,
+      developerExecution: await this.invocations.captureDeveloperExecution(),
       roles: await Promise.all(configuredRoles.map(async (role) => {
         const entryPointContent = await Promise.all(role.entryPoints.map((path) => readBmadTeaProcessFile(path)));
         const processReferences = processReferencePaths(role.role, manifest);
@@ -943,6 +948,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (attempt.status === 'completed' || attempt.status === 'waiting_for_input') {
       return attempt.result as AgentTeamTaskResult;
     }
+    if (taskRole === 'developer' && version.snapshot.developerExecution?.kind !== 'codex_app_server') {
+      throw new Error('This Team version has no captured Codex App Server developer backend. Start a new Team Run.');
+    }
 
     const controller = this.abortControllers.get(request.runId);
     const signal = controller?.signal ?? new AbortController().signal;
@@ -973,6 +981,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const output = await this.invocations.execute({
       workspaceId,
       publicModelId: role.publicModelId,
+      ...(taskRole === 'developer' ? { codexServerCommandArguments: version.snapshot.developerExecution.commandArguments } : {}),
       systemPrompt: taskSystemPrompt(role.instructions),
       context: taskContext(request),
       skills: role.skills,
@@ -994,6 +1003,10 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       correlation: { source: 'team', teamRunId: request.runId, teamTaskAttemptId: attempt.id },
       limits: { maxToolResultChars: 100_000 },
       operation: { taskKey, journal: operationJournal },
+      onBackendEvent: (activity) => {
+        if (activity.commandExecutionId) commandIds.add(activity.commandExecutionId);
+        this.appendEvent(this.db, request.runId, 'task.activity', { taskAttemptId: attempt.id, taskKey, ...activity });
+      },
       onTextDelta: (delta) => this.appendEvent(this.db, request.runId, 'task.delta', {
         taskAttemptId: attempt.id,
         taskKey,

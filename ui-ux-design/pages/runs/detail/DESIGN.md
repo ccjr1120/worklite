@@ -20,7 +20,7 @@ Read one Workflow Run's execution in full when the Run records dialog is too sma
 
 ## Primary Task
 
-Follow a Run's execution node by node to the point where it went wrong, suspend an active Run, resume a paused Run, or stop an active Run. Action budget: one activation point per goal — expand the node entry in question, pause the active Run, resume the paused Run, or cancel the active Run. These lifecycle commands are independent intents and only one is available for the current status.
+Follow a Run's execution node by node to the point where it went wrong, suspend an active Run, continue a paused or server-resumable cancelled Run, or stop an active Run. Action budget: one activation point per goal — expand the node entry in question, pause the active Run, resume the Run the server marks resumable, or cancel the active Run. These lifecycle commands are independent intents and only one is available for the current status.
 
 ## Layout
 
@@ -38,13 +38,13 @@ The Run detail query supplies the summary, node entries, input, result, pending 
 
 The Run summary exposes one neutral `Pause` action only while the Run is queued or running. Activation reports progress on the button and calls the Run pause endpoint without confirmation. The event stream and Run query update the summary to `paused`; a failure appears next to the control.
 
-### Resume a paused Run
+### Resume a resumable Run
 
-A paused Run exposes one neutral `Resume` action and retains `Cancel run`. Activation reports progress on the button and calls the Run resume endpoint without confirmation. The event stream and Run query return the summary to active execution; a failure appears next to the control.
+A Run whose detailed response sets the server-owned `resumable` flag exposes one neutral `Resume` action. This covers a paused Run and a cancelled Run with persisted scheduler state; a paused Run also retains `Cancel run`. Activation reports progress on the button and calls the Run resume endpoint without confirmation. The Run query returns the summary to active execution and the route reopens its event stream; a failure appears next to the control.
 
 ### Cancel an active Run
 
-The Run summary exposes one destructive `Cancel run` action while the Run is queued, running, waiting for input, or paused. Activation opens a confirmation dialog explaining that only this Run is affected. Confirmation calls the existing Run cancellation endpoint, keeps the dialog controls busy until the request settles, closes on success, and leaves the dialog open with an inline error on failure. The event stream and Run query update the summary to the terminal `cancelled` state; no manual refresh is offered.
+The Run summary exposes one destructive `Cancel run` action while the Run is queued, running, waiting for input, or paused. Activation opens a confirmation dialog explaining that only this Run is affected. Confirmation calls the existing Run cancellation endpoint, keeps the dialog controls busy until the request settles, closes on success, and leaves the dialog open with an inline error on failure. The event stream and Run query update the summary to `cancelled` and close the stream; when the server marks that stopped Run resumable, `Resume` is the next action. No manual refresh is offered.
 
 ### Stay current during an active Run
 
@@ -92,17 +92,22 @@ The Run summary is labelled by the page heading. Run status uses the shared stat
 
 ## Coverage Status
 
-Reviewed against implementation source 2026-09-24. Browser visual review was not performed. Differences found against the implementation:
+Reviewed against implementation source 2026-10-05. Browser visual review was not performed. Differences found against the implementation:
 
 - ~~The route displayed node runs as an ordered list without loading the Run's immutable graph or exposing a chronological edge-decision trace.~~ Resolved: the route now shows the immutable graph, node status and invocation count, edge state, chronological trace, and selected-node details.
 
 - The Workflow editor now enters this route after creating a Run, using the server-returned Run id.
 
 - The route is reached from the Run records dialog; no sidebar entry is added, because a Run is reached through its Workflow rather than as a top-level collection.
-- Active Run cancellation is exposed in the page heading and confirmed in a shared Dialog; the implementation uses the existing `api.cancelRun` endpoint and query/event updates. Queued and running Runs also expose pause, while paused Runs expose resume and retain cancellation.
+- Active Run cancellation is exposed in the page heading and confirmed in a shared Dialog; the implementation uses the existing `api.cancelRun` endpoint and query/event updates. Queued and running Runs also expose pause, while paused and scheduler-state-backed cancelled Runs expose resume through the server-owned `resumable` flag.
 - The route restores no expansion state from the URL, so a shared link opens the Run with every node entry collapsed.
 
 ## Changelog
+
+### 2026-10-05 - Resuming cancelled Runs
+
+- Extended Run Detail resume eligibility to the server-owned `resumable` flag, covering paused Runs and cancelled Runs with persisted scheduler state.
+- Kept continuation as one activation with control-local progress and failure feedback, preserved cancellation evidence, and reopened the event stream after a cancelled Run returns to active execution.
 
 ### 2026-09-24 - Run execution graph
 

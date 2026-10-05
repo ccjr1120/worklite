@@ -138,5 +138,5 @@ function TimeRangeControl({ range, onRangeChange }: { range: LogsTimeRange; onRa
   );
 }
 
-export { TimeRangeControl, isRangePreset, resolveTimeRange, RANGE_PRESETS };
+export { TimeRangeControl, isRangePreset, resolveTimeRange };
 export type { LogsTimeRange, RangePreset };

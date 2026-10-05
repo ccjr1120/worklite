@@ -9,14 +9,6 @@ function Sheet({ ...props }: ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root {...props} />;
 }
 
-function SheetTrigger({ ...props }: ComponentProps<typeof DialogPrimitive.Trigger>) {
-  return <DialogPrimitive.Trigger {...props} />;
-}
-
-function SheetClose({ ...props }: ComponentProps<typeof DialogPrimitive.Close>) {
-  return <DialogPrimitive.Close {...props} />;
-}
-
 function SheetOverlay({ className, ...props }: ComponentProps<typeof DialogPrimitive.Overlay>) {
   return (
     <DialogPrimitive.Overlay
@@ -67,8 +59,4 @@ function SheetTitle({ className, ...props }: ComponentProps<typeof DialogPrimiti
   return <DialogPrimitive.Title className={cn('text-base font-semibold', className)} {...props} />;
 }
 
-function SheetDescription({ className, ...props }: ComponentProps<typeof DialogPrimitive.Description>) {
-  return <DialogPrimitive.Description className={cn('text-[13px] text-muted-foreground', className)} {...props} />;
-}
-
-export { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger };
+export { Sheet, SheetContent, SheetHeader, SheetTitle };

@@ -301,7 +301,7 @@ export function TeamConversation({ teamId }: { teamId: string }) {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
   const [streamReconnecting, setStreamReconnecting] = useState(false);
-  const [coordinatorMention, setCoordinatorMention] = useState(false);
+  const [coordinatorMentionRemoved, setCoordinatorMentionRemoved] = useState(false);
   const [text, setText] = useState('');
   const [authorizedCommands, setAuthorizedCommands] = useState('');
   const [pendingSubmission, setPendingSubmission] = useState<{
@@ -350,6 +350,16 @@ export function TeamConversation({ teamId }: { teamId: string }) {
   const conversation = conversationQuery.data;
   const messages = conversation?.messages ?? [];
   const messageCount = messages.length;
+  const activeIntake = conversation
+    ? conversation.intakes.find((intake) => intake.id === conversation.activeIntakeId) ?? null
+    : null;
+  const pendingQuestion = activeIntake?.unresolvedField
+    ? messages.filter((message) => message.kind === 'coordinator_question' && message.intakeId === activeIntake.id).at(-1) ?? null
+    : null;
+  const pendingInput = conversation?.pendingInput ?? null;
+  const activeRun = conversation?.activeRun ?? null;
+  const answerMode = Boolean(pendingQuestion || pendingInput?.kind === 'question');
+  const coordinatorMention = !answerMode && !coordinatorMentionRemoved;
   useEffect(() => {
     if (!following || !transcriptRef.current) return;
     transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
@@ -385,12 +395,6 @@ export function TeamConversation({ teamId }: { teamId: string }) {
     );
   }
 
-  const activeIntake = conversation.intakes.find((intake) => intake.id === conversation.activeIntakeId) ?? null;
-  const pendingQuestion = activeIntake?.unresolvedField
-    ? messages.filter((message) => message.kind === 'coordinator_question' && message.intakeId === activeIntake.id).at(-1) ?? null
-    : null;
-  const pendingInput = conversation.pendingInput;
-  const activeRun = conversation.activeRun;
   const queuedRequest = activeIntake?.status === 'queued'
     ? messages.find((message) => message.kind === 'task_request' && message.intakeId === activeIntake.id) ?? null
     : null;
@@ -398,7 +402,10 @@ export function TeamConversation({ teamId }: { teamId: string }) {
   const canResume = activeRun?.status === 'paused';
   const canCancel = activeRun !== null && !TERMINAL_RUN_STATUSES.has(activeRun.status);
   const canRetry = activeRun?.retryableTaskKey != null;
-  const answerMode = Boolean(pendingQuestion || pendingInput?.kind === 'question');
+  const hasContextualInspector = activeIntake?.status === 'queued'
+    || activeRun !== null
+    || pendingInput?.kind === 'operation_recovery'
+    || selectedDocumentId !== null;
   const placeholder = pendingQuestion?.field === 'projectDirectory'
     ? t('conversation.enterDirectory')
     : pendingQuestion?.field === 'mode'
@@ -434,7 +441,7 @@ export function TeamConversation({ teamId }: { teamId: string }) {
       setPendingSubmission(null);
       setText('');
       setAuthorizedCommands('');
-      if (!input.mentions) setCoordinatorMention(false);
+      setCoordinatorMentionRemoved(false);
     } catch (error: unknown) {
       setPendingSubmission({ id: submissionId, text: trimmed, mentions: input.mentions, commands });
       const invalidDirectory = error instanceof ApiError
@@ -497,7 +504,7 @@ export function TeamConversation({ teamId }: { teamId: string }) {
   }
 
   return (
-    <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+    <div className={cn('grid min-w-0 gap-4', hasContextualInspector && 'lg:grid-cols-[minmax(0,1fr)_360px]')}>
       <section className="flex min-h-[560px] min-w-0 flex-col rounded-lg border border-border bg-surface" aria-labelledby="agent-team-conversation-title">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
           <div className="min-w-0">
@@ -549,36 +556,55 @@ export function TeamConversation({ teamId }: { teamId: string }) {
             </Button>
           </div>
         ) : null}
-        <form className="border-t border-border p-4" onSubmit={submit}>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant={coordinatorMention ? 'secondary' : 'ghost'}
-              size="compact"
-              aria-pressed={coordinatorMention}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape' && coordinatorMention) {
-                  event.preventDefault();
-                  setCoordinatorMention(false);
-                  setPendingSubmission(null);
-                }
-              }}
-              onClick={() => setCoordinatorMention((current) => !current)}
-            >
-              {t('conversation.mention')}
-            </Button>
-            {coordinatorMention ? <span className="text-xs text-muted-foreground">{t('conversation.removeMention')}</span> : null}
+        <form
+          className="border-t border-border p-4"
+          onSubmit={submit}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && coordinatorMention) {
+              event.preventDefault();
+              setCoordinatorMentionRemoved(true);
+              setPendingSubmission(null);
+            }
+          }}
+        >
+          <div className="rounded-lg border border-input bg-surface p-2 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
+            <div className="flex min-w-0 flex-wrap items-start gap-2">
+              {!answerMode ? (
+                <Button
+                  type="button"
+                  variant={coordinatorMention ? 'secondary' : 'ghost'}
+                  size="compact"
+                  className="shrink-0"
+                  aria-label={coordinatorMention ? t('conversation.removeMention') : t('conversation.mention')}
+                  aria-pressed={coordinatorMention}
+                  onClick={() => {
+                    setCoordinatorMentionRemoved((current) => !current);
+                    setPendingSubmission(null);
+                  }}
+                >
+                  {t('conversation.mention')}
+                  {coordinatorMention ? <X className="size-3.5" aria-hidden="true" /> : null}
+                </Button>
+              ) : null}
+              <Textarea
+                className="min-h-20 min-w-0 flex-1 resize-y border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                value={text}
+                placeholder={placeholder}
+                aria-label={answerMode ? t('conversation.answerPlaceholder') : t('conversation.inputPlaceholder')}
+                onChange={(event) => {
+                  setText(event.target.value);
+                  if (pendingSubmission?.text !== event.target.value) setPendingSubmission(null);
+                }}
+              />
+            </div>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-2">
+              {sendError ? <p className="text-[13px] text-danger" role="alert">{sendError}</p> : <span />}
+              <Button type="submit" disabled={sending || text.trim().length === 0}>
+                {sending ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}
+                {sending ? t('conversation.sending') : t('conversation.send')}
+              </Button>
+            </div>
           </div>
-          <Textarea
-            className="mt-3 min-h-20"
-            value={text}
-            placeholder={placeholder}
-            aria-label={answerMode ? t('conversation.answerPlaceholder') : t('conversation.inputPlaceholder')}
-            onChange={(event) => {
-              setText(event.target.value);
-              if (pendingSubmission?.text !== event.target.value) setPendingSubmission(null);
-            }}
-          />
           {pendingInput?.kind === 'question' ? (
             <div className="mt-3">
               <Field label={t('input.commands')} htmlFor="agent-team-conversation-commands">
@@ -592,16 +618,9 @@ export function TeamConversation({ teamId }: { teamId: string }) {
               </Field>
             </div>
           ) : null}
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            <Button type="submit" disabled={sending || text.trim().length === 0}>
-              {sending ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}
-              {sending ? t('conversation.sending') : t('conversation.send')}
-            </Button>
-            {sendError ? <p className="text-[13px] text-danger" role="alert">{sendError}</p> : null}
-          </div>
         </form>
       </section>
-      <aside className="min-w-0 space-y-4">
+      {hasContextualInspector ? <aside className="min-w-0 space-y-4">
         {activeIntake?.status === 'queued' ? (
           <section className="rounded-lg border border-border bg-surface p-4" aria-labelledby="agent-team-queued-intake">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -692,7 +711,7 @@ export function TeamConversation({ teamId }: { teamId: string }) {
           </section>
         ) : null}
         {selectedDocumentId ? <DocumentViewer documentId={selectedDocumentId} onClose={() => setSelectedDocumentId(null)} /> : null}
-      </aside>
+      </aside> : null}
       <ConfirmDialog
         open={cancelOpen}
         onOpenChange={(open) => {

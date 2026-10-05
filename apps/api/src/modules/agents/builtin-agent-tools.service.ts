@@ -61,7 +61,11 @@ export class BuiltinAgentToolsService {
     switch (name) {
       case 'bash': command = requiredString(args?.command, 'command'); break;
       case 'read': command = `node -e ${shellQuote("process.stdout.write(require('fs').readFileSync(process.argv[1], 'utf8'))")} ${shellQuote(requiredString(args?.path, 'path'))}`; break;
-      case 'write': command = `node -e ${shellQuote("require('fs').writeFileSync(process.argv[1], Buffer.from(process.argv[2], 'base64'))")} ${shellQuote(requiredString(args?.path, 'path'))} ${shellQuote(Buffer.from(requiredString(args?.content, 'content'), 'utf8').toString('base64'))}`; break;
+      case 'write': {
+        requiredString(args?.content, 'content');
+        command = `node -e ${shellQuote("require('fs').writeFileSync(process.argv[1], Buffer.from(process.argv[2], 'base64'))")} ${shellQuote(requiredString(args?.path, 'path'))} ${shellQuote(Buffer.from(args!.content as string, 'utf8').toString('base64'))}`;
+        break;
+      }
       case 'glob': command = `find . -type f -name ${shellQuote(requiredString(args?.pattern, 'pattern'))}`; break;
       case 'grep': command = `rg --line-number --no-heading -- ${shellQuote(requiredString(args?.pattern, 'pattern'))} ${shellQuote(typeof args?.path === 'string' && args.path.trim() ? args.path.trim() : '.')}`; break;
       case 'process_reference': throw new BadRequestException('Process references are read directly by the isolated Agent invocation.');

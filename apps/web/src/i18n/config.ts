@@ -15,7 +15,7 @@ import zhSkills from './locales/zh-CN/skills.json';
 import zhWorkflows from './locales/zh-CN/workflows.json';
 import zhWorkspace from './locales/zh-CN/workspace.json';
 
-export const NAMESPACES = [
+const NAMESPACES = [
   'common',
   'workspace',
   'home',

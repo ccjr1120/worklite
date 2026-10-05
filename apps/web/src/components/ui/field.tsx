@@ -40,4 +40,3 @@ function useFieldDescription(explicit?: string): string | undefined {
 }
 
 export { Field, useFieldDescription };
-export type { FieldProps };

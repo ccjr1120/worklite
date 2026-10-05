@@ -48,5 +48,4 @@ function Button({ className, variant, size, asChild = false, title, ...props }: 
   return <Comp className={cn(buttonVariants({ variant, size, className }))} title={resolvedTitle} {...props} />;
 }
 
-export { Button, buttonVariants };
-export type { ButtonProps };
+export { Button };

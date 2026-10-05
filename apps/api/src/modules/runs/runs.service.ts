@@ -401,15 +401,36 @@ export class RunsService {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const now = new Date();
     const resumedRun = await this.db.transaction((transaction) => {
+      const [currentRun] = transaction.select().from(workflowRuns)
+        .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id)))
+        .limit(1);
+      if (!currentRun || !runResumable(currentRun)) return null;
       const [updatedRun] = transaction.update(workflowRuns)
-        .set({ status: 'queued', updatedAt: now })
-        .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id), eq(workflowRuns.status, 'paused')))
+        .set({
+          status: 'queued',
+          result: null,
+          currentNodeId: currentRun.executionState?.active?.nodeId ?? null,
+          finishedAt: null,
+          updatedAt: now,
+        })
+        .where(and(
+          eq(workflowRuns.id, runId),
+          eq(workflowRuns.workspaceId, team.id),
+          eq(workflowRuns.status, currentRun.status),
+        ))
         .returning().all();
       if (!updatedRun) return null;
-      transaction.update(workflowNodeRuns)
-        .set({ status: 'queued' })
-        .where(and(eq(workflowNodeRuns.runId, runId), eq(workflowNodeRuns.status, 'running')))
-        .run();
+      const activeNodeRunId = updatedRun.executionState?.active?.nodeRunId;
+      if (activeNodeRunId) {
+        transaction.update(workflowNodeRuns)
+          .set({ status: 'queued', error: null, finishedAt: null })
+          .where(and(
+            eq(workflowNodeRuns.id, activeNodeRunId),
+            eq(workflowNodeRuns.runId, runId),
+            inArray(workflowNodeRuns.status, ['queued', 'running', 'waiting_for_input', 'cancelled']),
+          ))
+          .run();
+      }
       return updatedRun;
     });
     if (!resumedRun) return this.get(request, workspaceSlug, runId);
@@ -726,7 +747,7 @@ export class RunsService {
     const end = run.finishedAt?.getTime() ?? (run.status === 'queued' ? null : Date.now());
     const definition = version.definition as StoredWorkflowDefinition | null;
     const hasArtifactNode = Boolean(definition?.nodes.some((node) => node.type === 'worklite/artifact'));
-    const view: RunView = { id: run.id, workspaceSlug, workflowId: workflow.id, workflowName: workflow.name, version: `v${version.version}`, status: run.status, currentStep: run.currentNodeId, startedAt: run.createdAt.toISOString(), durationSeconds: end === null ? null : Math.max(0, Math.round((end - run.createdAt.getTime()) / 1000)), initiator, input: sanitizeWorkflowImages(run.input), result: sanitizeWorkflowImages(run.result), hasArtifactNode };
+    const view: RunView = { id: run.id, workspaceSlug, workflowId: workflow.id, workflowName: workflow.name, version: `v${version.version}`, status: run.status, currentStep: run.currentNodeId, startedAt: run.createdAt.toISOString(), durationSeconds: end === null ? null : Math.max(0, Math.round((end - run.createdAt.getTime()) / 1000)), initiator, input: sanitizeWorkflowImages(run.input), result: sanitizeWorkflowImages(run.result), hasArtifactNode, resumable: runResumable(run) };
     if (!details) return view;
     const nodeRows = await this.db.select().from(workflowNodeRuns).where(eq(workflowNodeRuns.runId, run.id)).orderBy(asc(workflowNodeRuns.position));
     const artifactRows = await this.db.select().from(artifacts).where(eq(artifacts.runId, run.id)).orderBy(asc(artifacts.createdAt));
@@ -899,6 +920,10 @@ function toNodeRunView(row: typeof workflowNodeRuns.$inferSelect, retryable: boo
 
 function retryableNodeRunIdOf(run: typeof workflowRuns.$inferSelect): string | null {
   return run.status === 'failed' ? run.executionState?.active?.nodeRunId ?? null : null;
+}
+
+function runResumable(run: typeof workflowRuns.$inferSelect): boolean {
+  return run.status === 'paused' || (run.status === 'cancelled' && run.executionState !== null);
 }
 
 function toArtifactView(row: typeof artifacts.$inferSelect, workspaceSlug: string, workflowName: string): ArtifactView {

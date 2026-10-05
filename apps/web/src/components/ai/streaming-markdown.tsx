@@ -32,4 +32,3 @@ function StreamingMarkdown({
 }
 
 export { StreamingMarkdown };
-export type { StreamingMarkdownProps };

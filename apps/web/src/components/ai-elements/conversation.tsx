@@ -1,5 +1,5 @@
 import { ArrowDown } from 'lucide-react';
-import { createContext, useContext, type ComponentProps, type ReactNode } from 'react';
+import { createContext, useContext, type ComponentProps } from 'react';
 import { useStickToBottom, type StickToBottomInstance } from 'use-stick-to-bottom';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -54,8 +54,4 @@ function ConversationContent({ className, ...props }: ConversationContentProps) 
   return <div ref={contentRef} className={cn('flex min-h-full flex-col py-5', className)} {...props} />;
 }
 
-function ConversationEmptyState({ children, className, ...props }: ComponentProps<'div'> & { children?: ReactNode }) {
-  return <div className={cn('flex size-full flex-col items-center justify-center gap-3 p-8 text-center', className)} {...props}>{children}</div>;
-}
-
-export { Conversation, ConversationContent, ConversationEmptyState };
+export { Conversation, ConversationContent };

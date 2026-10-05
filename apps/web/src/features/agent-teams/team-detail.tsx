@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import * as SelectPrimitive from '@radix-ui/react-select';
 import { useNavigate } from '@tanstack/react-router';
 import { LoaderCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -93,8 +94,13 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
     setSaveError('');
   }, [draftTeamId, teamQuery.data]);
 
-  const modelOptions = useMemo(
-    () => (providersQuery.data ?? []).flatMap((provider) => provider.models.map((model) => `${provider.name}/${model}`)),
+  const modelGroups = useMemo(
+    () => (providersQuery.data ?? [])
+      .map((provider) => ({
+        name: provider.name,
+        models: provider.models.map((model) => `${provider.name}/${model}`),
+      }))
+      .filter((group) => group.models.length > 0),
     [providersQuery.data],
   );
 
@@ -240,112 +246,126 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
                 <dd className="mt-1 font-mono break-all">{team.processVersion}</dd>
               </div>
             </dl>
-          </section>
+        </section>
         <form id="agent-team-configuration" className="mt-4 space-y-4" onSubmit={saveTeam}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-semibold">{t('team.roles')}</h2>
           {saveNotice ? <p role="status">{saveNotice}</p> : null}
         </div>
-        {roleDrafts.map((role) => (
-          <article key={role.role} className="min-w-0 rounded-lg border border-border bg-surface p-4">
-            <h3 className="text-sm font-semibold">{t(`role.${role.role}`)}</h3>
-            <div className="mt-4 grid gap-4 xl:grid-cols-2">
-              <Field label={t('model.label')} htmlFor={`agent-team-model-${role.role}`}>
-                <Select
-                  value={role.publicModelId}
-                  onValueChange={(value) => updateRole(role.role, { publicModelId: value })}
-                >
-                  <SelectTrigger id={`agent-team-model-${role.role}`}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={TEAM_MODEL_SENTINEL}>{t('model.default')}</SelectItem>
-                    {modelOptions.map((model) => (
-                      <SelectItem key={model} value={model}>{model}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label={t('entryPoints.label')} htmlFor={`agent-team-entry-points-${role.role}`}>
-                <Textarea
-                  id={`agent-team-entry-points-${role.role}`}
-                  className="min-h-20"
-                  value={role.entryPoints.join('\n')}
-                  placeholder={t('entryPoints.placeholder')}
-                  onChange={(event) => updateRole(role.role, {
-                    entryPoints: event.target.value.split(/\r?\n/).map((line) => line.trim()),
-                  })}
-                />
-              </Field>
-              <div className="xl:col-span-2">
-                <Field label={t('instructions.label')} htmlFor={`agent-team-instructions-${role.role}`}>
-                  <Textarea
-                    id={`agent-team-instructions-${role.role}`}
-                    className="min-h-32"
-                    value={role.instructions}
-                    onChange={(event) => updateRole(role.role, { instructions: event.target.value })}
-                  />
+        <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
+          {roleDrafts.map((role) => (
+            <section key={role.role} className="min-w-0 p-4" aria-labelledby={`agent-team-role-${role.role}`}>
+              <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(10rem,0.7fr)_minmax(0,1fr)] sm:items-center">
+                <h3 id={`agent-team-role-${role.role}`} className="text-sm font-semibold">{t(`role.${role.role}`)}</h3>
+                <Field label={t('model.label')} htmlFor={`agent-team-model-${role.role}`}>
+                  <Select
+                    value={role.publicModelId}
+                    onValueChange={(value) => updateRole(role.role, { publicModelId: value })}
+                  >
+                    <SelectTrigger id={`agent-team-model-${role.role}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={TEAM_MODEL_SENTINEL}>{t('model.default')}</SelectItem>
+                      {modelGroups.map((group) => (
+                        <SelectPrimitive.Group key={group.name}>
+                          <SelectPrimitive.Label className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                            {group.name}
+                          </SelectPrimitive.Label>
+                          {group.models.map((model) => (
+                            <SelectItem key={model} value={model}>{model}</SelectItem>
+                          ))}
+                        </SelectPrimitive.Group>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
               </div>
-              <fieldset className="min-w-0 space-y-2">
-                <legend className="text-xs font-medium text-foreground">{t('skills.label')}</legend>
-                {skillsQuery.isLoading ? <Skeleton className="h-20 w-full" /> : (skillsQuery.data ?? []).length === 0 ? (
-                  <p className="text-[13px] text-muted-foreground">{t('skills.empty')}</p>
-                ) : (skillsQuery.data ?? []).map((skill) => (
-                  <label key={skill.id} className="flex min-w-0 items-start gap-2 text-[13px]">
-                    <Checkbox
-                      className="mt-0.5"
-                      checked={role.skillIds.includes(skill.id)}
-                      onCheckedChange={(checked) => updateRole(role.role, {
-                        skillIds: toggleSelection(role.skillIds, skill.id, checked === true),
+              <details className="mt-3 border-t border-border pt-3">
+                <summary className="w-fit cursor-pointer rounded-sm text-[13px] font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45">
+                  {t('team.advanced')}
+                </summary>
+                <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                  <Field label={t('entryPoints.label')} htmlFor={`agent-team-entry-points-${role.role}`}>
+                    <Textarea
+                      id={`agent-team-entry-points-${role.role}`}
+                      className="min-h-20"
+                      value={role.entryPoints.join('\n')}
+                      placeholder={t('entryPoints.placeholder')}
+                      onChange={(event) => updateRole(role.role, {
+                        entryPoints: event.target.value.split(/\r?\n/).map((line) => line.trim()),
                       })}
                     />
-                    <span className="min-w-0">
-                      <span className="block font-medium">{skill.name}</span>
-                      <span className="block font-mono text-xs break-all text-muted-foreground">{skill.id}</span>
-                    </span>
-                  </label>
-                ))}
-              </fieldset>
-              <fieldset className="min-w-0 space-y-2">
-                <legend className="text-xs font-medium text-foreground">{t('mcpServers.label')}</legend>
-                {mcpServersQuery.isLoading ? <Skeleton className="h-20 w-full" /> : (mcpServersQuery.data ?? []).length === 0 ? (
-                  <p className="text-[13px] text-muted-foreground">{t('mcpServers.empty')}</p>
-                ) : (mcpServersQuery.data ?? []).map((server) => (
-                  <label key={server.id} className="flex min-w-0 items-start gap-2 text-[13px]">
-                    <Checkbox
-                      className="mt-0.5"
-                      checked={role.mcpServerIds.includes(server.id)}
-                      onCheckedChange={(checked) => updateRole(role.role, {
-                        mcpServerIds: toggleSelection(role.mcpServerIds, server.id, checked === true),
-                      })}
+                  </Field>
+                  <Field label={t('instructions.label')} htmlFor={`agent-team-instructions-${role.role}`}>
+                    <Textarea
+                      id={`agent-team-instructions-${role.role}`}
+                      className="min-h-32"
+                      value={role.instructions}
+                      onChange={(event) => updateRole(role.role, { instructions: event.target.value })}
                     />
-                    <span className="min-w-0">
-                      <span className="block font-medium">{server.name}</span>
-                      <span className="block font-mono text-xs break-all text-muted-foreground">{server.id}</span>
-                    </span>
-                  </label>
-                ))}
-              </fieldset>
-              <fieldset className="min-w-0 xl:col-span-2">
-                <legend className="text-xs font-medium text-foreground">{t('tools.label')}</legend>
-                <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                  {ROLE_TOOLS[role.role].map((tool) => (
-                    <label key={tool} className="flex items-center gap-2 text-[13px]">
-                      <Checkbox
-                        checked={role.toolNames.includes(tool)}
-                        onCheckedChange={(checked) => updateRole(role.role, {
-                          toolNames: toggleSelection(role.toolNames, tool, checked === true),
-                        })}
-                      />
-                      <span className="font-mono break-all">{tool}</span>
-                    </label>
-                  ))}
+                  </Field>
+                  <fieldset className="min-w-0 space-y-2">
+                    <legend className="text-xs font-medium text-foreground">{t('skills.label')}</legend>
+                    {skillsQuery.isLoading ? <Skeleton className="h-20 w-full" /> : (skillsQuery.data ?? []).length === 0 ? (
+                      <p className="text-[13px] text-muted-foreground">{t('skills.empty')}</p>
+                    ) : (skillsQuery.data ?? []).map((skill) => (
+                      <label key={skill.id} className="flex min-w-0 items-start gap-2 text-[13px]">
+                        <Checkbox
+                          className="mt-0.5"
+                          checked={role.skillIds.includes(skill.id)}
+                          onCheckedChange={(checked) => updateRole(role.role, {
+                            skillIds: toggleSelection(role.skillIds, skill.id, checked === true),
+                          })}
+                        />
+                        <span className="min-w-0">
+                          <span className="block font-medium">{skill.name}</span>
+                          <span className="block font-mono text-xs break-all text-muted-foreground">{skill.id}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </fieldset>
+                  <fieldset className="min-w-0 space-y-2">
+                    <legend className="text-xs font-medium text-foreground">{t('mcpServers.label')}</legend>
+                    {mcpServersQuery.isLoading ? <Skeleton className="h-20 w-full" /> : (mcpServersQuery.data ?? []).length === 0 ? (
+                      <p className="text-[13px] text-muted-foreground">{t('mcpServers.empty')}</p>
+                    ) : (mcpServersQuery.data ?? []).map((server) => (
+                      <label key={server.id} className="flex min-w-0 items-start gap-2 text-[13px]">
+                        <Checkbox
+                          className="mt-0.5"
+                          checked={role.mcpServerIds.includes(server.id)}
+                          onCheckedChange={(checked) => updateRole(role.role, {
+                            mcpServerIds: toggleSelection(role.mcpServerIds, server.id, checked === true),
+                          })}
+                        />
+                        <span className="min-w-0">
+                          <span className="block font-medium">{server.name}</span>
+                          <span className="block font-mono text-xs break-all text-muted-foreground">{server.id}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </fieldset>
+                  <fieldset className="min-w-0 xl:col-span-2">
+                    <legend className="text-xs font-medium text-foreground">{t('tools.label')}</legend>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                      {ROLE_TOOLS[role.role].map((tool) => (
+                        <label key={tool} className="flex items-center gap-2 text-[13px]">
+                          <Checkbox
+                            checked={role.toolNames.includes(tool)}
+                            onCheckedChange={(checked) => updateRole(role.role, {
+                              toolNames: toggleSelection(role.toolNames, tool, checked === true),
+                            })}
+                          />
+                          <span className="font-mono break-all">{tool}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
                 </div>
-              </fieldset>
-            </div>
-          </article>
-        ))}
+              </details>
+            </section>
+          ))}
+        </div>
         </form>
       </TabsContent>
       </Tabs>

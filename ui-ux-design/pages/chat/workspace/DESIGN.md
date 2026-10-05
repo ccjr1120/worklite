@@ -39,7 +39,7 @@ Channels presents Web as the built-in channel and Feishu as the configured exter
 
 ## Interaction Contract
 
-- Send and answer: use shared `POST /chat/dispatch`, stable submission ids and the existing master execution. Show an immediate response region; stream persisted Agent events. Keep partial replies on failure, with existing retry and cancellation controls. Show options only for the active pending question.
+- Send and answer: use shared `POST /chat/dispatch`, stable submission ids and the existing master execution. `Enter` sends the composer and `Shift+Enter` inserts a newline; while an input method is composing text, `Enter` first confirms that composition instead of submitting it. Show an immediate response region; stream persisted Agent events. Keep partial replies on failure, with existing retry and cancellation controls. Show options only for the active pending question.
 - History: cursor-page `GET /chat/conversations`, with server data as authority. Search and channel filters operate on server history. Browser memory remembers only the selected id; it never limits discovery. Selecting a conversation silently restores its in-memory draft and queue without cancelling another execution. Accepted queued requests carry stable submission ids, so returning after a response was interrupted cannot create another turn. Navigation retains browser-session drafts/queues in memory; reload clears unsent input.
 - New conversation: one action opens an empty Web composer; the first accepted request creates its server execution. Existing records stay available.
 - Feishu conversation: identify the bound channel before submission. Web can continue its Agent execution; the adapter projects replies into the same Feishu-bound conversation. Exact Team command grants still require the task-bound authoritative form and cannot originate from ordinary chat prose.
@@ -85,6 +85,10 @@ Source comparison also covers generation guards for switched conversations, reta
 Source comparison 2026-10-04: the old embedded surface supports persisted messages, SSE, Skill/MCP activity, questions, retry, cancellation, Workflow mentions, queues and exports. The new source adds the full-page route and server conversation list, removes the silent browser history cap, places Feishu under Channels, exposes complete saved channel/Agent records and retains failed streamed text in the read model. The embedded surface and its fixed starter menu have been removed. Source coverage also includes standalone Web task submissions that have no Agent execution. The later deployment request authorized Gateway/Web/API compilation and isolated Web/API/Gateway readiness; these passed on 2026-10-04. Browser rendering, standalone type checking, test suites and live Feishu checks were not performed. Historical original Feishu envelopes were not saved and cannot be recovered; records show full retained data and newly saved safe platform context.
 
 ## Changelog
+
+### 2026-10-05
+
+- Required `Enter` to confirm in-progress IME composition before it can send the Chat composer; `Shift+Enter` remains a newline.
 
 ### 2026-10-04
 

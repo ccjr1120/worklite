@@ -33,9 +33,9 @@ Saving Team configuration is a separate goal with one Save action. Editing confi
 
 ## Layout
 
-The page uses the full Workspace page width with a `1200px` maximum and two lightweight top tabs. The Conversation tab has a compact Team header, a chronological transcript with its own bounded scroll region, and a persistent composer at the bottom. Member messages are left-aligned and user messages right-aligned; speaker identity, alignment, and text cues distinguish speakers without colored message backgrounds. The composer contains a structured removable `@Coordinator` token, a multiline text input, and one Send control. Pending intake options and Run questions render in the transcript beside their answers.
+The page uses the full Workspace page width with a `1200px` maximum and two lightweight top tabs. The Conversation tab has a compact Team header, a chronological transcript with its own bounded scroll region, and a persistent composer at the bottom. Member messages are left-aligned and user messages right-aligned; speaker identity, alignment, and text cues distinguish speakers without colored message backgrounds. A new-task composer has a structured removable `@Coordinator` token inside the same bordered surface as its multiline input and Send control; pending answers omit the token because their destination is already known. The conversation uses its full width while no contextual Run, queued intake, recovery, or selected document needs an inspector. Pending intake options and Run questions render in the transcript beside their answers.
 
-The desktop transcript can open a delivered document in a contextual right-side viewer. Below `1024px`, the transcript and configuration columns stack. The document viewer becomes an overlay below `768px`. The Configuration tab retains the existing metadata/role layout and all controls; only its entry location changes.
+When active Run, queued intake, operation recovery, or a selected document needs supporting controls, the desktop transcript shares the page with a contextual inspector. Below `1024px`, the transcript and inspector stack. The document viewer becomes an overlay below `768px`. The Configuration tab keeps process metadata and one Save action above a compact list of six roles. Each role shows its provider-grouped model selector in the list row; its instructions, entry points, Skills, MCP servers, and tools are disclosed only when that role's advanced settings are expanded. The role list and its controls stack at narrow widths.
 
 ## Interaction Contract
 
@@ -56,6 +56,8 @@ The desktop transcript can open a delivered document in a contextual right-side 
 | Save Team configuration | The Configuration tab Save control shows local progress, is disabled while saving, replaces the Team cache on success, and preserves local edits on failure. |
 | Edit a role field | Editing updates local configuration only and marks it unsaved. |
 | Select model, Skills, MCP servers, or tools | Selection updates the role locally; Save is the sole commit control. |
+| Expand role settings | One disclosure activation reveals that role's instructions, entry points, Skills, MCP servers, and tools. The disclosure is keyboard reachable and does not change saved configuration. |
+| Select role model | The selector groups available models by Provider name and stores the selected public model id; the change remains local until Save. |
 | Open from Chat Bot | The Team starter performs one navigation activation and does not send a Chat Bot message or dispatch a Team Run. |
 
 Conversation and Run queries own freshness. The persisted conversation stream replays with `Last-Event-ID`, so no manual refresh control is introduced.
@@ -65,7 +67,7 @@ Conversation and Run queries own freshness. The persisted conversation stream re
 | State | Behavior |
 | --- | --- |
 | Loading | Keep the page and composer geometry stable with content-shaped placeholders. |
-| No task yet | Show an empty transcript state and the Coordinator token available in the composer; no onboarding sequence is added. |
+| No task yet | Show an empty transcript state with `@Coordinator` selected by default in the composer; removing it is available for a message that should not start a Team task. No onboarding sequence is added. |
 | Intake in progress | Show the unanswered Coordinator question, preserve prior answers and submitted requests across reload, and offer only actual recent directories. |
 | Queued task request | A new Coordinator request remains visible as pending input while an active task has not settled. |
 | Queued or running Run | Show the responsible member and concise state. Raw model deltas, task JSON, command output, and document bodies stay out of the transcript. |
@@ -159,6 +161,7 @@ The Team query owns configuration freshness. No manual refresh control is introd
 | `agentTeams:team.processId` | State |
 | `agentTeams:team.processVersion` | State |
 | `agentTeams:team.roles` | State |
+| `agentTeams:team.advanced` | Action |
 | `agentTeams:model.default` | Action |
 | `agentTeams:model.label` | Constraint |
 | `agentTeams:instructions.label` | Constraint |
@@ -178,13 +181,19 @@ The Team query owns configuration freshness. No manual refresh control is introd
 
 ## Accessibility
 
-The tabs, mention token, transcript, composer, file link, viewer, download, and Run controls are keyboard reachable with visible shared focus rings. Mention selection supports arrow keys, Enter, and Escape. The transcript is a scrollable log-like region with accessible speaker labels; state changes use polite live regions while model deltas are not announced. File links expose their full accessible filename, the viewer retains a labelled close action, and SSE updates never move focus. Forms and option groups use visible labels, and all status text includes a non-color cue. Light and dark modes use the same neutral surfaces and semantic status tokens.
+The tabs, mention token, transcript, composer, role disclosures, provider-grouped model selectors, file link, viewer, download, and Run controls are keyboard reachable with visible shared focus rings. The selected `@Coordinator` token can be removed with its labelled control or Escape; model groups expose Provider labels to assistive technology. The transcript is a scrollable log-like region with accessible speaker labels; state changes use polite live regions while model deltas are not announced. File links expose their full accessible filename, the viewer retains a labelled close action, and SSE updates never move focus. Forms and option groups use visible labels, and all status text includes a non-color cue. Light and dark modes use the same neutral surfaces and semantic status tokens.
 
 ## Coverage Status
 
-Source-level audit: 2026-10-03. Differences found: none in the source-level comparison of route search, durable conversation state, queued intake, Run controls and recovery, delivered-document viewer and download, configuration form, admitted copy, semantic tokens, responsive stacking, and accessibility structure. Only source review occurred; no browser, runtime, accessibility-tool, or real-Run verification was performed.
+Source-level audit: 2026-10-03. Differences found: none in route and tab state, default Coordinator routing, conditional contextual inspector, responsive stacking, provider-grouped model selectors, role-local advanced settings, save and error feedback, copy inventory, semantic tokens, or keyboard access. Only source review occurred; no browser, runtime, accessibility-tool, or real-Run verification was performed.
 
 ## Changelog
+
+### 2026-10-03 - Team interaction and role configuration
+
+- Made Coordinator routing the default for new tasks and placed its removable token inside the composer surface.
+- Let the conversation use its full width when no contextual Run, queue, recovery, or document inspector is needed.
+- Replaced repeated expanded role cards with provider-grouped model selectors and role-local advanced settings disclosures.
 
 ### 2026-10-03 - Team conversation
 

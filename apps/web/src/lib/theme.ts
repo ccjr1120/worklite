@@ -21,7 +21,7 @@ export function storeAppearance(appearance: Appearance) {
   }
 }
 
-export function getPreferredTheme(): ResolvedTheme {
+function getPreferredTheme(): ResolvedTheme {
   if (typeof window === 'undefined') {
     return 'light';
   }

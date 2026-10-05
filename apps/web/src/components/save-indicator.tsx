@@ -2,7 +2,7 @@ import { Check, CloudOff, LoaderCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 
-export type SaveState = 'saved' | 'saving' | 'unsaved';
+type SaveState = 'saved' | 'saving' | 'unsaved';
 
 function SaveIndicator({ state }: { state: SaveState }) {
   const { t } = useTranslation('common');

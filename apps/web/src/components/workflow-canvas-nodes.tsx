@@ -103,7 +103,7 @@ export function workflowNodeInputs(node: WorkflowCanvasNode, t: TFunction<'workf
   return inputs[node.data.nodeType];
 }
 
-export function workflowNodeKind(nodeType: WorkflowCanvasNodeType, t: TFunction<'workflows'>): string {
+function workflowNodeKind(nodeType: WorkflowCanvasNodeType, t: TFunction<'workflows'>): string {
   const kinds: Record<WorkflowCanvasNodeType, string> = {
     input: t('editor.workflowInputNode'),
     timer: t('editor.timerNode'),

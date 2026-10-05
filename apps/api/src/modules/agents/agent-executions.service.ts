@@ -18,6 +18,7 @@ import { CommandsService } from '../commands/commands.service';
 
 const CHAT_AGENT_ID = 'agt_system_helper_chat';
 const WORKLITE_PLATFORM_SKILL_ID = 'sk_worklite_platform';
+const CHAT_HOST_TOOL_NAMES: readonly string[] = ['read', 'glob', 'grep'];
 const MAX_HELPER_TOOL_ROUNDS = 24;
 // A research node batches several retrieval calls per turn and still needs turns left to compose its
 // output. Eight rounds exhausted before collection finished; the retrieval allowance is enforced by the
@@ -289,8 +290,14 @@ export class AgentExecutionsService {
     const [execution] = await this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.workspaceId, workspace.id))).limit(1);
     if (!execution) throw new NotFoundException('Agent execution not found');
     if (execution.status !== 'running') return this.toView(execution);
-    const priorToolCalls = await this.db.select({ id: agentToolCalls.id, toolName: agentToolCalls.toolName, mcpToolName: agentToolCalls.mcpToolName }).from(agentToolCalls).where(eq(agentToolCalls.executionId, executionId));
-    if (priorToolCalls.length >= MAX_HELPER_TOOL_ROUNDS) throw new Error('The Agent reached its maximum tool rounds for this execution.');
+    // New user messages start a turn; clarification answers and retries keep its existing budget.
+    const turnStart = execution.modelMessages.map((message) => message.role).lastIndexOf('user');
+    const turnToolCallIds = execution.modelMessages.slice(turnStart + 1).flatMap((message) => message.role === 'assistant'
+      ? message.content.flatMap((part) => part.type === 'tool-call' ? [part.toolCallId] : [])
+      : []);
+    const priorToolCalls = turnToolCallIds.length === 0 ? [] : await this.db.select({ id: agentToolCalls.id, toolName: agentToolCalls.toolName, mcpToolName: agentToolCalls.mcpToolName }).from(agentToolCalls)
+      .where(and(eq(agentToolCalls.executionId, executionId), inArray(agentToolCalls.toolCallId, turnToolCallIds)));
+    if (priorToolCalls.length >= MAX_HELPER_TOOL_ROUNDS) throw new Error('The Agent reached its maximum tool rounds for this turn.');
     const clarificationAllowed = execution.plan.length > 0
       && execution.plan.some((step) => step.status !== 'completed')
       && priorToolCalls.length === 1
@@ -307,7 +314,7 @@ export class AgentExecutionsService {
     const availableSkillScripts = clarificationPass ? [] : skillScripts;
     const availableMcpTools = clarificationPass ? [] : mcpTools;
     const builtinToolDefinitions = agent.id === CHAT_AGENT_ID
-      ? clarificationPass ? HELPER_BUILTIN_TOOLS : [...this.builtinTools.toolDefinitions(), ...HELPER_BUILTIN_TOOLS]
+      ? clarificationPass ? HELPER_BUILTIN_TOOLS : [...this.builtinTools.toolDefinitions(CHAT_HOST_TOOL_NAMES), ...HELPER_BUILTIN_TOOLS]
       : [];
     const skillInstructions = assignedSkills.map((skill) => `## ${skill.name}\n${skill.instructions.trim()}`).filter((value) => value.trim()).join('\n\n');
     const scriptList = availableSkillScripts.map((script) => `- Skill ${script.skillName} (${script.skillId}): ${script.path}`).join('\n');
@@ -419,6 +426,7 @@ export class AgentExecutionsService {
     try {
       if (call.toolName === 'builtin') {
         if (!call.mcpToolName) throw new Error('Built-in tool is no longer available.');
+        if (agentId === CHAT_AGENT_ID && !CHAT_HOST_TOOL_NAMES.includes(call.mcpToolName)) throw new BadRequestException('Chat performs read-only inspection; dispatch repair work to Agent Team.');
         const started = await this.builtinTools.start(call.mcpToolName, call.input, agentId === CHAT_AGENT_ID && process.env.WORKLITE_PROJECT_ROOT ? { cwd: process.env.WORKLITE_PROJECT_ROOT } : undefined);
         commandExecutionId = started.id;
         const [linked] = await this.db.update(agentToolCalls).set({ commandExecutionId: started.id }).where(and(eq(agentToolCalls.id, callId), eq(agentToolCalls.status, 'running'))).returning({ id: agentToolCalls.id });

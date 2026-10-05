@@ -93,7 +93,7 @@ function RunDetailPage() {
   const duration = run.durationSeconds == null ? null : durationParts(run.durationSeconds);
   const failureReason = failureReasonOf(run.result, run.status);
   const canPause = run.status === 'queued' || run.status === 'running';
-  const canResume = run.status === 'paused';
+  const canResume = run.resumable;
   const canCancel = run.status === 'queued' || run.status === 'running' || run.status === 'paused' || run.status === 'waiting_for_input';
 
   const changeRunLifecycle = async (action: 'pause' | 'resume') => {

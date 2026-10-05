@@ -757,7 +757,7 @@ function resolveModel(provider: ModelProviderConfig, modelId: string, correlatio
   return provider.operation === 'responses' || provider.adapter === 'codex' ? openai.responses(gatewayModel) as unknown as LanguageModel : openai.chat(gatewayModel);
 }
 
-function gatewayBaseURL(): string {
+export function gatewayBaseURL(): string {
   const apiURL = process.env.WORKLITE_API_URL?.trim();
   return apiURL ? `${apiURL.replace(/\/$/, '')}/portkey-gateway/v1` : 'http://127.0.0.1:3392/v1';
 }

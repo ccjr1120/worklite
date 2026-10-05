@@ -6,10 +6,6 @@ function Popover({ ...props }: ComponentProps<typeof PopoverPrimitive.Root>) {
   return <PopoverPrimitive.Root {...props} />;
 }
 
-function PopoverTrigger({ ...props }: ComponentProps<typeof PopoverPrimitive.Trigger>) {
-  return <PopoverPrimitive.Trigger {...props} />;
-}
-
 function PopoverAnchor({ ...props }: ComponentProps<typeof PopoverPrimitive.Anchor>) {
   return <PopoverPrimitive.Anchor {...props} />;
 }
@@ -30,4 +26,4 @@ function PopoverContent({ className, align = 'center', sideOffset = 6, ...props 
   );
 }
 
-export { Popover, PopoverAnchor, PopoverContent, PopoverTrigger };
+export { Popover, PopoverAnchor, PopoverContent };

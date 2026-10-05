@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
 import { commandShortcutLabel } from '@/lib/platform';
-import { cn } from '@/lib/utils';
 
 type ContextBarProps = {
   breadcrumbs: ReactNode;
@@ -58,9 +57,4 @@ function ContextBar({
   );
 }
 
-function Breadcrumb({ children, className }: { children: ReactNode; className?: string }) {
-  return <nav className={cn('flex items-center gap-1.5 text-foreground', className)}>{children}</nav>;
-}
-
-export { ContextBar, Breadcrumb };
-export type { ContextBarProps };
+export { ContextBar };

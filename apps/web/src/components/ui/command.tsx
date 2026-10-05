@@ -87,10 +87,6 @@ function CommandSeparator({ className, ...props }: ComponentProps<typeof Command
   return <CommandPrimitive.Separator className={cn('-mx-1 my-1 h-px bg-border', className)} {...props} />;
 }
 
-function CommandShortcut({ className, ...props }: ComponentProps<'span'>) {
-  return <span className={cn('ml-auto text-xs tracking-widest text-muted-foreground', className)} {...props} />;
-}
-
 export {
   Command,
   CommandDialog,
@@ -100,5 +96,4 @@ export {
   CommandItem,
   CommandList,
   CommandSeparator,
-  CommandShortcut,
 };

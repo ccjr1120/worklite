@@ -7,6 +7,7 @@
     "saveFailed": "无法保存团队配置",
     "process": "流程",
     "roles": "角色配置",
+    "advanced": "高级设置",
     "processId": "流程 ID",
     "processVersion": "流程版本"
   },
@@ -138,7 +139,7 @@
   },
   "model": {
     "default": "使用团队默认模型",
-    "label": "公开模型"
+    "label": "角色模型"
   },
   "instructions": {
     "label": "角色指令"

@@ -90,6 +90,10 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-10-05 - Resuming cancelled Runs
+
+- Updated the Run Detail contract so resume visibility follows the server-owned `resumable` flag for paused Runs and scheduler-state-backed cancelled Runs.
+
 ### 2026-10-04 - Chat workspace
 
 - Replaced the embedded Chat Bot specification with the `/chat` page, Web channel, Feishu channel configuration, server-owned conversation history and complete stored evidence.

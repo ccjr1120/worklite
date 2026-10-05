@@ -7,7 +7,7 @@
   },
   "providers": {
     "title": "模型提供商",
-    "description": "自定义请求头仅可写入。修改 Provider 可能影响 Chat Bot 和未来的 Workflow 运行。",
+    "description": "自定义请求头仅可写入。修改 Provider 可能影响 Chat 和未来的 Workflow 运行。",
     "create": "创建提供商",
     "columns": {
       "provider": "提供商",
@@ -26,7 +26,7 @@
     "openActivity": "查看 {{provider}} 的表现和请求",
     "empty": {
       "title": "还没有模型提供商",
-      "description": "添加 Provider，使 Chat Bot 和 Workflow Agent 节点可以使用模型。"
+      "description": "添加 Provider，使 Chat 和 Workflow Agent 节点可以使用模型。"
     },
     "noMatches": {
       "title": "没有匹配的提供商",

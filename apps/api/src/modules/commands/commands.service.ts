@@ -12,11 +12,27 @@ type CommandEventListener = (event: CommandEventView) => void;
 
 export type CommandReservation = (transaction: Database, commandId: string) => void;
 
+type StdioProcessOptions = {
+  argv: readonly string[];
+  env: NodeJS.ProcessEnv;
+  onEvent: CommandEventListener;
+  started: (child: ChildProcess) => void;
+  failed: (error: Error) => void;
+};
+
+export type CommandStdioProcess = {
+  executionId: string;
+  write(data: string): Promise<void>;
+  close(): Promise<void>;
+  completion: Promise<CommandExecutionView>;
+};
+
 @Injectable()
 export class CommandsService {
   private readonly activeProcesses = new Map<string, ChildProcess>();
   private readonly completionPromises = new Map<string, Promise<CommandExecutionView>>();
   private readonly pendingStdin = new Map<string, string>();
+  private readonly stdioProcesses = new Map<string, StdioProcessOptions>();
   private readonly cancellationRequested = new Set<string>();
   private readonly listeners = new Set<CommandEventListener>();
 
@@ -40,11 +56,40 @@ export class CommandsService {
     return this.createInternal(command, undefined, cwd, reservation);
   }
 
+  // Trusted integration transport, never exposed as a browser command API.
+  async openStdioProcess(
+    argv: readonly string[],
+    cwd: string,
+    env: NodeJS.ProcessEnv,
+    onEvent: CommandEventListener,
+  ): Promise<CommandStdioProcess> {
+    if (!argv[0]) throw new BadRequestException('A process executable is required.');
+    let started!: (child: ChildProcess) => void;
+    let failed!: (error: Error) => void;
+    const ready = new Promise<ChildProcess>((resolve, reject) => { started = resolve; failed = reject; });
+    void ready.catch(() => undefined);
+    const options = { argv, env, onEvent, started, failed };
+    const execution = await this.createInternal(argv.map(shellQuote).join(' '), undefined, cwd, undefined, options);
+    const completion = this.waitForCompletion(execution.id);
+    void completion.then(() => failed(new Error('The stdio process has stopped.')), failed);
+    return {
+      executionId: execution.id,
+      completion,
+      write: async (data) => {
+        const child = await ready;
+        if (!child.stdin || child.stdin.destroyed) throw new Error('The stdio process input is closed.');
+        await new Promise<void>((resolve, reject) => child.stdin!.write(data, (error) => error ? reject(error) : resolve()));
+      },
+      close: async () => { (await ready).stdin?.end(); },
+    };
+  }
+
   private async createInternal(
     command: string,
     stdinInput?: string,
     cwd?: string,
     reservation?: CommandReservation,
+    stdioProcess?: StdioProcessOptions,
   ): Promise<CommandExecutionView> {
     const id = `cmd_${randomUUID()}`;
     const workingDirectory = resolve(cwd ?? process.cwd());
@@ -52,6 +97,7 @@ export class CommandsService {
       transaction.insert(commandExecutions).values({ id, command, cwd: workingDirectory, status: 'queued' }).run();
       reservation?.(transaction as unknown as Database, id);
     });
+    if (stdioProcess) this.stdioProcesses.set(id, stdioProcess);
     await this.persistEvent(id, 'lifecycle', 'Command queued.');
     return this.dispatch(id, stdinInput);
   }
@@ -59,7 +105,10 @@ export class CommandsService {
   private dispatch(commandId: string, stdinInput?: string): Promise<CommandExecutionView> {
     const completion = Promise.resolve()
       .then(() => this.execute(commandId))
-      .finally(() => this.completionPromises.delete(commandId));
+      .finally(() => {
+        this.completionPromises.delete(commandId);
+        this.stdioProcesses.delete(commandId);
+      });
     this.completionPromises.set(commandId, completion);
     if (stdinInput !== undefined) this.pendingStdin.set(commandId, stdinInput);
     return this.get(commandId);
@@ -152,22 +201,22 @@ export class CommandsService {
       .set({ status: 'running', startedAt })
       .where(and(eq(commandExecutions.id, commandId), eq(commandExecutions.status, 'queued')))
       .returning();
-    if (!claimed) return this.get(commandId);
+    if (!claimed) {
+      this.stdioProcesses.get(commandId)?.failed(new Error('The stdio process was cancelled before startup.'));
+      return this.get(commandId);
+    }
 
     await this.persistEvent(commandId, 'lifecycle', 'Command started.');
     const stdinInput = this.pendingStdin.get(commandId);
     this.pendingStdin.delete(commandId);
-    const child = spawn('/bin/sh', ['-lc', claimed.command], {
+    const stdioProcess = this.stdioProcesses.get(commandId);
+    const child = spawn(stdioProcess?.argv[0] ?? '/bin/sh', stdioProcess ? [...stdioProcess.argv.slice(1)] : ['-lc', claimed.command], {
       cwd: claimed.cwd,
-      env: process.env,
+      env: stdioProcess ? { ...process.env, ...stdioProcess.env } : process.env,
       detached: true,
-      stdio: [stdinInput === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      stdio: [stdioProcess || stdinInput !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     });
     this.activeProcesses.set(commandId, child);
-    if (child.pid) await this.db.update(commandExecutions).set({ pid: child.pid }).where(eq(commandExecutions.id, commandId));
-    if (stdinInput !== undefined && child.stdin) {
-      child.stdin.end(stdinInput);
-    }
 
     const stdoutDecoder = new StringDecoder('utf8');
     const stderrDecoder = new StringDecoder('utf8');
@@ -178,6 +227,10 @@ export class CommandsService {
     };
     child.stdout?.on('data', (chunk: Buffer) => enqueue('stdout', stdoutDecoder.write(chunk)));
     child.stderr?.on('data', (chunk: Buffer) => enqueue('stderr', stderrDecoder.write(chunk)));
+    child.stdin?.on('error', (error) => stdioProcess?.failed(error));
+    stdioProcess?.started(child);
+    if (stdinInput !== undefined) child.stdin?.end(stdinInput);
+    if (child.pid) this.db.update(commandExecutions).set({ pid: child.pid }).where(eq(commandExecutions.id, commandId)).run();
 
     if (this.cancellationRequested.has(commandId) && child.pid) terminateProcessGroup(child.pid, 'SIGTERM');
 
@@ -193,6 +246,7 @@ export class CommandsService {
         const cancelled = this.cancellationRequested.has(commandId);
         const status = cancelled ? 'cancelled' : spawnError || exitCode !== 0 ? 'failed' : 'succeeded';
         if (spawnError) await this.persistEvent(commandId, 'stderr', `${spawnError.message}\n`);
+        if (spawnError) stdioProcess?.failed(spawnError);
         await this.db.update(commandExecutions).set({
           status,
           exitCode,
@@ -213,8 +267,13 @@ export class CommandsService {
   private async persistEvent(commandId: string, type: 'stdout' | 'stderr' | 'lifecycle', data: string): Promise<void> {
     const [row] = await this.db.insert(commandExecutionEvents).values({ commandId, type, data }).returning();
     const event = toEventView(row);
+    this.stdioProcesses.get(commandId)?.onEvent(event);
     for (const listener of this.listeners) listener(event);
   }
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\"'\"'")}'`;
 }
 
 function toView(row: typeof commandExecutions.$inferSelect): CommandExecutionView {

@@ -604,6 +604,7 @@ function ChatWorkspace() {
       return;
     }
     if (event.key === 'Enter' && !event.shiftKey) {
+      if (event.nativeEvent.isComposing) return;
       event.preventDefault();
       if (mentionMenuOpen) {
         const workflow = mentionMatches.find((item) => `mention:${item.id}` === activeValue) ?? mentionMatches[0];

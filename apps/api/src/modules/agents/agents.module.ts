@@ -10,6 +10,7 @@ import { BuiltinAgentToolsService } from './builtin-agent-tools.service';
 import { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
 import { McpServersModule } from '../mcp-servers/mcp-servers.module';
 import { PluginsModule } from '../plugins/plugins.module';
+import { CodexAppServerService } from './codex-app-server.service';
 
-@Module({ imports: [WorkspaceModule, SkillsModule, CommandsModule, McpServersModule, forwardRef(() => PluginsModule)], controllers: [AgentsController], providers: [AgentsService, AgentExecutionsService, McpRuntimeService, BuiltinAgentToolsService, IsolatedAgentInvocationService], exports: [AgentsService, AgentExecutionsService, IsolatedAgentInvocationService] })
+@Module({ imports: [WorkspaceModule, SkillsModule, CommandsModule, McpServersModule, forwardRef(() => PluginsModule)], controllers: [AgentsController], providers: [AgentsService, AgentExecutionsService, McpRuntimeService, BuiltinAgentToolsService, IsolatedAgentInvocationService, CodexAppServerService], exports: [AgentsService, AgentExecutionsService, IsolatedAgentInvocationService] })
 export class AgentsModule {}

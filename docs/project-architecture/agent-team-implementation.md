@@ -65,6 +65,8 @@ A server-owned coordinator handles dependencies and task transitions. A role can
 
 Each role invocation receives its own context, including the original goal, project rules, relevant accepted documents, and its assigned task. Models may be shared or selected individually. Cross-provider review is an option rather than a prerequisite.
 
+The 2026-10-05 confirmed increment runs the Developer role through the Codex plugin App Server over local stdio. New immutable TeamVersions capture its executable arguments, while planning and independent review retain the existing model loop. Codex requires version 0.160.0 or later, uses the captured public model through the current Gateway Responses entry, and delegates project operations to the captured WorkLite tools and operation journal. Native environments and personal capabilities are disabled; exact-command grants, cancellation and uncertain-effect recovery stay Team-owned. Older developer snapshots require a new Run, without migration or an alternate execution backend. The Run read includes backend configuration and persisted activity references; no new Web controls or deployment operation is part of this increment.
+
 ### 4.2 Execution Flow
 
 ```mermaid

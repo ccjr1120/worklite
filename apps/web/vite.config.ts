@@ -49,7 +49,7 @@ export default defineConfig({
     port: 23390,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:23391',
+        target: `http://127.0.0.1:${process.env.API_PORT || '23391'}`,
         changeOrigin: true,
       },
     },

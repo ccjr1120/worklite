@@ -16,6 +16,8 @@ import { BuiltinAgentToolsService, selectBuiltinToolNames } from './builtin-agen
 import type { CommandReservation } from '../commands/commands.service';
 import { McpRuntimeService, type McpRuntimeTool } from './mcp-runtime.service';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
+import { CODEX_CLI_PLUGIN_ID, PluginsService } from '../plugins/plugins.service';
+import { CodexAppServerService, type CodexBackendActivity } from './codex-app-server.service';
 
 type AgentInvocationSkill = {
   id: string;
@@ -86,6 +88,7 @@ export type AgentInvocationOperationJournal = {
 type IsolatedAgentInvocationRequest = {
   workspaceId: string;
   publicModelId: string;
+  codexServerCommandArguments?: readonly string[];
   systemPrompt: string;
   context: unknown;
   skills: readonly AgentInvocationSkill[];
@@ -98,6 +101,7 @@ type IsolatedAgentInvocationRequest = {
   readProcessReference?: (path: string) => Promise<string>;
   signal: AbortSignal;
   onTextDelta?: (delta: string) => void | Promise<void>;
+  onBackendEvent?: (activity: CodexBackendActivity) => void | Promise<void>;
   onModelRound?: (round: WorkflowAgentRound) => void | Promise<void>;
   onSkillScript?: (activity: AgentInvocationSkillActivity) => void | Promise<void>;
   onMcpCall?: (activity: AgentInvocationMcpActivity) => void | Promise<void>;
@@ -143,7 +147,13 @@ export class IsolatedAgentInvocationService {
     private readonly skillScripts: SkillScriptRunnerService,
     private readonly mcpRuntime: McpRuntimeService,
     private readonly builtinTools: BuiltinAgentToolsService,
+    private readonly plugins: PluginsService,
+    private readonly codexAppServer: CodexAppServerService,
   ) {}
+
+  async captureDeveloperExecution(): Promise<{ kind: 'codex_app_server'; commandArguments: string[] }> {
+    return { kind: 'codex_app_server', commandArguments: await this.plugins.commandArguments(CODEX_CLI_PLUGIN_ID) };
+  }
 
   async execute(request: IsolatedAgentInvocationRequest): Promise<string> {
     const assignedSkills = request.skills.map((skill) => ({
@@ -189,6 +199,26 @@ export class IsolatedAgentInvocationService {
     const mcpTools = await this.mcpRuntime.discover(request.mcpRuntimes, request.signal);
     const runtime = await this.resources.publicModelRuntime(request.workspaceId, request.publicModelId);
     const contextText = typeof request.context === 'string' ? request.context : JSON.stringify(request.context);
+    if (request.codexServerCommandArguments) {
+      if (request.role !== 'developer' || !request.operation || !request.projectDirectory) {
+        throw new BadRequestException('Codex App Server is available only for journaled Team developer tasks.');
+      }
+      if (runtime.protocol !== 'openai/responses' && runtime.protocol !== 'codex/responses') {
+        throw new BadRequestException('The Team developer model must use an openai/responses or codex/responses Provider for Codex App Server.');
+      }
+      return this.codexAppServer.execute({
+        commandArguments: request.codexServerCommandArguments,
+        publicModelId: request.publicModelId,
+        systemPrompt: effectiveSystemPrompt,
+        input: contextText?.trim() ? contextText : 'No input was provided.',
+        tools: [...builtinDefinitions, ...mcpTools],
+        signal: request.signal,
+        correlation: request.correlation,
+        onTextDelta: request.onTextDelta,
+        onEvent: request.onBackendEvent,
+        executeTool: (call, signal) => this.executeTool({ ...request, signal }, assignedSkills, mcpTools, new Set(builtinDefinitions.map((definition) => definition.name)), call),
+      });
+    }
     const maxRounds = Math.min(request.limits?.maxToolRounds ?? MAX_TOOL_ROUNDS, MAX_TOOL_ROUNDS);
     const result = await createModelGateway().runWorkflowAgent({
       provider: runtime.provider,
@@ -219,9 +249,11 @@ export class IsolatedAgentInvocationService {
     selectedBuiltinToolNames: ReadonlySet<string>,
     call: WorkflowAgentToolCall,
   ): Promise<WorkflowAgentToolResult> {
+    request.signal.throwIfAborted();
     this.validateProcessReference(request, call);
     this.validateTeamToolAuthorization(request, call);
-    if (!request.operation) {
+    const freshCodexRead = request.codexServerCommandArguments && ['read', 'glob', 'grep'].includes(call.toolName);
+    if (!request.operation || freshCodexRead) {
       return (await this.runToolEffect(request, assignedSkills, mcpTools, selectedBuiltinToolNames, call)).output;
     }
 
@@ -285,6 +317,7 @@ export class IsolatedAgentInvocationService {
           request.operation!.journal.reserveOperation(journalRequest, commandId, transaction);
         }
         operationReserved = true;
+        effectDispatched = true;
       }
       : undefined;
 
@@ -369,6 +402,7 @@ export class IsolatedAgentInvocationService {
       });
       const cancel = () => { void this.skillScripts.cancel(started.id).catch(() => undefined); };
       request.signal.addEventListener('abort', cancel, { once: true });
+      if (request.signal.aborted) cancel();
       try {
         const completed = await this.skillScripts.wait(started.id);
         request.signal.throwIfAborted();
@@ -402,6 +436,7 @@ export class IsolatedAgentInvocationService {
       });
       const cancel = () => { void this.builtinTools.cancel(started.id).catch(() => undefined); };
       request.signal.addEventListener('abort', cancel, { once: true });
+      if (request.signal.aborted) cancel();
       try {
         const completed = await this.builtinTools.wait(started.id);
         request.signal.throwIfAborted();
