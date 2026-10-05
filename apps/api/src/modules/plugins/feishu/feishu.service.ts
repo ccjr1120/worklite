@@ -11,7 +11,7 @@ import { AgentTeamConversationService } from '../../agent-teams/agent-team-conve
 import { AgentTeamsService } from '../../agent-teams/agent-teams.service';
 import { RunsService } from '../../runs/runs.service';
 import { PluginsService } from '../plugins.service';
-import { renderCard, statusText, type CardButton, type CardState, type FeishuAction, type SavedCard } from './feishu-cards';
+import { renderCard, statusText, type CardButton, type CardState, type CardTransport, type CardUpdate, type FeishuAction, type FeishuCard, type SavedCard } from './feishu-cards';
 import { runtimeAdmissionClosed, runtimeWritesFrozen } from '../../../infrastructure/runtime-upgrade-state';
 import { UpgradesService } from '../../upgrades/upgrades.service';
 
@@ -348,9 +348,11 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       if (!reference.completionStatus && (execution.status === 'running' || execution.status === 'waiting_for_input')) state.buttons.push({ label: '停止本轮对话', action: { kind: 'control', domain: 'conversation', runId: execution.id, action: 'cancel' } });
       if ((!reference.completionStatus || reference.completionStatus === 'failed') && execution.status === 'failed') state.buttons.push({ label: '重试本轮对话', action: { kind: 'control', domain: 'conversation', runId: execution.id, action: 'retry' } });
       state.replyContent = state.content;
+      state.streaming = executionStatus === 'running' && execution.phase === 'model' && response.length > 0;
       if (Buffer.byteLength(state.content) > 20_000) {
         if (terminal) files.push({ id: `reply:${submission.id}:${digest(state.content)}`, name: 'chat-reply.md', content: state.content });
         state.content = terminal ? '完整回复见 Markdown 文件。' : '正在生成较长回复，完成后将发送完整文件。';
+        state.streaming = false;
       }
     } else if (reference?.kind === 'team') {
       const conversation = await this.conversations.getConversation(request, 'personal', reference.teamId);
@@ -370,6 +372,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       } else {
         const run = await this.teams.getRun(request, 'personal', intake.runId);
         state.status = statusText[run.status] ?? run.status;
+        state.details = run.tasks.map((task) => `- ${task.taskKey} · ${statusText[task.status] ?? task.status}`).join('\n');
         const active = [...run.tasks].reverse().find((task) => task.retryable || ['running', 'waiting_for_input', 'waiting_for_recovery'].includes(task.status));
         state.content = `${run.intent}\n\n${active ? `当前任务：${active.taskKey}` : ''}`;
         if (run.status === 'failed' && active?.error) state.content += `\n\n${active.error}`;
@@ -394,6 +397,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       if (run.pendingAction && (run.pendingAction.status === 'expired' || run.pendingAction.expiresAt && Date.parse(run.pendingAction.expiresAt) <= Date.now())) run = await this.runs.refreshPendingAction(request, 'personal', run.id);
       state.title = `Chat · ${run.workflowName}`;
       state.status = statusText[run.status] ?? run.status;
+      state.details = run.nodeRuns?.map((node) => `- 步骤 ${node.position + 1} · ${statusText[node.status] ?? node.status}`).join('\n');
       state.content = run.currentStep ? `当前步骤：${run.currentStep}` : submission.message;
       const failed = run.nodeRuns?.find((node) => node.retryable);
       if (run.status === 'failed' && failed?.error) state.content += `\n\n${failed.error}`;
@@ -422,36 +426,163 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
     }
     const saved = renderCard(submission.id, state);
     const fingerprint = digest(JSON.stringify(saved));
-    if (fingerprint === submission.deliveryFingerprint) {
+    const transport = (submission.renderedCard as SavedCard | null)?.transport;
+    const renewStream = saved.card.config.streaming_mode && transport?.streamingStartedAt != null
+      && Date.now() - transport.streamingStartedAt >= 9 * 60_000;
+    const cardUnchanged = !transport || JSON.stringify(saved.card) === JSON.stringify(transport.card);
+    if (fingerprint === submission.deliveryFingerprint && cardUnchanged && !transport?.pending && !renewStream) {
       if (terminal) await this.db.update(chatSubmissions).set({ settled: true }).where(eq(chatSubmissions.id, submission.id));
       return;
     }
-    // Persist the action allow-list before the message can be clicked.
-    await this.db.update(chatSubmissions).set({ renderedCard: saved as unknown as Json }).where(eq(chatSubmissions.id, submission.id));
+    await this.deliverCard(submission, saved, renewStream);
+    await this.db.update(chatSubmissions).set({ deliveryFingerprint: fingerprint, settled: terminal, updatedAt: new Date() }).where(eq(chatSubmissions.id, submission.id));
+  }
+
+  private async persistCard(submissionId: string, saved: SavedCard, transport: CardTransport): Promise<void> {
+    await this.db.update(chatSubmissions).set({ renderedCard: { ...saved, transport } as unknown as Json }).where(eq(chatSubmissions.id, submissionId));
+  }
+
+  private async deliverCard(submission: Submission, saved: SavedCard, renewStream: boolean): Promise<void> {
     const client = this.client;
-    if (!client) return;
+    if (!client) throw new Error('Feishu is disconnected.');
+    let transport = (submission.renderedCard as SavedCard | null)?.transport;
     let messageId = submission.outputMessageId;
-    const operation = messageId ? 'card.update' : 'card.create';
-    let platform: { code?: number; message?: string } | null = null;
-    let reason = '飞书卡片投递失败。';
-    try {
-      if (messageId) {
-        const result = await client.im.v1.message.patch({ path: { message_id: messageId }, data: { content: JSON.stringify(saved.card) } });
+    // Historical message cards have no CardKit identity. Do not convert them or send a second reply.
+    if (messageId && !transport) {
+      const reason = '此卡片来自旧版投递方式，请发送新请求以使用新版卡片。';
+      await this.recordDelivery(submission.chatId!, `${submission.id}:legacy-card`, 'failed', { operation: 'card.update', messageId }, reason);
+      throw new Error(reason);
+    }
+    if (!transport) {
+      let reason = '飞书卡片创建暂时失败，恢复后将继续投递。';
+      let platform: { code?: number; message?: string } | null = null;
+      try {
+        const result = await client.cardkit.v1.card.create({ data: { type: 'card_json', data: JSON.stringify(saved.card) } });
         platform = { code: result.code, message: result.msg };
-        if (result.code) { reason = `飞书拒绝更新卡片（${result.code}）：${result.msg ?? ''}`; throw new Error(reason); }
-      } else {
-        const result = await client.im.v1.message.create({ params: { receive_id_type: 'chat_id' }, data: { receive_id: chatId, msg_type: 'interactive', content: JSON.stringify(saved.card), uuid: digest(`card:${submission.id}`).slice(0, 32) } });
+        if (result.code) { reason = `飞书拒绝创建卡片（${result.code}）：${result.msg ?? ''}`; throw new Error(reason); }
+        if (!result.data?.card_id) { reason = '飞书接受了创建请求，但未返回卡片 ID。'; throw new Error(reason); }
+        transport = { cardId: result.data.card_id, sequence: 0, card: saved.card, streamingStartedAt: saved.card.config.streaming_mode ? Date.now() : null };
+        // Preserve the entity before any later send or receipt write can be interrupted.
+        await this.persistCard(submission.id, saved, transport);
+        await this.recordDelivery(submission.chatId!, `${submission.id}:entity`, 'done', { operation: 'card.create', cardId: transport.cardId, platform, card: saved.card });
+      } catch (error) {
+        await this.recordDelivery(submission.chatId!, `${submission.id}:entity`, 'failed', { operation: 'card.create', platform, card: saved.card }, reason);
+        throw error;
+      }
+    }
+    // Persist identity and action allow-list before sending or updating clickable content.
+    await this.persistCard(submission.id, saved, transport);
+    if (!messageId) {
+      let reason = '飞书卡片发送暂时失败，恢复后将继续投递。';
+      let platform: { code?: number; message?: string } | null = null;
+      try {
+        const result = await client.im.v1.message.create({ params: { receive_id_type: 'chat_id' }, data: {
+          receive_id: submission.chatId!, msg_type: 'interactive',
+          content: JSON.stringify({ type: 'card', data: { card_id: transport.cardId } }),
+          uuid: digest(`card:${submission.id}`).slice(0, 32),
+        } });
         platform = { code: result.code, message: result.msg };
         if (result.code) { reason = `飞书拒绝发送卡片（${result.code}）：${result.msg ?? ''}`; throw new Error(reason); }
         if (!result.data?.message_id) { reason = '飞书接受了发送请求，但未返回消息 ID。'; throw new Error(reason); }
         messageId = result.data.message_id;
+        await this.db.update(chatSubmissions).set({ outputMessageId: messageId }).where(eq(chatSubmissions.id, submission.id));
+        await this.recordDelivery(submission.chatId!, `${submission.id}:message`, 'done', {
+          operation: 'card.send', messageId, cardId: transport.cardId, platform, card: transport.card,
+        });
+      } catch (error) {
+        await this.recordDelivery(submission.chatId!, `${submission.id}:message`, 'failed', { operation: 'card.send', cardId: transport.cardId, platform, card: transport.card }, reason);
+        throw error;
       }
-      await this.recordDelivery(chatId, `${submission.id}:${fingerprint}`, 'done', { operation, submissionId: submission.id, messageId, platform, card: saved.card });
+    }
+    submission.outputMessageId = messageId;
+    await this.flushCardUpdate(submission, saved, transport);
+    const desired = saved.card;
+    // Close before interaction changes, or explicitly reopen the platform's streaming window.
+    if (transport.card.config.streaming_mode && (!desired.config.streaming_mode || renewStream)) {
+      const config = { ...transport.card.config, streaming_mode: false };
+      await this.updateCard(submission, saved, transport, 'settings', JSON.stringify({ config }), { ...transport.card, config }, undefined, null);
+    }
+    const current = transport.card;
+    const sameStructure = JSON.stringify(current.header) === JSON.stringify(desired.header)
+      && JSON.stringify(current.body.elements.map((element) => [element.element_id, element.tag]))
+        === JSON.stringify(desired.body.elements.map((element) => [element.element_id, element.tag]));
+    if (!sameStructure) {
+      await this.updateCard(submission, saved, transport, 'card', JSON.stringify(desired), desired, undefined,
+        desired.config.streaming_mode ? transport.streamingStartedAt ?? Date.now() : null);
+      return;
+    }
+    if (JSON.stringify(transport.card.config) !== JSON.stringify(desired.config) || renewStream) {
+      await this.updateCard(submission, saved, transport, 'settings', JSON.stringify({ config: desired.config }),
+        { ...transport.card, config: desired.config }, undefined,
+        desired.config.streaming_mode ? renewStream ? Date.now() : transport.streamingStartedAt ?? Date.now() : null);
+    }
+    for (const element of desired.body.elements) {
+      const previous = transport.card.body.elements.find((item) => item.element_id === element.element_id);
+      if (JSON.stringify(previous) === JSON.stringify(element)) continue;
+      const next = { ...transport.card, body: { elements: transport.card.body.elements.map((item) => item.element_id === element.element_id ? element : item) } };
+      if (element.element_id === 'reply' && desired.config.streaming_mode) {
+        await this.updateCard(submission, saved, transport, 'content', String(element.content), next, 'reply');
+      } else if (element.element_id === 'details') {
+        // Replace only the inner text, preserving the reader's native panel expansion.
+        const detail = (element.elements as Json[])[0];
+        await this.updateCard(submission, saved, transport, 'element', JSON.stringify(detail), next, 'task_details');
+      } else {
+        await this.updateCard(submission, saved, transport, 'element', JSON.stringify(element), next, String(element.element_id));
+      }
+    }
+  }
+
+  private async updateCard(submission: Submission, saved: SavedCard, transport: CardTransport,
+    kind: CardUpdate['kind'], data: string, card: FeishuCard, elementId?: string,
+    streamingStartedAt = transport.streamingStartedAt): Promise<void> {
+    const sequence = transport.sequence + 1;
+    transport.sequence = sequence;
+    transport.pending = { kind, data, card, elementId, sequence, streamingStartedAt,
+      uuid: digest(`${submission.id}:${transport.cardId}:${sequence}`).slice(0, 32) };
+    // Save the exact request first. A reconnect retries this UUID, payload and sequence before newer work.
+    await this.persistCard(submission.id, saved, transport);
+    await this.flushCardUpdate(submission, saved, transport);
+  }
+
+  private async flushCardUpdate(submission: Submission, saved: SavedCard, transport: CardTransport): Promise<void> {
+    const pending = transport.pending;
+    if (!pending) return;
+    const client = this.client;
+    if (!client) throw new Error('Feishu is disconnected.');
+    const { sequence, uuid } = pending;
+    const path = { card_id: transport.cardId };
+    const elementPath = { ...path, element_id: pending.elementId! };
+    let reason = '飞书卡片更新暂时失败，恢复后将继续投递。';
+    let platform: { code?: number; msg?: string } | null = null;
+    let rejected = false;
+    const key = `${submission.id}:${transport.cardId}:${sequence}`;
+    const payload = { operation: `card.${pending.kind}`, cardId: transport.cardId, messageId: submission.outputMessageId, request: pending };
+    try {
+      const result = pending.kind === 'settings'
+        ? await client.cardkit.v1.card.settings({ path, data: { settings: pending.data, sequence, uuid } })
+        : pending.kind === 'card'
+          ? await client.cardkit.v1.card.update({ path, data: { card: { type: 'card_json', data: pending.data }, sequence, uuid } })
+          : pending.kind === 'content'
+            ? await client.cardkit.v1.cardElement.content({ path: elementPath, data: { content: pending.data, sequence, uuid } })
+            : await client.cardkit.v1.cardElement.update({ path: elementPath, data: { element: pending.data, sequence, uuid } });
+      platform = { code: result.code, msg: result.msg };
+      if (result.code) { rejected = true; reason = `飞书拒绝更新卡片（${result.code}）：${result.msg ?? ''}`; throw new Error(reason); }
+      await this.recordDelivery(submission.chatId!, key, 'done', { ...payload, platform });
+      transport.card = pending.card;
+      transport.streamingStartedAt = pending.streamingStartedAt;
+      delete transport.pending;
+      await this.persistCard(submission.id, saved, transport);
     } catch (error) {
-      await this.recordDelivery(chatId, `${submission.id}:${fingerprint}`, 'failed', { operation, submissionId: submission.id, messageId, platform, card: saved.card }, reason);
+      await this.recordDelivery(submission.chatId!, key, 'failed', { ...payload, platform }, reason);
+      // A platform rejection is a known non-effect. Keep its sequence consumed locally;
+      // the next delivery may renew an expired stream and send current content with a new sequence.
+      // Unknown transport outcomes retain the exact pending request for idempotent retry.
+      if (rejected) {
+        delete transport.pending;
+        await this.persistCard(submission.id, saved, transport);
+      }
       throw error;
     }
-    await this.db.update(chatSubmissions).set({ outputMessageId: messageId, deliveryFingerprint: fingerprint, settled: terminal, updatedAt: new Date() }).where(eq(chatSubmissions.id, submission.id));
   }
 
   private async recordDelivery(chatId: string, key: string, status: 'done' | 'failed', payload: Json, error: string | null = null) {

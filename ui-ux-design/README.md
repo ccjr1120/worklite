@@ -39,7 +39,7 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 - Skills: [List](pages/skills/list/DESIGN.md), [Editor](pages/skills/editor/DESIGN.md)
 - MCP servers: [List](pages/mcp-servers/list/DESIGN.md), [Configuration](pages/mcp-servers/configuration/DESIGN.md)
 - Plugins: [List](pages/plugins/list/DESIGN.md), [Configuration](pages/plugins/configuration/DESIGN.md), excluding communication-channel setup, which lives in Chat
-- External chat: [Feishu](surfaces/external-chat/feishu/DESIGN.md), including capability updates and release-bound upgrade confirmation
+- External chat: [Feishu](surfaces/external-chat/feishu/DESIGN.md), including native streamed reply cards, collapsed task details, capability updates and release-bound upgrade confirmation
 - Artifacts: [Run artifacts](surfaces/workflow-run/artifacts/DESIGN.md), [Details](pages/artifacts/details/DESIGN.md)
 - Settings: [Usage](pages/settings/usage/DESIGN.md), [Audit log](pages/settings/audit-log/DESIGN.md), [Appearance](pages/settings/appearance/DESIGN.md)
 
@@ -89,6 +89,10 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-10-06 - Feishu native card presentation
+
+- Defined native typewriter replies, independent status/body updates and collapsed Team/Workflow execution details in the Feishu surface; kept question and recovery actions visible.
 
 ### 2026-10-05 - Resuming cancelled Runs
 
