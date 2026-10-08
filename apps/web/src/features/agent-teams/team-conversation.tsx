@@ -3,18 +3,13 @@ import { Link } from '@tanstack/react-router';
 import {
   ArrowDown,
   Ban,
-  CheckCircle2,
-  CircleDashed,
-  CircleHelp,
   Download,
   FileText,
   LoaderCircle,
-  MessageCircleQuestion,
   Pause,
   Play,
   RefreshCw,
   X,
-  XCircle,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -29,7 +24,7 @@ import { agentTeamConversationQueryKey, useAgentTeamConversationQuery, useAgentT
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
-import { Badge } from '@/components/ui/badge';
+import { StatusBadge, toStatusKey } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -71,28 +66,10 @@ function isAgentTeamMode(value: string): value is AgentTeamMode {
 type ConversationUiStatus = AgentTeamRunStatus | AgentTeamTaskAttemptStatus;
 type RecoveryDecision = 'adopt_command' | 'mark_failed' | 'replay';
 
-const STATUS_META: Record<ConversationUiStatus, { variant: 'neutral' | 'brand' | 'success' | 'warning' | 'danger'; icon: typeof CheckCircle2 }> = {
-  queued: { variant: 'neutral', icon: CircleDashed },
-  running: { variant: 'brand', icon: LoaderCircle },
-  waiting_for_input: { variant: 'warning', icon: MessageCircleQuestion },
-  paused: { variant: 'warning', icon: Pause },
-  succeeded: { variant: 'success', icon: CheckCircle2 },
-  failed: { variant: 'danger', icon: XCircle },
-  cancelled: { variant: 'neutral', icon: Ban },
-  waiting_for_recovery: { variant: 'warning', icon: CircleHelp },
-  completed: { variant: 'success', icon: CheckCircle2 },
-};
-
+// Team statuses keep their own wording but share the product-wide status presentation.
 function ConversationStatusBadge({ status }: { status: ConversationUiStatus }) {
   const { t } = useTranslation('agentTeams');
-  const meta = STATUS_META[status];
-  const Icon = meta.icon;
-  return (
-    <Badge variant={meta.variant}>
-      <Icon className={cn('size-3', status === 'running' && 'motion-safe:animate-spin')} aria-hidden="true" />
-      {t(`run.status.${status}`)}
-    </Badge>
-  );
+  return <StatusBadge key={status} status={toStatusKey(status)} label={t(`run.status.${status}`)} />;
 }
 
 function runStateText(
@@ -255,7 +232,7 @@ function DocumentViewer({ documentId, onClose }: { documentId: string; onClose: 
   return (
     <section
       className={cn(
-        'min-w-0 rounded-lg border border-border bg-surface p-4',
+        'min-w-0 rounded-xl border border-border bg-surface p-4 shadow-xs',
         'fixed inset-4 z-40 overflow-hidden flex flex-col md:static md:inset-auto md:z-auto',
       )}
       aria-labelledby="agent-team-document-title"
@@ -634,7 +611,7 @@ export function TeamConversation({ teamId }: { teamId: string }) {
       </section>
       {hasContextualInspector ? <aside className="min-w-0 space-y-4">
         {activeIntake?.status === 'queued' ? (
-          <section className="rounded-lg border border-border bg-surface p-4" aria-labelledby="agent-team-queued-intake">
+          <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-queued-intake">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 id="agent-team-queued-intake" className="text-sm font-semibold">{t('conversation.queuedTask')}</h2>
               <ConversationStatusBadge status="queued" />
@@ -644,14 +621,14 @@ export function TeamConversation({ teamId }: { teamId: string }) {
           </section>
         ) : null}
         {activeRun ? (
-          <section className="rounded-lg border border-border bg-surface p-4" aria-labelledby="agent-team-run-state">
+          <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-run-state">
             <h2 id="agent-team-run-state" className="text-sm font-semibold">{t('conversation.run')}</h2>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <ConversationStatusBadge status={activeRun.status} />
               <Link
                 to="/agent-team-runs/$runId"
                 params={{ runId: activeRun.runId }}
-                className="text-[13px] font-medium text-brand hover:underline"
+                className="text-[13px] font-medium text-brand-text hover:underline"
               >
                 {t('conversation.openRun')}
               </Link>
@@ -696,7 +673,7 @@ export function TeamConversation({ teamId }: { teamId: string }) {
           </section>
         ) : null}
         {pendingInput?.kind === 'operation_recovery' ? (
-          <section className="rounded-lg border border-border bg-surface p-4" aria-labelledby="agent-team-conversation-recovery">
+          <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-conversation-recovery">
             <h2 id="agent-team-conversation-recovery" className="text-sm font-semibold">{t('recovery.title')}</h2>
             <p className="mt-2 text-[13px] whitespace-pre-wrap break-words">{pendingInput.question}</p>
             <div className="mt-3">

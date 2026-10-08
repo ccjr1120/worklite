@@ -75,7 +75,7 @@ function SkillListPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-6 py-6">
+    <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome
         crumbs={[{ label: t('title') }]}
       />
@@ -89,11 +89,11 @@ function SkillListPage() {
         actions={
           <div className="flex items-center gap-2">
             <input ref={folderInput} type="file" multiple className="sr-only" onChange={(event) => void handleFolderChange(event)} {...({ webkitdirectory: '' } as Record<string, string>)} />
-            <Button type="button" variant="secondary" size="compact" onClick={() => folderInput.current?.click()} disabled={importSkill.isPending}>
+            <Button type="button" variant="secondary" onClick={() => folderInput.current?.click()} disabled={importSkill.isPending}>
               <FolderUp className="size-4" />
               {importSkill.isPending ? t('import.importing') : t('import.action')}
             </Button>
-            <Button asChild size="compact">
+            <Button asChild>
             <Link to="/skills/$skillId" params={{ skillId: 'new' }}>
               <Plus className="size-4" />
               {t('create')}

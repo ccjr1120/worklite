@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { AppLocale } from '@/i18n/locale';
 
 function Metric({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-md border border-border bg-surface p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold tabular-nums">{value}</p></div>;
+  return <div className="rounded-xl border border-border bg-surface p-3 shadow-xs"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold tabular-nums">{value}</p></div>;
 }
 
 function Detail({ label, value }: { label: string; value: string }) {

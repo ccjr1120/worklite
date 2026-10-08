@@ -31,7 +31,7 @@ function StreamingMarkdownView({
         '[&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5',
         '[&_li]:my-1 [&_li]:pl-0.5',
         '[&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground',
-        '[&_a]:text-brand [&_a]:underline [&_a]:underline-offset-2',
+        '[&_a]:text-brand-text [&_a]:underline [&_a]:underline-offset-2',
         '[&_code]:font-mono [&_code]:text-[13px]',
         '[&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:border [&_pre]:border-border [&_pre]:bg-surface-subtle [&_pre]:p-3',
         '[&_table]:text-[13px] [&_th]:font-semibold',

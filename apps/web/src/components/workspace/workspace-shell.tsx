@@ -57,7 +57,7 @@ function WorkspaceShell() {
             showSearch={pathname !== '/chat'}
           />
           <div className="relative min-h-0 flex-1">
-            <main className="h-full overflow-auto">
+            <main className="wl-page h-full overflow-auto">
               <Outlet />
             </main>
           </div>

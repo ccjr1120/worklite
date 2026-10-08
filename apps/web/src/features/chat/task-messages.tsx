@@ -9,6 +9,7 @@ import { MessageResponse } from '@/components/ai-elements/message';
 import { api } from '@/api/client';
 import { queryClient } from '@/lib/query-client';
 import { Button } from '@/components/ui/button';
+import { StatusBadge, toStatusKey } from '@/components/status-badge';
 
 function WorkflowTask({ submission }: { submission: ChatSubmissionView }) {
   const { t } = useTranslation('assistant');
@@ -25,7 +26,7 @@ function WorkflowTask({ submission }: { submission: ChatSubmissionView }) {
   }
   return <div className="space-y-2">
     <TaskLink reference={reference} />
-    {query.data ? <p className="text-[13px] text-muted-foreground">{query.data.workflowName} · {t(`status.${query.data.status}`)}{query.data.currentStep ? ` · ${query.data.currentStep}` : ''}</p> : null}
+    {query.data ? <div className="flex min-w-0 flex-wrap items-center gap-2 text-[13px] text-muted-foreground"><StatusBadge key={query.data.status} status={toStatusKey(query.data.status)} label={t(`status.${query.data.status}`)} /><span className="min-w-0 truncate">{query.data.workflowName}{query.data.currentStep ? ` · ${query.data.currentStep}` : ''}</span></div> : null}
     {query.isError ? <p className="text-[13px] text-danger" role="alert">{t('records.taskLoadFailed')}</p> : null}
     {query.data && ['queued', 'running', 'paused', 'waiting_for_input'].includes(query.data.status) ? <Button variant="secondary" size="compact" onClick={() => void cancel()} disabled={busy}>{busy ? <LoaderCircle className="size-3.5 motion-safe:animate-spin" /> : null}{t('records.cancelTask')}</Button> : null}
     {error ? <p role="alert" className="text-[13px] text-danger">{error}</p> : null}
@@ -36,7 +37,7 @@ function WorkflowTask({ submission }: { submission: ChatSubmissionView }) {
 function TeamRunLink({ runId }: { runId: string }) {
   const { t } = useTranslation('assistant');
   const query = useAgentTeamRunQuery('personal', runId);
-  return <div className="space-y-2"><Link to="/agent-team-runs/$runId" params={{ runId }} className="text-[13px] text-brand underline underline-offset-4">{t('records.openTask')}</Link>{query.data ? <p className="text-[13px] text-muted-foreground">{t(`status.${query.data.status}`)}</p> : null}</div>;
+  return <div className="space-y-2"><Link to="/agent-team-runs/$runId" params={{ runId }} className="text-[13px] text-brand-text underline underline-offset-4">{t('records.openTask')}</Link>{query.data ? <div><StatusBadge key={query.data.status} status={toStatusKey(query.data.status)} label={t(`status.${query.data.status}`)} /></div> : null}</div>;
 }
 
 function TeamTask({ submission }: { submission: ChatSubmissionView }) {
@@ -70,5 +71,5 @@ function UpgradeTask({ jobId }: { jobId: string }) {
 }
 
 export function TaskMessages({ submissions }: { submissions: ChatSubmissionView[] }) {
-  return <>{submissions.filter((submission) => submission.reference && submission.reference.kind !== 'conversation').map((submission) => <section key={submission.id} className="my-4 space-y-3 border-l-2 border-border pl-3"><p className="whitespace-pre-wrap break-words text-sm">{submission.message}</p>{submission.error ? <p className="text-[13px] text-danger" role="alert">{submission.error}</p> : null}{submission.reference?.kind === 'workflow' ? <WorkflowTask submission={submission} /> : submission.reference?.kind === 'team' ? <TeamTask submission={submission} /> : submission.reference?.kind === 'upgrade' ? <UpgradeTask jobId={submission.reference.jobId} /> : typeof submission.renderedCard?.content === 'string' ? <MessageResponse content={submission.renderedCard.content} enabled /> : null}</section>)}</>;
+  return <>{submissions.filter((submission) => submission.reference && submission.reference.kind !== 'conversation').map((submission) => <section key={submission.id} className="wl-enter my-4 space-y-3 rounded-xl border border-border bg-surface p-4 shadow-xs"><p className="whitespace-pre-wrap break-words text-sm">{submission.message}</p>{submission.error ? <p className="text-[13px] text-danger" role="alert">{submission.error}</p> : null}{submission.reference?.kind === 'workflow' ? <WorkflowTask submission={submission} /> : submission.reference?.kind === 'team' ? <TeamTask submission={submission} /> : submission.reference?.kind === 'upgrade' ? <UpgradeTask jobId={submission.reference.jobId} /> : typeof submission.renderedCard?.content === 'string' ? <MessageResponse content={submission.renderedCard.content} enabled /> : null}</section>)}</>;
 }

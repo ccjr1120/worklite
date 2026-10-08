@@ -8,7 +8,7 @@ import { chatConversationsQueryKey, useAgentQuery, useChatConversationQuery, use
 import { Conversation, ConversationContent } from '@/components/ai-elements/conversation';
 import { useLocale } from '@/components/locale-provider';
 import { useTheme } from '@/components/theme-provider';
-import { Badge } from '@/components/ui/badge';
+import { StatusBadge, type StatusKey } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { focusRingInset } from '@/components/ui/interaction';
 import { queryClient } from '@/lib/query-client';
@@ -677,16 +677,16 @@ function ChatWorkspace() {
 
   // The header badge reports server execution state only. A submission the server has
   // not accepted yet is reported by the Send control, not as a running execution.
-  const status = workflowRun?.run.status === 'queued' ? t('assistant:status.queued')
-    : workflowRun?.run.status === 'running' ? t('assistant:status.running')
-    : workflowRun?.run.status === 'paused' ? t('assistant:status.paused')
-    : workflowRun?.run.status === 'waiting_for_input' ? t('assistant:workflowRun.waitingForConfirmation')
-    : connectionState === 'reconnecting' ? t('assistant:status.reconnecting')
-    : visibleExecution?.status === 'failed' ? t('assistant:status.failed')
-      : visibleExecution?.status === 'cancelled' ? t('assistant:status.cancelled')
-        : visibleExecution?.status === 'completed' ? t('assistant:status.completed')
-          : visibleExecution?.status === 'waiting_for_input' ? t('assistant:status.waiting_for_input')
-            : visibleExecution?.status === 'running' ? t('assistant:status.running') : '';
+  const headerStatus: { key: StatusKey; label: string } | null = workflowRun?.run.status === 'queued' ? { key: 'queued', label: t('assistant:status.queued') }
+    : workflowRun?.run.status === 'running' ? { key: 'running', label: t('assistant:status.running') }
+    : workflowRun?.run.status === 'paused' ? { key: 'paused', label: t('assistant:status.paused') }
+    : workflowRun?.run.status === 'waiting_for_input' ? { key: 'waiting_for_input', label: t('assistant:workflowRun.waitingForConfirmation') }
+    : connectionState === 'reconnecting' ? { key: 'pending', label: t('assistant:status.reconnecting') }
+    : visibleExecution?.status === 'failed' ? { key: 'failed', label: t('assistant:status.failed') }
+      : visibleExecution?.status === 'cancelled' ? { key: 'cancelled', label: t('assistant:status.cancelled') }
+        : visibleExecution?.status === 'completed' ? { key: 'completed', label: t('assistant:status.completed') }
+          : visibleExecution?.status === 'waiting_for_input' ? { key: 'waiting_for_input', label: t('assistant:status.waiting_for_input') }
+            : visibleExecution?.status === 'running' ? { key: 'running', label: t('assistant:status.running') } : null;
   const canCancel = Boolean(workflowRunning || ((running || waitingForInput) && !visibleExecution?.pendingQuestion?.recovery));
   const composerAvailable = Boolean(isConfigured || eligibleWorkflows.length > 0 || canCancel);
   const composerLoading = agentQuery.isLoading || workflowsQuery.isLoading || mcpServersQuery.isLoading;
@@ -701,7 +701,7 @@ function ChatWorkspace() {
     <div className="flex h-full min-h-0 flex-col">
       <WorkspaceChrome
         crumbs={[{ label: 'Chat' }]}
-        status={status ? <Badge variant={visibleExecution?.status === 'failed' ? 'danger' : 'neutral'}>{status}</Badge> : undefined}
+        status={headerStatus ? <StatusBadge key={headerStatus.key} status={headerStatus.key} label={headerStatus.label} /> : undefined}
         actions={(
           <Button type="button" variant="ghost" size="icon-compact" aria-label={t('assistant:settings.open')} onClick={() => openSettings('channels')}>
             <Settings className="size-4" />
@@ -709,18 +709,18 @@ function ChatWorkspace() {
         )}
       />
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-64 shrink-0 border-r border-border md:flex"><ConversationList selectedId={selectedConversationId} onSelect={selectConversation} onNew={() => selectConversation(null)} /></aside>
+        <aside className="hidden w-72 shrink-0 border-r border-border bg-surface md:flex"><ConversationList selectedId={selectedConversationId} onSelect={selectConversation} onNew={() => selectConversation(null)} /></aside>
         <section ref={chatSurfaceRef} className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={t('assistant:title')}>
-            <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
+            <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3 md:px-5">
               <Button variant="ghost" size="icon-compact" className="md:hidden" aria-label={t('assistant:history.title')} onClick={() => setSwitcherOpen(true)}><List className="size-4" /></Button>
-              <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{selected?.title || t(selectedConversationId ? 'assistant:history.loading' : 'assistant:history.new')}</p><p className="text-xs text-muted-foreground">{selected?.channel === 'feishu' ? t(conversationQuery.data?.channelDelivery === 'unbound' ? 'assistant:channels.feishuUnbound' : conversationQuery.data?.channelDelivery === 'disconnected' ? 'assistant:channels.feishuDisconnected' : 'assistant:channels.feishuBound') : 'Web'}</p></div>
+              <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{selected?.title || t(selectedConversationId ? 'assistant:history.loading' : 'assistant:history.new')}</p><p className="truncate text-xs text-muted-foreground">{selected?.channel === 'feishu' ? t(conversationQuery.data?.channelDelivery === 'unbound' ? 'assistant:channels.feishuUnbound' : conversationQuery.data?.channelDelivery === 'disconnected' ? 'assistant:channels.feishuDisconnected' : 'assistant:channels.feishuBound') : 'Web'}</p></div>
               <Button type="button" variant="ghost" size="icon-compact" aria-label={t('assistant:history.new')} onClick={() => selectConversation(null)} className="md:hidden"><Plus className="size-4" /></Button>
               {selectedConversationId ? <Button type="button" variant="ghost" size="compact" aria-expanded={recordsOpen} onClick={() => setRecordsOpen((value) => !value)}><ScrollText className="size-4" />{t('assistant:records.title')}</Button> : null}
             </header>
             <div className="relative min-h-0 flex-1">
               <div className="flex h-full min-h-0 flex-col" inert={recordsOpen} aria-hidden={recordsOpen}>
-              <Conversation className="min-h-0 flex-1 px-4 md:px-6" scrollToEndLabel={t('assistant:transcript.scrollToEnd')}>
-                <ConversationContent>
+              <Conversation className="min-h-0 flex-1 px-4 md:px-8" scrollToEndLabel={t('assistant:transcript.scrollToEnd')}>
+                <ConversationContent className="mx-auto w-full max-w-3xl">
                   {loadingConversation ? <TranscriptSkeleton /> : null}
                   {conversationQuery.isError ? <div className="space-y-2"><p role="alert" className="text-sm text-danger">{t('assistant:history.loadFailed')}</p><Button variant="secondary" size="compact" onClick={() => void conversationQuery.refetch()}>{t('assistant:history.retry')}</Button></div> : null}
                   {turns.map((turn, index) => turn.kind === 'user' ? <UserMessage key={turn.item.id} message={turn.item} /> : <AssistantTurn key={turn.segments[0].item.id} segments={turn.segments} working={showWorkingInLastTurn && index === turns.length - 1} markdownEnabled />)}
@@ -732,7 +732,7 @@ function ChatWorkspace() {
                   {conversationQuery.data?.pendingReceipts.map((receipt) => <div key={receipt.id} className="my-3 space-y-2"><UserMessage message={{ id: receipt.id, role: 'user', content: receipt.text, createdAt: receipt.createdAt }} /><p role={receipt.error ? 'alert' : 'status'} className={cn('text-[13px]', receipt.error ? 'text-danger' : 'text-muted-foreground')}>{receipt.error || t('assistant:status.queued')}</p></div>)}
                   {executionError ? <FailureNote execution={visibleExecution} message={executionError} onRetry={() => void retryExecution()} retryDisabled={busy || cancelling} locale={locale} /> : null}
                   <QueueRows queued={queued} paused={queuePaused} sendingId={queueSendingId} onRemove={(id) => setQueued((current) => current.filter((item) => item.id !== id))} />
-                  {error ? <p className="mt-4 border-l-2 border-danger pl-3 text-[13px] text-danger" role="alert">{error}</p> : null}
+                  {error ? <p className="wl-enter mt-4 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2 text-[13px] text-danger" role="alert">{error}</p> : null}
                 </ConversationContent>
               </Conversation>
               </div>
@@ -743,10 +743,10 @@ function ChatWorkspace() {
                 selectedWorkflow={selectedWorkflow} onRemoveWorkflow={() => setSelectedWorkflow(null)} commandMatches={commandMatches} commandMenuOpen={commandMenuOpen} onRunCommand={runCommand}
                 mentionMatches={mentionMatches} mentionMenuOpen={mentionMenuOpen} onSelectMention={selectMention} activeValue={activeValue} onActiveValueChange={setActiveValue}
                 onDismissMenus={() => { setSlashDismissed(true); setMentionDismissed(true); }} running={stopTarget} busy={busy || cancelling} canCancel={canCancel} cancelling={cancelling} submitDisabled={submitDisabled} waitingForInput={Boolean(waitingForInput)} onStop={() => void cancelExecution()} />
-            ) : <button type="button" className={cn('flex min-h-12 w-full items-center gap-2 border-t border-border px-4 text-left text-[13px] hover:bg-surface-subtle', focusRingInset)} onClick={() => openSettings('configuration')}><ShieldAlert className="size-4" />{t('assistant:composer.configure')}<ChevronRight className="ml-auto size-4" /></button>}
+            ) : <div className="px-4 pb-4 md:px-8"><button type="button" className={cn('wl-press mx-auto flex min-h-12 w-full max-w-3xl items-center gap-2.5 rounded-xl border border-warning/30 bg-warning-subtle px-4 text-left text-[13px] font-medium text-foreground shadow-xs hover:border-warning/50', focusRingInset)} onClick={() => openSettings('configuration')}><ShieldAlert className="size-4 text-warning" />{t('assistant:composer.configure')}<ChevronRight className="ml-auto size-4" /></button></div>}
         </section>
       </div>
-      <Sheet open={switcherOpen} onOpenChange={setSwitcherOpen}><SheetContent side="left" className="flex w-80 flex-col p-0"><SheetHeader className="sr-only"><SheetTitle>{t('assistant:history.title')}</SheetTitle></SheetHeader><ConversationList selectedId={selectedConversationId} onSelect={selectConversation} onNew={() => selectConversation(null)} /></SheetContent></Sheet>
+      <Sheet open={switcherOpen} onOpenChange={setSwitcherOpen}><SheetContent side="left" className="flex w-80 flex-col p-0 pt-10 sm:max-w-80"><SheetHeader className="sr-only"><SheetTitle>{t('assistant:history.title')}</SheetTitle></SheetHeader><ConversationList selectedId={selectedConversationId} onSelect={selectConversation} onNew={() => selectConversation(null)} /></SheetContent></Sheet>
       <Dialog open={settingsOpen} onOpenChange={handleSettingsOpenChange}>
         <DialogContent className="flex max-h-[85vh] w-[calc(100%-2rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0">
           <DialogHeader className="px-6 pt-6">
@@ -754,7 +754,7 @@ function ChatWorkspace() {
             <DialogDescription>{t('assistant:settings.description')}</DialogDescription>
           </DialogHeader>
           <Tabs value={settingsSection} onValueChange={changeSettingsSection} className="min-h-0 flex-1 flex-col gap-0">
-            <div className="px-6 pt-4">
+            <div className="px-6 pt-2">
               <TabsList>
                 <TabsTrigger value="channels">{t('assistant:settings.channels')}</TabsTrigger>
                 <TabsTrigger value="configuration">{t('assistant:settings.configuration')}</TabsTrigger>

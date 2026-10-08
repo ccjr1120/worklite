@@ -28,7 +28,7 @@ function PluginListPage() {
   const items = useMemo(() => plugins.filter((plugin) => plugin.id !== 'feishu-bot').filter((plugin) => `${plugin.name} ${plugin.description} ${plugin.command}`.toLowerCase().includes(search.toLowerCase())), [plugins, search]);
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-6 py-6">
+    <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome crumbs={[{ label: tPlugins('title') }]} />
       <PageHeading title={tPlugins('title')} />
       <CollectionToolbar className="mt-6" search={search} onSearchChange={setSearch} placeholder={tPlugins('search')} />

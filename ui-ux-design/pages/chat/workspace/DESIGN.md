@@ -34,7 +34,9 @@ Send a request and read its response. Action budget one: submit the composer. A 
 
 ## Layout
 
-A full-height conversation-only Chat workspace has a stable context bar, searchable channel-filtered server history on the left, and an unframed transcript with composer on the right. The complete evidence pane opens within the transcript area. Below `md`, history opens in a labelled Sheet. The shell hides command search on `/chat`; one page-owned settings icon in the context-bar action area opens the Chat settings Dialog. Both themes use shared neutral surfaces and semantic tokens.
+A full-height conversation-only Chat workspace has a stable context bar, searchable channel-filtered server history on the left, and an unframed transcript with a floating composer card on the right. The complete evidence pane opens within the transcript area. Below `md`, history opens in a labelled Sheet. The shell hides command search on `/chat`; one page-owned settings icon in the context-bar action area opens the Chat settings Dialog. Both themes use shared neutral surfaces and semantic tokens.
+
+The conversation list separates live work from history. An **In progress** group pinned at the top holds conversations whose status is running, waiting for input, or queued; each row carries a leading status mark (an animated brand live dot for running, a pulsing amber mark for waiting, a dashed mark for queued) and a `brand-subtle` tint. Below it, **Today** and **Earlier** groups hold settled conversations with quiet leading marks: a green check for completed, a red cross for failed, a slash for cancelled. Group headers show a count. A conversation moves between groups with a short fade as its server status changes. The conversation header shows the shared status badge for the selected conversation, and the sidebar Chat destination shows the live dot while the In progress group is non-empty. The complete evidence pane opens below the conversation header and scrolls within its own region; ordinary replies stay readable. Below `md`, the conversation list opens in a labelled navigation drawer, preserving the full transcript width. Both themes use shared semantic tokens; ordinary icons and secondary actions stay neutral. Chat replaces Home's bottom composer and the shell floating Chat Bot.
 
 The Dialog uses internal Channels and Configuration sections. Channels owns the existing Web and Feishu setup; Configuration owns model, prompt and delegated Codex Skill/MCP selection; custom capabilities do not execute in Chat. The main workspace height and conversation content remain stable while the Dialog opens and closes. Cancelling uses the existing neutral Send-or-Stop target while executing. While waiting for an ordinary answer, one neutral Cancel button sits beside Send. Cancel progress stays on that control; input and conversation content remain in place. No new design token is introduced.
 
@@ -137,6 +139,8 @@ Source comparison 2026-10-04: the old embedded surface supports persisted messag
 
 ### 2026-10-08
 
+- Grouped the conversation list into a pinned In progress group and Today/Earlier history, with leading animated status marks so running, waiting and settled conversations are distinguishable without reading text.
+- Used the shared sliding-underline tabs inside the Chat settings Dialog, moved the header status to the shared status badge, made the composer a floating auto-growing card, and added message entry motion and a streaming caret.
 - Made Chat the first workspace destination and root redirect while retaining `/home` as a non-navigation route.
 - Hid Chat command search and replaced its internal Conversation, Channels and Configuration top tabs with a conversation-only body plus an accessible settings Dialog and URL-backed section deep links.
 - Compose Tooltip and Send/Stop click handlers so the lower-right square invokes cancellation.

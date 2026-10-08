@@ -90,6 +90,11 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-10-08 - Lively visual direction
+
+- Applied the new lively design-system direction to shared components: shared motion tokens, trigger-width field overlays, single-line truncation, sliding tabs, shimmer skeletons, and unified status components.
+- Updated the [Workspace shell](shared/workspace-shell.md), [Shared states](shared/shared-states.md), and [Chat](pages/chat/workspace/DESIGN.md) specifications for live-work grouping, status presentation, and shell geometry.
+
 ### 2026-10-08 - User-requested Chat redeployment
 
 - Sending an explicit redeploy request is the single activation in Web and Feishu; persisted deployment progress uses the existing conversation task region, with no confirmation or refresh control.

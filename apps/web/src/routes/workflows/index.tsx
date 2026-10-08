@@ -9,7 +9,7 @@ import { CollectionLoading } from '@/components/collection-loading';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
 import { PageHeading } from '@/components/page-heading';
-import { StatusBadge } from '@/components/status-badge';
+import { isLiveStatus, StatusBadge, toStatusKey } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
@@ -58,13 +58,18 @@ function WorkflowListPage() {
     }
   }
 
+  // Workflows with a live latest Run are pinned first; the sort is stable otherwise.
   const items = useMemo(
-    () => all.filter((item) => item.name.toLowerCase().includes(search.toLowerCase())),
+    () => all
+      .filter((item) => item.name.toLowerCase().includes(search.toLowerCase()))
+      .map((item, index) => ({ item, index, live: isLiveStatus(item.lastRunStatus) }))
+      .sort((left, right) => Number(right.live) - Number(left.live) || left.index - right.index)
+      .map(({ item }) => item),
     [all, search],
   );
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-6 py-6">
+    <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome
         crumbs={[{ label: t('title') }]}
         actions={
@@ -98,7 +103,7 @@ function WorkflowListPage() {
               const lastRunAt = item.lastRunAt ? formatDateTime(item.lastRunAt, locale) : undefined;
 
               return (
-                <CollectionRow key={item.id} className="min-w-[880px] whitespace-nowrap md:grid-cols-[minmax(190px,1.7fr)_minmax(104px,0.8fr)_minmax(140px,1fr)_minmax(144px,0.9fr)_40px]">
+                <CollectionRow key={item.id} className={cn('min-w-[880px] whitespace-nowrap md:grid-cols-[minmax(190px,1.7fr)_minmax(104px,0.8fr)_minmax(140px,1fr)_minmax(144px,0.9fr)_40px]', isLiveStatus(item.lastRunStatus) && 'bg-brand-subtle/40 hover:bg-brand-subtle/70')}>
                   <Link to="/workflows/$workflowId" params={{ workflowId: item.id }} className="min-w-0 truncate text-sm font-medium hover:underline" title={item.name}>{item.name}</Link>
                   <StatusBadge status={item.state} />
 	                  <span className="min-w-0" title={lastRunAt}>
@@ -109,7 +114,7 @@ function WorkflowListPage() {
 	                        aria-label={t('latestRunRecordsAction', { name: item.name })}
 	                        onClick={() => setRunHistoryWorkflow({ id: item.id, name: item.name, failed: failedRun })}
 	                      >
-	                        <StatusBadge status={item.lastRunStatus === 'succeeded' ? 'completed' : item.lastRunStatus === 'timed_out' ? 'failed' : item.lastRunStatus} />
+	                        <StatusBadge key={item.lastRunStatus} status={toStatusKey(item.lastRunStatus)} />
 	                      </button>
 	                    ) : t('common:empty.dash')}
 	                  </span>

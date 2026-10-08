@@ -145,7 +145,7 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
 
   if (teamQuery.isLoading) {
     return (
-      <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
+      <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
         <WorkspaceChrome crumbs={[{ label: t('title') }]} />
         <div className="space-y-4" role="status" aria-busy="true" aria-live="polite">
           <span className="sr-only">{t('loading')}</span>
@@ -163,7 +163,7 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
   const notFound = teamQuery.isError && teamQuery.error instanceof ApiError && teamQuery.error.status === 404;
   if (notFound || (!teamQuery.isError && !teamQuery.data)) {
     return (
-      <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
+      <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
         <WorkspaceChrome crumbs={[{ label: t('title') }]} />
         <EmptyState title={t('unavailable.title')} description={t('unavailable.description')} />
       </div>
@@ -172,7 +172,7 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
 
   if (teamQuery.isError || !teamQuery.data) {
     return (
-      <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
+      <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
         <WorkspaceChrome crumbs={[{ label: t('title') }]} />
         <ErrorState title={t('title')} description={t('loadFailed')} onAction={() => void teamQuery.refetch()} />
       </div>
@@ -187,7 +187,7 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
   ].filter(Boolean) as Array<{ label: string; refetch: () => Promise<unknown> }>;
 
   return (
-    <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
+    <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome
         crumbs={[{ label: t('title') }, { label: team.name }]}
         status={tab === 'configuration' ? <SaveIndicator state={saveState} /> : undefined}
@@ -234,7 +234,7 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
               ))}
             </div>
           ) : null}
-          <section className="min-w-0 rounded-lg border border-border bg-surface p-4" aria-labelledby="agent-team-process">
+          <section className="min-w-0 rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-process">
             <h2 id="agent-team-process" className="text-sm font-semibold">{t('team.process')}</h2>
             <dl className="mt-3 grid gap-3 text-[13px] sm:grid-cols-2">
               <div>

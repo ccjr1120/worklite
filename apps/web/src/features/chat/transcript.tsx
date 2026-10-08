@@ -1,10 +1,10 @@
 import { Link } from '@tanstack/react-router';
-import { Ban, ChevronDown, ChevronRight, CircleX, FileCode2, LoaderCircle, MessageSquareText, Play, RefreshCw, ShieldAlert, X } from 'lucide-react';
+import { Ban, ChevronDown, ChevronRight, CircleX, FileCode2, Hourglass, LoaderCircle, MessageSquareText, Play, RefreshCw, ShieldAlert, X } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentToolCallView, RunView, WorkflowView } from '@worklite/contracts';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
-import { Badge } from '@/components/ui/badge';
+import { isLiveStatus, StatusBadge, toStatusKey, type StatusKey } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -44,8 +44,8 @@ function groupTurns(execution: AgentExecutionView): Turn[] {
 function UserMessage({ message }: { message: TranscriptMessage }) {
   const { t } = useTranslation('assistant');
   return (
-    <Message from="user" aria-label={t('speaker.you')}>
-      <MessageContent className="max-w-[min(78%,640px)] rounded-md bg-surface-subtle px-3 py-2.5">
+    <Message from="user" aria-label={t('speaker.you')} className="wl-enter">
+      <MessageContent className="max-w-[min(78%,640px)] rounded-2xl rounded-br-md bg-brand-subtle px-4 py-2.5">
         <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.content}</p>
       </MessageContent>
     </Message>
@@ -59,16 +59,16 @@ function AssistantTurn({ segments, working, markdownEnabled }: {
 }) {
   const { t } = useTranslation('assistant');
   return (
-    <Message from="assistant" aria-label={t('speaker.assistant')}>
+    <Message from="assistant" aria-label={t('speaker.assistant')} className="wl-enter">
       <div className="flex w-full items-start gap-3">
-        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface">
-          <MessageSquareText className="size-4 text-muted-foreground" aria-hidden="true" />
+        <span className={cn('mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-surface shadow-xs transition-shadow duration-[200ms]', working && 'wl-live-glow border-transparent')}>
+          <MessageSquareText className={cn('size-4 transition-colors duration-[200ms]', working ? 'text-brand' : 'text-muted-foreground')} aria-hidden="true" />
         </span>
-        <MessageContent className="min-w-0 flex-1 pt-0.5">
-          {segments.map((segment) => segment.kind === 'message'
-            ? <MessageResponse key={segment.item.id} content={segment.item.content} enabled={markdownEnabled} />
+        <MessageContent className="min-w-0 flex-1 pt-1">
+          {segments.map((segment, index) => segment.kind === 'message'
+            ? <MessageResponse key={segment.item.id} content={segment.item.content} enabled={markdownEnabled} className={working && index === segments.length - 1 ? 'wl-caret' : undefined} />
             : <ToolCallPanel key={segment.item.id} call={segment.item} />)}
-          {working ? <WorkingNote /> : null}
+          {working && segments[segments.length - 1]?.kind !== 'message' ? <WorkingNote /> : null}
         </MessageContent>
       </div>
     </Message>
@@ -78,8 +78,8 @@ function AssistantTurn({ segments, working, markdownEnabled }: {
 function WorkingNote() {
   const { t } = useTranslation('assistant');
   return (
-    <p className="flex items-center gap-2 py-1.5 text-[13px] text-muted-foreground" role="status">
-      <LoaderCircle className="size-4 shrink-0 text-brand motion-safe:animate-spin" aria-hidden="true" />
+    <p className="wl-fade inline-flex items-center gap-2.5 rounded-full bg-brand-subtle px-3 py-1.5 text-[13px] font-medium text-brand-text" role="status">
+      <span className="wl-live text-brand" aria-hidden="true" />
       {t('execution.working')}
     </p>
   );
@@ -111,8 +111,8 @@ function QuestionNote({ question, onAnswer, busy }: { question: NonNullable<Agen
   const [selected, setSelected] = useState<string | null>(null);
   const { t } = useTranslation('assistant');
   return (
-    <div className="my-3 border-l-2 border-brand pl-3" role="status">
-      <p className="text-sm font-medium">{question.question}</p>
+    <div className="wl-enter my-3 rounded-xl border border-warning/30 bg-warning-subtle px-4 py-3" role="status">
+      <p className="flex items-start gap-2 text-sm font-medium"><Hourglass className="wl-breathe mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />{question.question}</p>
       {question.action === 'new_conversation' ? <Button type="button" variant="secondary" size="compact" className="mt-2" disabled={busy} onClick={() => onAnswer(t('history.new'), { newConversation: true })}>{busy ? <LoaderCircle className="size-3.5 motion-safe:animate-spin" aria-hidden="true" /> : null}{t('history.new')}</Button> : null}
       {question.recovery ? <div className="mt-2 flex flex-wrap gap-2">
         {question.recovery.commandExecutionId ? <Button type="button" variant="secondary" size="compact" disabled={busy} onClick={() => onAnswer(t('codex.adopt'), { recoveryDecision: 'adopt_command' })}>{t('codex.adopt')}</Button> : null}
@@ -128,7 +128,7 @@ function QuestionNote({ question, onAnswer, busy }: { question: NonNullable<Agen
 function CancelledNote() {
   const { t } = useTranslation('assistant');
   return (
-    <p className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground" role="status">
+    <p className="wl-fade flex items-center gap-2 py-3 text-[13px] text-muted-foreground" role="status">
       <Ban className="size-4 shrink-0" aria-hidden="true" />
       {t('execution.cancelled')}
     </p>
@@ -139,7 +139,7 @@ function FailureNote({ execution, message, onRetry, retryDisabled, locale }: { e
   const { t } = useTranslation('assistant');
   if (!execution) return null;
   return (
-    <div className="flex items-start gap-2 py-3 text-[13px] text-danger" role="alert">
+    <div className="wl-enter my-2 flex items-start gap-2.5 rounded-xl border border-danger/25 bg-danger-subtle px-4 py-3 text-[13px] text-danger" role="alert">
       <CircleX className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
       <div className="min-w-0 flex-1">
         <p>{message}</p>
@@ -166,7 +166,7 @@ function QueueRows({ queued, paused, sendingId, onRemove }: { queued: Array<{ id
   const { t } = useTranslation('assistant');
   if (queued.length === 0) return null;
   return (
-    <section className="mt-3 rounded-md border border-border bg-surface-subtle p-3" role="status" aria-label={t('queue.title', { count: queued.length })}>
+    <section className="wl-enter mt-3 rounded-xl border border-dashed border-border bg-surface-subtle/60 p-3" role="status" aria-label={t('queue.title', { count: queued.length })}>
       <p className="text-xs font-medium text-muted-foreground">{t('queue.title', { count: queued.length })}</p>
       <ol className="mt-2 space-y-1.5">
         {queued.map((item, index) => (
@@ -191,20 +191,19 @@ function QueueRows({ queued, paused, sendingId, onRemove }: { queued: Array<{ id
 
 function WorkflowRunRow({ run, workflow, input }: { run: RunView; workflow: WorkflowView; input: string }) {
   const { t } = useTranslation('assistant');
-  const statusKey = run.status === 'succeeded' ? 'completed' : run.status === 'timed_out' ? 'failed' : run.status;
+  const statusKey = toStatusKey(run.status);
+  const live = isLiveStatus(run.status);
   const failure = run.nodeRuns?.find((nodeRun) => nodeRun.status === 'failed')?.error;
   return (
-    <div className="my-3 rounded-md border border-border bg-surface-subtle p-3" role="status">
+    <div className={cn('wl-enter my-3 rounded-xl border bg-surface p-3.5 shadow-xs transition-[border-color,box-shadow] duration-[200ms]', live ? 'border-brand/40 wl-live-glow' : 'border-border')} role="status">
       <div className="flex items-start gap-3">
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface">
-          <Play className={cn('size-4 text-muted-foreground', (run.status === 'queued' || run.status === 'running') && 'text-brand motion-safe:animate-pulse')} aria-hidden="true" />
+        <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-full', live ? 'bg-brand-subtle' : 'bg-surface-subtle')}>
+          <Play className={cn('size-4', live ? 'text-brand' : 'text-muted-foreground')} aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium">{workflow.name}</span>
-            <Badge variant={run.status === 'failed' || run.status === 'timed_out' ? 'danger' : run.status === 'paused' ? 'warning' : 'neutral'}>
-              {run.status === 'waiting_for_input' ? t('workflowRun.waitingForConfirmation') : t(`status.${statusKey}`)}
-            </Badge>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="min-w-0 truncate text-sm font-semibold">{workflow.name}</span>
+            <StatusBadge key={statusKey} status={statusKey} label={run.status === 'waiting_for_input' ? t('workflowRun.waitingForConfirmation') : t(`status.${run.status === 'succeeded' ? 'completed' : run.status === 'timed_out' ? 'failed' : run.status}`)} />
           </div>
           <p className="mt-1 break-words text-[13px] text-muted-foreground">{input || t('workflowRun.emptyInput')}</p>
           {run.currentStep ? <p className="mt-1 text-xs text-muted-foreground">{t('workflowRun.currentStep', { step: run.currentStep })}</p> : null}
@@ -213,7 +212,7 @@ function WorkflowRunRow({ run, workflow, input }: { run: RunView; workflow: Work
           {run.artifacts && run.artifacts.length > 0 ? (
             <div className="mt-3 flex flex-wrap gap-2">
               {run.artifacts.map((artifact) => (
-                <Link key={artifact.id} to="/artifacts/$artifactId" params={{ artifactId: artifact.id }} className="text-xs font-medium text-brand underline-offset-2 hover:underline">
+                <Link key={artifact.id} to="/artifacts/$artifactId" params={{ artifactId: artifact.id }} className="text-xs font-medium text-brand-text underline-offset-2 hover:underline">
                   {artifact.name}
                 </Link>
               ))}
@@ -233,26 +232,28 @@ function ToolCallPanel({ call }: { call: AgentToolCallView }) {
   const dispatch = call.result?.type === 'dispatch' ? call.result : null;
   const navigation = call.result?.type === 'navigation' ? call.result : null;
   const scriptName = call.codexTask?.model || call.scriptPath?.split('/').pop() || call.mcpToolName || t('tool.script');
-  const variant = call.status === 'completed' ? 'success' : call.status === 'running' ? 'brand' : call.status === 'cancelled' ? 'neutral' : 'danger';
+  // Tool statuses map onto the shared keys; an unknown status falls back to a neutral mark
+  // rather than reading as a failure.
+  const statusKey: StatusKey = call.status === 'completed' ? 'completed' : call.status === 'running' ? 'running' : call.status === 'failed' ? 'failed' : call.status === 'cancelled' ? 'cancelled' : 'idle';
   return (
-    <article className="my-2 border-l-2 border-warning bg-surface-subtle" aria-label={t('tool.label')}>
+    <article className={cn('wl-enter my-2 overflow-hidden rounded-lg border bg-surface shadow-xs transition-[border-color,box-shadow] duration-[200ms]', call.status === 'running' ? 'border-brand/40 wl-live-glow' : call.status === 'failed' ? 'border-danger/30' : 'border-border')} aria-label={t('tool.label')}>
       <button
         type="button"
-        className={cn('flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left hover:bg-background/50', surfaceInteraction, focusRingInset)}
+        className={cn('flex min-h-11 w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-surface-subtle/70', surfaceInteraction, focusRingInset)}
         aria-expanded={expanded}
         aria-label={expanded ? t('tool.collapse') : t('tool.expand')}
         onClick={() => setExpanded((value) => !value)}
       >
-        <FileCode2 className="size-4 shrink-0" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface-subtle"><FileCode2 className="size-3.5 text-muted-foreground" aria-hidden="true" /></span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">
           {call.shell ? 'Shell' : call.codexTask ? 'Codex' : call.skillName || t('tool.label')} <span className="font-mono text-xs font-normal text-muted-foreground">/ {scriptName}</span>
         </span>
-        {finished && call.exitCode !== null ? <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">{t('tool.exitCode', { code: call.exitCode })}</span> : null}
-        <Badge variant={variant}>{t(`tool.status.${call.status}`)}</Badge>
-        {expanded ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
+        {finished && call.exitCode !== null ? <span className="hidden shrink-0 font-mono text-xs text-muted-foreground sm:inline">{t('tool.exitCode', { code: call.exitCode })}</span> : null}
+        <StatusBadge status={statusKey} label={t(`tool.status.${call.status}`)} />
+        <ChevronDown className={cn('size-4 shrink-0 text-muted-foreground transition-transform duration-[200ms] ease-[var(--ease-out)]', !expanded && '-rotate-90')} aria-hidden="true" />
       </button>
       {expanded ? (
-        <div className="border-t border-border px-3 pb-3 pt-2.5">
+        <div className="wl-fade border-t border-border px-3 pb-3 pt-2.5">
           <dl className="grid gap-3 text-xs sm:grid-cols-2">
             <div><dt className="font-medium text-muted-foreground">{t(call.shell ? 'shell.command' : 'tool.script')}</dt><dd className="mt-1 whitespace-pre-wrap break-all font-mono">{call.shell?.command ?? call.scriptPath}</dd></div>
             <div><dt className="font-medium text-muted-foreground">{t('tool.workingDirectory')}</dt><dd className="mt-1 break-all font-mono">{call.workingDirectory}</dd></div>

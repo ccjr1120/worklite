@@ -16,6 +16,7 @@ type ContextBarProps = {
   showSearch?: boolean;
 };
 
+// The bar floats over scrolling content with a translucent blurred surface.
 function ContextBar({
   breadcrumbs,
   primaryAction,
@@ -29,14 +30,15 @@ function ContextBar({
   const { t } = useTranslation('workspace');
 
   return (
-    <header className="flex h-[52px] items-center gap-3 border-b border-border bg-surface px-3 md:px-4">
+    <header className="wl-glass relative z-20 flex h-14 shrink-0 items-center gap-3 border-b border-border px-3 md:px-5">
       {showMenuButton ? (
         <Button variant="ghost" size="icon-compact" aria-label={t('openNavigation')} onClick={onOpenNavigation}>
           <Menu className="size-4" />
         </Button>
       ) : null}
       <div className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">{breadcrumbs}</div>
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
+        {status}
         {showSearch ? (
           <>
             <Button
@@ -48,14 +50,21 @@ function ContextBar({
             >
               <Search className="size-4" />
             </Button>
-            <Button variant="secondary" size="compact" onClick={onOpenCommand} aria-label={t('command.open')} className="hidden sm:inline-flex">
-              <Search className="size-3.5" />
-              {t('command.search')}
-              <Kbd className="ml-1">{commandShortcutLabel()}</Kbd>
+            <button
+              type="button"
+              onClick={onOpenCommand}
+              aria-label={t('command.open')}
+              className="wl-press hidden h-8 w-56 items-center gap-2 rounded-full border border-border bg-surface-subtle/70 pl-3 pr-1.5 text-[13px] text-muted-foreground hover:border-foreground/15 hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25 lg:inline-flex"
+            >
+              <Search className="size-3.5 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate text-left">{t('command.search')}</span>
+              <Kbd className="shrink-0">{commandShortcutLabel()}</Kbd>
+            </button>
+            <Button variant="ghost" size="icon-compact" onClick={onOpenCommand} aria-label={t('command.open')} className="hidden sm:inline-flex lg:hidden">
+              <Search className="size-4" />
             </Button>
           </>
         ) : null}
-        {status}
         {secondaryActions}
         {primaryAction}
       </div>

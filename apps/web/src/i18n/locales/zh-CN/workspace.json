@@ -15,7 +15,8 @@
     "usage": "用量",
     "settings": "设置",
     "title": "导航",
-    "chat": "Chat"
+    "chat": "Chat",
+    "live": "有正在进行的对话"
   },
   "command": {
     "title": "命令菜单",

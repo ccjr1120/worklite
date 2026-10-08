@@ -2,7 +2,7 @@
 
 ## Loading and Mutation
 
-Keep the shell stable. Use content-shaped skeletons instead of ordinary full-page spinners. Show progress locally for local mutations and prevent duplicate submissions without hiding context.
+Keep the shell stable. Use content-shaped shimmer skeletons instead of ordinary full-page spinners, and fade content in as it replaces them. Show progress locally for local mutations and prevent duplicate submissions without hiding context.
 
 A skeleton stands in for the content it replaces. Do not render the frame of absent content beside it: a table header above no rows, or a detail heading above no fields, reports structure the surface cannot yet fill.
 
@@ -46,7 +46,16 @@ Success feedback reports an outcome that occurred. A control must not confirm wo
 
 Truncate only summaries and provide expand, copy, download or details access. Inline Agent Skill calls stay collapsed by default, retain status and exit context in their summary, and reveal height-bounded scrollable raw output only on request. Never reveal secrets in fields, logs, errors or audit metadata. Untrusted content is rendered without inline execution.
 
+## Status Presentation
+
+Every execution and resource status renders through the shared `StatusBadge` and `StatusDot` components. A surface may map its domain status to a shared key (for example `succeeded` to `completed`, `timed_out` to `failed`) but must not define its own colors, icons, or labels for a shared meaning. Collections that hold both live and settled items group or pin live items first.
+
 ## Changelog
+
+### 2026-10-08 - Status presentation
+
+- Required all status rendering to use the shared status components and live items to be grouped or pinned ahead of settled ones.
+- Changed skeletons to a shimmer sweep and required content to fade in over them.
 
 ### 2026-10-08 — Cancellation state ownership
 
