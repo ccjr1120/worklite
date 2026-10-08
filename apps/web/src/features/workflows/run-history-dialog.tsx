@@ -6,7 +6,7 @@ import type { ArtifactView, RunProgressEvent, RunView } from '@worklite/contract
 import { RunExecutionView } from './run-execution-view';
 import { toRecordStatus } from './node-run-log';
 import { applyRunProgressEvent } from './run-progress';
-import { StatusBadge } from '@/components/status-badge';
+import { isLiveStatus, StatusBadge } from '@/components/status-badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useLocale } from '@/components/locale-provider';
 import { durationParts, formatDateTime } from '@/i18n/format';
@@ -168,7 +168,7 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
 
   return (
     <li>
-      <article id={`workflow-run-${run.id}`} className="overflow-hidden rounded-lg border border-border bg-surface">
+      <article id={`workflow-run-${run.id}`} className={cn('wl-enter overflow-hidden rounded-xl border bg-surface shadow-xs transition-[border-color,box-shadow] duration-[200ms]', isLiveStatus(run.status) ? 'border-brand/40 wl-live-glow' : 'border-border')}>
         <button
           type="button"
           onClick={onToggle}
@@ -213,7 +213,7 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
               <section aria-labelledby={`workflow-run-${run.id}-logs-title`}>
                 <div className="flex items-center gap-2">
                   <h4 id={`workflow-run-${run.id}-logs-title`} className="text-sm font-semibold">{t('runs:logs')}</h4>
-                  <Link to="/runs/$runId" params={{ runId: run.id }} className="ml-auto text-[13px] text-brand hover:underline">
+                  <Link to="/runs/$runId" params={{ runId: run.id }} className="ml-auto text-[13px] text-brand-text hover:underline">
                     {t('runs:detail.open')}
                   </Link>
                 </div>

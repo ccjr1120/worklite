@@ -7,7 +7,7 @@ function RoutePending() {
   const { t } = useTranslation('workspace');
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-6 py-6" role="status" aria-busy="true" aria-live="polite">
+    <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8" role="status" aria-busy="true" aria-live="polite">
       <span className="sr-only">{t('route.loading')}</span>
       <Skeleton className="h-8 w-52" />
       <Skeleton className="mt-3 h-4 w-full max-w-md" />
@@ -25,7 +25,7 @@ function RouteError({ reset }: { reset?: () => void }) {
   const router = useRouter();
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-6 py-6">
+    <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
       <ErrorState
         title={t('route.errorTitle')}
         description={t('route.errorDescription')}

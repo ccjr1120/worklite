@@ -8,10 +8,12 @@ function Toaster(props: ToasterProps) {
     <Sonner
       theme={resolvedTheme}
       className="toaster group"
+      position="bottom-right"
+      gap={10}
       toastOptions={{
         classNames: {
           toast:
-            'group toast group-[.toaster]:bg-surface-raised group-[.toaster]:text-foreground group-[.toaster]:border-border group-[.toaster]:shadow-md',
+            'group toast group-[.toaster]:rounded-lg group-[.toaster]:bg-surface-raised group-[.toaster]:text-foreground group-[.toaster]:border-border group-[.toaster]:shadow-lg',
           description: 'group-[.toast]:text-muted-foreground',
         },
       }}

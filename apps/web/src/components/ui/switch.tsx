@@ -7,14 +7,14 @@ function Switch({ className, ...props }: ComponentProps<typeof SwitchPrimitive.R
   return (
     <SwitchPrimitive.Root
       className={cn(
-        'peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent bg-surface-subtle hover:border-foreground/15 hover:bg-border disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-transparent disabled:hover:bg-surface-subtle data-[state=checked]:bg-brand data-[state=checked]:hover:border-transparent data-[state=checked]:hover:bg-brand-hover disabled:data-[state=checked]:hover:bg-brand',
+        'peer inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-full border border-transparent bg-border p-0.5 hover:bg-foreground/20 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-border data-[state=checked]:bg-brand data-[state=checked]:hover:bg-brand-hover disabled:data-[state=checked]:hover:bg-brand',
         surfaceInteraction,
         focusRing,
         className,
       )}
       {...props}
     >
-      <SwitchPrimitive.Thumb className="pointer-events-none block size-4 rounded-full bg-surface shadow-sm transition-transform duration-[120ms] data-[state=checked]:translate-x-4 data-[state=unchecked]:translate-x-0.5" />
+      <SwitchPrimitive.Thumb className="pointer-events-none block size-[18px] rounded-full bg-white shadow-sm transition-transform duration-[260ms] ease-[var(--ease-spring)] data-[state=checked]:translate-x-4 data-[state=unchecked]:translate-x-0" />
     </SwitchPrimitive.Root>
   );
 }

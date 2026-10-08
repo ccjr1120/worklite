@@ -1,15 +1,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link } from '@tanstack/react-router';
 import {
-  AlertTriangle,
   Ban,
   CheckCircle2,
   ChevronRight,
-  CircleDashed,
   CircleHelp,
-  Clock,
   LoaderCircle,
-  MessageCircleQuestion,
   Pause,
   Play,
   RefreshCw,
@@ -36,6 +32,7 @@ import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
 import { PageHeading } from '@/components/page-heading';
 import { Badge } from '@/components/ui/badge';
+import { StatusBadge, toStatusKey } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Field } from '@/components/ui/field';
@@ -65,21 +62,6 @@ const ROLE_LABELS: Record<AgentTeamRole, string> = {
   reviewer: 'role.reviewer',
 };
 
-const STATUS_META: Record<TeamStatus, { variant: 'neutral' | 'brand' | 'success' | 'warning' | 'danger' | 'info'; icon: typeof CheckCircle2 }> = {
-  queued: { variant: 'neutral', icon: CircleDashed },
-  running: { variant: 'brand', icon: LoaderCircle },
-  waiting_for_input: { variant: 'warning', icon: MessageCircleQuestion },
-  waiting_for_recovery: { variant: 'warning', icon: CircleHelp },
-  paused: { variant: 'warning', icon: Pause },
-  succeeded: { variant: 'success', icon: CheckCircle2 },
-  completed: { variant: 'success', icon: CheckCircle2 },
-  failed: { variant: 'danger', icon: XCircle },
-  cancelled: { variant: 'neutral', icon: Ban },
-  reserved: { variant: 'info', icon: Clock },
-  uncertain: { variant: 'warning', icon: AlertTriangle },
-  cancelling: { variant: 'warning', icon: RefreshCw },
-};
-
 const ASSESSMENT_META: Record<AgentTeamCriterionAssessment['assessment'], { variant: 'success' | 'warning' | 'danger'; icon: typeof CheckCircle2 }> = {
   met: { variant: 'success', icon: CheckCircle2 },
   unmet: { variant: 'danger', icon: XCircle },
@@ -96,19 +78,10 @@ type RunStatusPayload = {
   status: string;
 };
 
+// Team statuses keep their own wording but share the product-wide status presentation.
 function TeamStatusBadge({ status }: { status: TeamStatus }) {
   const { t } = useTranslation('agentTeams');
-  const meta = STATUS_META[status];
-  const Icon = meta.icon;
-  return (
-    <Badge variant={meta.variant}>
-      <Icon
-        className={cn('size-3', (status === 'running' || status === 'cancelling') && 'motion-safe:animate-spin')}
-        aria-hidden="true"
-      />
-      {t(`run.status.${status}`)}
-    </Badge>
-  );
+  return <StatusBadge key={status} status={toStatusKey(status)} label={t(`run.status.${status}`)} />;
 }
 
 function AssessmentBadge({ assessment }: { assessment: AgentTeamCriterionAssessment['assessment'] }) {
@@ -209,7 +182,7 @@ function PendingInputPanel({
   }
 
   return (
-    <section className="rounded-lg border border-border bg-surface p-4" aria-labelledby="agent-team-question-title">
+    <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-question-title">
       <h2 id="agent-team-question-title" className="text-sm font-semibold">{t('input.title')}</h2>
       <p className="mt-2 text-[13px] whitespace-pre-wrap break-words">{pendingInput.question}</p>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
@@ -281,7 +254,7 @@ function OperationRecoveryPanel({
   }
 
   return (
-    <section className="rounded-lg border border-border bg-surface p-4" aria-labelledby={`operation-recovery-${operation.operationKey}`}>
+    <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby={`operation-recovery-${operation.operationKey}`}>
       <h2 id={`operation-recovery-${operation.operationKey}`} className="text-sm font-semibold">{t('recovery.title')}</h2>
       {pendingInput ? <p className="mt-2 text-[13px] whitespace-pre-wrap break-words">{pendingInput.question}</p> : null}
       <dl className="mt-3 grid gap-3 text-[13px] sm:grid-cols-2">
@@ -365,7 +338,7 @@ function TaskPanel({
   const result = JSON.stringify(task.result, null, 2);
 
   return (
-    <article className="min-w-0 rounded-lg border border-border bg-surface p-4">
+    <article className="min-w-0 rounded-xl border border-border bg-surface p-4 shadow-xs">
       <div className="flex flex-wrap items-center gap-2">
         <TeamStatusBadge status={task.status} />
         <span className="min-w-0 font-mono text-xs break-all">{task.taskKey}</span>
@@ -512,7 +485,7 @@ function CommandEvidence({ commandId }: { commandId: string }) {
 function OperationPanel({ operation }: { operation: AgentTeamOperationView }) {
   const { t } = useTranslation('agentTeams');
   return (
-    <article className="min-w-0 rounded-lg border border-border bg-surface p-4">
+    <article className="min-w-0 rounded-xl border border-border bg-surface p-4 shadow-xs">
       <div className="flex flex-wrap items-center gap-2">
         <TeamStatusBadge status={operation.status} />
         <span className="min-w-0 font-mono text-xs break-all">{operation.operationKey}</span>
@@ -645,7 +618,7 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
 
   if (runQuery.isLoading) {
     return (
-      <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
+      <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
         <WorkspaceChrome crumbs={[{ label: t('run.detail.title') }]} />
         <div className="space-y-4" role="status" aria-busy="true" aria-live="polite">
           <span className="sr-only">{t('run.loading')}</span>
@@ -663,7 +636,7 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
   const notFound = runQuery.isError && runQuery.error instanceof ApiError && runQuery.error.status === 404;
   if (notFound || (!runQuery.isError && !runQuery.data)) {
     return (
-      <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
+      <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
         <WorkspaceChrome crumbs={[{ label: t('run.detail.title') }]} />
         <EmptyState title={t('run.unavailable.title')} description={t('run.unavailable.description')} />
       </div>
@@ -672,7 +645,7 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
 
   if (runQuery.isError || !runQuery.data) {
     return (
-      <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
+      <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
         <WorkspaceChrome crumbs={[{ label: t('run.detail.title') }]} />
         <ErrorState title={t('run.detail.title')} description={t('run.loadFailed')} onAction={() => void runQuery.refetch()} />
       </div>
@@ -693,7 +666,7 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
   const taskRoles = new Map(run.tasks.map((task) => [task.taskKey, task.role]));
 
   return (
-    <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
+    <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome
         crumbs={[{ label: t('title') }, { label: t('run.detail.title') }]}
         actions={
@@ -726,7 +699,7 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
         }
       />
       <PageHeading title={t('run.detail.title')} />
-      <section className="rounded-lg border border-border bg-surface p-4" aria-labelledby="agent-team-run-metadata">
+      <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-run-metadata">
         <h2 id="agent-team-run-metadata" className="text-sm font-semibold">{t('metadata.title')}</h2>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <TeamStatusBadge status={run.status} />
@@ -741,7 +714,7 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
                 to="/agent-teams/$teamId"
                 params={{ teamId: run.teamId }}
                 search={run.originatingConversationId ? { tab: 'conversation' } : { tab: 'configuration' }}
-                className="font-medium text-brand hover:underline"
+                className="font-medium text-brand-text hover:underline"
               >
                 {run.originatingConversationId ? t('openConversation') : t('openTeam')}
               </Link>
@@ -801,7 +774,7 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
           </section>
         </div>
         <div className="min-w-0 space-y-6">
-          <section className="rounded-lg border border-border bg-surface p-4" aria-labelledby="agent-team-output-title">
+          <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-output-title">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 id="agent-team-output-title" className="text-sm font-semibold">{t('output.title')}</h2>
               {streamReconnecting ? (
@@ -827,7 +800,7 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
             <h2 id="agent-team-documents-title" className="text-sm font-semibold">{t('documents.title')}</h2>
             <div className="mt-3 space-y-3">
               {run.documents.length === 0 ? <EmptyState title={t('documents.title')} description={t('documents.empty')} /> : run.documents.map((document) => (
-                <article key={document.id} className="min-w-0 rounded-lg border border-border bg-surface p-4">
+                <article key={document.id} className="min-w-0 rounded-xl border border-border bg-surface p-4 shadow-xs">
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="text-sm font-medium">{document.title}</h3>
                     <span>{t('documents.revision', { count: document.revision })}</span>
@@ -856,7 +829,7 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
               ))}
             </div>
           </section>
-          <section className="rounded-lg border border-border bg-surface p-4" aria-labelledby="agent-team-outcome-title">
+          <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-outcome-title">
             <h2 id="agent-team-outcome-title" className="text-sm font-semibold">{t('outcome.title')}</h2>
             {run.outcome ? (
               <div className="mt-3 space-y-4 text-[13px]">

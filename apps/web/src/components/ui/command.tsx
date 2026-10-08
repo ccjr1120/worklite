@@ -23,7 +23,7 @@ function CommandDialog({
   const { t } = useTranslation('workspace');
   return (
     <Dialog {...props}>
-      <DialogContent className="overflow-hidden p-0 shadow-lg">
+      <DialogContent className="max-w-xl gap-0 overflow-hidden p-0 [&>button:last-child]:hidden">
         <VisuallyHidden>
           <DialogTitle>{t('command.title')}</DialogTitle>
         </VisuallyHidden>
@@ -41,7 +41,7 @@ function CommandInput({ className, ...props }: ComponentProps<typeof CommandPrim
       <Search className="mr-2 size-4 shrink-0 text-muted-foreground" />
       <CommandPrimitive.Input
         className={cn(
-          'flex h-11 w-full bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50',
+          'flex h-12 w-full min-w-0 truncate bg-transparent py-3 text-[15px] outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50',
           className,
         )}
         {...props}
@@ -51,7 +51,7 @@ function CommandInput({ className, ...props }: ComponentProps<typeof CommandPrim
 }
 
 function CommandList({ className, ...props }: ComponentProps<typeof CommandPrimitive.List>) {
-  return <CommandPrimitive.List className={cn('max-h-80 overflow-y-auto overflow-x-hidden p-1', className)} {...props} />;
+  return <CommandPrimitive.List className={cn('max-h-[min(24rem,60vh)] scroll-py-1 overflow-y-auto overflow-x-hidden p-1.5', className)} {...props} />;
 }
 
 function CommandEmpty({ className, ...props }: ComponentProps<typeof CommandPrimitive.Empty>) {
@@ -74,7 +74,7 @@ function CommandItem({ className, ...props }: ComponentProps<typeof CommandPrimi
   return (
     <CommandPrimitive.Item
       className={cn(
-        'relative flex cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:pointer-events-none data-[selected=true]:bg-brand-subtle data-[selected=true]:text-foreground data-[disabled=true]:opacity-50',
+        'relative flex min-h-9 min-w-0 cursor-pointer select-none items-center gap-2.5 rounded-sm px-2.5 py-1.5 text-sm outline-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:pointer-events-none data-[selected=true]:bg-surface-subtle data-[selected=true]:text-foreground [&_svg]:shrink-0 data-[disabled=true]:opacity-50',
         surfaceInteraction,
         className,
       )}

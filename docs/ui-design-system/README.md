@@ -4,30 +4,31 @@ This document is the source of truth for WorkLite user-interface principles and 
 
 ## Product Character
 
-WorkLite is a professional personal workspace for creating and running AI agents and workflows. Its interface should feel calm, precise, focused, and warm.
+WorkLite is a personal workspace for creating and running AI agents and workflows. Its interface should feel lively, fluid, warm, and responsive: every action answers immediately, every state change is visible as motion, and live work is unmistakable at a glance.
 
-The visual direction is inspired by the clarity and efficiency of Linear without copying its brand. WorkLite establishes its own identity through a clear blue accent, execution-oriented interaction patterns, and a consistent visual language for agents, workflows, and runs.
+The visual identity grows from the orange WorkLite robot mark. A warm persimmon-orange accent, soft layered surfaces, generous rounding, and a shared spring-based motion language replace the earlier flat, border-only grammar.
 
 The interface must:
 
-- Prioritize clarity, scanability, and control over decoration.
-- Support efficient, sustained use at moderate-to-high information density.
-- Communicate AI behavior through observable state and feedback rather than visual spectacle.
-- Feel lighter than a traditional enterprise dashboard and more dependable than a novelty AI interface.
+- Make live execution obvious: running, waiting, and finished work never look alike.
+- Respond to every pointer and keyboard action with immediate, physical feedback.
+- Move rather than jump: overlays, disclosures, selections, lists, and status changes transition.
+- Support sustained use at moderate information density with comfortable spacing.
 - Treat light and dark modes as equally important, deliberately designed experiences.
 
 The WorkLite brand mark is the orange robot outline in `apps/web/public/brand/worklite-logo.png`. Use the transparent asset through the shared `WorkLiteMark` component for product-owned branding, onboarding, and browser icons. Do not recreate the mark with a substitute icon or apply a background that reduces its legibility.
 
 ## Design Principles
 
-1. **Calm by default.** Neutral surfaces dominate; color is reserved for meaning and action.
-2. **Precise hierarchy.** Typography, spacing, borders, and surface contrast establish structure before shadows or decoration.
-3. **Visible execution.** Users can understand what is running, waiting, completed, or failed.
-4. **Progressive disclosure.** Common actions remain immediate while advanced configuration stays available without overwhelming the primary flow.
-5. **Consistent semantics.** The same color, component, and motion meaning applies throughout the product.
-6. **Accessible interaction.** Keyboard access, visible focus, sufficient contrast, and non-color cues are baseline requirements.
-7. **One action per goal.** A goal has a single activation point. The product does not ask for a step it can take itself, and it recovers from staleness it can observe rather than offering a refresh control. `ui-ux-design/shared/interaction-contract.md` governs the details.
-8. **Text earns its place.** Every string is an action, a state, a constraint, or a recovery. Text that restates a heading, repeats what a component already shows, or explains automation the user cannot act on is removed. `ui-ux-design/shared/copy-standards.md` governs the details.
+1. **Warm and alive.** Warm neutral surfaces carry content; the orange accent, soft elevation, and motion give the product energy without competing with content.
+2. **Layered hierarchy.** Surface tone, soft shadows, rounding, and spacing establish structure; borders are hairlines that support rather than define it.
+3. **Visible execution.** Live work is grouped, pinned, and animated; finished work settles into a quiet state. Users never have to read a label to tell running from done.
+4. **Fluid feedback.** Controls press, overlays grow from their trigger, disclosures expand, and lists flow. Motion always explains a change and never delays one.
+5. **Progressive disclosure.** Common actions remain immediate while advanced configuration stays available without overwhelming the primary flow.
+6. **Consistent semantics.** The same color, component, and motion meaning applies throughout the product.
+7. **Accessible interaction.** Keyboard access, visible focus, sufficient contrast, non-color cues, and reduced-motion equivalents are baseline requirements.
+8. **One action per goal.** A goal has a single activation point. The product does not ask for a step it can take itself, and it recovers from staleness it can observe rather than offering a refresh control. `ui-ux-design/shared/interaction-contract.md` governs the details.
+9. **Text earns its place.** Every string is an action, a state, a constraint, or a recovery. Text that restates a heading, repeats what a component already shows, or explains automation the user cannot act on is removed. `ui-ux-design/shared/copy-standards.md` governs the details.
 
 ## Color System
 
@@ -37,32 +38,37 @@ All implementation colors must be exposed through semantic design tokens. Raw co
 
 | Token | Light mode | Dark mode | Purpose |
 | --- | --- | --- | --- |
-| `background` | `#F7F8FA` | `#101216` | Application background |
-| `surface` | `#FFFFFF` | `#171A20` | Primary content surface |
-| `surface-raised` | `#FFFFFF` | `#1C2027` | Menus, dialogs, and elevated panels |
-| `surface-subtle` | `#F1F3F5` | `#1D2128` | Secondary and selected-neutral surfaces |
-| `text-primary` | `#202126` | `#ECEEF2` | Primary text |
-| `text-secondary` | `#6F747E` | `#989FAA` | Supporting text |
-| `border` | `#E4E6EA` | `rgba(255, 255, 255, 0.09)` | Standard boundaries |
-| `brand` | `#4F6F9F` | `#8EA8CF` | Primary action and brand emphasis |
-| `brand-hover` | `#415F8B` | `#A5B9D7` | Brand control hover |
-| `brand-active` | `#344D73` | `#7893BD` | Brand control active state |
-| `brand-subtle` | `#F1F2F4` | `rgba(255, 255, 255, 0.08)` | Selection and restrained emphasis |
+| `background` | `#F7F6F3` | `#121110` | Application background, warm off-white or warm near-black |
+| `surface` | `#FFFFFF` | `#1B1A18` | Primary content surface |
+| `surface-raised` | `#FFFFFF` | `#24221F` | Menus, dialogs, popovers, and elevated panels |
+| `surface-subtle` | `#F2F0EC` | `#262421` | Secondary surfaces, hover fill, inset wells |
+| `text-primary` | `#211F1C` | `#F0EDE8` | Primary text |
+| `text-secondary` | `#6E6A64` | `#A09C96` | Supporting text |
+| `border` | `#E7E4DF` | `rgba(255, 255, 255, 0.08)` | Hairline boundaries |
+| `input` | `#DEDAD4` | `rgba(255, 255, 255, 0.12)` | Form control boundary at rest |
+| `brand` | `#CF4A0C` | `#FF8A3D` | Primary action, selection, focus, and live execution |
+| `brand-hover` | `#B8420B` | `#FF9C59` | Brand control hover |
+| `brand-active` | `#9F390A` | `#F07A2C` | Brand control active state |
+| `brand-subtle` | `#FFF1E8` | `rgba(255, 138, 61, 0.14)` | Selected rows, active navigation, and live-work tint |
+| `brand-text` | `#B8420B` | `#FF9C59` | Brand-colored text on neutral or `brand-subtle` surfaces |
+| `brand-foreground` | `#FFFFFF` | `#1A0F08` | Text and icons on solid brand fills |
 
-The blue brand color is the signature accent. It represents primary action and current focus. It must not be applied indiscriminately to headings, icons, large backgrounds, or ordinary content.
+Brand persimmon orange is the signature accent and echoes the WorkLite robot mark. It represents primary action, current selection, keyboard focus, and live execution. A restrained brand gradient (`brand` to a lighter orange) is permitted on the primary button, the brand mark area, and the live-execution glow; it is never used for large backgrounds or ordinary content.
 
 ### Semantic Status Colors
 
-Brand color must not replace status meaning.
+Brand color must not replace status meaning. Live execution borrows the brand accent because it is the product's most important state; every other state uses its own hue.
 
-- **Running:** blue brand accent plus a text or icon cue.
-- **Success and completed:** green.
-- **Warning and paused:** amber or yellow, visually distinct from brand orange.
-- **Error and failed:** red.
-- **Information:** cool blue.
-- **Queued, cancelled, and inactive:** neutral gray.
+| Status | Light | Dark | Cue |
+| --- | --- | --- | --- |
+| Running | `brand` | `brand` | Animated live dot with a breathing halo, plus label |
+| Waiting for input, paused | `#A15C07` on `#FDF4DC` | `#FBBF24` on amber tint | Pulsing hourglass or pause icon, plus label |
+| Completed, succeeded | `#15803D` on `#E9F6EE` | `#4ADE80` on green tint | Check icon that pops in once, plus label |
+| Failed, timed out | `#C62828` on `#FDECEC` | `#F87171` on red tint | Cross icon, plus label |
+| Information | `#2563EB` on `#EAF1FD` | `#60A5FA` on blue tint | Info icon |
+| Queued, cancelled, inactive | `text-secondary` on `surface-subtle` | same tokens | Dashed circle or slash icon |
 
-Every status must use at least one non-color cue, such as an icon, label, shape, or motion pattern.
+Amber warning is visually distinct from brand orange through a yellower hue, an amber tint surface, and its own icon. Every status uses at least one non-color cue, such as an icon, label, shape, or motion pattern, and every status color meets WCAG AA against its tint surface.
 
 ## Themes
 
@@ -75,7 +81,7 @@ WorkLite supports `System`, `Light`, and `Dark` appearance settings. The default
 - Do not create dark mode through automatic color inversion.
 - Use subtle transition timing and respect `prefers-reduced-motion`.
 
-Light mode should feel crisp and open. Dark mode should feel focused and deep, using dark blue-gray rather than pure black.
+Light mode should feel warm and open, using a paper-like off-white canvas with white floating surfaces. Dark mode should feel deep and cozy, using warm charcoal rather than pure black or blue-gray; elevation in dark mode comes from lighter surface tone plus a faint top highlight rather than heavier shadows.
 
 ## Typography
 
@@ -97,16 +103,18 @@ Use concise, direct source copy and preserve the same meaning and tone in every 
 
 Use a `4px` base spacing grid.
 
-- Page padding: `24px`.
-- Major section gap: `24px`.
-- Standard panel padding: `16px`.
-- Form-field gap: `16px`.
+- Page padding: `24px` on desktop, `16px` below `md`.
+- Major section gap: `28px`.
+- Standard panel padding: `20px`.
+- Form-field gap: `18px`.
 - Compact element gap: `8px`.
 - Icon-to-label gap: `6px` to `8px`.
-- Standard control height: `36px`.
-- Compact control height: `28px` to `32px`.
-- Top context bar height: `48px` to `52px`.
-- Primary sidebar width: `220px` to `240px`.
+- Standard control height: `38px`. Every input, select trigger, and default button in one toolbar shares this height.
+- Compact control height: `32px`, used together as a set, never mixed with standard controls in one row.
+- Top context bar height: `56px`.
+- Primary sidebar width: `240px`.
+
+Single-line controls never wrap. Inputs, select triggers, buttons, badges, tabs, chips, and menu items keep one line and truncate overflowing text with an ellipsis; the full value remains available through a tooltip, the open menu, or a details view.
 
 The default application shell uses a stable sidebar, a compact context bar, a primary content region, and an optional contextual inspector. Logs or execution output may use a resizable lower panel when persistent visibility is valuable.
 
@@ -114,29 +122,43 @@ Responsive layouts must preserve task priority. Secondary inspectors may collaps
 
 ## Shape, Borders, and Elevation
 
-- Small controls: `6px` radius.
-- Buttons and inputs: `8px` radius.
-- Cards and panels: `10px` radius.
-- Dialogs: `12px` radius.
-- Status badges may use a pill shape.
-- Standard borders are `1px`.
+- Small elements (checkbox, menu item, tag): `8px` radius.
+- Buttons, inputs, and select triggers: `10px` radius.
+- Cards and panels: `14px` radius.
+- Popovers and menus: `12px` radius.
+- Dialogs and sheets: `18px` radius.
+- Status badges, chips, and the composer submit control use a pill shape.
+- Hairline borders are `1px`.
 
-Use cards only when content is a distinct object or group. Avoid placing every section in a rounded container. Use shadows primarily for menus, dialogs, drag previews, and genuinely elevated content; prefer surface contrast and borders for ordinary hierarchy.
+Elevation is expressed through four shared shadow tokens rather than page-local shadows:
+
+| Token | Use |
+| --- | --- |
+| `shadow-xs` | Resting cards, segmented controls, and the selected tab pill |
+| `shadow-sm` | Hovered interactive cards and the floating composer |
+| `shadow-md` | Popovers, menus, select content, and tooltips |
+| `shadow-lg` | Dialogs, sheets, and the command menu |
+
+Shadows are soft, warm-tinted, and multi-layered in light mode; in dark mode they deepen while a `1px` inner top highlight separates layers. The context bar and floating overlays may use a translucent surface with background blur so content scrolls visibly beneath them. Use cards for distinct objects and groups; flat sections inside a card are separated by spacing or hairlines rather than nested cards.
 
 ## Components
 
 ### Navigation
 
-Keep navigation neutral and grouped by task. Keep the first-level menu concise and direct; related views owned by a destination use stable in-page tabs instead of child sidebar menus. The selected item uses a subtle brand surface, stronger text, and a narrow blue indicator. Do not fill the entire sidebar with brand color.
+Keep navigation grouped by task. Keep the first-level menu concise and direct; related views owned by a destination use stable in-page tabs instead of child sidebar menus. The selected item uses a `brand-subtle` pill, `brand-text` icon, and stronger text; the pill glides between items rather than jumping. A destination with live work, such as Chat with a running conversation, shows a small animated live dot beside its label or icon. Do not fill the entire sidebar with brand color.
+
+### Tabs and Segmented Controls
+
+Page-level and panel-level tabs use one shared underline style: neutral labels, with an orange indicator that slides to the selected tab. Compact mode switches inside toolbars use a segmented control whose selected pill slides. Feature code must not define its own tab styling.
 
 ### Buttons
 
-- **Primary:** solid blue for the most important action in the current context.
-- **Secondary:** neutral fill or restrained border for supporting actions.
+- **Primary:** solid brand orange with a subtle top-to-bottom gradient and `shadow-xs` for the most important action in the current context.
+- **Secondary:** white or raised surface with a hairline border and `shadow-xs` for supporting actions.
 - **Ghost:** toolbars, inline actions, and low-emphasis controls.
 - **Destructive:** red and reserved for genuinely destructive actions.
 
-Prefer one primary action per visible region. Loading actions must respond immediately and preserve enough label context to explain what is happening. Progress belongs on the activated control, not on the region around it.
+Every button presses: on active it scales to `0.97` and returns with the spring curve. Prefer one primary action per visible region. Loading actions must respond immediately and preserve enough label context to explain what is happening. Progress belongs on the activated control, not on the region around it.
 
 Do not pair a preparation control with a commit control for one goal. When a step is always required before committing, the commit performs it. A manual refresh control is permitted only when the product cannot observe that the value is stale.
 
@@ -148,13 +170,23 @@ Form controls use one crisp boundary at rest. Hover may strengthen that boundary
 
 Apply the same focus language to buttons, selection controls, tabs, menu items, and custom interactive rows. Borderless or inset interactions use one contained focus indicator that follows the component shape. Pointer, hover, active, focus, disabled, and invalid states must remain consistent across local and shared controls.
 
+Switches slide their thumb with the spring curve; checkboxes and radios draw their mark with a short scale-in. Textareas grow with content up to a bounded height instead of scrolling a fixed box.
+
+### Select, Menus, and Popovers
+
+An overlay attached to a field matches that field. Select content, comboboxes, and field-anchored popovers use exactly the trigger width; long options truncate with an ellipsis and keep the full text available on hover. Free-standing menus opened from icon or toolbar buttons keep a shared minimum width instead. Every overlay grows from its trigger: it scales from `0.96` and fades in from the side it opens toward, then reverses on close. The selected option shows a check mark; the highlighted option uses `surface-subtle`, not brand fill.
+
 ### Tables and Lists
 
-Prefer compact lists or tables for agents, workflows, and runs when scanability matters. Use row heights around `44px` to `48px`, subdued headers, predictable sorting, visible filter chips, and on-hover secondary actions. Keep status near the object name. Truncated identifiers must be copyable. Distinguish an empty collection from a filtered result with no matches.
+Prefer lists or tables for agents, workflows, and runs when scanability matters. Use row heights around `48px` to `52px`, subdued headers, predictable sorting, visible filter chips, and on-hover secondary actions that fade in. Keep status near the object name. Truncated identifiers must be copyable. Distinguish an empty collection from a filtered result with no matches. Rows enter with a short staggered rise on first render, and newly added or removed rows animate in place instead of reflowing abruptly.
 
 ### Overlays and Feedback
 
-Dialogs are for focused decisions, not routine navigation. Toasts communicate transient outcomes; important results and errors must remain visible in the page. Error feedback should explain the problem and provide a recovery action when one exists.
+Dialogs are for focused decisions, not routine navigation. They rise and scale in over a blurred dimming layer. Sheets slide from their edge. Toasts communicate transient outcomes, such as a saved change, a copied value, or a started Run, and appear in the lower right with a short slide; important results and errors must remain visible in the page. Error feedback should explain the problem and provide a recovery action when one exists. Reversible local mutations update optimistically and roll back with an inline explanation if the server rejects them.
+
+### Loading
+
+Skeletons use a soft shimmer sweep rather than an opacity pulse. Content replaces a skeleton with a short fade so the layout does not flash.
 
 ### Icons
 
@@ -174,7 +206,7 @@ Present agents as configurable work units, not cartoon characters. Identity come
 
 Use one shared streaming Markdown renderer for model-generated text across Chat and future Agent response surfaces. It must handle incomplete Markdown during streaming, GitHub Flavored Markdown, long words, tables, links, lists, quotations, and fenced code without executing embedded HTML or scripts. Product styling wraps the renderer and uses semantic tokens in both themes; transport parsing and conversation state do not belong inside the renderer.
 
-In conversational layouts, user messages align to the right in compact neutral bubbles and remain plain text. Agent responses align to the left with a wider, unframed reading column so structured output remains scannable. Alignment, accessible labels, and optional identity marks distinguish speakers without relying on color. Streaming updates follow the end only when the reader was already at the end, and a return-to-end control appears while they are not.
+In conversational layouts, user messages align to the right in rounded `brand-subtle` bubbles and remain plain text. Each new message enters with a short fade and rise; streamed text shows a soft caret while tokens arrive. The composer is a floating rounded card with `shadow-sm` that grows with its content and lifts its focus halo when active. Agent responses align to the left with a wider, unframed reading column so structured output remains scannable. Alignment, accessible labels, and optional identity marks distinguish speakers without relying on color. Streaming updates follow the end only when the reader was already at the end, and a return-to-end control appears while they are not.
 
 One Agent turn is one block with one identity mark, however many message segments and Skill calls it contains. Its segments and Skill-call rows share that block's content column, so a turn that answers, runs a script, and answers again reads as one reply instead of as several speakers. Working, cancelled, and failure cues render as inline notes without identity marks, because a status is not a speaker; they remain independent status regions for assistive technology.
 
@@ -197,7 +229,7 @@ Treat `@` selection in the Chat composer as structured dispatch, not decorated m
 - Keep edge direction and handle compatibility visible through shape, persistent port labels, and valid or invalid interaction state rather than color alone.
 - Preserve a keyboard-accessible inspector path for reviewing configuration and removing selected nodes or edges. The diagram toolbar exposes independent node addition without an idle side palette.
 - Keep the selected-item inspector in a bounded, independently scrollable dock below the diagram at every breakpoint. Keep the node picker anchored to the diagram.
-- Use blue borders or indicators for the selected and currently executing node or edge. Selection belongs to the graph and must remain synchronized with contextual panel content and keyboard focus.
+- Use brand borders or indicators for the selected and currently executing node or edge; a currently executing node also shows the live breathing halo. Selection belongs to the graph and must remain synchronized with contextual panel content and keyboard focus.
 - Represent successful and failed states through compact green or red markers rather than filling the whole node.
 - Render edges with restrained neutral strokes and reserve stronger treatment for selection and execution.
 - Shorten conditional edge labels to the decision value on the canvas; the inspector retains the full predicate. Selecting a graph item emphasizes its directly connected nodes and edges and softens unrelated paths. A subtle directional animation may run on those selected edges only, with a static equivalent for reduced-motion preferences.
@@ -205,7 +237,7 @@ Treat `@` selection in the Chat composer as structured dispatch, not decorated m
 - Present AI-assisted edits in a side panel and make proposed structured operations understandable and reviewable.
 - Group workflow-level settings into General, Inputs, Execution, and Versioning sections, with advanced fields disclosed progressively.
 
-Restrained blue emphasis communicates graph selection and active execution while neutral surfaces and edges keep dense workflows readable. Directional selection animation indicates the path being inspected, not Run progress.
+Brand emphasis communicates graph selection and active execution while neutral surfaces and edges keep dense workflows readable. Directional selection animation indicates the path being inspected, not Run progress.
 
 ### WeChat Article Output
 
@@ -225,13 +257,27 @@ Failure is the one node log state that carries a recovery action. When the serve
 
 ## Motion
 
-- Hover feedback: approximately `120ms`.
-- Tooltips and menus: approximately `150ms`.
-- Panels and dialogs: `180ms` to `220ms`.
-- Prefer natural ease-out curves.
-- Avoid decorative page transitions, bounce effects, strong zoom, and large animated gradients.
-- Use motion to clarify execution, selection, expansion, and state changes.
-- Respect `prefers-reduced-motion` and retain static state cues when animation is disabled.
+Motion is a first-class part of the interface. It is defined once as shared tokens and utilities; feature code composes them rather than writing its own keyframes or durations.
+
+| Token | Value | Use |
+| --- | --- | --- |
+| `ease-out` | `cubic-bezier(0.22, 1, 0.36, 1)` | Default for entrances, color, and layout changes |
+| `ease-spring` | `cubic-bezier(0.34, 1.56, 0.64, 1)` | Press release, switch thumb, check pop, indicator glide |
+| `ease-in-out` | `cubic-bezier(0.65, 0, 0.35, 1)` | Exits and reversible disclosures |
+| `duration-fast` | `140ms` | Hover, press, color and status transitions |
+| `duration-base` | `200ms` | Menus, popovers, tooltips, tab indicator |
+| `duration-slow` | `280ms` | Dialogs, sheets, disclosures, route content |
+
+- **Press:** interactive controls scale to `0.97` on active and spring back.
+- **Overlays:** grow from their trigger origin with fade and `0.96` scale; dialogs also rise `8px`; sheets slide from their edge.
+- **Disclosure:** collapsible content animates its height and opacity rather than appearing.
+- **Selection:** tab indicators, segmented pills, and the navigation pill glide between positions.
+- **Lists:** first render staggers rows by `30ms` up to eight rows; later additions fade and rise in place.
+- **Routes:** page content fades and rises `4px` on navigation; the shell stays still.
+- **Status:** status color changes cross-fade; a completed check pops in once; live dots breathe continuously while work runs.
+- **Streaming:** streamed assistant text shows a soft caret while tokens arrive.
+- Never animate for decoration alone, never delay an action behind an animation, and never animate layout properties that cause visible jank during streaming.
+- Respect `prefers-reduced-motion`: transitions shorten to near zero, continuous animations stop, and every static state cue remains.
 
 ## Accessibility
 
@@ -247,10 +293,14 @@ Failure is the one node log state that carries a recovery action. When the serve
 
 Do not introduce:
 
-- Large areas of blue or decorative AI gradients.
-- Glassmorphism, excessive glow, or pervasive shadows.
+- Large areas of brand orange, full-page gradients, or rainbow AI gradients.
+- Heavy glassmorphism on content surfaces; blur is limited to the context bar, overlays, and their dimming layer.
+- Glow outside live execution, or shadows that are not one of the four shared elevation tokens.
 - Oversized marketing typography inside the application workspace.
-- Excessive card nesting or large consumer-style rounded corners.
+- Excessive card nesting.
+- Page-local keyframes, durations, or easing curves that bypass the shared motion tokens.
+- Status rendering that bypasses the shared status component.
+- Overlays attached to a field whose width differs from that field.
 - Chat interfaces as the default representation of every AI capability.
 - Decorative robot imagery as the identity of agents.
 - Theme-specific functionality or an unpolished secondary theme.
@@ -264,12 +314,23 @@ Before confirming a UI proposal, verify that it:
 - Uses existing semantic tokens and patterns where possible.
 - Defines both light and dark behavior.
 - Preserves clear information hierarchy at the intended density.
-- Uses blue only for brand, focus, selection, or execution.
+- Uses brand orange only for primary action, selection, focus, or live execution.
+- Distinguishes live work from finished work without reading a label.
+- Defines how each state change moves, using the shared motion tokens.
 - Includes loading, empty, error, disabled, and long-content states where relevant.
 - Meets keyboard, focus, contrast, reduced-motion, and non-color-cue requirements.
 - Introduces a documented design-system decision before implementation when no existing rule applies.
 
 ## Changelog
+
+### 2026-10-08 - Lively visual direction
+
+- Replaced the Linear-inspired calm, flat, border-first direction with a lively, fluid direction: warm neutrals, persimmon-orange brand from the WorkLite mark, soft four-level elevation, larger radii, and moderately relaxed density with `38px` standard controls.
+- Added shared motion tokens and required motion for press, overlays, disclosures, selection indicators, list entry, route content, status changes, and streaming, with reduced-motion equivalents.
+- Required field-anchored overlays to match their trigger width and single-line controls to truncate rather than wrap.
+- Defined live-execution visibility: running work uses the brand live dot and halo, is grouped and pinned in collections, and finished work settles into a quiet state.
+- Unified tabs into one sliding-underline style and segmented controls into one sliding-pill style.
+- Added optimistic updates for reversible mutations and toasts for transient outcomes.
 
 ### 2026-09-24 - Run execution graph
 

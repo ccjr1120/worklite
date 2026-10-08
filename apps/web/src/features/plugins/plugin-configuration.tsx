@@ -220,13 +220,13 @@ export function PluginConfiguration({ pluginId, embedded = false }: { pluginId: 
   }
 
   if (pluginQuery.isLoading) return <div className="space-y-4 p-4" role="status" aria-label={embedded ? tChat('channels.loading') : tPlugins('loading')}><div className="h-10 animate-pulse rounded bg-surface-subtle motion-reduce:animate-none" /><div className="h-32 animate-pulse rounded bg-surface-subtle motion-reduce:animate-none" /></div>;
-  if (!plugin) return <div className="mx-auto w-full max-w-[840px] px-6 py-6"><p className="text-sm text-danger" role="alert">{embedded ? tChat('channels.loadFailed') : tPlugins('loadFailed')}</p><Button className="mt-4" variant="secondary" onClick={() => void pluginQuery.refetch()}>{tCommon('actions.retry')}</Button></div>;
+  if (!plugin) return <div className="mx-auto w-full max-w-[840px] px-4 py-6 md:px-6 md:py-8"><p className="text-sm text-danger" role="alert">{embedded ? tChat('channels.loadFailed') : tPlugins('loadFailed')}</p><Button className="mt-4" variant="secondary" onClick={() => void pluginQuery.refetch()}>{tCommon('actions.retry')}</Button></div>;
 
   const feishuManualSave = pluginId === 'feishu-bot' && (saveState !== 'saved' || registration?.status === 'needs_user_id') && !registrationPending && !registrationBusy;
   const secretAvailable = Boolean(feishuAppSecret.trim() || plugin.feishu?.hasAppSecret && feishuAppId.trim() === plugin.feishu.appId);
 
   return (
-    <div className={embedded ? "w-full max-w-[840px] p-4 sm:p-6" : "mx-auto w-full max-w-[840px] px-6 py-6"}>
+    <div className={embedded ? "w-full max-w-[840px] p-4 sm:p-6" : "mx-auto w-full max-w-[840px] px-4 py-6 md:px-6 md:py-8"}>
       {embedded ? <div className="flex items-center justify-between gap-3">{!registrationPending && (plugin.feishu?.hasAppSecret || saveState !== 'saved') ? <SaveIndicator state={saveState} /> : <span />}{feishuManualSave ? <Button size="compact" onClick={() => void saveFeishu()} disabled={saving || !feishuAppId.trim() || !feishuUserId.trim() || !secretAvailable}>{saving ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : null}{tCommon('actions.save')}</Button> : null}</div> : (<WorkspaceChrome crumbs={[{ label: tPlugins('title'), to: '/plugins' }, { label: plugin.name }]} status={pluginId === 'codex-cli-chat' || pluginId === 'feishu-bot' && !registrationPending && (plugin.feishu?.hasAppSecret || saveState !== 'saved') ? <SaveIndicator state={saveState} /> : undefined} actions={pluginId === 'codex-cli-chat' || feishuManualSave ? <Button size="compact" onClick={() => void (pluginId === 'feishu-bot' ? saveFeishu() : saveAndVerify())} disabled={saving || (pluginId === 'feishu-bot' ? !feishuAppId.trim() || !feishuUserId.trim() || !secretAvailable : testState === 'pending' || !command.trim())}>{saving ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : null}{tCommon('actions.save')}</Button> : undefined} />)}
       {embedded ? null : <PageHeading title={plugin.name} description={plugin.description} />}
       <div className="mt-6 space-y-5">
@@ -256,7 +256,7 @@ export function PluginConfiguration({ pluginId, embedded = false }: { pluginId: 
               {registrationPending && registrationBusy !== 'starting' ? (
                 <div className="space-y-3">
                   {registrationQr ? <img src={registrationQr} alt={tPlugins('feishu.registration.qrAlt')} className="size-48 rounded border border-border bg-white object-contain p-2" /> : null}
-                  {registration.verificationUrl ? <a href={registration.verificationUrl} target="_blank" rel="noreferrer" className="inline-block text-sm text-brand underline underline-offset-4">{tPlugins('feishu.registration.open')}</a> : null}
+                  {registration.verificationUrl ? <a href={registration.verificationUrl} target="_blank" rel="noreferrer" className="inline-block text-sm text-brand-text underline underline-offset-4">{tPlugins('feishu.registration.open')}</a> : null}
                   {qrFailed ? <p className="text-[13px] text-danger" role="alert">{tPlugins('feishu.registration.qrFailed')}</p> : null}
                 </div>
               ) : null}
@@ -265,14 +265,14 @@ export function PluginConfiguration({ pluginId, embedded = false }: { pluginId: 
               {registrationPending && registrationBusy !== 'starting' ? <Button type="button" variant="ghost" onClick={() => void cancelFeishuRegistration()} disabled={Boolean(registrationBusy)}>{registrationBusy === 'cancelling' ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : null}{tPlugins('feishu.registration.cancel')}</Button> : <Button type="button" onClick={() => void startFeishuRegistration()} disabled={Boolean(registrationBusy) || saving || connectionPending}>{registrationBusy === 'starting' ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : null}{tPlugins(plugin.feishu.hasAppSecret ? 'feishu.registration.replace' : 'feishu.registration.create')}</Button>}
             </div>
             <p className="text-[13px] text-muted-foreground">{tPlugins('feishu.registration.platformRequirements')}</p>
-            <a href={plugin.feishu.appId ? `https://open.feishu.cn/app/${encodeURIComponent(plugin.feishu.appId)}` : 'https://open.feishu.cn/app'} target="_blank" rel="noreferrer" className="text-sm text-brand underline underline-offset-4">{tPlugins('feishu.openPlatform')}</a>
+            <a href={plugin.feishu.appId ? `https://open.feishu.cn/app/${encodeURIComponent(plugin.feishu.appId)}` : 'https://open.feishu.cn/app'} target="_blank" rel="noreferrer" className="text-sm text-brand-text underline underline-offset-4">{tPlugins('feishu.openPlatform')}</a>
             <fieldset className="space-y-4" disabled={registrationPending || Boolean(registrationBusy) || saving}>
               <legend className="mb-3 text-sm font-medium">{tPlugins('feishu.registration.manual')}</legend>
               <Field label={tPlugins('feishu.appId')} htmlFor="feishu-app-id"><Input id="feishu-app-id" value={feishuAppId} autoComplete="off" onChange={(event) => { setFeishuAppId(event.target.value); setSaveState('unsaved'); }} /></Field>
               <Field label={tPlugins('feishu.appSecret')} htmlFor="feishu-app-secret"><Input id="feishu-app-secret" type="password" value={feishuAppSecret} autoComplete="new-password" placeholder={plugin.feishu.hasAppSecret && feishuAppId === plugin.feishu.appId ? tPlugins('feishu.secretConfigured') : undefined} onChange={(event) => { setFeishuAppSecret(event.target.value); setSaveState('unsaved'); }} /></Field>
               <Field label={tPlugins('feishu.allowedUserId')} htmlFor="feishu-user-id"><Input id="feishu-user-id" value={feishuUserId} autoComplete="off" onChange={(event) => { setFeishuUserId(event.target.value); setSaveState('unsaved'); }} /></Field>
             </fieldset>
-            <p className="text-sm" role="status">{tPlugins(`feishu.status.${plugin.feishu.status}`)}</p>
+            <div role="status"><StatusBadge key={plugin.feishu.status} status={plugin.feishu.status === 'connecting' ? 'starting' : plugin.feishu.status} label={tPlugins(`feishu.status.${plugin.feishu.status}`)} /></div>
             {plugin.feishu.lastError ? <p className="text-[13px] text-danger" role="alert">{plugin.feishu.lastError}</p> : null}
             {plugin.feishu.status !== 'disconnected' ? <Button type="button" variant="ghost" disabled={connectionPending || registrationPending || Boolean(registrationBusy) || saving} onClick={() => void disconnectFeishu()}>{connectionPending ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <Unplug aria-hidden="true" />}{tPlugins('feishu.disconnect')}</Button> : null}
           </section>

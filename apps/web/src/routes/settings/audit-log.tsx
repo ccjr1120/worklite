@@ -7,6 +7,7 @@ import { CollectionLoading } from '@/components/collection-loading';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
+import { PageHeading } from '@/components/page-heading';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
 import { useAuditLogsQuery } from '@/api/queries';
@@ -27,9 +28,9 @@ function AuditLogPage() {
   );
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-6 py-6">
+    <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome crumbs={[{ label: t('nav.title') }, { label: t('nav.auditLog') }]} />
-      <h1 className="text-2xl font-semibold tracking-tight">{t('audit.title')}</h1>
+      <PageHeading title={t('audit.title')} />
       <p className="mt-2 text-[13px] text-muted-foreground">{t('audit.description')}</p>
       <CollectionToolbar className="mt-6" search={search} onSearchChange={setSearch} placeholder={t('audit.search')} />
       <div className="mt-4">

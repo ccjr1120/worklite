@@ -55,7 +55,7 @@ function RunDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="w-full px-6 py-6">
+      <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
         <WorkspaceChrome crumbs={[{ label: t('runs:title'), to: '/workflows' }]} />
         <div role="status" aria-busy="true" aria-live="polite">
           <span className="sr-only">{t('runs:logsLoading')}</span>
@@ -73,7 +73,7 @@ function RunDetailPage() {
 
   if (notFound || (!isError && !run)) {
     return (
-      <div className="w-full px-6 py-6">
+      <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
         <WorkspaceChrome crumbs={[{ label: t('runs:title'), to: '/workflows' }]} />
         <EmptyState title={t('runs:detail.notFound')} description={t('runs:detail.notFoundDescription')} />
       </div>
@@ -82,7 +82,7 @@ function RunDetailPage() {
 
   if (isError || !run) {
     return (
-      <div className="w-full px-6 py-6">
+      <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
         <WorkspaceChrome crumbs={[{ label: t('runs:title'), to: '/workflows' }]} />
         <ErrorState title={t('runs:logsFailed')} description={t('runs:detail.loadFailed')} onAction={() => void refetch()} />
       </div>
@@ -127,7 +127,7 @@ function RunDetailPage() {
   };
 
   return (
-    <div className="w-full px-6 py-6">
+    <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome crumbs={[{ label: run.workflowName, to: '/workflows' }, { label: t('runs:detail.title') }]} />
       <PageHeading
         title={run.workflowName}

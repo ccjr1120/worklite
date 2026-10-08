@@ -2,13 +2,13 @@
 
 ## Structure
 
-Use a persistent `232px` sidebar, a `52px` context bar, fluid main content, an optional `360px` inspector, and an optional resizable bottom run panel. The sidebar collapses to `56px` only between `768px` and `1023px`.
+Use a persistent `240px` sidebar, a translucent blurred `56px` context bar, fluid main content, an optional `360px` inspector, and an optional resizable bottom run panel. The sidebar collapses to `56px` only between `768px` and `1023px`.
 
 Primary navigation is grouped and single-level. **Workspace** contains `Home`, `Chat`, `Workflows`, and `Agent Team`; **Capabilities** contains `Plugins`, with `Skills` and `MCP Servers` available as capability sub-navigation; **Configuration** contains `Providers`, `Logs`, and `Settings`.
 
 Providers owns the Model Providers, Portkey Gateway summary, and Codex account views in one page context. Logs owns Gateway transport observability: request statistics and captured request details over one shared time range. The two are separate destinations because one configures upstream dispatch and the other reads what was dispatched. Skills and MCP Servers are the capability destinations; standalone Agents have no page-level destination; Plugins remains its peer. Workflow List owns execution-history access through its per-Workflow Run records dialog, whose expanded Run rows expose Artifacts inline; direct Artifact details provide deeper inspection. At `1024px` and above, the expanded sidebar shows group labels and all destinations. From `768px` to `1023px`, the compact icon rail uses group separators, direct icons, and tooltips. The mobile navigation drawer uses the same grouped destinations. Usage, audit log, and appearance are reached from Settings. Chat is a first-level destination at `/chat`, with direct Web conversation and external-channel inspection. The former Home composer and floating chat control are removed. Counts indicate actionable state only. The WorkLite mark is at the top and the personal preferences menu is at the bottom. The expanded preferences control keeps its neutral status label and shows the application version as a right-aligned monospace label; the compact rail exposes the same version inside the preferences menu.
 
-The selected navigation item uses `brand-subtle`, primary text, and a narrow brand indicator. The selected resource link represents its route family: Agent Team and Agent Team Run routes select Agent Team; Skills and MCP Server routes select Capabilities; Artifact routes select Workflows. The Agent Team destination links directly to `/agent-teams/agent_team_bmad_tea` and has no Team collection destination. Personal preferences stay in the bottom menu.
+The selected navigation item uses a `brand-subtle` pill, `brand-text` icon, and primary text; the pill glides between items. Chat shows an animated live dot while any conversation is running or waiting for input, derived from the same server conversation list the Chat page reads. The selected resource link represents its route family: Agent Team and Agent Team Run routes select Agent Team; Skills and MCP Server routes select Capabilities; Artifact routes select Workflows. The Agent Team destination links directly to `/agent-teams/agent_team_bmad_tea` and has no Team collection destination. Personal preferences stay in the bottom menu.
 
 ## Context Bar
 
@@ -31,6 +31,10 @@ There is no separate first-use route family. Home derives first-use completion f
 `Command+K` or `Control+K` opens grouped search, recent destinations, navigation and safe creation commands. Destructive actions are excluded. The command menu opens `/chat` directly. The user menu contains the personal workspace identity, Appearance, Keyboard shortcuts, and the application version. Appearance includes the personal theme and language preferences.
 
 ## Changelog
+
+### 2026-10-08
+
+- Widened the sidebar to `240px`, made the context bar a translucent blurred `56px` bar, replaced the selected indicator with a gliding brand pill, and added the Chat live-work dot.
 
 ### 2026-10-04
 

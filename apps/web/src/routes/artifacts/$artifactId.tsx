@@ -83,7 +83,7 @@ function ArtifactDetailsPage() {
 
   if (isLoading) {
     return (
-      <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
+      <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
         <WorkspaceChrome crumbs={[{ label: t('title'), to: '/workflows' }]} />
         <div role="status" aria-busy="true" aria-live="polite">
           <span className="sr-only">{t('details.loading')}</span>
@@ -99,7 +99,7 @@ function ArtifactDetailsPage() {
 
   if (isError) {
     return (
-      <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
+      <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
         <WorkspaceChrome crumbs={[{ label: t('title'), to: '/workflows' }]} />
         <ErrorState title={t('details.loadFailedTitle')} description={t('details.loadFailed')} onAction={() => void refetch()} />
       </div>
@@ -108,7 +108,7 @@ function ArtifactDetailsPage() {
 
   if (!artifact) {
     return (
-      <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
+      <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
         <WorkspaceChrome crumbs={[{ label: t('title'), to: '/workflows' }]} />
         <EmptyState title={t('details.unavailableTitle')} description={t('details.unavailableDescription')} />
       </div>
@@ -116,7 +116,7 @@ function ArtifactDetailsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
+    <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome
         crumbs={[{ label: artifact.name }]}
         actions={
@@ -133,7 +133,7 @@ function ArtifactDetailsPage() {
         <span>{artifact.runId ? t('details.run', { value: artifact.runId }) : t('details.noRun')}</span>
         <span className="tabular-nums">{formatDateTime(artifact.createdAt, locale)}</span>
       </div>
-      <div className="mt-6 overflow-auto rounded-lg border border-border bg-surface p-4">
+      <div className="mt-6 overflow-auto rounded-xl border border-border bg-surface p-4 shadow-xs">
         {artifact.type === 'unsupported' ? (
           <p className="text-[13px] text-muted-foreground">{t('details.unsupported')}</p>
         ) : artifact.content === '' ? (

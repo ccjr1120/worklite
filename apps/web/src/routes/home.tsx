@@ -130,21 +130,22 @@ function HomePage() {
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background">
       <WorkspaceChrome crumbs={[{ label: t('workspace:nav.home') }]} />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[1200px] px-6 pb-6 pt-6">
+        <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
           {firstUseStateReady && !chatConfigured ? <FirstUseGuide providerConfigured={providerConfigured} /> : null}
 
           <div className="mt-8">
-            <PageHeading title={t('home:boards.title')} />
-
-            <div className="mt-5 flex justify-end">
-              <Button type="button" size="compact" disabled={categoriesBusy} onClick={() => setCreateCategoryOpen(true)}>
-                <Plus className="size-4" />
-                {t('home:categories.create')}
-              </Button>
-            </div>
+            <PageHeading
+              title={t('home:boards.title')}
+              actions={(
+                <Button type="button" variant="secondary" disabled={categoriesBusy} onClick={() => setCreateCategoryOpen(true)}>
+                  <Plus className="size-4" />
+                  {t('home:categories.create')}
+                </Button>
+              )}
+            />
 
               {categoryError ? (
-                <p className="mt-3 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[13px] text-danger" role="alert">{t('home:categories.unavailable')}</p>
+                <p className="mt-3 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2 text-[13px] text-danger" role="alert">{t('home:categories.unavailable')}</p>
               ) : null}
 
               {workflowsQuery.isLoading || runsQuery.isLoading || categoriesQuery.isLoading ? (
@@ -163,7 +164,7 @@ function HomePage() {
                       <div className="flex min-h-9 items-center justify-between gap-3">
                           {isRenaming && category ? (
                             <form className="flex w-full max-w-md gap-2" onSubmit={renameCategory}>
-                              <Input value={renameValue} onChange={(event) => setRenameValue(event.target.value)} aria-label={t('home:categories.nameLabel')} disabled={categoriesBusy} autoFocus />
+                              <Input className="h-8" value={renameValue} onChange={(event) => setRenameValue(event.target.value)} aria-label={t('home:categories.nameLabel')} disabled={categoriesBusy} autoFocus />
                               <Button type="submit" size="compact" disabled={!renameValue.trim() || categoriesBusy}>{t('common:actions.save')}</Button>
                               <Button type="button" variant="secondary" size="compact" disabled={categoriesBusy} onClick={() => setRenamingCategoryId(null)}>{t('common:actions.cancel')}</Button>
                             </form>
@@ -189,9 +190,9 @@ function HomePage() {
                         </div>
 
                         {group.boards.length === 0 ? (
-                          <p className="rounded-lg border border-dashed border-border bg-surface/50 px-4 py-5 text-[13px] text-muted-foreground">{t('home:categories.empty')}</p>
+                          <p className="mt-3 rounded-xl border border-dashed border-border bg-surface/60 px-4 py-5 text-[13px] text-muted-foreground">{t('home:categories.empty')}</p>
                         ) : (
-                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                          <div className="wl-stagger mt-3 grid gap-3 md:grid-cols-2">
                             {group.boards.map((board) => (
                               <BoardCard key={board.workflow.id} board={board} />
                             ))}
@@ -228,7 +229,7 @@ function HomePage() {
               />
             </div>
             {createCategoryMutation.isError ? (
-              <p className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[13px] text-danger" role="alert">{t('home:categories.unavailable')}</p>
+              <p className="rounded-md border border-danger/25 bg-danger-subtle px-3 py-2 text-[13px] text-danger" role="alert">{t('home:categories.unavailable')}</p>
             ) : null}
             <DialogFooter>
               <Button type="button" variant="secondary" size="compact" disabled={createCategoryMutation.isPending} onClick={() => setCreateCategoryOpen(false)}>
@@ -253,11 +254,11 @@ function HomePage() {
             <DialogDescription>{t('home:categories.addDescription')}</DialogDescription>
           </DialogHeader>
           {assignBoardMutation.isError ? (
-            <p className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[13px] text-danger" role="alert">{t('home:categories.unavailable')}</p>
+            <p className="rounded-md border border-danger/25 bg-danger-subtle px-3 py-2 text-[13px] text-danger" role="alert">{t('home:categories.unavailable')}</p>
           ) : null}
           <div className="grid max-h-[60vh] gap-2 overflow-y-auto">
             {boards.length === 0 ? (
-              <p className="rounded-lg border border-dashed border-border bg-surface/50 px-4 py-5 text-[13px] text-muted-foreground">{t('home:categories.addEmpty')}</p>
+              <p className="mt-3 rounded-xl border border-dashed border-border bg-surface/60 px-4 py-5 text-[13px] text-muted-foreground">{t('home:categories.addEmpty')}</p>
             ) : boards.map((board) => {
               const added = boardCategories.get(board.workflow.id)?.id === addingCategory?.id;
               return (
@@ -332,9 +333,9 @@ function BoardCard({ board }: { board: HomeBoard }) {
   const headerElements = board.dashboard.layout.header.filter((element) => element.kind !== 'list');
 
   return (
-    <article className="flex w-full min-w-0 flex-col items-stretch gap-2 rounded-lg border border-border bg-surface p-3">
+    <article className="flex w-full min-w-0 flex-col items-stretch gap-3 rounded-xl border border-border bg-surface p-4 shadow-xs transition-[box-shadow,border-color] duration-[200ms] ease-[var(--ease-out)] hover:border-foreground/10 hover:shadow-sm">
       <header className="flex items-center gap-3">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-surface-subtle text-foreground" aria-hidden="true">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand-subtle text-brand" aria-hidden="true">
           <LayoutDashboard className="size-[18px]" />
         </span>
         <span className="min-w-0">

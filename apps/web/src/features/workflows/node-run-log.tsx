@@ -208,7 +208,7 @@ function NodeRunLogEntry({ nodeRun, runId, locale, nodeLabel }: NodeRunLogEntryP
               <Link
                 to="/logs"
                 search={{ tab: 'requests', range: '24h', workflowRunId: runId }}
-                className={cn('inline-flex items-center gap-1.5 text-[13px] text-brand hover:underline', focusRing)}
+                className={cn('inline-flex items-center gap-1.5 text-[13px] text-brand-text hover:underline', focusRing)}
               >
                 <ScrollText className="size-3.5" aria-hidden="true" />
                 {t('runs:nodeLog.viewRequestLogs')}

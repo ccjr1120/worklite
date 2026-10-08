@@ -129,7 +129,7 @@ function McpConfigPage() {
 
   if (editorLoading) {
     return (
-      <div className="mx-auto w-full max-w-[840px] px-6 py-6">
+      <div className="mx-auto w-full max-w-[840px] px-4 py-6 md:px-6 md:py-8">
         <WorkspaceChrome crumbs={[{ label: t('title'), to: '/mcp-servers' }]} />
         <div className="flex flex-col gap-4" role="status" aria-busy="true" aria-live="polite">
           <span className="sr-only">{t('config.loading')}</span>
@@ -149,7 +149,7 @@ function McpConfigPage() {
 
   if (!isNew && serverError) {
     return (
-      <div className="mx-auto w-full max-w-[840px] px-6 py-6">
+      <div className="mx-auto w-full max-w-[840px] px-4 py-6 md:px-6 md:py-8">
         <WorkspaceChrome crumbs={[{ label: t('title'), to: '/mcp-servers' }]} />
         <ErrorState title={t('config.fallback')} description={t('config.loadFailed')} onAction={() => void refetchServer()} />
       </div>
@@ -157,7 +157,7 @@ function McpConfigPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[840px] px-6 py-6">
+    <div className="mx-auto w-full max-w-[840px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome
         crumbs={[
           { label: t('title'), to: '/mcp-servers' },

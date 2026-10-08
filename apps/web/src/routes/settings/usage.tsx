@@ -4,6 +4,7 @@ import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/c
 import { ErrorState } from '@/components/error-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
+import { PageHeading } from '@/components/page-heading';
 import { useLocale } from '@/components/locale-provider';
 import { formatCurrency, formatNumber } from '@/i18n/format';
 import { useUsageQuery } from '@/api/queries';
@@ -20,9 +21,9 @@ function UsageSettingsPage() {
   const max = Math.max(1, ...usageRows.map((row) => row.tokens));
 
   return (
-    <div className="mx-auto w-full max-w-[840px] px-6 py-6">
+    <div className="mx-auto w-full max-w-[840px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome crumbs={[{ label: t('nav.title') }, { label: t('nav.usage') }]} />
-      <h1 className="text-2xl font-semibold tracking-tight">{t('usage.title')}</h1>
+      <PageHeading title={t('usage.title')} />
       {isLoading ? <div className="mt-6 space-y-4" role="status" aria-busy="true" aria-live="polite"><span className="sr-only">{t('usage.loading')}</span>{Array.from({ length: 3 }, (_, index) => <div key={index}><div className="mb-1 flex justify-between gap-4"><Skeleton className="h-4 w-32" /><Skeleton className="h-4 w-20" /></div><Skeleton className="h-2 w-full rounded-full" /></div>)}</div> : isError ? <div className="mt-6"><ErrorState title={t('usage.title')} description={t('usage.loadFailed')} onAction={() => void refetch()} /></div> : <div className="mt-6 space-y-3" role="img" aria-label={t('usage.chartLabel')}>
         {usageRows.map((row) => {
           const width = `${Math.round((row.tokens / max) * 100)}%`;

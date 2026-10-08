@@ -86,6 +86,11 @@
     "loadFailed": "无法加载会话记录。",
     "retry": "重试",
     "clear": "清除筛选",
+    "groups": {
+      "live": "进行中",
+      "today": "今天",
+      "earlier": "更早"
+    },
     "taskRecord": "此记录是一次任务提交，可打开任务详情继续处理，或新建对话。"
   },
   "tool": {

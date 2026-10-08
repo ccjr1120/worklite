@@ -1,11 +1,11 @@
 import { Link } from '@tanstack/react-router';
 import { Blocks, Server } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
-import { cn } from '@/lib/utils';
+import { TabNav, tabTriggerClassName } from '@/components/ui/tabs';
 
 type AgentResourceView = 'skills' | 'mcp-servers';
 
+// Capability destinations share the page-level underline tab grammar.
 function AgentResourceNav({ active }: { active: AgentResourceView }) {
   const { t } = useTranslation('workspace');
   const items = [
@@ -14,24 +14,19 @@ function AgentResourceNav({ active }: { active: AgentResourceView }) {
   ] as const;
 
   return (
-    <nav className="mt-6 flex max-w-full items-center gap-1 overflow-x-auto rounded-md bg-surface-subtle p-1" aria-label={t('nav.capabilities')}>
+    <TabNav className="mt-6" aria-label={t('nav.capabilities')}>
       {items.map((item) => (
         <Link
           key={item.id}
           to={item.to}
-          className={cn(
-            'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-sm px-3 text-[13px] font-medium text-muted-foreground hover:bg-surface/70 hover:text-foreground',
-            surfaceInteraction,
-            focusRingInset,
-            active === item.id && 'bg-surface text-foreground shadow-sm',
-          )}
+          className={tabTriggerClassName()}
           aria-current={active === item.id ? 'page' : undefined}
         >
-          <item.icon className="size-4" aria-hidden="true" />
+          <item.icon aria-hidden="true" />
           {item.label}
         </Link>
       ))}
-    </nav>
+    </TabNav>
   );
 }
 

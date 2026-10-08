@@ -23,6 +23,11 @@ const router = createRouter({
   routeTree,
   defaultPendingComponent: RoutePending,
   defaultErrorComponent: RouteError,
+  // Page content fades on path changes only; search-param updates (tabs, filters,
+  // selected conversation) stay instant so in-page interactions never flash.
+  defaultViewTransition: {
+    types: ({ pathChanged }) => (pathChanged ? ['page'] : false),
+  },
 });
 
 declare module '@tanstack/react-router' {

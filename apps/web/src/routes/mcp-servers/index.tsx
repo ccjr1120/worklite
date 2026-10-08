@@ -49,7 +49,7 @@ function McpListPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-6 py-6">
+    <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome
         crumbs={[{ label: t('title') }]}
       />
@@ -61,7 +61,7 @@ function McpListPage() {
         onSearchChange={setSearch}
         placeholder={t('search')}
         actions={
-          <Button asChild size="compact">
+          <Button asChild>
             <Link to="/mcp-servers/$serverId" params={{ serverId: 'new' }}>
               <Plus className="size-4" />
               {t('create')}

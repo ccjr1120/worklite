@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '@/components/theme-provider';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
+import { PageHeading } from '@/components/page-heading';
 import { cn } from '@/lib/utils';
 import type { Appearance } from '@/lib/theme';
 
@@ -41,9 +42,9 @@ function AppearanceSettingsPage() {
   ];
 
   return (
-    <div className="mx-auto w-full max-w-[840px] px-6 py-6">
+    <div className="mx-auto w-full max-w-[840px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome crumbs={[{ label: t('nav.title') }, { label: t('nav.appearance') }]} />
-      <h1 className="text-2xl font-semibold tracking-tight">{t('appearance.title')}</h1>
+      <PageHeading title={t('appearance.title')} />
 
       <h2 className="mt-8 text-base font-semibold">{t('appearance.theme.title')}</h2>
       <RadioGroup className="mt-3 gap-3" value={appearance} onValueChange={(value) => void selectTheme(value as Appearance)}>
@@ -56,8 +57,8 @@ function AppearanceSettingsPage() {
               key={option.value}
               htmlFor={`appearance-${option.value}`}
               className={cn(
-                'flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors duration-[120ms] ease-out',
-                selected ? 'border-brand bg-brand-subtle' : 'border-border bg-surface',
+                'wl-press flex cursor-pointer items-start gap-3 rounded-xl border p-4 shadow-xs transition-[border-color,background-color,box-shadow] duration-[200ms] ease-[var(--ease-out)] hover:shadow-sm',
+                selected ? 'border-brand bg-brand-subtle' : 'border-border bg-surface hover:border-foreground/15',
               )}
             >
               <RadioGroupItem id={`appearance-${option.value}`} value={option.value} className="mt-0.5" />

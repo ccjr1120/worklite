@@ -29,7 +29,7 @@ function WorkflowVersionsPage() {
   const columns = [t('versions.columns.version'), t('versions.columns.published'), t('versions.columns.publisher'), t('versions.columns.steps'), t('versions.columns.actions')];
 
   return (
-    <div className="mx-auto w-full max-w-[1200px] px-6 py-6">
+    <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome
         crumbs={[
           { label: t('title'), to: '/workflows' },

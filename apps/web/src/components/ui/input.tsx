@@ -10,7 +10,7 @@ function Input({ className, type, 'aria-describedby': describedBy, ...props }: I
       type={type}
       aria-describedby={fieldDescription}
       className={cn(
-        'flex h-9 w-full rounded-md border border-input bg-surface px-3 text-sm text-foreground shadow-none placeholder:text-muted-foreground file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted-foreground disabled:opacity-70',
+        'flex h-[38px] w-full min-w-0 truncate rounded-md border border-input bg-surface px-3 text-sm text-foreground shadow-xs placeholder:text-muted-foreground file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted-foreground disabled:opacity-70 disabled:shadow-none',
         controlInteraction,
         focusRing,
         className,

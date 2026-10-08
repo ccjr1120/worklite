@@ -114,7 +114,7 @@ function LogsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-6 py-6">
+    <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome crumbs={[{ label: t('workspace:nav.logs') }]} />
       <PageHeading title={t('logs:title')} />
       <div className="mt-6">

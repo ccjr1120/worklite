@@ -6,18 +6,30 @@ function Popover({ ...props }: ComponentProps<typeof PopoverPrimitive.Root>) {
   return <PopoverPrimitive.Root {...props} />;
 }
 
+function PopoverTrigger({ ...props }: ComponentProps<typeof PopoverPrimitive.Trigger>) {
+  return <PopoverPrimitive.Trigger {...props} />;
+}
+
 function PopoverAnchor({ ...props }: ComponentProps<typeof PopoverPrimitive.Anchor>) {
   return <PopoverPrimitive.Anchor {...props} />;
 }
 
-function PopoverContent({ className, align = 'center', sideOffset = 6, ...props }: ComponentProps<typeof PopoverPrimitive.Content>) {
+// `matchTrigger` sizes a field-anchored popover to its trigger or anchor exactly.
+function PopoverContent({
+  className,
+  align = 'center',
+  sideOffset = 6,
+  matchTrigger = false,
+  ...props
+}: ComponentProps<typeof PopoverPrimitive.Content> & { matchTrigger?: boolean }) {
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Content
         align={align}
         sideOffset={sideOffset}
         className={cn(
-          'z-50 w-72 rounded-lg border border-border bg-surface-raised p-3 text-sm shadow-md outline-none duration-[150ms]',
+          'wl-overlay z-50 rounded-lg border border-border bg-surface-raised p-3 text-sm text-foreground shadow-md outline-none',
+          matchTrigger ? 'w-[var(--radix-popover-trigger-width)]' : 'w-72',
           className,
         )}
         {...props}
@@ -26,4 +38,4 @@ function PopoverContent({ className, align = 'center', sideOffset = 6, ...props 
   );
 }
 
-export { Popover, PopoverAnchor, PopoverContent };
+export { Popover, PopoverAnchor, PopoverContent, PopoverTrigger };

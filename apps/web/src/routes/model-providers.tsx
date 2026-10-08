@@ -134,7 +134,7 @@ function ModelList({ id, value, onChange, removeLabel, editLabel, addPlaceholder
     setEditDraft('');
   }
   return (
-    <div id={id} className="grid gap-2 rounded-md border border-border bg-surface p-2" aria-label="模型列表">
+    <div id={id} className="grid gap-2 rounded-xl border border-border bg-surface p-2 shadow-xs" aria-label="模型列表">
       <Input
         autoComplete="off"
         className="font-mono text-[13px]"
@@ -482,7 +482,7 @@ function ModelProvidersPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-6 py-6">
+    <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome crumbs={[{ label: t('providers.title') }]} />
       <PageHeading title={t('providers.title')} description={t('providers.description')} />
       <Tabs value={view} onValueChange={changeView} className="mt-6">
@@ -506,7 +506,7 @@ function ModelProvidersPage() {
           onSearchChange={setSearch}
           placeholder={t('providers.search')}
           actions={
-            <Button size="compact" onClick={openCreate}>
+            <Button onClick={openCreate}>
               <Plus className="size-4" />
               {t('providers.create')}
             </Button>
@@ -575,9 +575,9 @@ function ModelProvidersPage() {
             </div> : null}
             <Tabs value={providerActivityTab} onValueChange={(value) => { if (value === 'statistics' || value === 'requests') setProviderActivityTab(value); }}>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <TabsList>
-                  <TabsTrigger value="statistics"><BarChart3 className="size-4" aria-hidden="true" />{t('providers.activity.statistics')}</TabsTrigger>
-                  <TabsTrigger value="requests"><ScrollText className="size-4" aria-hidden="true" />{t('providers.activity.requests')}</TabsTrigger>
+                <TabsList variant="segmented">
+                  <TabsTrigger variant="segmented" value="statistics"><BarChart3 className="size-4" aria-hidden="true" />{t('providers.activity.statistics')}</TabsTrigger>
+                  <TabsTrigger variant="segmented" value="requests"><ScrollText className="size-4" aria-hidden="true" />{t('providers.activity.requests')}</TabsTrigger>
                 </TabsList>
                 <Button type="button" variant="ghost" size="compact" onClick={() => {
                   const activity = providerActivity;
@@ -687,14 +687,14 @@ function ModelProvidersPage() {
             </div>
           </div> : <div className="flex min-h-52 flex-col gap-5 py-2">
             <div className="flex justify-end">
-              <div className="max-w-[80%] rounded-md bg-brand px-4 py-3 text-sm text-white">
+              <div className="wl-enter max-w-[80%] rounded-2xl rounded-br-md bg-brand-subtle px-4 py-3 text-sm text-foreground">
                 <p className="sr-only">{t('providers.testPromptLabel')}</p>
                 <p className="whitespace-pre-wrap">{testDialog.status === 'success' && testDialog.result.protocol !== 'typesafe/systemone' ? testDialog.result.prompt : CHAT_PROVIDER_TEST_PROMPT}</p>
               </div>
             </div>
             <div className="flex items-start gap-3">
-              <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-brand-subtle text-brand" aria-hidden="true"><Bot className="size-4" /></div>
-              <div className="min-w-0 flex-1 rounded-md border border-border bg-surface-subtle px-4 py-3 text-sm">
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-brand shadow-xs" aria-hidden="true"><Bot className="size-4" /></div>
+              <div className="wl-enter min-w-0 flex-1 rounded-2xl rounded-tl-md border border-border bg-surface-subtle px-4 py-3 text-sm">
                 <p className="sr-only">{t('providers.testReplyLabel')}</p>
                 {testDialog.status === 'loading' ? (
                   <div className="flex items-center gap-2 text-muted-foreground"><LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /><span className="sr-only">{t('providers.waitingReplyAccessible')}</span><span aria-hidden="true" className="tabular-nums">{t('providers.waitingReply', { seconds: testDialog.elapsedSeconds })}</span></div>
@@ -734,7 +734,7 @@ function GatewayPanel({ gateway, providers, t }: { gateway?: { port: number; hos
   const exampleModel = namespacedModels[0] ?? '<providerName>/<modelId>';
   const configExample = JSON.stringify({ base_url: publicBaseUrl, api_key: 'not-required', model: exampleModel }, null, 2);
   async function copyValue(value: string) { if (!navigator.clipboard) return; await navigator.clipboard.writeText(value); toast.success(t('providers.gateway.copied')); }
-  return <section className="mt-6 w-full rounded-lg border border-border bg-surface p-4">
+  return <section className="mt-6 w-full rounded-xl border border-border bg-surface p-4 shadow-xs">
     <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-base font-semibold">{t('providers.gateway.title')}</h2><p className="mt-1 text-[13px] text-muted-foreground">{t('providers.gateway.description')}</p></div><div className="shrink-0"><p className="text-xs font-medium text-muted-foreground">{t('providers.gateway.status')}</p><div className="mt-1"><StatusBadge status={running ? 'gateway_running' : status} /></div></div></div>
     <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground"><span><span className="font-medium">{t('providers.gateway.port')}:</span> <code className="font-mono text-foreground">{gateway?.port ?? 3392}</code></span><span className="font-mono">{gateway ? `http://${gateway.host}:${gateway.port}` : t('providers.gateway.loading')}</span></div>
     {gateway?.error ? <p className="text-[13px] text-danger" role="alert">{gateway.error}</p> : null}
@@ -799,7 +799,7 @@ function CodexAccountCard({ account, usage, authBusy, accountBusy, actionError, 
   const statusBadge = status === 'disabled' ? 'disabled' : status === 'expired' ? 'invalid' : status === 'error' ? 'error' : status === 'unavailable' ? 'missing' : status === 'connected' ? 'connected' : 'unconfigured';
   const accountLabel = account.email || account.name;
   const identity = account.accountId || account.id;
-  return <article className="rounded-lg border border-border bg-surface p-4">
+  return <article className="rounded-xl border border-border bg-surface p-4 shadow-xs">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0"><p className="truncate text-sm font-semibold">{accountLabel}</p><p className="mt-1 break-all font-mono text-xs text-muted-foreground">{t('providers.codexPool.accountId')}: {maskAccountId(identity)}</p></div>
       <StatusBadge status={statusBadge} />

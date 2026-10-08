@@ -33,7 +33,9 @@ Send a request and read its response. Action budget one: submit the composer. A 
 
 ## Layout
 
-A full-height workspace with a stable top context bar and lightweight Conversation, Channels and Configuration tabs. Conversation places a compact searchable, channel-filtered server conversation list on the left and an unframed transcript with composer on the right. The complete evidence pane opens below the conversation header and scrolls within its own region; ordinary replies stay readable. Below `md`, the conversation list opens in a labelled navigation drawer, preserving the full transcript width. Both themes use shared semantic tokens; ordinary icons and secondary actions stay neutral. Chat replaces Home's bottom composer and the shell floating Chat Bot.
+A full-height workspace with a stable top context bar and Conversation, Channels and Configuration tabs using the shared sliding-underline tabs. Conversation places a searchable, channel-filtered server conversation list on the left and an unframed transcript with a floating composer card on the right.
+
+The conversation list separates live work from history. An **In progress** group pinned at the top holds conversations whose status is running, waiting for input, or queued; each row carries a leading status mark (an animated brand live dot for running, a pulsing amber mark for waiting, a dashed mark for queued) and a `brand-subtle` tint. Below it, **Today** and **Earlier** groups hold settled conversations with quiet leading marks: a green check for completed, a red cross for failed, a slash for cancelled. Group headers show a count. A conversation moves between groups with a short fade as its server status changes. The conversation header shows the shared status badge for the selected conversation, and the sidebar Chat destination shows the live dot while the In progress group is non-empty. The complete evidence pane opens below the conversation header and scrolls within its own region; ordinary replies stay readable. Below `md`, the conversation list opens in a labelled navigation drawer, preserving the full transcript width. Both themes use shared semantic tokens; ordinary icons and secondary actions stay neutral. Chat replaces Home's bottom composer and the shell floating Chat Bot.
 
 Channels presents Web as the built-in channel and Feishu as the configured external adapter. Selecting Feishu exposes QR registration, manual credentials and connection status in the same page. Agent Configuration is independent and owns model selection, user prompt, Skills and MCP server selections. No create/delete Agent controls or future unimplemented channel controls appear.
 
@@ -85,6 +87,11 @@ Source comparison also covers generation guards for switched conversations, reta
 Source comparison 2026-10-04: the old embedded surface supports persisted messages, SSE, Skill/MCP activity, questions, retry, cancellation, Workflow mentions, queues and exports. The new source adds the full-page route and server conversation list, removes the silent browser history cap, places Feishu under Channels, exposes complete saved channel/Agent records and retains failed streamed text in the read model. The embedded surface and its fixed starter menu have been removed. Source coverage also includes standalone Web task submissions that have no Agent execution. The later deployment request authorized Gateway/Web/API compilation and isolated Web/API/Gateway readiness; these passed on 2026-10-04. Browser rendering, standalone type checking, test suites and live Feishu checks were not performed. Historical original Feishu envelopes were not saved and cannot be recovered; records show full retained data and newly saved safe platform context.
 
 ## Changelog
+
+### 2026-10-08
+
+- Grouped the conversation list into a pinned In progress group and Today/Earlier history, with leading animated status marks so running, waiting and settled conversations are distinguishable without reading text.
+- Replaced the local Chat tab styling with the shared tabs, moved the header status to the shared status badge, made the composer a floating auto-growing card, and added message entry motion and a streaming caret.
 
 ### 2026-10-05
 

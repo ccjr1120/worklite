@@ -374,7 +374,7 @@ function RunExecutionView({ run, locale, loading, failed, compact = false }: Run
       </section>
 
       {selectedNode ? (
-        <section className="mt-4 max-h-[40vh] overflow-auto rounded-md border border-border bg-surface p-3" aria-labelledby={`run-node-details-${run.id}-title`}>
+        <section className="mt-4 max-h-[40vh] overflow-auto rounded-xl border border-border bg-surface p-3 shadow-xs" aria-labelledby={`run-node-details-${run.id}-title`}>
           <h4 id={`run-node-details-${run.id}-title`} className="mb-2 text-sm font-semibold">{selectedNode.data.label}</h4>
           {selectedNodeRuns.length === 0 ? (
             <p className="text-[13px] text-muted-foreground">{tRun('noLogs')}</p>

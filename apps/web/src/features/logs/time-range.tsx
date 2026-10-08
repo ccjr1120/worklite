@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { focusRingInset } from '@/components/ui/interaction';
+import { SegmentedRadioGroup } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 
 const RANGE_PRESETS = ['1h', '24h', '7d', '30d'] as const;
@@ -82,8 +83,8 @@ function TimeRangeControl({ range, onRangeChange }: { range: LogsTimeRange; onRa
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-border bg-surface px-4 py-3 lg:flex-row lg:items-end lg:justify-between" aria-label={t('range.label')}>
-      <div role="radiogroup" aria-label={t('range.label')} className="flex flex-wrap gap-1">
+    <section className="flex flex-col gap-3 rounded-xl border border-border bg-surface px-4 py-3 shadow-xs lg:flex-row lg:items-end lg:justify-between" aria-label={t('range.label')}>
+      <SegmentedRadioGroup label={t('range.label')}>
         {RANGE_PRESETS.map((preset) => {
           const selected = range.kind === 'preset' && range.preset === preset;
           return (
@@ -94,8 +95,8 @@ function TimeRangeControl({ range, onRangeChange }: { range: LogsTimeRange; onRa
               aria-checked={selected}
               onClick={() => onRangeChange({ kind: 'preset', preset })}
               className={cn(
-                'h-8 rounded-md px-3 text-[13px] transition-colors duration-[120ms]',
-                selected ? 'bg-brand-subtle font-medium text-foreground' : 'text-muted-foreground hover:bg-surface-subtle hover:text-foreground',
+                'relative z-[1] h-[30px] shrink-0 whitespace-nowrap rounded-sm px-3 text-[13px] font-medium transition-colors duration-[140ms]',
+                selected ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
                 focusRingInset,
               )}
             >
@@ -103,7 +104,7 @@ function TimeRangeControl({ range, onRangeChange }: { range: LogsTimeRange; onRa
             </button>
           );
         })}
-      </div>
+      </SegmentedRadioGroup>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
         <div className="flex flex-col gap-1">
           <label htmlFor={startId} className="text-xs font-medium text-muted-foreground">{t('range.start')}</label>
@@ -129,7 +130,7 @@ function TimeRangeControl({ range, onRangeChange }: { range: LogsTimeRange; onRa
             className="w-full sm:w-[200px]"
           />
         </div>
-        <Button type="button" variant="secondary" size="compact" onClick={applyCustom} disabled={!applicable} className="sm:mb-0.5">
+        <Button type="button" variant="secondary" onClick={applyCustom} disabled={!applicable}>
           {t('range.apply')}
         </Button>
       </div>

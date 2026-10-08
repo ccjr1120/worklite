@@ -2,26 +2,28 @@ import { Slot } from '@radix-ui/react-slot';
 import { cva, type VariantProps } from 'class-variance-authority';
 import type { ButtonHTMLAttributes } from 'react';
 import { cn } from '@/lib/utils';
-import { focusRing, surfaceInteraction } from '@/components/ui/interaction';
+import { focusRing } from '@/components/ui/interaction';
 
+// `wl-press` gives every variant the shared press-and-spring-back feedback.
 const buttonVariants = cva(
-  `inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 ${surfaceInteraction} ${focusRing}`,
+  `wl-press inline-flex shrink-0 cursor-pointer select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 ${focusRing}`,
   {
     variants: {
       variant: {
-        primary: 'bg-brand text-brand-foreground hover:bg-brand-hover hover:text-brand-foreground active:bg-brand-active disabled:hover:bg-brand',
+        primary:
+          'bg-brand bg-[image:var(--brand-gradient)] text-brand-foreground shadow-xs hover:bg-brand-hover hover:bg-none hover:shadow-sm active:bg-brand-active disabled:hover:bg-[image:var(--brand-gradient)] disabled:hover:shadow-xs',
         secondary:
-          'border border-border bg-surface text-foreground hover:border-foreground/20 hover:bg-surface-subtle active:bg-border disabled:hover:border-border disabled:hover:bg-surface',
+          'border border-border bg-surface text-foreground shadow-xs hover:border-foreground/15 hover:bg-surface-subtle active:bg-border disabled:hover:border-border disabled:hover:bg-surface',
         ghost: 'text-foreground hover:bg-surface-subtle active:bg-border disabled:hover:bg-transparent',
-        destructive: 'bg-danger text-white hover:bg-danger/90 active:bg-danger/80 disabled:hover:bg-danger',
-        link: 'text-brand underline-offset-4 hover:underline disabled:hover:no-underline',
+        destructive: 'bg-danger text-danger-foreground shadow-xs hover:bg-danger/90 active:bg-danger/80 disabled:hover:bg-danger',
+        link: 'h-auto px-0 text-brand-text underline-offset-4 hover:underline disabled:hover:no-underline',
       },
       size: {
-        default: 'h-9 min-w-8 px-3.5',
-        compact: 'h-8 min-w-8 px-2.5 text-[13px]',
-        sm: 'h-7 min-w-7 px-2 text-[13px]',
-        icon: 'h-9 w-9',
-        'icon-compact': 'h-8 w-8',
+        default: 'h-[38px] min-w-9 px-4',
+        compact: 'h-8 min-w-8 px-3 text-[13px]',
+        sm: 'h-7 min-w-7 rounded-sm px-2.5 text-[13px]',
+        icon: 'size-[38px]',
+        'icon-compact': 'size-8',
       },
     },
     defaultVariants: {
@@ -48,4 +50,4 @@ function Button({ className, variant, size, asChild = false, title, ...props }: 
   return <Comp className={cn(buttonVariants({ variant, size, className }))} title={resolvedTitle} {...props} />;
 }
 
-export { Button };
+export { Button, buttonVariants };
