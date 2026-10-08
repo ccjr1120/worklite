@@ -1,5 +1,5 @@
 import { useNavigate, useRouterState } from '@tanstack/react-router';
-import { ChevronRight, List, Plus, ScrollText, ShieldAlert } from 'lucide-react';
+import { ChevronRight, List, Plus, ScrollText, Settings, ShieldAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentToolCallView, DispatchChatRequest, RunView, WorkflowView } from '@worklite/contracts';
@@ -22,6 +22,8 @@ import { ChannelConfiguration } from './channel-configuration';
 import { TaskMessages } from './task-messages';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CHAT_AGENT_ID } from '@worklite/contracts';
 import { AssistantTurn, CancelledNote, FailureNote, groupTurns, QuestionNote, QueueRows, TranscriptSkeleton, UserMessage, WorkflowRunRow } from './transcript';
 
@@ -42,6 +44,13 @@ function readSelectedConversation() {
 
 function apiErrorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError && error.message ? error.message : fallback;
+}
+
+function mergeExecutionSnapshot(current: AgentExecutionView | null, next: AgentExecutionView | null) {
+  if (!current || !next || current.id !== next.id) return next;
+  if (next.updatedAt < current.updatedAt) return current;
+  const ids = new Set(next.messages.map((entry) => entry.id));
+  return { ...next, messages: [...next.messages, ...current.messages.filter((entry) => entry.role === 'assistant' && !ids.has(entry.id))] };
 }
 
 function ChatWorkspace() {
@@ -65,8 +74,8 @@ function ChatWorkspace() {
     if (pendingDispatch.current?.signature !== signature) pendingDispatch.current = { signature, id: `web_${crypto.randomUUID()}` };
     return api.dispatchChat({ ...input, submissionId: pendingDispatch.current.id });
   }, []);
-  const sendConversation = useCallback(async (message: string, executionId: string | null, questionId?: string, submissionId?: string) => {
-    const input = { message, target: { kind: 'conversation' as const }, executionId, ...(questionId ? { questionId } : {}) };
+  const sendConversation = useCallback(async (message: string, executionId: string | null, questionId?: string, submissionId?: string, authorization?: Pick<DispatchChatRequest, 'recoveryDecision' | 'newConversation'>) => {
+    const input = { message, target: { kind: 'conversation' as const }, executionId, ...(questionId ? { questionId } : {}), ...authorization };
     const result = submissionId ? await api.dispatchChat({ ...input, submissionId }) : await dispatchRequest(input);
     if (result.reference.kind !== 'conversation') throw new Error('The conversation did not return an execution.');
     const execution = await api.agentExecution(workspaceSlug, CHAT_AGENT_ID, result.reference.executionId);
@@ -80,7 +89,8 @@ function ChatWorkspace() {
   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowView | null>(null);
   const [workflowRun, setWorkflowRun] = useState<ActiveWorkflowRun | null>(null);
   const [draft, setDraft] = useState(() => conversationDrafts.get(selectedConversationId ?? 'new')?.draft ?? '');
-  const [panelView, setPanelView] = useState<'chat' | 'channels' | 'configuration'>(locationSearch.view === 'channels' ? 'channels' : locationSearch.view === 'configuration' ? 'configuration' : 'chat');
+  const [settingsOpen, setSettingsOpen] = useState(locationSearch.view === 'channels' || locationSearch.view === 'configuration');
+  const [settingsSection, setSettingsSection] = useState<'channels' | 'configuration'>(locationSearch.view === 'channels' || locationSearch.view === 'configuration' ? locationSearch.view : 'channels');
   const [configSelection, setConfigSelection] = useState('');
   const [selectedMcpServerIds, setSelectedMcpServerIds] = useState<string[]>([]);
   const [configSaving, setConfigSaving] = useState(false);
@@ -89,6 +99,7 @@ function ChatWorkspace() {
   const [configError, setConfigError] = useState('');
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [loadingExecution, setLoadingExecution] = useState(false);
   const [error, setError] = useState('');
   const [queued, setQueued] = useState<QueuedMessage[]>(() => conversationDrafts.get(selectedConversationId ?? 'new')?.queued ?? []);
@@ -101,6 +112,7 @@ function ChatWorkspace() {
   const chatSurfaceRef = useRef<HTMLDivElement>(null);
   const appliedResultIdsRef = useRef(new Set<string>());
   const mainRequestGenerationRef = useRef(0);
+  const observedEventRef = useRef({ executionId: '', sequence: 0 });
   const isConfigured = Boolean(agentQuery.data?.providerId && agentQuery.data?.model);
 
   useEffect(() => {
@@ -133,13 +145,26 @@ function ChatWorkspace() {
     } finally { setConfigSaving(false); }
   };
 
-  function setView(view: 'chat' | 'channels' | 'configuration') {
-    setPanelView(view);
-    void navigate({ to: '/chat', search: { view: view === 'chat' ? 'conversation' : view, conversation: selectedConversationId ?? undefined } });
+  function openSettings(section: 'channels' | 'configuration') {
+    setSettingsSection(section);
+    setSettingsOpen(true);
+    void navigate({ to: '/chat', search: { view: section, conversation: selectedConversationId ?? undefined } });
+  }
+
+  function handleSettingsOpenChange(open: boolean) {
+    setSettingsOpen(open);
+    if (!open) void navigate({ to: '/chat', search: { view: 'conversation', conversation: selectedConversationId ?? undefined } });
+  }
+
+  function changeSettingsSection(value: string) {
+    if (value !== 'channels' && value !== 'configuration') return;
+    setSettingsSection(value);
+    void navigate({ to: '/chat', search: { view: value, conversation: selectedConversationId ?? undefined } });
   }
 
   function selectConversation(id: string | null) {
     ++mainRequestGenerationRef.current;
+    observedEventRef.current = { executionId: '', sequence: 0 };
     conversationDrafts.set(selectedConversationId ?? 'new', { draft, queued, paused: queuePaused });
     const remembered = id ? conversationDrafts.get(id) : undefined;
     if (!id) conversationDrafts.delete('new');
@@ -149,6 +174,7 @@ function ChatWorkspace() {
     setExecution(null);
     setWorkflowRun(null);
     setBusy(false);
+    setCancelling(false);
     setQueueSendingId(null);
     setLoadingExecution(Boolean(id));
     if (!id) setRecordsOpen(false);
@@ -157,7 +183,7 @@ function ChatWorkspace() {
     setQueuePaused(remembered?.paused ?? false);
     setError('');
     setSwitcherOpen(false);
-    setPanelView('chat');
+    setSettingsOpen(false);
     void navigate({ to: '/chat', search: { view: 'conversation', conversation: id ?? undefined } });
   }
 
@@ -177,8 +203,12 @@ function ChatWorkspace() {
   useEffect(() => {
     const id = typeof locationSearch.conversation === 'string' ? locationSearch.conversation : null;
     if (id && id !== selectedConversationId) selectConversation(id);
-    if (locationSearch.view === 'configuration' || locationSearch.view === 'channels') setPanelView(locationSearch.view);
-    else setPanelView('chat');
+    if (locationSearch.view === 'configuration' || locationSearch.view === 'channels') {
+      setSettingsSection(locationSearch.view);
+      setSettingsOpen(true);
+    } else setSettingsOpen(false);
+    // URL state is authoritative; conversation switching owns the selected-id dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locationSearch.conversation, locationSearch.view]);
 
   useEffect(() => {
@@ -188,14 +218,17 @@ function ChatWorkspace() {
       appliedResultIdsRef.current = new Set(data.execution.toolCalls.filter((call) => call.status === 'completed').map((call) => call.id));
     }
     setActiveId(data.conversation.executionId);
-    setExecution((current) => current?.id === data.execution?.id && current?.status === 'running' && data.execution?.status === 'running' ? current : data.execution);
+    setExecution((current) => mergeExecutionSnapshot(current, data.execution));
     setLoadingExecution(false);
+    // activeId only guards the completed-tool result seed when the execution binding changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationQuery.data]);
 
   const visibleExecution = execution;
   const connectionState = mainConnectionState;
   const running = visibleExecution?.status === 'running';
   const waitingForInput = visibleExecution?.status === 'waiting_for_input';
+  const observingExecution = running || waitingForInput;
   const workflowRunning = workflowRun?.run.status === 'queued' || workflowRun?.run.status === 'running' || workflowRun?.run.status === 'paused' || workflowRun?.run.status === 'waiting_for_input';
   const mentionMatch = !selectedWorkflow && !workflowRunning ? /(?:^|\s)@([^\s@]*)$/.exec(draft) : null;
   const mentionQuery = mentionMatch?.[1]?.toLocaleLowerCase() ?? '';
@@ -257,7 +290,7 @@ function ChatWorkspace() {
 
   useEffect(() => {
     let cancelled = false;
-    const generation = ++mainRequestGenerationRef.current;
+    const generation = mainRequestGenerationRef.current;
     let retryTimer: number | undefined;
     if (!activeId) {
       setExecution(null);
@@ -276,7 +309,7 @@ function ChatWorkspace() {
         for (const call of next.toolCalls) if (call.status === 'completed') appliedResultIdsRef.current.add(call.id);
         setMainConnectionState('connected');
         setError('');
-        setExecution(next);
+        setExecution((current) => mergeExecutionSnapshot(current, next));
       } catch (loadError) {
         if (cancelled || generation !== mainRequestGenerationRef.current) return;
         if (loadError instanceof ApiError && loadError.status < 500) {
@@ -296,20 +329,21 @@ function ChatWorkspace() {
   }, [activeId, t, workspaceSlug]);
 
   useEffect(() => {
-    if (!activeId || (execution?.status !== 'running' && execution?.status !== 'waiting_for_input')) return;
+    if (!activeId || !observingExecution) return;
+    if (observedEventRef.current.executionId !== activeId) observedEventRef.current = { executionId: activeId, sequence: 0 };
+    let closed = false;
     const source = new EventSource(api.agentExecutionEventsUrl(CHAT_AGENT_ID, activeId), { withCredentials: true });
     source.onopen = () => setMainConnectionState('connected');
     source.onerror = () => setMainConnectionState('reconnecting');
     source.onmessage = (message) => {
+      if (closed) return;
       try {
         const event = parseAgentExecutionEvent(message.data);
+        if (event.executionId !== activeId || (event.sequence > 0 && event.sequence <= observedEventRef.current.sequence)) return;
+        if (event.sequence > 0) observedEventRef.current.sequence = event.sequence;
         const data = event.data;
         if (data.kind === 'snapshot') {
-          setExecution((current) => {
-            if (!current || current.id !== data.execution.id || !['failed', 'cancelled'].includes(data.execution.status)) return data.execution;
-            const ids = new Set(data.execution.messages.map((entry) => entry.id));
-            return { ...data.execution, messages: [...data.execution.messages, ...current.messages.filter((entry) => entry.role === 'assistant' && !ids.has(entry.id))] };
-          });
+          setExecution((current) => mergeExecutionSnapshot(current, data.execution));
           void applyCompletedResults(data.execution);
         } else if (data.kind === 'message_delta') {
           setExecution((current) => {
@@ -325,8 +359,8 @@ function ChatWorkspace() {
         setMainConnectionState('reconnecting');
       }
     };
-    return () => source.close();
-  }, [activeId, applyCompletedResults, execution?.status]);
+    return () => { closed = true; source.close(); };
+  }, [activeId, applyCompletedResults, observingExecution]);
 
   const workflowRunId = workflowRun?.run.id;
   useEffect(() => {
@@ -388,7 +422,7 @@ function ChatWorkspace() {
   async function submit(event: FormEvent) {
     event.preventDefault();
     const trimmedMessage = draft.trim();
-    if (busy || (!trimmedMessage && !selectedWorkflow)) return;
+    if (busy || cancelling || (!trimmedMessage && !selectedWorkflow)) return;
     const generation = mainRequestGenerationRef.current;
     const command = trimmedMessage.toLowerCase();
     if (command === '/log' || command === '/new' || command === '/resume') {
@@ -467,35 +501,34 @@ function ChatWorkspace() {
   }
 
   async function cancelExecution() {
-    const generation = mainRequestGenerationRef.current;
-    if (workflowRunning && workflowRun && !busy) {
-      setBusy(true);
-      setError('');
-      try {
-        const run = await api.cancelRun(workspaceSlug, workflowRun.run.id);
-        if (generation !== mainRequestGenerationRef.current) return;
-        setWorkflowRun((current) => current ? { ...current, run } : current);
-      } catch (cancelError) {
-        if (generation !== mainRequestGenerationRef.current) return;
-        setError(apiErrorMessage(cancelError, t('assistant:workflowRun.cancelFailed')));
-      } finally {
-        if (generation === mainRequestGenerationRef.current) setBusy(false);
-      }
-      return;
-    }
-    if (!visibleExecution || visibleExecution.status !== 'running' || busy) return;
-    setBusy(true);
+    if (cancelling) return;
+    const cancelWorkflow = workflowRunning && workflowRun;
+    if (!cancelWorkflow && (!visibleExecution || !['running', 'waiting_for_input'].includes(visibleExecution.status) || visibleExecution.pendingQuestion?.recovery)) return;
+    const generation = ++mainRequestGenerationRef.current;
+    setCancelling(true);
     setError('');
     setQueuePaused(true);
     try {
-      const next = await api.cancelAgentExecution(workspaceSlug, CHAT_AGENT_ID, visibleExecution.id);
-      if (generation !== mainRequestGenerationRef.current) return;
-      setExecution(next);
+      if (cancelWorkflow) {
+        const run = await api.cancelRun(workspaceSlug, cancelWorkflow.run.id);
+        if (generation !== mainRequestGenerationRef.current) return;
+        setWorkflowRun((current) => current ? { ...current, run } : current);
+      } else {
+        const next = await api.cancelAgentExecution(workspaceSlug, CHAT_AGENT_ID, visibleExecution!.id);
+        if (generation !== mainRequestGenerationRef.current) return;
+        setExecution((current) => {
+          if (!current || current.id !== next.id) return next;
+          const ids = new Set(next.messages.map((message) => message.id));
+          return { ...next, messages: [...next.messages, ...current.messages.filter((message) => message.role === 'assistant' && !ids.has(message.id))] };
+        });
+        void queryClient.invalidateQueries({ queryKey: chatConversationsQueryKey });
+        void queryClient.invalidateQueries({ queryKey: ['chat-conversation'] });
+      }
     } catch (cancelError) {
       if (generation !== mainRequestGenerationRef.current) return;
-      setError(apiErrorMessage(cancelError, t('assistant:execution.cancelFailed')));
+      setError(apiErrorMessage(cancelError, t(cancelWorkflow ? 'assistant:workflowRun.cancelFailed' : 'assistant:execution.cancelFailed')));
     } finally {
-      if (generation === mainRequestGenerationRef.current) setBusy(false);
+      if (generation === mainRequestGenerationRef.current) { setBusy(false); setCancelling(false); }
     }
   }
 
@@ -586,10 +619,6 @@ function ChatWorkspace() {
       setSelectedWorkflow(null);
       return true;
     }
-    if (panelView === 'configuration' && isConfigured) {
-      setPanelView('chat');
-      return true;
-    }
     return false;
   }
 
@@ -628,23 +657,14 @@ function ChatWorkspace() {
     setActiveValue(values[(currentIndex + offset + values.length) % values.length]);
   }
 
-  function handlePanelTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    event.preventDefault();
-    const views = ['chat', 'channels', 'configuration'] as const;
-    const index = views.indexOf(panelView);
-    const next = event.key === 'Home' ? views[0] : event.key === 'End' ? views[2] : views[(index + (event.key === 'ArrowRight' ? 1 : 2)) % 3];
-    setView(next);
-    window.requestAnimationFrame(() => document.getElementById(`chat-${next}-tab`)?.focus());
-  }
-
-  async function answerChoice(answer: string) {
+  async function answerChoice(answer: string, authorization?: Pick<DispatchChatRequest, 'recoveryDecision' | 'newConversation'>) {
     if (!execution?.pendingQuestion || busy) return;
     const generation = mainRequestGenerationRef.current;
     setBusy(true); setError('');
     try {
-      const next = await sendConversation(answer, execution.id, execution.pendingQuestion.id);
+      const next = await sendConversation(answer, execution.id, execution.pendingQuestion.id, undefined, authorization);
       if (generation !== mainRequestGenerationRef.current) return;
+      if (authorization?.newConversation) { selectConversation(next.id); return; }
       setExecution(next); setQueuePaused(false);
       void queryClient.invalidateQueries({ queryKey: chatConversationsQueryKey });
     } catch (cause) { if (generation === mainRequestGenerationRef.current) setError(apiErrorMessage(cause, t('assistant:execution.answerFailed'))); }
@@ -667,36 +687,30 @@ function ChatWorkspace() {
         : visibleExecution?.status === 'completed' ? t('assistant:status.completed')
           : visibleExecution?.status === 'waiting_for_input' ? t('assistant:status.waiting_for_input')
             : visibleExecution?.status === 'running' ? t('assistant:status.running') : '';
-  const composerAvailable = Boolean(isConfigured || eligibleWorkflows.length > 0);
+  const canCancel = Boolean(workflowRunning || ((running || waitingForInput) && !visibleExecution?.pendingQuestion?.recovery));
+  const composerAvailable = Boolean(isConfigured || eligibleWorkflows.length > 0 || canCancel);
   const composerLoading = agentQuery.isLoading || workflowsQuery.isLoading || mcpServersQuery.isLoading;
-  const stopTarget = (running && !selectedWorkflow) || workflowRunning;
-  const submitDisabled = busy || (!draft.trim() && !selectedWorkflow && !stopTarget) || (!selectedWorkflow && !stopTarget && !isConfigured);
+  const stopTarget = running || workflowRunning;
+  const submitDisabled = stopTarget ? cancelling : busy || cancelling || (!draft.trim() && !selectedWorkflow && !stopTarget) || (!selectedWorkflow && !stopTarget && !isConfigured);
 
   const selected = conversationQuery.data?.conversation;
   const selectedWithoutExecution = Boolean(selectedConversationId && !activeId);
-  const loadingConversation = !conversationQuery.isError && (conversationQuery.isLoading || loadingExecution);
+  const loadingConversation = !visibleExecution && !conversationQuery.isError && (conversationQuery.isLoading || loadingExecution);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <WorkspaceChrome crumbs={[{ label: 'Chat' }]} status={status ? <Badge variant={visibleExecution?.status === 'failed' ? 'danger' : 'neutral'}>{status}</Badge> : undefined} />
-      <div className="agent-tabs shrink-0" role="tablist" aria-label={t('assistant:panelTabs.label')}>
-        {(['chat', 'channels', 'configuration'] as const).map((view) => <button key={view} id={`chat-${view}-tab`} type="button" role="tab" aria-selected={panelView === view} aria-controls={`chat-${view}-content`} tabIndex={panelView === view ? 0 : -1} className={cn(panelView === view && 'active')} onKeyDown={handlePanelTabKeyDown} onClick={() => setView(view)}>{t(`assistant:panelTabs.${view}`)}</button>)}
-      </div>
-      {panelView === 'channels' ? <div id="chat-channels-content" role="tabpanel" aria-labelledby="chat-channels-tab" className="min-h-0 flex-1 overflow-auto"><ChannelConfiguration onOpenWeb={() => selectConversation(null)} /></div> : panelView === 'configuration' ? (
-        <div id="chat-configuration-content" role="tabpanel" aria-labelledby="chat-configuration-tab" className="min-h-0 flex-1 overflow-auto">
-          <Configuration providers={providersQuery.data ?? []} mcpServers={mcpServersQuery.data ?? []} selection={configSelection}
-            onSelectionChange={(value) => { setConfigSelection(value); void saveConfiguration(value, selectedMcpServerIds); }}
-            selectedMcpServerIds={selectedMcpServerIds} onMcpServersChange={(ids) => { setSelectedMcpServerIds(ids); void saveConfiguration(configSelection, ids); }}
-            skills={skillsQuery.data ?? []} selectedSkillIds={selectedSkillIds} onSkillsChange={(ids) => { setSelectedSkillIds(ids); void saveConfiguration(configSelection, selectedMcpServerIds, ids); }}
-            extensionPrompt={extensionPrompt} onPromptChange={setExtensionPrompt} onPromptSave={() => { if (extensionPrompt !== (agentQuery.data?.chatConfiguration?.extensionPrompt ?? '')) void saveConfiguration(configSelection, selectedMcpServerIds); }}
-            saving={configSaving} error={configError} loading={agentQuery.isLoading || providersQuery.isLoading || skillsQuery.isLoading || mcpServersQuery.isLoading}
-            loadFailed={agentQuery.isError || providersQuery.isError || skillsQuery.isError || mcpServersQuery.isError}
-            onReload={() => { void agentQuery.refetch(); void providersQuery.refetch(); void skillsQuery.refetch(); void mcpServersQuery.refetch(); }} />
-        </div>
-      ) : (
-        <div id="chat-chat-content" role="tabpanel" aria-labelledby="chat-chat-tab" className="flex min-h-0 flex-1">
-          <aside className="hidden w-64 shrink-0 border-r border-border md:flex"><ConversationList selectedId={selectedConversationId} onSelect={selectConversation} onNew={() => selectConversation(null)} /></aside>
-          <section ref={chatSurfaceRef} className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={t('assistant:panelTabs.chat')}>
+      <WorkspaceChrome
+        crumbs={[{ label: 'Chat' }]}
+        status={status ? <Badge variant={visibleExecution?.status === 'failed' ? 'danger' : 'neutral'}>{status}</Badge> : undefined}
+        actions={(
+          <Button type="button" variant="ghost" size="icon-compact" aria-label={t('assistant:settings.open')} onClick={() => openSettings('channels')}>
+            <Settings className="size-4" />
+          </Button>
+        )}
+      />
+      <div className="flex min-h-0 flex-1">
+        <aside className="hidden w-64 shrink-0 border-r border-border md:flex"><ConversationList selectedId={selectedConversationId} onSelect={selectConversation} onNew={() => selectConversation(null)} /></aside>
+        <section ref={chatSurfaceRef} className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={t('assistant:title')}>
             <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
               <Button variant="ghost" size="icon-compact" className="md:hidden" aria-label={t('assistant:history.title')} onClick={() => setSwitcherOpen(true)}><List className="size-4" /></Button>
               <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{selected?.title || t(selectedConversationId ? 'assistant:history.loading' : 'assistant:history.new')}</p><p className="text-xs text-muted-foreground">{selected?.channel === 'feishu' ? t(conversationQuery.data?.channelDelivery === 'unbound' ? 'assistant:channels.feishuUnbound' : conversationQuery.data?.channelDelivery === 'disconnected' ? 'assistant:channels.feishuDisconnected' : 'assistant:channels.feishuBound') : 'Web'}</p></div>
@@ -710,13 +724,13 @@ function ChatWorkspace() {
                   {loadingConversation ? <TranscriptSkeleton /> : null}
                   {conversationQuery.isError ? <div className="space-y-2"><p role="alert" className="text-sm text-danger">{t('assistant:history.loadFailed')}</p><Button variant="secondary" size="compact" onClick={() => void conversationQuery.refetch()}>{t('assistant:history.retry')}</Button></div> : null}
                   {turns.map((turn, index) => turn.kind === 'user' ? <UserMessage key={turn.item.id} message={turn.item} /> : <AssistantTurn key={turn.segments[0].item.id} segments={turn.segments} working={showWorkingInLastTurn && index === turns.length - 1} markdownEnabled />)}
-                  {(running && !showWorkingInLastTurn || busy && !running && !waitingForInput) ? <AssistantTurn segments={[]} working markdownEnabled /> : null}
-                  {waitingForInput && visibleExecution?.pendingQuestion ? <QuestionNote key={visibleExecution.pendingQuestion.id} question={visibleExecution.pendingQuestion} onAnswer={(answer) => void answerChoice(answer)} busy={busy} /> : null}
+                  {(running && !showWorkingInLastTurn || busy && !cancelling && !running && !waitingForInput) ? <AssistantTurn segments={[]} working markdownEnabled /> : null}
+                  {waitingForInput && visibleExecution?.pendingQuestion ? <QuestionNote key={visibleExecution.pendingQuestion.id} question={visibleExecution.pendingQuestion} onAnswer={(answer, authorization) => void answerChoice(answer, authorization)} busy={busy || cancelling} /> : null}
                   {visibleExecution?.status === 'cancelled' ? <CancelledNote /> : null}
                   <TaskMessages submissions={conversationQuery.data?.submissions ?? []} />
                   {workflowRun && !conversationQuery.data?.submissions.some((submission) => submission.reference?.kind === 'workflow' && submission.reference.runId === workflowRun.run.id) ? <WorkflowRunRow run={workflowRun.run} workflow={workflowRun.workflow} input={workflowRun.input} /> : null}
                   {conversationQuery.data?.pendingReceipts.map((receipt) => <div key={receipt.id} className="my-3 space-y-2"><UserMessage message={{ id: receipt.id, role: 'user', content: receipt.text, createdAt: receipt.createdAt }} /><p role={receipt.error ? 'alert' : 'status'} className={cn('text-[13px]', receipt.error ? 'text-danger' : 'text-muted-foreground')}>{receipt.error || t('assistant:status.queued')}</p></div>)}
-                  {executionError ? <FailureNote execution={visibleExecution} message={executionError} onRetry={() => void retryExecution()} retryDisabled={busy} locale={locale} /> : null}
+                  {executionError ? <FailureNote execution={visibleExecution} message={executionError} onRetry={() => void retryExecution()} retryDisabled={busy || cancelling} locale={locale} /> : null}
                   <QueueRows queued={queued} paused={queuePaused} sendingId={queueSendingId} onRemove={(id) => setQueued((current) => current.filter((item) => item.id !== id))} />
                   {error ? <p className="mt-4 border-l-2 border-danger pl-3 text-[13px] text-danger" role="alert">{error}</p> : null}
                 </ConversationContent>
@@ -728,12 +742,40 @@ function ChatWorkspace() {
               <Composer draft={draft} onDraftChange={(value) => { setDraft(value); setSlashDismissed(false); setMentionDismissed(false); setActiveValue(''); }} onSubmit={submit} onKeyDown={handleComposerKeyDown} onFocus={() => {}}
                 selectedWorkflow={selectedWorkflow} onRemoveWorkflow={() => setSelectedWorkflow(null)} commandMatches={commandMatches} commandMenuOpen={commandMenuOpen} onRunCommand={runCommand}
                 mentionMatches={mentionMatches} mentionMenuOpen={mentionMenuOpen} onSelectMention={selectMention} activeValue={activeValue} onActiveValueChange={setActiveValue}
-                onDismissMenus={() => { setSlashDismissed(true); setMentionDismissed(true); }} running={stopTarget} busy={busy} submitDisabled={submitDisabled} waitingForInput={Boolean(waitingForInput)} onStop={() => void cancelExecution()} />
-            ) : <button type="button" className={cn('flex min-h-12 w-full items-center gap-2 border-t border-border px-4 text-left text-[13px] hover:bg-surface-subtle', focusRingInset)} onClick={() => setView('configuration')}><ShieldAlert className="size-4" />{t('assistant:composer.configure')}<ChevronRight className="ml-auto size-4" /></button>}
-          </section>
-        </div>
-      )}
+                onDismissMenus={() => { setSlashDismissed(true); setMentionDismissed(true); }} running={stopTarget} busy={busy || cancelling} canCancel={canCancel} cancelling={cancelling} submitDisabled={submitDisabled} waitingForInput={Boolean(waitingForInput)} onStop={() => void cancelExecution()} />
+            ) : <button type="button" className={cn('flex min-h-12 w-full items-center gap-2 border-t border-border px-4 text-left text-[13px] hover:bg-surface-subtle', focusRingInset)} onClick={() => openSettings('configuration')}><ShieldAlert className="size-4" />{t('assistant:composer.configure')}<ChevronRight className="ml-auto size-4" /></button>}
+        </section>
+      </div>
       <Sheet open={switcherOpen} onOpenChange={setSwitcherOpen}><SheetContent side="left" className="flex w-80 flex-col p-0"><SheetHeader className="sr-only"><SheetTitle>{t('assistant:history.title')}</SheetTitle></SheetHeader><ConversationList selectedId={selectedConversationId} onSelect={selectConversation} onNew={() => selectConversation(null)} /></SheetContent></Sheet>
+      <Dialog open={settingsOpen} onOpenChange={handleSettingsOpenChange}>
+        <DialogContent className="flex max-h-[85vh] w-[calc(100%-2rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0">
+          <DialogHeader className="px-6 pt-6">
+            <DialogTitle>{t('assistant:settings.title')}</DialogTitle>
+            <DialogDescription>{t('assistant:settings.description')}</DialogDescription>
+          </DialogHeader>
+          <Tabs value={settingsSection} onValueChange={changeSettingsSection} className="min-h-0 flex-1 flex-col gap-0">
+            <div className="px-6 pt-4">
+              <TabsList>
+                <TabsTrigger value="channels">{t('assistant:settings.channels')}</TabsTrigger>
+                <TabsTrigger value="configuration">{t('assistant:settings.configuration')}</TabsTrigger>
+              </TabsList>
+            </div>
+            <TabsContent value="channels" className="min-h-0 flex-1 overflow-y-auto">
+              <ChannelConfiguration onOpenWeb={() => selectConversation(null)} />
+            </TabsContent>
+            <TabsContent value="configuration" className="min-h-0 flex-1 overflow-y-auto">
+              <Configuration providers={providersQuery.data ?? []} mcpServers={mcpServersQuery.data ?? []} selection={configSelection}
+                onSelectionChange={(value) => { setConfigSelection(value); void saveConfiguration(value, selectedMcpServerIds); }}
+                selectedMcpServerIds={selectedMcpServerIds} onMcpServersChange={(ids) => { setSelectedMcpServerIds(ids); void saveConfiguration(configSelection, ids); }}
+                skills={skillsQuery.data ?? []} selectedSkillIds={selectedSkillIds} onSkillsChange={(ids) => { setSelectedSkillIds(ids); void saveConfiguration(configSelection, selectedMcpServerIds, ids); }}
+                extensionPrompt={extensionPrompt} onPromptChange={setExtensionPrompt} onPromptSave={() => { if (extensionPrompt !== (agentQuery.data?.chatConfiguration?.extensionPrompt ?? '')) void saveConfiguration(configSelection, selectedMcpServerIds); }}
+                saving={configSaving} error={configError} loading={agentQuery.isLoading || providersQuery.isLoading || skillsQuery.isLoading || mcpServersQuery.isLoading}
+                loadFailed={agentQuery.isError || providersQuery.isError || skillsQuery.isError || mcpServersQuery.isError}
+                onReload={() => { void agentQuery.refetch(); void providersQuery.refetch(); void skillsQuery.refetch(); void mcpServersQuery.refetch(); }} />
+            </TabsContent>
+          </Tabs>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

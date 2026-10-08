@@ -18,9 +18,12 @@ function PromptInputTextarea({ className, onValueChange, ...props }: PromptInput
 
 type PromptInputSubmitProps = ComponentProps<'button'> & { status?: 'idle' | 'submitted' | 'streaming' | 'error'; onStop?: () => void };
 
-function PromptInputSubmit({ status = 'idle', onStop, children, ...props }: PromptInputSubmitProps) {
+function PromptInputSubmit({ status = 'idle', onStop, onClick, children, ...props }: PromptInputSubmitProps) {
   const active = status === 'submitted' || status === 'streaming';
-  return <button type={active && onStop ? 'button' : 'submit'} onClick={active && onStop ? onStop : undefined} {...props}>{children}</button>;
+  return <button {...props} type={active && onStop ? 'button' : 'submit'} onClick={(event) => {
+    onClick?.(event);
+    if (!event.defaultPrevented && active && onStop) onStop();
+  }}>{children}</button>;
 }
 
 export { PromptInput, PromptInputTextarea, PromptInputSubmit };

@@ -74,6 +74,7 @@
     "contextPort": "Context",
     "nodeName": "Node name",
     "skills": "Skills",
+    "inputPort": "Input",
     "outputPort": "Output",
     "workflowInput": "Workflow input",
     "connections": "Connections",

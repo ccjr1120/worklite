@@ -122,7 +122,7 @@ export class PluginsService {
 
   private probe(command: string): PluginTestResult {
     const [executable, ...argumentsValue] = parsePluginCommand(command);
-    const result = spawnSync(executable, [...argumentsValue, '--version'], { stdio: 'ignore' });
+    const result = spawnSync(executable === 'cx' || executable === 'cxo' ? 'codex' : executable, [...argumentsValue, '--version'], { stdio: 'ignore' });
     const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
     if (errorCode === 'ENOENT') return { enabled: false, status: 'missing' };
     return result.status === 0 ? { enabled: true, status: 'available' } : { enabled: false, status: 'failed' };

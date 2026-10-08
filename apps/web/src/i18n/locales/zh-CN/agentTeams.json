@@ -44,6 +44,7 @@
     },
     "version": "团队版本",
     "project": "项目目录",
+    "intent": "任务目标",
     "noCommands": "未授权命令",
     "scopeRevision": "授权范围版本",
     "detail": {

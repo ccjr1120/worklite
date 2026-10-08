@@ -310,8 +310,9 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
                     {skillsQuery.isLoading ? <Skeleton className="h-20 w-full" /> : (skillsQuery.data ?? []).length === 0 ? (
                       <p className="text-[13px] text-muted-foreground">{t('skills.empty')}</p>
                     ) : (skillsQuery.data ?? []).map((skill) => (
-                      <label key={skill.id} className="flex min-w-0 items-start gap-2 text-[13px]">
+                      <label key={skill.id} htmlFor={`agent-team-${role.role}-skill-${skill.id}`} className="flex min-w-0 items-start gap-2 text-[13px]">
                         <Checkbox
+                          id={`agent-team-${role.role}-skill-${skill.id}`}
                           className="mt-0.5"
                           checked={role.skillIds.includes(skill.id)}
                           onCheckedChange={(checked) => updateRole(role.role, {
@@ -330,8 +331,9 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
                     {mcpServersQuery.isLoading ? <Skeleton className="h-20 w-full" /> : (mcpServersQuery.data ?? []).length === 0 ? (
                       <p className="text-[13px] text-muted-foreground">{t('mcpServers.empty')}</p>
                     ) : (mcpServersQuery.data ?? []).map((server) => (
-                      <label key={server.id} className="flex min-w-0 items-start gap-2 text-[13px]">
+                      <label key={server.id} htmlFor={`agent-team-${role.role}-mcp-${server.id}`} className="flex min-w-0 items-start gap-2 text-[13px]">
                         <Checkbox
+                          id={`agent-team-${role.role}-mcp-${server.id}`}
                           className="mt-0.5"
                           checked={role.mcpServerIds.includes(server.id)}
                           onCheckedChange={(checked) => updateRole(role.role, {

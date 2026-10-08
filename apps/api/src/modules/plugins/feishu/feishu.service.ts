@@ -202,9 +202,11 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
         }
       }
       // Associate model-dispatched tasks with their originating external conversation.
-      const children = await this.db.select({ submission: chatSubmissions, chat: feishuChats }).from(chatSubmissions)
-        .innerJoin(feishuChats, eq(chatSubmissions.executionId, feishuChats.executionId)).where(isNull(chatSubmissions.chatId));
-      for (const { submission, chat } of children) await this.db.update(chatSubmissions).set({ chatId: chat.id }).where(eq(chatSubmissions.id, submission.id));
+      const children = await this.db.select().from(chatSubmissions).where(and(isNull(chatSubmissions.chatId), sql`${chatSubmissions.executionId} is not null`));
+      for (const submission of children) {
+        const [origin] = await this.db.select({ chatId: chatSubmissions.chatId }).from(chatSubmissions).where(and(eq(chatSubmissions.executionId, submission.executionId!), sql`${chatSubmissions.chatId} is not null`)).orderBy(asc(chatSubmissions.createdAt)).limit(1);
+        if (origin?.chatId) await this.db.update(chatSubmissions).set({ chatId: origin.chatId }).where(eq(chatSubmissions.id, submission.id));
+      }
       const submissions = await this.db.select().from(chatSubmissions).where(and(eq(chatSubmissions.workspaceId, 'workspace_personal'), eq(chatSubmissions.settled, false))).orderBy(asc(chatSubmissions.createdAt));
       for (const submission of submissions) {
         if (!submission.chatId) continue;
@@ -227,7 +229,8 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
     }
     const text = string(payload.text);
     if (!text) throw new BadRequestException('目前支持文字消息；请直接发送文字。');
-    await this.dispatchFromChannel({ submissionId: event.id, message: text, target: { kind: 'conversation' }, executionId: chat.executionId }, chat.id);
+    const [received] = await this.db.select({ executionId: chatSubmissions.executionId }).from(chatSubmissions).where(eq(chatSubmissions.id, event.id)).limit(1);
+    await this.dispatchFromChannel({ submissionId: event.id, message: text, target: { kind: 'conversation' }, executionId: received?.executionId ?? chat.executionId }, chat.id);
   }
 
   private async dispatchFromChannel(input: import('@worklite/contracts').DispatchChatRequest, chatId: string) {
@@ -237,8 +240,8 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
     if (result.reference.kind === 'conversation') {
       const executionId = result.reference.executionId;
       this.db.transaction((transaction) => {
-        transaction.update(feishuChats).set({ executionId, updatedAt: new Date() }).where(eq(feishuChats.id, chatId)).run();
-        transaction.update(chatSubmissions).set({ executionId }).where(and(eq(chatSubmissions.chatId, chatId), isNull(chatSubmissions.executionId))).run();
+        const bound = transaction.update(feishuChats).set({ executionId, updatedAt: new Date() }).where(and(eq(feishuChats.id, chatId), input.executionId ? eq(feishuChats.executionId, input.executionId) : isNull(feishuChats.executionId))).run();
+        if (bound.changes > 0) transaction.update(chatSubmissions).set({ executionId }).where(and(eq(chatSubmissions.chatId, chatId), isNull(chatSubmissions.executionId))).run();
       });
     }
     return result;
@@ -256,10 +259,13 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       await this.teams.answer(request, 'personal', action.runId, { pendingInputId: action.pendingInputId, scopeRevision: action.scopeRevision, answer, authorizedCommands: string(form.commands).split('\n').map((item) => item.trim()).filter(Boolean) });
     } else if (action.kind === 'agent_answer') {
       const [accepted] = await this.db.select({ reference: chatSubmissions.reference }).from(chatSubmissions).where(eq(chatSubmissions.id, eventId)).limit(1);
-      if (accepted?.reference) return;
+      if (accepted?.reference) {
+        if (action.newConversation && accepted.reference.kind === 'conversation') await this.db.update(feishuChats).set({ executionId: accepted.reference.executionId, updatedAt: new Date() }).where(and(eq(feishuChats.id, chatId), eq(feishuChats.executionId, action.executionId)));
+        return;
+      }
       const current = await this.executions.get(request, 'personal', CHAT_AGENT_ID, action.executionId);
       if (current.status !== 'waiting_for_input' || current.pendingQuestion?.id !== action.questionId) throw new ConflictException('This Agent question is no longer active.');
-      await this.dispatchFromChannel({ submissionId: eventId, message: action.answer ?? answer, target: { kind: 'conversation' }, executionId: action.executionId, questionId: action.questionId }, chatId);
+      await this.dispatchFromChannel({ submissionId: eventId, message: action.answer ?? answer, target: { kind: 'conversation' }, executionId: action.executionId, questionId: action.questionId, recoveryDecision: action.recoveryDecision, newConversation: action.newConversation }, chatId);
     } else if (action.kind === 'control') {
       if (action.domain === 'conversation') {
         const [turn] = await this.db.select({ reference: chatSubmissions.reference }).from(chatSubmissions).where(eq(chatSubmissions.id, parentId)).limit(1);
@@ -278,8 +284,6 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
         else await this.runs[action.action](request, 'personal', action.runId);
       } else if (action.action === 'cancel') await this.executions.cancel(request, 'personal', CHAT_AGENT_ID, action.runId);
       else if (action.action === 'retry') await this.executions.retry(request, 'personal', CHAT_AGENT_ID, action.runId);
-    } else if (action.kind === 'upgrade') {
-      this.upgrades.confirm(action.jobId, action.releaseHash, this.allowedUserId);
     } else if (action.kind === 'recovery') {
       const run = await this.teams.getRun(request, 'personal', action.runId);
       const operation = run.operations.find((item) => item.operationKey === action.operationKey);
@@ -303,13 +307,12 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       state.status = '请求失败'; state.content = submission.error; terminal = true;
     } else if (reference?.kind === 'upgrade') {
       const job = this.upgrades.view(reference.jobId);
-      const statuses: Record<string, string> = { awaiting_confirmation: '等待升级确认', authorized: '升级已确认', preflighting: '正在预检', draining: '正在交接任务', frozen: '即将切换', switching: '正在切换', recovering: '正在恢复旧版本', succeeded: '升级完成', rolled_back: '已恢复旧版本', failed: '升级未完成' };
-      state.title = 'WorkLite 升级'; state.status = statuses[job.phase] ?? job.phase;
+      const statuses: Record<string, string> = { proposed: '等待重新部署指令', authorized: '部署已启动', preflighting: '正在预检', draining: '正在交接任务', frozen: '即将切换', switching: '正在切换', recovering: '正在恢复旧版本', succeeded: '部署完成', rolled_back: '已恢复旧版本', failed: '部署未完成' };
+      state.title = 'WorkLite 部署'; state.status = statuses[job.phase] ?? job.phase;
       state.conversation = false;
-      state.content = `版本：${job.releaseHash.slice(0, 12)}\n${job.summary}\n\n确认将授权：安装依赖、编译与隔离预检、任务交接、数据备份、服务切换，以及失败时恢复旧版本。切换期间飞书可能短暂断连。`;
+      state.content = `版本：${job.releaseHash.slice(0, 12)}\n${job.summary}`;
       if (job.error) state.content += `\n\n${job.error}`;
-      if (job.phase === 'awaiting_confirmation') state.buttons.push({ label: '升级到此版本', action: { kind: 'upgrade', jobId: job.id, releaseHash: job.releaseHash } });
-      terminal = ['succeeded', 'rolled_back', 'failed'].includes(job.phase);
+      terminal = ['proposed', 'succeeded', 'rolled_back', 'failed'].includes(job.phase);
     } else if (reference?.kind === 'conversation') {
       const execution = await this.executions.get(request, 'personal', CHAT_AGENT_ID, reference.executionId);
       const start = reference.afterMessageId ? execution.messages.findIndex((message) => message.id === reference.afterMessageId) + 1 : 0;
@@ -342,11 +345,20 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       if (!reference.completionStatus && execution.status === 'waiting_for_input' && execution.pendingQuestion) {
         const question = execution.pendingQuestion;
         const action: Extract<FeishuAction, { kind: 'agent_answer' }> = { kind: 'agent_answer', executionId: execution.id, questionId: question.id };
-        state.question = { text: question.question, action, replyOnly: question.options.length > 0 };
+        state.question = { text: question.question, action, replyOnly: Boolean(question.recovery) || question.action === 'new_conversation' || question.options.length > 0 };
+        if (question.action === 'new_conversation') state.buttons.push({ label: '新对话', action: { ...action, answer: '开启新对话', newConversation: true } });
+        if (question.recovery) {
+          if (question.recovery.commandExecutionId) state.buttons.push({ label: '采用已有命令结果', action: { ...action, answer: '采用已有命令结果', recoveryDecision: 'adopt_command' } });
+          state.buttons.push({ label: '标记操作失败', action: { ...action, answer: '标记操作失败', recoveryDecision: 'mark_failed' } });
+        }
         state.buttons.push(...question.options.map((option) => ({ label: option, action: { ...action, answer: option } })));
       }
       if (!reference.completionStatus && (execution.status === 'running' || execution.status === 'waiting_for_input')) state.buttons.push({ label: '停止本轮对话', action: { kind: 'control', domain: 'conversation', runId: execution.id, action: 'cancel' } });
       if ((!reference.completionStatus || reference.completionStatus === 'failed') && execution.status === 'failed') state.buttons.push({ label: '重试本轮对话', action: { kind: 'control', domain: 'conversation', runId: execution.id, action: 'retry' } });
+      const codexTasks = execution.toolCalls.flatMap((call) => call.codexTask ? [call.codexTask] : []);
+      if (codexTasks.length) state.details = codexTasks.map((task) => ['Codex · ' + task.model, task.goal, statusText[task.status] ?? task.status, ...task.activities.filter((item) => typeof item.commandExecutionId === 'string').map((item) => String(item.phase) + ': ' + String(item.commandExecutionId)), task.error ?? '', task.result].filter(Boolean).join('\n')).join('\n\n');
+      const shellCalls = execution.toolCalls.filter((call) => call.shell);
+      if (shellCalls.length) state.details = [state.details, ...shellCalls.map((call) => ['Shell · ' + (statusText[call.status] ?? call.status), '工作目录：' + call.workingDirectory, call.shell!.command, 'Command：' + (call.commandExecutionId ?? '未启动'), '退出码：' + (call.exitCode ?? '无'), call.output].join('\n'))].filter(Boolean).join('\n\n');
       state.replyContent = state.content;
       state.streaming = executionStatus === 'running' && execution.phase === 'model' && response.length > 0;
       if (Buffer.byteLength(state.content) > 20_000) {
@@ -377,7 +389,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
         state.content = `${run.intent}\n\n${active ? `当前任务：${active.taskKey}` : ''}`;
         if (run.status === 'failed' && active?.error) state.content += `\n\n${active.error}`;
         const pending = run.pendingInputs.find((item) => item.status === 'pending');
-        if (pending?.kind === 'question') state.question = { text: pending.question, action: { kind: 'answer', runId: run.id, pendingInputId: pending.id, scopeRevision: pending.scopeRevision }, commands: run.mode !== 'plan_only' };
+        if (pending?.kind === 'question') state.question = { text: pending.question, action: { kind: 'answer', runId: run.id, pendingInputId: pending.id, scopeRevision: pending.scopeRevision }, commands: run.mode !== 'plan_only' && run.tasks.find((task) => task.id === pending.taskAttemptId)?.role !== 'developer' };
         if (pending?.kind === 'operation_recovery' && pending.operationKey) {
           state.content += `\n\n${pending.question}`;
           state.buttons.push(...(['adopt_command', 'mark_failed', 'replay'] as const).map((decision) => ({ label: ({ adopt_command: '采用已执行结果', mark_failed: '标记操作失败', replay: '重新执行此操作' })[decision], action: { kind: 'recovery', runId: run.id, operationKey: pending.operationKey!, decision } as FeishuAction })));

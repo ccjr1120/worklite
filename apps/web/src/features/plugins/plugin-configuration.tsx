@@ -46,7 +46,7 @@ export function PluginConfiguration({ pluginId, embedded = false }: { pluginId: 
     setTestState(plugin.status);
     setSaveState('saved');
     setError('');
-  }, [plugin?.id, plugin?.command, plugin?.feishu?.appId, plugin?.feishu?.allowedUserId]);
+  }, [plugin?.id, plugin?.command, plugin?.feishu?.appId, plugin?.feishu?.allowedUserId]); // eslint-disable-line react-hooks/exhaustive-deps -- unrelated status changes must not erase a typed secret.
 
   useEffect(() => {
     if (!registrationSavedId) return;
@@ -106,6 +106,8 @@ export function PluginConfiguration({ pluginId, embedded = false }: { pluginId: 
     if (replacedFeishuQrRef.current === registration.id) return;
     replacedFeishuQrRef.current = registration.id;
     void startFeishuRegistrationRef.current();
+    // Registration identity, expiry, busy state, and visibility drive this replacement timer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [registration?.id, registration?.status, registration?.expiresAt, registrationBusy, qrExpiryTick]);
 
   async function save() {

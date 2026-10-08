@@ -307,13 +307,17 @@ export function WorkflowFlowDiagram({
 
   return (
     <>
+      {/* The toolbar factory only runs its callback after a user-activated control event. */}
+      {/* eslint-disable-next-line react-hooks/refs */}
       <div className="workflow-flow-toolbar"><div>{toolbar(() => openNodePicker())}</div></div>
+      {/* The focusable scroll region owns canvas keyboard shortcuts. */}
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
       <div
         ref={viewportRef}
         className="workflow-flow-viewport"
         role="region"
         aria-label={t('editor.canvas')}
-        tabIndex={0}
+        tabIndex={0} /* eslint-disable-line jsx-a11y/no-noninteractive-tabindex */
         onKeyDown={handleViewportKeyDown}
         onClick={handleViewportClick}
         onScroll={() => setPickerAnchor(null)}
@@ -410,7 +414,7 @@ export function WorkflowFlowDiagram({
         {nodes.length === 0 ? <div className="workflow-flow-empty">{emptyState}</div> : null}
       </div>
       {pickerAnchor ? (
-        <div
+        <div /* eslint-disable-line jsx-a11y/no-noninteractive-element-interactions */
           ref={pickerRef}
           className="fixed z-[60] flex flex-col overflow-hidden rounded-lg border border-border bg-surface-raised p-3 text-foreground shadow-lg"
           style={{ left: pickerAnchor.left, top: pickerAnchor.top, width: pickerAnchor.width, maxHeight: pickerAnchor.maxHeight }}

@@ -14,6 +14,7 @@ LOG_FILE="$DEPLOY_DATA_DIR/worklite-local.log"
 PREFLIGHT_LOG_FILE="$DEPLOY_DATA_DIR/worklite-preflight.log"
 PREFLIGHT_DATA_DIR=""
 PREFLIGHT_PID=""
+PREFLIGHT_WEB_DIST_DIR=""
 PREFLIGHT_PASSED="false"
 
 cd "$ROOT_DIR"
@@ -81,6 +82,9 @@ cleanup_preflight() {
   if [[ -n "$PREFLIGHT_DATA_DIR" && -d "$PREFLIGHT_DATA_DIR" ]]; then
     rm -rf "$PREFLIGHT_DATA_DIR"
   fi
+  if [[ -n "$PREFLIGHT_WEB_DIST_DIR" && -d "$PREFLIGHT_WEB_DIST_DIR" ]]; then
+    rm -rf "$PREFLIGHT_WEB_DIST_DIR"
+  fi
   if [[ "$PREFLIGHT_PASSED" == "true" ]]; then
     rm -f "$PREFLIGHT_LOG_FILE"
   fi
@@ -122,6 +126,8 @@ run_preflight() {
   rm -f "$PREFLIGHT_LOG_FILE"
 
   (
+    export WORKLITE_PREFLIGHT="1"
+    export WORKLITE_WEB_DIST_DIR="$PREFLIGHT_WEB_DIST_DIR"
     export API_HOST="127.0.0.1"
     export API_PORT="$PREFLIGHT_API_PORT"
     export WEB_PORT="$PREFLIGHT_WEB_PORT"
@@ -132,8 +138,13 @@ run_preflight() {
   ) >"$PREFLIGHT_LOG_FILE" 2>&1 &
   PREFLIGHT_PID=$!
 
-  wait_for_ready "$PREFLIGHT_PID" "$PREFLIGHT_WEB_PORT" "$PREFLIGHT_API_PORT" "$PREFLIGHT_GATEWAY_PORT" "$PREFLIGHT_LOG_FILE" 120
+  if ! wait_for_ready "$PREFLIGHT_PID" "$PREFLIGHT_WEB_PORT" "$PREFLIGHT_API_PORT" "$PREFLIGHT_GATEWAY_PORT" "$PREFLIGHT_LOG_FILE" 120; then
+    cat "$PREFLIGHT_LOG_FILE"
+    return 1
+  fi
 }
+
+node scripts/bump-deployment-version.mjs
 
 echo "Installing dependencies..."
 pnpm install --frozen-lockfile
@@ -142,7 +153,8 @@ echo "Building Portkey Gateway..."
 pnpm --filter @portkey-ai/gateway build
 
 echo "Building WorkLite Web..."
-pnpm --filter @worklite/web exec vite build
+PREFLIGHT_WEB_DIST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/worklite-web.XXXXXX")"
+pnpm --filter @worklite/web exec vite build --outDir "$PREFLIGHT_WEB_DIST_DIR"
 
 echo "Preflighting WorkLite on isolated ports..."
 run_preflight
@@ -155,6 +167,8 @@ clear_port "$WEB_PORT"
 clear_port "$API_PORT"
 clear_port "$GATEWAY_PORT"
 rm -f "$PID_FILE"
+rm -rf "$ROOT_DIR/apps/web/dist"
+cp -R "$PREFLIGHT_WEB_DIST_DIR" "$ROOT_DIR/apps/web/dist"
 
 export API_HOST="127.0.0.1"
 export API_PORT

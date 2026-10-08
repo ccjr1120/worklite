@@ -120,7 +120,7 @@ function workflowNodeKind(nodeType: WorkflowCanvasNodeType, t: TFunction<'workfl
   return kinds[nodeType];
 }
 
-export function workflowNodeRowCount(node: WorkflowCanvasNode, t: (key: string) => string): number {
+export function workflowNodeRowCount(node: WorkflowCanvasNode, t: TFunction<'workflows'>): number {
   return Math.max(workflowNodeInputs(node, t).length, 1);
 }
 
@@ -176,6 +176,8 @@ export function WorkflowStageNode({
   const rowCount = Math.max(inputs.length, 1);
 
   return (
+    // Pointer selection is a convenience duplicate of the heading button and port controls.
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions
     <div
       className={cn('workflow-flow-node', node.className, selected && 'workflow-node-selected')}
       data-flow-node={node.id}

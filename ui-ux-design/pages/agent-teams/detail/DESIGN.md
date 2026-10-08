@@ -27,7 +27,7 @@ Start software work through the Team-owned Coordinator conversation and keep rol
 
 ## Primary Task
 
-Start a scoped Team Run by sending a Coordinator task request. Action budget: one when goal, mode, and a valid remembered directory are already known. Additional actions are charged only for values the server cannot infer: selecting or typing a directory, choosing an ambiguous mode, or answering a later durable question. Once required intake values exist, the server creates the Run without another Start control.
+Start a scoped Team Run by sending a Coordinator task request. Action budget: one when goal, mode, and a valid remembered directory are already known. The developer uses the same direct Codex executor as Chat and incurs no WorkLite proposal confirmation or command-grant action. Developer clarification shows only its answer input; exact-command fields belong to non-Codex roles. Additional actions are charged only for values the server cannot infer: selecting or typing a directory, choosing an ambiguous mode, or answering a later durable question. Once required intake values exist, the server creates the Run without another Start control.
 
 Saving Team configuration is a separate goal with one Save action. Editing configuration never silently saves.
 
@@ -185,9 +185,17 @@ The tabs, mention token, transcript, composer, role disclosures, provider-groupe
 
 ## Coverage Status
 
+2026-10-08 authorized deployment: Gateway and Web builds, API compilation, isolated startup on ports 23490–23492 and deployment readiness on ports 23390–23392 passed through pnpm deploy:local. The deployment platform snapshot reports shared direct Chat/Team Codex execution without WorkLite grants and Chat cancellation in running/waiting states. The original conversation remains cancelled with no pending question. Browser appearance, real Codex task execution, live cancellation interaction and Feishu client behavior were not tested; no test suite or standalone type check was run.
+
+2026-10-08 source comparison: Team developer shares direct Codex execution with Chat, and its Web conversation/Run and Feishu clarification surfaces omit command-grant fields. Non-Codex role fields remain. Runtime, browser, type check, build and test verification were not authorized or performed.
+
 Source-level audit: 2026-10-03. Differences found: none in route and tab state, default Coordinator routing, conditional contextual inspector, responsive stacking, provider-grouped model selectors, role-local advanced settings, save and error feedback, copy inventory, semantic tokens, or keyboard access. Only source review occurred; no browser, runtime, accessibility-tool, or real-Run verification was performed.
 
 ## Changelog
+
+### 2026-10-08 - Shared direct Codex execution
+
+- Removed WorkLite proposal and command-grant steps for developer tasks; retained clarification and effect recovery.
 
 ### 2026-10-03 - Team interaction and role configuration
 

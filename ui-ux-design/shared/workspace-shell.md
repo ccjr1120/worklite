@@ -4,33 +4,39 @@
 
 Use a persistent `232px` sidebar, a `52px` context bar, fluid main content, an optional `360px` inspector, and an optional resizable bottom run panel. The sidebar collapses to `56px` only between `768px` and `1023px`.
 
-Primary navigation is grouped and single-level. **Workspace** contains `Home`, `Chat`, `Workflows`, and `Agent Team`; **Capabilities** contains `Plugins`, with `Skills` and `MCP Servers` available as capability sub-navigation; **Configuration** contains `Providers`, `Logs`, and `Settings`.
+Primary navigation is grouped and single-level. **Workspace** contains `Chat`, `Workflows`, and `Agent Team`; **Capabilities** contains `Plugins`, with `Skills` and `MCP Servers` available as capability sub-navigation; **Configuration** contains `Providers`, `Logs`, and `Settings`.
 
-Providers owns the Model Providers, Portkey Gateway summary, and Codex account views in one page context. Logs owns Gateway transport observability: request statistics and captured request details over one shared time range. The two are separate destinations because one configures upstream dispatch and the other reads what was dispatched. Skills and MCP Servers are the capability destinations; standalone Agents have no page-level destination; Plugins remains its peer. Workflow List owns execution-history access through its per-Workflow Run records dialog, whose expanded Run rows expose Artifacts inline; direct Artifact details provide deeper inspection. At `1024px` and above, the expanded sidebar shows group labels and all destinations. From `768px` to `1023px`, the compact icon rail uses group separators, direct icons, and tooltips. The mobile navigation drawer uses the same grouped destinations. Usage, audit log, and appearance are reached from Settings. Chat is a first-level destination at `/chat`, with direct Web conversation and external-channel inspection. The former Home composer and floating chat control are removed. Counts indicate actionable state only. The WorkLite mark is at the top and the personal preferences menu is at the bottom. The expanded preferences control keeps its neutral status label and shows the application version as a right-aligned monospace label; the compact rail exposes the same version inside the preferences menu.
+Providers owns the Model Providers, Portkey Gateway summary, and Codex account views in one page context. Logs owns Gateway transport observability: request statistics and captured request details over one shared time range. The two are separate destinations because one configures upstream dispatch and the other reads what was dispatched. Skills and MCP Servers are the capability destinations; standalone Agents have no page-level destination; Plugins remains its peer. Workflow List owns execution-history access through its per-Workflow Run records dialog, whose expanded Run rows expose Artifacts inline; direct Artifact details provide deeper inspection. At `1024px` and above, the expanded sidebar shows group labels and all destinations. From `768px` to `1023px`, the compact icon rail uses group separators, direct icons, and tooltips. The mobile navigation drawer uses the same grouped destinations. Usage, audit log, and appearance are reached from Settings. Chat is the first Workspace destination at `/chat`, with direct Web conversation and external-channel inspection. `/home` remains a retained direct route for old links but has no sidebar, brand-mark or command-menu destination; the former Home composer and floating chat control remain removed. Counts indicate actionable state only. The WorkLite mark is at the top and links to `/chat` and the personal preferences menu is at the bottom. The expanded preferences control keeps its neutral status label and shows the application version as a right-aligned monospace label; the compact rail exposes the same version inside the preferences menu.
 
 The selected navigation item uses `brand-subtle`, primary text, and a narrow brand indicator. The selected resource link represents its route family: Agent Team and Agent Team Run routes select Agent Team; Skills and MCP Server routes select Capabilities; Artifact routes select Workflows. The Agent Team destination links directly to `/agent-teams/agent_team_bmad_tea` and has no Team collection destination. Personal preferences stay in the bottom menu.
 
 ## Context Bar
 
-Place navigation and breadcrumb context on the left. Place command search, state, secondary actions, and one primary page action on the right. Move low-frequency actions to overflow and never duplicate the primary action in the page heading.
+Place navigation and breadcrumb context on the left. Place command search, state, secondary actions, and one primary page action on the right. Chat hides shell command search; its page-owned settings action occupies the top-right action area instead. Move low-frequency actions to overflow and never duplicate the primary action in the page heading.
 
 ## Panels
 
 The inspector opens only for selected contextual content, keeps its header and essential actions available, scrolls internally, and does not discard unsaved work when closed. It may expand to `440px` for structured configuration.
 
-Chat owns its composer and active conversation inside `/chat`. Conversations and messages are server-owned and discoverable across browsers; the browser only remembers the last selected conversation. Navigation never cancels a running execution. Transient unsent drafts and queues survive route navigation in browser-session memory and disappear on reload; accepted submissions and tasks remain durable. Published Workflow mentions reuse the shared dispatch boundary. The shell mounts no conversation component and has no floating chat entry.
+Chat owns its composer and active conversation inside `/chat`. Its Channels and Configuration sections live in a page-owned settings Dialog, not a shell panel. Conversations and messages are server-owned and discoverable across browsers; the browser only remembers the last selected conversation. Navigation never cancels a running execution. Transient unsent drafts and queues survive route navigation in browser-session memory and disappear on reload; accepted submissions and tasks remain durable. Published Workflow mentions reuse the shared dispatch boundary. The shell mounts no conversation component and has no floating chat entry.
 
 ## Route Boundaries
 
-The root route owns the pending and error boundaries for every page. An unresolved route renders a content-shaped skeleton inside the stable shell rather than an empty content region; a route that throws renders a recoverable failure whose retry invalidates the router. The sidebar and context bar remain mounted through both states, so a slow or failed page never collapses the workspace. Chat is page-owned and is not mounted by the shell.
+The root route redirects to `/chat` and owns the pending and error boundaries for every page. An unresolved route renders a content-shaped skeleton inside the stable shell rather than an empty content region; a route that throws renders a recoverable failure whose retry invalidates the router. The sidebar and context bar remain mounted through both states, so a slow or failed page never collapses the workspace. Chat is page-owned and is not mounted by the shell.
 
 There is no separate first-use route family. Home derives first-use completion from persisted server resources, so the shell has no onboarding layout branch and no browser-state onboarding step.
 
 ## Command and User Menus
 
-`Command+K` or `Control+K` opens grouped search, recent destinations, navigation and safe creation commands. Destructive actions are excluded. The command menu opens `/chat` directly. The user menu contains the personal workspace identity, Appearance, Keyboard shortcuts, and the application version. Appearance includes the personal theme and language preferences.
+`Command+K` or `Control+K` opens grouped search, recent destinations, navigation and safe creation commands. Destructive actions are excluded. Chat is the first navigation command; Home is not listed. The command menu opens `/chat` directly. The user menu contains the personal workspace identity, Appearance, Keyboard shortcuts, and the application version. Appearance includes the personal theme and language preferences.
 
 ## Changelog
+
+### 2026-10-08
+
+- Made Chat the first Workspace destination and the root redirect; retained `/home` as a direct route without a navigation entry.
+- Hid Chat shell command search, delegated its top-right action area to Chat settings, and moved Channels/Configuration into the page-owned settings Dialog.
+- Removed Home from the command menu and linked the WorkLite mark to Chat.
 
 ### 2026-10-04
 

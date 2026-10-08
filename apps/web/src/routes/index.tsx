@@ -5,5 +5,5 @@ export const Route = createFileRoute('/')({
 });
 
 function IndexPage() {
-  return <Navigate to="/home" />;
+  return <Navigate to="/chat" />;
 }

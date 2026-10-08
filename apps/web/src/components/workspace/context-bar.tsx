@@ -13,6 +13,7 @@ type ContextBarProps = {
   onOpenCommand: () => void;
   onOpenNavigation?: () => void;
   showMenuButton?: boolean;
+  showSearch?: boolean;
 };
 
 function ContextBar({
@@ -23,6 +24,7 @@ function ContextBar({
   onOpenCommand,
   onOpenNavigation,
   showMenuButton,
+  showSearch = true,
 }: ContextBarProps) {
   const { t } = useTranslation('workspace');
 
@@ -35,20 +37,24 @@ function ContextBar({
       ) : null}
       <div className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">{breadcrumbs}</div>
       <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon-compact"
-          onClick={onOpenCommand}
-          aria-label={t('command.open')}
-          className="sm:hidden"
-        >
-          <Search className="size-4" />
-        </Button>
-        <Button variant="secondary" size="compact" onClick={onOpenCommand} aria-label={t('command.open')} className="hidden sm:inline-flex">
-          <Search className="size-3.5" />
-          {t('command.search')}
-          <Kbd className="ml-1">{commandShortcutLabel()}</Kbd>
-        </Button>
+        {showSearch ? (
+          <>
+            <Button
+              variant="ghost"
+              size="icon-compact"
+              onClick={onOpenCommand}
+              aria-label={t('command.open')}
+              className="sm:hidden"
+            >
+              <Search className="size-4" />
+            </Button>
+            <Button variant="secondary" size="compact" onClick={onOpenCommand} aria-label={t('command.open')} className="hidden sm:inline-flex">
+              <Search className="size-3.5" />
+              {t('command.search')}
+              <Kbd className="ml-1">{commandShortcutLabel()}</Kbd>
+            </Button>
+          </>
+        ) : null}
         {status}
         {secondaryActions}
         {primaryAction}

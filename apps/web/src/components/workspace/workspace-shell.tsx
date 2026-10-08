@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Outlet } from '@tanstack/react-router';
+import { Outlet, useRouterState } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { Sidebar } from '@/components/workspace/sidebar';
 import { ContextBar } from '@/components/workspace/context-bar';
@@ -11,6 +11,7 @@ import { useMediaQuery } from '@/hooks/use-media-query';
 
 function WorkspaceShell() {
   const { t } = useTranslation('workspace');
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   const isWide = useMediaQuery('(min-width: 1024px)');
   const isMobile = useMediaQuery('(max-width: 767px)');
   const collapsed = !isWide && !isMobile;
@@ -53,6 +54,7 @@ function WorkspaceShell() {
             onOpenCommand={() => setCommandOpen(true)}
             onOpenNavigation={() => setMobileNavOpen(true)}
             showMenuButton={isMobile}
+            showSearch={pathname !== '/chat'}
           />
           <div className="relative min-h-0 flex-1">
             <main className="h-full overflow-auto">

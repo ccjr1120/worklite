@@ -39,7 +39,7 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 - Skills: [List](pages/skills/list/DESIGN.md), [Editor](pages/skills/editor/DESIGN.md)
 - MCP servers: [List](pages/mcp-servers/list/DESIGN.md), [Configuration](pages/mcp-servers/configuration/DESIGN.md)
 - Plugins: [List](pages/plugins/list/DESIGN.md), [Configuration](pages/plugins/configuration/DESIGN.md), excluding communication-channel setup, which lives in Chat
-- External chat: [Feishu](surfaces/external-chat/feishu/DESIGN.md), including native streamed reply cards, collapsed task details, capability updates and release-bound upgrade confirmation
+- External chat: [Feishu](surfaces/external-chat/feishu/DESIGN.md), including native streamed reply cards, collapsed task details, capability updates and user-requested managed redeployment
 - Artifacts: [Run artifacts](surfaces/workflow-run/artifacts/DESIGN.md), [Details](pages/artifacts/details/DESIGN.md)
 - Settings: [Usage](pages/settings/usage/DESIGN.md), [Audit log](pages/settings/audit-log/DESIGN.md), [Appearance](pages/settings/appearance/DESIGN.md)
 
@@ -62,7 +62,7 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 /settings/{usage,audit-log,appearance}
 ```
 
-The root route opens Home. `/settings/` opens Appearance. Route layouts and redirects are governed by the shared Workspace shell rather than separate page specifications.
+The root route opens Chat. `/home` remains a retained direct route for old links but is no longer a navigation destination. `/settings/` opens Appearance. Route layouts and redirects are governed by the shared Workspace shell rather than separate page specifications.
 
 There is no `/onboarding` route family. First use is a server-derived sequence inside Home, so a separate browser-state onboarding flow would duplicate it with a less reliable completion signal.
 
@@ -89,6 +89,44 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-10-08 - User-requested Chat redeployment
+
+- Sending an explicit redeploy request is the single activation in Web and Feishu; persisted deployment progress uses the existing conversation task region, with no confirmation or refresh control.
+
+### 2026-10-08 - Chat-first navigation and settings Dialog
+
+- Redirected the root route to Chat and removed Home from sidebar and command-menu destinations while retaining `/home` as a direct route.
+- Replaced Chat's internal three-tab body with a conversation-only workspace, hid its shell search, and moved Channels and Configuration into an accessible URL-backed settings Dialog.
+
+### 2026-10-08 - Chat orchestration and stable conversation updates
+
+- Restrict Web and Feishu Chat to protected platform operations and delegated execution; Skill/MCP selections configure its Codex executor. Preserve historical evidence and recovery.
+- Keep conversation content and composer stable across active status changes and event replay in both themes.
+
+### 2026-10-08 - Chat cancellation and shared Codex execution
+
+- Compose Tooltip and Send/Stop click handlers so wrapper props cannot replace cancellation.
+- Keep Cancel available while Chat runs or waits for an ordinary answer, with control-local progress and retained evidence. Sending/answering does not block Cancel; snapshot loading does not invalidate mutation cleanup.
+- Chat Codex and Team developer use one direct executor without WorkLite authorization; direct Shell and non-Codex Team grants remain separate.
+- Team conversation, Run detail and Feishu developer questions omit obsolete command-grant inputs.
+
+### 2026-10-07 - Retired Chat question recovery
+
+- Automatically retire obsolete unstarted Shell questions and unblock normal dialogue while retaining history and explicit recovery for reserved effects.
+
+### 2026-10-07 - Chat task confirmation
+
+- Replaced Chat per-command fields with one proposal confirmation in the existing answer region, shared by direct Shell and Chat Codex tasks. Team command forms are unchanged.
+
+### 2026-10-07 - Chat direct Shell
+
+- Reused Chat and Feishu command authorization, recovery and execution disclosures for conversation-owned Shell calls independent of Codex and Team.
+
+### 2026-10-07 - Chat Codex execution
+
+- Added a request-bound new-conversation button after Agent intent recognition, absent from ordinary replies.
+- Extended Chat and Feishu conversation specifications with independent Codex task progress, exact-command answers and uncertain-effect recovery; no new route or navigation destination.
 
 ### 2026-10-06 - Feishu native card presentation
 

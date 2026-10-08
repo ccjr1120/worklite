@@ -7,7 +7,7 @@ import type { CommandExecutionView } from '@worklite/contracts';
 import { CommandsService, type CommandReservation } from '../commands/commands.service';
 
 type PackageFile = { path: string; content: string };
-type StartOptions = { cwd?: string; reserveCommand?: CommandReservation; chatContext?: { executionId: string; submissionId: string } };
+type StartOptions = { cwd?: string; reserveCommand?: CommandReservation; chatContext?: { executionId: string; submissionId: string; userMessageId: string } };
 
 @Injectable()
 export class SkillScriptRunnerService {
@@ -37,7 +37,7 @@ export class SkillScriptRunnerService {
       await chmod(executable, 0o700);
       const invocation = [executable, ...argumentsValue].map(shellQuote).join(' ');
       const command = options?.chatContext
-        ? `WORKLITE_CHAT_EXECUTION_ID=${shellQuote(options.chatContext.executionId)} WORKLITE_CHAT_SUBMISSION_ID=${shellQuote(options.chatContext.submissionId)} ${invocation}`
+        ? `WORKLITE_CHAT_EXECUTION_ID=${shellQuote(options.chatContext.executionId)} WORKLITE_CHAT_SUBMISSION_ID=${shellQuote(options.chatContext.submissionId)} WORKLITE_CHAT_USER_MESSAGE_ID=${shellQuote(options.chatContext.userMessageId)} ${invocation}`
         : invocation;
       if (options?.reserveCommand && !options.cwd) throw new BadRequestException('A project directory is required for journaled Skill scripts.');
       const execution = options?.reserveCommand

@@ -2,7 +2,7 @@
 
 ## Route
 
-`/chat`, with validated `view=conversation|channels|configuration` and optional `conversation` selection.
+`/chat`, with validated `view=conversation|channels|configuration` and optional `conversation` selection. `view=conversation` is the normal body state; the two non-conversation values open the settings Dialog directly on their named section.
 
 ## Design Source
 
@@ -21,6 +21,7 @@
 - `apps/web/src/features/chat/conversation-list.tsx`
 - `apps/web/src/features/chat/records.tsx`
 - `apps/web/src/features/chat/channel-configuration.tsx`
+- `apps/web/src/features/chat/task-messages.tsx`
 - `apps/api/src/modules/agents/chat-conversations.service.ts`
 
 ## Purpose
@@ -29,34 +30,50 @@ Converse with the protected master Agent through Web, configure its capabilities
 
 ## Primary Task
 
-Send a request and read its response. Action budget one: submit the composer. A material pending question adds one answer action. Channel configuration is an independent goal: one activation for Feishu QR registration, or field input and one save for an existing application because credentials must come from the operator. Inspecting a saved conversation costs one selection; opening its complete record pane is one separate inspection action.
+Send a request and read its response. Action budget one: submit the composer. A material pending question adds one answer action. Coding, project investigation and local command tasks delegate directly to Codex without a WorkLite authorization step. Chat exposes only platform orchestration operations. Cancelling the current turn is one separate action, available while running or waiting for an ordinary answer. Channel configuration is an independent goal: one activation for Feishu QR registration, or field input and one save for an existing application because credentials must come from the operator. Inspecting a saved conversation costs one selection; opening its complete record pane is one separate inspection action.
 
 ## Layout
 
-A full-height workspace with a stable top context bar and lightweight Conversation, Channels and Configuration tabs. Conversation places a compact searchable, channel-filtered server conversation list on the left and an unframed transcript with composer on the right. The complete evidence pane opens below the conversation header and scrolls within its own region; ordinary replies stay readable. Below `md`, the conversation list opens in a labelled navigation drawer, preserving the full transcript width. Both themes use shared semantic tokens; ordinary icons and secondary actions stay neutral. Chat replaces Home's bottom composer and the shell floating Chat Bot.
+A full-height conversation-only Chat workspace has a stable context bar, searchable channel-filtered server history on the left, and an unframed transcript with composer on the right. The complete evidence pane opens within the transcript area. Below `md`, history opens in a labelled Sheet. The shell hides command search on `/chat`; one page-owned settings icon in the context-bar action area opens the Chat settings Dialog. Both themes use shared neutral surfaces and semantic tokens.
 
-Channels presents Web as the built-in channel and Feishu as the configured external adapter. Selecting Feishu exposes QR registration, manual credentials and connection status in the same page. Agent Configuration is independent and owns model selection, user prompt, Skills and MCP server selections. No create/delete Agent controls or future unimplemented channel controls appear.
+The Dialog uses internal Channels and Configuration sections. Channels owns the existing Web and Feishu setup; Configuration owns model, prompt and delegated Codex Skill/MCP selection; custom capabilities do not execute in Chat. The main workspace height and conversation content remain stable while the Dialog opens and closes. Cancelling uses the existing neutral Send-or-Stop target while executing. While waiting for an ordinary answer, one neutral Cancel button sits beside Send. Cancel progress stays on that control; input and conversation content remain in place. No new design token is introduced.
 
 ## Interaction Contract
+
+- Redeployment: sending an explicit request to redeploy WorkLite is the single activation and authorization. Show its persisted phase, version and outcome in the existing task region of that conversation; update automatically and retain the last state during cutover. No second confirmation, manual refresh or automatic retry of deployment is offered. Initial managed installation remains an operator operation. Both themes use the existing neutral task region and semantic running/error states.
+- New conversation intent: Chat asks a typed pending question after recognizing the user's request and shows one contextual “新对话” button. Clicking creates and selects the new persisted conversation; old history and task evidence remain. This action is absent from ordinary replies and disappears after acceptance. No permanent reply menu or text-command requirement is introduced.
+
+- Retired command question: a never-started Shell call waiting on removed per-command authorization is cancelled by the server, retaining its history and clearing the invalid question. The server persists the resulting snapshot for replay; later messages return to normal dialogue with no manual stop instruction or extra recovery button is required. Reserved effects still use explicit recovery.
+- Execution boundary: coding, project investigation and local commands delegate to Codex; collaborative work uses Team and automation uses a published Workflow. Chat has no direct host tools or arbitrary Skill/MCP calls. Historical Shell disclosures and uncertain-effect recovery remain available without starting new Commands.
+- Live observation: keep the transcript, composer, expanded tool rows and reader scroll mounted during background updates. One SSE connection observes both running and waiting states; initial connection starts at the latest snapshot and following deltas. Older snapshots cannot roll back current content, and repeated event delivery cannot append a delta twice.
+- Independent Codex task: keep progress, result and full execution evidence in the originating conversation. Reuse the existing tool disclosure and answer region. Codex starts directly from the requested project task without a WorkLite proposal confirmation or command form; Team developer uses the same executor. An uncertain operation offers adopt-existing-result or mark-failed, without automatic replay. Stop cancels the task; uncertainty retains a visible recovery question. Ordinary dialogue and both themes retain their existing layout.
+
+- Cancel: use the existing cancellation API once, without a confirmation dialog. Running turns use the square control; ordinary waiting turns retain Send and expose one adjacent Cancel. The shared Send/Stop primitive composes its own click with the Tooltip-trigger click; forwarded wrapper props cannot overwrite cancellation. The control shows a spinner and “取消中” immediately and prevents duplicate cancellation with its own cancelling state. An in-flight send or answer cannot disable Cancel once the server execution exists. Cancelling invalidates older UI request completions; binding an execution id or reloading its snapshot does not count as switching conversations and cannot strand the send busy state. Preserve the draft and messages, pause queued sends and invalidate server conversation queries on completion. If the server returns uncertain-effect recovery, retain its question and recovery choices instead of claiming cancellation settled the effect. Failure stays beside the composer.
 
 - Send and answer: use shared `POST /chat/dispatch`, stable submission ids and the existing master execution. `Enter` sends the composer and `Shift+Enter` inserts a newline; while an input method is composing text, `Enter` first confirms that composition instead of submitting it. Show an immediate response region; stream persisted Agent events. Keep partial replies on failure, with existing retry and cancellation controls. Show options only for the active pending question.
 - History: cursor-page `GET /chat/conversations`, with server data as authority. Search and channel filters operate on server history. Browser memory remembers only the selected id; it never limits discovery. Selecting a conversation silently restores its in-memory draft and queue without cancelling another execution. Accepted queued requests carry stable submission ids, so returning after a response was interrupted cannot create another turn. Navigation retains browser-session drafts/queues in memory; reload clears unsent input.
 - New conversation: one action opens an empty Web composer; the first accepted request creates its server execution. Existing records stay available.
-- Feishu conversation: identify the bound channel before submission. Web can continue its Agent execution; the adapter projects replies into the same Feishu-bound conversation. Exact Team command grants still require the task-bound authoritative form and cannot originate from ordinary chat prose.
+- Feishu conversation: identify the bound channel before submission. Web can continue its Agent execution; the adapter projects replies into the same Feishu-bound conversation. Non-Codex Team command grants still require the task-bound authoritative form and cannot originate from ordinary chat prose.
 - Records: load the full execution snapshot, stored Agent events, inbound and outbound receipts, selected actions/forms, submissions, rendered outbound cards, safe errors and delivery identifiers. Reveal raw saved fields only on deliberate disclosure. Provide full text copy/download; never truncate evidence or model-returned reply content. Related Team/Workflow tasks link to their authoritative detail routes.
 - Freshness: execution SSE and five-second conversation/record queries recover observable changes automatically, retaining current content and reader scroll. No manual refresh control. Older history is explicitly paged, with no hidden final cap.
-- Configuration: save at the activated control, keep durable request failures beside it, and retain immutable per-turn configuration snapshots. New turns use the latest revision; answers/retries retain their accepted snapshot.
-- Channels: reuse the approved Feishu QR and manual setup interactions; the adapter owns identity, connection and platform-specific presentation. Web conversation needs no channel registration.
-- Slash commands: retain `/new`, `/resume` and `/log` as shortcuts for visible page capabilities. History comes from the server. Escape dismisses inner menus and selections, without hiding the Chat page.
+- Settings Dialog: the context-bar settings icon opens the Dialog on its last route-selected section; `view=channels` and `view=configuration` deep links do the same. Selecting an internal section updates the validated route value without replacing the selected conversation. Escape or the Dialog close affordance returns to `view=conversation`, restores focus to the settings control, and leaves the mounted conversation body unchanged.
+- Configuration: open the Dialog's Configuration section directly or from the unconfigured composer setup action. Save at the activated control, keep durable request failures beside it, and retain immutable per-turn configuration snapshots. New turns use the latest revision; answers/retries retain their accepted snapshot.
+- Channels: reuse the approved Feishu QR and manual setup interactions inside the Dialog's Channels section; the adapter owns identity, connection and platform-specific presentation. Web conversation needs no channel registration.
+- Slash commands: retain `/new`, `/resume` and `/log` as shortcuts for visible conversation capabilities. History comes from the server. Slash commands do not replace the Settings Dialog. Escape dismisses inner menus and selections; an open history Sheet or settings Dialog owns Escape and focus while open.
 
 ## States
 
 | State | Behavior |
 | --- | --- |
-| Loading | List and transcript skeletons keep the shell and tabs stable; evidence and setup loading stay local. |
+| Redeployment | Show preparation, preflight, handoff, switch, recovery and terminal outcomes in the same conversation; reconnect after cutover without resubmitting. A proposal waits for an explicit redeploy request rather than a confirmation button. |
+| Historical Shell call | Keep stored command evidence and explicit interrupted-command recovery inspectable; new direct Shell execution is unavailable. |
+| Codex task | Show task state and persisted Command references in the existing execution disclosure; the captured task and any pending question or uncertain result remain visible and task-bound across reload. |
+| Loading | List and transcript skeletons keep the shell and conversation body stable; Dialog evidence and setup loading stay local. |
 | Empty | Empty Web conversation shows the composer; no fixed capability or mode menu. A channel without records states it has no conversation yet. |
 | No results | Name the active search/filter and offer clearing it. |
 | Error | Preserve the selected transcript and show safe errors beside the affected send, configuration, channel or records action. |
+| Cancelling | Keep draft and messages, show Cancel progress on the activated control and pause queued sends. |
+| Waiting for input | Keep ordinary answer controls and one Cancel action. An unresolved recovery question retains its recovery controls. |
 | Busy | Keep draft editable, preserve existing FIFO queue behavior, show concise inline processing and local disabled/busy controls. |
 | Offline | Retain current data, show reconnect state and resume existing streams without resubmitting requests. |
 | Long content | Full message body wraps. Evidence uses bounded scrollable full text with copy/download. Only conversation titles/previews truncate. |
@@ -66,25 +83,70 @@ Channels presents Web as the built-in channel and Feishu as the configured exter
 
 | Key | Category |
 | --- | --- |
-| `workspace:nav.chat` / `assistant:title` / `assistant:panelTabs.*` | State |
+| `assistant:upgrade.*` | State, Constraint or Recovery according to the individual label |
+| `assistant:shell.command` / historical Shell evidence | Action or Constraint according to the label |
+| `assistant:codex.adopt`, `assistant:codex.markFailed` / native recovery controls | Action, State, Constraint or Recovery according to the individual label |
+| `workspace:nav.chat` / `assistant:title` | State or Action according to the individual key |
+| `assistant:composer.cancel` | Action |
+| `assistant:composer.cancelling` | State |
 | `assistant:history.*` | Action, State or Recovery according to individual key |
 | `assistant:channels.*` | Action, State or Constraint according to individual key |
 | `assistant:records.*` | Action, State or Constraint according to individual key |
 | `assistant:composer.*` / `assistant:queue.*` / `assistant:execution.*` | Action, State or Recovery according to individual key |
+| `assistant:settings.*` | Action, State or Constraint according to individual key |
 | `assistant:configuration.*` | Action, State or Constraint according to individual key |
 | `plugins:feishu.*` | Reused channel Action, State, Constraint or Recovery |
 
 ## Accessibility
 
-Tabs use ArrowLeft/ArrowRight, Home/End and visible focus. Label session search, channel filters, input fields and icon controls. Use textual channel, execution and delivery status. Preserve focus during streaming and channel polling. Conversation uses the shared return-to-end control; new messages never pull a reader away from earlier content. Respect reduced motion, and use restrained status/alert announcements.
+The settings control, Dialog heading, internal section tabs, history controls, input and Cancel have accessible names and visible shared focus rings. The Dialog traps focus, closes on Escape and returns focus to its activating control. Cancel uses icon and text state, and its spinner respects reduced motion. Pending answers remain keyboard reachable. State updates do not move focus or scroll the reader away from earlier messages.
 
 ## Coverage Status
+
+2026-10-08 authorized deployment of Chat-requested redeployment: `pnpm deploy:local` incremented the public version from 0.1.3 to 0.1.4. Gateway/Web builds, API compilation during isolated startup, preflight on ports 23490–23492 and target readiness on ports 23390–23392 passed before replacement completed. This uses the ordinary local deployment entry and does not initialize a managed baseline. No browser interaction, live Chat redeploy request, Feishu integration, standalone type check or test suite was run.
+
+2026-10-08 redeployment source change: upgrade submissions now have a dedicated read-only task region showing persisted phase, release hash and safe outcome. It observes the upgrade API automatically, retains cached progress during cutover and reconnects without resubmitting deployment. No confirmation, manual refresh or deployment retry control was added. Existing neutral task borders, theme tokens and reduced-motion loading icon are reused. Runtime deployment, reconnect behavior and browser appearance remain unexercised; no type check, test, build, deployment or service operation was run.
+
+2026-10-08 navigation and settings source comparison: `/` redirects to `/chat`; `/home` remains a direct route but is absent from the sidebar and command menu, with Chat first. The Chat context bar hides command search, and the former internal top tabs are replaced by a conversation-only body plus an accessible settings Dialog containing Channels and Configuration. `view=channels|configuration` deep links and the unconfigured composer action target that Dialog, while conversation selection remains URL-backed. Source review also confirms both shared themes continue to use existing semantic tokens and controls. The authorized `pnpm --filter @worklite/web typecheck` and `pnpm --filter @worklite/web lint` commands passed (`Locale key structures match for zh-CN.` and no ESLint findings). No browser interaction, deployment, service lifecycle operation, test suite or build was run. This entry supersedes the earlier 2026-10-08 correction that said Home removal and the settings modal were unimplemented.
+
+2026-10-08 authorized deployment of the orchestration and event-loop correction: pnpm deploy:local incremented the public version to 0.1.2. Gateway and Web builds, isolated Web/API/Gateway preflight on ports 23490–23492 and deployment readiness on ports 23390–23392 passed before replacement completed. No browser interaction, live Codex delegation, Feishu integration or test suite was run.
+
+2026-10-08 orchestration and event-loop correction: source inspection found direct host tools and custom Skill/MCP execution exposed to Chat, plus SSE recreation across running/waiting states and complete historical replay. The implementation removes those execution paths, preserves delegated Codex capabilities, starts initial replay at the latest snapshot and keeps active observation stable. Current transcript content is retained across older snapshots and background loading; shared neutral controls and existing tokens preserve both themes. No type check, tests, build, browser check or service restart was authorized or performed.
+
+2026-10-08 Tooltip click correction: source inspection identified the forwarded Tooltip onClick overwriting the shared Send/Stop handler. The primitive now explicitly composes both callbacks. The earlier busy-state fix did not address this click-chain failure. The authorized local deployment incremented the public version from 0.1.0 to 0.1.1 and passed Gateway/Web builds, API compilation, isolated preflight and deployment readiness. No live browser click or test has been performed for this correction.
+
+2026-10-08 cancellation correction: source review found Cancel gated by the unrelated send busy state and execution loading incrementing the mutation generation. Cancel now owns its busy state and invalidates older completion handlers; loading retains the conversation generation. The subsequent authorized pnpm deploy:local completed Gateway/Web builds, API compilation, isolated preflight and deployment readiness successfully. The screenshot conversation URL was not supplied, so its clicked request was not inspected; no live click, browser, test or standalone type check has been performed for this correction.
+
+2026-10-08 authorized deployment: Gateway and Web builds, API compilation, isolated startup on ports 23490–23492 and deployment readiness on ports 23390–23392 passed through pnpm deploy:local. The deployment platform snapshot reports shared direct Chat/Team Codex execution without WorkLite grants and Chat cancellation in running/waiting states. The original conversation remains cancelled with no pending question. Browser appearance, real Codex task execution, live cancellation interaction and Feishu client behavior were not tested; no test suite or standalone type check was run.
+
+2026-10-08 execution-evidence correction: the inspected Codex task wrote this specification but did not implement Home removal or the settings modal, and it did not run the claimed Web type check. The earlier completion entry is withdrawn. Existing top tabs, Home and search remain in the implementation; those redesign requests are outside the current Cancel change. Source review records Cancel in running and ordinary waiting states, control-local cancellation progress, retained draft and evidence, shared direct Codex execution and uncertainty recovery; browser checks, type checks, tests and builds are not authorized or performed.
+
+2026-10-07 deployment-log recovery: conversation aex_febcb394-2460-4fe0-a163-96562b8084fb retained an obsolete Shell question without a Command reservation, causing Feishu new-conversation and follow-up messages to be rejected. Startup retirement now cancels the never-started call and clears pending input. Agent initialization persists the current cancellation snapshot for replay when the previous snapshot is stale. Authorized compilation, isolated preflight and deployment readiness passed. The requested online records confirm both current state and latest snapshot (sequence 145) are cancelled with no pending question, and the saved originating Feishu card has no old question or actions. New dialogue execution and client appearance were not tested.
+
+2026-10-07 task-confirmation source comparison: Chat command fields and their obsolete copy were removed, and ask_user action confirm_execution renders the existing confirm/decline options. A bound affirmative answer persists the current proposal approval; direct Shell records its reference and Chat Codex captures the proposal. New ordinary user turns clear approval. Team forms retain exact-command grants. Shared semantic Web controls and native Feishu choices preserve both theme behaviors. Authorized deployment builds, API compilation, isolated startup preflight and Web/API/Gateway readiness passed. Live proposal confirmation, Shell/Codex execution, interrupted recovery and client appearance remain unverified; no standalone type check or tests were run.
+
+2026-10-07 direct Shell source comparison: Chat exposes bash directly with a persisted call grant and atomic Command reservation, reuses current Web and native Feishu command forms, supports one complete multiline command, and exposes command/directory/output/exit evidence through existing disclosures. Shared semantic surfaces and native controls preserve light and dark mode behavior. Authorized deployment builds, API compilation, isolated startup preflight and deployment Web/API/Gateway readiness passed. Real Shell execution, cancellation/restart recovery, browser appearance and Feishu client interaction remain unverified; no standalone type check or tests were run.
+
+2026-10-07 source comparison: Chat owns persisted Codex tasks and journals outside Team, exposes captured task evidence in the existing tool disclosure, and uses structured exact-command forms and explicit uncertain-result recovery. The typed new-conversation question renders a button only for that intent; acceptance atomically settles the old question and creates the new conversation, retaining old history and task evidence. Feishu binds new ordinary messages to the new execution while old task deliveries keep their originating conversation. Neutral shared surfaces and native Feishu components retain both theme behaviors. Authorized Gateway/Web builds, API compilation, isolated startup preflight and deployment Web/API/Gateway readiness passed; deployment capability metadata exposes both increments. Browser appearance, keyboard behavior, live Codex task execution and Feishu client interaction remain unverified; no standalone type check or tests were run.
 
 Source comparison also covers generation guards for switched conversations, retained cached history on read failures, local load retry, complete execution export and explicit current Feishu delivery availability. This source comparison ran no automated checks; deployment compilation and isolated readiness were subsequently authorized and passed as recorded below.
 
 Source comparison 2026-10-04: the old embedded surface supports persisted messages, SSE, Skill/MCP activity, questions, retry, cancellation, Workflow mentions, queues and exports. The new source adds the full-page route and server conversation list, removes the silent browser history cap, places Feishu under Channels, exposes complete saved channel/Agent records and retains failed streamed text in the read model. The embedded surface and its fixed starter menu have been removed. Source coverage also includes standalone Web task submissions that have no Agent execution. The later deployment request authorized Gateway/Web/API compilation and isolated Web/API/Gateway readiness; these passed on 2026-10-04. Browser rendering, standalone type checking, test suites and live Feishu checks were not performed. Historical original Feishu envelopes were not saved and cannot be recovered; records show full retained data and newly saved safe platform context.
 
 ## Changelog
+
+### 2026-10-08
+
+- Made Chat the first workspace destination and root redirect while retaining `/home` as a non-navigation route.
+- Hid Chat command search and replaced its internal Conversation, Channels and Configuration top tabs with a conversation-only body plus an accessible settings Dialog and URL-backed section deep links.
+- Compose Tooltip and Send/Stop click handlers so the lower-right square invokes cancellation.
+- Keep cancellation independent of send busy state and avoid invalidating pending mutation cleanup when binding or loading a conversation execution.
+- Keep Cancel reachable for active and ordinary waiting turns; Codex starts directly without WorkLite approval. Correct the unsupported Home/modal completion claim and restore the documented current page structure.
+
+### 2026-10-07
+
+- Added one request-bound new-conversation button after Agent intent recognition; accepting it preserves prior history and task evidence.
+- Added conversation-owned Codex task evidence, exact-command answers and explicit uncertain-effect recovery using existing neutral interaction surfaces.
 
 ### 2026-10-05
 

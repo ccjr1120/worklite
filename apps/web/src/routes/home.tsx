@@ -48,7 +48,6 @@ export const Route = createFileRoute('/home')({
 
 function HomePage() {
   const { t } = useTranslation(['home', 'workspace', 'common']);
-  const { locale } = useLocale();
   const workspaceKey = 'personal';
   const [newCategoryName, setNewCategoryName] = useState('');
   const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
@@ -163,7 +162,7 @@ function HomePage() {
                       <div className="flex min-h-9 items-center justify-between gap-3">
                           {isRenaming && category ? (
                             <form className="flex w-full max-w-md gap-2" onSubmit={renameCategory}>
-                              <Input value={renameValue} onChange={(event) => setRenameValue(event.target.value)} aria-label={t('home:categories.nameLabel')} disabled={categoriesBusy} autoFocus />
+                              <Input value={renameValue} onChange={(event) => setRenameValue(event.target.value)} aria-label={t('home:categories.nameLabel')} disabled={categoriesBusy} /* Focus follows the rename activation. */ /* eslint-disable-line jsx-a11y/no-autofocus */ autoFocus />
                               <Button type="submit" size="compact" disabled={!renameValue.trim() || categoriesBusy}>{t('common:actions.save')}</Button>
                               <Button type="button" variant="secondary" size="compact" disabled={categoriesBusy} onClick={() => setRenamingCategoryId(null)}>{t('common:actions.cancel')}</Button>
                             </form>
@@ -224,6 +223,8 @@ function HomePage() {
                 onChange={(event) => setNewCategoryName(event.target.value)}
                 placeholder={t('home:categories.namePlaceholder')}
                 disabled={createCategoryMutation.isPending}
+                /* Focus follows the dialog's create-category activation. */
+                /* eslint-disable-next-line jsx-a11y/no-autofocus */
                 autoFocus
               />
             </div>

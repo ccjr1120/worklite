@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import { LoaderCircle } from 'lucide-react';
 import type { ChatSubmissionView } from '@worklite/contracts';
-import { useAgentTeamConversationQuery, useAgentTeamRunQuery, useRunQuery } from '@/api/queries';
+import { useAgentTeamConversationQuery, useAgentTeamRunQuery, useRunQuery, useWorkliteUpgradeQuery } from '@/api/queries';
 import { TaskLink } from './records';
 import { MessageResponse } from '@/components/ai-elements/message';
 import { api } from '@/api/client';
@@ -46,6 +46,29 @@ function TeamTask({ submission }: { submission: ChatSubmissionView }) {
   return <div className="space-y-2">{intake?.runId ? <TeamRunLink runId={intake.runId} /> : <TaskLink reference={reference} />}{typeof submission.renderedCard?.content === 'string' ? <MessageResponse content={submission.renderedCard.content} enabled /> : null}</div>;
 }
 
+function UpgradeTask({ jobId }: { jobId: string }) {
+  const { t } = useTranslation('assistant');
+  const query = useWorkliteUpgradeQuery(jobId);
+  const job = query.data;
+  const statuses: Record<string, string> = {
+    proposed: t('upgrade.phase.proposed'), authorized: t('upgrade.phase.authorized'),
+    preflighting: t('upgrade.phase.preflighting'), draining: t('upgrade.phase.draining'),
+    frozen: t('upgrade.phase.frozen'), switching: t('upgrade.phase.switching'),
+    recovering: t('upgrade.phase.recovering'), succeeded: t('upgrade.phase.succeeded'),
+    rolled_back: t('upgrade.phase.rolled_back'), failed: t('upgrade.phase.failed'),
+  };
+  const active = job && !['proposed', 'succeeded', 'rolled_back', 'failed'].includes(job.phase);
+  return <div className="space-y-2">
+    <p className="flex items-center gap-2 text-[13px] text-muted-foreground" role="status">
+      {active || query.isLoading ? <LoaderCircle className="size-3.5 shrink-0 text-brand motion-safe:animate-spin" aria-hidden="true" /> : null}
+      {t('upgrade.title')} · {job ? statuses[job.phase] ?? job.phase : t('upgrade.loading')}
+    </p>
+    {job ? <p className="break-all font-mono text-xs text-muted-foreground">{t('upgrade.version', { version: job.releaseHash.slice(0, 12) })}</p> : null}
+    {query.isError ? <p className="text-[13px] text-muted-foreground" role="status">{t(job ? 'upgrade.reconnecting' : 'upgrade.loadFailed')}</p> : null}
+    {job?.error ? <p className="whitespace-pre-wrap break-words text-[13px] text-danger" role="alert">{job.error}</p> : null}
+  </div>;
+}
+
 export function TaskMessages({ submissions }: { submissions: ChatSubmissionView[] }) {
-  return <>{submissions.filter((submission) => submission.reference && submission.reference.kind !== 'conversation').map((submission) => <section key={submission.id} className="my-4 space-y-3 border-l-2 border-border pl-3"><p className="whitespace-pre-wrap break-words text-sm">{submission.message}</p>{submission.error ? <p className="text-[13px] text-danger" role="alert">{submission.error}</p> : null}{submission.reference?.kind === 'workflow' ? <WorkflowTask submission={submission} /> : submission.reference?.kind === 'team' ? <TeamTask submission={submission} /> : typeof submission.renderedCard?.content === 'string' ? <MessageResponse content={submission.renderedCard.content} enabled /> : null}</section>)}</>;
+  return <>{submissions.filter((submission) => submission.reference && submission.reference.kind !== 'conversation').map((submission) => <section key={submission.id} className="my-4 space-y-3 border-l-2 border-border pl-3"><p className="whitespace-pre-wrap break-words text-sm">{submission.message}</p>{submission.error ? <p className="text-[13px] text-danger" role="alert">{submission.error}</p> : null}{submission.reference?.kind === 'workflow' ? <WorkflowTask submission={submission} /> : submission.reference?.kind === 'team' ? <TeamTask submission={submission} /> : submission.reference?.kind === 'upgrade' ? <UpgradeTask jobId={submission.reference.jobId} /> : typeof submission.renderedCard?.content === 'string' ? <MessageResponse content={submission.renderedCard.content} enabled /> : null}</section>)}</>;
 }

@@ -981,9 +981,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const output = await this.invocations.execute({
       workspaceId,
       publicModelId: role.publicModelId,
-      ...(taskRole === 'developer' ? { codexServerCommandArguments: version.snapshot.developerExecution.commandArguments } : {}),
-      systemPrompt: taskSystemPrompt(role.instructions),
-      context: taskContext(request),
+      ...(taskRole === 'developer' ? { codexServerCommandArguments: version.snapshot.developerExecution.commandArguments, codexLaunch: version.snapshot.developerExecution.launch } : {}),
+      systemPrompt: taskSystemPrompt(role.instructions, taskRole === 'developer'),
+      context: taskContext(request, taskRole === 'developer'),
       skills: role.skills,
       mcpRuntimes: (await this.resources.workflowMcpRuntimes(workspaceId, role.mcpServers.map((server) => server.id)))
         .map((runtime) => {
@@ -1803,12 +1803,12 @@ function nextDocumentRevision(
   return revision;
 }
 
-function taskSystemPrompt(instructions: string): string {
+function taskSystemPrompt(instructions: string, codex: boolean): string {
   return `${instructions}
 
 You are executing one WorkLite Agent Team task. Use tools only when the captured role configuration and project authorization permit them. Return exactly one JSON object.
 
-Follow the captured project instructions supplied in the task context, and discover additional applicable AGENTS.md or AGENTS_WORKFLOW.md files before changing or assessing project files. If a project rule or missing user decision requires explicit authorization for an action, return the waiting_for_input response instead of taking that action. If a required shell command is not present verbatim in authorizedCommands, return the waiting_for_input response instead of calling bash. Map the process package's project root to projectDirectory and its process output location to outputDirectory. Use process_reference only with one of the exact pinned paths listed in the system prompt. The output directory is managed by WorkLite: return documents in JSON rather than writing planning output there directly.
+Follow the captured project instructions supplied in the task context, and discover additional applicable AGENTS.md or AGENTS_WORKFLOW.md files before changing or assessing project files. If a project rule or missing user decision requires explicit authorization for an action, return the waiting_for_input response instead of taking that action. ${codex ? 'Execute the captured user task directly through the same Codex executor as Chat. WorkLite requires neither proposal confirmation nor exact-command grants for Codex.' : 'If a required shell command is not present verbatim in authorizedCommands, return the waiting_for_input response instead of calling bash.'} Map the process package's project root to projectDirectory and its process output location to outputDirectory. Use process_reference only with one of the exact pinned paths listed in the system prompt. The output directory is managed by WorkLite: return documents in JSON rather than writing planning output there directly.
 
 When more user input is required, return:
 {"status":"waiting_for_input","pendingInput":{"question":"One specific question"}}
@@ -1819,7 +1819,7 @@ Otherwise return:
 Use an empty changedFiles array when the task changed no project files. Set completedAssignedWork to false only when the assigned work remains incomplete, and record the reason in unresolvedIssues. The reviewer may add "repairRequest":{"taskKey":"development","instruction":"specific repair instruction"}. Do not invent command ids; WorkLite records actual command evidence.`;
 }
 
-function taskContext(request: AgentTeamTaskRequest): unknown {
+function taskContext(request: AgentTeamTaskRequest, codex: boolean): unknown {
   return {
     task: {
       ...request.taskDefinition,
@@ -1833,7 +1833,7 @@ function taskContext(request: AgentTeamTaskRequest): unknown {
     projectDirectory: request.projectDirectory,
     outputDirectory: request.outputDirectory,
     authorization: modeAuthorization(request.mode),
-    authorizedCommands: request.authorizedCommands,
+    ...(codex ? {} : { authorizedCommands: request.authorizedCommands }),
     projectInstructions: request.projectInstructions,
     upstreamDocuments: request.upstream,
   };

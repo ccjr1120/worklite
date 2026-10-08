@@ -107,11 +107,17 @@ function TranscriptSkeleton() {
   );
 }
 
-function QuestionNote({ question, onAnswer, busy }: { question: NonNullable<AgentExecutionView['pendingQuestion']>; onAnswer: (answer: string) => void; busy: boolean }) {
+function QuestionNote({ question, onAnswer, busy }: { question: NonNullable<AgentExecutionView['pendingQuestion']>; onAnswer: (answer: string, authorization?: { recoveryDecision?: 'adopt_command' | 'mark_failed'; newConversation?: boolean }) => void; busy: boolean }) {
   const [selected, setSelected] = useState<string | null>(null);
+  const { t } = useTranslation('assistant');
   return (
     <div className="my-3 border-l-2 border-brand pl-3" role="status">
       <p className="text-sm font-medium">{question.question}</p>
+      {question.action === 'new_conversation' ? <Button type="button" variant="secondary" size="compact" className="mt-2" disabled={busy} onClick={() => onAnswer(t('history.new'), { newConversation: true })}>{busy ? <LoaderCircle className="size-3.5 motion-safe:animate-spin" aria-hidden="true" /> : null}{t('history.new')}</Button> : null}
+      {question.recovery ? <div className="mt-2 flex flex-wrap gap-2">
+        {question.recovery.commandExecutionId ? <Button type="button" variant="secondary" size="compact" disabled={busy} onClick={() => onAnswer(t('codex.adopt'), { recoveryDecision: 'adopt_command' })}>{t('codex.adopt')}</Button> : null}
+        <Button type="button" variant="secondary" size="compact" disabled={busy} onClick={() => onAnswer(t('codex.markFailed'), { recoveryDecision: 'mark_failed' })}>{t('codex.markFailed')}</Button>
+      </div> : null}
       {question.options.length > 0 ? <div className="mt-2 flex flex-wrap gap-2">{question.options.map((option) => <Button key={option} type="button" variant="secondary" size="compact" disabled={busy} onClick={() => { setSelected(option); onAnswer(option); }}>{busy && selected === option ? <LoaderCircle className="size-3.5 motion-safe:animate-spin" /> : null}{option}</Button>)}</div> : null}
     </div>
   );
@@ -226,7 +232,7 @@ function ToolCallPanel({ call }: { call: AgentToolCallView }) {
   const resource = call.result?.type === 'resource' ? call.result : null;
   const dispatch = call.result?.type === 'dispatch' ? call.result : null;
   const navigation = call.result?.type === 'navigation' ? call.result : null;
-  const scriptName = call.scriptPath?.split('/').pop() || t('tool.script');
+  const scriptName = call.codexTask?.model || call.scriptPath?.split('/').pop() || call.mcpToolName || t('tool.script');
   const variant = call.status === 'completed' ? 'success' : call.status === 'running' ? 'brand' : call.status === 'cancelled' ? 'neutral' : 'danger';
   return (
     <article className="my-2 border-l-2 border-warning bg-surface-subtle" aria-label={t('tool.label')}>
@@ -239,7 +245,7 @@ function ToolCallPanel({ call }: { call: AgentToolCallView }) {
       >
         <FileCode2 className="size-4 shrink-0" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-sm font-semibold">
-          {call.skillName || t('tool.label')} <span className="font-mono text-xs font-normal text-muted-foreground">/ {scriptName}</span>
+          {call.shell ? 'Shell' : call.codexTask ? 'Codex' : call.skillName || t('tool.label')} <span className="font-mono text-xs font-normal text-muted-foreground">/ {scriptName}</span>
         </span>
         {finished && call.exitCode !== null ? <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">{t('tool.exitCode', { code: call.exitCode })}</span> : null}
         <Badge variant={variant}>{t(`tool.status.${call.status}`)}</Badge>
@@ -248,7 +254,7 @@ function ToolCallPanel({ call }: { call: AgentToolCallView }) {
       {expanded ? (
         <div className="border-t border-border px-3 pb-3 pt-2.5">
           <dl className="grid gap-3 text-xs sm:grid-cols-2">
-            <div><dt className="font-medium text-muted-foreground">{t('tool.script')}</dt><dd className="mt-1 break-all font-mono">{call.scriptPath}</dd></div>
+            <div><dt className="font-medium text-muted-foreground">{t(call.shell ? 'shell.command' : 'tool.script')}</dt><dd className="mt-1 whitespace-pre-wrap break-all font-mono">{call.shell?.command ?? call.scriptPath}</dd></div>
             <div><dt className="font-medium text-muted-foreground">{t('tool.workingDirectory')}</dt><dd className="mt-1 break-all font-mono">{call.workingDirectory}</dd></div>
             <div><dt className="font-medium text-muted-foreground">{t('tool.toolCallId')}</dt><dd className="mt-1 break-all font-mono">{call.id}</dd></div>
             <div><dt className="font-medium text-muted-foreground">{t('tool.commandExecutionId')}</dt><dd className="mt-1 break-all font-mono">{call.commandExecutionId || t('tool.none')}</dd></div>
@@ -257,9 +263,13 @@ function ToolCallPanel({ call }: { call: AgentToolCallView }) {
               <dd><pre className="mt-1 overflow-x-auto rounded-md border border-border bg-background p-2.5 font-mono"><code>{JSON.stringify(call.arguments)}</code></pre></dd>
             </div>
           </dl>
-          <p className="mt-3 flex items-start gap-2 text-[13px] text-warning">
+          {call.codexTask ? <div className="mt-3">
+            <p className="text-xs font-medium">{call.codexTask.goal}</p>
+            <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-border bg-background p-2.5 font-mono text-xs"><code>{JSON.stringify(call.codexTask, null, 2)}</code></pre>
+          </div> : null}
+          {!call.shell ? <p className="mt-3 flex items-start gap-2 text-[13px] text-warning">
             <ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />{t('tool.warning')}
-          </p>
+          </p> : null}
           {finished ? (
             <div className="mt-3">
               <p className="text-xs font-medium text-muted-foreground">{t('tool.output', { code: call.exitCode ?? t('tool.noExitCode') })}</p>

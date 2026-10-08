@@ -162,6 +162,27 @@
       "when": 1791062520000,
       "tag": "0023_feishu_registration",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1791327600000,
+      "tag": "0024_chat_codex_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1791331200000,
+      "tag": "0025_chat_shell",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1791334800000,
+      "tag": "0026_chat_task_confirmation",
+      "breakpoints": true
     }
   ]
 }

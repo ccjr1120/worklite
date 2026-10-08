@@ -3,6 +3,7 @@ import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next';
 import type { WorkflowView } from '@worklite/contracts';
 import { PromptInput, PromptInputSubmit, PromptInputTextarea } from '@/components/ai-elements/prompt-input';
+import { Button } from '@/components/ui/button';
 import { Command, CommandEmpty, CommandItem, CommandList } from '@/components/ui/command';
 import { focusRingInset } from '@/components/ui/interaction';
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
@@ -36,6 +37,8 @@ type ComposerProps = {
   onDismissMenus: () => void;
   running: boolean;
   busy: boolean;
+  canCancel: boolean;
+  cancelling: boolean;
   submitDisabled: boolean;
   waitingForInput: boolean;
   onStop: () => void;
@@ -50,7 +53,7 @@ function Composer({
   commandMatches, commandMenuOpen, onRunCommand,
   mentionMatches, mentionMenuOpen, onSelectMention,
   activeValue, onActiveValueChange, onDismissMenus,
-  running, busy, submitDisabled, waitingForInput, onStop,
+  running, busy, canCancel, cancelling, submitDisabled, waitingForInput, onStop,
 }: ComposerProps) {
   const { t } = useTranslation('assistant');
   const menuOpen = commandMenuOpen || mentionMenuOpen;
@@ -131,19 +134,26 @@ function Composer({
           </Command>
         </PopoverContent>
       </Popover>
+      {canCancel && !running ? (
+        <Button type="button" variant="secondary" size="compact" disabled={cancelling} aria-busy={cancelling} onClick={onStop}>
+          {cancelling ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <Square aria-hidden="true" />}
+          {t(cancelling ? 'composer.cancelling' : 'composer.cancel')}
+        </Button>
+      ) : null}
       <Tooltip>
         <TooltipTrigger asChild>
           <PromptInputSubmit
-            className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md bg-brand text-white hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
-            status={running ? 'streaming' : busy ? 'submitted' : 'idle'}
-            aria-label={running ? t('composer.stop') : t('composer.send')}
+            className={cn('inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md disabled:cursor-not-allowed disabled:opacity-50', focusRingInset, running ? 'border border-border bg-surface text-foreground hover:bg-surface-subtle' : 'bg-brand text-white hover:bg-brand-hover')}
+            status={running ? 'streaming' : busy && !cancelling ? 'submitted' : 'idle'}
+            aria-label={running ? t(cancelling ? 'composer.cancelling' : 'composer.cancel') : t('composer.send')}
+            aria-busy={running ? cancelling : busy && !cancelling}
             disabled={submitDisabled}
-            onStop={onStop}
+            onStop={running ? onStop : undefined}
           >
-            {running ? <Square className="size-3.5 fill-current" aria-hidden="true" /> : busy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <ArrowUp className="size-4" aria-hidden="true" />}
+            {running && cancelling ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : running ? <Square className="size-3.5 fill-current" aria-hidden="true" /> : busy && !cancelling ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <ArrowUp className="size-4" aria-hidden="true" />}
           </PromptInputSubmit>
         </TooltipTrigger>
-        <TooltipContent>{running ? t('composer.stop') : t('composer.send')}</TooltipContent>
+        <TooltipContent>{running ? t(cancelling ? 'composer.cancelling' : 'composer.cancel') : t('composer.send')}</TooltipContent>
       </Tooltip>
     </PromptInput>
   );

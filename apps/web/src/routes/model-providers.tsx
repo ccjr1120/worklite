@@ -236,7 +236,7 @@ function ModelProvidersPage() {
 
   function changeView(value: string) {
     if (!isModelProviderTab(value)) return;
-    void navigate({ to: '/model-providers', search: (current) => ({ ...current, tab: value }) });
+    void navigate({ to: '/model-providers', search: () => ({ tab: value }) });
   }
 
   const openProviderActivity = useCallback((provider: ModelProviderView) => {
@@ -249,7 +249,7 @@ function ModelProvidersPage() {
     if (!requestedProvider || isLoading || isError) return;
     const provider = modelProviders.find((item) => item.name === requestedProvider);
     if (provider) openProviderActivity(provider);
-    void navigate({ to: '/model-providers', search: (current) => ({ ...current, provider: undefined }), replace: true });
+    void navigate({ to: '/model-providers', search: (current) => ({ tab: isModelProviderTab(current.tab) ? current.tab : 'providers', provider: undefined }), replace: true });
   }, [requestedProvider, isLoading, isError, modelProviders, navigate, openProviderActivity]);
 
   useEffect(() => {
@@ -726,7 +726,7 @@ function ModelProvidersPage() {
   );
 }
 
-function GatewayPanel({ gateway, providers, t }: { gateway?: { port: number; host: string; status: PortkeyGatewayStatus; error: string | null }; providers: ModelProviderView[]; t: (key: string) => string }) {
+function GatewayPanel({ gateway, providers, t }: { gateway?: { port: number; host: string; status: PortkeyGatewayStatus; error: string | null }; providers: ModelProviderView[]; t: (key: string, options?: Record<string, unknown>) => string }) {
   const status = gateway?.status ?? 'starting';
   const running = status === 'running';
   const publicBaseUrl = `${typeof window === 'undefined' ? '' : window.location.origin}/api/portkey-gateway/v1`;
@@ -760,7 +760,7 @@ type CodexAccountPoolProps = {
   onRefreshAccount: (accountId: string) => void;
   onDeleteAccount: (accountId: string) => void;
   locale: AppLocale;
-  t: (key: string) => string;
+  t: (key: string, options?: Record<string, unknown>) => string;
 };
 
 function CodexAccountPool({ auth, usage, usageLoading, usageError, authBusy, busyAccountIds, accountErrors, onLogin, importRef, onImport, onToggleAccount, onRefreshAccount, onDeleteAccount, locale, t }: CodexAccountPoolProps) {
@@ -794,7 +794,7 @@ function CodexAccountPool({ auth, usage, usageLoading, usageError, authBusy, bus
   </section>;
 }
 
-function CodexAccountCard({ account, usage, authBusy, accountBusy, actionError, locale, t, onToggle, onRefresh, onDelete }: { account: CodexAuthStatus['accounts'][number]; usage?: CodexAccountUsageSnapshot['accounts'][number]; authBusy: boolean; accountBusy: boolean; actionError?: string; locale: AppLocale; t: (key: string) => string; onToggle: (accountId: string, enabled: boolean) => void; onRefresh: (accountId: string) => void; onDelete: (accountId: string) => void }) {
+function CodexAccountCard({ account, usage, authBusy, accountBusy, actionError, locale, t, onToggle, onRefresh, onDelete }: { account: CodexAuthStatus['accounts'][number]; usage?: CodexAccountUsageSnapshot['accounts'][number]; authBusy: boolean; accountBusy: boolean; actionError?: string; locale: AppLocale; t: (key: string, options?: Record<string, unknown>) => string; onToggle: (accountId: string, enabled: boolean) => void; onRefresh: (accountId: string) => void; onDelete: (accountId: string) => void }) {
   const status = usage?.status ?? account.status;
   const statusBadge = status === 'disabled' ? 'disabled' : status === 'expired' ? 'invalid' : status === 'error' ? 'error' : status === 'unavailable' ? 'missing' : status === 'connected' ? 'connected' : 'unconfigured';
   const accountLabel = account.email || account.name;
@@ -825,7 +825,7 @@ function CodexAccountCard({ account, usage, authBusy, accountBusy, actionError, 
   </article>;
 }
 
-function CodexQuotaWindow({ title, window, locale, t }: { title: string; window: CodexRateLimitWindow | null; locale: AppLocale; t: (key: string) => string }) {
+function CodexQuotaWindow({ title, window, locale, t }: { title: string; window: CodexRateLimitWindow | null; locale: AppLocale; t: (key: string, options?: Record<string, unknown>) => string }) {
   if (!window) return <div className="rounded-md border border-border bg-surface-subtle p-3"><p className="text-xs font-medium text-muted-foreground">{title}</p><p className="mt-2 text-xs text-muted-foreground">{t('providers.codexPool.quotaUnavailable')}</p></div>;
   const used = Math.min(100, Math.max(0, Math.round(window.usedPercent)));
   const remaining = 100 - used;

@@ -5,6 +5,7 @@ import {
   Ban,
   CheckCircle2,
   CircleDashed,
+  CircleHelp,
   Download,
   FileText,
   LoaderCircle,
@@ -16,10 +17,10 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import type {
   AgentTeamConversationMessage,
   AgentTeamMode,
-  AgentTeamRole,
   AgentTeamRunStatus,
   AgentTeamTaskAttemptStatus,
 } from '@worklite/contracts';
@@ -37,8 +38,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { queryClient } from '@/lib/query-client';
 import { cn } from '@/lib/utils';
 
-const MODES: AgentTeamMode[] = ['plan_only', 'validate_existing', 'implement_and_validate'];
-
 function commandDraftLines(value: string): string[] {
   return value
     .split(/\r?\n/)
@@ -49,16 +48,25 @@ function commandDraftLines(value: string): string[] {
 function sameCommands(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((command, index) => command === right[index]);
 }
-const ACTIVE_RUN_STATUSES = new Set<AgentTeamRunStatus>(['queued', 'running', 'waiting_for_input', 'paused']);
 const TERMINAL_RUN_STATUSES = new Set<AgentTeamRunStatus>(['succeeded', 'failed', 'cancelled']);
-const ROLE_LABELS: Record<AgentTeamRole, string> = {
+const ROLE_LABELS = {
   planner: 'role.planner',
   test_designer: 'role.test_designer',
   developer: 'role.developer',
   test_author: 'role.test_author',
   test_runner: 'role.test_runner',
   reviewer: 'role.reviewer',
-};
+} as const;
+
+const MODE_LABELS = {
+  plan_only: 'conversation.mode.plan_only',
+  validate_existing: 'conversation.mode.validate_existing',
+  implement_and_validate: 'conversation.mode.implement_and_validate',
+} as const;
+
+function isAgentTeamMode(value: string): value is AgentTeamMode {
+  return value === 'plan_only' || value === 'validate_existing' || value === 'implement_and_validate';
+}
 
 type ConversationUiStatus = AgentTeamRunStatus | AgentTeamTaskAttemptStatus;
 type RecoveryDecision = 'adopt_command' | 'mark_failed' | 'replay';
@@ -71,7 +79,7 @@ const STATUS_META: Record<ConversationUiStatus, { variant: 'neutral' | 'brand' |
   succeeded: { variant: 'success', icon: CheckCircle2 },
   failed: { variant: 'danger', icon: XCircle },
   cancelled: { variant: 'neutral', icon: Ban },
-  pending: { variant: 'neutral', icon: CircleDashed },
+  waiting_for_recovery: { variant: 'warning', icon: CircleHelp },
   completed: { variant: 'success', icon: CheckCircle2 },
 };
 
@@ -89,7 +97,7 @@ function ConversationStatusBadge({ status }: { status: ConversationUiStatus }) {
 
 function runStateText(
   message: Extract<AgentTeamConversationMessage, { kind: 'run_state' }>,
-  t: (key: string) => string,
+  t: TFunction<'agentTeams'>,
 ): string {
   return [
     message.role ? t(ROLE_LABELS[message.role]) : null,
@@ -123,8 +131,8 @@ function MessageItem({
           ? message.document.role
             ? t(`role.${message.document.role}`)
             : t('conversation.speaker.member')
-        : message.speaker === 'member'
-          ? t(ROLE_LABELS[(message as Extract<AgentTeamConversationMessage, { speaker: 'member' }>).role])
+        : message.kind === 'member_question'
+          ? t(ROLE_LABELS[message.role])
           : t('conversation.speaker.system');
 
   let body: ReactNode;
@@ -162,7 +170,7 @@ function MessageItem({
                   className="max-w-full justify-start"
                   onClick={() => void selectOption(option.value, onSend)}
                 >
-                  <span className="min-w-0 truncate">{message.field === 'mode' ? t(`conversation.mode.${option.value}`) : option.label}</span>
+                  <span className="min-w-0 truncate">{message.field === 'mode' && isAgentTeamMode(option.value) ? t(MODE_LABELS[option.value]) : option.label}</span>
                 </Button>
               ))}
             </div>
@@ -297,6 +305,7 @@ function DocumentViewer({ documentId, onClose }: { documentId: string; onClose: 
 
 export function TeamConversation({ teamId }: { teamId: string }) {
   const { t } = useTranslation('agentTeams');
+  const { t: tCommon } = useTranslation('common');
   const conversationQuery = useAgentTeamConversationQuery('personal', teamId);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
@@ -354,10 +363,11 @@ export function TeamConversation({ teamId }: { teamId: string }) {
     ? conversation.intakes.find((intake) => intake.id === conversation.activeIntakeId) ?? null
     : null;
   const pendingQuestion = activeIntake?.unresolvedField
-    ? messages.filter((message) => message.kind === 'coordinator_question' && message.intakeId === activeIntake.id).at(-1) ?? null
+    ? messages.filter((message): message is Extract<AgentTeamConversationMessage, { kind: 'coordinator_question' }> => message.kind === 'coordinator_question' && message.intakeId === activeIntake.id).at(-1) ?? null
     : null;
   const pendingInput = conversation?.pendingInput ?? null;
   const activeRun = conversation?.activeRun ?? null;
+  const commandGrantQuestion = pendingInput?.kind === 'question' && messages.some((message) => message.kind === 'member_question' && message.pendingInputId === pendingInput.pendingInputId && message.role !== 'developer');
   const answerMode = Boolean(pendingQuestion || pendingInput?.kind === 'question');
   const coordinatorMention = !answerMode && !coordinatorMentionRemoved;
   useEffect(() => {
@@ -396,7 +406,7 @@ export function TeamConversation({ teamId }: { teamId: string }) {
   }
 
   const queuedRequest = activeIntake?.status === 'queued'
-    ? messages.find((message) => message.kind === 'task_request' && message.intakeId === activeIntake.id) ?? null
+    ? messages.find((message): message is Extract<AgentTeamConversationMessage, { kind: 'task_request' }> => message.kind === 'task_request' && message.intakeId === activeIntake.id) ?? null
     : null;
   const canPause = activeRun !== null && ['queued', 'running', 'waiting_for_input'].includes(activeRun.status);
   const canResume = activeRun?.status === 'paused';
@@ -455,7 +465,7 @@ export function TeamConversation({ teamId }: { teamId: string }) {
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const commands = commandDraftLines(authorizedCommands);
+    const commands = commandGrantQuestion ? commandDraftLines(authorizedCommands) : [];
     void sendConversation({ text, mentions: coordinatorMention, authorizedCommands: commands });
   }
 
@@ -556,6 +566,8 @@ export function TeamConversation({ teamId }: { teamId: string }) {
             </Button>
           </div>
         ) : null}
+        {/* Escape is a transient composer shortcut while the form remains submitted by its button. */}
+        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
         <form
           className="border-t border-border p-4"
           onSubmit={submit}
@@ -605,7 +617,7 @@ export function TeamConversation({ teamId }: { teamId: string }) {
               </Button>
             </div>
           </div>
-          {pendingInput?.kind === 'question' ? (
+          {commandGrantQuestion ? (
             <div className="mt-3">
               <Field label={t('input.commands')} htmlFor="agent-team-conversation-commands">
                 <Textarea
@@ -720,7 +732,7 @@ export function TeamConversation({ teamId }: { teamId: string }) {
         title={t('controls.cancelTitle')}
         description={t('controls.cancelDescription')}
         confirmLabel={t('controls.cancelConfirm')}
-        cancelLabel={t('common:actions.cancel')}
+        cancelLabel={tCommon('actions.cancel')}
         busyLabel={t('controls.cancelling')}
         error={runActionError}
         busy={runAction === 'cancel'}

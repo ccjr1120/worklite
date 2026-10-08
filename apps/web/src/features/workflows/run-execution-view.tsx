@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import type { RunView, WorkflowNodeDefinition, WorkflowNodeRunView } from '@worklite/contracts';
 import { StatusBadge } from '@/components/status-badge';
@@ -48,7 +49,7 @@ function nodeTypeFor(node: WorkflowNodeDefinition): WorkflowCanvasNodeType {
   return types[node.type] ?? 'agent';
 }
 
-function toFlowNode(node: WorkflowNodeDefinition, t: (key: string) => string): WorkflowCanvasNode {
+function toFlowNode(node: WorkflowNodeDefinition, t: TFunction<'workflows'>): WorkflowCanvasNode {
   const config = asRecord(node.config);
   const nodeType = nodeTypeFor(node);
   const fallbackLabels: Record<WorkflowCanvasNodeType, string> = {
@@ -77,7 +78,7 @@ function toFlowNode(node: WorkflowNodeDefinition, t: (key: string) => string): W
   };
 }
 
-function edgeConditionLabel(edge: WorkflowCanvasEdge, t: (key: string) => string): string | undefined {
+function edgeConditionLabel(edge: WorkflowCanvasEdge, t: TFunction<'workflows'>): string | undefined {
   const condition = edge.data?.condition;
   if (!condition) return undefined;
   if (condition.kind === 'fallback') return t('editor.edgeModes.fallback');
@@ -224,7 +225,7 @@ function RunExecutionView({ run, locale, loading, failed, compact = false }: Run
           className="workflow-flow-viewport"
           role="region"
           aria-label={tRun('logs')}
-          tabIndex={0}
+          tabIndex={0} /* The scroll region is focusable so keyboard users can traverse the graph. */ /* eslint-disable-line jsx-a11y/no-noninteractive-tabindex */
         >
           <div className="workflow-flow-content" style={{ width: contentMetrics.width, height: contentMetrics.height }}>
             <svg className="workflow-flow-edges" width={contentMetrics.width} height={contentMetrics.height} aria-hidden="false">

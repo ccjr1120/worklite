@@ -27,6 +27,15 @@ export function useChatConversationQuery(id: string | null) {
 export function useChatConversationRecordsQuery(id: string | null) {
   return useQuery({ queryKey: ['chat-conversation-records', id], queryFn: () => api.chatConversationRecords(id!), enabled: Boolean(id), refetchInterval: 5_000 });
 }
+
+export function useWorkliteUpgradeQuery(id: string) {
+  return useQuery({
+    queryKey: ['worklite-upgrade', id],
+    queryFn: () => api.workliteUpgrade(id),
+    enabled: Boolean(id),
+    refetchInterval: (query) => ['proposed', 'succeeded', 'rolled_back', 'failed'].includes(query.state.data?.phase ?? '') ? false : 5_000,
+  });
+}
 export const workflowsQueryKey = () => ['workflows'] as const;
 export const runsQueryKey = () => ['runs'] as const;
 export const mcpServersQueryKey = () => ['mcp-servers'] as const;

@@ -1,11 +1,12 @@
 import { BadRequestException, Body, Controller, Get, Headers, Inject, Injectable, NotFoundException, OnModuleInit, Param, Post, UnauthorizedException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { execFileSync, spawn } from 'node:child_process';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, openSync, closeSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { and, eq, inArray } from 'drizzle-orm';
-import { agentExecutions, agentTeamRuns, chatSubmissions, commandExecutions, feishuChats, workflowRuns, type Database } from '@worklite/db';
+import { agentExecutions, agentTeamRuns, agentToolCalls, chatSubmissions, commandExecutions, feishuChats, workflowRuns, type Database } from '@worklite/db';
+import type { WorkliteUpgradeView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { upgradeStateDirectory } from '../../infrastructure/runtime-upgrade-state';
 import { AgentTeamRuntimeService } from '../agent-teams/agent-team-runtime.service';
@@ -20,6 +21,7 @@ type UpgradeJob = {
   pausedTeams: string[]; pausedWorkflows: string[]; runnerPid?: number;
   confirmedAt?: string; confirmedBy?: string; error?: string; updatedAt: string;
   resumePending?: boolean;
+  authorization?: { userMessageId: string; userRequest: string; toolCallId: string };
 };
 
 @Injectable()
@@ -52,35 +54,59 @@ export class UpgradesService implements OnModuleInit {
     const [execution] = await this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, input.executionId), eq(agentExecutions.agentId, 'agt_system_helper_chat'))).limit(1);
     if (!execution || !input.summary?.trim()) throw new BadRequestException('A Chat execution and upgrade summary are required.');
     const [chat] = await this.db.select({ id: feishuChats.id }).from(feishuChats).where(eq(feishuChats.executionId, execution.id)).limit(1);
-    if (!chat) throw new BadRequestException('Upgrade requests need a Feishu conversation for release confirmation.');
     const [existing] = await this.db.select().from(chatSubmissions).where(eq(chatSubmissions.id, input.submissionId)).limit(1);
     if (existing?.reference?.kind === 'upgrade') return this.view(existing.reference.jobId);
     const id = `upgrade_${randomUUID()}`;
     const release = JSON.parse(execFileSync(process.execPath, [join(process.env.WORKLITE_RELEASE_ROOT!, 'scripts/upgrade-runner.mjs'), 'prepare', runtime.projectRoot, directory, id], { encoding: 'utf8' })) as { releaseHash: string; releaseDirectory: string };
-    const job: UpgradeJob = { id, ...release, summary: input.summary.trim(), phase: 'awaiting_confirmation', workspaceId: execution.workspaceId, submissionId: input.submissionId, executionId: execution.id, token: randomBytes(32).toString('hex'), pausedTeams: [], pausedWorkflows: [], updatedAt: new Date().toISOString() };
+    const job: UpgradeJob = { id, ...release, summary: input.summary.trim(), phase: 'proposed', workspaceId: execution.workspaceId, submissionId: input.submissionId, executionId: execution.id, token: randomBytes(32).toString('hex'), pausedTeams: [], pausedWorkflows: [], updatedAt: new Date().toISOString() };
     this.save(job);
-    await this.db.insert(chatSubmissions).values({ id: input.submissionId, workspaceId: execution.workspaceId, chatId: chat.id, executionId: execution.id, message: job.summary, target: { kind: 'conversation' }, reference: { kind: 'upgrade', jobId: id } }).onConflictDoNothing();
+    await this.db.insert(chatSubmissions).values({ id: input.submissionId, workspaceId: execution.workspaceId, chatId: chat?.id, executionId: execution.id, message: job.summary, target: { kind: 'conversation' }, reference: { kind: 'upgrade', jobId: id } }).onConflictDoNothing();
     return this.view(id);
   }
 
-  view(id: string) {
+  async redeploy(input: { summary: string; executionId: string; submissionId: string; userMessageId: string }) {
+    const directory = this.directory();
+    const [execution] = await this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, input.executionId), eq(agentExecutions.agentId, 'agt_system_helper_chat'))).limit(1);
+    const userMessage = execution?.displayMessages.filter((message) => message.role === 'user').at(-1);
+    const [call] = await this.db.select().from(agentToolCalls).where(and(eq(agentToolCalls.id, input.submissionId), eq(agentToolCalls.executionId, input.executionId))).limit(1);
+    const currentTurn = execution ? execution.modelMessages.slice(execution.modelMessages.map((message) => message.role).lastIndexOf('user')) : [];
+    const currentCall = currentTurn.some((message) => message.role === 'assistant' && message.content.some((part) => part.type === 'tool-call' && part.toolCallId === call?.toolCallId));
+    if (!execution || execution.status !== 'running' || !userMessage || userMessage.id !== input.userMessageId || !input.summary?.trim()
+      || call?.status !== 'running' || call.skillId !== 'sk_worklite_platform' || call.scriptPath !== 'scripts/redeploy.mjs' || !currentCall) {
+      throw new BadRequestException('Redeployment requires the current server-bound Chat user request.');
+    }
+    const [chat] = await this.db.select({ id: feishuChats.id }).from(feishuChats).where(eq(feishuChats.executionId, execution.id)).limit(1);
+    const id = `upgrade_${createHash('sha256').update(`${execution.id}:${userMessage.id}`).digest('hex').slice(0, 32)}`;
+    if (existsSync(join(directory, 'upgrades', `${id}.json`))) return this.view(id);
+    this.requireIdle();
+    const runtime = this.readFile<{ projectRoot: string }>(join(directory, 'current.json'));
+    const release = JSON.parse(execFileSync(process.execPath, [join(process.env.WORKLITE_RELEASE_ROOT!, 'scripts/upgrade-runner.mjs'), 'prepare', runtime.projectRoot, directory, id], { encoding: 'utf8' })) as { releaseHash: string; releaseDirectory: string };
+    const job: UpgradeJob = {
+      id, ...release, summary: input.summary.trim(), phase: 'authorized', workspaceId: execution.workspaceId,
+      submissionId: id, executionId: execution.id, token: randomBytes(32).toString('hex'), pausedTeams: [], pausedWorkflows: [],
+      confirmedAt: new Date().toISOString(), confirmedBy: userMessage.id,
+      authorization: { userMessageId: userMessage.id, userRequest: userMessage.content, toolCallId: call.id },
+      updatedAt: new Date().toISOString(),
+    };
+    this.save(job);
+    this.db.insert(chatSubmissions).values({ id, workspaceId: execution.workspaceId, chatId: chat?.id, executionId: execution.id, message: job.summary, target: { kind: 'conversation' }, reference: { kind: 'upgrade', jobId: id } }).onConflictDoNothing().run();
+    atomicWrite(join(directory, 'active.json'), { jobId: id });
+    this.launch(job);
+    return this.view(id);
+  }
+
+  view(id: string): WorkliteUpgradeView {
     const job = this.load(id);
     return { id: job.id, releaseHash: job.releaseHash, summary: job.summary, phase: job.phase, error: job.error ?? null, updatedAt: job.updatedAt };
   }
 
-  confirm(id: string, hash: string, userId: string): void {
-    const job = this.load(id);
-    if (job.releaseHash !== hash || job.phase !== 'awaiting_confirmation') throw new BadRequestException('This upgrade confirmation is no longer current.');
+  private requireIdle(): void {
     const directory = this.directory();
     if (existsSync(join(directory, 'active.json'))) {
       const { jobId } = this.readFile<{ jobId: string }>(join(directory, 'active.json'));
       const active = this.load(jobId);
       if (active.resumePending || !['succeeded', 'rolled_back', 'failed'].includes(active.phase)) throw new BadRequestException('Another upgrade is active.');
     }
-    job.confirmedAt = new Date().toISOString(); job.confirmedBy = userId; job.phase = 'authorized';
-    this.save(job);
-    atomicWrite(join(directory, 'active.json'), { jobId: id });
-    this.launch(job);
   }
 
   authorizeRunner(id: string, token: string | undefined): void {
@@ -172,6 +198,7 @@ export class UpgradesController {
   constructor(private readonly upgrades: UpgradesService) {}
   @Get('runtime') runtime() { return { releaseHash: process.env.WORKLITE_RELEASE_HASH ?? null, wrapperPid: Number(process.env.WORKLITE_RUNTIME_PID ?? 0), preflight: process.env.WORKLITE_PREFLIGHT === '1' }; }
   @Post() propose(@Body() body: { summary: string; executionId: string; submissionId: string }) { return this.upgrades.propose(body); }
+  @Post('redeploy') redeploy(@Body() body: { summary: string; executionId: string; submissionId: string; userMessageId: string }) { return this.upgrades.redeploy(body); }
   @Get(':id') inspect(@Param('id') id: string) { return this.upgrades.view(id); }
   @Post(':id/handoff') handoff(@Param('id') id: string, @Headers('x-worklite-upgrade-token') token: string) { this.upgrades.authorizeRunner(id, token); return this.upgrades.handoff(id); }
   @Post(':id/resume') resume(@Param('id') id: string, @Headers('x-worklite-upgrade-token') token: string) { this.upgrades.authorizeRunner(id, token); return this.upgrades.resume(id); }

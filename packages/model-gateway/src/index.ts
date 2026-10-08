@@ -191,7 +191,7 @@ export class AiSdkModelGateway implements ModelGateway {
     const model = resolveModel(request.provider, request.model, request.correlation);
     const useResponses = isResponsesProvider(request.provider);
     const skillScript = tool({
-      description: 'Run one script from an assigned Skill package immediately on the WorkLite host. Select only an exact Skill id and script path from the assigned script list.',
+      description: 'Run one script from an assigned Skill package immediately on the WorkLite host. Select only an exact Skill id and script path from the assigned script list. arguments must be a command-line string array: use [] for a script with no input; for a JSON-input script use one serialized JSON string, never a nested object or array.',
       strict: useResponses ? false : undefined,
       inputSchema: jsonSchema<{ skillId: string; scriptPath: string; arguments: string[] }>({
         type: 'object',
@@ -219,6 +219,7 @@ export class AiSdkModelGateway implements ModelGateway {
     const openaiProviderOptions = {
       ...(request.provider.adapter === 'openai' ? { parallelToolCalls: false as const } : {}),
       ...(useResponses ? { strictJsonSchema: false as const } : {}),
+      ...(request.provider.adapter === 'codex' ? { store: false as const, include: ['reasoning.encrypted_content'] } : {}),
     };
     const modelRequest = {
       model,
@@ -289,7 +290,7 @@ export class AiSdkModelGateway implements ModelGateway {
     });
 
     const skillScript = tool({
-      description: 'Run one script from an assigned Skill package immediately on the WorkLite host. Select only an exact Skill id and script path from the assigned script list.',
+      description: 'Run one script from an assigned Skill package immediately on the WorkLite host. Select only an exact Skill id and script path from the assigned script list. arguments must be a command-line string array: use [] for a script with no input; for a JSON-input script use one serialized JSON string, never a nested object or array.',
       strict: useResponses ? false : undefined,
       inputSchema: jsonSchema<{ skillId: string; scriptPath: string; arguments: string[] }>({
         type: 'object',
@@ -336,6 +337,7 @@ export class AiSdkModelGateway implements ModelGateway {
     const openaiProviderOptions = {
       ...(request.provider.adapter === 'openai' ? { parallelToolCalls: false as const } : {}),
       ...(useResponses ? { strictJsonSchema: false as const } : {}),
+      ...(request.provider.adapter === 'codex' ? { store: false as const, include: ['reasoning.encrypted_content'] } : {}),
     };
     const agentSettings = {
       model,
@@ -617,6 +619,9 @@ function extractJsonText(text: string): string {
 }
 
 function modelFailure(error: unknown, streamCause: unknown): Error {
+  if ([error, streamCause].some((value) => value instanceof Error && /context_length_exceeded|Prompt exceeds max length|maximum context length/i.test(value.message))) {
+    return new ModelGatewayError('INVALID_REQUEST', 'The model context limit was exceeded. Inspect focused diagnostic records or start a new conversation; complete evidence remains in the execution records.');
+  }
   const cause = APICallError.isInstance(streamCause) ? streamCause : APICallError.isInstance(error) ? error : undefined;
   const status = cause?.statusCode;
   if (status) return new Error(`The model provider request failed with HTTP status ${status}.`);

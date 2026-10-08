@@ -1,5 +1,5 @@
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Home, MessageSquareText, KeyRound, Puzzle, ScrollText, Settings, UsersRound, Workflow } from 'lucide-react';
+import { MessageSquareText, KeyRound, Puzzle, ScrollText, Settings, UsersRound, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { focusRingInset } from '@/components/ui/interaction';
@@ -12,10 +12,9 @@ const navigationGroups = [
     id: 'workspace',
     labelKey: 'nav.workspace',
     items: [
-      { id: 'home', labelKey: 'nav.home', to: '/home', icon: Home },
       { id: 'chat', labelKey: 'nav.chat', to: '/chat', icon: MessageSquareText },
       { id: 'workflows', labelKey: 'nav.workflows', to: '/workflows', icon: Workflow },
-      { id: 'agentTeam', labelKey: 'nav.agentTeam', to: '/agent-teams/agent_team_bmad_tea', icon: UsersRound },
+      { id: 'agentTeam', labelKey: 'nav.agentTeam', to: '/agent-teams/$teamId', icon: UsersRound },
     ],
   },
   {
@@ -52,6 +51,8 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
     const content = (
       <Link
         to={item.to}
+        params={item.id === 'agentTeam' ? { teamId: 'agent_team_bmad_tea' } : undefined}
+        search={item.id === 'agentTeam' ? { tab: 'conversation' } : undefined}
         onClick={onNavigate}
         className={cn(
           'relative flex h-8 items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-[120ms]',
@@ -72,7 +73,7 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
   return (
     <aside className={cn('flex h-full flex-col border-r border-border bg-surface', collapsed ? 'w-14' : 'w-[232px]')}>
       <div className={cn('flex h-[52px] items-center border-b border-border px-2', collapsed && 'justify-center')}>
-        <Link to="/home" aria-label="WorkLite" className="flex items-center gap-2">
+        <Link to="/chat" aria-label="WorkLite" className="flex items-center gap-2">
           <WorkLiteMark className={collapsed ? 'size-5' : 'size-6'} />
           {collapsed ? null : <span className="text-sm font-semibold">WorkLite</span>}
         </Link>

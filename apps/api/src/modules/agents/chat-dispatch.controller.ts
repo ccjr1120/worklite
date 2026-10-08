@@ -3,10 +3,18 @@ import type { Request } from 'express';
 import type { DispatchChatRequest } from '@worklite/contracts';
 import { ChatDispatchService } from './chat-dispatch.service';
 import { ChatConversationsService } from './chat-conversations.service';
+import { ChatCodexTasksService } from './chat-codex-tasks.service';
+import { WorkspaceService } from '../teams/teams.service';
 
 @Controller('chat')
 export class ChatDispatchController {
-  constructor(private readonly dispatches: ChatDispatchService, private readonly conversations: ChatConversationsService) {}
+  constructor(private readonly dispatches: ChatDispatchService, private readonly conversations: ChatConversationsService, private readonly codexTasks: ChatCodexTasksService, private readonly workspaces: WorkspaceService) {}
+
+  @Get('codex-tasks/:id')
+  async codexTask(@Req() request: Request, @Param('id') id: string) {
+    const workspace = await this.workspaces.getWorkspace(request, 'personal');
+    return this.codexTasks.view(id, workspace.id);
+  }
 
   @Get('channels')
   channels() { return this.conversations.channels(); }

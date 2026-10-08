@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router';
-import { Home, KeyRound, MessageSquareText, Plus, Puzzle, ScrollText, UsersRound, Workflow } from 'lucide-react';
+import { KeyRound, MessageSquareText, Plus, Puzzle, ScrollText, UsersRound, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   CommandDialog,
@@ -29,16 +29,13 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
         <CommandEmpty>{t('command.empty')}</CommandEmpty>
         <CommandGroup heading={t('command.navigation')}>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/chat' }))}><MessageSquareText className="size-4" />{t('nav.chat')}</CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/home' }))}>
-            <Home className="size-4" /> {t('nav.home')}
-          </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/workflows' }))}>
             <Workflow className="size-4" /> {t('nav.workflows')}
           </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/plugins' }))}>
             <Puzzle className="size-4" /> {t('nav.plugins')}
           </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/agent-teams/$teamId', params: { teamId: 'agent_team_bmad_tea' } }))}>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/agent-teams/$teamId', params: { teamId: 'agent_team_bmad_tea' }, search: { tab: 'conversation' } }))}>
             <UsersRound className="size-4" /> {t('nav.agentTeam')}
           </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/model-providers', search: { tab: 'providers' } }))}>

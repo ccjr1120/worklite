@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Runs only after an operator installation command or a release-bound Feishu confirmation.
+// Runs only after an operator installation command or a server-bound Chat redeploy request.
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -176,7 +176,7 @@ async function install(profile) {
 async function run(state, id) {
   const jobPath = join(state, 'upgrades', `${id}.json`);
   let job = read(jobPath);
-  if (!job.confirmedAt || job.releaseHash === undefined) throw new Error('User confirmation is required.');
+  if (!job.confirmedAt || job.releaseHash === undefined) throw new Error('A user-authorized deployment is required.');
   const lockPath = join(state, 'upgrade-runner.lock');
   if (existsSync(lockPath)) { const lock = read(lockPath); if (alive(lock.pid)) return; rmSync(lockPath); }
   writeFileSync(lockPath, JSON.stringify({ pid: process.pid }), { flag: 'wx', mode: 0o600 });

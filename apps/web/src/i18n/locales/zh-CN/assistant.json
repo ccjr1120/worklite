@@ -4,7 +4,8 @@
     "label": "向 Chat 发送消息",
     "placeholder": "询问 WorkLite，或输入 @ 运行已发布的 Workflow…",
     "send": "发送消息",
-    "stop": "中断当前回复",
+    "cancel": "取消当前执行",
+    "cancelling": "取消中…",
     "answerPlaceholder": "回答澄清问题...",
     "loading": "正在加载 Chat 配置",
     "configure": "绑定模型提供商和模型后使用 Chat"
@@ -149,20 +150,21 @@
     "model": "提供商和模型",
     "placeholder": "选择已配置的模型",
     "saving": "保存中...",
-    "mcpServers": "MCP 服务器",
-    "mcpServersHint": "选择 Chat 可使用的 MCP 服务器。",
+    "mcpServers": "Codex 执行器 MCP 服务器",
+    "mcpServersHint": "所选服务器仅供委派的 Codex 任务使用。",
     "prompt": "补充提示词",
     "nextTurn": "离开输入框后保存，从下一轮对话生效。",
-    "skills": "Skills",
-    "builtIn": "内置",
+    "skills": "Codex 执行器 Skills",
+    "builtIn": "Chat 平台操作",
     "saveFailed": "配置未保存，请重试。",
     "loadFailed": "无法加载配置。"
   },
-  "panelTabs": {
-    "label": "Chat 视图",
-    "chat": "对话",
-    "configuration": "配置",
-    "channels": "Channels"
+  "settings": {
+    "open": "打开 Chat 设置",
+    "title": "Chat 设置",
+    "description": "管理通信渠道和模型执行配置。",
+    "channels": "Channels",
+    "configuration": "配置"
   },
   "workflowRun": {
     "requestFailed": "无法创建 Workflow 执行。",
@@ -213,5 +215,31 @@
     "cancelTask": "取消执行",
     "cancelFailed": "取消失败，请重试。",
     "execution": "会话正文与工具调用"
+  },
+  "codex": {
+    "adopt": "采用已有命令结果",
+    "markFailed": "标记操作失败"
+  },
+  "upgrade": {
+    "title": "WorkLite 部署",
+    "loading": "正在加载部署进度",
+    "version": "版本：{{version}}",
+    "reconnecting": "连接已中断，正在重新连接部署进度。",
+    "loadFailed": "暂时无法读取部署进度，正在重新连接。",
+    "phase": {
+      "proposed": "等待重新部署指令",
+      "authorized": "部署已启动",
+      "preflighting": "正在预检",
+      "draining": "正在交接任务",
+      "frozen": "即将切换",
+      "switching": "正在切换",
+      "recovering": "正在恢复旧版本",
+      "succeeded": "部署完成",
+      "rolled_back": "已恢复旧版本",
+      "failed": "部署未完成"
+    }
+  },
+  "shell": {
+    "command": "命令"
   }
 }

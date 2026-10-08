@@ -2,7 +2,7 @@
 
 ## Wide Desktop
 
-At `1024px` and above, expand the sidebar, allow side-by-side inspectors on applicable pages, and retain useful table columns. The Workflow editor keeps its selected-item inspector dock below the diagram. Chat occupies the available workspace at `/chat`, with a conversation history column and an independently scrolling transcript. Its three top tabs keep a stable content height. Home has no composer and the shell has no floating chat entry. Tool execution regions remain inline as compact collapsed disclosure rows.
+At `1024px` and above, expand the sidebar, allow side-by-side inspectors on applicable pages, and retain useful table columns. The Workflow editor keeps its selected-item inspector dock below the diagram. Chat occupies the available workspace at `/chat`, with a conversation history column and an independently scrolling transcript; Channels and Configuration remain available from its settings Dialog without changing the conversation body height. Home has no composer and the shell has no floating chat entry. Tool execution regions remain inline as compact collapsed disclosure rows.
 
 ## Compact Desktop and Tablet
 
@@ -12,7 +12,7 @@ The Run execution graph scrolls natively on both axes at every desktop width. It
 
 ## Mobile
 
-Below `768px`, use a navigation drawer, retain page identity, state and primary action in the context bar, show the selected Workflow node or edge inspector in a bounded dock below the full-bleed diagram, and keep the floating node picker anchored over the diagram. The inspector dock and diagram scroll independently; the fixed-scale diagram scrolls natively on both axes with touch gestures. Node selection and deletion remain available through the diagram and inspector. Run execution graphs use the same fixed-scale touch scrolling; their chronological trace follows the graph and selected-node details stay in a bounded dock. The drawer preserves every grouped desktop destination named in `workspace-shell.md`, including Plugins and Logs; page-level collection and observability tabs remain reachable through horizontal scrolling, and the Workflow Run records dialog exposes Artifacts through in-place expansion. Chat fills the available workspace and opens conversation history in a Sheet below `768px`. Conversation, Channels, and Configuration tabs stay reachable. Its composer remains reachable above browser controls; the full-record view replaces the transcript visually without losing its scroll position.
+Below `768px`, use a navigation drawer, retain page identity, state and primary action in the context bar, show the selected Workflow node or edge inspector in a bounded dock below the full-bleed diagram, and keep the floating node picker anchored over the diagram. The inspector dock and diagram scroll independently; the fixed-scale diagram scrolls natively on both axes with touch gestures. Node selection and deletion remain available through the diagram and inspector. Run execution graphs use the same fixed-scale touch scrolling; their chronological trace follows the graph and selected-node details stay in a bounded dock. The drawer preserves every grouped desktop destination named in `workspace-shell.md`, including Plugins and Logs; page-level collection and observability tabs remain reachable through horizontal scrolling, and the Workflow Run records dialog exposes Artifacts through in-place expansion. Chat fills the available workspace and opens conversation history in a Sheet below `768px`. Its settings Dialog and internal Channels/Configuration sections stay reachable within the viewport. Its composer remains reachable above browser controls; the full-record view replaces the transcript visually without losing its scroll position.
 
 A shared time-range control keeps its preset selection and its custom start and end fields reachable at every breakpoint. Below `768px` the presets and the two fields stack in one column rather than dropping the custom range, because a range the reader cannot narrow on a small screen makes the surface unusable there.
 
@@ -21,6 +21,10 @@ Responsive layouts must not remove status, recovery, or cancellation controls, i
 Queued Chat messages keep their rows, count, and per-row remove control inside the scrollable transcript at every breakpoint, and the return-to-end control stays reachable without covering the composer.
 
 ## Changelog
+
+### 2026-10-08 - Chat settings responsive ownership
+
+- Kept Chat conversation-only across breakpoints and moved Channels/Configuration reachability into the bounded settings Dialog.
 
 ### 2026-10-04 - Chat workspace
 

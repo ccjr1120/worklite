@@ -111,11 +111,22 @@ export type DispatchChatRequest = {
   target: ChatTarget;
   executionId?: string | null;
   questionId?: string;
+  newConversation?: boolean;
+  recoveryDecision?: 'adopt_command' | 'mark_failed';
 };
 
 export type DispatchChatResponse = {
   submissionId: string;
   reference: ChatTaskReference;
+};
+
+export type WorkliteUpgradeView = {
+  id: string;
+  releaseHash: string;
+  summary: string;
+  phase: string;
+  error: string | null;
+  updatedAt: string;
 };
 
 export const CHAT_AGENT_ID = 'agt_system_helper_chat';
@@ -252,6 +263,10 @@ export type AgentPlanStep = {
 };
 
 export type AgentPendingQuestion = {
+  action?: 'new_conversation' | 'confirm_execution';
+  codexTaskId?: string;
+  shellCallId?: string;
+  recovery?: { operationKey: string; commandExecutionId?: string };
   id: string;
   question: string;
   options: string[];
@@ -260,7 +275,19 @@ export type AgentPendingQuestion = {
 
 export type AgentToolCallStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
+export type ChatCodexTaskView = {
+  launch?: { mode: 'cx' | 'cxo'; home: string; modelProvider: string; settings: Record<string, unknown> };
+  id: string; executionId: string; goal: string; projectDirectory: string; model: string;
+  status: 'running' | 'waiting_for_input' | 'waiting_for_recovery' | 'succeeded' | 'failed' | 'cancelled';
+  configurationRevision: number; pendingQuestion: AgentPendingQuestion | null;
+  activities: Array<Record<string, unknown>>; result: string; error: string | null;
+  operations: Array<{ key: string; toolName: string; status: 'reserved' | 'completed' | 'uncertain' | 'failed'; commandExecutionId: string | null; result: unknown; failureReason: string | null }>;
+  createdAt: string; updatedAt: string;
+};
+
 export type AgentToolCallView = {
+  shell?: { command: string; state: 'awaiting_confirmation' | 'authorized' | 'reserved' | 'uncertain' | 'settled'; authorizationId?: string; approvedAt?: string };
+  codexTask?: ChatCodexTaskView;
   id: string;
   workingDirectory: string;
   skillId: string | null;
@@ -278,7 +305,13 @@ export type AgentToolCallView = {
   finishedAt: string | null;
 };
 
+export type ChatExecutionAuthorization = {
+  id: string; questionId: string; proposal: string;
+  status: 'pending' | 'approved' | 'declined'; approvedAt: string | null; createdAt: string;
+};
+
 export type AgentExecutionView = {
+  executionAuthorization: ChatExecutionAuthorization | null;
   id: string;
   agentId: string;
   status: AgentExecutionStatus;
@@ -316,6 +349,7 @@ export type ContinueAgentExecutionRequest = {
 };
 
 export type AnswerAgentQuestionRequest = {
+  recoveryDecision?: 'adopt_command' | 'mark_failed';
   questionId: string;
   answer: string;
 };
@@ -1154,7 +1188,7 @@ export type AgentTeamVersionMetadata = {
   id: string;
   version: number;
   createdAt: string;
-  developerExecution?: { kind: 'codex_app_server'; commandArguments: string[] };
+  developerExecution?: { kind: 'codex_app_server'; commandArguments: string[]; launch?: { mode: 'cx' | 'cxo'; home: string; model: string; modelProvider: string; settings: Record<string, unknown> } };
 };
 
 export type AgentTeamTaskAttemptStatus =

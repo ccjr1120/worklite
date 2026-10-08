@@ -10,7 +10,7 @@ const webPort = process.env.WEB_PORT?.trim() || '23390';
 
 const commands = [
   ['api', ['--filter', '@worklite/api', 'exec', 'nest', 'start', '--builder', 'webpack', '--webpackPath', 'webpack.config.js']],
-  ['web', ['--filter', '@worklite/web', 'exec', 'vite', 'preview', '--host', '127.0.0.1', '--port', webPort]],
+  ['web', ['--filter', '@worklite/web', 'exec', 'vite', 'preview', '--host', '127.0.0.1', '--port', webPort, ...(process.env.WORKLITE_WEB_DIST_DIR ? ['--outDir', process.env.WORKLITE_WEB_DIST_DIR] : [])]],
 ];
 
 for (const [name, args] of commands) {

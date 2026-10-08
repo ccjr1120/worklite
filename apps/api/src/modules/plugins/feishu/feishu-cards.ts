@@ -1,10 +1,9 @@
 import { createHash } from 'node:crypto';
 
 export type FeishuAction =
-  | { kind: 'upgrade'; jobId: string; releaseHash: string }
   | { kind: 'intake'; teamId: string; intakeSubmissionId: string; field: 'goal' | 'projectDirectory' | 'mode'; answer?: string }
   | { kind: 'answer'; runId: string; pendingInputId: string; scopeRevision: number }
-  | { kind: 'agent_answer'; executionId: string; questionId: string; answer?: string }
+  | { kind: 'agent_answer'; executionId: string; questionId: string; answer?: string; recoveryDecision?: 'adopt_command' | 'mark_failed'; newConversation?: boolean }
   | { kind: 'control'; domain: 'team' | 'workflow' | 'conversation'; runId: string; action: 'pause' | 'resume' | 'cancel' | 'retry'; taskKey?: string }
   | { kind: 'recovery'; runId: string; operationKey: string; decision: 'adopt_command' | 'mark_failed' | 'replay' }
   | { kind: 'delivery' };

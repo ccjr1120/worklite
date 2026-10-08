@@ -21,7 +21,6 @@ import type {
   AgentTeamOperationRecoveryDecision,
   AgentTeamOperationView,
   AgentTeamPendingInputView,
-  AgentTeamRole,
   AgentTeamRunEvent,
   AgentTeamRunView,
   AgentTeamTaskAttemptView,
@@ -56,14 +55,20 @@ type TeamStatus =
 
 const TERMINAL_RUN_STATUSES = new Set<AgentTeamRunView['status']>(['succeeded', 'failed', 'cancelled']);
 const RECOVERY_DECISIONS = ['adopt_command', 'mark_failed', 'replay'] as const;
-const ROLE_LABELS: Record<AgentTeamRole, string> = {
+const ROLE_LABELS = {
   planner: 'role.planner',
   test_designer: 'role.test_designer',
   developer: 'role.developer',
   test_author: 'role.test_author',
   test_runner: 'role.test_runner',
   reviewer: 'role.reviewer',
-};
+} as const;
+
+const DESIRED_CONTROL_LABELS = {
+  none: 'run.desiredControl.none',
+  pause_requested: 'run.desiredControl.pause_requested',
+  cancel_requested: 'run.desiredControl.cancel_requested',
+} as const;
 
 const STATUS_META: Record<TeamStatus, { variant: 'neutral' | 'brand' | 'success' | 'warning' | 'danger' | 'info'; icon: typeof CheckCircle2 }> = {
   queued: { variant: 'neutral', icon: CircleDashed },
@@ -176,10 +181,12 @@ function ContentDisclosure({ summary, content }: { summary: string; content: str
 function PendingInputPanel({
   runId,
   pendingInput,
+  allowCommands,
   onRunUpdate,
 }: {
   runId: string;
   pendingInput: AgentTeamPendingInputView;
+  allowCommands: boolean;
   onRunUpdate: (run: AgentTeamRunView) => void;
 }) {
   const { t } = useTranslation('agentTeams');
@@ -198,7 +205,7 @@ function PendingInputPanel({
         pendingInputId: pendingInput.id,
         scopeRevision: pendingInput.scopeRevision,
         answer,
-        authorizedCommands: commandLines(authorizedCommands),
+        authorizedCommands: allowCommands ? commandLines(authorizedCommands) : [],
       });
       onRunUpdate(response.run);
     } catch (failure: unknown) {
@@ -225,7 +232,7 @@ function PendingInputPanel({
             onChange={(event) => setAnswer(event.target.value)}
           />
         </Field>
-        <Field label={t('input.commands')} htmlFor={`agent-team-answer-commands-${pendingInput.id}`}>
+        {allowCommands ? <Field label={t('input.commands')} htmlFor={`agent-team-answer-commands-${pendingInput.id}`}>
           <Textarea
             id={`agent-team-answer-commands-${pendingInput.id}`}
             className="min-h-20"
@@ -233,7 +240,7 @@ function PendingInputPanel({
             placeholder={t('run.commandsPlaceholder')}
             onChange={(event) => setAuthorizedCommands(event.target.value)}
           />
-        </Field>
+        </Field> : null}
         <div className="flex flex-col gap-2">
           <Button type="submit" disabled={submitting}>
             {submitting ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}
@@ -536,6 +543,7 @@ function OperationPanel({ operation }: { operation: AgentTeamOperationView }) {
 
 export function TeamRunDetailPage({ runId }: { runId: string }) {
   const { t } = useTranslation('agentTeams');
+  const { t: tCommon } = useTranslation('common');
   const { locale } = useLocale();
   const runQuery = useAgentTeamRunQuery('personal', runId);
   const [events, setEvents] = useState<AgentTeamRunEvent[]>([]);
@@ -731,7 +739,7 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <TeamStatusBadge status={run.status} />
           <CopyableId value={run.id} />
-          <span>{t('run.desiredControl.' + run.desiredControlState)}</span>
+          <span>{t(DESIRED_CONTROL_LABELS[run.desiredControlState])}</span>
         </div>
         <dl className="mt-4 grid gap-4 text-[13px] md:grid-cols-2 xl:grid-cols-3">
           <div>
@@ -781,7 +789,7 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
       </section>
       <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,430px)]">
         <div className="min-w-0 space-y-6">
-          {questionInputs.map((input) => <PendingInputPanel key={input.id} runId={runId} pendingInput={input} onRunUpdate={updateRun} />)}
+          {questionInputs.map((input) => <PendingInputPanel key={input.id} runId={runId} pendingInput={input} allowCommands={run.tasks.find((task) => task.id === input.taskAttemptId)?.role !== 'developer'} onRunUpdate={updateRun} />)}
           {uncertainOperations.map((operation) => (
             <OperationRecoveryPanel
               key={operation.key}
@@ -901,7 +909,7 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
         title={t('controls.cancelTitle')}
         description={t('controls.cancelDescription')}
         confirmLabel={t('controls.cancelConfirm')}
-        cancelLabel={t('common:actions.cancel')}
+        cancelLabel={tCommon('actions.cancel')}
         busyLabel={t('controls.cancelling')}
         error={cancelError}
         busy={cancelBusy}

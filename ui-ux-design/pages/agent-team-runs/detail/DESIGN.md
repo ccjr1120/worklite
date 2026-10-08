@@ -27,7 +27,7 @@ Observe one Team run, answer its current input, recover uncertain effects, and c
 
 ## Primary Task
 
-Understand and continue the current run. Reading costs no action: the persisted Run query and replayable SSE stream keep state fresh. Each independent continuation goal costs one activation: answer, operation recovery, resume, retry, pause, or cancel.
+Understand and continue the current run. Reading costs no action: the persisted Run query and replayable SSE stream keep state fresh. Codex developer tasks execute directly with no WorkLite proposal or command-grant step. Their clarification panel has only the answer input; non-Codex roles retain exact-command fields. Each independent continuation goal costs one activation: answer, operation recovery, resume, retry, pause, or cancel.
 
 ## Layout
 
@@ -38,7 +38,7 @@ The page uses the full Workspace page width with a `1200px` maximum. The heading
 | Action | Trigger and behavior |
 | --- | --- |
 | Observe run | The Run query is refreshed by SSE events while work is active. Persisted event replay and browser-managed `Last-Event-ID` reconnection preserve member output without a manual refresh. |
-| Answer input | The Answer control shows local progress, submits the exact pending input id and scope revision, and replaces the Run cache with the server response. Failure leaves the answer and command grants available. |
+| Answer input | The Answer control shows local progress, submits the exact pending input id and scope revision, and replaces the Run cache with the server response. Failure preserves the answer and any non-Codex command-grant input. Codex developer questions omit the command-grant field. |
 | Recover uncertain operation | Selecting one structured decision and submitting it shows local progress and uses the operation key in both path and body. Failure leaves the decision selected. |
 | Pause | Pause shows local progress and preserves the request as visible pending state until the server settles at a stable boundary. |
 | Resume | Resume shows local progress and is available only for a paused run. If recovery remains pending, the server returns it to the recovery input. |
@@ -167,9 +167,17 @@ The heading hierarchy moves from Run title to section titles. Controls are nativ
 
 ## Coverage Status
 
+2026-10-08 authorized deployment: Gateway and Web builds, API compilation, isolated startup on ports 23490–23492 and deployment readiness on ports 23390–23392 passed through pnpm deploy:local. The deployment platform snapshot reports shared direct Chat/Team Codex execution without WorkLite grants and Chat cancellation in running/waiting states. The original conversation remains cancelled with no pending question. Browser appearance, real Codex task execution, live cancellation interaction and Feishu client behavior were not tested; no test suite or standalone type check was run.
+
+2026-10-08 source comparison: pending-input panels identify the owning task attempt and omit command-grant fields for the Codex developer, retaining ordinary answers and recovery. No runtime, browser, type check, build or test verification was authorized or performed.
+
 Source-level audit: 2026-10-03. The source selects the Conversation tab and `openConversation` label when `run.originatingConversationId` is present; direct-origin Runs return to the Configuration tab with `openTeam`. No other difference was found in the source-level comparison of route, observation, mutation, replay, evidence, copy, token, responsive, and accessibility structure. Only source review occurred; no browser, accessibility-tool, runtime, acceptance, or real-Run verification was performed.
 
 ## Changelog
+
+### 2026-10-08 - Direct Codex execution
+
+- Removed developer command-grant inputs while retaining non-Codex role controls and immutable Run evidence.
 
 ### 2026-10-03 - Conversation origin
 

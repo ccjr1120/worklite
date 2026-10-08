@@ -65,7 +65,16 @@ export class AgentsController {
       unsubscribe();
     };
     request.once('close', cleanup);
-    const replay = await this.executions.events(request, 'personal', agentId, executionId, afterSequence);
+    const events = await this.executions.events(request, 'personal', agentId, executionId, afterSequence);
+    // A new observer needs current state and the uncommitted deltas after it,
+    // rather than every status transition from previous conversation turns.
+    let latestSnapshotIndex = -1;
+    if (afterSequence === 0) {
+      for (let index = events.length - 1; index >= 0; index--) {
+        if (events[index].data.kind === 'snapshot') { latestSnapshotIndex = index; break; }
+      }
+    }
+    const replay = latestSnapshotIndex >= 0 ? events.slice(latestSnapshotIndex) : events;
     replay.forEach(send);
     replaying = false;
     pending.sort((left, right) => left.sequence - right.sequence).forEach(send);

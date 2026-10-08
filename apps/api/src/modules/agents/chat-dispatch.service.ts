@@ -52,22 +52,26 @@ export class ChatDispatchService {
 
     if (input.target.kind === 'conversation') {
       const current = input.executionId ? await this.executions.get(request, 'personal', CHAT_AGENT_ID, input.executionId) : null;
-      const afterMessageId = current?.messages.at(-1)?.id ?? null;
+      const afterMessageId = input.newConversation ? null : current?.messages.at(-1)?.id ?? null;
       const accept = (transaction: Transaction, executionId: string) => {
         // Freeze the previous turn before appending another user message to the same execution.
         if (current) {
-          const previous = transaction.select().from(chatSubmissions).where(eq(chatSubmissions.executionId, executionId)).all();
+          const previous = transaction.select().from(chatSubmissions).where(eq(chatSubmissions.executionId, current.id)).all();
           for (const row of previous) {
             if (row.reference?.kind !== 'conversation' || row.reference.completionStatus) continue;
-            transaction.update(chatSubmissions).set({ reference: { ...row.reference, untilMessageId: afterMessageId, completionStatus: current.status === 'waiting_for_input' ? 'completed' : current.status, completionError: current.error }, settled: false, deliveryFingerprint: null }).where(eq(chatSubmissions.id, row.id)).run();
+            transaction.update(chatSubmissions).set({ reference: { ...row.reference, untilMessageId: current.messages.at(-1)?.id ?? null, completionStatus: current.status === 'waiting_for_input' ? 'completed' : current.status, completionError: current.error }, settled: false, deliveryFingerprint: null }).where(eq(chatSubmissions.id, row.id)).run();
           }
         }
         transaction.update(chatSubmissions).set({ executionId }).where(eq(chatSubmissions.id, submission.id)).run();
         const boundary = transaction.select({ sequence: sql<number>`coalesce(max(${agentExecutionEvents.sequence}), 0)` }).from(agentExecutionEvents).where(eq(agentExecutionEvents.executionId, executionId)).get();
         bind(transaction, { kind: 'conversation', executionId, afterMessageId, afterSequence: boundary?.sequence ?? 0 });
       };
-      if (!current) await this.executions.create(request, 'personal', CHAT_AGENT_ID, { message: input.message }, accept);
-      else if (current.status === 'waiting_for_input' && current.pendingQuestion && input.questionId === current.pendingQuestion.id) await this.executions.answer(request, 'personal', CHAT_AGENT_ID, current.id, { questionId: current.pendingQuestion.id, answer: input.message }, accept);
+      if (input.newConversation) {
+        if (!current || !input.questionId) throw new ConflictException('A bound new-conversation question is required.');
+        await this.executions.startNewConversation(request, 'personal', current.id, input.questionId, accept);
+      }
+      else if (!current) await this.executions.create(request, 'personal', CHAT_AGENT_ID, { message: input.message }, accept);
+      else if (current.status === 'waiting_for_input' && current.pendingQuestion && input.questionId === current.pendingQuestion.id) await this.executions.answer(request, 'personal', CHAT_AGENT_ID, current.id, { questionId: current.pendingQuestion.id, answer: input.message, recoveryDecision: input.recoveryDecision }, accept);
       else if (current.status === 'waiting_for_input') throw new ConflictException('A pending answer required before queued messages can continue.');
       else await this.executions.continue(request, 'personal', CHAT_AGENT_ID, current.id, { message: input.message }, accept);
     } else if (input.target.kind === 'workflow') {
