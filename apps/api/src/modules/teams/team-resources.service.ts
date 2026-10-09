@@ -21,7 +21,6 @@ import type {
   UpdateWorkspaceSettingsRequest,
   UpdateSkillRequest,
   UsageRow,
-  WorkliteNavigationTarget,
   WorkspaceSettingsView,
 } from '@worklite/contracts';
 import {
@@ -53,6 +52,7 @@ import { WorkspaceService } from './teams.service';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
 import { McpClientService } from '../mcp-servers/mcp-client.service';
 import { AGENT_TEAM_ROLES, BUILT_IN_AGENT_TEAM_ID } from '../agent-teams/agent-team-configuration';
+import { isWorkliteNavigationTarget, resolveWorkliteNavigationRoute } from './worklite-navigation';
 
 function maskSecret(value: string): string {
   return value.length > 4 ? `****${value.slice(-4)}` : '****';
@@ -155,21 +155,8 @@ const MAX_SKILL_FILES = 100;
 const MAX_SKILL_FILE_BYTES = 256 * 1_024;
 const MAX_SKILL_PACKAGE_BYTES = 1 * 1_024 * 1_024;
 
-const WORKLITE_NAVIGATION_ROUTES = {
-  home: '/home',
-  chat: '/chat',
-  skills: '/skills',
-  'mcp-servers': '/mcp-servers',
-  'model-providers': '/model-providers',
-  logs: '/logs',
-  workflows: '/workflows',
-  'settings-appearance': '/settings/appearance',
-  'settings-usage': '/settings/usage',
-  'settings-audit-log': '/settings/audit-log',
-} as const satisfies Record<WorkliteNavigationTarget, string>;
-
 const GATEWAY_PROVIDER_ID = 'gateway-provider';
-const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 3392);
+const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392);
 const GATEWAY_PROVIDER_URL = `http://127.0.0.1:${GATEWAY_PORT}/worklite/providers`;
 
 function validatePackageFiles(input: unknown): PackageFile[] {
@@ -518,17 +505,16 @@ export class WorkspaceResourcesService {
       capabilities: {
         troubleshooting: {
           evidenceOwner: 'Chat',
-          repairOwner: 'conversation-owned Codex task or collaborative Agent Team',
-          chatHostTools: [], chatDirectTools: ['codex', 'update_plan', 'ask_user'], chatScriptScope: 'protected worklite-platform only', chatCustomSkillsAndMcp: 'captured delegated Codex executor only',
-          repairDispatchScript: 'scripts/dispatch-task.mjs',
+          repairOwner: 'conversation-owned project task or collaborative Agent Team',
+          chatHostTools: [], chatDirectTools: ['project_task', 'update_plan', 'ask_user'], chatPlatformTools: 'one typed tool per protected worklite-platform script, declared in scripts/tools.json', chatCustomSkillsAndMcp: 'handed natively to the delegated project executor only',
+          repairDispatchTool: 'dispatch_task',
           repairDispatchRoute: 'POST /chat/dispatch',
-          repairIntake: 'codex tool for independent Chat execution; existing Team intake for collaboration',
+          repairIntake: 'project_task tool for independent Chat execution; existing Team intake for collaboration',
           inspectionAuthorizesRepair: false,
-          guidance: 'references/troubleshooting.md',
           gatewayLogs: {
-            statistics: { script: 'scripts/inspect-gateway-stats.mjs', route: 'GET /portkey-gateway/stats', retention: 'indefinite' },
-            list: { script: 'scripts/inspect-gateway-request-logs.mjs', route: 'GET /portkey-gateway/request-logs', filters: ['from', 'to', 'provider', 'model', 'statusClass', 'workflowRunId', 'teamRunId', 'limit', 'cursor'] },
-            detail: { script: 'scripts/inspect-gateway-request-log.mjs', route: 'GET /portkey-gateway/request-logs/:requestLogId', capture: 'complete stored request and response' },
+            statistics: { tool: 'inspect_gateway_stats', route: 'GET /portkey-gateway/stats', retention: 'indefinite' },
+            list: { tool: 'inspect_gateway_request_logs', route: 'GET /portkey-gateway/request-logs', filters: ['from', 'to', 'provider', 'model', 'statusClass', 'workflowRunId', 'teamRunId', 'limit', 'cursor'] },
+            detail: { tool: 'inspect_gateway_request_log', route: 'GET /portkey-gateway/request-logs/:requestLogId', capture: 'complete stored request and response' },
             timeRange: 'explicit absolute from/to ISO-8601 instants',
             requestRetentionDays: 3,
             retentionMetadata: ['from', 'to', 'retainedFrom', 'retentionDays'],
@@ -536,12 +522,17 @@ export class WorkspaceResourcesService {
             profile: 'server-owned WORKLITE_API_URL; no URL or profile override',
           },
         },
+        runtimeProfiles: {
+          development: { webPort: 3390, proxiedApiPort: 23391, gatewayPort: 23392, separateDatabase: false },
+          deployment: { webPort: 23390, apiPort: 23391, gatewayPort: 23392 },
+          sharedPersistentState: '.data/deployment',
+        },
         chatShell: { available: false, historicalEvidence: 'existing Chat conversation records', uncertainRecovery: ['adopt_command', 'mark_failed'], automaticReplay: false },
-        chatCodex: { launchModes: { cx: { home: '~/.codex-cli', model: 'current Gateway public id', authentication: 'selected Codex home' }, cxo: { home: '~/.codex', model: 'native Codex id', authentication: 'selected Codex home' } }, defaultLaunch: 'configured executable alias; plain codex defaults to cx', defaultModel: 'selected home config', minimumCodexVersion: '0.157.1', capturedLaunch: true, credentialsImported: false, olderSnapshots: 'new task required', available: true, tool: 'codex', independentOfTeam: true, modelProtocols: ['openai/responses', 'codex/responses'], readRoute: 'GET /chat/codex-tasks/:id', inspectScript: 'scripts/inspect-codex-task.mjs', taskOwner: 'Chat conversation turn', capturedExecutable: true, capturedProjectInstructions: true, turnCapabilities: true, sharedExecutor: 'Codex App Server; same as Team developer', authorization: 'direct execution; no WorkLite proposal confirmation or command grants', nativeExecution: false, uncertainRecovery: ['adopt_command', 'mark_failed'], automaticReplay: false, cancellation: 'existing Chat turn cancellation', dependencyBoundary: 'shared API and Codex process; cx inference additionally requires Gateway' },
-        chatCapabilities: { cancellation: { route: 'POST /agents/agt_system_helper_chat/executions/:executionId/cancel', states: ['running', 'waiting_for_input'], retained: ['messages', 'draft', 'execution evidence'], uncertainEffects: 'structured recovery; no automatic replay' }, orchestration: { directHostTools: false, customSkillExecution: false, directMcpCalls: false, platformScripts: 'protected worklite-platform only', executorCapabilities: 'captured user Skill/MCP selections', codingTarget: 'codex', localCommandTarget: 'codex', collaborationTarget: 'team intake', automationTarget: 'published Workflow' }, newConversation: { intentOwner: 'Chat', presentation: 'request-bound button only', action: 'ask_user action new_conversation', submitRoute: 'POST /chat/dispatch', retainsHistory: true, cancelsDomainTasks: false }, configuration: 'revisioned user extensions', turnSnapshot: true, updatesApply: 'next user turn', configureRoute: 'PATCH /agents/agt_system_helper_chat' },
-        upgrades: { operatorDeploymentVersion: { command: 'pnpm deploy:local', source: 'apps/web/package.json', bump: 'patch before compilation on every invocation', failedAttempt: 'consumes source version; active build retains previous version', gitMutations: false, managedRelease: 'immutable manifest-bound version' }, proposeRoute: 'POST /upgrades', redeployRoute: 'POST /upgrades/redeploy', redeployScript: 'scripts/redeploy.mjs', inspectRoute: 'GET /upgrades/:id', authorization: 'explicit current Web or Feishu Chat user redeploy request; no second confirmation', authorizationBinding: 'persisted current user message and immutable release', deduplication: 'one job per execution and user message', profile: 'current managed runtime only; no model override', progress: 'original conversation; automatic observation after reconnect', requiresManagedBaseline: true, projectRoot: process.env.WORKLITE_PROJECT_ROOT ?? null, phases: ['proposed', 'authorized', 'preflighting', 'draining', 'frozen', 'switching', 'recovering', 'succeeded', 'rolled_back', 'failed'], uninterruptedIngress: false },
-        chat: { workspaceRoute: '/chat', channelsRoute: 'GET /chat/channels', conversationsRoute: 'GET /chat/conversations', conversationRoute: 'GET /chat/conversations/:id', recordsRoute: 'GET /chat/conversations/:id/records', diagnosticScript: { path: 'scripts/inspect-chat-conversation.mjs', records: 'current evidence and status/receipt metadata; repeated snapshots and cards referenced', fullToolOutputInput: 'toolCallId', completeEvidence: 'fullRecordsRoute', inferenceHistory: 'raw replay snapshots replaced with explicit retained-evidence references; original history unchanged' }, channels: [{ id: 'web', builtIn: true, presentation: ['streaming', 'markdown', 'questions'] }, { id: 'feishu', builtIn: false, presentation: ['native streamed cards', 'collapsed task details', 'forms', 'QR images', 'files'] }], histories: 'server-persisted; unrelated conversations remain separate', masterAgentId: 'agt_system_helper_chat', dispatchRoute: 'POST /chat/dispatch', targets: ['conversation', 'team', 'workflow'], workflowVersions: 'published only', externalPluginId: 'feishu-bot', mergeHistories: false, webAccess: 'inspect and continue selected persisted conversation', feishu: { privateChat: true, defaultTarget: 'conversation', persistentTargetSelection: false, choices: 'current pending Agent question; plan not required', replyProgress: 'separate queued, thinking, responding and processing component in the same CardKit entity', cardPresentation: { transport: 'CardKit JSON 2.0 entity', requiredPermission: 'cardkit:card:write', replyAnimation: 'native fast typewriter', updates: 'component-local; full card for structural transitions', progressIcon: 'neutral native loading icon; no custom animation', taskDetails: 'default-collapsed Team task attempts and Workflow node execution statuses', visibleContext: ['current task or step', 'outcome', 'questions', 'failures', 'QR images', 'authorization forms', 'controls'], streamingLifecycle: 'model output only; close for tools, questions and terminal states; renew platform window', persistedDelivery: ['cardId', 'sequence', 'last delivered card', 'streaming start', 'pending idempotent UUID and exact payload'], legacyCardConversion: false }, completedDialogue: 'content without task header or completion label', taskAnswers: 'reply to the task card or submit its form', groupChat: false, inbound: ['text', 'card actions'], outbound: ['updated response cards', 'task questions and controls', 'QR images', 'Team documents', 'Workflow Artifacts'], configurationRoute: '/chat?view=channels', applicationRegistration: { available: true, archetype: 'PersonalAgent', startRoute: 'POST /plugins/feishu-bot/feishu/registration', cancelRoute: 'DELETE /plugins/feishu-bot/feishu/registration', operator: 'user through Web configuration', automaticCredentialPersistence: true, userBinding: 'automatic when returned, otherwise manual', resumable: true, manualExistingApplication: true, platformSetup: ['bot capability', 'IM permissions', 'long-connection message and card subscriptions', 'publication'], userOAuth: false, runtimeCompatibility: 'requires authorized real integration' } } },
-        supportedResourceOperations: ['inspect Gateway statistics and request logs', 'delegate independent project work to Codex App Server', 'inspect Chat Codex task effects', 'dispatch collaborative repair to Agent Team', 'inspect Chat conversations and full saved records', 'inspect and update Chat capabilities', 'propose and inspect managed upgrades', 'redeploy WorkLite on explicit user request', 'inspect workspace resources', 'inspect Workflow capabilities', 'inspect and configure Agent Teams', 'inspect Agent Team conversations and documents', 'continue Agent Team Runs', 'dispatch Team intake and published Workflow tasks', 'navigate to known WorkLite pages', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server draft', 'create Workflow draft', 'edit Workflow draft from a logical plan', 'change appearance', 'change language'],
+        projectExecutors: { tool: 'project_task', executors: { codex: { pluginId: 'codex-cli-chat', transport: 'App Server stdio JSON-RPC', home: '~/.codex-cli', minimumVersion: '0.157.1', modelProtocols: ['openai/responses', 'codex/responses'], skills: 'skills/extraRoots/set', mcp: '-c mcp_servers with enabled_tools and env bearer token' }, claude: { pluginId: 'claude-code', transport: 'claude -p stream-json control protocol', configuration: '~/.claude', minimumVersion: '2.1.259', modelProtocols: ['anthropic/messages'], skills: '--plugin-dir', mcp: 'owner-only --mcp-config file plus --disallowedTools' } }, defaultExecutor: 'Chat configuration defaultExecutor (claude unless changed); Team developer role executor', removedLaunchModes: ['cxo'], gateway: 'both executors must reach the WorkLite Gateway', nativeTools: true, worklitePlatformToolsForExecutors: false, localConfiguration: 'complete operator configuration', approvals: 'none; executors run without approvals', operationJournal: false, uncertainRecovery: false, interruption: 'task fails without replay; inspect the project state', evidence: 'executor event stream activity and process Command', capturedLaunch: true, olderSnapshots: 'new task or Run required', readRoute: 'GET /chat/project-tasks/:id', historicalOperationRoute: 'GET /chat/project-tasks/:id?operationKey=:operationKey', inspectTool: 'inspect_project_task', taskOwner: 'Chat conversation turn', independentOfTeam: true, authorization: 'direct execution; no WorkLite proposal confirmation or command grants', automaticReplay: false, cancellation: 'existing Chat turn cancellation' },
+        chatCapabilities: { cancellation: { route: 'POST /agents/agt_system_helper_chat/executions/:executionId/cancel', states: ['running', 'waiting_for_input'], retained: ['messages', 'draft', 'execution evidence'], uncertainEffects: 'structured recovery; no automatic replay' }, orchestration: { directHostTools: false, customSkillExecution: false, directMcpCalls: false, platformTools: 'typed protected worklite-platform tools only', executorCapabilities: 'captured user Skill/MCP selections', codingTarget: 'project_task', localCommandTarget: 'project_task', collaborationTarget: 'team intake', automationTarget: 'published Workflow' }, newConversation: { intentOwner: 'Chat', presentation: 'request-bound button only', action: 'ask_user action new_conversation', submitRoute: 'POST /chat/dispatch', retainsHistory: true, cancelsDomainTasks: false }, configuration: 'revisioned user extensions', turnSnapshot: true, updatesApply: 'next user turn', configureRoute: 'PATCH /agents/agt_system_helper_chat' },
+        upgrades: { operatorDeploymentVersion: { command: 'pnpm deploy:local', source: 'apps/web/package.json', bump: 'patch before compilation on every invocation', initialBaseline: 'established when current.json is absent after isolated preflight', laterDeployment: 'confirmed operator job through full managed upgrade flow', legacyTakeover: 'verified PID file, project start-local.mjs command, repository cwd, process group and target listeners only', unknownListeners: 'left untouched; deployment fails', failedAttempt: 'consumes source version; active build retains previous version', gitMutations: false, managedRelease: 'immutable manifest-bound version' }, proposeRoute: 'POST /upgrades', redeployRoute: 'POST /upgrades/redeploy', redeployTool: 'redeploy', inspectRoute: 'GET /upgrades/:id', authorization: 'explicit current Web or Feishu Chat user redeploy request; no second confirmation', authorizationBinding: 'persisted current user message and immutable release', deduplication: 'one job per execution and user message', profile: 'current managed runtime only; no model override', progress: 'original conversation; automatic observation after reconnect', requiresManagedBaseline: true, projectRoot: process.env.WORKLITE_PROJECT_ROOT ?? null, phases: ['proposed', 'authorized', 'preflighting', 'draining', 'frozen', 'switching', 'recovering', 'succeeded', 'rolled_back', 'failed'], uninterruptedIngress: false, interruptionPolicy: 'cancel active Agent, Team, Workflow and Command work after isolated preflight; never automatically resume after success or rollback' },
+        chat: { workspaceRoute: '/chat', channelsRoute: 'GET /chat/channels', conversationsRoute: 'GET /chat/conversations', conversationRoute: 'GET /chat/conversations/:id', recordsRoute: 'GET /chat/conversations/:id/records', recordsSnapshots: 'latest snapshot plus all non-snapshot events', maxSkillScriptOutputChars: 60000, diagnosticTool: { name: 'inspect_chat_conversation', records: 'current evidence and status/receipt metadata; repeated snapshots and cards referenced', fullToolOutputInput: 'toolCallId', completeEvidence: 'fullRecordsRoute', inferenceHistory: 'raw replay snapshots replaced with explicit retained-evidence references; original history unchanged' }, channels: [{ id: 'web', builtIn: true, presentation: ['streaming', 'markdown', 'questions'] }, { id: 'feishu', builtIn: false, presentation: ['native streamed cards', 'collapsed task details', 'forms', 'QR images', 'files'] }], histories: 'server-persisted; unrelated conversations remain separate', masterAgentId: 'agt_system_helper_chat', dispatchRoute: 'POST /chat/dispatch', targets: ['conversation', 'team', 'workflow'], workflowVersions: 'published only', externalPluginId: 'feishu-bot', mergeHistories: false, webAccess: 'inspect and continue selected persisted conversation', feishu: { privateChat: true, defaultTarget: 'conversation', persistentTargetSelection: false, choices: 'current pending Agent question; plan not required', replyProgress: 'separate queued, thinking, responding and processing component in the same CardKit entity', cardPresentation: { transport: 'CardKit JSON 2.0 entity', requiredPermission: 'cardkit:card:write', replyAnimation: 'native fast typewriter', updates: 'component-local; full card for structural transitions', progressIcon: 'neutral native loading icon; no custom animation', taskDetails: 'default-collapsed Team task attempts and Workflow node execution statuses', visibleContext: ['current task or step', 'outcome', 'questions', 'failures', 'QR images', 'authorization forms', 'controls'], streamingLifecycle: 'model output only; close for tools, questions and terminal states; renew platform window', persistedDelivery: ['cardId', 'sequence', 'last delivered card', 'streaming start', 'pending idempotent UUID and exact payload'], legacyCardConversion: false }, completedDialogue: 'content without task header or completion label', taskAnswers: 'reply to the task card or submit its form', groupChat: false, inbound: ['text', 'card actions'], outbound: ['updated response cards', 'task questions and controls', 'QR images', 'Team documents', 'Workflow Artifacts'], configurationRoute: '/chat?view=channels', applicationRegistration: { available: true, archetype: 'PersonalAgent', startRoute: 'POST /plugins/feishu-bot/feishu/registration', cancelRoute: 'DELETE /plugins/feishu-bot/feishu/registration', operator: 'user through Web configuration', automaticCredentialPersistence: true, userBinding: 'automatic when returned, otherwise manual', resumable: true, manualExistingApplication: true, platformSetup: ['bot capability', 'IM permissions', 'long-connection message and card subscriptions', 'publication'], userOAuth: false, runtimeCompatibility: 'requires authorized real integration' } } },
+        supportedResourceOperations: ['inspect Gateway statistics and request logs', 'delegate independent project work to a Codex or Claude Code project executor', 'inspect Chat project task activity', 'dispatch collaborative repair to Agent Team', 'inspect Chat conversations and full saved records', 'inspect and update Chat capabilities', 'propose and inspect managed upgrades', 'redeploy WorkLite on explicit user request', 'inspect workspace resources', 'inspect Workflow capabilities', 'inspect and configure Agent Teams', 'inspect Agent Team conversations and documents', 'continue Agent Team Runs', 'dispatch Team intake and published Workflow tasks', 'navigate to known WorkLite pages and a Workflow editor by name or id', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server draft', 'create Workflow draft', 'edit Workflow draft from a logical plan', 'publish Workflow draft', 'change appearance', 'change language'],
         modelProviderProxy: {
           protocols: ['openai/chat', 'openai/responses', 'anthropic/messages', 'codex/responses', 'typesafe/systemone'],
           requiresExplicitProtocol: true,
@@ -586,20 +577,15 @@ export class WorkspaceResourcesService {
           builtInTeamId: BUILT_IN_AGENT_TEAM_ID,
           roles: [...AGENT_TEAM_ROLES],
           developerExecution: {
-            backend: 'codex_app_server',
-            pluginId: 'codex-cli-chat',
-            transport: 'stdio JSON-RPC',
-            minimumCodexVersion: '0.157.1',
-            providerProtocols: ['openai/responses', 'codex/responses'],
-            capturedExecutable: true,
+            executors: ['claude', 'codex'],
+            roleField: 'executor (developer role only; default claude)',
             capturedLaunch: true,
-            launchModes: ['cx', 'cxo'],
-            nativeModelNamespace: 'cxo requires codex/<model> and uses native model portion',
             olderSnapshots: 'new Run required',
-            projectTools: 'captured WorkLite tools through the existing operation journal',
-            nativeEnvironments: false,
-            sharedExecutor: 'Codex App Server; same as direct Chat Codex', commandAuthorization: 'direct execution; no WorkLite proposal confirmation or command grants',
-            evidence: 'task.activity events and Commands output; Team owns final results',
+            nativeTools: true,
+            operationJournal: false,
+            processReferences: 'materialized read-only files listed in the task prompt',
+            sharedExecutor: 'same project executors as Chat project tasks', commandAuthorization: 'direct execution; no WorkLite proposal confirmation or command grants',
+            evidence: 'task.activity executor events and the executor process Command; Team owns final results',
           },
           modes: ['plan_only', 'validate_existing', 'implement_and_validate'],
           teamRoutes: {
@@ -634,9 +620,9 @@ export class WorkspaceResourcesService {
             cancel: 'POST /agent-team-runs/:runId/cancel',
             retryTask: 'POST /agent-team-runs/:runId/tasks/:taskKey/retry',
           },
-          events: { persisted: true, replay: 'Last-Event-ID', live: 'server-sent events', taskActivity: 'Codex backend process, thread, turn and item references' },
+          events: { persisted: true, replay: 'Last-Event-ID', live: 'server-sent events', taskActivity: 'developer executor process, session or thread, and command, file and tool activity' },
           directRunCreationApi: true,
-          commandAuthorization: 'non-Codex roles: cumulative exact command strings; Codex developer: direct execution',
+          commandAuthorization: 'non-developer roles: cumulative exact command strings; developer executor: direct native execution',
           recoveryDecisions: ['adopt_command', 'mark_failed', 'replay'],
           uncertainOperationRecovery: {
             cancellationPreservesRecoveryInput: true,
@@ -744,11 +730,18 @@ export class WorkspaceResourcesService {
   }
 
   async resolveNavigation(request: Request, workspaceSlug: string, input: { target?: unknown }) {
-    await this.workspaces.getWorkspace(request, workspaceSlug);
+    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some((key) => key !== 'target')) throw new BadRequestException('A navigation target is required.');
-    const route = WORKLITE_NAVIGATION_ROUTES[input.target as WorkliteNavigationTarget];
+    if (!isWorkliteNavigationTarget(input.target)) throw new BadRequestException('Unsupported WorkLite navigation target.');
+    const target = input.target;
+    if (target.startsWith('/workflows/')) {
+      const workflowId = target.slice('/workflows/'.length);
+      const [workflow] = await this.db.select({ id: workflows.id }).from(workflows).where(and(eq(workflows.id, workflowId), eq(workflows.workspaceId, workspace.id))).limit(1);
+      if (!workflow) throw new NotFoundException('Workflow not found');
+    }
+    const route = resolveWorkliteNavigationRoute(target);
     if (!route) throw new BadRequestException('Unsupported WorkLite navigation target.');
-    return { type: 'navigation' as const, target: input.target as WorkliteNavigationTarget, route };
+    return { type: 'navigation' as const, target, route };
   }
 
   async upsertProvider(request: Request, workspaceSlug: string, input: CreateModelProviderRequest): Promise<ModelProviderView> {

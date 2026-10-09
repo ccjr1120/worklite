@@ -90,6 +90,18 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-10-09 - Deployment-backed development data
+
+- Updated the [Providers](pages/model-providers/DESIGN.md) Gateway summary to display deployment listener `23392` because development no longer starts a separate Gateway.
+
+### 2026-10-08 - Bounded Codex operation evidence
+
+- Keep activity and operation summaries compact in the Chat transcript, with the latest operation detail loaded on demand and a control-local retry when that read fails.
+
+### 2026-10-08 - Chat Codex evidence readability
+
+- Structured the [Chat](pages/chat/workspace/DESIGN.md) Codex task disclosure: the collapsed row carries goal, status, directory, model/launch mode and latest persisted activity, while expansion shows metadata, bounded activities and journaled operations, Markdown result, red failure text, and a secondary raw-JSON disclosure.
+
 ### 2026-10-08 - Lively visual direction
 
 - Applied the new lively design-system direction to shared components: shared motion tokens, trigger-width field overlays, single-line truncation, sliding tabs, shimmer skeletons, and unified status components.

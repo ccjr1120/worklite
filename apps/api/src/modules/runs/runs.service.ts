@@ -354,14 +354,16 @@ export class RunsService {
     return { runId };
   }
 
-  async cancel(request: Request, workspaceSlug: string, runId: string): Promise<RunView> {
+  async cancel(request: Request, workspaceSlug: string, runId: string, deferExternalCleanup = false): Promise<RunView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const finishedAt = new Date();
     const [run] = await this.db.update(workflowRuns).set({ status: 'cancelled', currentNodeId: null, finishedAt, updatedAt: finishedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id), sql`${workflowRuns.status} in ('queued', 'running', 'paused', 'waiting_for_input')`)).returning();
     if (!run) return this.get(request, workspaceSlug, runId);
     this.activeRuns.get(runId)?.abort();
     const pendingActions = await this.db.select({ id: workflowPendingActions.id }).from(workflowPendingActions).where(and(eq(workflowPendingActions.runId, runId), eq(workflowPendingActions.status, 'pending')));
-    await Promise.all(pendingActions.map(({ id }) => this.wechatOfficialAccount.cancel(id)));
+    const cancelExternalActions = Promise.all(pendingActions.map(({ id }) => this.wechatOfficialAccount.cancel(id)));
+    if (deferExternalCleanup) void cancelExternalActions.catch(() => undefined);
+    else await cancelExternalActions;
     await this.db.update(workflowPendingActions).set({ status: 'cancelled', qrCode: null, updatedAt: finishedAt }).where(and(eq(workflowPendingActions.runId, runId), eq(workflowPendingActions.status, 'pending')));
     await this.db.update(workflowNodeRuns).set({ status: 'cancelled', error: 'Workflow run cancelled.', finishedAt }).where(and(eq(workflowNodeRuns.runId, runId), inArray(workflowNodeRuns.status, ['queued', 'running', 'waiting_for_input'])));
     await this.publish(runId, 'run.status', { status: 'cancelled' });

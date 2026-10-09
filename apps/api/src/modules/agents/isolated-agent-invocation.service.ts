@@ -9,15 +9,13 @@ import {
   type WorkflowAgentToolCall,
   type WorkflowAgentToolResult,
 } from '@worklite/model-gateway';
-import type { Database, StoredCodexLaunch } from '@worklite/db';
+import type { Database } from '@worklite/db';
 import type { AgentMcpRuntime } from '../teams/team-resources.service';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { BuiltinAgentToolsService, selectBuiltinToolNames } from './builtin-agent-tools.service';
 import type { CommandReservation } from '../commands/commands.service';
 import { McpRuntimeService, type McpRuntimeTool } from './mcp-runtime.service';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
-import { CODEX_CLI_PLUGIN_ID, PluginsService } from '../plugins/plugins.service';
-import { CodexAppServerService, type CodexBackendActivity } from './codex-app-server.service';
 
 type AgentInvocationSkill = {
   id: string;
@@ -86,11 +84,8 @@ export type AgentInvocationOperationJournal = {
 };
 
 type IsolatedAgentInvocationRequest = {
-  executionOwner?: 'chat' | 'team';
   workspaceId: string;
   publicModelId: string;
-  codexServerCommandArguments?: readonly string[];
-  codexLaunch?: StoredCodexLaunch;
   systemPrompt: string;
   context: unknown;
   skills: readonly AgentInvocationSkill[];
@@ -103,7 +98,6 @@ type IsolatedAgentInvocationRequest = {
   readProcessReference?: (path: string) => Promise<string>;
   signal: AbortSignal;
   onTextDelta?: (delta: string) => void | Promise<void>;
-  onBackendEvent?: (activity: CodexBackendActivity) => void | Promise<void>;
   onModelRound?: (round: WorkflowAgentRound) => void | Promise<void>;
   onSkillScript?: (activity: AgentInvocationSkillActivity) => void | Promise<void>;
   onMcpCall?: (activity: AgentInvocationMcpActivity) => void | Promise<void>;
@@ -149,13 +143,7 @@ export class IsolatedAgentInvocationService {
     private readonly skillScripts: SkillScriptRunnerService,
     private readonly mcpRuntime: McpRuntimeService,
     private readonly builtinTools: BuiltinAgentToolsService,
-    private readonly plugins: PluginsService,
-    private readonly codexAppServer: CodexAppServerService,
   ) {}
-
-  async captureDeveloperExecution(): Promise<{ kind: 'codex_app_server'; commandArguments: string[]; launch: StoredCodexLaunch }> {
-    return { kind: 'codex_app_server', ...await this.codexAppServer.captureLaunch(await this.plugins.commandArguments(CODEX_CLI_PLUGIN_ID)) };
-  }
 
   async execute(request: IsolatedAgentInvocationRequest): Promise<string> {
     const assignedSkills = request.skills.map((skill) => ({
@@ -190,7 +178,7 @@ export class IsolatedAgentInvocationService {
           `- Work in ${request.projectDirectory} unless a tool explicitly receives another server-authorized path.`,
           '- Follow the project instructions and any unresolved authorization limits.',
           '- The selected execution mode does not override either constraint.',
-          request.codexServerCommandArguments ? '- Execute the captured user task directly. Codex requires no WorkLite proposal confirmation or individual command grants.' : '- Execute bash only with a command exactly listed in authorizedCommands.',
+          '- Execute bash only with a command exactly listed in authorizedCommands.',
         ].join('\n')
         : '',
       request.role && request.processReferencePaths?.length
@@ -199,40 +187,12 @@ export class IsolatedAgentInvocationService {
     ].filter(Boolean).join('\n\n');
 
     const mcpTools = await this.mcpRuntime.discover(request.mcpRuntimes, request.signal);
-    const nativeCodex = request.codexServerCommandArguments && request.codexLaunch?.mode === 'cxo';
-    const runtime = nativeCodex ? undefined : await this.resources.publicModelRuntime(request.workspaceId, request.publicModelId);
+    const runtime = await this.resources.publicModelRuntime(request.workspaceId, request.publicModelId);
     const contextText = typeof request.context === 'string' ? request.context : JSON.stringify(request.context);
-    if (request.codexServerCommandArguments) {
-      if (request.role !== 'developer' || !request.operation || !request.projectDirectory) {
-        throw new BadRequestException('Codex App Server requires a journaled project task with captured tools.');
-      }
-      if (!request.codexLaunch) throw new BadRequestException('This old Codex execution has no captured launch; start a new task or Run.');
-      if (!nativeCodex && runtime?.protocol !== 'openai/responses' && runtime?.protocol !== 'codex/responses') {
-        throw new BadRequestException('The Codex task model must use an openai/responses or codex/responses Provider for Codex App Server.');
-      }
-      let model = request.publicModelId;
-      if (nativeCodex && request.executionOwner !== 'chat') {
-        if (!model.startsWith('codex/')) throw new BadRequestException('cxo Team developer execution requires an explicit codex/<model> id.');
-        model = model.slice('codex/'.length);
-      }
-      return this.codexAppServer.execute({
-        owner: request.executionOwner,
-        commandArguments: request.codexServerCommandArguments,
-        publicModelId: model, launch: request.codexLaunch,
-        systemPrompt: effectiveSystemPrompt,
-        input: contextText?.trim() ? contextText : 'No input was provided.',
-        tools: [...builtinDefinitions, ...mcpTools],
-        signal: request.signal,
-        correlation: request.correlation,
-        onTextDelta: request.onTextDelta,
-        onEvent: request.onBackendEvent,
-        executeTool: (call, signal) => this.executeTool({ ...request, signal }, assignedSkills, mcpTools, new Set(builtinDefinitions.map((definition) => definition.name)), call),
-      });
-    }
     const maxRounds = Math.min(request.limits?.maxToolRounds ?? MAX_TOOL_ROUNDS, MAX_TOOL_ROUNDS);
     const result = await createModelGateway().runWorkflowAgent({
-      provider: runtime!.provider,
-      model: runtime!.model,
+      provider: runtime.provider,
+      model: runtime.model,
       systemPrompt: effectiveSystemPrompt,
       initialUserContent: contextText?.trim() ? contextText : 'No input was provided.',
       jsonOutput: request.jsonOutput,
@@ -262,8 +222,7 @@ export class IsolatedAgentInvocationService {
     request.signal.throwIfAborted();
     this.validateProcessReference(request, call);
     this.validateTeamToolAuthorization(request, call);
-    const freshCodexRead = request.codexServerCommandArguments && ['read', 'glob', 'grep'].includes(call.toolName);
-    if (!request.operation || freshCodexRead) {
+    if (!request.operation) {
       return (await this.runToolEffect(request, assignedSkills, mcpTools, selectedBuiltinToolNames, call)).output;
     }
 
@@ -499,7 +458,6 @@ export class IsolatedAgentInvocationService {
     call: WorkflowAgentToolCall,
   ): void {
     if (!request.role || !request.projectDirectory || call.toolName !== 'bash') return;
-    if (request.codexServerCommandArguments) return;
     const command = requiredString((call.input as { command?: unknown } | null)?.command, 'command');
     if (!request.authorizedCommands?.includes(command)) {
       throw new BadRequestException('The exact shell command is not authorized for this project task.');

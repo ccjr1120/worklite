@@ -10,6 +10,8 @@ import type { WorkliteUpgradeView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { upgradeStateDirectory } from '../../infrastructure/runtime-upgrade-state';
 import { AgentTeamRuntimeService } from '../agent-teams/agent-team-runtime.service';
+import { AgentExecutionsService } from '../agents/agent-executions.service';
+import { CommandsService } from '../commands/commands.service';
 import { RunsService } from '../runs/runs.service';
 import type { FeishuService } from '../plugins/feishu/feishu.service';
 import type { FeishuRegistrationService } from '../plugins/feishu/feishu-registration.service';
@@ -20,29 +22,33 @@ type UpgradeJob = {
   workspaceId: string; submissionId: string; executionId: string; token: string;
   pausedTeams: string[]; pausedWorkflows: string[]; runnerPid?: number;
   confirmedAt?: string; confirmedBy?: string; error?: string; updatedAt: string;
-  resumePending?: boolean;
+  interruptionPolicy?: 'cancel_active_work_without_resume';
+  interruptedWork?: { agentExecutions: string[]; teamRuns: string[]; workflowRuns: string[]; commands: string[]; feishuRegistration: boolean };
+  interruptionFailures?: string[];
   authorization?: { userMessageId: string; userRequest: string; toolCallId: string };
 };
 
 @Injectable()
 export class UpgradesService implements OnModuleInit {
   private recoveryTimer?: ReturnType<typeof setInterval>;
-  private resuming = false;
-  private resumeWork?: Promise<{ resumed: boolean }>;
   constructor(@Inject(DATABASE) private readonly db: Database, private readonly modules: ModuleRef) {}
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
     if (process.env.WORKLITE_PREFLIGHT === '1') return;
     const directory = upgradeStateDirectory();
     if (!directory) return;
-    this.recoveryTimer = setInterval(() => {
-      if (!existsSync(join(directory, 'active.json')) || this.resuming) return;
+    if (existsSync(join(directory, 'active.json'))) {
       const { jobId } = this.readFile<{ jobId: string }>(join(directory, 'active.json'));
       const job = this.load(jobId);
-      if (job.resumePending && ['succeeded', 'rolled_back', 'failed'].includes(job.phase)) {
-        this.resuming = true;
-        void this.resume(jobId).catch(() => undefined).finally(() => { this.resuming = false; });
-      } else if (job.confirmedAt && !['succeeded', 'rolled_back', 'failed'].includes(job.phase) && !alive(job.runnerPid)) this.launch(job);
+      if (job.interruptionPolicy === 'cancel_active_work_without_resume' && ['switching', 'recovering'].includes(job.phase)) {
+        await this.interruptActiveWork(jobId);
+      }
+    }
+    this.recoveryTimer = setInterval(() => {
+      if (!existsSync(join(directory, 'active.json'))) return;
+      const { jobId } = this.readFile<{ jobId: string }>(join(directory, 'active.json'));
+      const job = this.load(jobId);
+      if (job.confirmedAt && !['succeeded', 'rolled_back', 'failed'].includes(job.phase) && !alive(job.runnerPid)) this.launch(job);
     }, 5_000);
     this.recoveryTimer.unref();
   }
@@ -85,6 +91,7 @@ export class UpgradesService implements OnModuleInit {
       id, ...release, summary: input.summary.trim(), phase: 'authorized', workspaceId: execution.workspaceId,
       submissionId: id, executionId: execution.id, token: randomBytes(32).toString('hex'), pausedTeams: [], pausedWorkflows: [],
       confirmedAt: new Date().toISOString(), confirmedBy: userMessage.id,
+      interruptionPolicy: 'cancel_active_work_without_resume',
       authorization: { userMessageId: userMessage.id, userRequest: userMessage.content, toolCallId: call.id },
       updatedAt: new Date().toISOString(),
     };
@@ -97,7 +104,7 @@ export class UpgradesService implements OnModuleInit {
 
   view(id: string): WorkliteUpgradeView {
     const job = this.load(id);
-    return { id: job.id, releaseHash: job.releaseHash, summary: job.summary, phase: job.phase, error: job.error ?? null, updatedAt: job.updatedAt };
+    return { id: job.id, releaseHash: job.releaseHash, summary: job.summary, phase: job.phase, error: job.error ?? null, updatedAt: job.updatedAt, interruptionPolicy: 'cancel_active_work_without_resume' };
   }
 
   private requireIdle(): void {
@@ -105,7 +112,7 @@ export class UpgradesService implements OnModuleInit {
     if (existsSync(join(directory, 'active.json'))) {
       const { jobId } = this.readFile<{ jobId: string }>(join(directory, 'active.json'));
       const active = this.load(jobId);
-      if (active.resumePending || !['succeeded', 'rolled_back', 'failed'].includes(active.phase)) throw new BadRequestException('Another upgrade is active.');
+      if (!['succeeded', 'rolled_back', 'failed'].includes(active.phase)) throw new BadRequestException('Another upgrade is active.');
     }
   }
 
@@ -117,53 +124,74 @@ export class UpgradesService implements OnModuleInit {
   async handoff(id: string) {
     const job = this.load(id);
     if (job.phase !== 'draining') throw new BadRequestException('Upgrade is not draining.');
-    const [activeTurn] = await this.db.select({ id: agentExecutions.id }).from(agentExecutions).where(eq(agentExecutions.status, 'running')).limit(1);
-    if (activeTurn) return { ready: false };
-    const runtime = this.modules.get(AgentTeamRuntimeService, { strict: false });
-    const runs = this.modules.get(RunsService, { strict: false });
-    const teams = await this.db.select().from(agentTeamRuns).where(inArray(agentTeamRuns.status, ['queued', 'running', 'waiting_for_input']));
-    const workflows = await this.db.select().from(workflowRuns).where(inArray(workflowRuns.status, ['queued', 'running', 'waiting_for_input']));
-    // Record handoff ownership before requesting a pause, including across runner restart.
-    job.pausedTeams = [...new Set([...job.pausedTeams, ...teams.map((run) => run.id)])];
-    job.pausedWorkflows = [...new Set([...job.pausedWorkflows, ...workflows.map((run) => run.id)])];
-    this.save(job);
-    for (const run of teams) await runtime.pause(run.id);
-    for (const run of workflows) await runs.pause({} as Request, 'personal', run.id);
-    const [command] = await this.db.select({ id: commandExecutions.id }).from(commandExecutions).where(inArray(commandExecutions.status, ['queued', 'running', 'cancelling'])).limit(1);
-    const registration = this.modules.get<FeishuRegistrationService>('FEISHU_REGISTRATION_RUNTIME', { strict: false });
-    return { ready: !command && runtime.upgradeQuiescent() && runs.upgradeQuiescent() && registration.upgradeQuiescent() };
+    const interruptions = await this.interruptActiveWork(id);
+    return { ready: true, interrupted: interruptions };
   }
 
-  async resume(id: string) {
-    if (this.resumeWork) return this.resumeWork;
-    this.resumeWork = this.resumeHandoff(id);
-    try { return await this.resumeWork; } finally { this.resumeWork = undefined; }
-  }
-
-  private async resumeHandoff(id: string) {
+  async complete(id: string) {
     const job = this.load(id);
-    if (!['succeeded', 'rolled_back', 'failed'].includes(job.phase)) throw new BadRequestException('Upgrade has not settled.');
-    const runtime = this.modules.get(AgentTeamRuntimeService, { strict: false });
+    if (job.phase !== 'succeeded') throw new BadRequestException('Upgrade has not succeeded.');
+    await this.modules.get<FeishuService>('FEISHU_UPGRADE_TRANSPORT', { strict: false }).connect();
+    return { connected: true };
+  }
+
+  private async interruptActiveWork(id: string) {
+    const job = this.load(id);
+    const activeAgents = await this.db.select({ id: agentExecutions.id, agentId: agentExecutions.agentId }).from(agentExecutions).where(inArray(agentExecutions.status, ['running', 'waiting_for_input']));
+    const activeTeams = await this.db.select({ id: agentTeamRuns.id }).from(agentTeamRuns).where(inArray(agentTeamRuns.status, ['queued', 'running', 'waiting_for_input', 'paused']));
+    const activeWorkflows = await this.db.select({ id: workflowRuns.id }).from(workflowRuns).where(inArray(workflowRuns.status, ['queued', 'running', 'waiting_for_input', 'paused']));
+    const activeCommands = await this.db.select({ id: commandExecutions.id }).from(commandExecutions).where(inArray(commandExecutions.status, ['queued', 'running', 'cancelling']));
+    const interruptedWork = {
+      agentExecutions: [...new Set([...(job.interruptedWork?.agentExecutions ?? []), ...activeAgents.map(({ id: executionId }) => executionId)])],
+      teamRuns: [...new Set([...(job.interruptedWork?.teamRuns ?? []), ...activeTeams.map(({ id: runId }) => runId)])],
+      workflowRuns: [...new Set([...(job.interruptedWork?.workflowRuns ?? []), ...activeWorkflows.map(({ id: runId }) => runId)])],
+      commands: [...new Set([...(job.interruptedWork?.commands ?? []), ...activeCommands.map(({ id: commandId }) => commandId)])],
+      feishuRegistration: true,
+    };
+    job.interruptionPolicy = 'cancel_active_work_without_resume';
+    job.interruptedWork = interruptedWork;
+    this.save(job);
+
+    const executions = this.modules.get(AgentExecutionsService, { strict: false });
+    const teamRuntime = this.modules.get(AgentTeamRuntimeService, { strict: false });
     const runs = this.modules.get(RunsService, { strict: false });
-    for (const runId of job.pausedTeams) {
-      const [run] = await this.db.select({ status: agentTeamRuns.status }).from(agentTeamRuns).where(eq(agentTeamRuns.id, runId)).limit(1);
-      if (run?.status === 'paused') await runtime.resume(runId);
-    }
-    for (const runId of job.pausedWorkflows) {
-      const [run] = await this.db.select({ status: workflowRuns.status }).from(workflowRuns).where(eq(workflowRuns.id, runId)).limit(1);
-      if (run?.status === 'paused') await runs.resume({} as Request, 'personal', runId);
-    }
-    const feishu = this.modules.get<FeishuService>('FEISHU_UPGRADE_TRANSPORT', { strict: false });
-    await feishu.connect();
-    job.resumePending = false; this.save(job);
-    return { resumed: true };
+    const commands = this.modules.get(CommandsService, { strict: false });
+    const registration = this.modules.get<FeishuRegistrationService>('FEISHU_REGISTRATION_RUNTIME', { strict: false });
+    const cancellationLabels = [
+      ...activeAgents.map(({ id: executionId }) => `agent:${executionId}`),
+      ...activeTeams.map(({ id: runId }) => `team:${runId}`),
+      ...activeWorkflows.map(({ id: runId }) => `workflow:${runId}`),
+      ...activeCommands.map(({ id: commandId }) => `command:${commandId}`),
+      'feishu-registration',
+    ];
+    const cancellations = [
+      ...activeAgents.map(({ id: executionId, agentId }) => executions.cancel({} as Request, 'personal', agentId, executionId)),
+      ...activeTeams.map(({ id: runId }) => teamRuntime.cancel(runId)),
+      ...activeWorkflows.map(({ id: runId }) => runs.cancel({} as Request, 'personal', runId, true)),
+      ...activeCommands.map(async ({ id: commandId }) => {
+        await commands.cancel(commandId);
+        await commands.waitForCompletion(commandId);
+      }),
+      registration.cancelForUpgrade(),
+    ];
+    const settled = await Promise.allSettled(cancellations);
+    const interruptionFailures = settled.flatMap((result, index) => result.status === 'rejected' ? [cancellationLabels[index]] : []);
+    const latest = this.load(id);
+    latest.interruptionFailures = interruptionFailures;
+    this.save(latest);
+    return {
+      agentExecutions: activeAgents.length,
+      teamRuns: activeTeams.length,
+      workflowRuns: activeWorkflows.length,
+      commands: activeCommands.length,
+      failures: interruptionFailures.length,
+    };
   }
 
   async freeze(id: string) {
     const job = this.load(id);
     if (job.phase !== 'draining') throw new BadRequestException('Upgrade is not draining.');
-    const { ready } = await this.handoff(id);
-    if (!ready) throw new BadRequestException('Work has not reached its handoff boundary.');
+    await this.handoff(id);
     const current = this.load(id); current.phase = 'frozen'; this.save(current);
     await this.modules.get<FeishuService>('FEISHU_UPGRADE_TRANSPORT', { strict: false }).freezeForUpgrade();
     return { frozen: true };
@@ -201,6 +229,6 @@ export class UpgradesController {
   @Post('redeploy') redeploy(@Body() body: { summary: string; executionId: string; submissionId: string; userMessageId: string }) { return this.upgrades.redeploy(body); }
   @Get(':id') inspect(@Param('id') id: string) { return this.upgrades.view(id); }
   @Post(':id/handoff') handoff(@Param('id') id: string, @Headers('x-worklite-upgrade-token') token: string) { this.upgrades.authorizeRunner(id, token); return this.upgrades.handoff(id); }
-  @Post(':id/resume') resume(@Param('id') id: string, @Headers('x-worklite-upgrade-token') token: string) { this.upgrades.authorizeRunner(id, token); return this.upgrades.resume(id); }
+  @Post(':id/complete') complete(@Param('id') id: string, @Headers('x-worklite-upgrade-token') token: string) { this.upgrades.authorizeRunner(id, token); return this.upgrades.complete(id); }
   @Post(':id/freeze') freeze(@Param('id') id: string, @Headers('x-worklite-upgrade-token') token: string) { this.upgrades.authorizeRunner(id, token); return this.upgrades.freeze(id); }
 }

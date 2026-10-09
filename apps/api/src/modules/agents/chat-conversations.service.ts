@@ -130,7 +130,7 @@ export class ChatConversationsService {
     return {
       conversation,
       execution,
-      events: conversation.executionId ? await this.executions.events(request, 'personal', CHAT_AGENT_ID, conversation.executionId) : [],
+      events: conversation.executionId ? await this.executions.recordsEvents(request, 'personal', CHAT_AGENT_ID, conversation.executionId) : [],
       receipts: receipts.map(({ id, payload, status, error, createdAt }) => ({ id, payload, status, error, createdAt: createdAt.toISOString() })),
       submissions,
       deliveries: deliveries.map(({ id, messageId }) => ({ id, messageId })),

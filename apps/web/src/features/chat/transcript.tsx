@@ -2,20 +2,61 @@ import { Link } from '@tanstack/react-router';
 import { Ban, ChevronDown, ChevronRight, CircleX, FileCode2, Hourglass, LoaderCircle, MessageSquareText, Play, RefreshCw, ShieldAlert, X } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AgentExecutionView, AgentToolCallView, RunView, WorkflowView } from '@worklite/contracts';
+import type { AgentExecutionView, AgentToolCallView, ChatProjectTaskView, RunView, WorkflowView } from '@worklite/contracts';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import { isLiveStatus, StatusBadge, toStatusKey, type StatusKey } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
 import type { AppLocale } from '@/i18n/locale';
 import { cn } from '@/lib/utils';
+import { useChatProjectOperationQuery } from '@/api/queries';
 
 type TranscriptMessage = AgentExecutionView['messages'][number];
 type TurnSegment = { kind: 'message'; item: TranscriptMessage } | { kind: 'tool'; item: AgentToolCallView };
 type Turn = { kind: 'user'; item: TranscriptMessage } | { kind: 'assistant'; segments: TurnSegment[] };
+
+
+type CodexActivity = ChatProjectTaskView['activities'][number];
+type CodexOperation = ChatProjectTaskView['operations'][number];
+
+function codexFirstLine(value: string): string {
+  return value.trim().split(/\r?\n/, 1)[0] ?? '';
+}
+
+function codexActivityText(activity: CodexActivity, key: string): string | null {
+  const value = activity[key];
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function CodexOperationDisclosure({ taskId, operation }: { taskId: string; operation: CodexOperation }) {
+  const { t } = useTranslation('assistant');
+  const [open, setOpen] = useState(false);
+  const query = useChatProjectOperationQuery(taskId, operation.key, open);
+  const activate = () => {
+    if (!open) { setOpen(true); return; }
+    if (query.isError) { void query.refetch(); return; }
+    setOpen(false);
+  };
+  return (
+    <div className="mt-2">
+      <Button type="button" variant="secondary" size="compact" aria-expanded={open} onClick={activate}>
+        {open ? query.isError ? t('codex.operation.retryDetails') : t('codex.operation.hideDetails') : t('codex.operation.details')}
+      </Button>
+      {open ? (
+        <div className="mt-2" aria-live="polite">
+          {query.isPending ? <p className="text-xs text-muted-foreground">{t('codex.operation.loading')}</p> : null}
+          {query.isError ? <p className="text-xs text-danger" role="alert">{t('codex.operation.detailError')}</p> : null}
+          {query.data ? <pre className="max-h-72 overflow-auto rounded-md border border-border bg-background p-2.5 font-mono text-xs"><code className="whitespace-pre-wrap break-all">{JSON.stringify(query.data.result, null, 2) ?? 'null'}</code></pre> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 // One Chat turn is one identity block: every assistant message and Skill call
 // between two user messages shares a single avatar and content column, so a turn that
@@ -224,14 +265,227 @@ function WorkflowRunRow({ run, workflow, input }: { run: RunView; workflow: Work
   );
 }
 
+function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
+  const { t } = useTranslation('assistant');
+  const { locale } = useLocale();
+  const [expanded, setExpanded] = useState(false);
+  const [rawOpen, setRawOpen] = useState(false);
+  const statusKey = toStatusKey(task.status);
+  const live = isLiveStatus(task.status);
+  const goalSummary = codexFirstLine(task.goal);
+  const executorName = task.executor ? t(`codex.executorName.${task.executor}`) : t('codex.launchNotCaptured');
+  const modelSummary = t('codex.modelLaunch', { model: task.model || t('codex.defaultModel'), mode: executorName });
+  const latestActivity = task.activities.at(-1) ?? null;
+  const visibleActivities = task.activities;
+  const visibleOperations = task.operations;
+  const rawJson = rawOpen ? JSON.stringify(task, null, 2) : '';
+
+  const describeItem = (itemType: string | null) => {
+    if (!itemType) return t('codex.activity.unknownItem');
+    if (itemType === 'reasoning') return t('codex.itemType.reasoning');
+    if (itemType === 'command_execution') return t('codex.itemType.command_execution');
+    if (itemType === 'file_change') return t('codex.itemType.file_change');
+    if (itemType === 'agent_message') return t('codex.itemType.agent_message');
+    if (itemType === 'mcp_tool_call') return t('codex.itemType.mcp_tool_call');
+    if (itemType === 'web_search') return t('codex.itemType.web_search');
+    if (itemType === 'todo_list') return t('codex.itemType.todo_list');
+    return itemType;
+  };
+
+  const describeActivity = (activity: CodexActivity) => {
+    const phase = codexActivityText(activity, 'phase') ?? '';
+    const itemType = codexActivityText(activity, 'itemType');
+    if (phase === 'codex.started') return t('codex.activity.started', { executor: t('codex.executorName.codex') });
+    if (phase === 'codex.thread_started') return t('codex.activity.threadStarted', { executor: t('codex.executorName.codex') });
+    if (phase === 'codex.turn_started') return t('codex.activity.turnStarted');
+    if (phase === 'codex.completed') return t('codex.activity.completed', { executor: t('codex.executorName.codex') });
+    if (phase === 'codex.item_started') return t('codex.activity.itemStarted', { type: codexActivityText(activity, 'summary') ?? describeItem(itemType) });
+    if (phase === 'codex.item_completed') return t('codex.activity.itemCompleted', { type: describeItem(itemType) });
+    if (phase === 'claude.started') return t('codex.activity.started', { executor: t('codex.executorName.claude') });
+    if (phase === 'claude.session_started') return t('codex.activity.threadStarted', { executor: t('codex.executorName.claude') });
+    if (phase === 'claude.completed') return t('codex.activity.completed', { executor: t('codex.executorName.claude') });
+    if (phase === 'claude.tool_started') return t('codex.activity.itemStarted', { type: codexActivityText(activity, 'summary') ?? describeItem(itemType) });
+    if (phase === 'claude.tool_completed') return t('codex.activity.itemCompleted', { type: describeItem(itemType) });
+    if (phase === 'project.tool') return t('codex.activity.projectTool', { tool: codexActivityText(activity, 'toolName') ?? t('codex.activity.unknownTool') });
+    if (phase === 'mcp.call') return t('codex.activity.mcpCall', { tool: codexActivityText(activity, 'toolName') ?? t('codex.activity.unknownTool') });
+    return t('codex.activity.unknown', { phase });
+  };
+  const activityPhaseSummary = Object.entries(task.activityPhases).map(([phase, count]) => `${describeActivity({ phase })} · ${count}`);
+  const operationStatusSummary = Object.entries(task.operationStatuses).map(([status, count]) => `${t(`codex.operationStatus.${status}`)} · ${count}`);
+
+  return (
+    <article
+      className={cn('wl-enter my-2 overflow-hidden rounded-lg border bg-surface shadow-xs transition-[border-color,box-shadow] duration-[200ms]', live ? 'border-brand/40 wl-live-glow' : task.status === 'failed' ? 'border-danger/30' : 'border-border')}
+      aria-label={t('codex.panel')}
+    >
+      <button
+        type="button"
+        className={cn('flex min-h-11 w-full items-start gap-2.5 px-3 py-2 text-left hover:bg-surface-subtle/70', surfaceInteraction, focusRingInset)}
+        aria-expanded={expanded}
+        aria-label={expanded ? t('codex.collapse') : t('codex.expand')}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface-subtle"><FileCode2 className="size-3.5 text-muted-foreground" aria-hidden="true" /></span>
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 flex-1 truncate text-[13px] font-semibold" title={goalSummary}>
+              <span className="text-foreground">Codex</span>
+              <span className="mx-1 text-muted-foreground" aria-hidden="true">·</span>
+              <span className="font-normal text-muted-foreground">{goalSummary}</span>
+            </span>
+            <StatusBadge status={statusKey} label={t(`status.${task.status}`)} />
+          </span>
+          <span className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <span className="max-w-full truncate font-mono" title={task.projectDirectory}>{task.projectDirectory}</span>
+            <span aria-hidden="true">·</span>
+            <span className="max-w-full truncate font-mono" title={modelSummary}>{modelSummary}</span>
+            {live ? (
+              <span className="basis-full truncate">
+                {latestActivity ? t('codex.latestActivity', { activity: describeActivity(latestActivity), count: task.activityCount }) : t('codex.starting')}
+              </span>
+            ) : null}
+          </span>
+        </span>
+        <ChevronDown className={cn('mt-1 size-4 shrink-0 text-muted-foreground transition-transform duration-[200ms] ease-[var(--ease-out)]', !expanded && '-rotate-90')} aria-hidden="true" />
+      </button>
+      {expanded ? (
+        <div className="wl-fade space-y-4 border-t border-border px-3 pb-3 pt-2.5">
+          <dl className="grid gap-3 text-xs sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <dt className="font-medium text-muted-foreground">{t('codex.goal')}</dt>
+              <dd className="mt-1 whitespace-pre-wrap break-words">{task.goal}</dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="font-medium text-muted-foreground">{t('codex.projectDirectory')}</dt>
+              <dd className="mt-1 break-all font-mono">{task.projectDirectory}</dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="font-medium text-muted-foreground">{t('codex.model')}</dt>
+              <dd className="mt-1 break-all font-mono">{task.model}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-muted-foreground">{t('codex.executor')}</dt>
+              <dd className="mt-1">{executorName}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-muted-foreground">{t('codex.status')}</dt>
+              <dd className="mt-1"><StatusBadge status={statusKey} label={t(`status.${task.status}`)} /></dd>
+            </div>
+            <div>
+              <dt className="font-medium text-muted-foreground">{t('codex.createdAt')}</dt>
+              <dd className="mt-1">{formatDateTime(task.createdAt, locale)}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-muted-foreground">{t('codex.updatedAt')}</dt>
+              <dd className="mt-1">{formatDateTime(task.updatedAt, locale)}</dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="font-medium text-muted-foreground">{t('codex.taskId')}</dt>
+              <dd className="mt-1 break-all font-mono">{task.id}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-muted-foreground">{t('codex.configurationRevision')}</dt>
+              <dd className="mt-1 font-mono">{task.configurationRevision}</dd>
+            </div>
+          </dl>
+
+          <section>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-xs font-medium">{t('codex.activities', { count: task.activityCount })}</h3>
+              {task.activityCount > task.activities.length ? <p className="text-[11px] text-muted-foreground">{t('codex.recentActivities', { count: task.activities.length })}</p> : null}
+            </div>
+            {activityPhaseSummary.length ? <p className="mt-1 text-[11px] text-muted-foreground">{activityPhaseSummary.join('　/　')}</p> : null}
+            {visibleActivities.length > 0 ? (
+              <ol className="mt-2 max-h-64 space-y-1 overflow-y-auto rounded-md border border-border bg-surface-subtle/50 p-2">
+                {visibleActivities.map((activity, index) => {
+                  const createdAt = codexActivityText(activity, 'createdAt');
+                  return (
+                    <li key={`${createdAt ?? codexActivityText(activity, 'phase') ?? 'activity'}-${index}`} className="flex gap-2 py-1">
+                      <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden="true" />
+                      <div className="min-w-0 flex-1">
+                        <p className="break-words text-xs font-medium">{describeActivity(activity)}</p>
+                        {createdAt ? <p className="mt-0.5 text-[11px] text-muted-foreground">{formatDateTime(createdAt, locale)}</p> : null}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            ) : <p className="mt-2 text-xs text-muted-foreground">{t('codex.noActivities')}</p>}
+          </section>
+
+          <section>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-xs font-medium">{t('codex.operations', { count: task.operationCount })}</h3>
+              {task.operationCount > task.operations.length ? <p className="text-[11px] text-muted-foreground">{t('codex.recentOperations', { count: task.operations.length })}</p> : null}
+            </div>
+            {operationStatusSummary.length ? <p className="mt-1 text-[11px] text-muted-foreground">{operationStatusSummary.join('　/　')}</p> : null}
+            {visibleOperations.length > 0 ? (
+              <ol className="mt-2 max-h-64 space-y-2 overflow-y-auto rounded-md border border-border bg-surface-subtle/50 p-2">
+                {visibleOperations.map((operation) => {
+                  const input = operation.inputSummary;
+                  const operationStatusKey = operation.status === 'completed' ? 'completed' : operation.status === 'failed' ? 'failed' : operation.status === 'uncertain' ? 'paused' : 'queued';
+                  return (
+                    <li key={operation.key} className="rounded-sm p-2">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="min-w-0 flex-1 break-words text-xs font-medium">{t('codex.operation.tool', { tool: operation.toolName })}</span>
+                        <StatusBadge status={operationStatusKey} label={t(`codex.operationStatus.${operation.status}`)} />
+                      </div>
+                      {input ? <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{input}</p> : null}
+                      {operation.commandExecutionId ? <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{t('codex.operation.command', { id: operation.commandExecutionId })}</p> : null}
+                      {operation.failureReason ? <p className="mt-1 max-h-20 overflow-y-auto whitespace-pre-wrap break-words text-xs text-danger">{operation.failureReason}</p> : null}
+                      <CodexOperationDisclosure taskId={task.id} operation={operation} />
+                    </li>
+                  );
+                })}
+              </ol>
+            ) : <p className="mt-2 text-xs text-muted-foreground">{t('codex.noOperations')}</p>}
+          </section>
+
+          {task.error ? (
+            <div className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger-subtle px-3 py-2.5 text-xs text-danger" role="alert">
+              <CircleX className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <p className="font-medium">{t('codex.error')}</p>
+                <p className="mt-1 whitespace-pre-wrap break-words">{task.error}</p>
+              </div>
+            </div>
+          ) : null}
+
+          <section>
+            <h3 className="text-xs font-medium text-muted-foreground">{t('codex.result')}</h3>
+            {task.result ? <MessageResponse content={task.result} enabled /> : <p className="mt-1 text-xs text-muted-foreground">{t('codex.noResult')}</p>}
+          </section>
+
+          <Collapsible open={rawOpen} onOpenChange={setRawOpen}>
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="secondary" size="compact">
+                {rawOpen ? t('codex.hideRawJson') : t('codex.viewRawJson')}
+                <ChevronRight className={cn('size-3 transition-transform duration-[120ms]', rawOpen && 'rotate-90')} aria-hidden="true" />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <pre className="mt-2 max-h-72 overflow-auto rounded-md border border-border bg-background p-2.5 font-mono text-xs"><code className="whitespace-pre-wrap break-all">{rawJson}</code></pre>
+            </CollapsibleContent>
+          </Collapsible>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
 function ToolCallPanel({ call }: { call: AgentToolCallView }) {
+  if (call.projectTask) return <CodexToolCallPanel task={call.projectTask} />;
+  return <StandardToolCallPanel call={call} />;
+}
+
+function StandardToolCallPanel({ call }: { call: AgentToolCallView }) {
   const { t } = useTranslation('assistant');
   const [expanded, setExpanded] = useState(false);
   const finished = call.status === 'completed' || call.status === 'failed' || call.status === 'cancelled';
   const resource = call.result?.type === 'resource' ? call.result : null;
   const dispatch = call.result?.type === 'dispatch' ? call.result : null;
   const navigation = call.result?.type === 'navigation' ? call.result : null;
-  const scriptName = call.codexTask?.model || call.scriptPath?.split('/').pop() || call.mcpToolName || t('tool.script');
+  const scriptName = call.scriptPath?.split('/').pop() || call.mcpToolName || t('tool.script');
   // Tool statuses map onto the shared keys; an unknown status falls back to a neutral mark
   // rather than reading as a failure.
   const statusKey: StatusKey = call.status === 'completed' ? 'completed' : call.status === 'running' ? 'running' : call.status === 'failed' ? 'failed' : call.status === 'cancelled' ? 'cancelled' : 'idle';
@@ -246,7 +500,7 @@ function ToolCallPanel({ call }: { call: AgentToolCallView }) {
       >
         <span className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface-subtle"><FileCode2 className="size-3.5 text-muted-foreground" aria-hidden="true" /></span>
         <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">
-          {call.shell ? 'Shell' : call.codexTask ? 'Codex' : call.skillName || t('tool.label')} <span className="font-mono text-xs font-normal text-muted-foreground">/ {scriptName}</span>
+          {call.shell ? 'Shell' : call.projectTask ? t('codex.panel') : call.skillName || t('tool.label')} <span className="font-mono text-xs font-normal text-muted-foreground">/ {scriptName}</span>
         </span>
         {finished && call.exitCode !== null ? <span className="hidden shrink-0 font-mono text-xs text-muted-foreground sm:inline">{t('tool.exitCode', { code: call.exitCode })}</span> : null}
         <StatusBadge status={statusKey} label={t(`tool.status.${call.status}`)} />
@@ -264,10 +518,6 @@ function ToolCallPanel({ call }: { call: AgentToolCallView }) {
               <dd><pre className="mt-1 overflow-x-auto rounded-md border border-border bg-background p-2.5 font-mono"><code>{JSON.stringify(call.arguments)}</code></pre></dd>
             </div>
           </dl>
-          {call.codexTask ? <div className="mt-3">
-            <p className="text-xs font-medium">{call.codexTask.goal}</p>
-            <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-border bg-background p-2.5 font-mono text-xs"><code>{JSON.stringify(call.codexTask, null, 2)}</code></pre>
-          </div> : null}
           {!call.shell ? <p className="mt-3 flex items-start gap-2 text-[13px] text-warning">
             <ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />{t('tool.warning')}
           </p> : null}

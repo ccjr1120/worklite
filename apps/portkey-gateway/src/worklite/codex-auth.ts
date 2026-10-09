@@ -32,7 +32,7 @@ let callbackServer: ReturnType<typeof createServer> | null = null;
 let refreshTimer: NodeJS.Timeout | null = null;
 let roundRobinCursor = 0;
 
-function databasePath(): string { const configured = process.env.PORTKEY_GATEWAY_DB_PATH?.trim(); return configured ? resolve(process.cwd(), configured) : resolve(process.cwd(), 'data/worklite-gateway.db'); }
+function databasePath(): string { const configured = process.env.PORTKEY_GATEWAY_DB_PATH?.trim(); return configured ? resolve(process.cwd(), configured) : resolve(process.cwd(), '../../.data/deployment/worklite-gateway.db'); }
 function db(): BetterSqlite3.Database {
   if (database) return database;
   const path = databasePath(); mkdirSync(dirname(path), { recursive: true }); database = new BetterSqlite3(path); database.pragma('busy_timeout = 5000');

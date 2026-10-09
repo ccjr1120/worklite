@@ -398,7 +398,7 @@ When implementation introduces these capabilities, update the architecture sourc
 
 WorkLite's current rules require explicit authorization for particular verification commands and prohibit automatic server lifecycle changes. Developing this feature does not waive those rules. Team scope for a target repository must also preserve that repository's instructions. Any policy change needed for autonomous test authoring or execution must be agreed explicitly before using it.
 
-Work directly on `main` in the primary checkout and preserve existing local changes. Default development resources remain Web `3390`, API `3391`, Gateway `3392`, and development data outside `.data/deployment/`. A deployment rollout is separate work requiring explicit authorization and the existing isolated preflight gate.
+Work directly on `main` in the primary checkout and preserve existing local changes. Default development serves Web `3390` and proxies to the managed deployment API `23391` and Gateway `23392`; all persistent development state is deployment-owned under `.data/deployment/`. A deployment rollout is separate work requiring explicit authorization and the existing isolated preflight gate.
 
 ## 15. Research References
 

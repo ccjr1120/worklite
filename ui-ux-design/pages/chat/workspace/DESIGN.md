@@ -38,6 +38,8 @@ A full-height conversation-only Chat workspace has a stable context bar, searcha
 
 The conversation list separates live work from history. An **In progress** group pinned at the top holds conversations whose status is running, waiting for input, or queued; each row carries a leading status mark (an animated brand live dot for running, a pulsing amber mark for waiting, a dashed mark for queued) and a `brand-subtle` tint. Below it, **Today** and **Earlier** groups hold settled conversations with quiet leading marks: a green check for completed, a red cross for failed, a slash for cancelled. Group headers show a count. A conversation moves between groups with a short fade as its server status changes. The conversation header shows the shared status badge for the selected conversation, and the sidebar Chat destination shows the live dot while the In progress group is non-empty. The complete evidence pane opens below the conversation header and scrolls within its own region; ordinary replies stay readable. Below `md`, the conversation list opens in a labelled navigation drawer, preserving the full transcript width. Both themes use shared semantic tokens; ordinary icons and secondary actions stay neutral. Chat replaces Home's bottom composer and the shell floating Chat Bot.
 
+A Codex tool call remains one inline disclosure. Its collapsed row shows the first line of the captured goal, shared task status, project directory, model and `cx`/`cxo` launch mode; a live task also shows its latest persisted activity and total activity count rather than a context-free running label. Expansion reveals a metadata grid, phase counts and the latest 20 persisted activities, journaled operations with compact input summaries and status, the Markdown result, a red failure reason, and raw task JSON only behind a second collapsed disclosure. Each operation's full retained input and output loads when its own detail control opens; the task and execution snapshot never carry those result bodies. The transcript does not render raw JSON merely because the task row is expanded.
+
 The Dialog uses internal Channels and Configuration sections. Channels owns the existing Web and Feishu setup; Configuration owns model, prompt and delegated Codex Skill/MCP selection; custom capabilities do not execute in Chat. The main workspace height and conversation content remain stable while the Dialog opens and closes. Cancelling uses the existing neutral Send-or-Stop target while executing. While waiting for an ordinary answer, one neutral Cancel button sits beside Send. Cancel progress stays on that control; input and conversation content remain in place. No new design token is introduced.
 
 ## Interaction Contract
@@ -49,6 +51,7 @@ The Dialog uses internal Channels and Configuration sections. Channels owns the 
 - Execution boundary: coding, project investigation and local commands delegate to Codex; collaborative work uses Team and automation uses a published Workflow. Chat has no direct host tools or arbitrary Skill/MCP calls. Historical Shell disclosures and uncertain-effect recovery remain available without starting new Commands.
 - Live observation: keep the transcript, composer, expanded tool rows and reader scroll mounted during background updates. One SSE connection observes both running and waiting states; initial connection starts at the latest snapshot and following deltas. Older snapshots cannot roll back current content, and repeated event delivery cannot append a delta twice.
 - Independent Codex task: keep progress, result and full execution evidence in the originating conversation. Reuse the existing tool disclosure and answer region. Codex starts directly from the requested project task without a WorkLite proposal confirmation or command form; Team developer uses the same executor. An uncertain operation offers adopt-existing-result or mark-failed, without automatic replay. Stop cancels the task; uncertainty retains a visible recovery question. Ordinary dialogue and both themes retain their existing layout.
+- Codex evidence disclosure: expansion is one inspection action. The primary expanded content is structured task data; raw JSON remains a separate secondary disclosure and is serialized only when opened. The task view shows the latest 20 activities with phase counts and compact operation metadata; a selected operation fetches its complete journal result on demand. Long lists remain bounded without replacing or truncating the authoritative raw record.
 
 - Cancel: use the existing cancellation API once, without a confirmation dialog. Running turns use the square control; ordinary waiting turns retain Send and expose one adjacent Cancel. The shared Send/Stop primitive composes its own click with the Tooltip-trigger click; forwarded wrapper props cannot overwrite cancellation. The control shows a spinner and “取消中” immediately and prevents duplicate cancellation with its own cancelling state. An in-flight send or answer cannot disable Cancel once the server execution exists. Cancelling invalidates older UI request completions; binding an execution id or reloading its snapshot does not count as switching conversations and cannot strand the send busy state. Preserve the draft and messages, pause queued sends and invalidate server conversation queries on completion. If the server returns uncertain-effect recovery, retain its question and recovery choices instead of claiming cancellation settled the effect. Failure stays beside the composer.
 
@@ -80,6 +83,7 @@ The Dialog uses internal Channels and Configuration sections. Channels owns the 
 | Offline | Retain current data, show reconnect state and resume existing streams without resubmitting requests. |
 | Long content | Full message body wraps. Evidence uses bounded scrollable full text with copy/download. Only conversation titles/previews truncate. |
 | Channel waiting | A received Feishu message awaiting an execution remains visible with receipt status; queued messages do not disappear because they have no execution yet. |
+| Codex operation detail | Show control-local loading for the selected operation, then its complete retained input and output; keep the summary visible on failure and offer the same control to retry the read. |
 
 ## Copy Inventory
 
@@ -87,7 +91,7 @@ The Dialog uses internal Channels and Configuration sections. Channels owns the 
 | --- | --- |
 | `assistant:upgrade.*` | State, Constraint or Recovery according to the individual label |
 | `assistant:shell.command` / historical Shell evidence | Action or Constraint according to the label |
-| `assistant:codex.adopt`, `assistant:codex.markFailed` / native recovery controls | Action, State, Constraint or Recovery according to the individual label |
+| `assistant:codex.*` | Action, State, Constraint or Recovery according to the individual label |
 | `workspace:nav.chat` / `assistant:title` | State or Action according to the individual key |
 | `assistant:composer.cancel` | Action |
 | `assistant:composer.cancelling` | State |
@@ -101,9 +105,13 @@ The Dialog uses internal Channels and Configuration sections. Channels owns the 
 
 ## Accessibility
 
-The settings control, Dialog heading, internal section tabs, history controls, input and Cancel have accessible names and visible shared focus rings. The Dialog traps focus, closes on Escape and returns focus to its activating control. Cancel uses icon and text state, and its spinner respects reduced motion. Pending answers remain keyboard reachable. State updates do not move focus or scroll the reader away from earlier messages.
+The settings control, Dialog heading, internal section tabs, history controls, input and Cancel have accessible names and visible shared focus rings. The Dialog traps focus, closes on Escape and returns focus to its activating control. Cancel uses icon and text state, and its spinner respects reduced motion. Pending answers remain keyboard reachable. State updates do not move focus or scroll the reader away from earlier messages. Codex disclosure triggers, operation detail/retry controls and the secondary raw-JSON trigger expose their expanded state and accessible names.
 
 ## Coverage Status
+
+2026-10-08 Codex evidence source comparison: the transcript now gives Codex its own disclosure while retaining the shared Skill/Shell panel. The collapsed row shows the first goal line, shared task status, project directory, model and launch mode, plus the latest persisted activity and activity count for live tasks. Expansion shows complete task metadata, the latest fifty activities and operations in bounded scroll regions with semantic command/path summaries, the Markdown result and red alert failure text; raw task JSON is serialized only when its secondary disclosure opens. Both themes reuse shared status badges, semantic surfaces and reduced-motion-aware disclosure motion. The authorized `pnpm --filter @worklite/web typecheck` and `pnpm --filter @worklite/web lint` commands passed (`Locale key structures match for zh-CN.` and no ESLint findings). No browser interaction, live Codex execution, test suite, build, deployment or service lifecycle operation was run.
+
+2026-10-08 Codex evidence payload comparison: the expanded task view now uses the latest 20 activities plus phase counts and compact operation metadata. Each operation's full retained input and output is loaded on demand from its task record, keeping it out of Agent snapshots. Task result and error remain visible; operation detail failures leave the summary in place and can be retried from the same disclosure. Both themes continue to use the existing neutral controls, semantic status badges and disclosure motion. Deployment verification confirmed the new client and API compiled and became ready after isolated preflight; no browser interaction or test suite was run.
 
 2026-10-08 authorized deployment of Chat-requested redeployment: `pnpm deploy:local` incremented the public version from 0.1.3 to 0.1.4. Gateway/Web builds, API compilation during isolated startup, preflight on ports 23490–23492 and target readiness on ports 23390–23392 passed before replacement completed. This uses the ordinary local deployment entry and does not initialize a managed baseline. No browser interaction, live Chat redeploy request, Feishu integration, standalone type check or test suite was run.
 
@@ -139,6 +147,7 @@ Source comparison 2026-10-04: the old embedded surface supports persisted messag
 
 ### 2026-10-08
 
+- Added structured Codex task disclosure: the collapsed row carries goal, status, directory, model/launch mode and latest persisted activity; expansion shows metadata, bounded activities and operations, Markdown result, red failure text, and a secondary raw-JSON disclosure.
 - Grouped the conversation list into a pinned In progress group and Today/Earlier history, with leading animated status marks so running, waiting and settled conversations are distinguishable without reading text.
 - Used the shared sliding-underline tabs inside the Chat settings Dialog, moved the header status to the shared status badge, made the composer a floating auto-growing card, and added message entry motion and a streaming caret.
 - Made Chat the first workspace destination and root redirect while retaining `/home` as a non-navigation route.

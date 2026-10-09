@@ -73,7 +73,7 @@ The test is read-only. Chat-compatible protocols send the fixed user message `ä½
 
 ### Portkey Gateway summary
 
-The full-width Gateway section shows the configured loopback listener, using development port `3392` by default, with current process status and credential-safe startup failure details. Gateway startup, shutdown, and unexpected-exit recovery are automatic; the section has no lifecycle mutation controls. Codex authorization and account status belong to the Codex view rather than a second Gateway summary here.
+The full-width Gateway section shows the configured deployment-owned loopback listener, using port `23392` by default, with current process status and credential-safe startup failure details. Gateway startup, shutdown, and unexpected-exit recovery are automatic; the section has no lifecycle mutation controls. Codex authorization and account status belong to the Codex view rather than a second Gateway summary here.
 
 Integration details stay collapsed by default and include the `/v1` Base URL, no-key guidance, namespaced models, and a connection example. Model chips and the connection example use the actual `<providerName>/<modelId>` request value; internal Provider ids are never exposed as model prefixes. Copying the Base URL or the example reports `Copied` on the control that was activated.
 
@@ -211,7 +211,7 @@ Icon-only edit, delete, per-account, and copy controls carry accessible names; p
 
 ## Coverage Status
 
-Verified 2026-10-03 for Provider activity details, the Codex summary placement, and existing Provider and Codex interactions. The latest comparison found no unresolved differences. Earlier resolved findings follow.
+Verified 2026-10-03 for Provider activity details, the Codex summary placement, and existing Provider and Codex interactions. The latest comparison found no unresolved differences. The 2026-10-09 Gateway fallback change was source-checked against `apps/web/src/routes/model-providers.tsx`; browser appearance was not re-run. Earlier resolved findings follow.
 
 - Resolved 2026-09-22: the edit dialog cleared the API key field, because the view carried only `maskedKey` and the stored key never reached the browser. The field now prefills from the record, so the existing reveal control can show the key being edited. This also re-enables `Fetch models` while editing, which was disabled by its empty-key guard for every saved provider except `codex/responses`. The obsolete `keepSecretPlaceholder` string was removed in the same change.
 - Resolved 2026-09-22: Provider name, Base URL, and the Headers JSON field carried no `autoComplete` attribute, so the browser offered unrelated history and saved-credential values for fields scoped to one upstream record. All three now disable it, matching the API key field and the transient chat composer.
@@ -232,6 +232,10 @@ Verified 2026-10-03 for Provider activity details, the Codex summary placement, 
 - ~~Protocol selection did not match the supported current contracts.~~ Resolved: `anthropic/messages` is available, `deepseek/chat` is removed, and a new provider draft starts without an implicit protocol.
 
 ## Changelog
+
+### 2026-10-09 - Deployment-backed development data
+
+- Changed the Gateway summary fallback to the deployment listener `23392`; development has no separate Gateway listener or database.
 
 ### 2026-10-03 - Provider activity and Codex context
 

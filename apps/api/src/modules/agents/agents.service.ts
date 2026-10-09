@@ -9,7 +9,7 @@ import { WorkspaceService } from '../teams/teams.service';
 
 const WORKLITE_PLATFORM_SKILL_ID = 'sk_worklite_platform';
 const CODEX_CLI_AGENT_ID = 'agt_codex_cli_chat';
-const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 3392);
+const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392);
 const GATEWAY_PROVIDER_URL = `http://127.0.0.1:${GATEWAY_PORT}/worklite/providers`;
 
 function initials(name: string): string {
@@ -52,7 +52,7 @@ export class AgentsService {
     const view = this.toView(row.agent, workspaceSlug, row.agent.providerId ? gatewayNames.get(row.agent.providerId) ?? null : null, assignments, latest);
     if (agentId === 'agt_system_helper_chat') {
       const [configuration] = await this.db.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
-      if (configuration) view.chatConfiguration = { revision: configuration.revision, extensionPrompt: configuration.extensionPrompt };
+      if (configuration) view.chatConfiguration = { revision: configuration.revision, extensionPrompt: configuration.extensionPrompt, defaultExecutor: configuration.defaultExecutor };
     }
     return view;
   }
@@ -132,7 +132,7 @@ export class AgentsService {
     if (existing.kind === 'system') {
 
       const isChat = existing.id === 'agt_system_helper_chat';
-      const fields = ['providerId', 'model', 'mcpServerIds', ...(isChat ? ['skillIds', 'extensionPrompt', 'expectedConfigurationRevision'] : [])];
+      const fields = ['providerId', 'model', 'mcpServerIds', ...(isChat ? ['skillIds', 'extensionPrompt', 'defaultExecutor', 'expectedConfigurationRevision'] : [])];
       if (Object.keys(input).some((key) => !fields.includes(key))) throw new BadRequestException('Unsupported built-in Agent configuration field.');
       const nextProviderId = input.providerId === undefined ? existing.providerId : input.providerId;
       const provider = await this.validateProvider(team.id, nextProviderId);
@@ -140,6 +140,7 @@ export class AgentsService {
       if (provider && requestedModel && !provider.models.includes(requestedModel)) throw new BadRequestException('The selected model is not configured for this provider.');
       const model = provider ? requestedModel || provider.models[0] || '' : '';
       if (input.extensionPrompt !== undefined && typeof input.extensionPrompt !== 'string') throw new BadRequestException('An extension prompt must be text.');
+      if (input.defaultExecutor !== undefined && input.defaultExecutor !== 'claude' && input.defaultExecutor !== 'codex') throw new BadRequestException('The default executor must be claude or codex.');
       const selectedSkills = input.skillIds?.filter((id) => id !== WORKLITE_PLATFORM_SKILL_ID);
       const selections = await this.validateAssignments(team.id, selectedSkills, input.mcpServerIds, true);
       this.db.transaction((transaction) => {
@@ -157,6 +158,7 @@ export class AgentsService {
         if (isChat) transaction.insert(chatConfigurations).values({
           workspaceId: team.id, revision: (previous?.revision ?? 0) + 1,
           extensionPrompt: input.extensionPrompt === undefined ? previous?.extensionPrompt ?? '' : input.extensionPrompt,
+          defaultExecutor: input.defaultExecutor ?? previous?.defaultExecutor ?? 'claude',
           providerId: nextProviderId ?? null, model,
           skillIds: transaction.select({ id: agentSkills.skillId }).from(agentSkills).where(eq(agentSkills.agentId, agentId)).all().map(({ id }) => id),
           mcpServerIds: transaction.select({ id: agentMcpServers.mcpServerId }).from(agentMcpServers).where(eq(agentMcpServers.agentId, agentId)).all().map(({ id }) => id),

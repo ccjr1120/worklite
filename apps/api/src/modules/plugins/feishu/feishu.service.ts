@@ -121,7 +121,6 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
     this.stopped = true; this.generation += 1;
     this.socket?.close({ force: true });
     if (this.timer) clearInterval(this.timer);
-    while (this.busy || this.intakePending) await new Promise((resolve) => setTimeout(resolve, 50));
   }
 
   private async receiveMessage(event: Json, allowedUserId: string): Promise<void> {
@@ -355,8 +354,8 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       }
       if (!reference.completionStatus && (execution.status === 'running' || execution.status === 'waiting_for_input')) state.buttons.push({ label: '停止本轮对话', action: { kind: 'control', domain: 'conversation', runId: execution.id, action: 'cancel' } });
       if ((!reference.completionStatus || reference.completionStatus === 'failed') && execution.status === 'failed') state.buttons.push({ label: '重试本轮对话', action: { kind: 'control', domain: 'conversation', runId: execution.id, action: 'retry' } });
-      const codexTasks = execution.toolCalls.flatMap((call) => call.codexTask ? [call.codexTask] : []);
-      if (codexTasks.length) state.details = codexTasks.map((task) => ['Codex · ' + task.model, task.goal, statusText[task.status] ?? task.status, ...task.activities.filter((item) => typeof item.commandExecutionId === 'string').map((item) => String(item.phase) + ': ' + String(item.commandExecutionId)), task.error ?? '', task.result].filter(Boolean).join('\n')).join('\n\n');
+      const projectTasks = execution.toolCalls.flatMap((call) => call.projectTask ? [call.projectTask] : []);
+      if (projectTasks.length) state.details = projectTasks.map((task) => [(task.executor === 'codex' ? 'Codex' : task.executor === 'claude' ? 'Claude Code' : '项目任务') + ' · ' + (task.model || '默认模型'), task.goal, statusText[task.status] ?? task.status, ...task.activities.filter((item) => typeof item.commandExecutionId === 'string').map((item) => String(item.phase) + ': ' + String(item.commandExecutionId)), task.error ?? '', task.result].filter(Boolean).join('\n')).join('\n\n');
       const shellCalls = execution.toolCalls.filter((call) => call.shell);
       if (shellCalls.length) state.details = [state.details, ...shellCalls.map((call) => ['Shell · ' + (statusText[call.status] ?? call.status), '工作目录：' + call.workingDirectory, call.shell!.command, 'Command：' + (call.commandExecutionId ?? '未启动'), '退出码：' + (call.exitCode ?? '无'), call.output].join('\n'))].filter(Boolean).join('\n\n');
       state.replyContent = state.content;

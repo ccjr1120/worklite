@@ -183,6 +183,13 @@
       "when": 1791334800000,
       "tag": "0026_chat_task_confirmation",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1791338400000,
+      "tag": "0027_project_executor",
+      "breakpoints": true
     }
   ]
 }

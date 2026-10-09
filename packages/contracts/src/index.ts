@@ -48,7 +48,7 @@ export type WorkspaceView = {
 };
 
 export type PluginView = {
-  id: 'codex-cli-chat' | 'feishu-bot' | 'wechat-official-account';
+  id: 'codex-cli-chat' | 'claude-code' | 'feishu-bot' | 'wechat-official-account';
   name: string;
   description: string;
   command: string;
@@ -127,6 +127,7 @@ export type WorkliteUpgradeView = {
   phase: string;
   error: string | null;
   updatedAt: string;
+  interruptionPolicy: 'cancel_active_work_without_resume';
 };
 
 export const CHAT_AGENT_ID = 'agt_system_helper_chat';
@@ -191,7 +192,7 @@ export type PluginTestResult = {
 };
 
 export type AgentView = {
-  chatConfiguration?: { revision: number; extensionPrompt: string };
+  chatConfiguration?: { revision: number; extensionPrompt: string; defaultExecutor: ProjectExecutor };
   id: string;
   workspaceSlug: string;
   kind: 'system' | 'custom';
@@ -264,7 +265,7 @@ export type AgentPlanStep = {
 
 export type AgentPendingQuestion = {
   action?: 'new_conversation' | 'confirm_execution';
-  codexTaskId?: string;
+  projectTaskId?: string;
   shellCallId?: string;
   recovery?: { operationKey: string; commandExecutionId?: string };
   id: string;
@@ -275,19 +276,37 @@ export type AgentPendingQuestion = {
 
 export type AgentToolCallStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
-export type ChatCodexTaskView = {
-  launch?: { mode: 'cx' | 'cxo'; home: string; modelProvider: string; settings: Record<string, unknown> };
+export type ProjectExecutor = 'codex' | 'claude';
+
+export type ProjectExecutorLaunchView =
+  | { executor: 'codex'; commandArguments: string[]; home: string; model: string; modelProvider: string; settings: Record<string, unknown> }
+  | { executor: 'claude'; commandArguments: string[]; baseUrl: string; model: string | null };
+
+export type ChatProjectTaskView = {
+  executor: ProjectExecutor | null;
+  launch?: ProjectExecutorLaunchView;
   id: string; executionId: string; goal: string; projectDirectory: string; model: string;
   status: 'running' | 'waiting_for_input' | 'waiting_for_recovery' | 'succeeded' | 'failed' | 'cancelled';
   configurationRevision: number; pendingQuestion: AgentPendingQuestion | null;
-  activities: Array<Record<string, unknown>>; result: string; error: string | null;
-  operations: Array<{ key: string; toolName: string; status: 'reserved' | 'completed' | 'uncertain' | 'failed'; commandExecutionId: string | null; result: unknown; failureReason: string | null }>;
+  activityCount: number; activityPhases: Record<string, number>; activities: Array<Record<string, unknown>>; result: string; error: string | null;
+  operationCount: number; operationStatuses: Record<string, number>;
+  operations: Array<{ key: string; toolName: string; status: 'reserved' | 'completed' | 'uncertain' | 'failed'; commandExecutionId: string | null; inputSummary: string | null; failureReason: string | null }>;
   createdAt: string; updatedAt: string;
+};
+
+export type ChatProjectOperationDetailView = {
+  taskId: string;
+  key: string;
+  toolName: string;
+  status: 'reserved' | 'completed' | 'uncertain' | 'failed';
+  commandExecutionId: string | null;
+  result: unknown;
+  failureReason: string | null;
 };
 
 export type AgentToolCallView = {
   shell?: { command: string; state: 'awaiting_confirmation' | 'authorized' | 'reserved' | 'uncertain' | 'settled'; authorizationId?: string; approvedAt?: string };
-  codexTask?: ChatCodexTaskView;
+  projectTask?: ChatProjectTaskView;
   id: string;
   workingDirectory: string;
   skillId: string | null;
@@ -369,10 +388,11 @@ export type CreateAgentVersionRequest = Record<string, never>;
 export type UpdateAgentRequest = Partial<CreateAgentRequest> & {
   providerId?: string | null;
   extensionPrompt?: string;
+  defaultExecutor?: ProjectExecutor;
   expectedConfigurationRevision?: number;
 };
 
-export type WorkliteNavigationTarget =
+export type WorkliteFixedNavigationTarget =
   | 'home'
   | 'chat'
   | 'skills'
@@ -383,6 +403,9 @@ export type WorkliteNavigationTarget =
   | 'settings-appearance'
   | 'settings-usage'
   | 'settings-audit-log';
+
+// A Workflow editor target addresses one workflow by id, such as `/workflows/wf_...`.
+export type WorkliteNavigationTarget = WorkliteFixedNavigationTarget | `/workflows/${string}`;
 
 export type WorkspaceSettingsView = {
   appearance: 'system' | 'light' | 'dark';
@@ -1171,6 +1194,7 @@ export type AgentTeamRoleConfiguration = {
   skillIds: string[];
   mcpServerIds: string[];
   toolNames: string[];
+  executor?: ProjectExecutor;
 };
 
 export type AgentTeamView = {
@@ -1188,7 +1212,7 @@ export type AgentTeamVersionMetadata = {
   id: string;
   version: number;
   createdAt: string;
-  developerExecution?: { kind: 'codex_app_server'; commandArguments: string[]; launch?: { mode: 'cx' | 'cxo'; home: string; model: string; modelProvider: string; settings: Record<string, unknown> } };
+  developerExecution?: ProjectExecutorLaunchView | { kind: 'codex_app_server' };
 };
 
 export type AgentTeamTaskAttemptStatus =

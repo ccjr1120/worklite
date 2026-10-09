@@ -24,6 +24,7 @@ import {
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
+import { PROJECT_EXECUTOR_PROTOCOLS } from '../agents/project-executor.types';
 import {
   AGENT_TEAM_ROLES,
   AGENT_TEAM_ROLE_TOOL_NAMES,
@@ -39,6 +40,7 @@ const ROLE_CONFIGURATION_KEYS = [
   'skillIds',
   'mcpServerIds',
   'toolNames',
+  'executor',
 ] as const;
 
 @Injectable()
@@ -203,7 +205,14 @@ export class AgentTeamsService {
         throw new BadRequestException(`A public model id for Agent Team role ${role} must be a string.`);
       }
       const publicModelId = value.publicModelId.trim();
-      if (publicModelId) await this.resources.publicModelRuntime(workspaceId, publicModelId);
+      if (value.executor !== undefined && (role !== 'developer' || (value.executor !== 'claude' && value.executor !== 'codex'))) {
+        throw new BadRequestException('Only the developer role selects an executor, which must be claude or codex.');
+      }
+      const executor = role === 'developer' ? value.executor ?? 'claude' : undefined;
+      const runtime = publicModelId ? await this.resources.publicModelRuntime(workspaceId, publicModelId) : undefined;
+      if (executor && runtime && !PROJECT_EXECUTOR_PROTOCOLS[executor].includes(runtime.protocol)) {
+        throw new BadRequestException(`The developer model must use ${PROJECT_EXECUTOR_PROTOCOLS[executor].join(' or ')} for the ${executor} executor.`);
+      }
       if (typeof value.instructions !== 'string' || !value.instructions.trim()) {
         throw new BadRequestException(`Instructions for Agent Team role ${role} are required.`);
       }
@@ -224,6 +233,7 @@ export class AgentTeamsService {
         instructions,
         entryPoints,
         toolNames,
+        ...(executor ? { executor } : {}),
       });
     }
 
@@ -289,6 +299,7 @@ function toTeamView(row: AgentTeam): AgentTeamView {
       skillIds: role.skills.map((skill) => skill.id),
       mcpServerIds: role.mcpServers.map((server) => server.id),
       toolNames: role.toolNames,
+      ...(role.role === 'developer' ? { executor: role.executor ?? 'claude' } : {}),
     })),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

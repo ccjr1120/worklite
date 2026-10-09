@@ -72,6 +72,7 @@ import {
   IsolatedAgentInvocationService,
   type AgentInvocationOperationJournal,
 } from '../agents/isolated-agent-invocation.service';
+import { ProjectExecutorService } from '../agents/project-executor.service';
 import { AgentTeamOperationJournalService } from './agent-team-operation-journal.service';
 import {
   AGENT_TEAM_PROCESS_ID,
@@ -127,6 +128,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     @Inject(DATABASE) private readonly db: Database,
     private readonly config: ConfigService,
     private readonly invocations: IsolatedAgentInvocationService,
+    private readonly executors: ProjectExecutorService,
     private readonly resources: WorkspaceResourcesService,
     private readonly operations: AgentTeamOperationJournalService,
     private readonly commands: CommandsService,
@@ -681,13 +683,14 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       processId: AGENT_TEAM_PROCESS_ID,
       processVersion: AGENT_TEAM_PROCESS_VERSION,
       processFiles,
-      developerExecution: await this.invocations.captureDeveloperExecution(),
+      developerExecution: await this.executors.captureLaunch(configuredRoles.find((role) => role.role === 'developer')?.executor ?? 'claude', null),
       roles: await Promise.all(configuredRoles.map(async (role) => {
         const entryPointContent = await Promise.all(role.entryPoints.map((path) => readBmadTeaProcessFile(path)));
         const processReferences = processReferencePaths(role.role, manifest);
         return {
           ...role,
-          publicModelId: role.publicModelId.trim() || this.config.get<string>('AGENT_TEAM_DEFAULT_PUBLIC_MODEL_ID')?.trim() || '',
+          // An empty developer model keeps the executor's own default instead of the Team default model.
+          publicModelId: role.publicModelId.trim() || (role.role === 'developer' ? '' : this.config.get<string>('AGENT_TEAM_DEFAULT_PUBLIC_MODEL_ID')?.trim() || ''),
           processReferences,
           instructions: [role.instructions, ...entryPointContent].filter(Boolean).join('\n\n---\n\n'),
         };
@@ -948,13 +951,40 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (attempt.status === 'completed' || attempt.status === 'waiting_for_input') {
       return attempt.result as AgentTeamTaskResult;
     }
-    if (taskRole === 'developer' && version.snapshot.developerExecution?.kind !== 'codex_app_server') {
-      throw new Error('This Team version has no captured Codex App Server developer backend. Start a new Team Run.');
-    }
-
     const controller = this.abortControllers.get(request.runId);
     const signal = controller?.signal ?? new AbortController().signal;
     const commandIds = new Set<string>();
+    if (taskRole === 'developer') {
+      const execution = version.snapshot.developerExecution;
+      if (!execution || !('executor' in execution)) throw new Error('This Team version has no captured developer executor. Start a new Team Run.');
+      const model = role.publicModelId.trim() || (execution.executor === 'codex' ? execution.model : null);
+      if (model) await this.executors.requireModel(workspaceId, execution.executor, model);
+      const references = await Promise.all((role.processReferences ?? []).map(async (path) => ({ path, content: await this.readCapturedProcessFile(version, path) })));
+      const output = await this.executors.execute({
+        owner: 'team',
+        workspaceId,
+        launch: execution,
+        model,
+        systemPrompt: taskSystemPrompt(role.instructions, true),
+        input: JSON.stringify(taskContext(request, true)),
+        projectDirectory: request.projectDirectory,
+        skills: role.skills,
+        mcpServers: (await this.resources.workflowMcpRuntimes(workspaceId, role.mcpServers.map((server) => server.id)))
+          .map((runtime) => {
+            const snapshot = role.mcpServers.find((server) => server.id === runtime.id);
+            return snapshot ? { ...runtime, name: snapshot.name, allowedTools: snapshot.allowedToolNames } : runtime;
+          }),
+        references,
+        signal,
+        correlation: { source: 'team', teamRunId: request.runId, teamTaskAttemptId: attempt.id },
+        onEvent: (activity) => {
+          commandIds.add(activity.commandExecutionId);
+          this.appendEvent(this.db, request.runId, 'task.activity', { taskAttemptId: attempt.id, taskKey, ...activity });
+        },
+        onTextDelta: (delta) => this.appendEvent(this.db, request.runId, 'task.delta', { taskAttemptId: attempt.id, taskKey, delta }),
+      });
+      return this.finishExecutorOutput(request, workspaceId, attempt.id, taskKey, output, commandIds);
+    }
     const scopedJournal = this.operations.forAttempt({
       workspaceId,
       runId: request.runId,
@@ -981,9 +1011,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const output = await this.invocations.execute({
       workspaceId,
       publicModelId: role.publicModelId,
-      ...(taskRole === 'developer' ? { codexServerCommandArguments: version.snapshot.developerExecution.commandArguments, codexLaunch: version.snapshot.developerExecution.launch } : {}),
-      systemPrompt: taskSystemPrompt(role.instructions, taskRole === 'developer'),
-      context: taskContext(request, taskRole === 'developer'),
+      systemPrompt: taskSystemPrompt(role.instructions, false),
+      context: taskContext(request, false),
       skills: role.skills,
       mcpRuntimes: (await this.resources.workflowMcpRuntimes(workspaceId, role.mcpServers.map((server) => server.id)))
         .map((runtime) => {
@@ -1003,10 +1032,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       correlation: { source: 'team', teamRunId: request.runId, teamTaskAttemptId: attempt.id },
       limits: { maxToolResultChars: 100_000 },
       operation: { taskKey, journal: operationJournal },
-      onBackendEvent: (activity) => {
-        if (activity.commandExecutionId) commandIds.add(activity.commandExecutionId);
-        this.appendEvent(this.db, request.runId, 'task.activity', { taskAttemptId: attempt.id, taskKey, ...activity });
-      },
       onTextDelta: (delta) => this.appendEvent(this.db, request.runId, 'task.delta', {
         taskAttemptId: attempt.id,
         taskKey,
@@ -1020,16 +1045,27 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
+    return this.finishExecutorOutput(request, workspaceId, attempt.id, taskKey, output, commandIds);
+  }
+
+  private async finishExecutorOutput(
+    request: AgentTeamTaskRequest,
+    workspaceId: string,
+    attemptId: string,
+    taskKey: string,
+    output: string,
+    commandIds: ReadonlySet<string>,
+  ): Promise<AgentTeamTaskResult> {
     const parsed = parseTaskOutput(output, taskKey);
     if (parsed.status === 'waiting_for_input') {
-      return this.finishWaitingAttempt(request, workspaceId, attempt.id, parsed);
+      return this.finishWaitingAttempt(request, workspaceId, attemptId, parsed);
     }
     validateUpstreamDocuments(parsed.documents, request.upstream);
     const result: Extract<AgentTeamTaskResult, { status: 'completed' }> = {
       ...parsed,
       commandIds: [...commandIds],
     };
-    return this.finishCompletedAttempt(request, workspaceId, attempt.id, result);
+    return this.finishCompletedAttempt(request, workspaceId, attemptId, result);
   }
 
   private async readCapturedProcessFile(version: AgentTeamVersion, path: string): Promise<string> {
@@ -1577,7 +1613,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private checkpointPath(): string {
-    const configuredSqlitePath = this.config.get<string>('SQLITE_PATH') ?? '../../.data/worklite.db';
+    const configuredSqlitePath = this.config.get<string>('SQLITE_PATH') ?? '../../.data/deployment/worklite.db';
     const sqlitePath = isAbsolute(configuredSqlitePath)
       ? configuredSqlitePath
       : resolve(process.cwd(), configuredSqlitePath);
@@ -1803,12 +1839,12 @@ function nextDocumentRevision(
   return revision;
 }
 
-function taskSystemPrompt(instructions: string, codex: boolean): string {
+function taskSystemPrompt(instructions: string, executor: boolean): string {
   return `${instructions}
 
 You are executing one WorkLite Agent Team task. Use tools only when the captured role configuration and project authorization permit them. Return exactly one JSON object.
 
-Follow the captured project instructions supplied in the task context, and discover additional applicable AGENTS.md or AGENTS_WORKFLOW.md files before changing or assessing project files. If a project rule or missing user decision requires explicit authorization for an action, return the waiting_for_input response instead of taking that action. ${codex ? 'Execute the captured user task directly through the same Codex executor as Chat. WorkLite requires neither proposal confirmation nor exact-command grants for Codex.' : 'If a required shell command is not present verbatim in authorizedCommands, return the waiting_for_input response instead of calling bash.'} Map the process package's project root to projectDirectory and its process output location to outputDirectory. Use process_reference only with one of the exact pinned paths listed in the system prompt. The output directory is managed by WorkLite: return documents in JSON rather than writing planning output there directly.
+Follow the captured project instructions supplied in the task context, and discover additional applicable AGENTS.md or AGENTS_WORKFLOW.md files before changing or assessing project files. If a project rule or missing user decision requires explicit authorization for an action, return the waiting_for_input response instead of taking that action. ${executor ? 'You run as a project executor in the project directory with your own native tools. WorkLite requires neither proposal confirmation nor exact-command grants. A previous attempt may have changed the project; inspect its actual state rather than assuming earlier work is absent or complete. Read pinned process references from the files listed in the system prompt.' : 'If a required shell command is not present verbatim in authorizedCommands, return the waiting_for_input response instead of calling bash. Use process_reference only with one of the exact pinned paths listed in the system prompt.'} Map the process package's project root to projectDirectory and its process output location to outputDirectory. The output directory is managed by WorkLite: return documents in JSON rather than writing planning output there directly.
 
 When more user input is required, return:
 {"status":"waiting_for_input","pendingInput":{"question":"One specific question"}}
@@ -1819,7 +1855,7 @@ Otherwise return:
 Use an empty changedFiles array when the task changed no project files. Set completedAssignedWork to false only when the assigned work remains incomplete, and record the reason in unresolvedIssues. The reviewer may add "repairRequest":{"taskKey":"development","instruction":"specific repair instruction"}. Do not invent command ids; WorkLite records actual command evidence.`;
 }
 
-function taskContext(request: AgentTeamTaskRequest, codex: boolean): unknown {
+function taskContext(request: AgentTeamTaskRequest, executor: boolean): unknown {
   return {
     task: {
       ...request.taskDefinition,
@@ -1833,7 +1869,7 @@ function taskContext(request: AgentTeamTaskRequest, codex: boolean): unknown {
     projectDirectory: request.projectDirectory,
     outputDirectory: request.outputDirectory,
     authorization: modeAuthorization(request.mode),
-    ...(codex ? {} : { authorizedCommands: request.authorizedCommands }),
+    ...(executor ? {} : { authorizedCommands: request.authorizedCommands }),
     projectInstructions: request.projectInstructions,
     upstreamDocuments: request.upstream,
   };

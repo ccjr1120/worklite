@@ -67,6 +67,12 @@ export class FeishuRegistrationService implements OnModuleInit, OnModuleDestroy 
     if (registration?.status === 'pending') await this.finish(registration, 'cancelled');
   }
 
+  async cancelForUpgrade(): Promise<void> {
+    this.requestAbort?.abort();
+    const registration = await this.latest();
+    if (registration?.status === 'pending') await this.finish(registration, 'cancelled');
+  }
+
   async completeManualBinding(): Promise<void> {
     const [configuration] = await this.db.select().from(plugins).where(eq(plugins.id, FEISHU_PLUGIN_ID)).limit(1);
     if (!configuration?.feishuAllowedUserId) return;

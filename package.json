@@ -6,10 +6,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "node ./scripts/kill-dev-ports.mjs && turbo dev",
+    "dev": "node ./scripts/kill-dev-ports.mjs && pnpm --filter @worklite/web dev",
     "dev:web": "pnpm --filter @worklite/web dev",
-    "dev:api": "pnpm --filter @worklite/api dev",
-    "deploy:local": "bash ./scripts/install-local.sh",
+    "deploy:local": "node ./scripts/bump-deployment-version.mjs && node ./scripts/upgrade-runner.mjs deploy deployment",
     "diagnose:responses": "node ./scripts/check-responses-stream.mjs",
     "diagnose:codex": "node ./scripts/test-codex-proxy.mjs",
     "typecheck": "turbo typecheck",

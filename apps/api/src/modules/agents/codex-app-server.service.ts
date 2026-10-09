@@ -1,35 +1,13 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { gatewayBaseURL, type GatewayCorrelation, type GatewayToolDefinition, type WorkflowAgentToolCall, type WorkflowAgentToolResult } from '@worklite/model-gateway';
 import { parse } from 'smol-toml';
-import type { StoredCodexLaunch } from '@worklite/db';
+import type { StoredProjectExecutorLaunch } from '@worklite/db';
 import { CommandsService, type CommandStdioProcess } from '../commands/commands.service';
+import { requireGatewayUrl, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
 
-export type CodexBackendActivity = {
-  phase: string;
-  commandExecutionId: string;
-  threadId?: string;
-  turnId?: string;
-  itemId?: string;
-  itemType?: string;
-};
-
-type CodexInvocation = {
-  owner?: 'chat' | 'team';
-  commandArguments: readonly string[];
-  launch: StoredCodexLaunch;
-  publicModelId: string;
-  systemPrompt: string;
-  input: string;
-  tools: readonly GatewayToolDefinition[];
-  signal: AbortSignal;
-  correlation?: GatewayCorrelation;
-  executeTool(call: WorkflowAgentToolCall, signal: AbortSignal): Promise<WorkflowAgentToolResult>;
-  onTextDelta?: (delta: string) => void | Promise<void>;
-  onEvent?: (activity: CodexBackendActivity) => void | Promise<void>;
-};
+type CodexLaunch = Extract<StoredProjectExecutorLaunch, { executor: 'codex' }>;
 
 export class CodexAppServerError extends Error {}
 
@@ -41,55 +19,45 @@ type RpcMessage = {
   error?: { code: number; message: string };
 };
 
-// Protocol and native-tool exclusion verified against openai/codex rust-v0.157.1.
-// Native environments stay empty: project effects run through WorkLite's journal.
+// Protocol verified against openai/codex rust-v0.157.1. Codex runs with its native tools and the operator's
+// ~/.codex-cli configuration; WorkLite provides no dynamic tools and records the item stream as evidence.
 @Injectable()
 export class CodexAppServerService {
   constructor(private readonly commands: CommandsService) {}
 
-  async captureLaunch(commandArguments: readonly string[], mode?: 'cx' | 'cxo', model?: string): Promise<{ commandArguments: string[]; launch: StoredCodexLaunch }> {
-    const alias = commandArguments[0] === 'cx' || commandArguments[0] === 'cxo' ? commandArguments[0] : undefined;
-    const selected = mode ?? alias ?? 'cx';
-    const home = join(homedir(), selected === 'cxo' ? '.codex' : '.codex-cli');
+  async captureLaunch(commandArguments: readonly string[]): Promise<CodexLaunch> {
+    if (commandArguments[0] === 'cxo') throw new BadRequestException('cxo 启动方式已移除；请把 Codex 插件命令配置为 codex 或 cx。');
+    const home = join(homedir(), '.codex-cli');
     let config: Record<string, any>;
     try { config = parse(await readFile(join(home, 'config.toml'), 'utf8')); }
-    catch { throw new BadRequestException(`无法读取 ${selected} 的 Codex 配置：${home}/config.toml。`); }
-    const selectedModel = model?.trim() || config.model;
+    catch { throw new BadRequestException(`无法读取 Codex 配置：${home}/config.toml。`); }
+    const model = config.model;
     const modelProvider = config.model_provider ?? 'openai';
-    if (typeof selectedModel !== 'string' || !selectedModel.trim() || typeof modelProvider !== 'string') throw new BadRequestException(`请先在 ${selected} 配置中设置模型和 Provider。`);
-    if (selected === 'cxo' && selectedModel.includes('/')) throw new BadRequestException('cxo 使用原生 Codex 模型 id，不使用 Gateway 的 Provider 前缀。');
+    if (typeof model !== 'string' || !model.trim() || typeof modelProvider !== 'string') throw new BadRequestException('请先在 ~/.codex-cli 配置中设置模型和 Provider。');
     const provider = config.model_providers?.[modelProvider];
-    if (selected === 'cx' && provider?.wire_api !== 'responses') throw new BadRequestException('cx 的 Codex Provider 必须使用 Responses 协议。');
-    if (selected === 'cx') {
-      const current = new URL(gatewayBaseURL());
-      const configured = new URL(provider.base_url);
-      const currentPort = Number(current.port);
-      const ports = currentPort >= 23390 && currentPort <= 23392 ? [23390, 23391, 23392] : currentPort >= 3390 && currentPort <= 3392 ? [3390, 3391, 3392] : [currentPort];
-      if (!['127.0.0.1', 'localhost', '[::1]'].includes(configured.hostname) || !ports.includes(Number(configured.port))) throw new BadRequestException('cx 的 Gateway 配置不属于当前 WorkLite 运行环境。');
-    }
-    const settings: Record<string, unknown> = { model: selectedModel, model_provider: modelProvider };
+    if (provider?.wire_api !== 'responses') throw new BadRequestException('~/.codex-cli 的 Codex Provider 必须使用 Responses 协议。');
+    requireGatewayUrl(provider.base_url, '~/.codex-cli 的 Codex Provider');
+    const settings: Record<string, unknown> = { model, model_provider: modelProvider };
     for (const key of ['model_reasoning_effort', 'service_tier', 'model_catalog_json', 'disable_response_storage']) {
       if (typeof config[key] === 'string' || typeof config[key] === 'boolean') settings[key] = config[key];
     }
     if (typeof config.model_catalog_json === 'string') settings.model_catalog_json = resolve(home, config.model_catalog_json);
-    if (provider) {
-      const captured: Record<string, unknown> = {};
-      for (const key of ['name', 'base_url', 'wire_api', 'requires_openai_auth', 'env_key', 'supports_websockets']) {
-        if (typeof provider[key] === 'string' || typeof provider[key] === 'boolean') captured[key] = provider[key];
-      }
-      settings.model_providers = { [modelProvider]: captured };
+    const captured: Record<string, unknown> = {};
+    for (const key of ['name', 'base_url', 'wire_api', 'requires_openai_auth', 'env_key', 'supports_websockets']) {
+      if (typeof provider[key] === 'string' || typeof provider[key] === 'boolean') captured[key] = provider[key];
     }
+    settings.model_providers = { [modelProvider]: captured };
     const args = [...commandArguments];
-    if (alias) args[0] = 'codex';
+    if (args[0] === 'cx') args[0] = 'codex';
     if (!args.includes('--dangerously-bypass-approvals-and-sandbox')) args.push('--dangerously-bypass-approvals-and-sandbox');
-    return { commandArguments: args, launch: { mode: selected, home, model: selectedModel, modelProvider, settings } };
+    return { executor: 'codex', commandArguments: args, home, model, modelProvider, settings };
   }
 
-  async execute(request: CodexInvocation): Promise<string> {
+  async execute(request: ProjectExecutorRequest, prepared: PreparedProjectExecution): Promise<string> {
     request.signal.throwIfAborted();
-    const home = await mkdtemp(join(tmpdir(), `worklite-codex-${request.owner ?? 'team'}-`));
+    const launch = request.launch as CodexLaunch;
     const controller = new AbortController();
-    const session = new CodexAppServerSession({ ...request, signal: controller.signal }, (error) => controller.abort(error));
+    const session = new CodexAppServerSession(request, (error) => controller.abort(error));
     let process: CommandStdioProcess | undefined;
     let completed = false;
     let closing = false;
@@ -101,10 +69,9 @@ export class CodexAppServerService {
       if (process) void this.commands.cancel(process.executionId).catch(() => undefined);
     };
     try {
-      const nativeConfig = parse(await readFile(join(request.launch.home, 'config.toml'), 'utf8'));
-      const disabledMcp = Object.fromEntries(Object.keys(nativeConfig.mcp_servers ?? {}).map((name) => [name, { enabled: false }]));
+      const mcp = codexMcpServers(prepared);
       process = await this.commands.openStdioProcess(
-        appServerArguments(request, disabledMcp), home, { CODEX_HOME: request.launch.home },
+        appServerArguments(request, launch, mcp.config), request.projectDirectory, { CODEX_HOME: launch.home, ...mcp.env },
         (event) => {
           if (event.type === 'stdout') session.consume(event.data);
         },
@@ -117,29 +84,20 @@ export class CodexAppServerService {
       if (request.signal.aborted) { cancel(); request.signal.throwIfAborted(); }
       await session.activity('codex.started');
       const initialized = await session.call('initialize', {
-        clientInfo: { name: `worklite_${request.owner ?? 'team'}`, title: 'WorkLite', version: '1.0.0' },
+        clientInfo: { name: `worklite_${request.owner}`, title: 'WorkLite', version: '1.0.0' },
         capabilities: { experimentalApi: true },
       });
       requireSupportedVersion(initialized.userAgent);
       await session.notify('initialized', {});
+      if (prepared.skillRoot) await session.call('skills/extraRoots/set', { extraRoots: [prepared.skillRoot] });
       const started = await session.call('thread/start', {
-        model: request.publicModelId,
-        modelProvider: request.launch.modelProvider,
-        cwd: home,
+        model: request.model ?? launch.model,
+        modelProvider: launch.modelProvider,
+        cwd: request.projectDirectory,
         approvalPolicy: 'never',
         sandbox: 'danger-full-access',
         ephemeral: true,
-        environments: [],
-        selectedCapabilityRoots: [],
-        developerInstructions: [
-          request.systemPrompt,
-          'Project operations are provided only by WorkLite dynamic tools. Use read, write, glob, grep, bash and process_reference only when listed. The captured WorkLite tools permit project edits and command execution without WorkLite proposal confirmation or individual command grants. Native execution environments are disabled.',
-          'The real projectDirectory and its captured instructions are in the task input. File paths are relative to that directory. Use the WorkLite write tool for edits.',
-          request.owner === 'chat'
-            ? 'Return JSON with status succeeded and summary, or status waiting_for_input with pendingInput.question for missing information. Execute the captured user task directly without WorkLite proposal confirmation or individual command grants.'
-            : 'Return the required Team JSON result. When authorization or a user decision is missing, return status waiting_for_input with one pendingInput question.',
-        ].join('\n\n'),
-        dynamicTools: request.tools.map((tool) => ({ type: 'function', name: tool.name, description: tool.description, inputSchema: tool.inputSchema })),
+        developerInstructions: prepared.systemPrompt,
       });
       session.threadId = started.thread.id;
       await session.activity('codex.thread_started');
@@ -165,12 +123,7 @@ export class CodexAppServerService {
         await this.commands.cancel(process.executionId);
         await process.completion;
       }
-      let toolFailure: unknown;
-      try { await session.settleTools(); }
-      catch (error) { toolFailure = error; }
       session.fail(new Error('The Codex App Server session is closed.'));
-      await rm(home, { recursive: true, force: true });
-      if (toolFailure) throw toolFailure;
     }
   }
 }
@@ -184,15 +137,14 @@ class CodexAppServerSession {
   private text = '';
   private questionOutput?: string;
   private failed?: unknown;
-  private toolFailure?: unknown;
   private readonly pending = new Map<number | string, { method: string; resolve: (result: any) => void; reject: (error: unknown) => void }>();
-  private toolQueue = Promise.resolve();
+  private requestQueue = Promise.resolve();
   private eventQueue = Promise.resolve();
   private readonly finished: Promise<string>;
   private finish!: (text: string) => void;
   private reject!: (error: unknown) => void;
 
-  constructor(private readonly request: CodexInvocation, private readonly onFailure: (error: unknown) => void) {
+  constructor(private readonly request: ProjectExecutorRequest, private readonly onFailure: (error: unknown) => void) {
     this.finished = new Promise((resolve, reject) => { this.finish = resolve; this.reject = reject; });
     void this.finished.catch(() => undefined);
   }
@@ -234,26 +186,23 @@ class CodexAppServerSession {
 
   async result(): Promise<string> {
     const text = await this.finished;
-    await this.settleTools();
+    await this.requestQueue;
     await this.eventQueue;
     if (this.failed) throw this.failed;
     if (!text.trim()) throw new Error('Codex App Server returned an empty task result.');
     return text.trim();
   }
 
-  async settleTools(): Promise<void> {
-    await this.toolQueue;
-    if (this.toolFailure) throw this.toolFailure;
-  }
-
   activity(phase: string, item?: Record<string, any>): Promise<void> {
-    const activity: CodexBackendActivity = {
+    const summary = item ? codexItemSummary(item) : undefined;
+    const activity: ProjectExecutorActivity = {
       phase,
       commandExecutionId: this.transport!.executionId,
       ...(this.threadId ? { threadId: this.threadId } : {}),
       ...(this.turnId ? { turnId: this.turnId } : {}),
       ...(typeof item?.id === 'string' ? { itemId: item.id } : {}),
       ...(typeof item?.type === 'string' ? { itemType: item.type } : {}),
+      ...(summary ? { summary } : {}),
     };
     return Promise.resolve(this.request.onEvent?.(activity));
   }
@@ -268,10 +217,10 @@ class CodexAppServerSession {
       return;
     }
     if (message.id !== undefined && message.method) {
-      this.toolQueue = this.toolQueue.then(() => {
+      this.requestQueue = this.requestQueue.then(() => {
         if (this.failed) return;
         return this.respond(message);
-      }).catch((error) => { this.toolFailure = error; this.fail(error); });
+      }).catch((error) => this.fail(error));
       return;
     }
     const params = message.params ?? {};
@@ -297,24 +246,13 @@ class CodexAppServerSession {
   private async respond(message: RpcMessage): Promise<void> {
     this.request.signal.throwIfAborted();
     const params = message.params ?? {};
-    if (message.method === 'item/tool/call') {
-      if (this.questionOutput) {
-        await this.send({ id: message.id, result: { contentItems: [{ type: 'inputText', text: 'The task is waiting for the user.' }], success: false } });
-        return;
-      }
-      if (params.threadId !== this.threadId || (this.turnId && params.turnId !== this.turnId) || params.namespace || !this.request.tools.some((tool) => tool.name === params.tool)) {
-        throw new CodexAppServerError('Codex requested a tool outside the captured WorkLite invocation.');
-      }
-      const output = await this.request.executeTool({ toolCallId: params.callId, toolName: params.tool, input: params.arguments }, this.request.signal);
-      await this.send({ id: message.id, result: { contentItems: [{ type: 'inputText', text: output.value }], success: output.type === 'text' } });
-      return;
-    }
+    // The approval policy is never, so approvals are not expected; any that arrive are accepted like the operator's cx alias.
     if (message.method === 'item/commandExecution/requestApproval' || message.method === 'item/fileChange/requestApproval') {
-      await this.send({ id: message.id, result: { decision: 'decline' } });
+      await this.send({ id: message.id, result: { decision: 'accept' } });
       return;
     }
     if (message.method === 'item/permissions/requestApproval') {
-      await this.send({ id: message.id, result: { permissions: {}, scope: 'turn' } });
+      await this.send({ id: message.id, result: { permissions: params.permissions ?? {}, scope: 'turn' } });
       return;
     }
     if (message.method === 'item/tool/requestUserInput') {
@@ -327,7 +265,6 @@ class CodexAppServerSession {
       return;
     }
     await this.send({ id: message.id, error: { code: -32601, message: 'This request is unavailable in WorkLite execution.' } });
-    throw new CodexAppServerError('Codex requested an unsupported client capability.');
   }
 
   private send(message: unknown): Promise<void> {
@@ -336,39 +273,54 @@ class CodexAppServerSession {
   }
 }
 
-function appServerArguments(request: CodexInvocation, disabledMcp: Record<string, unknown>): string[] {
+// Selected MCP servers join the operator's own servers; bearer tokens travel through the process environment.
+function codexMcpServers(prepared: PreparedProjectExecution): { config: Record<string, unknown>; env: Record<string, string> } {
+  const config: Record<string, unknown> = {};
+  const env: Record<string, string> = {};
+  prepared.mcpServers.forEach((server, index) => {
+    const tokenVariable = `WORKLITE_MCP_TOKEN_${index}`;
+    if (server.authToken) env[tokenVariable] = server.authToken;
+    config[`mcp_servers.${server.key}`] = {
+      url: server.endpoint,
+      enabled_tools: server.allowedTools,
+      ...(server.authToken ? { bearer_token_env_var: tokenVariable } : {}),
+    };
+  });
+  return { config, env };
+}
+
+function appServerArguments(request: ProjectExecutorRequest, launch: CodexLaunch, mcpServers: Record<string, unknown>): string[] {
   const config: Record<string, unknown> = {
-    ...request.launch.settings,
-    mcp_servers: disabledMcp,
-    model: request.publicModelId,
+    ...launch.settings,
+    ...mcpServers,
+    model: request.model ?? launch.model,
     approval_policy: 'never',
     sandbox_mode: 'danger-full-access',
-    web_search: 'disabled',
-    notify: [],
-    'features.shell_tool': false,
-    'features.hooks': false,
-    'features.plugins': false,
-    'features.multi_agent': false,
-    'features.multi_agent_v2': false,
-    'features.apps': false,
-    'features.code_mode': false,
-    'features.image_generation': false,
-    'features.skill_mcp_dependency_install': false,
-    ...(request.launch.mode === 'cx' ? {
-      [`model_providers.${request.launch.modelProvider}.http_headers`]: {
-        'x-worklite-log-source': request.owner ?? 'team',
-        ...(request.correlation?.teamRunId ? { 'x-worklite-team-run-id': request.correlation.teamRunId } : {}),
-        ...(request.correlation?.teamTaskAttemptId ? { 'x-worklite-team-task-attempt-id': request.correlation.teamTaskAttemptId } : {}),
-      },
-    } : {}),
+    [`model_providers.${launch.modelProvider}.http_headers`]: {
+      'x-worklite-log-source': request.owner,
+      ...(request.correlation?.teamRunId ? { 'x-worklite-team-run-id': request.correlation.teamRunId } : {}),
+      ...(request.correlation?.teamTaskAttemptId ? { 'x-worklite-team-task-attempt-id': request.correlation.teamTaskAttemptId } : {}),
+    },
   };
-  return [...request.commandArguments, ...Object.entries(config).flatMap(([key, value]) => ['-c', `${key}=${tomlValue(value)}`]), 'app-server', '--listen', 'stdio://'];
+  return [...launch.commandArguments, ...Object.entries(config).flatMap(([key, value]) => ['-c', `${key}=${tomlValue(value)}`]), 'app-server', '--listen', 'stdio://'];
 }
 
 function tomlValue(value: unknown): string {
   if (typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(tomlValue).join(', ')}]`;
   return `{ ${Object.entries(value as Record<string, unknown>).map(([key, entry]) => `${JSON.stringify(key)} = ${tomlValue(entry)}`).join(', ')} }`;
+}
+
+function codexItemSummary(item: Record<string, any>): string | undefined {
+  if (item.type === 'commandExecution' && typeof item.command === 'string') {
+    return [item.command, typeof item.exitCode === 'number' ? `exit ${item.exitCode}` : ''].filter(Boolean).join(' · ');
+  }
+  if (item.type === 'fileChange' && Array.isArray(item.changes)) {
+    return item.changes.map((change: { path?: unknown }) => change.path).filter((path: unknown): path is string => typeof path === 'string').join(', ') || undefined;
+  }
+  if (item.type === 'mcpToolCall' && typeof item.tool === 'string') return [item.server, item.tool].filter((part) => typeof part === 'string').join(' · ');
+  if (item.type === 'webSearch' && typeof item.query === 'string') return item.query;
+  return undefined;
 }
 
 function requireSupportedVersion(userAgent: unknown): void {

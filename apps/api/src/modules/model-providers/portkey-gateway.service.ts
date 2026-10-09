@@ -11,7 +11,7 @@ import type { ModelProviderConfig } from '@worklite/model-gateway';
 import { agents, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 
-const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 3392);
+const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392);
 
 const portkeyRequire = createRequire(__filename);
 const HOP_BY_HOP_HEADERS = new Set([
@@ -599,7 +599,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
 
   private gatewayDatabasePath(): string {
     const configured = process.env.PORTKEY_GATEWAY_DB_PATH?.trim();
-    return resolve(process.cwd(), configured || 'data/worklite-gateway.db');
+    return resolve(process.cwd(), configured || '../../.data/deployment/worklite-gateway.db');
   }
 
 }

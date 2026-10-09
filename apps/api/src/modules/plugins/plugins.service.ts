@@ -8,6 +8,8 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 
 export const FEISHU_PLUGIN_ID = 'feishu-bot' as const;
 export const CODEX_CLI_PLUGIN_ID = 'codex-cli-chat' as const;
+export const CLAUDE_CODE_PLUGIN_ID = 'claude-code' as const;
+const EXECUTABLE_PLUGIN_IDS: readonly string[] = [CODEX_CLI_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID];
 export const CODEX_CLI_AGENT_ID = 'agt_codex_cli_chat' as const;
 
 @Injectable()
@@ -49,7 +51,7 @@ export class PluginsService {
       }).where(eq(plugins.id, pluginId));
       return this.get(pluginId);
     }
-    if (pluginId !== CODEX_CLI_PLUGIN_ID) throw new BadRequestException('This plugin has no executable command configuration.');
+    if (!EXECUTABLE_PLUGIN_IDS.includes(pluginId)) throw new BadRequestException('This plugin has no executable command configuration.');
     const command = this.normalizeCommand(input?.command);
     const [updated] = await this.db.update(plugins).set({ command, updatedAt: new Date() }).where(eq(plugins.id, pluginId)).returning();
     if (!updated) throw new NotFoundException('Plugin not found.');
@@ -57,7 +59,7 @@ export class PluginsService {
   }
 
   async test(pluginId: string): Promise<PluginTestResult> {
-    if (pluginId !== CODEX_CLI_PLUGIN_ID) throw new BadRequestException('Only executable plugins support command testing.');
+    if (!EXECUTABLE_PLUGIN_IDS.includes(pluginId)) throw new BadRequestException('Only executable plugins support command testing.');
     return this.probe(await this.command(pluginId));
   }
 
@@ -73,7 +75,7 @@ export class PluginsService {
   }
 
   private async toView(row: typeof plugins.$inferSelect): Promise<PluginView> {
-    const availability = row.id !== CODEX_CLI_PLUGIN_ID
+    const availability = !EXECUTABLE_PLUGIN_IDS.includes(row.id)
       ? { enabled: true, status: 'available' as const }
       : this.probe(row.command);
     const [officialAccount] = row.id === WECHAT_OFFICIAL_ACCOUNT_PLUGIN_ID
@@ -122,7 +124,7 @@ export class PluginsService {
 
   private probe(command: string): PluginTestResult {
     const [executable, ...argumentsValue] = parsePluginCommand(command);
-    const result = spawnSync(executable === 'cx' || executable === 'cxo' ? 'codex' : executable, [...argumentsValue, '--version'], { stdio: 'ignore' });
+    const result = spawnSync(executable === 'cx' ? 'codex' : executable, [...argumentsValue, '--version'], { stdio: 'ignore' });
     const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
     if (errorCode === 'ENOENT') return { enabled: false, status: 'missing' };
     return result.status === 0 ? { enabled: true, status: 'available' } : { enabled: false, status: 'failed' };

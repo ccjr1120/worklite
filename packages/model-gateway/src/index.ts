@@ -50,7 +50,8 @@ export type GenerateAgentStepRequest = {
   jsonOutput?: boolean;
   correlation?: GatewayCorrelation;
   messages: readonly GatewayAgentMessage[];
-  skillScripts: Array<{ skillId: string; skillName: string; path: string }>;
+  // A script with a typed tool is offered as that tool instead of through the generic skill_script selector.
+  skillScripts: Array<{ skillId: string; skillName: string; path: string; tool?: GatewayToolDefinition }>;
   builtinTools?: readonly GatewayToolDefinition[];
   mcpTools?: readonly GatewayToolDefinition[];
   maxToolRounds?: number;
@@ -69,7 +70,7 @@ export type GatewayToolDefinition = {
 export type AgentStepResult = {
   text: string;
   responseMessages: GatewayAgentMessage[];
-  toolCalls: Array<{ toolCallId: string; toolName: string; input: unknown; skillId?: string; scriptPath?: string; arguments?: string[] }>;
+  toolCalls: Array<{ toolCallId: string; toolName: string; input: unknown; skillId?: string; scriptPath?: string; arguments?: string[]; modelToolName?: string }>;
   finishReason: string | null;
   contextDropped: number;
 };
@@ -190,6 +191,8 @@ export class AiSdkModelGateway implements ModelGateway {
   async generateAgentStep(request: GenerateAgentStepRequest): Promise<AgentStepResult> {
     const model = resolveModel(request.provider, request.model, request.correlation);
     const useResponses = isResponsesProvider(request.provider);
+    const genericScripts = request.skillScripts.filter((script) => !script.tool);
+    const typedScripts = new Map(request.skillScripts.flatMap((script) => script.tool ? [[script.tool.name, script] as const] : []));
     const skillScript = tool({
       description: 'Run one script from an assigned Skill package immediately on the WorkLite host. Select only an exact Skill id and script path from the assigned script list. arguments must be a command-line string array: use [] for a script with no input; for a JSON-input script use one serialized JSON string, never a nested object or array.',
       strict: useResponses ? false : undefined,
@@ -198,15 +201,23 @@ export class AiSdkModelGateway implements ModelGateway {
         additionalProperties: false,
         required: ['skillId', 'scriptPath', 'arguments'],
         properties: {
-          skillId: { type: 'string', enum: [...new Set(request.skillScripts.map((script) => script.skillId))] },
-          scriptPath: { type: 'string', enum: request.skillScripts.map((script) => script.path) },
+          skillId: { type: 'string', enum: [...new Set(genericScripts.map((script) => script.skillId))] },
+          scriptPath: { type: 'string', enum: genericScripts.map((script) => script.path) },
           arguments: { type: 'array', items: { type: 'string' } },
         },
       }),
     });
     const tools: Record<string, unknown> = {
-      ...(request.skillScripts.length > 0 ? { skill_script: skillScript } : {}),
+      ...(genericScripts.length > 0 ? { skill_script: skillScript } : {}),
     };
+    for (const definition of [...typedScripts.values()].map((script) => script.tool!)) {
+      if (tools[definition.name]) continue;
+      tools[definition.name] = tool({
+        description: definition.description,
+        strict: useResponses ? false : undefined,
+        inputSchema: jsonSchema<Record<string, unknown>>(definition.inputSchema as never),
+      });
+    }
     for (const definition of [...(request.builtinTools ?? []), ...(request.mcpTools ?? [])]) {
       if (!definition.name || tools[definition.name]) continue;
       tools[definition.name] = tool({
@@ -244,7 +255,7 @@ export class AiSdkModelGateway implements ModelGateway {
       }
     }
 
-    return toAgentStepResult(result, tools, context.dropped, request.jsonOutput === true);
+    return toAgentStepResult(result, tools, typedScripts, context.dropped, request.jsonOutput === true);
   }
 
   async runWorkflowAgent(request: RunWorkflowAgentRequest): Promise<WorkflowAgentLoopResult> {
@@ -638,12 +649,13 @@ function isResponsesProvider(provider: ModelProviderConfig): boolean {
 function toAgentStepResult(
   result: Awaited<ReturnType<typeof generateText>>,
   tools: Record<string, unknown>,
+  typedScripts: ReadonlyMap<string, { skillId: string; path: string }>,
   contextDropped: number,
   jsonOutput: boolean,
 ): AgentStepResult {
   const invalidToolRequest = classifyInvalidToolRequest(result.toolCalls);
   if (invalidToolRequest) throw invalidToolRequest;
-  const toolCalls = result.toolCalls.flatMap((call) => call ? normalizeAgentToolCall(call as { toolCallId: string; toolName: string; input: unknown }, tools) : []);
+  const toolCalls = result.toolCalls.flatMap((call) => call ? normalizeAgentToolCall(call as { toolCallId: string; toolName: string; input: unknown }, tools, typedScripts) : []);
   return {
     text: jsonOutput && toolCalls.length === 0 ? extractJsonText(result.text) : result.text,
     responseMessages: normalizeResponseMessages(result.responseMessages, new Set(toolCalls.map((call) => call.toolCallId))),
@@ -764,15 +776,20 @@ function resolveModel(provider: ModelProviderConfig, modelId: string, correlatio
 
 export function gatewayBaseURL(): string {
   const apiURL = process.env.WORKLITE_API_URL?.trim();
-  return apiURL ? `${apiURL.replace(/\/$/, '')}/portkey-gateway/v1` : 'http://127.0.0.1:3392/v1';
+  return apiURL ? `${apiURL.replace(/\/$/, '')}/portkey-gateway/v1` : 'http://127.0.0.1:23392/v1';
 }
 
 function toModelMessages(messages: readonly GatewayMessage[]): ModelMessage[] {
   return messages.map(({ role, content }) => ({ role, content }));
 }
 
-function normalizeAgentToolCall(call: { toolCallId: string; toolName: string; input: unknown }, tools: Record<string, unknown>): AgentStepResult['toolCalls'] {
+function normalizeAgentToolCall(call: { toolCallId: string; toolName: string; input: unknown }, tools: Record<string, unknown>, typedScripts: ReadonlyMap<string, { skillId: string; path: string }>): AgentStepResult['toolCalls'] {
   if (!tools[call.toolName]) return [];
+  // A typed script tool runs as the same skill_script invocation, with its JSON object as the single argument.
+  const typedScript = typedScripts.get(call.toolName);
+  if (typedScript) {
+    return [{ toolCallId: call.toolCallId, toolName: 'skill_script', modelToolName: call.toolName, input: call.input, skillId: typedScript.skillId, scriptPath: typedScript.path, arguments: [JSON.stringify(call.input ?? {})] }];
+  }
   if (call.toolName !== 'skill_script') return [{ toolCallId: call.toolCallId, toolName: call.toolName, input: call.input }];
   const input = asRecord(call.input);
   const skillId = requiredString(input?.skillId, 200);

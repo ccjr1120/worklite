@@ -28,6 +28,16 @@ export function useChatConversationRecordsQuery(id: string | null) {
   return useQuery({ queryKey: ['chat-conversation-records', id], queryFn: () => api.chatConversationRecords(id!), enabled: Boolean(id), refetchInterval: 5_000 });
 }
 
+export function useChatProjectOperationQuery(taskId: string, operationKey: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['chat-codex-operation', taskId, operationKey],
+    queryFn: () => api.chatProjectOperation(taskId, operationKey),
+    enabled: Boolean(taskId && operationKey && enabled),
+    retry: false,
+    staleTime: Infinity,
+  });
+}
+
 export function useWorkliteUpgradeQuery(id: string) {
   return useQuery({
     queryKey: ['worklite-upgrade', id],

@@ -10,8 +10,10 @@ import { BuiltinAgentToolsService } from './builtin-agent-tools.service';
 import { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
 import { McpServersModule } from '../mcp-servers/mcp-servers.module';
 import { PluginsModule } from '../plugins/plugins.module';
-import { ChatCodexTasksService } from './chat-codex-tasks.service';
+import { ChatProjectTasksService } from './chat-project-tasks.service';
 import { CodexAppServerService } from './codex-app-server.service';
+import { ClaudeCodeService } from './claude-code.service';
+import { ProjectExecutorService } from './project-executor.service';
 
-@Module({ imports: [WorkspaceModule, SkillsModule, CommandsModule, McpServersModule, forwardRef(() => PluginsModule)], controllers: [AgentsController], providers: [AgentsService, AgentExecutionsService, McpRuntimeService, BuiltinAgentToolsService, IsolatedAgentInvocationService, CodexAppServerService, ChatCodexTasksService], exports: [AgentsService, AgentExecutionsService, IsolatedAgentInvocationService, ChatCodexTasksService] })
+@Module({ imports: [WorkspaceModule, SkillsModule, CommandsModule, McpServersModule, forwardRef(() => PluginsModule)], controllers: [AgentsController], providers: [AgentsService, AgentExecutionsService, McpRuntimeService, BuiltinAgentToolsService, IsolatedAgentInvocationService, CodexAppServerService, ClaudeCodeService, ProjectExecutorService, ChatProjectTasksService], exports: [AgentsService, AgentExecutionsService, IsolatedAgentInvocationService, ProjectExecutorService, ChatProjectTasksService] })
 export class AgentsModule {}

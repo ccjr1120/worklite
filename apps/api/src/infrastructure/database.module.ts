@@ -11,7 +11,7 @@ export const DATABASE = Symbol('DATABASE');
       provide: DATABASE,
       inject: [ConfigService],
       useFactory: async (config: ConfigService): Promise<Database> => {
-        const db = createDb(config.get<string>('SQLITE_PATH') ?? '../../.data/worklite.db');
+        const db = createDb(config.get<string>('SQLITE_PATH') ?? '../../.data/deployment/worklite.db');
         await initializeDatabase(db);
         return db;
       },

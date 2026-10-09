@@ -356,20 +356,23 @@ export type StoredAgentPendingQuestion = {
   question: string;
   options: string[];
   createdAt: string;
-  codexTaskId?: string;
+  projectTaskId?: string;
   shellCallId?: string;
   recovery?: { operationKey: string; commandExecutionId?: string };
 };
 
 export type StoredWorkliteScriptResult =
   | { type: 'resource'; resourceType: 'provider' | 'skill' | 'mcp-server' | 'workflow'; id: string; route: string }
-  | { type: 'navigation'; target: 'home' | 'chat' | 'skills' | 'mcp-servers' | 'model-providers' | 'logs' | 'workflows' | 'settings-appearance' | 'settings-usage' | 'settings-audit-log'; route: string }
+  | { type: 'navigation'; target: 'home' | 'chat' | 'skills' | 'mcp-servers' | 'model-providers' | 'logs' | 'workflows' | 'settings-appearance' | 'settings-usage' | 'settings-audit-log' | `/workflows/${string}`; route: string }
   | { type: 'dispatch'; submissionId: string; route: string }
   | { type: 'settings'; appearance: 'system' | 'light' | 'dark' }
   | { type: 'snapshot' };
 
+export type StoredProjectExecutor = 'codex' | 'claude';
+
 export type StoredChatCapabilities = {
   revision: number;
+  defaultExecutor?: StoredProjectExecutor;
   agent: { id: string; providerId: string | null; model: string; systemPrompt: string };
   skills: Array<{ id: string; name: string; instructions: string; files: Array<{ path: string; content: string }> }>;
   mcpServers: Array<{ id: string; name: string; endpoint: string; authSecret: string | null; allowedTools: string[] }>;
@@ -379,6 +382,7 @@ export const chatConfigurations = sqliteTable('chat_bot_configurations', {
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   revision: integer('revision').notNull(),
   extensionPrompt: text('extension_prompt').notNull().default(''),
+  defaultExecutor: text('default_executor').$type<StoredProjectExecutor>().notNull().default('claude'),
   providerId: text('provider_id'), model: text('model').notNull(),
   skillIds: text('skill_ids', { mode: 'json' }).$type<string[]>().notNull(),
   mcpServerIds: text('mcp_server_ids', { mode: 'json' }).$type<string[]>().notNull(),
@@ -430,27 +434,25 @@ export const agentToolCalls = sqliteTable('agent_tool_calls', {
   id: text('id').primaryKey(), executionId: text('execution_id').notNull().references(() => agentExecutions.id, { onDelete: 'cascade' }), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }), toolCallId: text('tool_call_id').notNull(), toolName: text('tool_name').$type<'skill_script' | 'builtin' | 'mcp'>().notNull(), workingDirectory: text('working_directory').notNull(), skillId: text('skill_id'), skillName: text('skill_name'), scriptPath: text('script_path'), mcpServerId: text('mcp_server_id'), mcpToolName: text('mcp_tool_name'), arguments: text('arguments', { mode: 'json' }).$type<string[]>().notNull().default([]), input: text('input', { mode: 'json' }).$type<unknown>(), packageFiles: text('package_files', { mode: 'json' }).$type<Array<{ path: string; content: string }>>().notNull().default([]), commandExecutionId: text('command_execution_id').references(() => commandExecutions.id, { onDelete: 'set null' }), status: text('status').$type<'running' | 'completed' | 'failed' | 'cancelled'>().notNull().default('running'), output: text('output').notNull().default(''), result: text('result', { mode: 'json' }).$type<StoredWorkliteScriptResult>(), exitCode: integer('exit_code'), resultAppended: integer('result_appended', { mode: 'boolean' }).notNull().default(false), createdAt: timestamp('created_at'), finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
 });
 
-export type StoredCodexLaunch = {
-  mode: 'cx' | 'cxo';
-  home: string;
-  model: string;
-  modelProvider: string;
-  settings: Record<string, unknown>;
-};
+// Captured launch of a project executor. Codex always uses the ~/.codex-cli home through the WorkLite Gateway;
+// Claude Code uses the operator's ~/.claude configuration, whose effective base URL must be the Gateway.
+export type StoredProjectExecutorLaunch =
+  | { executor: 'codex'; commandArguments: string[]; home: string; model: string; modelProvider: string; settings: Record<string, unknown> }
+  | { executor: 'claude'; commandArguments: string[]; baseUrl: string; model: string | null };
 
-export type StoredChatCodexSnapshot = {
-  launch?: StoredCodexLaunch;
-  commandArguments: string[];
+export type StoredChatProjectTaskSnapshot = {
+  launch?: StoredProjectExecutorLaunch;
   projectInstructions: Array<{ path: string; content: string }>;
   capabilities: StoredChatCapabilities;
 };
 
-export const chatCodexTasks = sqliteTable('chat_codex_tasks', {
+// Table names keep their original codex prefix as persisted identifiers.
+export const chatProjectTasks = sqliteTable('chat_codex_tasks', {
   id: text('id').primaryKey().references(() => agentToolCalls.id, { onDelete: 'cascade' }),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   executionId: text('execution_id').notNull().references(() => agentExecutions.id, { onDelete: 'cascade' }),
   goal: text('goal').notNull(), projectDirectory: text('project_directory').notNull(), model: text('model').notNull(),
-  snapshot: text('snapshot', { mode: 'json' }).$type<StoredChatCodexSnapshot>().notNull(),
+  snapshot: text('snapshot', { mode: 'json' }).$type<StoredChatProjectTaskSnapshot>().notNull(),
   status: text('status').$type<'running' | 'waiting_for_input' | 'waiting_for_recovery' | 'succeeded' | 'failed' | 'cancelled'>().notNull(),
   answers: text('answers', { mode: 'json' }).$type<Array<{ question: string; answer: string }>>().notNull().default([]),
   pendingQuestion: text('pending_question', { mode: 'json' }).$type<StoredAgentPendingQuestion | null>(),
@@ -459,8 +461,9 @@ export const chatCodexTasks = sqliteTable('chat_codex_tasks', {
   createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
 }, (table) => [index('chat_codex_tasks_execution_idx').on(table.executionId)]);
 
-export const chatCodexOperations = sqliteTable('chat_codex_operations', {
-  key: text('key').primaryKey(), taskId: text('task_id').notNull().references(() => chatCodexTasks.id, { onDelete: 'cascade' }),
+// Operation journal of tasks recorded before executors used native tools; retained as read-only evidence.
+export const chatProjectOperations = sqliteTable('chat_codex_operations', {
+  key: text('key').primaryKey(), taskId: text('task_id').notNull().references(() => chatProjectTasks.id, { onDelete: 'cascade' }),
   taskKey: text('task_key').notNull(), operationKey: text('operation_key').notNull(), toolName: text('tool_name').notNull(),
   inputFingerprint: text('input_fingerprint').notNull(),
   status: text('status').$type<'reserved' | 'completed' | 'uncertain' | 'failed'>().notNull(),
@@ -530,6 +533,7 @@ export type StoredAgentTeamRoleConfiguration = {
   skills: StoredAgentTeamSkillSnapshot[];
   mcpServers: StoredAgentTeamMcpServerSnapshot[];
   toolNames: string[];
+  executor?: StoredProjectExecutor;
 };
 
 export type StoredAgentTeamRecipeDefaults = {
@@ -539,7 +543,7 @@ export type StoredAgentTeamRecipeDefaults = {
 export type StoredAgentTeamVersionSnapshot = {
   processId: string;
   processVersion: string;
-  developerExecution: { kind: 'codex_app_server'; commandArguments: string[]; launch?: StoredCodexLaunch };
+  developerExecution: StoredProjectExecutorLaunch | { kind: 'codex_app_server' };
   roles: StoredAgentTeamRoleConfiguration[];
   processFiles: Array<{ path: string; content: string }>;
   recipeDefaults: StoredAgentTeamRecipeDefaults;

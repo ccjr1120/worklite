@@ -5,6 +5,6 @@ export default defineConfig({
   out: './drizzle',
   dialect: 'sqlite',
   dbCredentials: {
-    url: process.env.SQLITE_PATH ?? '.data/worklite.db',
+    url: process.env.SQLITE_PATH ?? '../../.data/deployment/worklite.db',
   },
 });

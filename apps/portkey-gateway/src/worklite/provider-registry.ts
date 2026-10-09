@@ -82,7 +82,7 @@ let codexSyncedAt = 0;
 
 function databasePath(): string {
   const configured = process.env.PORTKEY_GATEWAY_DB_PATH?.trim();
-  return configured ? resolve(process.cwd(), configured) : resolve(process.cwd(), 'data/worklite-gateway.db');
+  return configured ? resolve(process.cwd(), configured) : resolve(process.cwd(), '../../.data/deployment/worklite-gateway.db');
 }
 
 function getDatabase(): BetterSqlite3.Database {

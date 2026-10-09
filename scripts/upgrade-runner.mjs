@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // Runs only after an operator installation command or a server-bound Chat redeploy request.
 import { execFileSync, spawn } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, readdirSync, lstatSync, readlinkSync, symlinkSync, chmodSync, rmSync, openSync, closeSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, readdirSync, lstatSync, readlinkSync, symlinkSync, chmodSync, rmSync, openSync, closeSync, writeSync } from 'node:fs';
 
 const [command, ...args] = process.argv.slice(2);
 const sleep = (milliseconds) => new Promise((done) => setTimeout(done, milliseconds));
@@ -32,6 +32,16 @@ function prepare(projectRoot, state, id) {
     if (info.isSymbolicLink()) symlinkSync(readlinkSync(source), destination);
     else { cpSync(source, destination); chmodSync(destination, info.mode); }
     manifest.push({ path, mode: info.mode, symlink: info.isSymbolicLink(), hash: createHash('sha256').update(info.isSymbolicLink() ? readlinkSync(destination) : readFileSync(destination)).digest('hex') });
+  }
+  const gatewayConfigurationPath = 'apps/portkey-gateway/conf.json';
+  if (!manifest.some((file) => file.path === gatewayConfigurationPath)) {
+    const examplePath = join(projectRoot, 'apps/portkey-gateway/conf.example.json');
+    const destination = join(root, gatewayConfigurationPath);
+    const info = lstatSync(examplePath);
+    mkdirSync(dirname(destination), { recursive: true });
+    cpSync(examplePath, destination);
+    chmodSync(destination, info.mode);
+    manifest.push({ path: gatewayConfigurationPath, mode: info.mode, symlink: false, hash: createHash('sha256').update(readFileSync(destination)).digest('hex') });
   }
   const releaseHash = createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
   write(join(root, 'release-manifest.json'), { releaseHash, files: manifest });
@@ -65,6 +75,60 @@ async function portsFree(ports) {
     const server = createServer(); server.once('error', () => fail(new Error(`Port ${port} is occupied; its listener will not be stopped.`)));
     server.listen(port, '127.0.0.1', () => server.close(done));
   });
+}
+
+function listeners(port) {
+  try {
+    return [...new Set(execFileSync('lsof', ['-nP', '-t', `-iTCP:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8' }).trim().split(/\s+/).filter(Boolean).map(Number))];
+  } catch (error) {
+    if (error?.status === 1) return [];
+    throw error;
+  }
+}
+
+function processGroup(pid) {
+  return Number(execFileSync('ps', ['-p', String(pid), '-o', 'pgid='], { encoding: 'utf8' }).trim());
+}
+
+function groupAlive(pgid) {
+  try { process.kill(-pgid, 0); return true; }
+  catch (error) { return error?.code !== 'ESRCH'; }
+}
+
+function verifiedLegacyPid(runtime) {
+  const pidPath = join(runtime.dataDirectory, 'worklite-local.pid');
+  if (!existsSync(pidPath)) throw new Error('Deployment ports are occupied, and no legacy launcher PID file proves ownership.');
+  const pid = Number(readFileSync(pidPath, 'utf8').trim());
+  if (!Number.isInteger(pid) || pid <= 1 || !alive(pid)) throw new Error('Deployment ports are occupied, but the recorded legacy launcher PID is not active.');
+  const command = execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' }).trim();
+  const script = command.split(/\s+/).find((argument) => argument.includes('start-local.mjs'));
+  if (!script || resolve(runtime.projectRoot, script) !== join(runtime.projectRoot, 'scripts/start-local.mjs')) throw new Error('The recorded PID is not this repository\'s legacy start-local.mjs process.');
+  if (processGroup(pid) !== pid) throw new Error('The recorded legacy launcher is not the leader of its own process group.');
+  const cwd = execFileSync('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], { encoding: 'utf8' }).split(/\r?\n/).find((line) => line.startsWith('n'))?.slice(1);
+  if (!cwd || resolve(cwd) !== resolve(runtime.projectRoot)) throw new Error('The recorded legacy launcher does not run from this repository root.');
+  const listening = runtime.ports.flatMap((port) => listeners(port).map((listenerPid) => ({ port, pid: listenerPid })));
+  if (!listening.length || listening.some(({ pid: listenerPid }) => processGroup(listenerPid) !== pid)) throw new Error('Deployment port listeners do not all belong to the recorded legacy launcher process group.');
+  return { pid, pidPath };
+}
+
+async function stopLegacyLauncher(runtime) {
+  const { pid, pidPath } = verifiedLegacyPid(runtime);
+  process.kill(-pid, 'SIGTERM');
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline && (groupAlive(pid) || runtime.ports.some((port) => listeners(port).length))) await sleep(100);
+  if (groupAlive(pid)) {
+    process.kill(-pid, 'SIGKILL');
+    const killDeadline = Date.now() + 5_000;
+    while (Date.now() < killDeadline && (groupAlive(pid) || runtime.ports.some((port) => listeners(port).length))) await sleep(100);
+  }
+  await portsFree(runtime.ports);
+  rmSync(pidPath, { force: true });
+}
+
+async function freeTargetPorts(runtime) {
+  const occupied = runtime.ports.some((port) => listeners(port).length > 0);
+  if (!occupied) { await portsFree(runtime.ports); return; }
+  await stopLegacyLauncher(runtime);
 }
 
 function profileEnvironment(runtime, data, ports, preflight) {
@@ -112,6 +176,23 @@ async function stop(pid, releaseDirectory) {
   try { process.kill(-pid, 'SIGKILL'); } catch { /* All owned processes already exited. */ }
 }
 
+async function stopImmediately(runtime) {
+  if (!alive(runtime.pid)) return;
+  const processCommand = execFileSync('ps', ['-p', String(runtime.pid), '-o', 'command='], { encoding: 'utf8' });
+  if (!processCommand.includes(join(runtime.releaseDirectory, 'scripts/managed-runtime.mjs')) || processGroup(runtime.pid) !== runtime.pid) {
+    throw new Error('The recorded PID is not the owned managed runtime process group; refusing to stop it.');
+  }
+  for (const port of runtime.ports) {
+    for (const pid of listeners(port)) {
+      if (processGroup(pid) !== runtime.pid) throw new Error(`Port ${port} has a listener outside the managed runtime process group; it was left untouched.`);
+    }
+  }
+  process.kill(-runtime.pid, 'SIGKILL');
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline && runtime.ports.some((port) => listeners(port).length > 0)) await sleep(50);
+  await portsFree(runtime.ports);
+}
+
 async function copyData(source, destination, moduleRoot) {
   mkdirSync(destination, { recursive: true });
   const SQLite = createRequire(join(moduleRoot, 'apps/api/package.json'))('better-sqlite3');
@@ -149,20 +230,20 @@ async function preflight(runtime, release, log, id) {
 }
 
 async function install(profile) {
-  if (!['development', 'deployment'].includes(profile)) throw new Error('Select development or deployment explicitly.');
+  if (profile !== 'deployment') throw new Error('Select deployment explicitly.');
   const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-  const dataDirectory = join(projectRoot, '.data', ...(profile === 'deployment' ? ['deployment'] : []));
+  const dataDirectory = join(projectRoot, '.data', 'deployment');
   const stateDirectory = join(dataDirectory, 'runtime');
   const currentPath = join(stateDirectory, 'current.json');
   if (existsSync(currentPath)) throw new Error('A managed baseline already exists; use a confirmed upgrade request.');
   const id = `baseline_${randomUUID()}`;
   const release = prepare(projectRoot, stateDirectory, id);
-  const runtime = { ...release, projectRoot, dataDirectory, stateDirectory, ports: profile === 'deployment' ? [23390, 23391, 23392] : [3390, 3391, 3392], preflightPorts: profile === 'deployment' ? [23490, 23491, 23492] : [3490, 3491, 3492] };
+  const runtime = { ...release, projectRoot, dataDirectory, stateDirectory, ports: [23390, 23391, 23392], preflightPorts: [23490, 23491, 23492] };
   const log = openSync(join(stateDirectory, 'install.log'), 'a', 0o600);
   try {
     await build(release.releaseDirectory, log);
     await preflight(runtime, release, log, id);
-    await portsFree(runtime.ports);
+    await freeTargetPorts(runtime);
     const backup = join(stateDirectory, 'backups', id);
     await copyData(dataDirectory, backup, release.releaseDirectory);
     write(currentPath, runtime);
@@ -171,6 +252,111 @@ async function install(profile) {
     catch (error) { await stop(runtime.pid, runtime.releaseDirectory); restoreData(backup, dataDirectory); rmSync(currentPath); throw error; }
     process.stdout.write(`Managed WorkLite baseline started on port ${runtime.ports[0]}.\n`);
   } finally { closeSync(log); }
+}
+
+function readActiveUpgrade(stateDirectory) {
+  const activePath = join(stateDirectory, 'active.json');
+  if (!existsSync(activePath)) return null;
+  const { jobId } = read(activePath);
+  return { id: jobId, ...read(join(stateDirectory, 'upgrades', `${jobId}.json`)) };
+}
+
+function verifiedOrphanGroups(runtime) {
+  const groups = new Set();
+  for (const port of runtime.ports) {
+    for (const pid of listeners(port)) {
+      const pgid = processGroup(pid);
+      let command = '';
+      try { command = execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' }).trim(); }
+      catch { throw new Error(`Deployment port ${port} changed ownership during runtime recovery.`); }
+      if (pgid !== runtime.pid || !command.includes(runtime.releaseDirectory)) throw new Error(`Deployment port ${port} is occupied by a process outside the recorded managed release; it was left untouched.`);
+      groups.add(pgid);
+    }
+  }
+  return [...groups];
+}
+
+async function stopOrphanGroups(runtime, groups) {
+  for (const pgid of groups) {
+    try { process.kill(-pgid, 'SIGKILL'); }
+    catch (error) { if (error?.code !== 'ESRCH') throw error; }
+    const groupHasTargetListener = () => runtime.ports.some((port) => listeners(port).some((pid) => {
+      try { return processGroup(pid) === pgid; } catch { return false; }
+    }));
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline && groupHasTargetListener()) await sleep(50);
+    if (groupHasTargetListener()) throw new Error('A verified orphan listener did not stop after interruption.');
+  }
+}
+
+function assertNoActiveUpgrade(state) {
+  const activePath = join(state, 'active.json');
+  if (!existsSync(activePath)) return;
+  const { jobId } = read(activePath);
+  const active = read(join(state, 'upgrades', `${jobId}.json`));
+  if (!['succeeded', 'rolled_back', 'failed'].includes(active.phase)) throw new Error('Another managed deployment is active.');
+}
+
+function describeError(error) {
+  const details = [];
+  const seen = new Set();
+  let current = error;
+  while (current instanceof Error && details.length < 4 && !seen.has(current)) {
+    seen.add(current);
+    const code = typeof current.code === 'string' ? ` [${current.code}]` : '';
+    details.push(`${current.message}${code}`);
+    current = current.cause;
+  }
+  return details.join(' <- ') || String(error);
+}
+
+async function fetchForUpgrade(url, options, action) {
+  try { return await fetch(url, options); }
+  catch (error) { throw new Error(`${action} request to ${url} failed: ${describeError(error)}`, { cause: error }); }
+}
+
+async function deploy(profile) {
+  if (profile !== 'deployment') throw new Error('Select deployment explicitly.');
+  const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const dataDirectory = join(projectRoot, '.data', 'deployment');
+  const stateDirectory = join(dataDirectory, 'runtime');
+  const currentPath = join(stateDirectory, 'current.json');
+  if (!existsSync(currentPath)) return install(profile);
+  const current = read(currentPath);
+  const expectedPorts = [23390, 23391, 23392];
+  if (resolve(current.projectRoot) !== projectRoot || resolve(current.dataDirectory) !== dataDirectory || JSON.stringify(current.ports) !== JSON.stringify(expectedPorts)) throw new Error('The recorded managed baseline does not belong to this project profile.');
+  const active = readActiveUpgrade(stateDirectory);
+  const terminalPhases = ['succeeded', 'rolled_back', 'failed'];
+  if (active && !terminalPhases.includes(active.phase)) throw new Error('Another managed deployment is active.');
+  const id = `upgrade_${randomUUID()}`;
+  const release = prepare(projectRoot, stateDirectory, id);
+  let candidatePreflighted = false;
+  const targetUnavailable = !alive(current.pid);
+  if (targetUnavailable) {
+    mkdirSync(join(stateDirectory, 'upgrades'), { recursive: true });
+    const log = openSync(join(stateDirectory, 'upgrades', `${id}.log`), 'a', 0o600);
+    try {
+      assertRelease(current);
+      await build(release.releaseDirectory, log);
+      await preflight(current, release, log, id);
+      // The candidate is ready before the recorded orphan groups are stopped.
+      candidatePreflighted = true;
+    } finally { closeSync(log); }
+  }
+  assertNoActiveUpgrade(stateDirectory);
+  const now = new Date().toISOString();
+  const job = {
+    id, ...release, summary: 'Operator-requested local deployment', phase: 'authorized', workspaceId: 'operator',
+    submissionId: id, executionId: 'operator', token: randomBytes(32).toString('hex'), pausedTeams: [], pausedWorkflows: [],
+    confirmedAt: now, confirmedBy: 'pnpm deploy:local', updatedAt: now, interruptionPolicy: 'cancel_active_work_without_resume',
+    ...(candidatePreflighted ? { candidatePreflighted: true } : {}), ...(targetUnavailable ? { targetUnavailable: true } : {}),
+  };
+  write(join(stateDirectory, 'upgrades', `${id}.json`), job);
+  write(join(stateDirectory, 'active.json'), { jobId: id });
+  await run(stateDirectory, id);
+  const settled = read(join(stateDirectory, 'upgrades', `${id}.json`));
+  if (settled.phase !== 'succeeded') throw new Error(settled.error || `Managed deployment ended in phase ${settled.phase}.`);
+  process.stdout.write(`Managed WorkLite deployment completed on port ${current.ports[0]}.\n`);
 }
 
 async function run(state, id) {
@@ -186,58 +372,122 @@ async function run(state, id) {
   const previous = job.previous ?? current;
   const backup = join(state, 'backups', id);
   const phase = (value, extra = {}) => { job = { ...read(jobPath), ...extra, phase: value, runnerPid: process.pid, updatedAt: new Date().toISOString() }; write(jobPath, job); };
+  let stage = 'upgrade initialization';
+  const targetUrl = `http://127.0.0.1:${previous.ports[1]}/api/upgrades/runtime`;
+  async function verifyTargetOwnership() {
+    const response = await fetchForUpgrade(targetUrl, { signal: AbortSignal.timeout(3000) }, 'Target runtime ownership check');
+    if (!response.ok) throw new Error(`Target runtime ownership check returned HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}.`);
+    const ownership = await response.json();
+    if (ownership.releaseHash !== previous.releaseHash || ownership.wrapperPid !== previous.pid) throw new Error('Target listeners are not owned by the recorded managed runtime.');
+  }
   async function call(action) {
-    const response = await fetch(`http://127.0.0.1:${previous.ports[1]}/api/upgrades/${id}/${action}`, { method: 'POST', headers: { 'x-worklite-upgrade-token': job.token }, signal: AbortSignal.timeout(30_000) });
-    if (!response.ok) throw new Error(`Upgrade ${action} did not complete.`);
+    const url = `http://127.0.0.1:${previous.ports[1]}/api/upgrades/${id}/${action}`;
+    const response = await fetchForUpgrade(url, { method: 'POST', headers: { 'x-worklite-upgrade-token': job.token }, signal: AbortSignal.timeout(30_000) }, `Upgrade ${action}`);
+    if (!response.ok) throw new Error(`Upgrade ${action} returned HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}.`);
     return response.json();
   }
+  async function cancelLegacyHandoff() {
+    if (job.executionId !== 'operator') throw new Error('The active runtime does not support immediate task cancellation; it was left running.');
+    const latest = read(jobPath);
+    const request = async (path, action) => {
+      const response = await fetchForUpgrade(`http://127.0.0.1:${previous.ports[1]}${path}`, { method: 'POST', signal: AbortSignal.timeout(5_000) }, action);
+      if (!response.ok) throw new Error(`${action} returned HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}.`);
+      return response.json();
+    };
+    for (const runId of latest.pausedWorkflows ?? []) await request(`/api/runs/${encodeURIComponent(runId)}/cancel`, 'Workflow cancellation');
+    for (const runId of latest.pausedTeams ?? []) await request(`/api/agent-teams/${encodeURIComponent(runId)}/cancel`, 'Team cancellation');
+    const commandsResponse = await fetchForUpgrade(`http://127.0.0.1:${previous.ports[1]}/api/commands`, { signal: AbortSignal.timeout(5_000) }, 'Command list');
+    if (!commandsResponse.ok) throw new Error(`Command list returned HTTP ${commandsResponse.status}${commandsResponse.statusText ? ` ${commandsResponse.statusText}` : ''}.`);
+    const commandRows = await commandsResponse.json();
+    const commands = Array.isArray(commandRows) ? commandRows : Array.isArray(commandRows.commands) ? commandRows.commands : [];
+    const activeCommands = commands.filter((command) => ['queued', 'running', 'cancelling'].includes(command.status));
+    for (const command of activeCommands) await request(`/api/commands/${encodeURIComponent(command.id)}/cancel`, 'Command cancellation');
+    if (activeCommands.length) await sleep(1_200);
+    const currentJob = read(jobPath);
+    currentJob.interruptionPolicy = 'cancel_active_work_without_resume';
+    currentJob.interruptedWork = {
+      agentExecutions: [],
+      teamRuns: [...new Set([...(currentJob.interruptedWork?.teamRuns ?? []), ...(latest.pausedTeams ?? [])])],
+      workflowRuns: [...new Set([...(currentJob.interruptedWork?.workflowRuns ?? []), ...(latest.pausedWorkflows ?? [])])],
+      commands: [...new Set([...(currentJob.interruptedWork?.commands ?? []), ...activeCommands.map((command) => command.id)])],
+      feishuRegistration: false,
+    };
+    write(jobPath, currentJob);
+  }
   async function recover() {
+    stage = 'previous release recovery';
     phase('recovering');
     const running = read(currentPath);
-    if (running.pid) await stop(running.pid, running.releaseDirectory);
+    if (running.pid) await stopImmediately(running);
     if (job.backupComplete) restoreData(backup, previous.dataDirectory);
     await portsFree(previous.ports);
     previous.pid = launch(previous, previous.dataDirectory, previous.ports, false, log); write(currentPath, previous);
     await ready(previous.pid, previous.ports, previous.releaseHash);
-    phase('rolled_back', { resumePending: true, error: '新版本未完成切换，已恢复对应的旧版本和数据。详情见本机升级日志。' });
-    try { await call('resume'); } catch { /* The API retries the persisted handoff. */ }
+    phase('rolled_back', { error: '新版本未完成切换，已恢复对应的旧版本和数据；被中断的任务不会自动恢复。详情见本机升级日志。' });
   }
   try {
     if (['frozen', 'switching', 'recovering'].includes(job.phase)) { await recover(); return; }
     phase('preflighting', { previous });
+    stage = 'release integrity check';
     assertRelease(job);
-    await build(job.releaseDirectory, log);
-    await preflight(previous, job, log, id);
+    stage = 'target runtime availability check';
+    if (!job.targetUnavailable) await verifyTargetOwnership();
+    if (!job.candidatePreflighted) {
+      stage = 'candidate build';
+      await build(job.releaseDirectory, log);
+      stage = 'isolated candidate preflight';
+      await preflight(previous, job, log, id);
+    }
     // No target process may be stopped before the isolated candidate is ready.
-    const ownership = await fetch(`http://127.0.0.1:${previous.ports[1]}/api/upgrades/runtime`, { signal: AbortSignal.timeout(3000) }).then((response) => response.json());
-    if (ownership.releaseHash !== previous.releaseHash || ownership.wrapperPid !== previous.pid) throw new Error('Target listeners are not owned by the recorded managed runtime.');
+    stage = 'final target ownership check';
+    if (!job.targetUnavailable) await verifyTargetOwnership();
     phase('draining');
-    const deadline = Date.now() + 15 * 60_000;
-    while (!(await call('handoff')).ready) { if (Date.now() > deadline) throw new Error('Task handoff timed out; no service was replaced.'); await sleep(1000); }
-    await call('freeze'); job = read(jobPath);
-    await stop(previous.pid, previous.releaseDirectory);
+    stage = 'interrupting active work';
+    if (!job.targetUnavailable) {
+      const handoff = await call('handoff');
+      if (!handoff.interrupted) await cancelLegacyHandoff();
+      else { stage = 'freezing runtime writes'; await call('freeze'); job = read(jobPath); }
+    } else {
+      const groups = verifiedOrphanGroups(previous);
+      await stopOrphanGroups(previous, groups);
+      await portsFree(previous.ports);
+    }
+    phase('frozen', { interruptionPolicy: 'cancel_active_work_without_resume' });
+    stage = 'stopping previous release';
+    await stopImmediately(previous);
     await portsFree(previous.ports);
+    stage = 'deployment data backup';
     await copyData(previous.dataDirectory, backup, previous.releaseDirectory);
     phase('switching', { backupComplete: true });
+    stage = 'starting candidate release';
     const candidate = { ...previous, releaseHash: job.releaseHash, releaseDirectory: job.releaseDirectory };
     candidate.pid = launch(candidate, candidate.dataDirectory, candidate.ports, false, log); write(currentPath, candidate);
     await ready(candidate.pid, candidate.ports, candidate.releaseHash);
-    phase('succeeded', { resumePending: true });
-    try { await call('resume'); } catch { /* The API retries the persisted handoff. */ }
+    phase('succeeded', { interruptionPolicy: 'cancel_active_work_without_resume' });
+    stage = 'reconnecting Feishu';
+    try { await call('complete'); }
+    catch (error) { writeSync(log, `Upgrade ${id} channel reconnect notice: ${describeError(error)}\n`); }
   } catch (error) {
     job = read(jobPath);
-    process.stderr.write(`${error instanceof Error ? error.message : 'Upgrade failed.'}\n`);
+    const detail = describeError(error);
+    const diagnostic = `Upgrade ${id} failed during "${stage}": ${detail}`;
+    writeSync(log, `${diagnostic}\n`);
+    process.stderr.write(`${diagnostic}\n`);
     if (['frozen', 'switching', 'recovering'].includes(job.phase)) {
       try { await recover(); }
-      catch { phase('recovering', { error: '自动恢复尚未完成，请在本机查看升级日志并恢复此请求。' }); }
+      catch (recoveryError) {
+        const recoveryDetail = describeError(recoveryError);
+        writeSync(log, `Upgrade ${id} previous release recovery failed: ${recoveryDetail}\n`);
+        phase('recovering', { error: `自动恢复尚未完成：${recoveryDetail}。原始失败：${detail}。详情见本机升级日志。` });
+      }
     } else {
-      phase('failed', { resumePending: true, error: '升级未完成，现有版本未被替换。详情见本机升级日志。' });
-      try { await call('resume'); } catch { /* Resume can be retried without repeating the upgrade. */ }
+      phase('failed', { error: `升级在「${stage}」阶段失败：${detail}。现有版本未被替换；已经中断的任务不会自动恢复。详情见本机升级日志。` });
     }
   } finally { closeSync(log); rmSync(lockPath, { force: true }); }
 }
 
 if (command === 'prepare') process.stdout.write(JSON.stringify(prepare(...args)));
 else if (command === 'install') await install(args[0]);
+else if (command === 'deploy') await deploy(args[0]);
 else if (command === 'run') await run(...args);
-else throw new Error('Usage: upgrade-runner.mjs install <development|deployment> | run <state-directory> <job-id>');
+else throw new Error('Usage: upgrade-runner.mjs deploy <deployment> | install <deployment> | run <state-directory> <job-id>');
