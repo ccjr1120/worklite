@@ -1146,13 +1146,15 @@ function parseTaskRequest(text: string): {
 }
 
 function extractDirectory(text: string): { value: string; raw: string } | null {
-  const labeled = text.match(/(?:directory|path|项目目录|目录|路径)\s*[:：]?\s*(\/[^\s，,；;]+)/i);
-  const raw = labeled?.[1] ?? text.match(/(^|\s)(\/[^\s，,；;]+)/)?.[2] ?? null;
+  const labeled = text.match(/(?:directory|path|项目目录|目录|路径)\s*[:：]?\s*(\/[^\s，,；;（）]+)/i);
+  const raw = labeled?.[1] ?? text.match(/(^|\s)(\/[^\s，,；;（）]+)/)?.[2] ?? null;
   return raw && isAbsolute(raw) ? { value: resolve(raw), raw } : null;
 }
 
 function parseMode(text: string): AgentTeamMode | null {
   const value = text.trim().toLowerCase();
+  const explicitMode = value.match(/\b(plan_only|implement_and_validate|validate_existing)\b/)?.[1];
+  if (explicitMode) return explicitMode as AgentTeamMode;
   if (/\b(plan|planning)\b|规划|计划/.test(value)) return 'plan_only';
   if (/\b(implement|fix|build)\b|实现|修复|开发/.test(value)) return 'implement_and_validate';
   if (/\b(check|validate|verify)\b|验证|检查/.test(value)) return 'validate_existing';

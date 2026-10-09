@@ -35,7 +35,7 @@ import { messagesHandler } from './handlers/messagesHandler';
 import { imageEditsHandler } from './handlers/imageEditsHandler';
 import { messagesCountTokensHandler } from './handlers/messagesCountTokensHandler';
 import modelResponsesHandler from './handlers/modelResponsesHandler';
-import { createProvider, deleteProvider, getProvider, listProviders, providerView, requestLog, requestLogs, requestStats, updateProvider } from './worklite/provider-registry';
+import { createProvider, deleteProvider, getProvider, listProviders, prepareGatewayDatabase, providerView, requestLog, requestLogs, requestStats, updateProvider } from './worklite/provider-registry';
 import { codexAuthStatus, deleteCodexAccount, importCodexAccounts, refreshCodexAccount, startCodexLogin, startCodexOAuthCallbackServer, updateCodexAccount } from './worklite/codex-auth';
 import { codexAccountUsages, codexRateLimits } from './worklite/codex-transport';
 import { isSystemOneProtocol, systemOnePassthrough, systemOneTest } from './worklite/systemone-transport';
@@ -332,7 +332,11 @@ app.onError((err, c) => {
   return c.json({ status: 'failure', message: err.message });
 });
 
-if (runtime === 'node') startCodexOAuthCallbackServer();
+if (runtime === 'node') {
+  // Runs at module load, before start-server binds the listener.
+  prepareGatewayDatabase();
+  startCodexOAuthCallbackServer();
+}
 
 /**
  * POST route for '/v1/messages' in anthropic format

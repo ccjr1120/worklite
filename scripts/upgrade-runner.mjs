@@ -144,7 +144,9 @@ function launch(runtime, data, ports, preflight, log) {
 }
 
 async function ready(pid, ports, hash) {
-  const deadline = Date.now() + 60_000;
+  // A one-time database VACUUM can keep a large deployment busy for minutes; an
+  // exited runtime still fails immediately below.
+  const deadline = Date.now() + 15 * 60_000;
   while (Date.now() < deadline) {
     if (!alive(pid)) throw new Error('The managed runtime exited before readiness.');
     try {

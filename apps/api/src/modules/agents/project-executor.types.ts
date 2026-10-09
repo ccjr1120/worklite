@@ -11,6 +11,7 @@ export type ProjectExecutorActivity = {
   itemId?: string;
   itemType?: string;
   summary?: string;
+  text?: string;
 };
 
 export type ProjectExecutorSkill = {

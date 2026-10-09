@@ -3,7 +3,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, Logger, Not
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { and, asc, desc, eq, gt, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { AgentExecutionErrorCode, AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, WorkflowNodeActivityDetail, WorkliteScriptResult } from '@worklite/contracts';
 import { agentExecutionEvents, agentExecutions, chatConfigurations, agentMcpServers, mcpServers, agents, agentSkills, agentSubSessions, agentToolCalls, auditLogs, chatSubmissions, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
@@ -18,6 +18,8 @@ import { BuiltinAgentToolsService } from './builtin-agent-tools.service';
 import { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
 import { CODEX_CLI_AGENT_ID, CODEX_CLI_PLUGIN_ID, PluginsService, decryptSecret } from '../plugins/plugins.service';
 import { CHAT_PROJECT_TASK_TOOL, ChatProjectTasksService } from './chat-project-tasks.service';
+import { ClaudeCodeError } from './claude-code.service';
+import { CodexAppServerError } from './codex-app-server.service';
 import { CommandsService } from '../commands/commands.service';
 
 const CHAT_AGENT_ID = 'agt_system_helper_chat';
@@ -695,7 +697,7 @@ export class AgentExecutionsService implements OnModuleInit {
   private async executeProjectTaskTool(request: Request, workspaceSlug: string, workspaceId: string, executionId: string, call: typeof agentToolCalls.$inferSelect): Promise<void> {
     try { await this.projectTasks.capture(workspaceId, executionId, call.id, call.input); }
     catch (error) {
-      const output = error instanceof BadRequestException || error instanceof ConflictException ? error.message : '无法启动项目任务，请检查项目目录、执行器插件可用性和 Gateway 模型。';
+      const output = error instanceof BadRequestException || error instanceof ConflictException || error instanceof ClaudeCodeError || error instanceof CodexAppServerError ? error.message : '无法启动项目任务，请检查项目目录、执行器插件可用性和 Gateway 模型。';
       await this.db.update(agentToolCalls).set({ status: 'failed', output, finishedAt: new Date() }).where(and(eq(agentToolCalls.id, call.id), eq(agentToolCalls.status, 'running')));
       await this.publishSnapshotForExecution(workspaceId, executionId);
       await this.resumeAfterToolCalls(request, workspaceSlug, workspaceId, CHAT_AGENT_ID, executionId);
@@ -867,11 +869,24 @@ export class AgentExecutionsService implements OnModuleInit {
   private async persistEvent(executionId: string, data: AgentExecutionEventData): Promise<void> {
     const previous = this.eventQueues.get(executionId) ?? Promise.resolve();
     const next = previous.then(async () => {
-      const [row] = await this.db.insert(agentExecutionEvents).values({
-        executionId,
-        sequence: sql<number>`coalesce((select max(sequence) from agent_execution_events where execution_id = ${executionId}), 0) + 1`,
-        data,
-      }).returning();
+      // A snapshot is a complete execution view, so it supersedes every earlier one.
+      // The new row is allocated first so that deleting a trailing snapshot never
+      // lets a later event reuse its sequence.
+      const row = this.db.transaction((transaction) => {
+        const inserted = transaction.insert(agentExecutionEvents).values({
+          executionId,
+          sequence: sql<number>`coalesce((select max(sequence) from agent_execution_events where execution_id = ${executionId}), 0) + 1`,
+          data,
+        }).returning().get();
+        if (inserted && data.kind === 'snapshot') {
+          transaction.delete(agentExecutionEvents).where(and(
+            eq(agentExecutionEvents.executionId, executionId),
+            lt(agentExecutionEvents.sequence, inserted.sequence),
+            sql`json_extract(${agentExecutionEvents.data}, '$.kind') = 'snapshot'`,
+          )).run();
+        }
+        return inserted;
+      });
       if (!row) return;
       const event = toExecutionEvent(row);
       for (const listener of this.listeners) listener(event);
@@ -931,6 +946,7 @@ function executionFailure(error: unknown): ExecutionFailure {
     if (error.code === 'INCOMPLETE_TOOL_REQUEST') return { message: error.message, code: 'incomplete_tool_request', phase: 'model' };
     if (error.code === 'INVALID_TOOL_REQUEST') return { message: error.message, code: 'invalid_tool_request', phase: 'model' };
     if (error.code === 'INVALID_PROVIDER') return { message: 'The Agent provider configuration is invalid. Check the provider settings and try again.', code: 'provider', phase: 'model' };
+    if (error.code === 'PROVIDER_REQUEST_FAILED') return { message: error.message, code: 'provider_request', phase: 'model' };
     if (error.code === 'INVALID_REQUEST') return { message: error.message, code: 'invalid_request', phase: 'model' };
   }
   if (error instanceof TooManyToolCallsError) return { message: 'The model requested too many tools in one step. Retry so the Agent can continue with fewer tool calls.', code: 'too_many_tool_calls', phase: 'model' };

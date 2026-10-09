@@ -64,14 +64,14 @@ Captured bodies are untrusted recorded content. They render as plain preformatte
 
 Filters cover Provider, model, status class, and correlated Workflow Run, and persist in the same Search parameters as the range, so one link restores the whole investigation. Changing Provider clears a model selection that may not belong to it. A Run-scoped link from a Workflow Run node log opens this tab filtered to that Run. A failed provider test's `View request log` opens the exact captured request expanded, with its Provider filter. Paging is an explicit `Load more` action appending the next page; it is not infinite scroll, because the list is an investigation surface rather than a feed. Changing the range or any filter discards accumulated pages, since they describe the previous query.
 
-Retention is a constraint the reader cannot infer: captured requests are kept for three days while statistics are kept indefinitely. The view states the three-day window, and when the applied range starts earlier than that window it states that the earlier part of the range has already expired. Without that text an expired period is indistinguishable from a period with no traffic. The view exposes no delete, export, or retention-configuration control, because expiry is automatic and the window is fixed. It is read-only and never exposes credentials or custom header values, which are excluded at capture time rather than filtered here.
+Retention is a constraint the reader cannot infer: captured requests are kept for 12 hours while statistics are kept indefinitely. The view states the 12-hour window, and when the applied range starts earlier than that window it states that the earlier part of the range has already expired. Without that text an expired period is indistinguishable from a period with no traffic. The view exposes no delete, export, or retention-configuration control, because expiry is automatic and the window is fixed. It is read-only and never exposes credentials or custom header values, which are excluded at capture time rather than filtered here.
 
 ## States
 
 | State | Behavior |
 | --- | --- |
 | Loading | Statistics: four metric skeletons above a table-shaped skeleton in a `role="status"` live region. Requests: row-shaped skeletons matching the list columns; an expanding row shows a bounded body-shaped skeleton while its detail loads. |
-| Empty | Statistics: explain that Gateway requests in this range appear once they occur. Requests: explain that captured requests appear once a Provider request occurs and that they are kept for three days. |
+| Empty | Statistics: explain that Gateway requests in this range appear once they occur. Requests: explain that captured requests appear once a Provider request occurs and that they are kept for 12 hours. |
 | No results | Statistics and Requests name the active filters and offer `Clear filters`, branching on whether the unfiltered range is empty so an expired or quiet period is never reported as a filter mismatch. An empty statistics range is the Empty state. |
 | Error | `ErrorState` with a retry action, scoped to the affected view. A failed row detail keeps its row expanded and explains itself inside that row rather than collapsing it. An invalid custom range is not an error state: it is reported beside the fields with `Apply` disabled and the previous range still applied. |
 | Busy | `Apply` and `Load more` report progress on themselves and keep existing content visible. |
@@ -139,6 +139,10 @@ A request-log row is an expand control with an accessible name naming its Provid
 Verified 2026-10-03 for Provider/model filters, row-to-request links, and focused request details. The latest comparison found no unresolved differences.
 
 ## Changelog
+
+### 2026-10-09 - 12-hour request retention
+
+- Updated the stated request-log retention window from three days to 12 hours to match the Gateway contract. Layout and interaction are unchanged.
 
 ### 2026-10-03 - Statistics drill-down
 

@@ -209,6 +209,7 @@
     "pending": "待投递",
     "openTask": "打开任务详情",
     "taskLoadFailed": "无法加载关联任务。",
+    "taskLoading": "正在读取任务状态…",
     "retainedFields": "记录展示完整已保存字段。历史飞书原始回调中未保存的字段无法补回。",
     "status": {
       "queued": "待处理",
@@ -274,6 +275,7 @@
       "turnStarted": "本轮任务已开始",
       "itemStarted": "开始：{{type}}",
       "itemCompleted": "完成：{{type}}",
+      "message": "执行器回复",
       "completed": "{{executor}} 会话已结束",
       "projectTool": "项目工具：{{tool}}",
       "mcpCall": "MCP 工具：{{tool}}",
@@ -290,6 +292,12 @@
       "web_search": "网页搜索",
       "todo_list": "待办清单"
     }
+  },
+  "pinned": {
+    "label": "未结束的执行",
+    "reveal": "回到 {{title}}（{{status}}）",
+    "more": "另有 {{count}} 个",
+    "collapse": "收起"
   },
   "upgrade": {
     "title": "WorkLite 部署",

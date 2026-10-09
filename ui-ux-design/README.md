@@ -90,9 +90,17 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-10-09 - Independent Chat task feedback
+
+- The [Chat](pages/chat/workspace/DESIGN.md) task region retains public executor progress text, failed dispatches and separately observed Team status, failures and pending questions. Existing task links and dual-theme semantic components remain the interaction surface.
+
 ### 2026-10-09 - Deployment-backed development data
 
 - Updated the [Providers](pages/model-providers/DESIGN.md) Gateway summary to display deployment listener `23392` because development no longer starts a separate Gateway.
+
+### 2026-10-09 - Chronological Chat transcript
+
+- The [Chat](pages/chat/workspace/DESIGN.md) transcript orders every entry, including task cards and failed dispatches, by its own timestamp; unfinished execution cards scrolled above the view appear as compact rows in a pinned bar. The project task disclosure names its executor instead of a `cx`/`cxo` launch mode.
 
 ### 2026-10-08 - Bounded Codex operation evidence
 

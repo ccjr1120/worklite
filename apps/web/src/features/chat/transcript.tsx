@@ -1,8 +1,8 @@
 import { Link } from '@tanstack/react-router';
 import { Ban, ChevronDown, ChevronRight, CircleX, FileCode2, Hourglass, LoaderCircle, MessageSquareText, Play, RefreshCw, ShieldAlert, X } from 'lucide-react';
-import { useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AgentExecutionView, AgentToolCallView, ChatProjectTaskView, RunView, WorkflowView } from '@worklite/contracts';
+import type { AgentExecutionView, AgentToolCallView, ChatConversationView, ChatProjectTaskView, ChatSubmissionView, RunView, WorkflowView } from '@worklite/contracts';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import { isLiveStatus, StatusBadge, toStatusKey, type StatusKey } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
@@ -15,10 +15,10 @@ import { formatDateTime } from '@/i18n/format';
 import type { AppLocale } from '@/i18n/locale';
 import { cn } from '@/lib/utils';
 import { useChatProjectOperationQuery } from '@/api/queries';
+import { PinTrackingContext } from './pinned-executions';
 
 type TranscriptMessage = AgentExecutionView['messages'][number];
 type TurnSegment = { kind: 'message'; item: TranscriptMessage } | { kind: 'tool'; item: AgentToolCallView };
-type Turn = { kind: 'user'; item: TranscriptMessage } | { kind: 'assistant'; segments: TurnSegment[] };
 
 
 type CodexActivity = ChatProjectTaskView['activities'][number];
@@ -58,28 +58,60 @@ function CodexOperationDisclosure({ taskId, operation }: { taskId: string; opera
   );
 }
 
-// One Chat turn is one identity block: every assistant message and Skill call
-// between two user messages shares a single avatar and content column, so a turn that
-// answers, runs a script, and answers again does not read as three speakers.
-function groupTurns(execution: AgentExecutionView): Turn[] {
-  const ordered: TurnSegment[] = [
-    ...execution.messages.map((item) => ({ kind: 'message' as const, occurredAt: item.createdAt, item })),
-    ...execution.toolCalls.map((item) => ({ kind: 'tool' as const, occurredAt: item.createdAt, item })),
-  ]
-    .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt))
-    .map(({ kind, item }) => ({ kind, item }) as TurnSegment);
+type PendingReceipt = ChatConversationView['pendingReceipts'][number];
+type ActiveWorkflowRun = { workflow: WorkflowView; run: RunView; input: string };
 
-  const turns: Turn[] = [];
-  for (const segment of ordered) {
-    if (segment.kind === 'message' && segment.item.role === 'user') {
-      turns.push({ kind: 'user', item: segment.item });
-      continue;
-    }
-    const last = turns[turns.length - 1];
-    if (last?.kind === 'assistant') last.segments.push(segment);
-    else turns.push({ kind: 'assistant', segments: [segment] });
+// Every transcript entry carries its own timestamp and the transcript is that one sequence; no category is
+// appended after the conversation. Unsent queued messages are rendered by the caller after the sequence.
+type TimelineEntry =
+  | { kind: 'user'; item: TranscriptMessage }
+  | { kind: 'assistant'; segments: TurnSegment[] }
+  | { kind: 'task'; submission: ChatSubmissionView }
+  | { kind: 'workflowRun'; active: ActiveWorkflowRun }
+  | { kind: 'receipt'; receipt: PendingReceipt }
+  | { kind: 'question'; question: NonNullable<AgentExecutionView['pendingQuestion']> }
+  | { kind: 'cancelled' }
+  | { kind: 'failure' };
+
+type TimedEntry = { at: string; order: number; entry: TimelineEntry | { kind: 'segment'; segment: TurnSegment } };
+
+// One Chat turn is one identity block: every assistant message and Skill call between two other entries
+// shares a single avatar and content column, so a turn that answers, runs a script, and answers again does
+// not read as three speakers. A task card or other entry between them splits the turn at its time.
+function buildTimeline(sources: {
+  execution: AgentExecutionView | null;
+  submissions: ChatSubmissionView[];
+  workflowRun: ActiveWorkflowRun | null;
+  receipts: PendingReceipt[];
+  question: AgentExecutionView['pendingQuestion'];
+  cancelled: boolean;
+  failed: boolean;
+}): TimelineEntry[] {
+  const timed: TimedEntry[] = [];
+  const push = (at: string, entry: TimedEntry['entry']) => timed.push({ at, order: timed.length, entry });
+  const execution = sources.execution;
+  for (const item of execution?.messages ?? []) push(item.createdAt, { kind: 'segment', segment: { kind: 'message', item } });
+  for (const item of execution?.toolCalls ?? []) push(item.createdAt, { kind: 'segment', segment: { kind: 'tool', item } });
+  for (const submission of sources.submissions) {
+    if (submission.reference?.kind !== 'conversation' && (submission.reference || submission.error)) push(submission.createdAt, { kind: 'task', submission });
   }
-  return turns;
+  if (sources.workflowRun) push(sources.workflowRun.run.startedAt, { kind: 'workflowRun', active: sources.workflowRun });
+  for (const receipt of sources.receipts) push(receipt.createdAt, { kind: 'receipt', receipt });
+  if (sources.question) push(sources.question.createdAt, { kind: 'question', question: sources.question });
+  if (execution && sources.cancelled) push(execution.updatedAt, { kind: 'cancelled' });
+  if (execution && sources.failed) push(execution.updatedAt, { kind: 'failure' });
+  timed.sort((left, right) => Date.parse(left.at) - Date.parse(right.at) || left.order - right.order);
+
+  const entries: TimelineEntry[] = [];
+  for (const { entry } of timed) {
+    if (entry.kind !== 'segment') { entries.push(entry); continue; }
+    const { segment } = entry;
+    if (segment.kind === 'message' && segment.item.role === 'user') { entries.push({ kind: 'user', item: segment.item }); continue; }
+    const last = entries[entries.length - 1];
+    if (last?.kind === 'assistant') last.segments.push(segment);
+    else entries.push({ kind: 'assistant', segments: [segment] });
+  }
+  return entries;
 }
 
 function UserMessage({ message }: { message: TranscriptMessage }) {
@@ -235,8 +267,9 @@ function WorkflowRunRow({ run, workflow, input }: { run: RunView; workflow: Work
   const statusKey = toStatusKey(run.status);
   const live = isLiveStatus(run.status);
   const failure = run.nodeRuns?.find((nodeRun) => nodeRun.status === 'failed')?.error;
+  const pins = useContext(PinTrackingContext);
   return (
-    <div className={cn('wl-enter my-3 rounded-xl border bg-surface p-3.5 shadow-xs transition-[border-color,box-shadow] duration-[200ms]', live ? 'border-brand/40 wl-live-glow' : 'border-border')} role="status">
+    <div ref={pins?.track(run.id)} tabIndex={-1} className={cn('wl-enter my-3 rounded-xl border bg-surface p-3.5 shadow-xs outline-none transition-[border-color,box-shadow] duration-[200ms]', live ? 'border-brand/40 wl-live-glow' : 'border-border')} role="status">
       <div className="flex items-start gap-3">
         <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-full', live ? 'bg-brand-subtle' : 'bg-surface-subtle')}>
           <Play className={cn('size-4', live ? 'text-brand' : 'text-muted-foreground')} aria-hidden="true" />
@@ -270,6 +303,11 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
   const { locale } = useLocale();
   const [expanded, setExpanded] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
+  const pins = useContext(PinTrackingContext);
+  const expandRequest = pins?.expandRequest;
+  useEffect(() => {
+    if (expandRequest?.id === task.id) setExpanded(true);
+  }, [expandRequest, task.id]);
   const statusKey = toStatusKey(task.status);
   const live = isLiveStatus(task.status);
   const goalSummary = codexFirstLine(task.goal);
@@ -295,6 +333,7 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
   const describeActivity = (activity: CodexActivity) => {
     const phase = codexActivityText(activity, 'phase') ?? '';
     const itemType = codexActivityText(activity, 'itemType');
+    if (phase === 'claude.agent_message' || (phase === 'codex.item_completed' && codexActivityText(activity, 'text'))) return t('codex.activity.message');
     if (phase === 'codex.started') return t('codex.activity.started', { executor: t('codex.executorName.codex') });
     if (phase === 'codex.thread_started') return t('codex.activity.threadStarted', { executor: t('codex.executorName.codex') });
     if (phase === 'codex.turn_started') return t('codex.activity.turnStarted');
@@ -311,11 +350,13 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
     return t('codex.activity.unknown', { phase });
   };
   const activityPhaseSummary = Object.entries(task.activityPhases).map(([phase, count]) => `${describeActivity({ phase })} · ${count}`);
-  const operationStatusSummary = Object.entries(task.operationStatuses).map(([status, count]) => `${t(`codex.operationStatus.${status}`)} · ${count}`);
+  const operationStatusSummary = Object.entries(task.operationStatuses).map(([status, count]) => `${t(`codex.operationStatus.${status}`, { defaultValue: status })} · ${count}`);
 
   return (
     <article
-      className={cn('wl-enter my-2 overflow-hidden rounded-lg border bg-surface shadow-xs transition-[border-color,box-shadow] duration-[200ms]', live ? 'border-brand/40 wl-live-glow' : task.status === 'failed' ? 'border-danger/30' : 'border-border')}
+      ref={pins?.track(task.id)}
+      tabIndex={-1}
+      className={cn('wl-enter my-2 overflow-hidden rounded-lg border bg-surface shadow-xs transition-[border-color,box-shadow] duration-[200ms] outline-none', live ? 'border-brand/40 wl-live-glow' : task.status === 'failed' ? 'border-danger/30' : 'border-border')}
       aria-label={t('codex.panel')}
     >
       <button
@@ -329,7 +370,7 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-2">
             <span className="min-w-0 flex-1 truncate text-[13px] font-semibold" title={goalSummary}>
-              <span className="text-foreground">Codex</span>
+              <span className="text-foreground">{executorName}</span>
               <span className="mx-1 text-muted-foreground" aria-hidden="true">·</span>
               <span className="font-normal text-muted-foreground">{goalSummary}</span>
             </span>
@@ -348,6 +389,7 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
         </span>
         <ChevronDown className={cn('mt-1 size-4 shrink-0 text-muted-foreground transition-transform duration-[200ms] ease-[var(--ease-out)]', !expanded && '-rotate-90')} aria-hidden="true" />
       </button>
+      {task.progressText && !task.result ? <div className="max-h-64 overflow-y-auto border-t border-border px-3 py-2.5 text-[13px]"><MessageResponse content={task.progressText} enabled /></div> : null}
       {expanded ? (
         <div className="wl-fade space-y-4 border-t border-border px-3 pb-3 pt-2.5">
           <dl className="grid gap-3 text-xs sm:grid-cols-2">
@@ -403,7 +445,7 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
                     <li key={`${createdAt ?? codexActivityText(activity, 'phase') ?? 'activity'}-${index}`} className="flex gap-2 py-1">
                       <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden="true" />
                       <div className="min-w-0 flex-1">
-                        <p className="break-words text-xs font-medium">{describeActivity(activity)}</p>
+                        {codexActivityText(activity, 'text') ? <MessageResponse content={codexActivityText(activity, 'text')!} enabled /> : <p className="break-words text-xs font-medium">{describeActivity(activity)}</p>}
                         {createdAt ? <p className="mt-0.5 text-[11px] text-muted-foreground">{formatDateTime(createdAt, locale)}</p> : null}
                       </div>
                     </li>
@@ -540,4 +582,5 @@ function StandardToolCallPanel({ call }: { call: AgentToolCallView }) {
   );
 }
 
-export { AssistantTurn, CancelledNote, FailureNote, groupTurns, QuestionNote, QueueRows, TranscriptSkeleton, UserMessage, WorkflowRunRow };
+export { AssistantTurn, buildTimeline, CancelledNote, codexFirstLine, FailureNote, QuestionNote, QueueRows, TranscriptSkeleton, UserMessage, WorkflowRunRow };
+export type { ActiveWorkflowRun, TimelineEntry };

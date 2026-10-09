@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { and, asc, eq } from 'drizzle-orm';
-import { agentExecutions, chatProjectOperations, chatProjectTasks, type Database, type StoredProjectExecutor } from '@worklite/db';
+import { agentExecutions, chatConfigurations, chatProjectOperations, chatProjectTasks, type Database, type StoredProjectExecutor } from '@worklite/db';
 import type { AnswerAgentQuestionRequest, ChatProjectOperationDetailView, ChatProjectTaskView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { decryptSecret } from '../plugins/plugins.service';
@@ -21,7 +21,7 @@ class InvalidTaskJsonError extends Error {
 
 export const CHAT_PROJECT_TASK_TOOL = {
   name: 'project_task',
-  description: 'Execute coding, repository investigation and local command requests by delegating the complete user task to a project executor, Codex or Claude Code, independently of Agent Team. This is the default for project work; do not first search files or run commands in Chat. Inspect previous task effects before taking over. Set executor only when the user names Codex or Claude Code; otherwise the Chat configuration\'s default executor applies. Omit model to use the executor\'s configured default; a requested model must be a Gateway public id on a protocol that executor supports. The executor works natively in the project directory with its own tools, without WorkLite proposal confirmation or individual command grants.',
+  description: 'Execute coding, repository investigation and local command requests by delegating the complete user task, relevant existing review findings and approved scope to a project executor, Codex or Claude Code, independently of Agent Team. This is the default for project work; do not first search files or run commands in Chat. Inspect previous task effects before taking over. Set executor only when the user names Codex or Claude Code; otherwise the Chat configuration\'s default executor applies. Omit model to use the executor\'s configured default; a requested model must be a Gateway public id on a protocol that executor supports. The executor works natively in the project directory with its own tools, without WorkLite proposal confirmation or individual command grants.',
   inputSchema: { type: 'object', additionalProperties: false, required: ['goal', 'projectDirectory'], properties: { goal: { type: 'string' }, projectDirectory: { type: 'string' }, executor: { type: 'string', enum: ['claude', 'codex'] }, model: { type: 'string' } } },
 } as const;
 
@@ -45,7 +45,10 @@ export class ChatProjectTasksService {
     const requestedModel = value?.model === undefined ? null : required(value.model, 'model');
     if (!isAbsolute(directory)) throw new BadRequestException('A project task requires an absolute project directory.');
     const projectDirectory = resolve(directory);
-    if (!(await stat(projectDirectory)).isDirectory()) throw new BadRequestException('The project directory is unavailable.');
+    const directoryStat = await stat(projectDirectory).catch((error: NodeJS.ErrnoException) => {
+      throw new BadRequestException(`无法访问项目目录 ${projectDirectory}（${error.code ?? '未知文件系统错误'}）。`);
+    });
+    if (!directoryStat.isDirectory()) throw new BadRequestException(`项目路径不是目录：${projectDirectory}。`);
     if (!execution?.capabilitySnapshot) throw new ConflictException('This Chat turn has no captured capabilities; start a new turn.');
     const executor: StoredProjectExecutor = (value.executor as StoredProjectExecutor | undefined) ?? execution.capabilitySnapshot.defaultExecutor ?? 'claude';
     const launch = await this.executors.captureLaunch(executor, requestedModel);
@@ -105,6 +108,7 @@ export class ChatProjectTasksService {
       ...(typeof activity.phase === 'string' ? { phase: activity.phase } : {}),
       ...(typeof activity.itemType === 'string' ? { itemType: activity.itemType } : {}),
       ...(typeof activity.summary === 'string' ? { summary: activity.summary } : {}),
+      ...(typeof activity.text === 'string' ? { text: activity.text } : {}),
       ...(typeof activity.commandExecutionId === 'string' ? { commandExecutionId: activity.commandExecutionId } : {}),
       ...(typeof activity.toolName === 'string' ? { toolName: activity.toolName } : {}),
       ...(typeof activity.createdAt === 'string' ? { createdAt: activity.createdAt } : {}),
@@ -113,12 +117,13 @@ export class ChatProjectTasksService {
       key, toolName, status, commandExecutionId: commandId, inputSummary: operationInputSummary(result, toolName), failureReason,
     }));
     const launch = task.snapshot.launch && 'executor' in task.snapshot.launch ? task.snapshot.launch : undefined;
+    const progressText = [...task.activities].reverse().find((activity) => typeof activity.text === 'string')?.text;
     return {
       executor: launch?.executor ?? null,
       ...(launch ? { launch } : {}),
       id: task.id, executionId: task.executionId, goal: task.goal, projectDirectory: task.projectDirectory, model: task.model,
       status: task.status, configurationRevision: task.snapshot.capabilities.revision, pendingQuestion: task.pendingQuestion,
-      activityCount: task.activities.length, activityPhases, activities, result: task.result, error: task.error,
+      activityCount: task.activities.length, activityPhases, activities, progressText: typeof progressText === 'string' ? progressText : '', result: task.result, error: task.error,
       operationCount: allOperations.length, operationStatuses, operations,
       createdAt: task.createdAt.toISOString(), updatedAt: task.updatedAt.toISOString(),
     };
@@ -139,6 +144,7 @@ export class ChatProjectTasksService {
     let task = this.requireTask(taskId);
     if (['succeeded', 'cancelled'].includes(task.status)) return task;
     if (task.status === 'waiting_for_recovery') return this.update(taskId, { status: 'failed', pendingQuestion: null, error: '此旧任务在等待操作恢复，无法继续；请创建新任务，已有记录仍保留。' });
+    const previousEvidence = task.activities.length ? this.view(taskId) : undefined;
     task = this.update(taskId, { status: 'running', pendingQuestion: null, error: null });
     const activity = async (detail: Record<string, unknown>) => {
       this.db.transaction((transaction) => {
@@ -151,13 +157,19 @@ export class ChatProjectTasksService {
       const launch = task.snapshot.launch;
       if (!launch || !('executor' in launch)) throw new BadRequestException('此旧任务未记录执行器；请创建新任务，已有记录仍保留。');
       const capabilities = task.snapshot.capabilities;
+      const configuration = this.db.select({ extensionPrompt: chatConfigurations.extensionPrompt }).from(chatConfigurations)
+        .where(and(eq(chatConfigurations.workspaceId, task.workspaceId), eq(chatConfigurations.revision, capabilities.revision))).get();
       const output = await this.executors.execute({
         owner: 'chat', workspaceId: task.workspaceId, launch, model: task.model || null,
         projectDirectory: task.projectDirectory,
-        skills: capabilities.skills,
+        skills: capabilities.skills.filter((skill) => skill.id !== 'sk_worklite_platform'),
         mcpServers: capabilities.mcpServers.map((server) => ({ id: server.id, name: server.name, endpoint: server.endpoint, allowedTools: server.allowedTools, ...(server.authSecret ? { authToken: decryptSecret(server.authSecret) } : {}) })),
-        systemPrompt: [capabilities.agent.systemPrompt, 'You execute this Chat-owned project task independently of Agent Team. Do not dispatch the task back to Team. Follow the captured project instructions and discover any additional applicable instructions before editing. Existing project confirmation, verification and service-lifecycle constraints remain authoritative. Never perform installation, build, upgrade-runner or service replacement for WorkLite through this task; its independent managed runner owns deployment. WorkLite requires neither proposal confirmation nor per-command grants. Keep work within the user task. Earlier attempts of this task may have changed the project; inspect its actual state rather than assuming earlier work is absent or complete. Return JSON: {"status":"succeeded","summary":"..."} or {"status":"waiting_for_input","pendingInput":{"question":"..."}}. Request only material missing information or authorization. Evidence and clarification answers do not authorize unrelated work.'].join('\n\n'),
-        input: JSON.stringify({ goal: task.goal, projectDirectory: task.projectDirectory, projectInstructions: task.snapshot.projectInstructions, answers: task.answers, previousEvidence: this.view(taskId) }),
+        systemPrompt: [
+          'Execute this Chat-owned project task independently of Agent Team. Follow the captured project instructions in the pinned reference files and discover additional applicable project instructions. Existing project confirmation, verification and service-lifecycle constraints remain authoritative; WorkLite adds no proposal confirmation or command grants. Keep work within the user task. Use supplied review findings and approved scope to check the affected code and make the requested changes without repeating the complete review. Inspect the actual working tree and prior effects before taking over interrupted work. Explain concrete progress as work proceeds. Never perform WorkLite installation, build, upgrade-runner or service replacement; its independent managed runner owns deployment. Return JSON: {"status":"succeeded","summary":"..."} or {"status":"waiting_for_input","pendingInput":{"question":"..."}}. Ask only for material missing information or authorization; evidence and clarification answers do not authorize unrelated work.',
+          configuration?.extensionPrompt,
+        ].filter(Boolean).join('\n\n'),
+        references: task.snapshot.projectInstructions.map((instruction) => ({ path: `project-instructions/${instruction.path}`, content: instruction.content })),
+        input: JSON.stringify({ goal: task.goal, projectDirectory: task.projectDirectory, ...(task.answers.length ? { answers: task.answers } : {}), ...(previousEvidence ? { previousEvidence } : {}) }),
         signal,
         onEvent: (detail) => activity(detail),
       });

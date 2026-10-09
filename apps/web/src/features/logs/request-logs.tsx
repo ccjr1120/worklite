@@ -161,7 +161,7 @@ function GatewayRequestLogs({ from, to, providers, filters, onFiltersChange, foc
     : [...(logsQuery.data?.items ?? []), ...pages.flatMap((page) => page.items)], [focusedRequestId, focusedQuery.data, logsQuery.data, pages]);
   const nextCursor = pages.at(-1)?.nextCursor ?? logsQuery.data?.nextCursor ?? null;
   const retainedFrom = logsQuery.data?.retainedFrom;
-  // Statistics answer the whole range; details only reach back three days. Saying
+  // Statistics answer the whole range; details only reach back 12 hours. Saying
   // so is the difference between "already expired" and "nothing happened".
   const truncated = Boolean(retainedFrom && from < retainedFrom);
 

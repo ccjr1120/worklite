@@ -203,6 +203,7 @@ class CodexAppServerSession {
       ...(typeof item?.id === 'string' ? { itemId: item.id } : {}),
       ...(typeof item?.type === 'string' ? { itemType: item.type } : {}),
       ...(summary ? { summary } : {}),
+      ...(phase === 'codex.item_completed' && item?.type === 'agentMessage' && typeof item.text === 'string' ? { text: item.text } : {}),
     };
     return Promise.resolve(this.request.onEvent?.(activity));
   }

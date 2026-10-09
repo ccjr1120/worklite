@@ -229,7 +229,10 @@ class ClaudeCodeSession {
     }
     if (message.type === 'assistant' && Array.isArray(message.message?.content)) {
       for (const block of message.message.content) {
-        if (block?.type === 'text' && topLevel && typeof block.text === 'string') this.text = block.text;
+        if (block?.type === 'text' && topLevel && typeof block.text === 'string') {
+          this.text = block.text;
+          this.queueActivity('claude.agent_message', { itemType: 'agent_message', text: block.text });
+        }
         if (block?.type === 'tool_use' && typeof block.id === 'string') {
           this.toolNames.set(block.id, String(block.name));
           const summary = toolSummary(String(block.name), block.input);

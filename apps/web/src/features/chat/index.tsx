@@ -19,13 +19,14 @@ import { downloadExecutionLog } from './execution-log';
 import { ConversationList } from './conversation-list';
 import { ConversationRecords } from './records';
 import { ChannelConfiguration } from './channel-configuration';
-import { TaskMessages } from './task-messages';
+import { TaskCard } from './task-messages';
+import { PinnedExecutionBar, PinTrackingContext, usePinTracking, type PinCandidate } from './pinned-executions';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CHAT_AGENT_ID } from '@worklite/contracts';
-import { AssistantTurn, CancelledNote, FailureNote, groupTurns, QuestionNote, QueueRows, TranscriptSkeleton, UserMessage, WorkflowRunRow } from './transcript';
+import { AssistantTurn, buildTimeline, CancelledNote, FailureNote, QuestionNote, QueueRows, TranscriptSkeleton, UserMessage, WorkflowRunRow } from './transcript';
 
 const INCOMPLETE_SKILL_REQUEST = 'The model returned an incomplete Skill request. Its JSON ended before the request was complete.';
 const INVALID_SKILL_REQUEST = 'The model returned an invalid Skill request. Its arguments could not be parsed or did not match the required structure.';
@@ -671,9 +672,27 @@ function ChatWorkspace() {
     finally { if (generation === mainRequestGenerationRef.current) setBusy(false); }
   }
 
-  const turns = visibleExecution ? groupTurns(visibleExecution) : [];
-  const lastTurn = turns[turns.length - 1];
-  const showWorkingInLastTurn = running && lastTurn?.kind === 'assistant';
+  const transcriptHostRef = useRef<HTMLDivElement>(null);
+  const pinTracking = usePinTracking(transcriptHostRef);
+  const submissions = conversationQuery.data?.submissions ?? [];
+  const timeline = buildTimeline({
+    execution: visibleExecution,
+    submissions,
+    workflowRun: workflowRun && !submissions.some((submission) => submission.reference?.kind === 'workflow' && submission.reference.runId === workflowRun.run.id) ? workflowRun : null,
+    receipts: conversationQuery.data?.pendingReceipts ?? [],
+    question: waitingForInput ? visibleExecution?.pendingQuestion ?? null : null,
+    cancelled: visibleExecution?.status === 'cancelled',
+    failed: visibleExecution?.status === 'failed',
+  });
+  const lastEntry = timeline[timeline.length - 1];
+  const showWorkingInLastTurn = running && lastEntry?.kind === 'assistant';
+  const pinCandidates: PinCandidate[] = timeline.flatMap((entry): PinCandidate[] => entry.kind === 'task'
+    ? [{ id: entry.submission.id, kind: 'submission', submission: entry.submission }]
+    : entry.kind === 'workflowRun'
+      ? [{ id: entry.active.run.id, kind: 'workflowRun', run: entry.active.run, name: entry.active.workflow.name }]
+      : entry.kind === 'assistant'
+        ? entry.segments.flatMap((segment): PinCandidate[] => segment.kind === 'tool' && segment.item.projectTask ? [{ id: segment.item.projectTask.id, kind: 'project', task: segment.item.projectTask }] : [])
+        : []);
 
   // The header badge reports server execution state only. A submission the server has
   // not accepted yet is reported by the Send control, not as a running execution.
@@ -717,25 +736,33 @@ function ChatWorkspace() {
               <Button type="button" variant="ghost" size="icon-compact" aria-label={t('assistant:history.new')} onClick={() => selectConversation(null)} className="md:hidden"><Plus className="size-4" /></Button>
               {selectedConversationId ? <Button type="button" variant="ghost" size="compact" aria-expanded={recordsOpen} onClick={() => setRecordsOpen((value) => !value)}><ScrollText className="size-4" />{t('assistant:records.title')}</Button> : null}
             </header>
-            <div className="relative min-h-0 flex-1">
+            <div ref={transcriptHostRef} className="relative min-h-0 flex-1">
+              <PinTrackingContext.Provider value={pinTracking.context}>
+              {recordsOpen ? null : <PinnedExecutionBar candidates={pinCandidates} above={pinTracking.above} onReveal={pinTracking.reveal} />}
               <div className="flex h-full min-h-0 flex-col" inert={recordsOpen} aria-hidden={recordsOpen}>
               <Conversation className="min-h-0 flex-1 px-4 md:px-8" scrollToEndLabel={t('assistant:transcript.scrollToEnd')}>
                 <ConversationContent className="mx-auto w-full max-w-3xl">
                   {loadingConversation ? <TranscriptSkeleton /> : null}
                   {conversationQuery.isError ? <div className="space-y-2"><p role="alert" className="text-sm text-danger">{t('assistant:history.loadFailed')}</p><Button variant="secondary" size="compact" onClick={() => void conversationQuery.refetch()}>{t('assistant:history.retry')}</Button></div> : null}
-                  {turns.map((turn, index) => turn.kind === 'user' ? <UserMessage key={turn.item.id} message={turn.item} /> : <AssistantTurn key={turn.segments[0].item.id} segments={turn.segments} working={showWorkingInLastTurn && index === turns.length - 1} markdownEnabled />)}
+                  {timeline.map((entry, index) => {
+                    switch (entry.kind) {
+                      case 'user': return <UserMessage key={entry.item.id} message={entry.item} />;
+                      case 'assistant': return <AssistantTurn key={entry.segments[0].item.id} segments={entry.segments} working={showWorkingInLastTurn && index === timeline.length - 1} markdownEnabled />;
+                      case 'task': return <TaskCard key={entry.submission.id} submission={entry.submission} />;
+                      case 'workflowRun': return <WorkflowRunRow key={entry.active.run.id} run={entry.active.run} workflow={entry.active.workflow} input={entry.active.input} />;
+                      case 'receipt': return <div key={entry.receipt.id} className="my-3 space-y-2"><UserMessage message={{ id: entry.receipt.id, role: 'user', content: entry.receipt.text, createdAt: entry.receipt.createdAt }} /><p role={entry.receipt.error ? 'alert' : 'status'} className={cn('text-[13px]', entry.receipt.error ? 'text-danger' : 'text-muted-foreground')}>{entry.receipt.error || t('assistant:status.queued')}</p></div>;
+                      case 'question': return <QuestionNote key={entry.question.id} question={entry.question} onAnswer={(answer, authorization) => void answerChoice(answer, authorization)} busy={busy || cancelling} />;
+                      case 'cancelled': return <CancelledNote key="cancelled" />;
+                      case 'failure': return <FailureNote key="failure" execution={visibleExecution} message={executionError || t('assistant:execution.requestFailed')} onRetry={() => void retryExecution()} retryDisabled={busy || cancelling} locale={locale} />;
+                    }
+                  })}
                   {(running && !showWorkingInLastTurn || busy && !cancelling && !running && !waitingForInput) ? <AssistantTurn segments={[]} working markdownEnabled /> : null}
-                  {waitingForInput && visibleExecution?.pendingQuestion ? <QuestionNote key={visibleExecution.pendingQuestion.id} question={visibleExecution.pendingQuestion} onAnswer={(answer, authorization) => void answerChoice(answer, authorization)} busy={busy || cancelling} /> : null}
-                  {visibleExecution?.status === 'cancelled' ? <CancelledNote /> : null}
-                  <TaskMessages submissions={conversationQuery.data?.submissions ?? []} />
-                  {workflowRun && !conversationQuery.data?.submissions.some((submission) => submission.reference?.kind === 'workflow' && submission.reference.runId === workflowRun.run.id) ? <WorkflowRunRow run={workflowRun.run} workflow={workflowRun.workflow} input={workflowRun.input} /> : null}
-                  {conversationQuery.data?.pendingReceipts.map((receipt) => <div key={receipt.id} className="my-3 space-y-2"><UserMessage message={{ id: receipt.id, role: 'user', content: receipt.text, createdAt: receipt.createdAt }} /><p role={receipt.error ? 'alert' : 'status'} className={cn('text-[13px]', receipt.error ? 'text-danger' : 'text-muted-foreground')}>{receipt.error || t('assistant:status.queued')}</p></div>)}
-                  {executionError ? <FailureNote execution={visibleExecution} message={executionError} onRetry={() => void retryExecution()} retryDisabled={busy || cancelling} locale={locale} /> : null}
                   <QueueRows queued={queued} paused={queuePaused} sendingId={queueSendingId} onRemove={(id) => setQueued((current) => current.filter((item) => item.id !== id))} />
                   {error ? <p className="wl-enter mt-4 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2 text-[13px] text-danger" role="alert">{error}</p> : null}
                 </ConversationContent>
               </Conversation>
               </div>
+              </PinTrackingContext.Provider>
               {recordsOpen && selectedConversationId ? <div className="absolute inset-0 z-10 flex flex-col bg-background"><ConversationRecords conversationId={selectedConversationId} /></div> : null}
             </div>
             {recordsOpen ? null : loadingConversation || composerLoading ? <p className="px-4 py-3 text-[13px] text-muted-foreground" role="status">{t('assistant:composer.loading')}</p> : selectedWithoutExecution ? <p className="border-t border-border px-4 py-3 text-[13px] text-muted-foreground">{t(selected?.channel === 'feishu' ? 'assistant:channels.waiting' : 'assistant:history.taskRecord')}</p> : composerAvailable ? (

@@ -242,6 +242,7 @@ export type AgentExecutionPhase = 'model' | 'skill' | 'recovery';
 
 export type AgentExecutionErrorCode =
   | 'provider'
+  | 'provider_request'
   | 'invalid_request'
   | 'invalid_tool_request'
   | 'incomplete_tool_request'
@@ -289,6 +290,7 @@ export type ChatProjectTaskView = {
   status: 'running' | 'waiting_for_input' | 'waiting_for_recovery' | 'succeeded' | 'failed' | 'cancelled';
   configurationRevision: number; pendingQuestion: AgentPendingQuestion | null;
   activityCount: number; activityPhases: Record<string, number>; activities: Array<Record<string, unknown>>; result: string; error: string | null;
+  progressText: string;
   operationCount: number; operationStatuses: Record<string, number>;
   operations: Array<{ key: string; toolName: string; status: 'reserved' | 'completed' | 'uncertain' | 'failed'; commandExecutionId: string | null; inputSummary: string | null; failureReason: string | null }>;
   createdAt: string; updatedAt: string;
@@ -1045,7 +1047,7 @@ export type GatewayRequestLogQuery = GatewayTimeRange & {
 export type GatewayRequestLogList = {
   items: GatewayRequestLogListItem[];
   nextCursor: string | null;
-  retentionDays: number;
+  retentionHours: number;
   /**
    * The range actually served. It is the requested range intersected with the
    * retention window, so a client can tell that an earlier part of what it asked

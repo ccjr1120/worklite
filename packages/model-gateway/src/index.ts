@@ -156,7 +156,7 @@ export interface ModelGateway {
 }
 
 export class ModelGatewayError extends Error {
-  readonly code: 'INVALID_PROVIDER' | 'INVALID_REQUEST' | 'INVALID_TOOL_REQUEST' | 'INCOMPLETE_TOOL_REQUEST';
+  readonly code: 'INVALID_PROVIDER' | 'INVALID_REQUEST' | 'INVALID_TOOL_REQUEST' | 'INCOMPLETE_TOOL_REQUEST' | 'PROVIDER_REQUEST_FAILED';
 
   constructor(code: ModelGatewayError['code'], message: string) {
     super(message);
@@ -635,9 +635,9 @@ function modelFailure(error: unknown, streamCause: unknown): Error {
   }
   const cause = APICallError.isInstance(streamCause) ? streamCause : APICallError.isInstance(error) ? error : undefined;
   const status = cause?.statusCode;
-  if (status) return new Error(`The model provider request failed with HTTP status ${status}.`);
+  if (status) return new ModelGatewayError('PROVIDER_REQUEST_FAILED', `模型服务请求失败（HTTP ${status}），请稍后重试。`);
   if (NoOutputGeneratedError.isInstance(error)) {
-    return new Error('The provider returned no usable model output. Check the provider connection and model capabilities.');
+    return new ModelGatewayError('PROVIDER_REQUEST_FAILED', '模型服务未返回可用内容，请检查连接和模型能力后重试。');
   }
   return error instanceof Error ? error : new Error('The model request failed.');
 }

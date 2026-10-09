@@ -165,8 +165,24 @@ function addMissingRequestLogColumns(database: BetterSqlite3.Database): void {
   `);
 }
 
-const REQUEST_LOG_RETENTION_DAYS = 3;
-const REQUEST_LOG_RETENTION_MS = REQUEST_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+const REQUEST_LOG_RETENTION_HOURS = 12;
+const REQUEST_LOG_RETENTION_MS = REQUEST_LOG_RETENTION_HOURS * 60 * 60 * 1000;
+const AUTO_VACUUM_INCREMENTAL = 2;
+
+/**
+ * Switches the database to incremental auto-vacuum with one full rewrite, or returns
+ * accumulated free pages when it already uses it. Called from the Node entry point
+ * before the listener starts, because a full VACUUM holds an exclusive lock.
+ */
+export function prepareGatewayDatabase(): void {
+  const target = getDatabase();
+  if (target.pragma('auto_vacuum', { simple: true }) !== AUTO_VACUUM_INCREMENTAL) {
+    target.pragma('auto_vacuum = INCREMENTAL');
+    target.exec('VACUUM');
+    return;
+  }
+  target.pragma('incremental_vacuum');
+}
 
 function pruneRequestLogs(target: BetterSqlite3.Database): void {
   target.prepare('DELETE FROM gateway_request_logs WHERE occurred_at < ?').run(Date.now() - REQUEST_LOG_RETENTION_MS);
@@ -635,7 +651,7 @@ export function requestLogs(query: GatewayTimeRangeQuery & {
   const database = getDatabase();
   pruneRequestLogs(database);
   const { fromMs, toMs } = resolveTimeRange(query);
-  // Details live for three days while statistics live forever, so a range that
+  // Details live for 12 hours while statistics live forever, so a range that
   // reaches further back is served as its intersection with the retention window.
   // The reader is told what was actually covered instead of being handed a
   // rejection for a range that is valid against the other store.
@@ -676,7 +692,7 @@ export function requestLogs(query: GatewayTimeRangeQuery & {
   return {
     items: page.map(requestLogListItem),
     nextCursor: rows.length > limit && last ? String(last.occurred_at) : null,
-    retentionDays: REQUEST_LOG_RETENTION_DAYS,
+    retentionHours: REQUEST_LOG_RETENTION_HOURS,
     from: new Date(fromMs).toISOString(),
     to: new Date(toMs).toISOString(),
     retainedFrom: new Date(retainedFromMs).toISOString(),

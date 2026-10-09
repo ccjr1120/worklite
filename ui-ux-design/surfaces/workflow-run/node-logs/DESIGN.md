@@ -57,7 +57,7 @@ Incoming events apply incrementally to cached Run detail. An event must not trig
 
 ### Open the correlated Provider request
 
-An Agent or image node entry links to the Logs `requests` tab filtered to this Run, where the captured upstream request and response for its model rounds are readable. The link states that captured requests are kept for three days, because a Run outliving that window keeps its activity while those bodies are already expired.
+An Agent or image node entry links to the Logs `requests` tab filtered to this Run, where the captured upstream request and response for its model rounds are readable. The link states that captured requests are kept for 12 hours, because a Run outliving that window keeps its activity while those bodies are already expired.
 
 ### Read the Run graph and trace
 

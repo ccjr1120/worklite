@@ -52,7 +52,7 @@
     "copyOutput": "复制输出",
     "copyStreamedOutput": "复制模型流式输出",
     "viewRequestLogs": "查看该运行的模型请求",
-    "requestLogRetention": "已捕获的模型请求保留三天。",
+    "requestLogRetention": "已捕获的模型请求保留 12 小时。",
     "commandExecution": "命令执行 {{id}}",
     "contextDropped": "为适配上下文已丢弃 {{count}} 条较早消息",
     "finishReasonUnknown": "未知",

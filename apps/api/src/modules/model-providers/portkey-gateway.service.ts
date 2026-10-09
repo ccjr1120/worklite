@@ -558,8 +558,12 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async waitUntilReady(): Promise<void> {
-    const deadline = Date.now() + 5_000;
+    // The first start after enabling incremental auto-vacuum rewrites the whole
+    // Gateway database before listening, so readiness allows minutes rather than
+    // seconds and ends as soon as the process exits.
+    const deadline = Date.now() + 15 * 60_000;
     while (Date.now() < deadline) {
+      if (!this.gateway) throw new Error('Portkey Gateway exited before it became ready.');
       try {
         const response = await fetch(`http://127.0.0.1:${this.activeGatewayPort}/`, { signal: AbortSignal.timeout(500) });
         if (response.ok) {

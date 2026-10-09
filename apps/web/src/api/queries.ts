@@ -153,6 +153,7 @@ export function useAgentTeamConversationQuery(workspace: string | undefined, tea
     queryKey: agentTeamConversationQueryKey(teamId),
     queryFn: () => api.agentTeamConversation(teamId),
     enabled: Boolean(workspace && teamId),
+    refetchInterval: 5_000,
   });
 }
 
