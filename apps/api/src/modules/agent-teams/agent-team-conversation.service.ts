@@ -587,12 +587,15 @@ export class AgentTeamConversationService implements OnModuleInit, OnModuleDestr
   private async emitRunState(conversationId: string, runId: string): Promise<void> {
     const [run] = await this.db.select().from(agentTeamRuns).where(eq(agentTeamRuns.id, runId)).limit(1);
     if (!run) return;
+    const retryableTaskKeys = await retryableTaskKeysForRun(run.id, this.db);
     const payload: AgentTeamConversationRunStateView = {
       runId: run.id,
       status: run.status,
       mode: run.mode,
       projectDirectory: run.projectDirectory,
-      retryableTaskKey: null,
+      retryableTaskKey: retryableTaskKeys[0] ?? null,
+      retryableTaskKeys,
+      progress: await this.runtime.getRunProgress(run.id),
     };
     const now = new Date();
     const event = await this.db.transaction((transaction) => insertConversationEvent(
@@ -615,7 +618,9 @@ export class AgentTeamConversationService implements OnModuleInit, OnModuleDestr
       return;
     }
     await this.projectRunEvent(intake.conversationId, event);
-    if (event.type === 'input.answered') await this.emitRunState(intake.conversationId, event.runId);
+    if (event.type === 'input.answered' || event.type === 'run.progress') {
+      await this.emitRunState(intake.conversationId, event.runId);
+    }
     if (event.type === 'run.status' && isTerminalRunStatus((event.payload as { status?: unknown }).status)) {
       await this.resumeIntakes(intake.conversationId);
     }
@@ -663,6 +668,8 @@ export class AgentTeamConversationService implements OnModuleInit, OnModuleDestr
     const task = taskAttemptId ? await this.taskAttempt(taskAttemptId) : null;
     const role = (typeof payload.role === 'string' ? payload.role : task?.role) as AgentTeamRole | undefined;
     const taskKey = typeof payload.taskKey === 'string' ? payload.taskKey : task?.taskKey ?? null;
+    const developerId = typeof payload.developerId === 'string' ? payload.developerId : task?.developerId ?? null;
+    const assignmentTitle = typeof payload.assignmentTitle === 'string' ? payload.assignmentTitle : task?.assignmentTitle ?? null;
 
     if (event.type === 'run.status' || event.type === 'run.outcome') {
       const status = payload.status;
@@ -677,6 +684,8 @@ export class AgentTeamConversationService implements OnModuleInit, OnModuleDestr
           taskStatus: null,
           role: null,
           taskKey: null,
+          developerId: null,
+          assignmentTitle: null,
           outcomeSummary: outcomeSummary(payload.outcome),
         },
         deduplicationKey,
@@ -706,6 +715,8 @@ export class AgentTeamConversationService implements OnModuleInit, OnModuleDestr
           taskStatus,
           role: role ?? null,
           taskKey,
+          developerId,
+          assignmentTitle,
           outcomeSummary: null,
         },
         deduplicationKey,
@@ -727,6 +738,8 @@ export class AgentTeamConversationService implements OnModuleInit, OnModuleDestr
         payload: {
           role: task.role,
           taskKey: task.taskKey,
+          developerId: task.developerId ?? null,
+          assignmentTitle: task.assignmentTitle ?? null,
           pendingInputId,
           scopeRevision,
           kindDetail: operationKey ? 'operation_recovery' : 'question',
@@ -872,26 +885,28 @@ export class AgentTeamConversationService implements OnModuleInit, OnModuleDestr
     return rows[0]?.run ?? null;
   }
 
-  private async currentPendingInput(conversationId: string): Promise<AgentTeamConversationPendingInputView | null> {
+  private async currentPendingInputs(conversationId: string): Promise<AgentTeamConversationPendingInputView[]> {
     const run = await this.activeRunRow(conversationId);
-    if (!run) return null;
-    const [pending] = await this.db.select().from(agentTeamPendingInputs)
+    if (!run) return [];
+    const pending = await this.db.select().from(agentTeamPendingInputs)
       .where(and(
         eq(agentTeamPendingInputs.runId, run.id),
         eq(agentTeamPendingInputs.status, 'pending'),
       ))
-      .orderBy(desc(agentTeamPendingInputs.createdAt))
-      .limit(1);
-    if (!pending) return null;
-    return {
-      runId: pending.runId,
-      pendingInputId: pending.id,
-      taskAttemptId: pending.taskAttemptId,
-      scopeRevision: pending.scopeRevision,
-      kind: pending.kind,
-      question: pending.question,
-      operationKey: pending.operationKey,
-    };
+      .orderBy(asc(agentTeamPendingInputs.createdAt));
+    return pending.map((row) => ({
+      runId: row.runId,
+      pendingInputId: row.id,
+      taskAttemptId: row.taskAttemptId,
+      scopeRevision: row.scopeRevision,
+      kind: row.kind,
+      question: row.question,
+      operationKey: row.operationKey,
+    }));
+  }
+
+  private async currentPendingInput(conversationId: string): Promise<AgentTeamConversationPendingInputView | null> {
+    return (await this.currentPendingInputs(conversationId))[0] ?? null;
   }
 
   private async conversationView(conversationId: string): Promise<AgentTeamConversationView> {
@@ -915,7 +930,8 @@ export class AgentTeamConversationService implements OnModuleInit, OnModuleDestr
       .limit(1);
     const activeRun = await this.activeRunRow(conversationId);
     const conversationRun = activeRun ?? await this.latestRunRow(conversationId);
-    const pendingInput = await this.currentPendingInput(conversationId);
+    const pendingInputs = await this.currentPendingInputs(conversationId);
+    const retryableTaskKeys = conversationRun ? await retryableTaskKeysForRun(conversationRun.id, this.db) : [];
     const recentDirectories = await this.recentProjectDirectories(conversationId);
     const activeIntake = activeRun
       ? intakes.find((intake) => intake.runId === activeRun.id)
@@ -933,9 +949,12 @@ export class AgentTeamConversationService implements OnModuleInit, OnModuleDestr
         status: conversationRun.status,
         mode: conversationRun.mode,
         projectDirectory: conversationRun.projectDirectory,
-        retryableTaskKey: await retryableTaskKey(conversationRun.id, this.db),
+        retryableTaskKey: retryableTaskKeys[0] ?? null,
+        retryableTaskKeys,
+        progress: await this.runtime.getRunProgress(conversationRun.id),
       } : null,
-      pendingInput,
+      pendingInput: pendingInputs[0] ?? null,
+      pendingInputs,
       lastSequence: latestEvent?.sequence ?? 0,
       createdAt: conversation.createdAt.toISOString(),
       updatedAt: conversation.updatedAt.toISOString(),
@@ -1004,17 +1023,16 @@ async function intakeIdForRun(
   return row?.id ?? null;
 }
 
-async function retryableTaskKey(runId: string, db: Database): Promise<string | null> {
-  const [task] = await db.select({ taskKey: agentTeamTaskAttempts.taskKey })
+async function retryableTaskKeysForRun(runId: string, db: Database): Promise<string[]> {
+  const tasks = await db.select({ taskKey: agentTeamTaskAttempts.taskKey })
     .from(agentTeamTaskAttempts)
     .where(and(
       eq(agentTeamTaskAttempts.runId, runId),
       eq(agentTeamTaskAttempts.status, 'failed'),
       eq(agentTeamTaskAttempts.active, true),
     ))
-    .orderBy(desc(agentTeamTaskAttempts.attemptIndex))
-    .limit(1);
-  return task?.taskKey ?? null;
+    .orderBy(asc(agentTeamTaskAttempts.createdAt), desc(agentTeamTaskAttempts.attemptIndex));
+  return [...new Set(tasks.map((task) => task.taskKey))];
 }
 
 function nextMessageSequence(
@@ -1278,6 +1296,8 @@ function toMessageView(row: MessageRow): AgentTeamConversationMessage {
         kind: 'member_question',
         role: payload.role as AgentTeamRole,
         taskKey: typeof payload.taskKey === 'string' ? payload.taskKey : null,
+        developerId: typeof payload.developerId === 'string' ? payload.developerId : null,
+        assignmentTitle: typeof payload.assignmentTitle === 'string' ? payload.assignmentTitle : null,
         pendingInputId: String(payload.pendingInputId ?? ''),
         scopeRevision: Number(payload.scopeRevision ?? 0),
         kindDetail: payload.kindDetail === 'operation_recovery' ? 'operation_recovery' : 'question',
@@ -1310,6 +1330,8 @@ function toMessageView(row: MessageRow): AgentTeamConversationMessage {
         taskStatus: (payload.taskStatus ?? null) as AgentTeamTaskAttemptStatus | null,
         role: (payload.role ?? null) as AgentTeamRole | null,
         taskKey: typeof payload.taskKey === 'string' ? payload.taskKey : null,
+        developerId: typeof payload.developerId === 'string' ? payload.developerId : null,
+        assignmentTitle: typeof payload.assignmentTitle === 'string' ? payload.assignmentTitle : null,
         outcomeSummary: typeof payload.outcomeSummary === 'string' ? payload.outcomeSummary : null,
       };
   }

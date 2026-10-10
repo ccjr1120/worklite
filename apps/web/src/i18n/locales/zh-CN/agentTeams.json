@@ -9,7 +9,21 @@
     "roles": "角色配置",
     "advanced": "高级设置",
     "processId": "流程 ID",
-    "processVersion": "流程版本"
+    "processVersion": "流程版本",
+    "executor": {
+      "label": "执行器",
+      "claude": "Claude Code",
+      "codex": "Codex"
+    },
+    "instances": {
+      "label": "额外 Developer 实例",
+      "name": "实例名称",
+      "add": "添加 Developer 实例",
+      "remove": "移除实例"
+    },
+    "concurrency": {
+      "label": "Developer 并行上限"
+    }
   },
   "run": {
     "loading": "正在加载 Agent Team 执行",
@@ -63,11 +77,44 @@
     "retry": "重试任务",
     "retrying": "正在重试任务",
     "retryFailed": "无法重试任务",
+    "retryTask": "重试 {{taskKey}}",
     "changedFiles": "变更文件",
     "noChangedFiles": "无变更文件",
     "assignedWork": "分配工作",
     "assignedWorkCompleted": "已完成",
     "assignedWorkNotCompleted": "未完成"
+  },
+  "progress": {
+    "title": "执行进度",
+    "phase": "当前阶段",
+    "phaseValue": {
+      "planning": "规划中",
+      "test_design": "测试设计中",
+      "development": "开发中",
+      "test_authoring": "测试编写中",
+      "test_execution": "测试执行中",
+      "review": "审查中",
+      "repair": "修复中",
+      "waiting": "等待输入",
+      "terminal": "已结束"
+    },
+    "nextStep": "下一步",
+    "nextStepValue": {
+      "dispatch_assignments": "派发开发任务",
+      "await_assignment_completion": "等待开发任务完成",
+      "answer_question": "回答待处理问题",
+      "test_authoring": "编写测试",
+      "test_execution": "执行测试",
+      "review": "审查",
+      "finish": "结束"
+    },
+    "assignments": "开发任务 {{completed}}/{{total}}",
+    "activeDevelopers": "进行中的 Developer",
+    "pendingQuestions": "{{count}} 个待回答问题",
+    "waitingReason": {
+      "user_input": "等待用户输入",
+      "pause_boundary": "在暂停边界等待"
+    }
   },
   "input": {
     "title": "等待回答",
@@ -91,7 +138,11 @@
   "output": {
     "title": "成员输出",
     "empty": "暂无输出。",
-    "reconnecting": "事件流正在重新连接"
+    "reconnecting": "事件流正在重新连接",
+    "lane": {
+      "label": "输出通道",
+      "all": "全部通道"
+    }
   },
   "documents": {
     "title": "团队文档",

@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { Ban, ChevronDown, ChevronRight, CircleX, FileCode2, Hourglass, LoaderCircle, MessageSquareText, Play, RefreshCw, ShieldAlert, X } from 'lucide-react';
+import { Ban, ChevronDown, ChevronRight, CircleX, FileCode2, Hourglass, LoaderCircle, MessageCircleQuestion, MessageSquareText, Play, RefreshCw, ShieldAlert, X } from 'lucide-react';
 import { useContext, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentToolCallView, ChatConversationView, ChatProjectTaskView, ChatSubmissionView, RunView, WorkflowView } from '@worklite/contracts';
@@ -18,7 +18,7 @@ import { useChatProjectOperationQuery } from '@/api/queries';
 import { PinTrackingContext } from './pinned-executions';
 
 type TranscriptMessage = AgentExecutionView['messages'][number];
-type TurnSegment = { kind: 'message'; item: TranscriptMessage } | { kind: 'tool'; item: AgentToolCallView };
+type TurnSegment = { kind: 'message'; item: TranscriptMessage } | { kind: 'tool'; item: AgentToolCallView } | { kind: 'question'; item: AgentToolCallView; text: string };
 
 
 type CodexActivity = ChatProjectTaskView['activities'][number];
@@ -91,7 +91,14 @@ function buildTimeline(sources: {
   const push = (at: string, entry: TimedEntry['entry']) => timed.push({ at, order: timed.length, entry });
   const execution = sources.execution;
   for (const item of execution?.messages ?? []) push(item.createdAt, { kind: 'segment', segment: { kind: 'message', item } });
-  for (const item of execution?.toolCalls ?? []) push(item.createdAt, { kind: 'segment', segment: { kind: 'tool', item } });
+  for (const item of execution?.toolCalls ?? []) {
+    if (!item.question) { push(item.createdAt, { kind: 'segment', segment: { kind: 'tool', item } }); continue; }
+    // An active question is represented only by the pending question note. A settled one stays
+    // as an exchange: its question line in the asking turn and the answer as a user message.
+    if (item.status === 'running') continue;
+    push(item.createdAt, { kind: 'segment', segment: { kind: 'question', item, text: item.question.text } });
+    if (item.question.answer) push(item.finishedAt ?? item.createdAt, { kind: 'segment', segment: { kind: 'message', item: { id: `${item.id}:answer`, role: 'user', content: item.question.answer, createdAt: item.finishedAt ?? item.createdAt } } });
+  }
   for (const submission of sources.submissions) {
     if (submission.reference?.kind !== 'conversation' && (submission.reference || submission.error)) push(submission.createdAt, { kind: 'task', submission });
   }
@@ -114,11 +121,13 @@ function buildTimeline(sources: {
   return entries;
 }
 
-function UserMessage({ message }: { message: TranscriptMessage }) {
+// A pending message has been submitted but not yet accepted by the server; it keeps its
+// place with reduced emphasis while the working note below it reports progress.
+function UserMessage({ message, pending = false }: { message: TranscriptMessage; pending?: boolean }) {
   const { t } = useTranslation('assistant');
   return (
-    <Message from="user" aria-label={t('speaker.you')} className="wl-enter">
-      <MessageContent className="max-w-[min(78%,640px)] rounded-2xl rounded-br-md bg-brand-subtle px-4 py-2.5">
+    <Message from="user" aria-label={t('speaker.you')} aria-busy={pending || undefined} className="wl-enter">
+      <MessageContent className={cn('max-w-[min(78%,640px)] rounded-2xl rounded-br-md bg-brand-subtle px-4 py-2.5 transition-opacity duration-[140ms] ease-[var(--ease-out)]', pending && 'opacity-60')}>
         <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.content}</p>
       </MessageContent>
     </Message>
@@ -140,11 +149,24 @@ function AssistantTurn({ segments, working, markdownEnabled }: {
         <MessageContent className="min-w-0 flex-1 pt-1">
           {segments.map((segment, index) => segment.kind === 'message'
             ? <MessageResponse key={segment.item.id} content={segment.item.content} enabled={markdownEnabled} className={working && index === segments.length - 1 ? 'wl-caret' : undefined} />
-            : <ToolCallPanel key={segment.item.id} call={segment.item} />)}
+            : segment.kind === 'question'
+              ? <AskedQuestion key={segment.item.id} text={segment.text} />
+              : <ToolCallPanel key={segment.item.id} call={segment.item} />)}
           {working && segments[segments.length - 1]?.kind !== 'message' ? <WorkingNote /> : null}
         </MessageContent>
       </div>
     </Message>
+  );
+}
+
+// A settled question is part of the reply that asked it, so it reads as quiet assistant text
+// rather than the amber waiting note it replaced.
+function AskedQuestion({ text }: { text: string }) {
+  return (
+    <p className="wl-fade my-2 flex items-start gap-2 text-sm text-muted-foreground">
+      <MessageCircleQuestion className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      <span className="min-w-0 whitespace-pre-wrap break-words">{text}</span>
+    </p>
   );
 }
 

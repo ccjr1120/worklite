@@ -31,13 +31,14 @@ Understand and continue the current run. Reading costs no action: the persisted 
 
 ## Layout
 
-The page uses the full Workspace page width with a `1200px` maximum. The heading and execution controls are followed by immutable TeamVersion metadata, mode, intent, project directory, command grants, and scope revision. The main desktop grid places active work — pending input or recovery, then task attempts — in a wider primary column and documents, operations, and criterion assessments in a supporting column. Each completed task attempt exposes its changed-file list and assigned-work completion before the raw result JSON disclosure. Columns stack below `1024px`. The live member output occupies a fixed reading column with its own bounded scroll region; documents and command evidence use disclosures with bounded preformatted regions rather than expanding the page.
+The page uses the full Workspace page width with a `1200px` maximum. The heading and execution controls are followed by a progress header naming the current phase, next step, completed and total development assignments, active Developers, and the waiting reason, then immutable TeamVersion metadata, mode, intent, project directory, command grants, and scope revision. The main desktop grid places active work — pending input or recovery, then task attempts — in a wider primary column and documents, operations, and criterion assessments in a supporting column. Development task attempts carry their Developer and assignment title beside the task key and show the attempt's latest public progress text while it runs; test authoring, test execution, and review attempts remain single tasks after the fan-in. Pending input panels name their owning task attempt. The live member output occupies a fixed reading column with its own bounded scroll region and a lane filter that scopes it to one Developer lane. Columns stack below `1024px`. Documents and command evidence use disclosures with bounded preformatted regions rather than expanding the page.
 
 ## Interaction Contract
 
 | Action | Trigger and behavior |
 | --- | --- |
 | Observe run | The Run query is refreshed by SSE events while work is active. Persisted event replay and browser-managed `Last-Event-ID` reconnection preserve member output without a manual refresh. |
+| Filter member output by lane | One selection scopes the live output column to all lanes or one Developer lane; the persisted stream is unchanged and the filter resets when the run changes. |
 | Answer input | The Answer control shows local progress, submits the exact pending input id and scope revision, and replaces the Run cache with the server response. Failure preserves the answer and any non-Codex command-grant input. Codex developer questions omit the command-grant field. |
 | Recover uncertain operation | Selecting one structured decision and submitting it shows local progress and uses the operation key in both path and body. Failure leaves the decision selected. |
 | Pause | Pause shows local progress and preserves the request as visible pending state until the server settles at a stable boundary. |
@@ -60,6 +61,7 @@ SSE transport failure is shown as a reconnecting state, not a run failure. The p
 | Busy | Every action control owns its spinner and disabled state; no full-page blocking overlay is used. |
 | Offline | SSE shows a reconnecting cue, React Query retries the persisted snapshot, and completed durable sections remain readable. |
 | Long content | Member output, documents, changed-file lists, task result JSON, and command output use bounded scroll or disclosure regions. Output is never silently truncated. |
+| Parallel development | The progress header reports phase, assignment completion, active Developers, and next step; development attempts show their lane attribution and latest public progress text. |
 
 The page distinguishes execution status from criterion assessment. `succeeded` is only the Run completion state; criterion values remain `met`, `unmet`, or `not_verified` with their evidence.
 
@@ -116,6 +118,16 @@ The page distinguishes execution status from criterion assessment. `succeeded` i
 | `agentTeams:output.title` | State |
 | `agentTeams:output.empty` | State |
 | `agentTeams:output.reconnecting` | State |
+| `agentTeams:output.lane.label` | Constraint |
+| `agentTeams:output.lane.all` | State |
+| `agentTeams:progress.title` | State |
+| `agentTeams:progress.phase` | State |
+| `agentTeams:progress.phase.*` | State |
+| `agentTeams:progress.nextStep` | State |
+| `agentTeams:progress.nextStep.*` | State |
+| `agentTeams:progress.assignments` | State |
+| `agentTeams:progress.activeDevelopers` | State |
+| `agentTeams:progress.waitingReason.*` | State |
 | `agentTeams:documents.title` | State |
 | `agentTeams:documents.empty` | State |
 | `agentTeams:documents.revision` | State |
@@ -167,6 +179,8 @@ The heading hierarchy moves from Run title to section titles. Controls are nativ
 
 ## Coverage Status
 
+2026-10-10 source comparison: the progress header follows the heading and controls and names phase, next step, assignment completion, active Developers and waiting reason; development attempts show Developer, assignment title and latest progressText; pending input panels attribute their owning attempt; a lane filter scopes live member output when more than one lane exists. Web type check (tsc --noEmit and locale key check) passed; no browser, runtime, accessibility-tool or real-Run verification was authorized or performed.
+
 2026-10-08 authorized deployment: Gateway and Web builds, API compilation, isolated startup on ports 23490–23492 and deployment readiness on ports 23390–23392 passed through pnpm deploy:local. The deployment platform snapshot reports shared direct Chat/Team Codex execution without WorkLite grants and Chat cancellation in running/waiting states. The original conversation remains cancelled with no pending question. Browser appearance, real Codex task execution, live cancellation interaction and Feishu client behavior were not tested; no test suite or standalone type check was run.
 
 2026-10-08 source comparison: pending-input panels identify the owning task attempt and omit command-grant fields for the Codex developer, retaining ordinary answers and recovery. No runtime, browser, type check, build or test verification was authorized or performed.
@@ -174,6 +188,10 @@ The heading hierarchy moves from Run title to section titles. Controls are nativ
 Source-level audit: 2026-10-03. The source selects the Conversation tab and `openConversation` label when `run.originatingConversationId` is present; direct-origin Runs return to the Configuration tab with `openTeam`. No other difference was found in the source-level comparison of route, observation, mutation, replay, evidence, copy, token, responsive, and accessibility structure. Only source review occurred; no browser, accessibility-tool, runtime, acceptance, or real-Run verification was performed.
 
 ## Changelog
+
+### 2026-10-10 - Parallel Developer progress
+
+- Added the progress header (phase, next step, assignment completion, active Developers, waiting reason), Developer lane attribution and latest progress text on task attempts, owning-attempt attribution on pending inputs, and a lane filter for live member output.
 
 ### 2026-10-08 - Direct Codex execution
 

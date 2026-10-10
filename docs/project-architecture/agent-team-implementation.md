@@ -101,6 +101,14 @@ The runtime validates fields needed for scheduling and evidence linkage. Generat
 
 Accepted requirements and scope have explicit revisions. If requirements change, dependent plans and assessments must refer to the new revision. A retry continues the same task against the same input revision; changing completed upstream decisions is a new planning revision or run, not an arbitrary rollback command.
 
+## 4.4 Multi-Developer Orchestration
+
+The Developer role remains one of the six required role entries. Its optional `developerInstances` list describes up to three complete extra instances beyond the primary reserved id `developer`; `developerConcurrency` is clamped to 1–4 and defaults to `min(logicalDeveloperCount, 2)`. Omitting `developerInstances` in a PATCH preserves saved extras, while an explicit empty array clears them.
+
+A new TeamVersion uses `orchestrationVersion: 2`, captures a launch for every logical Developer in `developerExecutions`, retains the equivalent primary `developerExecution`, and records `recipeDefaults.maxDeveloperConcurrency`. Planner output supplies non-overlapping path-owned assignments for every required Developer. Development uses a deterministic LangGraph dispatcher and per-Developer branches; pending input and repair are assignment-specific, and downstream roles begin only after fan-in. Version 1 snapshots remain unchanged and use the serial graph.
+
+A parallel failure uses one retry barrier: successful siblings and predecessor attempts are not rerun, failed assignments in the same fan-out resume together, and unstarted assignments remain checkpoint-owned. Pause stops new dispatch, cancellation interrupts every Developer executor, and restart fails only running Developer attempts that cannot be confirmed in process. Joined results retain per-assignment evidence and fail on conflicting changed paths rather than silently overwriting them.
+
 ## 5. BMAD and TEA Process Packaging
 
 P0 pinned BMAD `v6.12.0` (annotated tag object `b28fef564f2c48ac20d969bcccaf2fc08d503afb`, commit `05bfbd46d00766ec88eb9b42e76be2c575d64d7b`) and TEA `v1.27.2` (annotated tag object `fa068c614f9642aad62f060c0b1c2e9956506fb5`, commit `d99ad29c62697c152e3393351406686d5bcd323c`). Both repositories provide MIT license terms with a BMad trademark notice. The selected runtime versions are `@langchain/langgraph@1.4.18`, `@langchain/langgraph-checkpoint-sqlite@1.0.4`, and `@langchain/core@1.1.48`.
@@ -414,6 +422,12 @@ References were consulted on 2026-10-03. They support the selected mechanisms; t
 - [LangGraph.js multi-Agent code examples](https://github.com/langchain-ai/langgraphjs/blob/93dfc54bdd8613fdd79eaaa16a7a747f72d3706f/docs/docs/concepts/multi_agent.md): repository-backed graph, supervisor, and state-handoff examples read through authenticated `gh` during the initial research. This reference is not a selected dependency version.
 
 ## 16. Change Record
+
+### 2026-10-10 — Multi-Developer stage 2
+
+- Added the confirmed six-role-compatible Developer instance contract, immutable per-instance launch capture, and orchestration-v2 fan-out semantics.
+- Documented bounded dispatch, assignment ownership, per-assignment pending input and repair, aggregate conflict handling, restart behavior, and same-fan-out retry.
+- Defined replay-compatible `developerId` task attribution and low-frequency `run.progress` events.
 
 ### 2026-10-03 - Team conversation and file delivery
 

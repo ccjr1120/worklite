@@ -106,6 +106,9 @@ function ChatWorkspace() {
   const [queued, setQueued] = useState<QueuedMessage[]>(() => conversationDrafts.get(selectedConversationId ?? 'new')?.queued ?? []);
   const [queuePaused, setQueuePaused] = useState(() => conversationDrafts.get(selectedConversationId ?? 'new')?.paused ?? false);
   const [queueSendingId, setQueueSendingId] = useState<string | null>(null);
+  // An answer the server has not accepted yet. It is shown at once so the reader sees what they
+  // sent; the accepted exchange replaces it, and a rejection returns the text to the composer.
+  const [pendingAnswer, setPendingAnswer] = useState<{ id: string; text: string; createdAt: string } | null>(null);
   const [slashDismissed, setSlashDismissed] = useState(false);
   const [mentionDismissed, setMentionDismissed] = useState(false);
   const [activeValue, setActiveValue] = useState('');
@@ -177,6 +180,7 @@ function ChatWorkspace() {
     setBusy(false);
     setCancelling(false);
     setQueueSendingId(null);
+    setPendingAnswer(null);
     setLoadingExecution(Boolean(id));
     if (!id) setRecordsOpen(false);
     setQueued(remembered?.queued ?? []);
@@ -413,6 +417,10 @@ function ChatWorkspace() {
     if (visibleExecution?.status === 'failed' || visibleExecution?.status === 'cancelled' || visibleExecution?.status === 'waiting_for_input') setQueuePaused(true);
   }, [visibleExecution?.status]);
 
+  function showPendingAnswer(text: string) {
+    setPendingAnswer({ id: `pending_${crypto.randomUUID()}`, text, createdAt: new Date().toISOString() });
+  }
+
   function enqueue(text: string) {
     setQueued((current) => [...current, { id: `web_${crypto.randomUUID()}`, text }]);
     setDraft('');
@@ -461,17 +469,20 @@ function ChatWorkspace() {
     if (waitingForInput && visibleExecution?.pendingQuestion) {
       setBusy(true);
       setError('');
+      showPendingAnswer(trimmedMessage);
+      setDraft('');
       try {
         const next = await sendConversation(trimmedMessage, visibleExecution.id, visibleExecution.pendingQuestion.id);
         if (generation !== mainRequestGenerationRef.current) return;
         setExecution(next);
-        setDraft('');
         setQueuePaused(false);
       } catch (answerError) {
         if (generation !== mainRequestGenerationRef.current) return;
+        // Only an empty composer receives the answer back, so text typed meanwhile is never replaced.
+        setDraft((current) => current || trimmedMessage);
         setError(apiErrorMessage(answerError, t('assistant:execution.answerFailed')));
       } finally {
-        if (generation === mainRequestGenerationRef.current) setBusy(false);
+        if (generation === mainRequestGenerationRef.current) { setBusy(false); setPendingAnswer(null); }
       }
       return;
     }
@@ -662,6 +673,8 @@ function ChatWorkspace() {
     if (!execution?.pendingQuestion || busy) return;
     const generation = mainRequestGenerationRef.current;
     setBusy(true); setError('');
+    // Accepting a new conversation is navigation, not an answer, so it has no answer message.
+    if (!authorization?.newConversation) showPendingAnswer(answer);
     try {
       const next = await sendConversation(answer, execution.id, execution.pendingQuestion.id, undefined, authorization);
       if (generation !== mainRequestGenerationRef.current) return;
@@ -669,7 +682,7 @@ function ChatWorkspace() {
       setExecution(next); setQueuePaused(false);
       void queryClient.invalidateQueries({ queryKey: chatConversationsQueryKey });
     } catch (cause) { if (generation === mainRequestGenerationRef.current) setError(apiErrorMessage(cause, t('assistant:execution.answerFailed'))); }
-    finally { if (generation === mainRequestGenerationRef.current) setBusy(false); }
+    finally { if (generation === mainRequestGenerationRef.current) { setBusy(false); setPendingAnswer(null); } }
   }
 
   const transcriptHostRef = useRef<HTMLDivElement>(null);
@@ -684,6 +697,9 @@ function ChatWorkspace() {
     cancelled: visibleExecution?.status === 'cancelled',
     failed: visibleExecution?.status === 'failed',
   });
+  // The event stream can report the accepted answer before its request returns; once the question
+  // is no longer pending, the stored exchange represents the answer instead.
+  const visiblePendingAnswer = waitingForInput ? pendingAnswer : null;
   const lastEntry = timeline[timeline.length - 1];
   const showWorkingInLastTurn = running && lastEntry?.kind === 'assistant';
   const pinCandidates: PinCandidate[] = timeline.flatMap((entry): PinCandidate[] => entry.kind === 'task'
@@ -756,7 +772,8 @@ function ChatWorkspace() {
                       case 'failure': return <FailureNote key="failure" execution={visibleExecution} message={executionError || t('assistant:execution.requestFailed')} onRetry={() => void retryExecution()} retryDisabled={busy || cancelling} locale={locale} />;
                     }
                   })}
-                  {(running && !showWorkingInLastTurn || busy && !cancelling && !running && !waitingForInput) ? <AssistantTurn segments={[]} working markdownEnabled /> : null}
+                  {visiblePendingAnswer ? <UserMessage key={visiblePendingAnswer.id} message={{ id: visiblePendingAnswer.id, role: 'user', content: visiblePendingAnswer.text, createdAt: visiblePendingAnswer.createdAt }} pending /> : null}
+                  {(running && !showWorkingInLastTurn || busy && !cancelling && !running && (!waitingForInput || visiblePendingAnswer)) ? <AssistantTurn segments={[]} working markdownEnabled /> : null}
                   <QueueRows queued={queued} paused={queuePaused} sendingId={queueSendingId} onRemove={(id) => setQueued((current) => current.filter((item) => item.id !== id))} />
                   {error ? <p className="wl-enter mt-4 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2 text-[13px] text-danger" role="alert">{error}</p> : null}
                 </ConversationContent>

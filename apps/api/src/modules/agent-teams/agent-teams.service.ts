@@ -19,6 +19,7 @@ import {
   skills,
   type AgentTeam,
   type Database,
+  type StoredAgentTeamDeveloperInstanceConfiguration,
   type StoredAgentTeamRoleConfiguration,
 } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
@@ -41,7 +42,25 @@ const ROLE_CONFIGURATION_KEYS = [
   'mcpServerIds',
   'toolNames',
   'executor',
+  'developerInstances',
+  'developerConcurrency',
 ] as const;
+
+const DEVELOPER_INSTANCE_CONFIGURATION_KEYS = [
+  'developerId',
+  'label',
+  'publicModelId',
+  'instructions',
+  'entryPoints',
+  'skillIds',
+  'mcpServerIds',
+  'toolNames',
+  'executor',
+] as const;
+
+const RESERVED_DEVELOPER_ID = 'developer';
+const MAX_DEVELOPER_INSTANCES = 3;
+const MAX_DEVELOPER_CONCURRENCY = 4;
 
 @Injectable()
 export class AgentTeamsService {
@@ -77,7 +96,7 @@ export class AgentTeamsService {
       throw new BadRequestException('Only Agent Team roles can be changed.');
     }
     if (input.roles === undefined) throw new BadRequestException('Agent Team roles are required.');
-    const configuredRoles = await this.resolveRoles(workspace.id, input.roles);
+    const configuredRoles = await this.resolveRoles(workspace.id, input.roles, team.roles);
     const [updated] = await this.db.update(agentTeams).set({
       roles: configuredRoles,
       updatedAt: new Date(),
@@ -178,6 +197,7 @@ export class AgentTeamsService {
   private async resolveRoles(
     workspaceId: string,
     values: AgentTeamRoleConfiguration[],
+    existingRoles?: StoredAgentTeamRoleConfiguration[],
   ): Promise<StoredAgentTeamRoleConfiguration[]> {
     if (!Array.isArray(values) || values.length !== AGENT_TEAM_ROLES.length) {
       throw new BadRequestException('Every supported Agent Team role is required exactly once.');
@@ -194,10 +214,20 @@ export class AgentTeamsService {
       if (!AGENT_TEAM_ROLES.includes(role) || byRole.has(role)) {
         throw new BadRequestException('Every supported Agent Team role is required exactly once.');
       }
+      if (role !== 'developer' && (value.developerInstances !== undefined || value.developerConcurrency !== undefined)) {
+        throw new BadRequestException('Only the developer role configures additional Developer instances.');
+      }
       byRole.set(role, value);
     }
 
-    const normalized: Array<Omit<StoredAgentTeamRoleConfiguration, 'skills' | 'mcpServers'>> = [];
+    type NormalizedInstance = Omit<StoredAgentTeamDeveloperInstanceConfiguration, 'skills' | 'mcpServers'> & {
+      skillIds: string[];
+      mcpServerIds: string[];
+    };
+    type NormalizedRole = Omit<StoredAgentTeamRoleConfiguration, 'skills' | 'mcpServers' | 'developerInstances'> & {
+      developerInstances?: NormalizedInstance[] | StoredAgentTeamDeveloperInstanceConfiguration[];
+    };
+    const normalized: NormalizedRole[] = [];
     for (const role of AGENT_TEAM_ROLES) {
       const value = byRole.get(role);
       if (!value) throw new BadRequestException('Every supported Agent Team role is required exactly once.');
@@ -227,6 +257,89 @@ export class AgentTeamsService {
       if (toolNames.some((toolName) => !allowedToolNames.includes(toolName))) {
         throw new BadRequestException(`A tool is not supported for Agent Team role ${role}.`);
       }
+
+      let developerInstances: NormalizedRole['developerInstances'];
+      let developerConcurrency: number | undefined;
+      if (role === 'developer') {
+        // Omitting developerInstances preserves the saved extra instances so older clients
+        // updating the six role entries cannot silently delete them; an explicit [] clears.
+        if (value.developerInstances === undefined) {
+          developerInstances = existingRoles?.find((candidate) => candidate.role === 'developer')?.developerInstances;
+        } else {
+          if (!Array.isArray(value.developerInstances)) {
+            throw new BadRequestException('Developer instances must be an array.');
+          }
+          if (value.developerInstances.length > MAX_DEVELOPER_INSTANCES) {
+            throw new BadRequestException(`At most ${MAX_DEVELOPER_INSTANCES} additional Developer instances are supported.`);
+          }
+          const seenDeveloperIds = new Set<string>();
+          developerInstances = await Promise.all(value.developerInstances.map(async (instance) => {
+            if (!instance || typeof instance !== 'object' || Array.isArray(instance)) {
+              throw new BadRequestException('Every Developer instance configuration must be an object.');
+            }
+            if (Object.keys(instance).some((key) => !(DEVELOPER_INSTANCE_CONFIGURATION_KEYS as readonly string[]).includes(key))) {
+              throw new BadRequestException('A Developer instance configuration contains an unsupported field.');
+            }
+            if (typeof instance.developerId !== 'string' || !instance.developerId.trim()) {
+              throw new BadRequestException('A Developer instance id is required.');
+            }
+            const developerId = instance.developerId.trim();
+            if (developerId === RESERVED_DEVELOPER_ID || seenDeveloperIds.has(developerId)) {
+              throw new BadRequestException('Developer instance ids must be unique and cannot be the reserved id "developer".');
+            }
+            seenDeveloperIds.add(developerId);
+            if (typeof instance.label !== 'string' || !instance.label.trim()) {
+              throw new BadRequestException(`A label for Developer instance ${developerId} is required.`);
+            }
+            if (typeof instance.publicModelId !== 'string') {
+              throw new BadRequestException(`A public model id for Developer instance ${developerId} must be a string.`);
+            }
+            const instancePublicModelId = instance.publicModelId.trim();
+            if (instance.executor !== undefined && instance.executor !== 'claude' && instance.executor !== 'codex') {
+              throw new BadRequestException(`The executor for Developer instance ${developerId} must be claude or codex.`);
+            }
+            const instanceExecutor = instance.executor ?? 'claude';
+            const instanceRuntime = instancePublicModelId
+              ? await this.resources.publicModelRuntime(workspaceId, instancePublicModelId)
+              : undefined;
+            if (instanceRuntime && !PROJECT_EXECUTOR_PROTOCOLS[instanceExecutor].includes(instanceRuntime.protocol)) {
+              throw new BadRequestException(`The model for Developer instance ${developerId} must use ${PROJECT_EXECUTOR_PROTOCOLS[instanceExecutor].join(' or ')} for the ${instanceExecutor} executor.`);
+            }
+            if (typeof instance.instructions !== 'string' || !instance.instructions.trim()) {
+              throw new BadRequestException(`Instructions for Developer instance ${developerId} are required.`);
+            }
+            const instanceEntryPoints = normalizeStrings(instance.entryPoints, `entry points for Developer instance ${developerId}`);
+            if (instanceEntryPoints.some((entryPoint) => !allowedEntryPoints.includes(entryPoint))) {
+              throw new BadRequestException(`An entry point is not supported for Developer instance ${developerId}.`);
+            }
+            const instanceToolNames = normalizeStrings(instance.toolNames, `tool names for Developer instance ${developerId}`);
+            if (instanceToolNames.some((toolName) => !allowedToolNames.includes(toolName))) {
+              throw new BadRequestException(`A tool is not supported for Developer instance ${developerId}.`);
+            }
+            return {
+              developerId,
+              label: instance.label.trim(),
+              publicModelId: instancePublicModelId,
+              instructions: instance.instructions.trim(),
+              entryPoints: instanceEntryPoints,
+              toolNames: instanceToolNames,
+              executor: instanceExecutor,
+              skillIds: uniqueStrings(instance.skillIds, `Skill ids for Developer instance ${developerId}`),
+              mcpServerIds: uniqueStrings(instance.mcpServerIds, `MCP server ids for Developer instance ${developerId}`),
+            };
+          }));
+        }
+        if (value.developerConcurrency !== undefined) {
+          if (typeof value.developerConcurrency !== 'number'
+            || !Number.isInteger(value.developerConcurrency)
+            || value.developerConcurrency < 1
+            || value.developerConcurrency > MAX_DEVELOPER_CONCURRENCY) {
+            throw new BadRequestException(`Developer concurrency must be an integer between 1 and ${MAX_DEVELOPER_CONCURRENCY}.`);
+          }
+          developerConcurrency = value.developerConcurrency;
+        }
+      }
+
       normalized.push({
         role,
         publicModelId,
@@ -234,20 +347,49 @@ export class AgentTeamsService {
         entryPoints,
         toolNames,
         ...(executor ? { executor } : {}),
+        ...(developerInstances !== undefined ? { developerInstances } : {}),
+        ...(developerConcurrency !== undefined ? { developerConcurrency } : {}),
       });
     }
 
     const skillIds = new Set(values.flatMap((value) => uniqueStrings(value.skillIds, `Skill ids for Agent Team role ${value.role}`)));
     const mcpServerIds = new Set(values.flatMap((value) => uniqueStrings(value.mcpServerIds, `MCP server ids for Agent Team role ${value.role}`)));
+    for (const role of normalized) {
+      for (const instance of role.developerInstances ?? []) {
+        if (!('skillIds' in instance)) continue;
+        for (const id of instance.skillIds) skillIds.add(id);
+        for (const id of instance.mcpServerIds) mcpServerIds.add(id);
+      }
+    }
     const skillSnapshots = await this.resolveSkills(workspaceId, skillIds);
     const mcpSnapshots = await this.resolveMcpServers(workspaceId, mcpServerIds);
     const skillsByRole = new Map(values.map((value) => [value.role, uniqueStrings(value.skillIds, `Skill ids for Agent Team role ${value.role}`)]));
     const mcpServersByRole = new Map(values.map((value) => [value.role, uniqueStrings(value.mcpServerIds, `MCP server ids for Agent Team role ${value.role}`)]));
-    return normalized.map((role) => ({
-      ...role,
-      skills: skillsByRole.get(role.role)?.flatMap((id) => skillSnapshots.get(id) ? [skillSnapshots.get(id)!] : []) ?? [],
-      mcpServers: mcpServersByRole.get(role.role)?.flatMap((id) => mcpSnapshots.get(id) ? [mcpSnapshots.get(id)!] : []) ?? [],
-    }));
+    return normalized.map((role) => {
+      const { developerInstances, ...rest } = role;
+      return {
+        ...rest,
+        skills: skillsByRole.get(role.role)?.flatMap((id) => skillSnapshots.get(id) ? [skillSnapshots.get(id)!] : []) ?? [],
+        mcpServers: mcpServersByRole.get(role.role)?.flatMap((id) => mcpSnapshots.get(id) ? [mcpSnapshots.get(id)!] : []) ?? [],
+        ...(developerInstances
+          ? {
+            developerInstances: developerInstances.map((instance) => 'skillIds' in instance
+              ? {
+                developerId: instance.developerId,
+                label: instance.label,
+                publicModelId: instance.publicModelId,
+                instructions: instance.instructions,
+                entryPoints: instance.entryPoints,
+                toolNames: instance.toolNames,
+                executor: instance.executor,
+                skills: instance.skillIds.flatMap((id) => skillSnapshots.get(id) ? [skillSnapshots.get(id)!] : []),
+                mcpServers: instance.mcpServerIds.flatMap((id) => mcpSnapshots.get(id) ? [mcpSnapshots.get(id)!] : []),
+              }
+              : instance),
+          }
+          : {}),
+      };
+    });
   }
 
   private async resolveSkills(
@@ -300,6 +442,22 @@ function toTeamView(row: AgentTeam): AgentTeamView {
       mcpServerIds: role.mcpServers.map((server) => server.id),
       toolNames: role.toolNames,
       ...(role.role === 'developer' ? { executor: role.executor ?? 'claude' } : {}),
+      ...(role.developerInstances
+        ? {
+          developerInstances: role.developerInstances.map((instance) => ({
+            developerId: instance.developerId,
+            label: instance.label,
+            publicModelId: instance.publicModelId,
+            instructions: instance.instructions,
+            entryPoints: instance.entryPoints,
+            skillIds: instance.skills.map((skill) => skill.id),
+            mcpServerIds: instance.mcpServers.map((server) => server.id),
+            toolNames: instance.toolNames,
+            ...(instance.executor ? { executor: instance.executor } : {}),
+          })),
+        }
+        : {}),
+      ...(role.developerConcurrency !== undefined ? { developerConcurrency: role.developerConcurrency } : {}),
     })),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

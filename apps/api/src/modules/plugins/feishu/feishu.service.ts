@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Client, EventDispatcher, LoggerLevel, WSClient } from '@larksuiteoapi/node-sdk';
 import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
@@ -15,6 +15,7 @@ import { renderCard, statusText, type CardButton, type CardState, type CardTrans
 import { runtimeAdmissionClosed, runtimeWritesFrozen } from '../../../infrastructure/runtime-upgrade-state';
 import { UpgradesService } from '../../upgrades/upgrades.service';
 
+type FeishuActionReceipt = { accepted: true } | { accepted: false; reason: string };
 type Json = Record<string, unknown>;
 type Submission = typeof chatSubmissions.$inferSelect;
 const request = {} as Request;
@@ -24,6 +25,7 @@ const digest = (value: string) => createHash('sha256').update(value).digest('hex
 
 @Injectable()
 export class FeishuService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(FeishuService.name);
   private client?: Client;
   private socket?: WSClient;
   private timer?: ReturnType<typeof setInterval>;
@@ -99,8 +101,8 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       'card.action.trigger': async (event: unknown) => {
         if (generation !== this.generation || runtimeWritesFrozen()) throw new Error('Runtime is switching.');
         this.intakePending += 1;
-        try { await this.receiveAction(record(event), config.feishuAllowedUserId); } finally { this.intakePending -= 1; }
-        return { toast: { type: 'info', content: '已收到，正在处理' } };
+        const receipt = await this.receiveAction(record(event), config.feishuAllowedUserId).finally(() => { this.intakePending -= 1; });
+        return { toast: { type: receipt.accepted ? 'info' : 'error', content: receipt.accepted ? '已收到，正在处理' : `操作已被拒绝：${receipt.reason}` } };
       },
     });
     await state('connecting');
@@ -140,34 +142,64 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
     const replyTo = string(message.parent_id) || string(message.root_id);
     let boundAction: FeishuAction | undefined;
     let parentSubmissionId: string | undefined;
+    const execution = chat.executionId ? await this.executions.get(request, 'personal', CHAT_AGENT_ID, chat.executionId) : undefined;
     if (replyTo) {
       const [parent] = await this.db.select().from(chatSubmissions).where(and(eq(chatSubmissions.chatId, chatId), eq(chatSubmissions.outputMessageId, replyTo))).limit(1);
       boundAction = (parent?.renderedCard as SavedCard | null)?.replyAction;
       parentSubmissionId = parent?.id;
-    } else if (chat.executionId) {
-      const execution = await this.executions.get(request, 'personal', CHAT_AGENT_ID, chat.executionId);
-      if (execution.pendingQuestion) boundAction = { kind: 'agent_answer', executionId: execution.id, questionId: execution.pendingQuestion.id };
+    } else if (execution?.pendingQuestion) {
+      boundAction = { kind: 'agent_answer', executionId: execution.id, questionId: execution.pendingQuestion.id };
     }
+    const escapeFailedConversation = !boundAction && text === '新对话' && execution?.status === 'failed';
     const eventId = `message:${messageId}`;
     this.db.transaction((transaction) => {
       const receipt = transaction.insert(feishuEvents).values({ id: eventId, chatId, payload: { text, context: { content: message.content, messageId, messageType: message.message_type, createTime: message.create_time, parentId: message.parent_id, rootId: message.root_id }, ...(boundAction ? { action: boundAction, form: { answer: text }, ...(parentSubmissionId ? { submissionId: parentSubmissionId } : {}) } : {}) } }).onConflictDoNothing().run();
-      if (receipt.changes > 0 && text && !boundAction) transaction.insert(chatSubmissions).values({ id: eventId, workspaceId: chat.workspaceId, chatId, executionId: chat.executionId, message: text, target: { kind: 'conversation' } }).run();
+      let submissionExecutionId = chat.executionId;
+      if (receipt.changes > 0 && escapeFailedConversation && chat.executionId) {
+        const unbound = transaction.update(feishuChats).set({ executionId: null, updatedAt: new Date() }).where(and(eq(feishuChats.id, chatId), eq(feishuChats.executionId, chat.executionId))).run();
+        if (unbound.changes === 0) throw new ConflictException('This Feishu conversation is no longer bound to the failed Agent execution.');
+        submissionExecutionId = null;
+      }
+      if (receipt.changes > 0 && text && !boundAction) transaction.insert(chatSubmissions).values({ id: eventId, workspaceId: chat.workspaceId, chatId, executionId: submissionExecutionId, message: text, target: { kind: 'conversation' } }).run();
     });
     void this.work();
   }
 
-  private async receiveAction(event: Json, allowedUserId: string): Promise<void> {
-    if (string(record(event.operator).open_id) !== allowedUserId) return;
+  private async receiveAction(event: Json, allowedUserId: string): Promise<FeishuActionReceipt> {
+    const eventId = string(event.event_id) || digest(JSON.stringify(event));
+    const operatorId = string(record(event.operator).open_id);
+    if (operatorId !== allowedUserId) {
+      this.logger.warn(`Feishu card action rejected: operator mismatch, eventId=${eventId}, operator=${digest(operatorId).slice(0, 12)}.`);
+      return { accepted: false, reason: '操作者不匹配' };
+    }
     const action = record(event.action);
     const value = record(action.value);
-    const [submission] = await this.db.select().from(chatSubmissions).where(eq(chatSubmissions.id, string(value.submissionId))).limit(1);
-    const saved = submission?.renderedCard as SavedCard | null;
-    const selected = saved?.actions[string(value.actionKey)];
-    if (!submission?.chatId || !selected || string(record(event.context).open_message_id) !== submission.outputMessageId) return;
+    const submissionId = string(value.submissionId);
+    const actionKey = string(value.actionKey);
+    const [submission] = await this.db.select().from(chatSubmissions).where(eq(chatSubmissions.id, submissionId)).limit(1);
+    if (!submission) {
+      this.logger.warn(`Feishu card action rejected: submission not found, eventId=${eventId}, submissionId=${submissionId}.`);
+      return { accepted: false, reason: '任务卡片不存在' };
+    }
+    if (!submission.chatId) {
+      this.logger.warn(`Feishu card action rejected: submission chat missing, eventId=${eventId}, submissionId=${submission.id}.`);
+      return { accepted: false, reason: '任务卡片未关联对话' };
+    }
+    const saved = submission.renderedCard as SavedCard | null;
+    const selected = saved?.actions[actionKey];
+    if (!selected) {
+      this.logger.warn(`Feishu card action rejected: action not found, eventId=${eventId}, chatId=${submission.chatId}, submissionId=${submission.id}, actionKey=${actionKey}.`);
+      return { accepted: false, reason: '卡片操作不存在' };
+    }
+    const messageId = string(record(event.context).open_message_id);
+    if (messageId !== submission.outputMessageId) {
+      this.logger.warn(`Feishu card action rejected: message mismatch, eventId=${eventId}, chatId=${submission.chatId}, submissionId=${submission.id}, expectedMessageId=${submission.outputMessageId}, actualMessageId=${messageId}.`);
+      return { accepted: false, reason: '消息不匹配' };
+    }
     // Persist only the server-rendered operation; callback fields cannot fabricate a Run or permission.
-    const eventId = string(event.token) || digest(JSON.stringify(event));
-    await this.db.insert(feishuEvents).values({ id: `action:${eventId}`, chatId: submission.chatId, payload: { submissionId: submission.id, action: selected, form: record(action.form_value), context: { messageId: submission.outputMessageId, actionKey: string(value.actionKey) } } }).onConflictDoNothing();
+    await this.db.insert(feishuEvents).values({ id: `action:${eventId}`, chatId: submission.chatId, payload: { submissionId: submission.id, action: selected, form: record(action.form_value), context: { messageId: submission.outputMessageId, actionKey } } }).onConflictDoNothing();
     void this.work();
+    return { accepted: true };
   }
 
   private async work(): Promise<void> {

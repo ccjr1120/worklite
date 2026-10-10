@@ -5,9 +5,9 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { and, asc, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
-import type { AgentExecutionErrorCode, AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, WorkflowNodeActivityDetail, WorkliteScriptResult } from '@worklite/contracts';
-import { agentExecutionEvents, agentExecutions, chatConfigurations, agentMcpServers, mcpServers, agents, agentSkills, agentSubSessions, agentToolCalls, auditLogs, chatSubmissions, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
-import { createModelGateway, ModelGatewayError, type GatewayAgentMessage, type GatewayToolDefinition, type GatewayToolResultOutput } from '@worklite/model-gateway';
+import type { AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, WorkflowNodeActivityDetail, WorkliteScriptResult } from '@worklite/contracts';
+import { agentExecutionEvents, agentExecutions, chatConfigurations, agentMcpServers, mcpServers, agents, agentSkills, agentSubSessions, agentToolCalls, auditLogs, chatSubmissions, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage, insertAgentToolResults, normalizeAgentModelMessages } from '@worklite/db';
+import { createModelGateway, type GatewayAgentMessage, type GatewayToolDefinition, type GatewayToolResultOutput } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
@@ -21,6 +21,7 @@ import { CHAT_PROJECT_TASK_TOOL, ChatProjectTasksService } from './chat-project-
 import { ClaudeCodeError } from './claude-code.service';
 import { CodexAppServerError } from './codex-app-server.service';
 import { CommandsService } from '../commands/commands.service';
+import { executionFailure, executionFailureSource, TooManyToolCallsError, type ExecutionFailure } from './agent-execution-failure';
 
 const CHAT_AGENT_ID = 'agt_system_helper_chat';
 const WORKLITE_PLATFORM_SKILL_ID = 'sk_worklite_platform';
@@ -34,12 +35,6 @@ const MAX_WORKFLOW_TOOL_ROUNDS = 20;
 type WorkflowAgentActivityReporter = (detail: Extract<WorkflowNodeActivityDetail, { phase: 'model.round' | 'skill.script' | 'mcp.call' }>) => void | Promise<void>;
 const MAX_TOOL_CALLS_PER_STEP = 4;
 
-class TooManyToolCallsError extends Error {
-  constructor() {
-    super('The model requested too many tools in one step.');
-    this.name = 'TooManyToolCallsError';
-  }
-}
 
 const HELPER_BUILTIN_TOOLS = [
   {
@@ -214,8 +209,8 @@ export class AgentExecutionsService implements OnModuleInit {
     await this.requireExecutableAgent(workspace.id, agentId);
     const execution = await this.loadExecution(workspace.id, agentId, executionId);
     if (execution.status === 'running' || execution.status === 'waiting_for_input') throw new ConflictException(execution.status === 'waiting_for_input' ? 'Answer the pending Agent question before sending another message.' : 'This Agent execution is already running.');
-    const unresolvedShell = agentId === CHAT_AGENT_ID ? (await this.db.select({ id: agentToolCalls.id }).from(agentToolCalls).where(and(eq(agentToolCalls.executionId, executionId), eq(agentToolCalls.resultAppended, false), sql`${agentToolCalls.shell} IS NOT NULL`)).limit(1))[0] : undefined;
-    if (unresolvedShell) throw new ConflictException('请先重试本轮对话，处理尚未结束的 Shell 调用；命令不会自动重跑。');
+    const unresolvedToolCall = (await this.db.select({ id: agentToolCalls.id }).from(agentToolCalls).where(and(eq(agentToolCalls.executionId, executionId), eq(agentToolCalls.resultAppended, false))).limit(1))[0];
+    if (unresolvedToolCall) throw new ConflictException('请先重试本轮对话，处理尚未结束的工具调用；外部效果不会自动重跑。');
     const content = normalizeUserMessage(input?.message);
     let accepted = false;
     this.db.transaction((transaction) => {
@@ -261,11 +256,10 @@ export class AgentExecutionsService implements OnModuleInit {
     if (shellCall) return this.retryShell(request, workspaceSlug, workspace.id, executionId, shellCall);
 
     let accepted = false;
-    const retryMessages: StoredAgentModelMessage[] = unresolvedCalls.length > 0
-      ? [{ role: 'tool', content: unresolvedCalls.map((call) => ({ type: 'tool-result' as const, toolCallId: call.toolCallId, toolName: modelToolName(call), output: { type: 'error-text' as const, value: 'The previous tool attempt did not complete and was discarded before retry.' } })) }]
-      : [];
+    const retryResults = unresolvedCalls.map((call) => ({ type: 'tool-result' as const, toolCallId: call.toolCallId, toolName: modelToolName(call), output: { type: 'error-text' as const, value: 'The previous tool attempt did not complete and was discarded before retry.' } }));
+    const retryMessages = insertAgentToolResults(execution.modelMessages, retryResults);
     this.db.transaction((transaction) => {
-      const updated = transaction.update(agentExecutions).set({ status: 'running', phase: 'model', errorCode: null, error: null, pendingQuestion: null, modelMessages: retryMessages.length > 0 ? [...execution.modelMessages, ...retryMessages] : execution.modelMessages, updatedAt: new Date() }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'failed'))).run();
+      const updated = transaction.update(agentExecutions).set({ status: 'running', phase: 'model', errorCode: null, error: null, pendingQuestion: null, modelMessages: retryMessages, updatedAt: new Date() }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'failed'))).run();
       accepted = updated.changes > 0;
       if (accepted) {
         for (const call of unresolvedCalls) transaction.update(agentToolCalls).set({ status: 'failed', output: 'The previous tool attempt was discarded before retry.', resultAppended: true, finishedAt: new Date() }).where(and(eq(agentToolCalls.id, call.id), eq(agentToolCalls.resultAppended, false))).run();
@@ -463,14 +457,18 @@ export class AgentExecutionsService implements OnModuleInit {
       const streamedMessageId = `msg_${randomUUID()}`;
       const streamedMessageCreatedAt = new Date().toISOString();
       const diagnosticCalls = agent.id === CHAT_AGENT_ID ? await this.db.select().from(agentToolCalls).where(and(eq(agentToolCalls.executionId, executionId), eq(agentToolCalls.skillId, WORKLITE_PLATFORM_SKILL_ID), eq(agentToolCalls.scriptPath, 'scripts/inspect-chat-conversation.mjs'), eq(agentToolCalls.status, 'completed'))) : [];
-      const inferenceMessages = diagnosticModelMessages(execution.modelMessages, diagnosticCalls);
+      const modelMessagesBeforeInference = normalizeAgentModelMessages(execution.modelMessages);
+      if (JSON.stringify(modelMessagesBeforeInference) !== JSON.stringify(execution.modelMessages)) {
+        await this.db.update(agentExecutions).set({ modelMessages: modelMessagesBeforeInference, updatedAt: new Date() }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'running')));
+      }
+      const inferenceMessages = diagnosticModelMessages(modelMessagesBeforeInference, diagnosticCalls);
       const result = await createModelGateway().generateAgentStep({ provider: runtime.provider, model: runtime.model, systemPrompt, messages: inferenceMessages, skillScripts: availableSkillScripts, builtinTools: builtinToolDefinitions, mcpTools: availableMcpTools, maxToolRounds: MAX_HELPER_TOOL_ROUNDS, abortSignal: abortController.signal, onTextDelta: (delta) => this.persistEvent(executionId, { kind: 'message_delta', messageId: streamedMessageId, delta }) });
       const responseText = normalizeAssistantMessage(result.text);
       if (!responseText && result.toolCalls.length === 0) throw new Error('Empty Agent response');
       if (result.toolCalls.length > MAX_TOOL_CALLS_PER_STEP) throw new TooManyToolCallsError();
       const currentExecution = await this.loadExecution(workspace.id, execution.agentId, executionId);
       if (currentExecution.status !== 'running') return this.toView(currentExecution);
-      const modelMessages = [...execution.modelMessages, ...result.responseMessages] as StoredAgentModelMessage[];
+      const modelMessages = [...modelMessagesBeforeInference, ...result.responseMessages] as StoredAgentModelMessage[];
       const displayMessages = responseText ? [...execution.displayMessages, { id: streamedMessageId, role: 'assistant' as const, content: responseText, createdAt: streamedMessageCreatedAt }] : execution.displayMessages;
       let status: 'running' | 'waiting_for_input' | 'completed' = result.toolCalls.length > 0 ? 'running' : 'completed';
       let phase: AgentExecutionPhase = result.toolCalls.length > 0 ? 'skill' : 'model';
@@ -495,7 +493,8 @@ export class AgentExecutionsService implements OnModuleInit {
           if (requestedCall.toolName === 'skill_script' && (!skill || !script)) throw new BadRequestException('The model requested a Skill script that is not assigned or executable.');
           if (requestedCall.toolName.startsWith('mcp_') && !mcpTool) throw new BadRequestException('The model requested an MCP tool that is not assigned or available.');
           if (clarificationPass && requestedCall.toolName !== 'update_plan' && requestedCall.toolName !== 'ask_user') throw new BadRequestException('Only clarification tools are available during the planning clarification pass.');
-          if (requestedCall.toolName === 'project_task' && result.toolCalls.length !== 1) throw new BadRequestException('A project task must be requested alone.');
+          // A plan update settles immediately, so it may accompany the one project task it describes.
+          if (requestedCall.toolName === 'project_task' && result.toolCalls.some((call) => call !== requestedCall && call.toolName !== 'update_plan')) throw new BadRequestException('A project task must be requested alone or with update_plan.');
           if (requestedCall.toolName === 'ask_user') {
             if (agent.id !== CHAT_AGENT_ID) throw new BadRequestException('Only Chat may ask a conversation question.');
             if (result.toolCalls.length !== 1) throw new BadRequestException('The clarification tool must be requested in its own model step.');
@@ -740,7 +739,7 @@ export class AgentExecutionsService implements OnModuleInit {
     }
     const execution = await this.loadExecution(workspaceId, agentId, executionId);
     const toolResults = calls.map((call) => ({ type: 'tool-result' as const, toolCallId: call.toolCallId, toolName: modelToolName(call), output: toolCallOutput(call) }));
-    const modelMessages: StoredAgentModelMessage[] = [...execution.modelMessages, { role: 'tool', content: toolResults }];
+    const modelMessages = insertAgentToolResults(execution.modelMessages, toolResults);
     let shouldAdvance = false;
     this.db.transaction((transaction) => {
       const updated = transaction.update(agentExecutions).set({ status: 'running', phase: 'model', modelMessages, updatedAt: new Date() }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'running'))).run();
@@ -862,7 +861,12 @@ export class AgentExecutionsService implements OnModuleInit {
     const [execution] = await this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.workspaceId, workspaceId))).limit(1);
     if (!execution) return;
     const view = await this.toView(execution);
-    await this.persistEvent(executionId, { kind: 'status', status: view.status, phase: view.phase, errorCode: view.errorCode, error: view.error });
+    const status: AgentExecutionEventData = { kind: 'status', status: view.status, phase: view.phase, errorCode: view.errorCode, error: view.error };
+    const [latestStatus] = await this.db.select({ data: agentExecutionEvents.data }).from(agentExecutionEvents)
+      .where(and(eq(agentExecutionEvents.executionId, executionId), sql`json_extract(${agentExecutionEvents.data}, '$.kind') = 'status'`))
+      .orderBy(desc(agentExecutionEvents.sequence)).limit(1);
+    // Heartbeat snapshots repeat the same status; persist only actual changes.
+    if (JSON.stringify(latestStatus?.data) !== JSON.stringify(status)) await this.persistEvent(executionId, status);
     await this.persistEvent(executionId, { kind: 'snapshot', execution: view });
   }
 
@@ -939,25 +943,6 @@ function collectCodexText(value: unknown, messages: string[]): void {
   }
 }
 
-type ExecutionFailure = { message: string; code: AgentExecutionErrorCode; phase: AgentExecutionPhase };
-
-function executionFailure(error: unknown): ExecutionFailure {
-  if (error instanceof ModelGatewayError) {
-    if (error.code === 'INCOMPLETE_TOOL_REQUEST') return { message: error.message, code: 'incomplete_tool_request', phase: 'model' };
-    if (error.code === 'INVALID_TOOL_REQUEST') return { message: error.message, code: 'invalid_tool_request', phase: 'model' };
-    if (error.code === 'INVALID_PROVIDER') return { message: 'The Agent provider configuration is invalid. Check the provider settings and try again.', code: 'provider', phase: 'model' };
-    if (error.code === 'PROVIDER_REQUEST_FAILED') return { message: error.message, code: 'provider_request', phase: 'model' };
-    if (error.code === 'INVALID_REQUEST') return { message: error.message, code: 'invalid_request', phase: 'model' };
-  }
-  if (error instanceof TooManyToolCallsError) return { message: 'The model requested too many tools in one step. Retry so the Agent can continue with fewer tool calls.', code: 'too_many_tool_calls', phase: 'model' };
-  if (error instanceof Error && error.message === 'Skill execution failed') return { message: 'The Agent Skill script could not be completed.', code: 'skill', phase: 'skill' };
-  return { message: 'The Agent could not complete this turn because an internal execution error occurred. Retry the request.', code: 'internal', phase: 'model' };
-}
-
-function executionFailureSource(error: unknown): string {
-  return error instanceof Error && /^[A-Za-z0-9_.-]+$/.test(error.name) ? error.name : typeof error;
-}
-
 function toolCallOutput(call: typeof agentToolCalls.$inferSelect): GatewayToolResultOutput {
   const output = call.output || '(no output)';
   const header = `status=${call.status}\nexitCode=${call.exitCode ?? 'none'}\n\n`;
@@ -1007,8 +992,19 @@ function shellRecoveryQuestion(call: typeof agentToolCalls.$inferSelect): AgentP
   return { id: `question_${randomUUID()}`, shellCallId: call.id, question: '此 Shell 调用已中断，执行效果需要确认。可以采用已有命令的确定结果，或标记本次调用失败；命令不会自动重跑。', options: [], recovery: { operationKey: call.id, ...(call.commandExecutionId ? { commandExecutionId: call.commandExecutionId } : {}) }, createdAt: new Date().toISOString() };
 }
 
+// A Chat question is shown as an exchange rather than a script row. Only a completed ordinary
+// question carries an answer: cancellation and an accepted new conversation also settle the call.
+function toQuestionView(call: typeof agentToolCalls.$inferSelect): AgentToolCallView['question'] {
+  if (call.toolName !== 'builtin' || call.mcpToolName !== 'ask_user') return undefined;
+  const record = asRecord(call.input);
+  const text = typeof record?.question === 'string' ? record.question.trim() : '';
+  if (!text) return undefined;
+  return { text, answer: call.status === 'completed' && record?.action !== 'new_conversation' ? call.output : null };
+}
+
 function toToolCallView(call: typeof agentToolCalls.$inferSelect): AgentToolCallView {
-  return { ...(call.shell ? { shell: call.shell } : {}), id: call.id, workingDirectory: call.workingDirectory, skillId: call.skillId, skillName: call.skillName, scriptPath: call.scriptPath, mcpServerId: call.mcpServerId, mcpToolName: call.mcpToolName, arguments: call.arguments, status: call.status, output: call.output, exitCode: call.exitCode, commandExecutionId: call.commandExecutionId, result: call.result, createdAt: call.createdAt.toISOString(), finishedAt: call.finishedAt?.toISOString() ?? null };
+  const question = toQuestionView(call);
+  return { ...(call.shell ? { shell: call.shell } : {}), ...(question ? { question } : {}), id: call.id, workingDirectory: call.workingDirectory, skillId: call.skillId, skillName: call.skillName, scriptPath: call.scriptPath, mcpServerId: call.mcpServerId, mcpToolName: call.mcpToolName, arguments: call.arguments, status: call.status, output: call.output, exitCode: call.exitCode, commandExecutionId: call.commandExecutionId, result: call.result, createdAt: call.createdAt.toISOString(), finishedAt: call.finishedAt?.toISOString() ?? null };
 }
 
 function toExecutionEvent(row: typeof agentExecutionEvents.$inferSelect): AgentExecutionEvent {

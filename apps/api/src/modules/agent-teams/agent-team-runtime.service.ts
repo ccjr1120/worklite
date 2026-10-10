@@ -23,6 +23,7 @@ import type {
   AgentTeamRunEvent,
   AgentTeamRunEventType,
   AgentTeamRunOutcome,
+  AgentTeamRunProgress,
   AgentTeamRunStatus,
   AgentTeamRunView,
   AgentTeamTaskAttemptStatus,
@@ -56,8 +57,10 @@ import {
   createTeamGraph,
   getBmadTeaProcessManifest,
   isInterrupted,
+  type AgentTeamDevelopmentAssignment,
   type AgentTeamPendingInputAnswer,
   type AgentTeamProjectInstructionFile,
+  type AgentTeamTargetedRepairRequest,
   readBmadTeaProcessFile,
   toGraphResult,
   type AgentTeamDocument,
@@ -92,11 +95,14 @@ const TASK_ROLES: Array<[RegExp, AgentTeamRole]> = [
   [/^repair_/, 'developer'],
   [/^planning$/, 'planner'],
   [/^test_design$/, 'test_designer'],
+  [/^development_join$/, 'developer'],
+  [/^development_/, 'developer'],
   [/^development$/, 'developer'],
   [/^test_authoring$/, 'test_author'],
   [/^test_execution$/, 'test_runner'],
   [/^review$/, 'reviewer'],
 ];
+const RESERVED_DEVELOPER_ID = 'developer';
 
 type Checkpointer = ReturnType<typeof createSqliteCheckpointer>;
 type AgentTeamDatabaseTransaction = Parameters<Parameters<Database['transaction']>[0]>[0];
@@ -111,6 +117,8 @@ type RawTaskOutput = {
   completedAssignedWork?: unknown;
   criterionAssessments?: unknown;
   repairRequest?: unknown;
+  repairRequests?: unknown;
+  developmentAssignments?: unknown;
   pendingInput?: unknown;
 };
 
@@ -278,10 +286,25 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         .where(and(eq(agentTeamRunEvents.runId, runId), eq(agentTeamRunEvents.type, 'task.activity')))
         .orderBy(asc(agentTeamRunEvents.sequence)),
     ]);
+    const progressTextByAttemptId = new Map<string, string>();
+    for (const row of [...activityRows].reverse()) {
+      const payload = row.payload as { taskAttemptId?: unknown; text?: unknown } | null;
+      if (typeof payload?.taskAttemptId !== 'string' || progressTextByAttemptId.has(payload.taskAttemptId)) continue;
+      if (typeof payload.text === 'string' && payload.text.trim()) {
+        progressTextByAttemptId.set(payload.taskAttemptId, payload.text);
+      }
+    }
     return {
       id: run.id,
       teamId: run.teamId,
-      teamVersion: { id: version.id, version: version.version, createdAt: version.createdAt.toISOString(), developerExecution: version.snapshot.developerExecution },
+      teamVersion: {
+        id: version.id,
+        version: version.version,
+        createdAt: version.createdAt.toISOString(),
+        developerExecution: version.snapshot.developerExecution,
+        developerExecutions: version.snapshot.developerExecutions,
+        orchestrationVersion: version.snapshot.orchestrationVersion,
+      },
       status: run.status,
       intent: run.intent,
       projectDirectory: run.projectDirectory,
@@ -289,17 +312,27 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       authorizedCommands: run.authorizedCommands,
       scopeRevision: run.scopeRevision,
       desiredControlState: run.desiredControlState,
-      tasks: taskRows.map(toTaskAttemptView),
+      tasks: taskRows.map((row) => toTaskAttemptView(row, progressTextByAttemptId.get(row.id) ?? '')),
       documents: documentRows.map(toDocumentView),
       originatingConversationId: origin?.conversationId ?? null,
       pendingInputs: pendingRows.map(toPendingInputView),
       operations: operationRows.map(toOperationView),
       activities: activityRows.map((row) => ({ runId: row.runId, sequence: row.sequence, type: row.type, payload: row.payload, createdAt: row.createdAt.toISOString() })),
+      progress: deriveRunProgress(run, taskRows),
       outcome: isRunOutcome(run.outcome) ? run.outcome : null,
       createdAt: run.createdAt.toISOString(),
       updatedAt: run.updatedAt.toISOString(),
       finishedAt: run.finishedAt?.toISOString() ?? null,
     };
+  }
+
+  async getRunProgress(runId: string): Promise<AgentTeamRunProgress | null> {
+    const [run] = await this.db.select().from(agentTeamRuns).where(eq(agentTeamRuns.id, runId)).limit(1);
+    if (!run) return null;
+    const taskRows = await this.db.select().from(agentTeamTaskAttempts)
+      .where(eq(agentTeamTaskAttempts.runId, runId))
+      .orderBy(asc(agentTeamTaskAttempts.createdAt), asc(agentTeamTaskAttempts.attemptIndex));
+    return deriveRunProgress(run, taskRows);
   }
 
   async getRunEvents(runId: string, workspaceId?: string, afterSequence = 0): Promise<AgentTeamRunEvent[]> {
@@ -352,8 +385,20 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('Plan-only Agent Team runs cannot authorize commands.');
     }
 
+    const version = await this.getVersion(run);
+    const orchestrationVersion = version.snapshot.orchestrationVersion ?? 1;
+    let resumeInterruptId: string | undefined;
+    if (orchestrationVersion === 2) {
+      const graph = this.createGraph(run, version);
+      const snapshot = await graph.getState({ configurable: { thread_id: run.langGraphThreadId } });
+      resumeInterruptId = snapshot.tasks
+        .flatMap((task) => task.interrupts)
+        .find((candidate) => (candidate.value as { id?: unknown } | undefined)?.id === request.pendingInputId)?.id;
+      if (!resumeInterruptId) throw new BadRequestException('The pending input is no longer active.');
+    }
+
     const now = new Date();
-    const authorizedCommands = await this.transaction((transaction) => {
+    const answered = await this.transaction((transaction) => {
       const rows = transaction.update(agentTeamPendingInputs).set({
         status: 'answered',
         answer: request.answer,
@@ -372,8 +417,17 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         .limit(1)
         .all();
       const nextCommands = mergeAuthorizedCommands(currentRun?.authorizedCommands ?? [], grantedCommands);
+      const remaining = transaction.select({ id: agentTeamPendingInputs.id })
+        .from(agentTeamPendingInputs)
+        .where(and(
+          eq(agentTeamPendingInputs.runId, runId),
+          eq(agentTeamPendingInputs.kind, 'question'),
+          eq(agentTeamPendingInputs.status, 'pending'),
+        ))
+        .limit(1)
+        .all();
       transaction.update(agentTeamRuns).set({
-        status: 'running',
+        status: remaining.length > 0 ? 'waiting_for_input' : 'running',
         desiredControlState: 'none',
         authorizedCommands: nextCommands,
         updatedAt: now,
@@ -384,12 +438,14 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         answer: request.answer,
         ...(grantedCommands.length > 0 ? { authorizedCommands: grantedCommands } : {}),
       });
+      this.appendProgressIfChanged(transaction, runId);
       return nextCommands;
     });
-    if (!authorizedCommands) throw new BadRequestException('The pending input is no longer active.');
+    if (!answered) throw new BadRequestException('The pending input is no longer active.');
 
+    const resume = pendingInputAnswer(request.answer, answered);
     this.scheduleExecution(runId, new Command({
-      resume: pendingInputAnswer(request.answer, authorizedCommands),
+      resume: orchestrationVersion === 2 ? { [resumeInterruptId as string]: resume } : resume,
     }));
     return this.getRunView(runId);
   }
@@ -623,14 +679,29 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       .limit(1);
     if (!failed) throw new BadRequestException('The failed active Agent Team task was not found.');
 
+    // A failed Developer lane retries its whole fan-out: successful sibling lanes keep their
+    // results, and the dispatcher re-dispatches every lane that has none.
+    const repairFanOut = /^repair_(\d+)(?=_|$)/.exec(taskKey);
+    const fanOutPattern = /^development(_|$)/.test(taskKey)
+      ? /^development(_|$)/
+      : repairFanOut
+        ? new RegExp(`^repair_${repairFanOut[1]}(_|$)`)
+        : null;
+
     const now = new Date();
     await this.transaction((transaction) => {
-      transaction.update(agentTeamTaskAttempts).set({ active: false })
+      const failedRows = transaction.select({ id: agentTeamTaskAttempts.id, taskKey: agentTeamTaskAttempts.taskKey })
+        .from(agentTeamTaskAttempts)
         .where(and(
           eq(agentTeamTaskAttempts.runId, runId),
-          eq(agentTeamTaskAttempts.taskKey, taskKey),
           eq(agentTeamTaskAttempts.active, true),
-        )).run();
+          eq(agentTeamTaskAttempts.status, 'failed'),
+        )).all();
+      for (const row of failedRows) {
+        if (fanOutPattern ? !fanOutPattern.test(row.taskKey) : row.taskKey !== taskKey) continue;
+        transaction.update(agentTeamTaskAttempts).set({ active: false })
+          .where(eq(agentTeamTaskAttempts.id, row.id)).run();
+      }
       transaction.update(agentTeamRuns).set({
         status: 'running',
         desiredControlState: 'none',
@@ -638,6 +709,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         finishedAt: null,
       }).where(and(eq(agentTeamRuns.id, runId), eq(agentTeamRuns.status, 'failed'))).run();
       this.appendEvent(transaction, runId, 'run.status', { status: 'running' });
+      this.appendProgressIfChanged(transaction, runId);
     });
 
     this.scheduleExecution(runId, null);
@@ -679,11 +751,22 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       path: file.path,
       content: await readBmadTeaProcessFile(file.path),
     })));
+    const developerRole = configuredRoles.find((role) => role.role === 'developer');
+    const developerInstances = developerRole?.developerInstances ?? [];
+    const developerExecution = await this.executors.captureLaunch(developerRole?.executor ?? 'claude', null);
+    const developerExecutions: NonNullable<StoredAgentTeamVersionSnapshot['developerExecutions']> = {
+      [RESERVED_DEVELOPER_ID]: developerExecution,
+    };
+    for (const instance of developerInstances) {
+      developerExecutions[instance.developerId] = await this.executors.captureLaunch(instance.executor ?? 'claude', null);
+    }
     return {
       processId: AGENT_TEAM_PROCESS_ID,
       processVersion: AGENT_TEAM_PROCESS_VERSION,
       processFiles,
-      developerExecution: await this.executors.captureLaunch(configuredRoles.find((role) => role.role === 'developer')?.executor ?? 'claude', null),
+      developerExecution,
+      developerExecutions,
+      orchestrationVersion: 2,
       roles: await Promise.all(configuredRoles.map(async (role) => {
         const entryPointContent = await Promise.all(role.entryPoints.map((path) => readBmadTeaProcessFile(path)));
         const processReferences = processReferencePaths(role.role, manifest);
@@ -693,9 +776,18 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           publicModelId: role.publicModelId.trim() || (role.role === 'developer' ? '' : this.config.get<string>('AGENT_TEAM_DEFAULT_PUBLIC_MODEL_ID')?.trim() || ''),
           processReferences,
           instructions: [role.instructions, ...entryPointContent].filter(Boolean).join('\n\n---\n\n'),
+          ...(role.role === 'developer'
+            ? {
+              developerInstances: await Promise.all(developerInstances.map(async (instance) => ({
+                ...instance,
+                processReferences,
+                instructions: [instance.instructions, ...(await Promise.all(instance.entryPoints.map((path) => readBmadTeaProcessFile(path))))].filter(Boolean).join('\n\n---\n\n'),
+              }))),
+            }
+            : {}),
         };
       })),
-      recipeDefaults: { maxRepairRounds: 2 },
+      recipeDefaults: { maxRepairRounds: 2, maxDeveloperConcurrency: developerRole?.developerConcurrency },
     };
   }
 
@@ -794,6 +886,25 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (validState) await this.reconcileProjection(run, state);
     const interrupted = snapshot.tasks.some((task) => task.interrupts.length > 0);
     if (interrupted) {
+      if ((version.snapshot.orchestrationVersion ?? 1) === 2) {
+        const resume: Record<string, AgentTeamPendingInputAnswer> = {};
+        let unanswered = false;
+        for (const interrupt of snapshot.tasks.flatMap((task) => task.interrupts)) {
+          const pendingInputId = (interrupt.value as { id?: unknown } | undefined)?.id;
+          const answeredInput = validState && typeof pendingInputId === 'string'
+            ? await this.findAnsweredInput(run, pendingInputId)
+            : undefined;
+          if (answeredInput && interrupt.id) resume[interrupt.id] = answeredInput;
+          else unanswered = true;
+        }
+        if (Object.keys(resume).length > 0) {
+          await this.setRunStatus(run.id, unanswered ? 'waiting_for_input' : 'running', undefined, 'none');
+          this.scheduleExecution(run.id, new Command({ resume }));
+          return;
+        }
+        await this.setRunStatus(run.id, 'waiting_for_input');
+        return;
+      }
       const answeredInput = validState && state?.pendingInput
         ? await this.findAnsweredInput(run, state.pendingInput.id)
         : undefined;
@@ -880,7 +991,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const graph = this.createGraph(run, version);
     const controller = new AbortController();
     this.abortControllers.set(runId, controller);
-    await this.setRunStatus(runId, 'running');
+    // A partial answer resumes the graph while other Developers still wait: keep the
+    // waiting_for_input status instead of forcing a running flicker.
+    if (run.status !== 'waiting_for_input') await this.setRunStatus(runId, 'running');
     let sawInterrupt = false;
     let pauseAtBoundary = false;
     try {
@@ -931,10 +1044,14 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private createGraph(run: AgentTeamRun, version: AgentTeamVersion) {
+    const developerRole = version.snapshot.roles.find((role) => role.role === 'developer');
     return createTeamGraph({
       executeTask: async (request) => this.executeTask(run.workspaceId, version, request),
     }, this.checkpointer, {
       maxRepairRounds: version.snapshot.recipeDefaults.maxRepairRounds,
+      orchestrationVersion: version.snapshot.orchestrationVersion ?? 1,
+      developerIds: versionDeveloperIds(version.snapshot),
+      developerConcurrency: version.snapshot.recipeDefaults.maxDeveloperConcurrency ?? developerRole?.developerConcurrency,
     });
   }
 
@@ -955,23 +1072,32 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const signal = controller?.signal ?? new AbortController().signal;
     const commandIds = new Set<string>();
     if (taskRole === 'developer') {
-      const execution = version.snapshot.developerExecution;
+      const developerId = request.developerId ?? RESERVED_DEVELOPER_ID;
+      const execution = version.snapshot.developerExecutions?.[developerId]
+        ?? (developerId === RESERVED_DEVELOPER_ID ? version.snapshot.developerExecution : undefined);
       if (!execution || !('executor' in execution)) throw new Error('This Team version has no captured developer executor. Start a new Team Run.');
-      const model = role.publicModelId.trim() || (execution.executor === 'codex' ? execution.model : null);
+      const instance = developerId === RESERVED_DEVELOPER_ID
+        ? undefined
+        : role.developerInstances?.find((candidate) => candidate.developerId === developerId);
+      if (developerId !== RESERVED_DEVELOPER_ID && !instance) {
+        throw new Error(`Developer instance ${developerId} was not captured by this Team version.`);
+      }
+      const developerRole = instance ?? role;
+      const model = developerRole.publicModelId.trim() || (execution.executor === 'codex' ? execution.model : null);
       if (model) await this.executors.requireModel(workspaceId, execution.executor, model);
-      const references = await Promise.all((role.processReferences ?? []).map(async (path) => ({ path, content: await this.readCapturedProcessFile(version, path) })));
+      const references = await Promise.all((developerRole.processReferences ?? []).map(async (path) => ({ path, content: await this.readCapturedProcessFile(version, path) })));
       const output = await this.executors.execute({
         owner: 'team',
         workspaceId,
         launch: execution,
         model,
-        systemPrompt: taskSystemPrompt(role.instructions, true),
+        systemPrompt: taskSystemPrompt(developerRole.instructions, true, developerPromptAddition(request)),
         input: JSON.stringify(taskContext(request, true)),
         projectDirectory: request.projectDirectory,
-        skills: role.skills,
-        mcpServers: (await this.resources.workflowMcpRuntimes(workspaceId, role.mcpServers.map((server) => server.id)))
+        skills: developerRole.skills,
+        mcpServers: (await this.resources.workflowMcpRuntimes(workspaceId, developerRole.mcpServers.map((server) => server.id)))
           .map((runtime) => {
-            const snapshot = role.mcpServers.find((server) => server.id === runtime.id);
+            const snapshot = developerRole.mcpServers.find((server) => server.id === runtime.id);
             return snapshot ? { ...runtime, name: snapshot.name, allowedTools: snapshot.allowedToolNames } : runtime;
           }),
         references,
@@ -979,9 +1105,19 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         correlation: { source: 'team', teamRunId: request.runId, teamTaskAttemptId: attempt.id },
         onEvent: (activity) => {
           commandIds.add(activity.commandExecutionId);
-          this.appendEvent(this.db, request.runId, 'task.activity', { taskAttemptId: attempt.id, taskKey, ...activity });
+          this.appendEvent(this.db, request.runId, 'task.activity', {
+            taskAttemptId: attempt.id,
+            taskKey,
+            ...taskAttribution(request),
+            ...activity,
+          });
         },
-        onTextDelta: (delta) => this.appendEvent(this.db, request.runId, 'task.delta', { taskAttemptId: attempt.id, taskKey, delta }),
+        onTextDelta: (delta) => this.appendEvent(this.db, request.runId, 'task.delta', {
+          taskAttemptId: attempt.id,
+          taskKey,
+          ...taskAttribution(request),
+          delta,
+        }),
       });
       return this.finishExecutorOutput(request, workspaceId, attempt.id, taskKey, output, commandIds);
     }
@@ -1011,7 +1147,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const output = await this.invocations.execute({
       workspaceId,
       publicModelId: role.publicModelId,
-      systemPrompt: taskSystemPrompt(role.instructions, false),
+      systemPrompt: taskSystemPrompt(role.instructions, false, rolePromptAddition(taskRole, version.snapshot)),
       context: taskContext(request, false),
       skills: role.skills,
       mcpRuntimes: (await this.resources.workflowMcpRuntimes(workspaceId, role.mcpServers.map((server) => server.id)))
@@ -1035,6 +1171,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       onTextDelta: (delta) => this.appendEvent(this.db, request.runId, 'task.delta', {
         taskAttemptId: attempt.id,
         taskKey,
+        ...taskAttribution(request),
         delta,
       }),
       onSkillScript: (activity) => {
@@ -1129,14 +1266,18 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       status: 'running',
       inputRevision: request,
       inputFingerprint,
+      developerId: request.developerId ?? null,
+      assignmentTitle: request.assignment?.title ?? null,
       startedAt: now,
     }).returning();
     this.appendEvent(this.db, run.id, 'task.started', {
       taskAttemptId: attemptId,
       taskKey: request.taskDefinition.taskKey,
       role: request.taskDefinition.role,
+      ...taskAttribution(request),
       attemptIndex: created.attemptIndex,
     });
+    await this.appendProgressIfChanged(this.db, run.id);
     return { id: created.id, status: created.status, result: created.result };
   }
 
@@ -1186,6 +1327,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       this.appendEvent(transaction, request.runId, 'task.waiting', {
         taskAttemptId: attemptId,
         taskKey: request.taskDefinition.taskKey,
+        ...taskAttribution(request),
         pendingInputId,
         kind: 'question',
       });
@@ -1194,7 +1336,10 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         kind: 'question',
         question: persistedResult.pendingInput.question,
         scopeRevision: request.scopeRevision,
+        taskKey: request.taskDefinition.taskKey,
+        ...taskAttribution(request),
       });
+      this.appendProgressIfChanged(transaction, request.runId);
     });
     return Promise.resolve(persistedResult);
   }
@@ -1253,8 +1398,10 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       this.appendEvent(transaction, request.runId, 'task.completed', {
         taskAttemptId: attemptId,
         taskKey,
+        ...taskAttribution(request),
         result,
       });
+      this.appendProgressIfChanged(transaction, request.runId);
     });
     await this.deliverDocuments(request.runId);
     return result;
@@ -1439,13 +1586,16 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     ))
       .returning();
     for (const row of rows) {
-      await this.appendEvent(this.db, runId, status === 'cancelled' ? 'task.failed' : 'task.failed', {
+      await this.appendEvent(this.db, runId, 'task.failed', {
         taskAttemptId: row.id,
         taskKey: row.taskKey,
+        ...(row.developerId ? { developerId: row.developerId } : {}),
+        ...(row.assignmentTitle ? { assignmentTitle: row.assignmentTitle } : {}),
         error: reason,
         cancelled: status === 'cancelled',
       });
     }
+    this.appendProgressIfChanged(this.db, runId);
   }
 
   private async failStaleAttempts(runId: string, reason: string): Promise<void> {
@@ -1532,7 +1682,10 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       ...(outcome === undefined ? {} : { outcome }),
       ...(desiredControlState === undefined ? {} : { desiredControlState }),
     }).where(eq(agentTeamRuns.id, runId)).returning();
-    if (row) await this.appendEvent(this.db, runId, 'run.status', { status, ...(outcome ? { outcome } : {}) });
+    if (row) {
+      await this.appendEvent(this.db, runId, 'run.status', { status, ...(outcome ? { outcome } : {}) });
+      this.appendProgressIfChanged(this.db, runId);
+    }
   }
 
   private async getVersion(run: AgentTeamRun): Promise<AgentTeamVersion> {
@@ -1603,6 +1756,26 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const pending = this.transactionEvents.get(db);
     if (pending) pending.push(event);
     else this.publishEvents([event]);
+  }
+
+  private appendProgressIfChanged(
+    db: Database | AgentTeamDatabaseTransaction,
+    runId: string,
+  ): void {
+    const [run] = db.select().from(agentTeamRuns).where(eq(agentTeamRuns.id, runId)).limit(1).all();
+    if (!run) return;
+    const taskRows = db.select().from(agentTeamTaskAttempts)
+      .where(eq(agentTeamTaskAttempts.runId, runId))
+      .orderBy(asc(agentTeamTaskAttempts.createdAt), asc(agentTeamTaskAttempts.attemptIndex))
+      .all();
+    const progress = deriveRunProgress(run, taskRows);
+    const [latest] = db.select({ payload: agentTeamRunEvents.payload })
+      .from(agentTeamRunEvents)
+      .where(and(eq(agentTeamRunEvents.runId, runId), eq(agentTeamRunEvents.type, 'run.progress')))
+      .orderBy(desc(agentTeamRunEvents.sequence))
+      .limit(1).all();
+    if (latest && JSON.stringify(latest.payload) === JSON.stringify(progress)) return;
+    this.appendEvent(db, runId, 'run.progress', progress);
   }
 
   private publishEvents(events: readonly AgentTeamRunEvent[]): void {
@@ -1839,8 +2012,66 @@ function nextDocumentRevision(
   return revision;
 }
 
-function taskSystemPrompt(instructions: string, executor: boolean): string {
-  return `${instructions}
+function versionDeveloperIds(snapshot: StoredAgentTeamVersionSnapshot): string[] {
+  const developerRole = snapshot.roles.find((role) => role.role === 'developer');
+  return [
+    RESERVED_DEVELOPER_ID,
+    ...(developerRole?.developerInstances ?? []).map((instance) => instance.developerId),
+  ];
+}
+
+function taskAttribution(request: AgentTeamTaskRequest): { developerId?: string; assignmentTitle?: string } {
+  return {
+    ...(request.developerId ? { developerId: request.developerId } : {}),
+    ...(request.assignment?.title ? { assignmentTitle: request.assignment.title } : {}),
+  };
+}
+
+function developerPromptAddition(request: AgentTeamTaskRequest): string | undefined {
+  const sections: string[] = [];
+  if (request.assignment) {
+    sections.push([
+      `This development fan-out is executed by multiple Developers in parallel. You are Developer "${request.developerId ?? RESERVED_DEVELOPER_ID}", responsible only for the assignment "${request.assignment.title}".`,
+      `Assignment scope: ${request.assignment.scopeSummary}`,
+      request.assignment.ownedPaths.length > 0
+        ? `You may only create or modify files under: ${request.assignment.ownedPaths.join(', ')}. Another Developer owns every other path; do not modify files outside your owned paths.`
+        : 'The assignment declares no owned paths; limit your changes to the assignment scope.',
+    ].join('\n'));
+  }
+  const siblingResults = request.siblingResults ? Object.entries(request.siblingResults) : [];
+  if (siblingResults.length > 0) {
+    sections.push([
+      'Other Developers already completed their assignments. Respect their committed work and do not undo it:',
+      ...siblingResults.map(([developerId, result]) => [
+        `- ${developerId}: changed files ${result.changedFiles.join(', ') || '(none)'}`,
+        result.unresolvedIssues.length > 0 ? `; unresolved issues: ${result.unresolvedIssues.join('; ')}` : '',
+      ].join('')),
+    ].join('\n'));
+  }
+  return sections.length > 0 ? sections.join('\n\n') : undefined;
+}
+
+function rolePromptAddition(role: AgentTeamRole, snapshot: StoredAgentTeamVersionSnapshot): string | undefined {
+  const developerIds = versionDeveloperIds(snapshot);
+  if (developerIds.length < 2) return undefined;
+  if (role === 'planner') {
+    return [
+      `This Team Run is developed by ${developerIds.length} Developers in parallel: ${developerIds.join(', ')}.`,
+      'Split the implementation into one development assignment per Developer and add "developmentAssignments":[{"developerId":"...","title":"...","scopeSummary":"...","ownedPaths":["path/or/prefix"]}] to the completed response.',
+      'Assignments must not overlap: no two assignments may own the same path. Give each Developer an independent, self-contained slice and use every listed Developer exactly once.',
+    ].join('\n');
+  }
+  if (role === 'reviewer') {
+    return [
+      'Development was executed by multiple Developers in parallel; each development result names its Developer.',
+      'To request repairs, add "repairRequests":[{"developerId":"...","instruction":"specific repair instruction"}] targeting only the Developers that must change their own work. Do not use the legacy repairRequest field.',
+    ].join('\n');
+  }
+  return undefined;
+}
+
+function taskSystemPrompt(instructions: string, executor: boolean, addition?: string): string {
+  const prompt = `${instructions}
 
 You are executing one WorkLite Agent Team task. Use tools only when the captured role configuration and project authorization permit them. Return exactly one JSON object.
 
@@ -1853,6 +2084,7 @@ Otherwise return:
 {"status":"completed","documents":[{"key":"stable-document-key","title":"Document title","content":"Document content","upstreamDocumentKeys":["optional-upstream-key"]}],"unresolvedIssues":["specific unresolved issue"],"changedFiles":["path/to/changed/file"],"completedAssignedWork":true,"criterionAssessments":[{"criterion":"criterion","assessment":"met|unmet|not_verified","evidence":["evidence reference"]}]}
 
 Use an empty changedFiles array when the task changed no project files. Set completedAssignedWork to false only when the assigned work remains incomplete, and record the reason in unresolvedIssues. The reviewer may add "repairRequest":{"taskKey":"development","instruction":"specific repair instruction"}. Do not invent command ids; WorkLite records actual command evidence.`;
+  return addition ? `${prompt}\n\n${addition}` : prompt;
 }
 
 function taskContext(request: AgentTeamTaskRequest, executor: boolean): unknown {
@@ -1872,6 +2104,20 @@ function taskContext(request: AgentTeamTaskRequest, executor: boolean): unknown 
     ...(executor ? {} : { authorizedCommands: request.authorizedCommands }),
     projectInstructions: request.projectInstructions,
     upstreamDocuments: request.upstream,
+    ...(request.assignment ? { assignment: request.assignment } : {}),
+    ...(request.developmentAssignments ? { developmentAssignments: request.developmentAssignments } : {}),
+    ...(request.siblingResults && Object.keys(request.siblingResults).length > 0
+      ? {
+        siblingResults: Object.fromEntries(Object.entries(request.siblingResults).map(([developerId, result]) => [
+          developerId,
+          {
+            changedFiles: result.changedFiles,
+            unresolvedIssues: result.unresolvedIssues,
+            completedAssignedWork: result.completedAssignedWork,
+          },
+        ])),
+      }
+      : {}),
   };
 }
 
@@ -1902,6 +2148,8 @@ function parseTaskOutput(output: string, taskKey: string): AgentTeamTaskResult {
   if (typeof value.completedAssignedWork !== 'boolean') {
     throw new Error('The Agent Team role did not report assigned-work completion.');
   }
+  const developmentAssignments = parseDevelopmentAssignments(value.developmentAssignments);
+  const repairRequests = parseRepairRequests(value.repairRequests);
   return {
     status: 'completed',
     documents: parseDocuments(value.documents, taskKey),
@@ -1911,6 +2159,8 @@ function parseTaskOutput(output: string, taskKey: string): AgentTeamTaskResult {
     completedAssignedWork: value.completedAssignedWork,
     criterionAssessments: parseAssessments(value.criterionAssessments),
     repairRequest: parseRepairRequest(value.repairRequest),
+    ...(developmentAssignments ? { developmentAssignments } : {}),
+    ...(repairRequests ? { repairRequests } : {}),
   };
 }
 
@@ -1980,7 +2230,46 @@ function parseRepairRequest(value: unknown): Extract<AgentTeamTaskResult, { stat
   return { taskKey: 'development', instruction: request.instruction.trim() };
 }
 
-function toTaskAttemptView(row: typeof agentTeamTaskAttempts.$inferSelect): AgentTeamTaskAttemptView {
+function parseDevelopmentAssignments(value: unknown): AgentTeamDevelopmentAssignment[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new Error('The planner returned invalid development assignments.');
+  return value.map((item) => {
+    const assignment = item as Partial<AgentTeamDevelopmentAssignment>;
+    if (typeof assignment.developerId !== 'string' || !assignment.developerId.trim()) {
+      throw new Error('A development assignment developerId is required.');
+    }
+    if (typeof assignment.title !== 'string' || !assignment.title.trim()) {
+      throw new Error('A development assignment title is required.');
+    }
+    if (typeof assignment.scopeSummary !== 'string') {
+      throw new Error('A development assignment scope summary must be text.');
+    }
+    if (!Array.isArray(assignment.ownedPaths) || assignment.ownedPaths.some((path) => typeof path !== 'string')) {
+      throw new Error('A development assignment owned path list must be strings.');
+    }
+    return {
+      developerId: assignment.developerId.trim(),
+      title: assignment.title.trim(),
+      scopeSummary: assignment.scopeSummary,
+      ownedPaths: assignment.ownedPaths as string[],
+    };
+  });
+}
+
+function parseRepairRequests(value: unknown): AgentTeamTargetedRepairRequest[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new Error('The reviewer returned invalid repair requests.');
+  return value.map((item) => {
+    const request = item as Partial<AgentTeamTargetedRepairRequest>;
+    if (typeof request.developerId !== 'string' || !request.developerId.trim()
+      || typeof request.instruction !== 'string' || !request.instruction.trim()) {
+      throw new Error('A repair request needs a developerId and an instruction.');
+    }
+    return { developerId: request.developerId.trim(), instruction: request.instruction.trim() };
+  });
+}
+
+function toTaskAttemptView(row: typeof agentTeamTaskAttempts.$inferSelect, progressText = ''): AgentTeamTaskAttemptView {
   return {
     id: row.id,
     taskKey: row.taskKey,
@@ -1991,6 +2280,9 @@ function toTaskAttemptView(row: typeof agentTeamTaskAttempts.$inferSelect): Agen
     result: row.result as AgentTeamTaskResultView | null,
     error: row.error,
     retryable: row.status === 'failed' && row.active,
+    developerId: row.developerId,
+    assignmentTitle: row.assignmentTitle,
+    progressText,
     createdAt: row.createdAt.toISOString(),
     startedAt: row.startedAt?.toISOString() ?? null,
     finishedAt: row.finishedAt?.toISOString() ?? null,
@@ -2055,6 +2347,109 @@ function isRunOutcome(value: unknown): value is AgentTeamRunOutcome {
 
 function isTerminalRunStatus(status: AgentTeamRunStatus): boolean {
   return status === 'succeeded' || status === 'failed' || status === 'cancelled';
+}
+
+function deriveRunProgress(
+  run: AgentTeamRun,
+  taskRows: ReadonlyArray<typeof agentTeamTaskAttempts.$inferSelect>,
+): AgentTeamRunProgress {
+  type CompletedResult = Extract<AgentTeamTaskResultView, { status: 'completed' }>;
+  const activeRows = taskRows.filter((row) => row.active);
+  const completedResultOf = (row: (typeof activeRows)[number]): CompletedResult | undefined =>
+    row.status === 'completed' && row.result !== null && row.result !== undefined
+      && (row.result as { status?: unknown }).status === 'completed'
+      ? row.result as CompletedResult
+      : undefined;
+
+  const planningRow = [...activeRows].reverse()
+    .find((row) => row.taskKey === 'planning' && completedResultOf(row));
+  const planningResult = planningRow ? completedResultOf(planningRow) : undefined;
+  const assignments: AgentTeamDevelopmentAssignment[] = planningResult?.developmentAssignments?.length
+    ? planningResult.developmentAssignments
+    : planningResult
+      ? [{ developerId: RESERVED_DEVELOPER_ID, title: 'Development', scopeSummary: '', ownedPaths: [] }]
+      : [];
+
+  // A repair round targets only the lanes named by the latest completed review.
+  const reviewRow = [...activeRows].reverse().find((row) =>
+    (row.taskKey === 'review' || /^repair_review_\d+$/.test(row.taskKey)) && completedResultOf(row));
+  const reviewResult = reviewRow ? completedResultOf(reviewRow) : undefined;
+  let currentRound = 0;
+  let repairTargets: ReadonlySet<string> | null = null;
+  if (reviewRow && reviewResult?.repairRequests?.length) {
+    const reviewRound = /^repair_review_(\d+)$/.exec(reviewRow.taskKey);
+    currentRound = reviewRound ? Number(reviewRound[1]) + 1 : 1;
+    repairTargets = new Set(reviewResult.repairRequests.map((request) => request.developerId));
+  }
+
+  let completedAssignments = 0;
+  for (const assignment of assignments) {
+    if (currentRound > 0 && repairTargets && !repairTargets.has(assignment.developerId)) {
+      completedAssignments += 1;
+      continue;
+    }
+    const laneTaskKey = currentRound > 0
+      ? (assignment.developerId === RESERVED_DEVELOPER_ID ? `repair_${currentRound}` : `repair_${currentRound}_${assignment.developerId}`)
+      : (assignment.developerId === RESERVED_DEVELOPER_ID ? 'development' : `development_${assignment.developerId}`);
+    if (activeRows.some((row) => row.taskKey === laneTaskKey && completedResultOf(row))) {
+      completedAssignments += 1;
+    }
+  }
+
+  const phaseOfTaskKey = (taskKey: string): AgentTeamRunProgress['phase'] => {
+    if (/^repair_test_authoring/.test(taskKey)) return 'test_authoring';
+    if (/^repair_test_execution/.test(taskKey)) return 'test_execution';
+    if (/^repair_review/.test(taskKey)) return 'review';
+    if (/^repair_/.test(taskKey)) return 'repair';
+    if (taskKey === 'planning') return 'planning';
+    if (taskKey === 'test_design') return 'test_design';
+    if (taskKey === 'development' || taskKey.startsWith('development_')) return 'development';
+    if (taskKey === 'test_authoring') return 'test_authoring';
+    if (taskKey === 'test_execution') return 'test_execution';
+    return 'review';
+  };
+
+  const terminal = isTerminalRunStatus(run.status);
+  const inFlight = activeRows.filter((row) =>
+    row.status === 'running' || row.status === 'waiting_for_input' || row.status === 'waiting_for_recovery');
+  let phase: AgentTeamRunProgress['phase'];
+  if (terminal) phase = 'terminal';
+  else if (run.status === 'waiting_for_input') phase = 'waiting';
+  else if (inFlight.length > 0) phase = phaseOfTaskKey(inFlight[inFlight.length - 1].taskKey);
+  else {
+    const latest = [...activeRows].reverse().find((row) => completedResultOf(row) || row.status === 'failed');
+    phase = latest ? phaseOfTaskKey(latest.taskKey) : 'planning';
+  }
+
+  const activeDeveloperIds = terminal
+    ? []
+    : [...new Set(inFlight
+      .filter((row) => row.role === 'developer')
+      .map((row) => row.developerId ?? RESERVED_DEVELOPER_ID))]
+      .sort((left, right) => left === RESERVED_DEVELOPER_ID ? -1 : right === RESERVED_DEVELOPER_ID ? 1 : left.localeCompare(right));
+
+  let nextStep: AgentTeamRunProgress['nextStep'];
+  if (terminal) nextStep = 'finish';
+  else if (run.status === 'waiting_for_input') nextStep = 'answer_question';
+  else if (phase === 'development' || phase === 'repair') {
+    nextStep = activeDeveloperIds.length > 0 ? 'await_assignment_completion' : 'dispatch_assignments';
+  } else if (phase === 'test_authoring') nextStep = 'test_execution';
+  else if (phase === 'test_execution') nextStep = 'review';
+  else if (phase === 'review') nextStep = 'finish';
+  else nextStep = 'dispatch_assignments';
+
+  return {
+    phase,
+    nextStep,
+    totalAssignments: assignments.length,
+    completedAssignments,
+    activeDeveloperIds,
+    waitingReason: run.status === 'waiting_for_input'
+      ? 'user_input'
+      : run.status === 'paused' || run.desiredControlState === 'pause_requested'
+        ? 'pause_boundary'
+        : null,
+  };
 }
 
 function isUsableGraphState(value: unknown, run: AgentTeamRun): value is AgentTeamGraphState {
