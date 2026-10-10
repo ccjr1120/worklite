@@ -246,6 +246,7 @@ export type AgentExecutionErrorCode =
   | 'invalid_request'
   | 'invalid_tool_request'
   | 'incomplete_tool_request'
+  | 'missing_tool_results'
   | 'too_many_tool_calls'
   | 'skill'
   | 'mcp'
@@ -309,6 +310,8 @@ export type ChatProjectOperationDetailView = {
 export type AgentToolCallView = {
   shell?: { command: string; state: 'awaiting_confirmation' | 'authorized' | 'reserved' | 'uncertain' | 'settled'; authorizationId?: string; approvedAt?: string };
   projectTask?: ChatProjectTaskView;
+  /** Present only for a Chat `ask_user` call: the stored question and the user's accepted answer, if any. */
+  question?: { text: string; answer: string | null };
   id: string;
   workingDirectory: string;
   skillId: string | null;
@@ -1188,6 +1191,18 @@ export type AgentTeamRole =
 
 export type AgentTeamMode = 'plan_only' | 'validate_existing' | 'implement_and_validate';
 
+export type AgentTeamDeveloperInstanceConfiguration = {
+  developerId: string;
+  label: string;
+  publicModelId: string;
+  instructions: string;
+  entryPoints: string[];
+  skillIds: string[];
+  mcpServerIds: string[];
+  toolNames: string[];
+  executor?: ProjectExecutor;
+};
+
 export type AgentTeamRoleConfiguration = {
   role: AgentTeamRole;
   publicModelId: string;
@@ -1197,6 +1212,24 @@ export type AgentTeamRoleConfiguration = {
   mcpServerIds: string[];
   toolNames: string[];
   executor?: ProjectExecutor;
+  developerInstances?: AgentTeamDeveloperInstanceConfiguration[];
+  developerConcurrency?: number;
+};
+
+export type AgentTeamDevelopmentAssignment = {
+  developerId: string;
+  title: string;
+  scopeSummary: string;
+  ownedPaths: string[];
+};
+
+export type AgentTeamRunProgress = {
+  phase: 'planning' | 'test_design' | 'development' | 'test_authoring' | 'test_execution' | 'review' | 'repair' | 'waiting' | 'terminal';
+  nextStep: 'dispatch_assignments' | 'await_assignment_completion' | 'answer_question' | 'test_authoring' | 'test_execution' | 'review' | 'finish';
+  totalAssignments: number;
+  completedAssignments: number;
+  activeDeveloperIds: string[];
+  waitingReason: 'user_input' | 'pause_boundary' | null;
 };
 
 export type AgentTeamView = {
@@ -1215,6 +1248,8 @@ export type AgentTeamVersionMetadata = {
   version: number;
   createdAt: string;
   developerExecution?: ProjectExecutorLaunchView | { kind: 'codex_app_server' };
+  developerExecutions?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
+  orchestrationVersion?: 1 | 2;
 };
 
 export type AgentTeamTaskAttemptStatus =
@@ -1235,6 +1270,9 @@ export type AgentTeamTaskAttemptView = {
   result: AgentTeamTaskResult | null;
   error: string | null;
   retryable: boolean;
+  developerId: string | null;
+  assignmentTitle: string | null;
+  progressText: string;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -1323,6 +1361,8 @@ export type AgentTeamTaskResult =
       changedFiles: string[];
       completedAssignedWork: boolean;
       criterionAssessments: AgentTeamCriterionAssessment[];
+      developmentAssignments?: AgentTeamDevelopmentAssignment[];
+      repairRequests?: Array<{ developerId: string; instruction: string }>;
       repairRequest?: {
         taskKey: string;
         instruction: string;
@@ -1360,6 +1400,7 @@ export type AgentTeamRunView = {
   pendingInputs: AgentTeamPendingInputView[];
   operations: AgentTeamOperationView[];
   activities: AgentTeamRunEvent[];
+  progress: AgentTeamRunProgress;
   outcome: AgentTeamRunOutcome | null;
   createdAt: string;
   updatedAt: string;
@@ -1380,7 +1421,8 @@ export type AgentTeamRunEventType =
   | 'operation.updated'
   | 'input.requested'
   | 'input.answered'
-  | 'run.outcome';
+  | 'run.outcome'
+  | 'run.progress';
 
 export type AgentTeamRunEvent = {
   runId: string;
@@ -1476,6 +1518,8 @@ export type AgentTeamConversationMessage =
       kind: 'member_question';
       role: AgentTeamRole;
       taskKey: string | null;
+      developerId: string | null;
+      assignmentTitle: string | null;
       pendingInputId: string;
       scopeRevision: number;
       kindDetail: 'question' | 'operation_recovery';
@@ -1529,6 +1573,8 @@ export type AgentTeamConversationMessage =
       taskStatus: AgentTeamTaskAttemptStatus | null;
       role: AgentTeamRole | null;
       taskKey: string | null;
+      developerId: string | null;
+      assignmentTitle: string | null;
       outcomeSummary: string | null;
       createdAt: string;
     };
@@ -1562,6 +1608,8 @@ export type AgentTeamConversationRunStateView = {
   mode: AgentTeamMode;
   projectDirectory: string;
   retryableTaskKey: string | null;
+  retryableTaskKeys: string[];
+  progress: AgentTeamRunProgress | null;
 };
 
 export type AgentTeamConversationView = {
@@ -1574,6 +1622,7 @@ export type AgentTeamConversationView = {
   activeIntakeId: string | null;
   activeRun: AgentTeamConversationRunStateView | null;
   pendingInput: AgentTeamConversationPendingInputView | null;
+  pendingInputs: AgentTeamConversationPendingInputView[];
   lastSequence: number;
   createdAt: string;
   updatedAt: string;

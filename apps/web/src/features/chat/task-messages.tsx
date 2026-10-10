@@ -60,7 +60,7 @@ function TeamTask({ submission }: { submission: ChatSubmissionView }) {
     {intake?.runId ? <TeamRunLink runId={intake.runId} /> : <>
       <TaskLink reference={reference} />
       {intake ? <StatusBadge status={toStatusKey(intake.status === 'collecting' ? 'waiting_for_input' : intake.status)} label={t(`status.${intake.status === 'collecting' ? 'waiting_for_input' : intake.status}`)} /> : query.isPending ? <p className="text-[13px] text-muted-foreground" role="status">{t('records.taskLoading')}</p> : null}
-      {intake?.status === 'collecting' && question ? <MessageResponse content={question.text} enabled /> : null}
+      {intake?.status === 'collecting' && question?.kind === 'coordinator_question' ? <MessageResponse content={question.text} enabled /> : null}
     </>}
     {query.isError ? <p className="text-[13px] text-danger" role="alert">{t('records.taskLoadFailed')}</p> : null}
     {typeof submission.renderedCard?.content === 'string' ? <MessageResponse content={submission.renderedCard.content} enabled /> : null}

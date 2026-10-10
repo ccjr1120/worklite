@@ -401,7 +401,7 @@ export type StoredChatExecutionAuthorization = {
 export const agentExecutions = sqliteTable('agent_executions', {
   executionAuthorization: text('execution_authorization', { mode: 'json' }).$type<StoredChatExecutionAuthorization | null>(),
   capabilitySnapshot: text('capability_snapshot', { mode: 'json' }).$type<StoredChatCapabilities | null>(),
-  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }), status: text('status').$type<'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled'>().notNull().default('running'), phase: text('phase').$type<'model' | 'skill' | 'recovery'>().notNull().default('model'), errorCode: text('error_code').$type<'provider' | 'provider_request' | 'invalid_request' | 'invalid_tool_request' | 'incomplete_tool_request' | 'too_many_tool_calls' | 'skill' | 'mcp' | 'restarted' | 'internal'>(), modelMessages: text('model_messages', { mode: 'json' }).$type<StoredAgentModelMessage[]>().notNull().default([]), displayMessages: text('display_messages', { mode: 'json' }).$type<StoredAgentDisplayMessage[]>().notNull().default([]), plan: text('plan', { mode: 'json' }).$type<StoredAgentPlanStep[]>().notNull().default([]), pendingQuestion: text('pending_question', { mode: 'json' }).$type<StoredAgentPendingQuestion | null>(), contextDropped: integer('context_dropped').notNull().default(0), error: text('error'), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }), status: text('status').$type<'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled'>().notNull().default('running'), phase: text('phase').$type<'model' | 'skill' | 'recovery'>().notNull().default('model'), errorCode: text('error_code').$type<'provider' | 'provider_request' | 'invalid_request' | 'invalid_tool_request' | 'incomplete_tool_request' | 'missing_tool_results' | 'too_many_tool_calls' | 'skill' | 'mcp' | 'restarted' | 'internal'>(), modelMessages: text('model_messages', { mode: 'json' }).$type<StoredAgentModelMessage[]>().notNull().default([]), displayMessages: text('display_messages', { mode: 'json' }).$type<StoredAgentDisplayMessage[]>().notNull().default([]), plan: text('plan', { mode: 'json' }).$type<StoredAgentPlanStep[]>().notNull().default([]), pendingQuestion: text('pending_question', { mode: 'json' }).$type<StoredAgentPendingQuestion | null>(), contextDropped: integer('context_dropped').notNull().default(0), error: text('error'), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
 });
 
 export const agentExecutionEvents = sqliteTable('agent_execution_events', {
@@ -526,8 +526,9 @@ export type StoredAgentTeamProjectInstructionFile = {
   content: string;
 };
 
-export type StoredAgentTeamRoleConfiguration = {
-  role: StoredAgentTeamRole;
+export type StoredAgentTeamDeveloperInstanceConfiguration = {
+  developerId: string;
+  label: string;
   publicModelId: string;
   instructions: string;
   entryPoints: string[];
@@ -538,14 +539,31 @@ export type StoredAgentTeamRoleConfiguration = {
   executor?: StoredProjectExecutor;
 };
 
+export type StoredAgentTeamRoleConfiguration = {
+  role: StoredAgentTeamRole;
+  publicModelId: string;
+  instructions: string;
+  entryPoints: string[];
+  processReferences?: string[];
+  skills: StoredAgentTeamSkillSnapshot[];
+  mcpServers: StoredAgentTeamMcpServerSnapshot[];
+  toolNames: string[];
+  executor?: StoredProjectExecutor;
+  developerInstances?: StoredAgentTeamDeveloperInstanceConfiguration[];
+  developerConcurrency?: number;
+};
+
 export type StoredAgentTeamRecipeDefaults = {
   maxRepairRounds: number;
+  maxDeveloperConcurrency?: number;
 };
 
 export type StoredAgentTeamVersionSnapshot = {
   processId: string;
   processVersion: string;
   developerExecution: StoredProjectExecutorLaunch | { kind: 'codex_app_server' };
+  developerExecutions?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
+  orchestrationVersion?: 1 | 2;
   roles: StoredAgentTeamRoleConfiguration[];
   processFiles: Array<{ path: string; content: string }>;
   recipeDefaults: StoredAgentTeamRecipeDefaults;
@@ -655,6 +673,8 @@ export const agentTeamTaskAttempts = sqliteTable('agent_team_task_attempts', {
   taskKey: text('task_key').notNull(),
   attemptIndex: integer('attempt_index').notNull(),
   role: text('role').$type<StoredAgentTeamRole>().notNull(),
+  developerId: text('developer_id'),
+  assignmentTitle: text('assignment_title'),
   status: text('status').$type<'running' | 'waiting_for_input' | 'waiting_for_recovery' | 'completed' | 'failed' | 'cancelled'>().notNull().default('running'),
   inputRevision: text('input_revision', { mode: 'json' }).$type<unknown>().notNull(),
   inputFingerprint: text('input_fingerprint').notNull(),
@@ -690,7 +710,7 @@ export const agentTeamDocuments = sqliteTable('agent_team_documents', {
 export const agentTeamRunEvents = sqliteTable('agent_team_run_events', {
   runId: text('run_id').notNull().references(() => agentTeamRuns.id, { onDelete: 'cascade' }),
   sequence: integer('sequence').notNull(),
-  type: text('type').$type<'run.status' | 'task.started' | 'task.activity' | 'task.delta' | 'task.waiting' | 'task.completed' | 'task.failed' | 'document.committed' | 'document.delivered' | 'document.delivery_failed' | 'operation.updated' | 'input.requested' | 'input.answered' | 'run.outcome'>().notNull(),
+  type: text('type').$type<'run.status' | 'task.started' | 'task.activity' | 'task.delta' | 'task.waiting' | 'task.completed' | 'task.failed' | 'document.committed' | 'document.delivered' | 'document.delivery_failed' | 'operation.updated' | 'input.requested' | 'input.answered' | 'run.outcome' | 'run.progress'>().notNull(),
   payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(),
   createdAt: timestamp('created_at'),
 }, (table) => [primaryKey({ columns: [table.runId, table.sequence] })]);

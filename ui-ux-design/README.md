@@ -90,6 +90,10 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-10-09 - Visible Chat question answers
+
+- The [Chat](pages/chat/workspace/DESIGN.md) transcript keeps answered questions as a question line plus a user answer message, shows a submitted answer immediately, and restores it to the composer when it is rejected. No new token or copy key.
+
 ### 2026-10-09 - Independent Chat task feedback
 
 - The [Chat](pages/chat/workspace/DESIGN.md) task region retains public executor progress text, failed dispatches and separately observed Team status, failures and pending questions. Existing task links and dual-theme semantic components remain the interaction surface.

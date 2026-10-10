@@ -18,6 +18,7 @@ import type {
   AgentTeamOperationView,
   AgentTeamPendingInputView,
   AgentTeamRunEvent,
+  AgentTeamRunProgress,
   AgentTeamRunView,
   AgentTeamTaskAttemptView,
   CommandExecutionEvent,
@@ -36,6 +37,7 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Field } from '@/components/ui/field';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
@@ -151,14 +153,36 @@ function ContentDisclosure({ summary, content }: { summary: string; content: str
   );
 }
 
+function RunProgressSection({ progress }: { progress: AgentTeamRunProgress }) {
+  const { t } = useTranslation('agentTeams');
+  return (
+    <section className="mt-4 rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-run-progress">
+      <h2 id="agent-team-run-progress" className="text-sm font-semibold">{t('progress.title')}</h2>
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px]">
+        <span>{t('progress.phase')}: <span className="font-medium">{t(`progress.phaseValue.${progress.phase}`)}</span></span>
+        <span>{t('progress.nextStep')}: <span className="font-medium">{t(`progress.nextStepValue.${progress.nextStep}`)}</span></span>
+        {progress.totalAssignments > 0 ? (
+          <span className="tabular-nums">{t('progress.assignments', { completed: progress.completedAssignments, total: progress.totalAssignments })}</span>
+        ) : null}
+        {progress.activeDeveloperIds.length > 0 ? (
+          <span className="min-w-0">{t('progress.activeDevelopers')}: <span className="font-mono text-xs break-all">{progress.activeDeveloperIds.join(', ')}</span></span>
+        ) : null}
+        {progress.waitingReason ? <span className="text-warning">{t(`progress.waitingReason.${progress.waitingReason}`)}</span> : null}
+      </div>
+    </section>
+  );
+}
+
 function PendingInputPanel({
   runId,
   pendingInput,
+  owner,
   allowCommands,
   onRunUpdate,
 }: {
   runId: string;
   pendingInput: AgentTeamPendingInputView;
+  owner: AgentTeamTaskAttemptView | undefined;
   allowCommands: boolean;
   onRunUpdate: (run: AgentTeamRunView) => void;
 }) {
@@ -189,10 +213,13 @@ function PendingInputPanel({
   }
 
   return (
-    <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-question-title">
-      <h2 id="agent-team-question-title" className="text-sm font-semibold">{t('input.title')}</h2>
+    <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby={`agent-team-question-title-${pendingInput.id}`}>
+      <h2 id={`agent-team-question-title-${pendingInput.id}`} className="text-sm font-semibold">{t('input.title')}</h2>
       <p className="mt-2 text-[13px] whitespace-pre-wrap break-words">{pendingInput.question}</p>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
+        {owner ? <span>{t(ROLE_LABELS[owner.role])}</span> : null}
+        {owner ? <span className="font-mono text-xs break-all">{owner.taskKey}</span> : null}
+        {owner?.assignmentTitle ? <span className="min-w-0 break-all">{owner.assignmentTitle}</span> : null}
         <CopyableId value={pendingInput.id} />
         <span>{t('run.scopeRevision')}: <span className="font-mono tabular-nums">{pendingInput.scopeRevision}</span></span>
       </div>
@@ -350,8 +377,13 @@ function TaskPanel({
         <TeamStatusBadge status={task.status} />
         <span className="min-w-0 font-mono text-xs break-all">{task.taskKey}</span>
         <span className="text-[13px] text-muted-foreground">{t(ROLE_LABELS[task.role])}</span>
+        {task.developerId ? <span className="font-mono text-xs text-muted-foreground break-all">{task.developerId}</span> : null}
+        {task.assignmentTitle ? <span className="min-w-0 text-[13px] break-all">{task.assignmentTitle}</span> : null}
         <span className="text-[13px] text-muted-foreground">{t('tasks.attempt', { count: task.attemptIndex })}</span>
       </div>
+      {task.progressText && (task.status === 'running' || task.status === 'waiting_for_input') ? (
+        <p className="mt-2 text-[13px] text-muted-foreground whitespace-pre-wrap break-words">{task.progressText}</p>
+      ) : null}
       {task.error ? <p className="mt-2 text-[13px] text-danger" role="alert">{task.error}</p> : null}
       {completedResult ? (
         <dl className="mt-3 space-y-2 text-[13px]">
@@ -521,11 +553,13 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
   const runQuery = useAgentTeamRunQuery('personal', runId);
   const [events, setEvents] = useState<AgentTeamRunEvent[]>([]);
   const [streamReconnecting, setStreamReconnecting] = useState(false);
+  const [laneFilter, setLaneFilter] = useState('');
 
   useEffect(() => {
     let disposed = false;
     let closed = false;
     setEvents([]);
+    setLaneFilter('');
     setStreamReconnecting(false);
     const source = new EventSource(api.agentTeamRunEventsUrl(runId), { withCredentials: true });
 
@@ -671,7 +705,15 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
       .map((input) => [input.operationKey ?? '', input]),
   );
   const uncertainOperations = run.operations.filter((operation) => operation.status === 'uncertain');
-  const taskRoles = new Map(run.tasks.map((task) => [task.taskKey, task.role]));
+  const taskById = new Map(run.tasks.map((task) => [task.id, task]));
+  const laneOf = (payload: TaskDeltaPayload) => taskById.get(payload.taskAttemptId)?.developerId ?? payload.taskKey;
+  const lanes = new Map<string, string>();
+  for (const { payload } of memberOutput) {
+    const lane = laneOf(payload);
+    if (!lanes.has(lane)) lanes.set(lane, taskById.get(payload.taskAttemptId)?.assignmentTitle ?? lane);
+  }
+  const activeLane = laneFilter && lanes.has(laneFilter) ? laneFilter : '';
+  const visibleOutput = activeLane ? memberOutput.filter(({ payload }) => laneOf(payload) === activeLane) : memberOutput;
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
@@ -707,7 +749,8 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
         }
       />
       <PageHeading title={t('run.detail.title')} />
-      <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-run-metadata">
+      {run.progress ? <RunProgressSection progress={run.progress} /> : null}
+      <section className="mt-4 rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-run-metadata">
         <h2 id="agent-team-run-metadata" className="text-sm font-semibold">{t('metadata.title')}</h2>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <TeamStatusBadge status={run.status} />
@@ -762,7 +805,10 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
       </section>
       <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,430px)]">
         <div className="min-w-0 space-y-6">
-          {questionInputs.map((input) => <PendingInputPanel key={input.id} runId={runId} pendingInput={input} allowCommands={run.tasks.find((task) => task.id === input.taskAttemptId)?.role !== 'developer'} onRunUpdate={updateRun} />)}
+          {questionInputs.map((input) => {
+            const owner = taskById.get(input.taskAttemptId);
+            return <PendingInputPanel key={input.id} runId={runId} pendingInput={input} owner={owner} allowCommands={owner?.role !== 'developer'} onRunUpdate={updateRun} />;
+          })}
           {uncertainOperations.map((operation) => (
             <OperationRecoveryPanel
               key={operation.key}
@@ -785,23 +831,42 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
           <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-output-title">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 id="agent-team-output-title" className="text-sm font-semibold">{t('output.title')}</h2>
-              {streamReconnecting ? (
-                <span className="flex items-center gap-1.5 text-[13px] text-warning" role="status">
-                  <RefreshCw className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
-                  {t('output.reconnecting')}
-                </span>
-              ) : null}
+              <div className="flex flex-wrap items-center gap-2">
+                {lanes.size > 1 ? (
+                  <Select value={activeLane || '__all__'} onValueChange={(value) => setLaneFilter(value === '__all__' ? '' : value)}>
+                    <SelectTrigger aria-label={t('output.lane.label')}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">{t('output.lane.all')}</SelectItem>
+                      {[...lanes.entries()].map(([lane, label]) => (
+                        <SelectItem key={lane} value={lane}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
+                {streamReconnecting ? (
+                  <span className="flex items-center gap-1.5 text-[13px] text-warning" role="status">
+                    <RefreshCw className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
+                    {t('output.reconnecting')}
+                  </span>
+                ) : null}
+              </div>
             </div>
             <div className="mt-3 max-h-[520px] overflow-y-auto" role="log" aria-live="polite">
-              {memberOutput.length === 0 ? <p className="text-[13px] text-muted-foreground">{t('output.empty')}</p> : memberOutput.map(({ event, payload }) => (
+              {visibleOutput.length === 0 ? <p className="text-[13px] text-muted-foreground">{t('output.empty')}</p> : visibleOutput.map(({ event, payload }) => {
+                const owner = taskById.get(payload.taskAttemptId);
+                return (
                 <article key={event.sequence} className="border-b border-border py-2 last:border-b-0">
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <span className="font-mono break-all">{payload.taskKey}</span>
-                    <span>{taskRoles.has(payload.taskKey) ? t(ROLE_LABELS[taskRoles.get(payload.taskKey)!]) : null}</span>
+                    <span>{owner ? t(ROLE_LABELS[owner.role]) : null}</span>
+                    {owner?.assignmentTitle ? <span className="min-w-0 break-all">{owner.assignmentTitle}</span> : null}
                   </div>
                   <pre className="mt-1 min-w-0 font-mono text-xs whitespace-pre-wrap break-words">{payload.delta}</pre>
                 </article>
-              ))}
+                );
+              })}
             </div>
           </section>
           <section aria-labelledby="agent-team-documents-title">

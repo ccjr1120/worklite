@@ -19,6 +19,15 @@ export type AgentTeamPendingInputAnswer = {
   authorizedCommands: readonly string[];
 };
 
+export type AgentTeamPendingInputAnswerMap = Record<string, AgentTeamPendingInputAnswer>;
+
+export type AgentTeamDevelopmentAssignment = {
+  developerId: string;
+  title: string;
+  scopeSummary: string;
+  ownedPaths: string[];
+};
+
 export type AgentTeamProjectInstructionFile = {
   path: string;
   content: string;
@@ -32,6 +41,11 @@ export type AgentTeamCriterionAssessment = {
 
 export type AgentTeamRepairRequest = {
   taskKey: string;
+  instruction: string;
+};
+
+export type AgentTeamTargetedRepairRequest = {
+  developerId: string;
   instruction: string;
 };
 
@@ -72,6 +86,10 @@ export type AgentTeamTaskRequest = {
   pendingInputId?: string;
   answer?: string;
   repairInstruction?: string;
+  developerId?: string;
+  assignment?: AgentTeamDevelopmentAssignment;
+  developmentAssignments?: readonly AgentTeamDevelopmentAssignment[];
+  siblingResults?: Readonly<Record<string, Extract<AgentTeamTaskResult, { status: 'completed' }>>>;
 };
 
 export type AgentTeamTaskResult =
@@ -83,7 +101,9 @@ export type AgentTeamTaskResult =
       changedFiles: string[];
       completedAssignedWork: boolean;
       criterionAssessments: AgentTeamCriterionAssessment[];
+      developmentAssignments?: AgentTeamDevelopmentAssignment[];
       repairRequest?: AgentTeamRepairRequest;
+      repairRequests?: AgentTeamTargetedRepairRequest[];
     }
   | {
       status: 'waiting_for_input';
@@ -96,6 +116,9 @@ export type AgentTeamGraphDelegate = {
 
 export type AgentTeamGraphOptions = {
   maxRepairRounds?: number;
+  orchestrationVersion?: 1 | 2;
+  developerIds?: readonly string[];
+  developerConcurrency?: number;
 };
 
 export type AgentTeamRunRequest = {
@@ -114,6 +137,7 @@ export type AgentTeamGraphResult = AgentTeamRunRequest & {
   unresolvedIssues: readonly string[];
   commandIds: readonly string[];
   criterionAssessments: readonly AgentTeamCriterionAssessment[];
+  developmentAssignments: readonly AgentTeamDevelopmentAssignment[];
 };
 
 export type AgentTeamOperationStatus = 'reserved' | 'completed' | 'uncertain' | 'failed';

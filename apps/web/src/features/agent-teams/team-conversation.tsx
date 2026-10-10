@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import type {
   AgentTeamConversationMessage,
+  AgentTeamConversationPendingInputView,
   AgentTeamMode,
   AgentTeamRunStatus,
   AgentTeamTaskAttemptStatus,
@@ -78,6 +79,7 @@ function runStateText(
 ): string {
   return [
     message.role ? t(ROLE_LABELS[message.role]) : null,
+    message.assignmentTitle ?? message.developerId,
     message.taskStatus ? t(`run.status.${message.taskStatus}`) : t(`run.status.${message.status}`),
     message.outcomeSummary,
   ].filter(Boolean).join(' · ');
@@ -109,7 +111,7 @@ function MessageItem({
             ? t(`role.${message.document.role}`)
             : t('conversation.speaker.member')
         : message.kind === 'member_question'
-          ? t(ROLE_LABELS[message.role])
+          ? `${t(ROLE_LABELS[message.role])}${message.assignmentTitle ? ` · ${message.assignmentTitle}` : ''}`
           : t('conversation.speaker.system');
 
   let body: ReactNode;
@@ -280,6 +282,66 @@ function DocumentViewer({ documentId, onClose }: { documentId: string; onClose: 
   );
 }
 
+function PendingQuestionPanel({
+  input,
+  attribution,
+  teamId,
+}: {
+  input: AgentTeamConversationPendingInputView;
+  attribution: string | null;
+  teamId: string;
+}) {
+  const { t } = useTranslation('agentTeams');
+  const [answer, setAnswer] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (submitting || !answer.trim()) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      await api.answerAgentTeamRun(input.runId, {
+        pendingInputId: input.pendingInputId,
+        scopeRevision: input.scopeRevision,
+        answer: answer.trim(),
+        authorizedCommands: [],
+      });
+      await queryClient.invalidateQueries({ queryKey: agentTeamConversationQueryKey(teamId) });
+    } catch (failure: unknown) {
+      setError(failure instanceof Error ? failure.message : t('input.answerFailed'));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby={`agent-team-extra-question-${input.pendingInputId}`}>
+      <h2 id={`agent-team-extra-question-${input.pendingInputId}`} className="text-sm font-semibold">{t('input.title')}</h2>
+      {attribution ? <p className="mt-1 text-xs text-muted-foreground">{attribution}</p> : null}
+      <p className="mt-2 text-[13px] whitespace-pre-wrap break-words">{input.question}</p>
+      <form className="mt-3 space-y-3" onSubmit={submit}>
+        <Field label={t('input.answer')} htmlFor={`agent-team-extra-answer-${input.pendingInputId}`}>
+          <Textarea
+            id={`agent-team-extra-answer-${input.pendingInputId}`}
+            value={answer}
+            placeholder={t('input.answerPlaceholder')}
+            onChange={(event) => setAnswer(event.target.value)}
+          />
+        </Field>
+        <div className="flex flex-col gap-2">
+          <Button type="submit" disabled={submitting || answer.trim().length === 0}>
+            {submitting ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}
+            {submitting ? t('input.answering') : t('input.answer')}
+          </Button>
+          {error ? <p className="text-[13px] text-danger" role="alert">{error}</p> : null}
+        </div>
+      </form>
+    </section>
+  );
+}
+
 export function TeamConversation({ teamId }: { teamId: string }) {
   const { t } = useTranslation('agentTeams');
   const { t: tCommon } = useTranslation('common');
@@ -344,6 +406,14 @@ export function TeamConversation({ teamId }: { teamId: string }) {
     : null;
   const pendingInput = conversation?.pendingInput ?? null;
   const activeRun = conversation?.activeRun ?? null;
+  const pendingQuestions = (conversation?.pendingInputs ?? []).filter((input) => input.kind === 'question');
+  const extraPendingQuestions = pendingQuestions.filter((input) => input.pendingInputId !== pendingInput?.pendingInputId);
+  const questionAttribution = (input: AgentTeamConversationPendingInputView) => {
+    const message = messages.find((candidate) => candidate.kind === 'member_question' && candidate.pendingInputId === input.pendingInputId);
+    return message && message.kind === 'member_question'
+      ? `${t(ROLE_LABELS[message.role])}${message.assignmentTitle ? ` · ${message.assignmentTitle}` : ''}`
+      : null;
+  };
   const commandGrantQuestion = pendingInput?.kind === 'question' && messages.some((message) => message.kind === 'member_question' && message.pendingInputId === pendingInput.pendingInputId && message.role !== 'developer');
   const answerMode = Boolean(pendingQuestion || pendingInput?.kind === 'question');
   const coordinatorMention = !answerMode && !coordinatorMentionRemoved;
@@ -388,10 +458,18 @@ export function TeamConversation({ teamId }: { teamId: string }) {
   const canPause = activeRun !== null && ['queued', 'running', 'waiting_for_input'].includes(activeRun.status);
   const canResume = activeRun?.status === 'paused';
   const canCancel = activeRun !== null && !TERMINAL_RUN_STATUSES.has(activeRun.status);
-  const canRetry = activeRun?.retryableTaskKey != null;
+  const retryableTaskKeys = activeRun
+    ? (activeRun.retryableTaskKeys.length > 0 ? activeRun.retryableTaskKeys : activeRun.retryableTaskKey ? [activeRun.retryableTaskKey] : [])
+    : [];
+  const canRetry = retryableTaskKeys.length > 0;
+  const retryAttribution = (taskKey: string) => {
+    const message = [...messages].reverse().find((candidate) => candidate.kind === 'run_state' && candidate.taskKey === taskKey && (candidate.assignmentTitle || candidate.developerId));
+    return message && message.kind === 'run_state' ? message.assignmentTitle ?? message.developerId : null;
+  };
   const hasContextualInspector = activeIntake?.status === 'queued'
     || activeRun !== null
     || pendingInput?.kind === 'operation_recovery'
+    || extraPendingQuestions.length > 0
     || selectedDocumentId !== null;
   const placeholder = pendingQuestion?.field === 'projectDirectory'
     ? t('conversation.enterDirectory')
@@ -446,7 +524,7 @@ export function TeamConversation({ teamId }: { teamId: string }) {
     void sendConversation({ text, mentions: coordinatorMention, authorizedCommands: commands });
   }
 
-  async function updateRun(action: 'pause' | 'resume' | 'cancel' | 'retry') {
+  async function updateRun(action: 'pause' | 'resume' | 'cancel' | 'retry', taskKey?: string) {
     if (!activeRun || runAction) return;
     setRunAction(action);
     setRunActionError('');
@@ -456,8 +534,9 @@ export function TeamConversation({ teamId }: { teamId: string }) {
       else if (action === 'cancel') {
         await api.cancelAgentTeamRun(activeRun.runId);
         setCancelOpen(false);
-      } else if (activeRun.retryableTaskKey) {
-        await api.retryAgentTeamTask(activeRun.runId, activeRun.retryableTaskKey);
+      } else {
+        const target = taskKey ?? activeRun.retryableTaskKey;
+        if (target) await api.retryAgentTeamTask(activeRun.runId, target);
       }
       await queryClient.invalidateQueries({ queryKey: agentTeamConversationQueryKey(teamId) });
     } catch (error: unknown) {
@@ -643,6 +722,21 @@ export function TeamConversation({ teamId }: { teamId: string }) {
                 <dd>{t(`conversation.mode.${activeRun.mode}`)}</dd>
               </div>
             </dl>
+            {activeRun.progress ? (
+              <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
+                <span>{t(`progress.phaseValue.${activeRun.progress.phase}`)}</span>
+                {activeRun.progress.totalAssignments > 0 ? (
+                  <span className="tabular-nums">{t('progress.assignments', { completed: activeRun.progress.completedAssignments, total: activeRun.progress.totalAssignments })}</span>
+                ) : null}
+                {activeRun.progress.activeDeveloperIds.length > 0 ? (
+                  <span className="min-w-0 font-mono text-xs break-all">{activeRun.progress.activeDeveloperIds.join(', ')}</span>
+                ) : null}
+                <span>{t('progress.nextStep')}: {t(`progress.nextStepValue.${activeRun.progress.nextStep}`)}</span>
+              </div>
+            ) : null}
+            {pendingQuestions.length > 0 ? (
+              <p className="mt-2 text-[13px] text-warning" role="status">{t('progress.pendingQuestions', { count: pendingQuestions.length })}</p>
+            ) : null}
             <div className="mt-4 flex flex-wrap gap-2">
               {canPause ? (
                 <Button type="button" variant="secondary" size="compact" disabled={runAction !== null} onClick={() => void updateRun('pause')}>
@@ -662,16 +756,32 @@ export function TeamConversation({ teamId }: { teamId: string }) {
                   {runAction === 'cancel' ? t('controls.cancelling') : t('controls.cancel')}
                 </Button>
               ) : null}
-              {canRetry ? (
-                <Button type="button" size="compact" disabled={runAction !== null} onClick={() => void updateRun('retry')}>
+              {canRetry && retryableTaskKeys.length === 1 ? (
+                <Button type="button" size="compact" disabled={runAction !== null} onClick={() => void updateRun('retry', retryableTaskKeys[0])}>
                   {runAction === 'retry' ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <RefreshCw className="size-4" aria-hidden="true" />}
                   {runAction === 'retry' ? t('tasks.retrying') : t('tasks.retry')}
                 </Button>
               ) : null}
             </div>
+            {canRetry && retryableTaskKeys.length > 1 ? (
+              <ul className="mt-3 space-y-2">
+                {retryableTaskKeys.map((taskKey) => (
+                  <li key={taskKey} className="flex flex-wrap items-center gap-2">
+                    <Button type="button" variant="secondary" size="compact" disabled={runAction !== null} onClick={() => void updateRun('retry', taskKey)}>
+                      {runAction === 'retry' ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <RefreshCw className="size-4" aria-hidden="true" />}
+                      {runAction === 'retry' ? t('tasks.retrying') : t('tasks.retryTask', { taskKey })}
+                    </Button>
+                    {retryAttribution(taskKey) ? <span className="min-w-0 text-[13px] text-muted-foreground break-all">{retryAttribution(taskKey)}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             {runActionError ? <p className="mt-2 text-[13px] text-danger" role="alert">{runActionError}</p> : null}
           </section>
         ) : null}
+        {extraPendingQuestions.map((input) => (
+          <PendingQuestionPanel key={input.pendingInputId} input={input} attribution={questionAttribution(input)} teamId={teamId} />
+        ))}
         {pendingInput?.kind === 'operation_recovery' ? (
           <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-conversation-recovery">
             <h2 id="agent-team-conversation-recovery" className="text-sm font-semibold">{t('recovery.title')}</h2>

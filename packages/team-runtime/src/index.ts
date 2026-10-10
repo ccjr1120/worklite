@@ -1,7 +1,12 @@
 export { Command, isInterrupted } from '@langchain/langgraph';
 export { createSqliteCheckpointer } from './checkpointer';
-export { createTeamGraph, requestTeamInput, toGraphResult } from './graph';
-export type { AgentTeamGraphState } from './graph';
+export {
+  createTeamGraph,
+  normalizeDevelopmentAssignments,
+  requestTeamInput,
+  toGraphResult,
+} from './graph';
+export type { AgentTeamGraphState, AgentTeamGraphV2State } from './graph';
 export {
   bmadTeaProcessDirectory,
   getBmadTeaProcessManifest,
