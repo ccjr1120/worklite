@@ -229,7 +229,10 @@ function ChatWorkspace() {
   const connectionState = mainConnectionState;
   const running = visibleExecution?.status === 'running';
   const waitingForInput = visibleExecution?.status === 'waiting_for_input';
-  const observingExecution = running || waitingForInput;
+  // Background project tasks keep the stream open after their turn settles so progress and the
+  // automatic report turn arrive live.
+  const activeProjectTasks = Boolean(visibleExecution?.toolCalls.some((call) => call.projectTask && (call.projectTask.status === 'running' || call.projectTask.status === 'waiting_for_input')));
+  const observingExecution = running || waitingForInput || activeProjectTasks;
   const workflowRunning = workflowRun?.run.status === 'queued' || workflowRun?.run.status === 'running' || workflowRun?.run.status === 'paused' || workflowRun?.run.status === 'waiting_for_input';
   const mentionMatch = !selectedWorkflow && !workflowRunning ? /(?:^|\s)@([^\s@]*)$/.exec(draft) : null;
   const mentionQuery = mentionMatch?.[1]?.toLocaleLowerCase() ?? '';
@@ -504,7 +507,7 @@ function ChatWorkspace() {
   async function cancelExecution() {
     if (cancelling) return;
     const cancelWorkflow = workflowRunning && workflowRun;
-    if (!cancelWorkflow && (!visibleExecution || !['running', 'waiting_for_input'].includes(visibleExecution.status) || visibleExecution.pendingQuestion?.recovery)) return;
+    if (!cancelWorkflow && (!visibleExecution || (!['running', 'waiting_for_input'].includes(visibleExecution.status) && !activeProjectTasks) || visibleExecution.pendingQuestion?.recovery)) return;
     const generation = ++mainRequestGenerationRef.current;
     setCancelling(true);
     setError('');
@@ -706,7 +709,7 @@ function ChatWorkspace() {
         : visibleExecution?.status === 'completed' ? { key: 'completed', label: t('assistant:status.completed') }
           : visibleExecution?.status === 'waiting_for_input' ? { key: 'waiting_for_input', label: t('assistant:status.waiting_for_input') }
             : visibleExecution?.status === 'running' ? { key: 'running', label: t('assistant:status.running') } : null;
-  const canCancel = Boolean(workflowRunning || ((running || waitingForInput) && !visibleExecution?.pendingQuestion?.recovery));
+  const canCancel = Boolean(workflowRunning || ((running || waitingForInput || activeProjectTasks) && !visibleExecution?.pendingQuestion?.recovery));
   const composerAvailable = Boolean(isConfigured || eligibleWorkflows.length > 0 || canCancel);
   const composerLoading = agentQuery.isLoading || workflowsQuery.isLoading || mcpServersQuery.isLoading;
   const stopTarget = running || workflowRunning;

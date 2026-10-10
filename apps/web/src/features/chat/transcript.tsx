@@ -9,11 +9,13 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
 import type { AppLocale } from '@/i18n/locale';
 import { cn } from '@/lib/utils';
+import { ApiError, api } from '@/api/client';
 import { useChatProjectOperationQuery } from '@/api/queries';
 import { PinTrackingContext } from './pinned-executions';
 
@@ -303,6 +305,10 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
   const { locale } = useLocale();
   const [expanded, setExpanded] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
+  const [answerDraft, setAnswerDraft] = useState('');
+  const [answering, setAnswering] = useState(false);
+  const [cancellingTask, setCancellingTask] = useState(false);
+  const [actionError, setActionError] = useState('');
   const pins = useContext(PinTrackingContext);
   const expandRequest = pins?.expandRequest;
   useEffect(() => {
@@ -310,6 +316,36 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
   }, [expandRequest, task.id]);
   const statusKey = toStatusKey(task.status);
   const live = isLiveStatus(task.status);
+  const pendingQuestion = task.status === 'waiting_for_input' ? task.pendingQuestion : null;
+
+  const submitAnswer = async () => {
+    const question = pendingQuestion;
+    const answer = answerDraft.trim();
+    if (!question || !answer || answering) return;
+    setAnswering(true);
+    setActionError('');
+    try {
+      await api.answerChatProjectTask(task.id, { questionId: question.id, answer });
+      setAnswerDraft('');
+    } catch (error) {
+      setActionError(error instanceof ApiError ? error.message : t('codex.answerFailed'));
+    } finally {
+      setAnswering(false);
+    }
+  };
+
+  const cancelTask = async () => {
+    if (cancellingTask) return;
+    setCancellingTask(true);
+    setActionError('');
+    try {
+      await api.cancelChatProjectTask(task.id);
+    } catch (error) {
+      setActionError(error instanceof ApiError ? error.message : t('codex.cancelFailed'));
+    } finally {
+      setCancellingTask(false);
+    }
+  };
   const goalSummary = codexFirstLine(task.goal);
   const executorName = task.executor ? t(`codex.executorName.${task.executor}`) : t('codex.launchNotCaptured');
   const modelSummary = t('codex.modelLaunch', { model: task.model || t('codex.defaultModel'), mode: executorName });
@@ -389,6 +425,34 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
         </span>
         <ChevronDown className={cn('mt-1 size-4 shrink-0 text-muted-foreground transition-transform duration-[200ms] ease-[var(--ease-out)]', !expanded && '-rotate-90')} aria-hidden="true" />
       </button>
+      {pendingQuestion ? (
+        <div className="space-y-2 border-t border-border px-3 py-2.5">
+          <p className="whitespace-pre-wrap break-words text-[13px] font-medium">{pendingQuestion.question}</p>
+          <Textarea
+            value={answerDraft}
+            onChange={(event) => setAnswerDraft(event.target.value)}
+            placeholder={t('codex.answerPlaceholder')}
+            rows={2}
+            disabled={answering}
+            aria-label={t('codex.answerPlaceholder')}
+          />
+          <div className="flex items-center justify-end">
+            <Button type="button" size="compact" disabled={answering || !answerDraft.trim()} aria-busy={answering} onClick={() => void submitAnswer()}>
+              {answering ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : null}
+              {t('codex.answerQuestion')}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {live ? (
+        <div className="flex items-center justify-end gap-2 border-t border-border px-3 py-2">
+          {actionError ? <p className="mr-auto text-xs text-danger" role="alert">{actionError}</p> : null}
+          <Button type="button" variant="secondary" size="compact" disabled={cancellingTask} aria-busy={cancellingTask} onClick={() => void cancelTask()}>
+            {cancellingTask ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : null}
+            {t('codex.cancelTask')}
+          </Button>
+        </div>
+      ) : null}
       {task.progressText && !task.result ? <div className="max-h-64 overflow-y-auto border-t border-border px-3 py-2.5 text-[13px]"><MessageResponse content={task.progressText} enabled /></div> : null}
       {expanded ? (
         <div className="wl-fade space-y-4 border-t border-border px-3 pb-3 pt-2.5">

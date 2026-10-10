@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { agentExecutions, chatConfigurations, chatProjectOperations, chatProjectTasks, type Database, type StoredProjectExecutor } from '@worklite/db';
 import type { AnswerAgentQuestionRequest, ChatProjectOperationDetailView, ChatProjectTaskView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
@@ -21,8 +21,20 @@ class InvalidTaskJsonError extends Error {
 
 export const CHAT_PROJECT_TASK_TOOL = {
   name: 'project_task',
-  description: 'Execute coding, repository investigation and local command requests by delegating the complete user task, relevant existing review findings and approved scope to a project executor, Codex or Claude Code, independently of Agent Team. This is the default for project work; do not first search files or run commands in Chat. Inspect previous task effects before taking over. Set executor only when the user names Codex or Claude Code; otherwise the Chat configuration\'s default executor applies. Omit model to use the executor\'s configured default; a requested model must be a Gateway public id on a protocol that executor supports. The executor works natively in the project directory with its own tools, without WorkLite proposal confirmation or individual command grants.',
+  description: 'Execute coding, repository investigation and local command requests by delegating the complete user task, relevant existing review findings and approved scope to a project executor, Codex or Claude Code, independently of Agent Team. This is the default for project work; do not first search files or run commands in Chat. The task runs in the background: the turn continues immediately after dispatch, progress stays visible on the task card, and completion or a task question is reported to the user automatically without polling. Only one active task per project directory; a concurrent request is rejected. Inspect previous task effects before taking over. Set executor only when the user names Codex or Claude Code; otherwise the Chat configuration\'s default executor applies. Omit model to use the executor\'s configured default; a requested model must be a Gateway public id on a protocol that executor supports. The executor works natively in the project directory with its own tools, without WorkLite proposal confirmation or individual command grants.',
   inputSchema: { type: 'object', additionalProperties: false, required: ['goal', 'projectDirectory'], properties: { goal: { type: 'string' }, projectDirectory: { type: 'string' }, executor: { type: 'string', enum: ['claude', 'codex'] }, model: { type: 'string' } } },
+} as const;
+
+export const CHAT_PROJECT_TASK_ANSWER_TOOL = {
+  name: 'answer_project_task',
+  description: 'Answer the pending question of a conversation-owned background project task so it resumes running. The taskId and questionId come from the task record or its report; answer only what the user stated.',
+  inputSchema: { type: 'object', additionalProperties: false, required: ['taskId', 'questionId', 'answer'], properties: { taskId: { type: 'string' }, questionId: { type: 'string' }, answer: { type: 'string' } } },
+} as const;
+
+export const CHAT_PROJECT_TASK_CANCEL_TOOL = {
+  name: 'cancel_project_task',
+  description: 'Cancel an active conversation-owned background project task when the user asks to stop it.',
+  inputSchema: { type: 'object', additionalProperties: false, required: ['taskId'], properties: { taskId: { type: 'string' } } },
 } as const;
 
 @Injectable()
@@ -49,6 +61,9 @@ export class ChatProjectTasksService {
       throw new BadRequestException(`无法访问项目目录 ${projectDirectory}（${error.code ?? '未知文件系统错误'}）。`);
     });
     if (!directoryStat.isDirectory()) throw new BadRequestException(`项目路径不是目录：${projectDirectory}。`);
+    const concurrent = this.db.select({ id: chatProjectTasks.id }).from(chatProjectTasks)
+      .where(and(eq(chatProjectTasks.workspaceId, workspaceId), eq(chatProjectTasks.projectDirectory, projectDirectory), inArray(chatProjectTasks.status, ['running', 'waiting_for_input']))).get();
+    if (concurrent) throw new ConflictException('同一项目目录已有执行中的后台任务，请等待其结束或取消后再发起。');
     if (!execution?.capabilitySnapshot) throw new ConflictException('This Chat turn has no captured capabilities; start a new turn.');
     const executor: StoredProjectExecutor = (value.executor as StoredProjectExecutor | undefined) ?? execution.capabilitySnapshot.defaultExecutor ?? 'claude';
     const launch = await this.executors.captureLaunch(executor, requestedModel);
@@ -62,11 +77,15 @@ export class ChatProjectTasksService {
     return this.db.insert(chatProjectTasks).values({ id: callId, workspaceId, executionId, goal, projectDirectory, model: model ?? '', snapshot: { launch, projectInstructions, capabilities: execution.capabilitySnapshot }, status: 'running' }).returning().get();
   }
 
-  async run(taskId: string, onProgress: () => Promise<void>): Promise<Task> {
+  async run(taskId: string, onProgress: () => Promise<void>, onSettled?: (task: Task) => void): Promise<Task> {
     const active = this.active.get(taskId);
-    if (active) return active.completion;
+    if (active) {
+      if (onSettled) void active.completion.then(onSettled, () => undefined);
+      return active.completion;
+    }
     const controller = new AbortController();
     const completion = this.execute(taskId, controller.signal, onProgress).finally(() => this.active.delete(taskId));
+    if (onSettled) void completion.then(onSettled, () => undefined);
     this.active.set(taskId, { controller, completion });
     return completion;
   }
@@ -76,7 +95,7 @@ export class ChatProjectTasksService {
     if (active) { active.controller.abort(new Error('The project task was cancelled.')); return active.completion; }
     const task = this.requireTask(taskId);
     if (task.status === 'succeeded' || task.status === 'failed' || task.status === 'cancelled') return task;
-    return this.update(taskId, { status: 'cancelled', pendingQuestion: null });
+    return this.update(taskId, { status: 'cancelled', pendingQuestion: null, reportedAt: new Date() });
   }
 
   async answer(workspaceId: string, taskId: string, input: AnswerAgentQuestionRequest, accept: (transaction: Parameters<Parameters<Database['transaction']>[0]>[0]) => void): Promise<Task> {
@@ -90,7 +109,8 @@ export class ChatProjectTasksService {
       const current = transaction.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
       if (current.pendingQuestion?.id !== question.id || current.status !== 'waiting_for_input') throw new ConflictException('This project task question has already been answered.');
       accept(transaction);
-      return transaction.update(chatProjectTasks).set({ status: 'running', pendingQuestion: null, error: null, answers: [...current.answers, { question: question.question, answer }], updatedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).returning().get();
+      // The task runs again, so its next settlement must be reported anew.
+      return transaction.update(chatProjectTasks).set({ status: 'running', pendingQuestion: null, error: null, reportedAt: null, answers: [...current.answers, { question: question.question, answer }], updatedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).returning().get();
     });
   }
 
@@ -140,12 +160,29 @@ export class ChatProjectTasksService {
     return this.db.select({ id: chatProjectTasks.id }).from(chatProjectTasks).where(eq(chatProjectTasks.executionId, executionId)).orderBy(asc(chatProjectTasks.createdAt)).all().map(({ id }) => this.view(id));
   }
 
+  // Background tasks stay active after their originating turn settles, so conversation-level
+  // cancel and the conversation list read this query rather than the turn's unresolved calls.
+  activeForExecution(executionId: string): Task[] {
+    return this.db.select().from(chatProjectTasks)
+      .where(and(eq(chatProjectTasks.executionId, executionId), inArray(chatProjectTasks.status, ['running', 'waiting_for_input'])))
+      .all();
+  }
+
+  // Settled tasks whose report never ran (for example the API stopped between settlement and the
+  // report turn) are picked up once at startup. Restart-interrupted tasks are already marked reported.
+  unreportedSettled(): Task[] {
+    return this.db.select().from(chatProjectTasks)
+      .where(and(isNull(chatProjectTasks.reportedAt), inArray(chatProjectTasks.status, ['succeeded', 'failed', 'waiting_for_input'])))
+      .all();
+  }
+
   private async execute(taskId: string, signal: AbortSignal, onProgress: () => Promise<void>): Promise<Task> {
     let task = this.requireTask(taskId);
     if (['succeeded', 'cancelled'].includes(task.status)) return task;
     if (task.status === 'waiting_for_recovery') return this.update(taskId, { status: 'failed', pendingQuestion: null, error: '此旧任务在等待操作恢复，无法继续；请创建新任务，已有记录仍保留。' });
     const previousEvidence = task.activities.length ? this.view(taskId) : undefined;
-    task = this.update(taskId, { status: 'running', pendingQuestion: null, error: null });
+    // A re-run (retry or answer) clears the report marker so the next settlement reports again.
+    task = this.update(taskId, { status: 'running', pendingQuestion: null, error: null, reportedAt: null });
     const activity = async (detail: Record<string, unknown>) => {
       this.db.transaction((transaction) => {
         const current = transaction.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
@@ -185,7 +222,7 @@ export class ChatProjectTasksService {
       if (response.status !== 'succeeded' || typeof response.summary !== 'string' || !response.summary.trim()) throw new InvalidTaskJsonError(output);
       return this.update(taskId, { status: 'succeeded', result: response.summary, pendingQuestion: null });
     } catch (error) {
-      if (signal.aborted) return this.update(taskId, { status: 'cancelled', pendingQuestion: null });
+      if (signal.aborted) return this.update(taskId, { status: 'cancelled', pendingQuestion: null, reportedAt: new Date() });
       if (error instanceof InvalidTaskJsonError) return this.update(taskId, { status: 'failed', result: error.output, pendingQuestion: null, error: '执行器返回的结果不是有效 JSON 结果，原始输出已保留以供检查。' });
       return this.update(taskId, { status: 'failed', pendingQuestion: null, error: error instanceof CodexAppServerError || error instanceof ClaudeCodeError || error instanceof BadRequestException ? error.message : '项目任务执行失败，请查看关联的命令记录。' });
     }

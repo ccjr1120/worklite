@@ -225,6 +225,10 @@
   "codex": {
     "adopt": "采用已有命令结果",
     "markFailed": "标记操作失败",
+    "cancelTask": "取消任务",
+    "answerQuestion": "回答",
+    "answerPlaceholder": "输入对任务问题的回答…",
+    "answerFailed": "无法提交回答，请重试。",
     "panel": "项目任务",
     "expand": "展开项目任务详情",
     "collapse": "收起项目任务详情",

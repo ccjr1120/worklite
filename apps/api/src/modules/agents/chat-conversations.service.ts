@@ -1,8 +1,8 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import { CHAT_AGENT_ID, type AgentExecutionEventData, type ChatChannelView, type ChatConversationList, type ChatConversationRecords, type ChatConversationSummary, type ChatConversationView, type ChatSubmissionView } from '@worklite/contracts';
-import { agentExecutionEvents, agentExecutions, chatSubmissions, feishuChats, feishuDeliveries, feishuEvents, plugins, type Database } from '@worklite/db';
+import { agentExecutionEvents, agentExecutions, chatProjectTasks, chatSubmissions, feishuChats, feishuDeliveries, feishuEvents, plugins, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from './agent-executions.service';
@@ -38,6 +38,13 @@ export class ChatConversationsService {
       channelConversationId: row.chatId, status: row.status,
       createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
     }));
+    // A conversation with an active background project task reads as in progress even though its turn settled.
+    const activeTasks = await this.db.select({ executionId: chatProjectTasks.executionId }).from(chatProjectTasks)
+      .where(and(eq(chatProjectTasks.workspaceId, workspace.id), inArray(chatProjectTasks.status, ['running', 'waiting_for_input'])));
+    const activeTaskExecutions = new Set(activeTasks.map((task) => task.executionId));
+    for (const item of items) {
+      if (item.executionId && activeTaskExecutions.has(item.executionId) && item.status !== 'running' && item.status !== 'waiting_for_input') item.status = 'running';
+    }
     const tasks = await this.db.select().from(chatSubmissions).where(and(eq(chatSubmissions.workspaceId, workspace.id), isNull(chatSubmissions.executionId), isNull(chatSubmissions.chatId), sql`${chatSubmissions.reference} is not null`));
     for (const task of tasks) {
       if (query.search?.trim() && !task.message.toLowerCase().includes(query.search.trim().toLowerCase())) continue;

@@ -458,6 +458,8 @@ export const chatProjectTasks = sqliteTable('chat_codex_tasks', {
   pendingQuestion: text('pending_question', { mode: 'json' }).$type<StoredAgentPendingQuestion | null>(),
   activities: text('activities', { mode: 'json' }).$type<Array<Record<string, unknown>>>().notNull().default([]),
   result: text('result').notNull().default(''), error: text('error'),
+  // Set once the conversation has reported this background task's outcome or question.
+  reportedAt: integer('reported_at', { mode: 'timestamp_ms' }),
   createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
 }, (table) => [index('chat_codex_tasks_execution_idx').on(table.executionId)]);
 
