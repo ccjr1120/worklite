@@ -34,10 +34,6 @@ export function useChatConversationsQuery(search = '', channel = '') {
   });
 }
 
-export function useChatConversationQuery(id: string | null) {
-  return useQuery({ queryKey: ['chat-conversation', id], queryFn: () => api.chatConversation(id!), enabled: Boolean(id), refetchInterval: 5_000 });
-}
-
 export function useChatConversationRecordsQuery(id: string | null) {
   return useQuery({ queryKey: ['chat-conversation-records', id], queryFn: () => api.chatConversationRecords(id!), enabled: Boolean(id), refetchInterval: 5_000 });
 }

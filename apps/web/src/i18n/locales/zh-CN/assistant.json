@@ -16,7 +16,8 @@
     "remove": "从队列中移除"
   },
   "transcript": {
-    "scrollToEnd": "回到最新消息"
+    "scrollToEnd": "回到最新消息",
+    "showEarlier": "显示更早的 {{count}} 条"
   },
   "commands": {
     "menuLabel": "对话命令",

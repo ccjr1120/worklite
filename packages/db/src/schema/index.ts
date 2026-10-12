@@ -79,7 +79,7 @@ export const chatSubmissions = sqliteTable('chat_submissions', {
   error: text('error'),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
-});
+}, (table) => [index('chat_submissions_execution_idx').on(table.executionId)]);
 
 export const feishuEvents = sqliteTable('feishu_events', {
   id: text('id').primaryKey(),
@@ -88,7 +88,7 @@ export const feishuEvents = sqliteTable('feishu_events', {
   status: text('status').$type<'queued' | 'done' | 'failed'>().notNull().default('queued'),
   error: text('error'),
   createdAt: timestamp('created_at'),
-});
+}, (table) => [index('feishu_events_chat_idx').on(table.chatId)]);
 
 export const feishuDeliveries = sqliteTable('feishu_deliveries', {
   id: text('id').primaryKey(),
@@ -417,7 +417,7 @@ export const agentExecutions = sqliteTable('agent_executions', {
   executionAuthorization: text('execution_authorization', { mode: 'json' }).$type<StoredChatExecutionAuthorization | null>(),
   capabilitySnapshot: text('capability_snapshot', { mode: 'json' }).$type<StoredChatCapabilities | null>(),
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }), status: text('status').$type<'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled'>().notNull().default('running'), phase: text('phase').$type<'model' | 'skill' | 'recovery'>().notNull().default('model'), errorCode: text('error_code').$type<'provider' | 'provider_request' | 'invalid_request' | 'invalid_tool_request' | 'incomplete_tool_request' | 'missing_tool_results' | 'too_many_tool_calls' | 'skill' | 'mcp' | 'restarted' | 'internal'>(), modelMessages: text('model_messages', { mode: 'json' }).$type<StoredAgentModelMessage[]>().notNull().default([]), displayMessages: text('display_messages', { mode: 'json' }).$type<StoredAgentDisplayMessage[]>().notNull().default([]), plan: text('plan', { mode: 'json' }).$type<StoredAgentPlanStep[]>().notNull().default([]), pendingQuestion: text('pending_question', { mode: 'json' }).$type<StoredAgentPendingQuestion | null>(), contextDropped: integer('context_dropped').notNull().default(0), error: text('error'), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
-});
+}, (table) => [index('agent_executions_workspace_agent_updated_idx').on(table.workspaceId, table.agentId, table.updatedAt)]);
 
 export const agentExecutionEvents = sqliteTable('agent_execution_events', {
   executionId: text('execution_id').notNull().references(() => agentExecutions.id, { onDelete: 'cascade' }),
@@ -447,7 +447,7 @@ export type StoredChatShellCall = {
 export const agentToolCalls = sqliteTable('agent_tool_calls', {
   shell: text('shell', { mode: 'json' }).$type<StoredChatShellCall | null>(),
   id: text('id').primaryKey(), executionId: text('execution_id').notNull().references(() => agentExecutions.id, { onDelete: 'cascade' }), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }), toolCallId: text('tool_call_id').notNull(), toolName: text('tool_name').$type<'skill_script' | 'builtin' | 'mcp'>().notNull(), workingDirectory: text('working_directory').notNull(), skillId: text('skill_id'), skillName: text('skill_name'), scriptPath: text('script_path'), mcpServerId: text('mcp_server_id'), mcpToolName: text('mcp_tool_name'), arguments: text('arguments', { mode: 'json' }).$type<string[]>().notNull().default([]), input: text('input', { mode: 'json' }).$type<unknown>(), packageFiles: text('package_files', { mode: 'json' }).$type<Array<{ path: string; content: string }>>().notNull().default([]), commandExecutionId: text('command_execution_id').references(() => commandExecutions.id, { onDelete: 'set null' }), status: text('status').$type<'running' | 'completed' | 'failed' | 'cancelled'>().notNull().default('running'), output: text('output').notNull().default(''), result: text('result', { mode: 'json' }).$type<StoredWorkliteScriptResult>(), exitCode: integer('exit_code'), resultAppended: integer('result_appended', { mode: 'boolean' }).notNull().default(false), createdAt: timestamp('created_at'), finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
-});
+}, (table) => [index('agent_tool_calls_execution_idx').on(table.executionId)]);
 
 // Captured launch of a project executor. Codex always uses the ~/.codex-cli home through the WorkLite Gateway;
 // Claude Code uses the operator's ~/.claude configuration, whose effective base URL must be the Gateway.

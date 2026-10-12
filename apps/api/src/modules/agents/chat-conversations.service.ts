@@ -74,14 +74,14 @@ export class ChatConversationsService {
 
   async get(request: Request, id: string): Promise<ChatConversationView> {
     const workspace = await this.workspaces.getWorkspace(request, 'personal');
-    let [row] = await this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, id), eq(agentExecutions.workspaceId, workspace.id), eq(agentExecutions.agentId, CHAT_AGENT_ID))).limit(1);
+    let [row] = await this.db.select({ id: agentExecutions.id }).from(agentExecutions).where(and(eq(agentExecutions.id, id), eq(agentExecutions.workspaceId, workspace.id), eq(agentExecutions.agentId, CHAT_AGENT_ID))).limit(1);
     let chat: typeof feishuChats.$inferSelect | undefined;
     let standalone: typeof chatSubmissions.$inferSelect | undefined;
     if (!row) {
       [chat] = await this.db.select().from(feishuChats).where(and(eq(feishuChats.id, id), eq(feishuChats.workspaceId, workspace.id))).limit(1);
       if (!chat) [standalone] = await this.db.select().from(chatSubmissions).where(and(eq(chatSubmissions.id, id), eq(chatSubmissions.workspaceId, workspace.id), isNull(chatSubmissions.executionId), isNull(chatSubmissions.chatId))).limit(1);
       if (!chat && !standalone) throw new NotFoundException('Chat conversation not found.');
-      if (chat?.executionId) [row] = await this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, chat.executionId), eq(agentExecutions.workspaceId, workspace.id), eq(agentExecutions.agentId, CHAT_AGENT_ID))).limit(1);
+      if (chat?.executionId) [row] = await this.db.select({ id: agentExecutions.id }).from(agentExecutions).where(and(eq(agentExecutions.id, chat.executionId), eq(agentExecutions.workspaceId, workspace.id), eq(agentExecutions.agentId, CHAT_AGENT_ID))).limit(1);
     }
     if (row && !chat) {
       const [submission] = await this.db.select({ chatId: chatSubmissions.chatId }).from(chatSubmissions)
@@ -89,9 +89,10 @@ export class ChatConversationsService {
       if (submission?.chatId) [chat] = await this.db.select().from(feishuChats).where(and(eq(feishuChats.id, submission.chatId), eq(feishuChats.workspaceId, workspace.id))).limit(1);
     }
     const execution = row ? await this.executions.get(request, 'personal', CHAT_AGENT_ID, row.id) : null;
-    if (execution) {
-      // The conversation read model retains streamed text that a failed turn never committed
-      // to displayMessages. It does not alter model context or scheduler state.
+    // The conversation read model retains streamed text that an interrupted turn never committed
+    // to displayMessages. It does not alter model context or scheduler state, and only an
+    // interrupted turn can hold such deltas, so settled and live turns skip the event scan.
+    if (execution && (execution.status === 'failed' || execution.status === 'cancelled')) {
       const savedIds = new Set(execution.messages.map((message) => message.id));
       const partial = new Map<string, typeof execution.messages[number]>();
       const deltas = await this.db.select().from(agentExecutionEvents).where(and(eq(agentExecutionEvents.executionId, execution.id), sql`json_extract(${agentExecutionEvents.data}, '$.kind') = 'message_delta'`)).orderBy(agentExecutionEvents.sequence);

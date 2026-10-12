@@ -53,6 +53,25 @@ const HELPER_BUILTIN_TOOLS = [
 type AcceptanceTransaction = Parameters<Parameters<Database['transaction']>[0]>[0];
 type ConversationAcceptance = (transaction: AcceptanceTransaction, executionId: string) => void;
 
+// The columns toView reads. modelMessages and capabilitySnapshot carry the largest JSON payloads
+// on the row and are excluded so view loads never parse them.
+const agentExecutionViewColumns = {
+  executionAuthorization: agentExecutions.executionAuthorization,
+  id: agentExecutions.id,
+  agentId: agentExecutions.agentId,
+  status: agentExecutions.status,
+  phase: agentExecutions.phase,
+  errorCode: agentExecutions.errorCode,
+  displayMessages: agentExecutions.displayMessages,
+  plan: agentExecutions.plan,
+  pendingQuestion: agentExecutions.pendingQuestion,
+  contextDropped: agentExecutions.contextDropped,
+  error: agentExecutions.error,
+  createdAt: agentExecutions.createdAt,
+  updatedAt: agentExecutions.updatedAt,
+} as const;
+type AgentExecutionViewRow = Pick<typeof agentExecutions.$inferSelect, keyof typeof agentExecutionViewColumns>;
+
 @Injectable()
 export class AgentExecutionsService implements OnModuleInit {
   private readonly logger = new Logger(AgentExecutionsService.name);
@@ -182,7 +201,7 @@ export class AgentExecutionsService implements OnModuleInit {
 
   async get(request: Request, workspaceSlug: string, agentId: string, executionId: string): Promise<AgentExecutionView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    return this.toView(await this.loadExecution(workspace.id, agentId, executionId));
+    return this.toView(await this.loadExecutionView(workspace.id, agentId, executionId));
   }
 
   async events(request: Request, workspaceSlug: string, agentId: string, executionId: string, afterSequence = 0): Promise<AgentExecutionEvent[]> {
@@ -1050,7 +1069,15 @@ export class AgentExecutionsService implements OnModuleInit {
     return execution;
   }
 
-  private async toView(execution: typeof agentExecutions.$inferSelect): Promise<AgentExecutionView> {
+  // The execution view never reads modelMessages or capabilitySnapshot, and those columns hold the
+  // largest JSON payloads on the row, so read paths that only build a view skip parsing them.
+  private async loadExecutionView(workspaceId: string, agentId: string, executionId: string): Promise<AgentExecutionViewRow> {
+    const [execution] = await this.db.select(agentExecutionViewColumns).from(agentExecutions).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.agentId, agentId), eq(agentExecutions.workspaceId, workspaceId))).limit(1);
+    if (!execution) throw new NotFoundException('Agent execution not found');
+    return execution;
+  }
+
+  private async toView(execution: AgentExecutionViewRow): Promise<AgentExecutionView> {
     const calls = await this.db.select().from(agentToolCalls).where(eq(agentToolCalls.executionId, execution.id)).orderBy(agentToolCalls.createdAt);
     const projectTasks = new Map(this.projectTasks.list(execution.id).map((task) => [task.id, task]));
     return { executionAuthorization: execution.executionAuthorization ?? null, id: execution.id, agentId: execution.agentId, status: execution.status, phase: execution.phase, errorCode: execution.errorCode, messages: execution.displayMessages, toolCalls: calls.map((call) => ({ ...toToolCallView(call), ...(call.toolName === 'builtin' && call.mcpToolName === 'project_task' ? { projectTask: projectTasks.get(call.id) } : {}) })), error: execution.error, plan: execution.plan ?? [], pendingQuestion: execution.pendingQuestion ?? null, contextDropped: execution.contextDropped ?? 0, createdAt: execution.createdAt.toISOString(), updatedAt: execution.updatedAt.toISOString() };
@@ -1068,7 +1095,7 @@ export class AgentExecutionsService implements OnModuleInit {
   }
 
   private async publishSnapshotForExecution(workspaceId: string, executionId: string): Promise<void> {
-    const [execution] = await this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.workspaceId, workspaceId))).limit(1);
+    const [execution] = await this.db.select(agentExecutionViewColumns).from(agentExecutions).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.workspaceId, workspaceId))).limit(1);
     if (!execution) return;
     const view = await this.toView(execution);
     const status: AgentExecutionEventData = { kind: 'status', status: view.status, phase: view.phase, errorCode: view.errorCode, error: view.error };

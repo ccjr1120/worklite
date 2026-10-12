@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import { Ban, ChevronDown, ChevronRight, CircleX, FileCode2, Hourglass, LoaderCircle, MessageCircleQuestion, MessageSquareText, Play, RefreshCw, ShieldAlert, X } from 'lucide-react';
-import { useContext, useEffect, useState } from 'react';
+import { memo, useContext, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentToolCallView, ChatConversationView, ChatProjectTaskView, ChatSubmissionView, RunView, WorkflowView } from '@worklite/contracts';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
@@ -137,7 +137,9 @@ function buildTimeline(sources: {
 
 // A pending message has been submitted but not yet accepted by the server; it keeps its
 // place with reduced emphasis while the working note below it reports progress.
-function UserMessage({ message, pending = false }: { message: TranscriptMessage; pending?: boolean }) {
+// Memoized on message identity: timeline rebuilds keep settled messages referentially stable,
+// so a streaming turn does not re-render earlier messages.
+const UserMessage = memo(function UserMessage({ message, pending = false }: { message: TranscriptMessage; pending?: boolean }) {
   const { t } = useTranslation('assistant');
   return (
     <Message from="user" aria-label={t('speaker.you')} aria-busy={pending || undefined} className="wl-enter">
@@ -146,9 +148,13 @@ function UserMessage({ message, pending = false }: { message: TranscriptMessage;
       </MessageContent>
     </Message>
   );
+}, (left, right) => left.pending === right.pending && left.message === right.message);
+
+function sameSegments(left: TurnSegment[], right: TurnSegment[]): boolean {
+  return left.length === right.length && left.every((segment, index) => segment.kind === right[index].kind && segment.item === right[index].item);
 }
 
-function AssistantTurn({ segments, working, markdownEnabled }: {
+const AssistantTurn = memo(function AssistantTurn({ segments, working, markdownEnabled }: {
   segments: TurnSegment[];
   working: boolean;
   markdownEnabled: boolean;
@@ -171,7 +177,7 @@ function AssistantTurn({ segments, working, markdownEnabled }: {
       </div>
     </Message>
   );
-}
+}, (left, right) => left.working === right.working && left.markdownEnabled === right.markdownEnabled && sameSegments(left.segments, right.segments));
 
 // A settled question is part of the reply that asked it, so it reads as quiet assistant text
 // rather than the amber waiting note it replaced.

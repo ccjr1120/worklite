@@ -2,9 +2,9 @@ import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { ChevronRight, List, Plus, ScrollText, Settings, ShieldAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AgentExecutionView, AgentToolCallView, DispatchChatRequest, ProjectExecutor, RunView, WorkflowView } from '@worklite/contracts';
+import type { AgentExecutionView, AgentToolCallView, ChatConversationView, ChatSubmissionView, DispatchChatRequest, ProjectExecutor, RunView, WorkflowView } from '@worklite/contracts';
 import { ApiError, api, parseAgentExecutionEvent } from '@/api/client';
-import { chatConversationsQueryKey, useAgentQuery, useChatConversationQuery, useModelProvidersQuery, useWorkflowsQuery } from '@/api/queries';
+import { chatConversationsQueryKey, useAgentQuery, useModelProvidersQuery, useWorkflowsQuery } from '@/api/queries';
 import { Conversation, ConversationContent } from '@/components/ai-elements/conversation';
 import { useLocale } from '@/components/locale-provider';
 import { useTheme } from '@/components/theme-provider';
@@ -38,7 +38,13 @@ const RESTARTED_AGENT_ERROR = 'The API restarted before this Chat turn completed
 
 type QueuedMessage = { id: string; text: string };
 type ActiveWorkflowRun = { workflow: WorkflowView; run: RunView; input: string };
+type PendingReceipt = ChatConversationView['pendingReceipts'][number];
 const conversationDrafts = new Map<string, { draft: string; queued: QueuedMessage[]; paused: boolean }>();
+const NO_SUBMISSIONS: ChatSubmissionView[] = [];
+const NO_RECEIPTS: PendingReceipt[] = [];
+// The transcript mounts only the newest entries until the reader asks for the rest, so opening a
+// long conversation does not mount its whole history at once.
+const RECENT_TIMELINE_COUNT = 30;
 
 function readSelectedConversation() {
   try { return window.localStorage.getItem('worklite.chat.selected'); } catch { return null; }
@@ -66,7 +72,9 @@ function ChatWorkspace() {
   const { applyAppearancePreference } = useTheme();
   const { locale } = useLocale();
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(() => typeof locationSearch.conversation === 'string' ? locationSearch.conversation : readSelectedConversation());
-  const conversationQuery = useChatConversationQuery(selectedConversationId);
+  const [conversationView, setConversationView] = useState<ChatConversationView | null>(null);
+  const [conversationFailed, setConversationFailed] = useState(false);
+  const [conversationReloadKey, setConversationReloadKey] = useState(0);
   const [recordsOpen, setRecordsOpen] = useState(false);
   const pendingDispatch = useRef<{ signature: string; id: string } | null>(null);
   const dispatchRequest = useCallback(async (input: Omit<DispatchChatRequest, 'submissionId'>) => {
@@ -81,7 +89,6 @@ function ChatWorkspace() {
     const execution = await api.agentExecution(workspaceSlug, CHAT_AGENT_ID, result.reference.executionId);
     pendingDispatch.current = null;
     void queryClient.invalidateQueries({ queryKey: chatConversationsQueryKey });
-    void queryClient.invalidateQueries({ queryKey: ['chat-conversation'] });
     return execution;
   }, [dispatchRequest, workspaceSlug]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -98,6 +105,7 @@ function ChatWorkspace() {
   const [extensionPrompt, setExtensionPrompt] = useState('');
   const [configError, setConfigError] = useState('');
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [showAllTimeline, setShowAllTimeline] = useState(false);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [loadingExecution, setLoadingExecution] = useState(false);
@@ -174,6 +182,9 @@ function ChatWorkspace() {
     setSelectedConversationId(id);
     setActiveId(null);
     setExecution(null);
+    setConversationView(null);
+    setConversationFailed(false);
+    setShowAllTimeline(false);
     setWorkflowRun(null);
     setBusy(false);
     setCancelling(false);
@@ -214,18 +225,61 @@ function ChatWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locationSearch.conversation, locationSearch.view]);
 
+  const currentView = conversationView && conversationView.conversation.id === selectedConversationId ? conversationView : null;
+
+  // The conversation view loads through one manual path with generation cancellation and
+  // exponential backoff; a settled load polls on the former query interval so channel-side
+  // activity keeps arriving without a second request path.
   useEffect(() => {
-    const data = conversationQuery.data;
-    if (!data) return;
-    if (data.execution && data.execution.id !== activeId) {
-      appliedResultIdsRef.current = new Set(data.execution.toolCalls.filter((call) => call.status === 'completed').map((call) => call.id));
+    if (!selectedConversationId) {
+      setConversationView(null);
+      setConversationFailed(false);
+      return;
     }
-    setActiveId(data.conversation.executionId);
-    setExecution((current) => mergeExecutionSnapshot(current, data.execution));
+    let cancelled = false;
+    const generation = mainRequestGenerationRef.current;
+    let retryTimer: number | undefined;
+    let delay = 1_500;
+    setConversationFailed(false);
+    const load = async () => {
+      if (cancelled || generation !== mainRequestGenerationRef.current) return;
+      try {
+        const view = await api.chatConversation(selectedConversationId);
+        if (cancelled || generation !== mainRequestGenerationRef.current) return;
+        setMainConnectionState('connected');
+        setError('');
+        setConversationView(view);
+        retryTimer = window.setTimeout(load, 5_000);
+      } catch (loadError) {
+        if (cancelled || generation !== mainRequestGenerationRef.current) return;
+        if (loadError instanceof ApiError && loadError.status < 500) {
+          setMainConnectionState('connected');
+          setConversationFailed(true);
+          setError(apiErrorMessage(loadError, t('assistant:execution.loadFailed')));
+          return;
+        }
+        setMainConnectionState('reconnecting');
+        retryTimer = window.setTimeout(load, delay);
+        delay = Math.min(delay * 2, 12_000);
+      } finally {
+        if (!cancelled) setLoadingExecution(false);
+      }
+    };
+    void load();
+    return () => { cancelled = true; if (retryTimer !== undefined) window.clearTimeout(retryTimer); };
+  }, [selectedConversationId, conversationReloadKey, t]);
+
+  useEffect(() => {
+    if (!currentView) return;
+    if (currentView.execution && currentView.execution.id !== activeId) {
+      appliedResultIdsRef.current = new Set(currentView.execution.toolCalls.filter((call) => call.status === 'completed').map((call) => call.id));
+    }
+    setActiveId(currentView.conversation.executionId);
+    setExecution((current) => mergeExecutionSnapshot(current, currentView.execution));
     setLoadingExecution(false);
     // activeId only guards the completed-tool result seed when the execution binding changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationQuery.data]);
+  }, [currentView]);
 
   const visibleExecution = execution;
   const connectionState = mainConnectionState;
@@ -293,46 +347,6 @@ function ChatWorkspace() {
       await applyCompletedResult(call, next.id);
     }
   }, [applyCompletedResult]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const generation = mainRequestGenerationRef.current;
-    let retryTimer: number | undefined;
-    if (!activeId) {
-      setExecution(null);
-      setLoadingExecution(false);
-      setMainConnectionState('connected');
-      return;
-    }
-    setLoadingExecution(true);
-    let delay = 1_500;
-    const load = async () => {
-      if (cancelled || generation !== mainRequestGenerationRef.current) return;
-      try {
-        const { execution: next } = await api.chatConversation(activeId);
-        if (!next) throw new Error(t('assistant:execution.loadFailed'));
-        if (cancelled || generation !== mainRequestGenerationRef.current) return;
-        for (const call of next.toolCalls) if (call.status === 'completed') appliedResultIdsRef.current.add(call.id);
-        setMainConnectionState('connected');
-        setError('');
-        setExecution((current) => mergeExecutionSnapshot(current, next));
-      } catch (loadError) {
-        if (cancelled || generation !== mainRequestGenerationRef.current) return;
-        if (loadError instanceof ApiError && loadError.status < 500) {
-          setMainConnectionState('connected');
-          setError(apiErrorMessage(loadError, t('assistant:execution.loadFailed')));
-          return;
-        }
-        setMainConnectionState('reconnecting');
-        retryTimer = window.setTimeout(load, delay);
-        delay = Math.min(delay * 2, 12_000);
-      } finally {
-        if (!cancelled) setLoadingExecution(false);
-      }
-    };
-    void load();
-    return () => { cancelled = true; if (retryTimer !== undefined) window.clearTimeout(retryTimer); };
-  }, [activeId, t, workspaceSlug]);
 
   useEffect(() => {
     if (!activeId || !observingExecution) return;
@@ -449,7 +463,6 @@ function ChatWorkspace() {
         if (created.reference.kind !== 'workflow') throw new Error(t('assistant:workflowRun.requestFailed'));
         const run = await api.run(workspaceSlug, created.reference.runId);
         void queryClient.invalidateQueries({ queryKey: chatConversationsQueryKey });
-        void queryClient.invalidateQueries({ queryKey: ['chat-conversation'] });
         if (generation !== mainRequestGenerationRef.current) return;
         pendingDispatch.current = null;
         if (!activeId) {
@@ -536,7 +549,6 @@ function ChatWorkspace() {
           return { ...next, messages: [...next.messages, ...current.messages.filter((message) => message.role === 'assistant' && !ids.has(message.id))] };
         });
         void queryClient.invalidateQueries({ queryKey: chatConversationsQueryKey });
-        void queryClient.invalidateQueries({ queryKey: ['chat-conversation'] });
       }
     } catch (cancelError) {
       if (generation !== mainRequestGenerationRef.current) return;
@@ -689,16 +701,19 @@ function ChatWorkspace() {
 
   const transcriptHostRef = useRef<HTMLDivElement>(null);
   const pinTracking = usePinTracking(transcriptHostRef);
-  const submissions = conversationQuery.data?.submissions ?? [];
-  const timeline = buildTimeline({
+  const submissions = currentView?.submissions ?? NO_SUBMISSIONS;
+  const receipts = currentView?.pendingReceipts ?? NO_RECEIPTS;
+  const timeline = useMemo(() => buildTimeline({
     execution: visibleExecution,
     submissions,
     workflowRun: workflowRun && !submissions.some((submission) => submission.reference?.kind === 'workflow' && submission.reference.runId === workflowRun.run.id) ? workflowRun : null,
-    receipts: conversationQuery.data?.pendingReceipts ?? [],
+    receipts,
     question: waitingForInput ? visibleExecution?.pendingQuestion ?? null : null,
     cancelled: visibleExecution?.status === 'cancelled',
     failed: visibleExecution?.status === 'failed',
-  });
+  }), [visibleExecution, submissions, workflowRun, receipts, waitingForInput]);
+  const hiddenTimelineCount = !showAllTimeline && timeline.length > RECENT_TIMELINE_COUNT ? timeline.length - RECENT_TIMELINE_COUNT : 0;
+  const visibleTimeline = hiddenTimelineCount > 0 ? timeline.slice(hiddenTimelineCount) : timeline;
   // The event stream can report the accepted answer before its request returns; once the question
   // is no longer pending, the stored exchange represents the answer instead.
   const visiblePendingAnswer = waitingForInput ? pendingAnswer : null;
@@ -730,9 +745,9 @@ function ChatWorkspace() {
   const stopTarget = running || workflowRunning;
   const submitDisabled = stopTarget ? cancelling : busy || cancelling || (!draft.trim() && !selectedWorkflow && !stopTarget) || (!selectedWorkflow && !stopTarget && !isConfigured);
 
-  const selected = conversationQuery.data?.conversation;
+  const selected = currentView?.conversation;
   const selectedWithoutExecution = Boolean(selectedConversationId && !activeId);
-  const loadingConversation = !visibleExecution && !conversationQuery.isError && (conversationQuery.isLoading || loadingExecution);
+  const loadingConversation = !visibleExecution && !conversationFailed && loadingExecution;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -750,7 +765,7 @@ function ChatWorkspace() {
         <section ref={chatSurfaceRef} className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={t('assistant:title')}>
             <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3 md:px-5">
               <Button variant="ghost" size="icon-compact" className="md:hidden" aria-label={t('assistant:history.title')} onClick={() => setSwitcherOpen(true)}><List className="size-4" /></Button>
-              <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{selected?.title || t(selectedConversationId ? 'assistant:history.loading' : 'assistant:history.new')}</p><p className="truncate text-xs text-muted-foreground">{selected?.channel === 'feishu' ? t(conversationQuery.data?.channelDelivery === 'unbound' ? 'assistant:channels.feishuUnbound' : conversationQuery.data?.channelDelivery === 'disconnected' ? 'assistant:channels.feishuDisconnected' : 'assistant:channels.feishuBound') : 'Web'}</p></div>
+              <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{selected?.title || t(selectedConversationId ? 'assistant:history.loading' : 'assistant:history.new')}</p><p className="truncate text-xs text-muted-foreground">{selected?.channel === 'feishu' ? t(currentView?.channelDelivery === 'unbound' ? 'assistant:channels.feishuUnbound' : currentView?.channelDelivery === 'disconnected' ? 'assistant:channels.feishuDisconnected' : 'assistant:channels.feishuBound') : 'Web'}</p></div>
               <Button type="button" variant="ghost" size="icon-compact" aria-label={t('assistant:history.new')} onClick={() => selectConversation(null)} className="md:hidden"><Plus className="size-4" /></Button>
               {selectedConversationId ? <Button type="button" variant="ghost" size="compact" aria-expanded={recordsOpen} onClick={() => setRecordsOpen((value) => !value)}><ScrollText className="size-4" />{t('assistant:records.title')}</Button> : null}
             </header>
@@ -761,11 +776,12 @@ function ChatWorkspace() {
               <Conversation className="min-h-0 flex-1 px-4 md:px-8" scrollToEndLabel={t('assistant:transcript.scrollToEnd')}>
                 <ConversationContent className="mx-auto w-full max-w-3xl">
                   {loadingConversation ? <TranscriptSkeleton /> : null}
-                  {conversationQuery.isError ? <div className="space-y-2"><p role="alert" className="text-sm text-danger">{t('assistant:history.loadFailed')}</p><Button variant="secondary" size="compact" onClick={() => void conversationQuery.refetch()}>{t('assistant:history.retry')}</Button></div> : null}
-                  {timeline.map((entry, index) => {
+                  {conversationFailed ? <div className="space-y-2"><p role="alert" className="text-sm text-danger">{t('assistant:history.loadFailed')}</p><Button variant="secondary" size="compact" onClick={() => { setConversationFailed(false); setLoadingExecution(true); setConversationReloadKey((key) => key + 1); }}>{t('assistant:history.retry')}</Button></div> : null}
+                  {hiddenTimelineCount > 0 ? <div className="flex justify-center"><Button type="button" variant="secondary" size="compact" onClick={() => setShowAllTimeline(true)}>{t('assistant:transcript.showEarlier', { count: hiddenTimelineCount })}</Button></div> : null}
+                  {visibleTimeline.map((entry, index) => {
                     switch (entry.kind) {
                       case 'user': return <UserMessage key={entry.item.id} message={entry.item} />;
-                      case 'assistant': return <AssistantTurn key={entry.segments[0].item.id} segments={entry.segments} working={showWorkingInLastTurn && index === timeline.length - 1} markdownEnabled />;
+                      case 'assistant': return <AssistantTurn key={entry.segments[0].item.id} segments={entry.segments} working={showWorkingInLastTurn && index === visibleTimeline.length - 1} markdownEnabled />;
                       case 'task': return <TaskCard key={entry.submission.id} submission={entry.submission} />;
                       case 'workflowRun': return <WorkflowRunRow key={entry.active.run.id} run={entry.active.run} workflow={entry.active.workflow} input={entry.active.input} />;
                       case 'receipt': return <div key={entry.receipt.id} className="my-3 space-y-2"><UserMessage message={{ id: entry.receipt.id, role: 'user', content: entry.receipt.text, createdAt: entry.receipt.createdAt }} /><p role={entry.receipt.error ? 'alert' : 'status'} className={cn('text-[13px]', entry.receipt.error ? 'text-danger' : 'text-muted-foreground')}>{entry.receipt.error || t('assistant:status.queued')}</p></div>;
