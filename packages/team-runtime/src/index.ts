@@ -21,4 +21,9 @@ export {
   stableInputFingerprint,
   teamOperationKey,
 } from './operations';
+export {
+  AGENT_TEAM_PLANNER_WORKTREE_CONVENTION_INSTRUCTIONS,
+  AGENT_TEAM_WORKTREE_MANAGER_INSTRUCTIONS,
+  AGENT_TEAM_WORKTREE_MANAGER_TOOL_NAMES,
+} from './roles';
 export type * from './types';

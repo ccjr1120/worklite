@@ -248,6 +248,7 @@ function taskGoal(
     test_author: 'Author only authorized tests for the implemented behavior using the existing framework.',
     test_runner: 'Run only authorized checks and report their actual outcomes and evidence.',
     reviewer: 'Independently assess changed files and test evidence against the acceptance criteria.',
+    'worktree-manager': 'Read the Planner plan and produce the structured worktree specification for this phase; the runtime executes every filesystem effect.',
   };
   return isRepair ? `${goals[role]} Repair instruction: ${repairInstruction ?? ''}` : goals[role];
 }
@@ -260,6 +261,7 @@ function expectedResultKind(role: AgentTeamRole): string {
     test_author: 'test_automation_record',
     test_runner: 'execution_evidence',
     reviewer: 'review_assessment',
+    'worktree-manager': 'worktree_specification',
   };
   return kinds[role];
 }
@@ -308,6 +310,12 @@ function inputNode() {
 }
 
 export function createTeamGraph(delegate: AgentTeamGraphDelegate, checkpointer: BaseCheckpointSaver | undefined, options: AgentTeamGraphOptions = {}) {
+  if (options.orchestrationVersion === 4) {
+    // Version 4 inserts Worktree Manager setup/teardown stages around the
+    // developer fan-out. Its topology is not wired yet; fail loudly rather
+    // than silently running a v4 snapshot on the v1 graph.
+    throw new Error('Orchestration version 4 graph topology is not implemented.');
+  }
   if (options.orchestrationVersion === 3) {
     // Version 3 runs the v2 topology over the fixed lane pool; the Planner's
     // assignment count alone decides how many lanes execute, so dispatch

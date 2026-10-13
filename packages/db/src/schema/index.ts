@@ -542,7 +542,8 @@ export type StoredAgentTeamRole =
   | 'developer'
   | 'test_author'
   | 'test_runner'
-  | 'reviewer';
+  | 'reviewer'
+  | 'worktree-manager';
 
 export type StoredAgentTeamMode = 'plan_only' | 'validate_existing' | 'implement_and_validate';
 
@@ -605,7 +606,7 @@ export type StoredAgentTeamVersionSnapshot = {
   processVersion: string;
   developerExecution: StoredProjectExecutorLaunch | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3;
+  orchestrationVersion?: 1 | 2 | 3 | 4;
   roles: StoredAgentTeamRoleConfiguration[];
   processFiles: Array<{ path: string; content: string }>;
   recipeDefaults: StoredAgentTeamRecipeDefaults;
@@ -619,6 +620,9 @@ export const agentTeams = sqliteTable('agent_teams', {
   processId: text('process_id').notNull(),
   processVersion: text('process_version').notNull(),
   roles: text('roles', { mode: 'json' }).$type<StoredAgentTeamRoleConfiguration[]>().notNull().default([]),
+  // Maximum number of simultaneously active Runs for this Team; dispatches
+  // beyond it persist as queued Runs and start FIFO when a slot frees.
+  maxConcurrentRuns: integer('max_concurrent_runs').notNull().default(3),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 }, (table) => [unique().on(table.workspaceId, table.name)]);
@@ -703,6 +707,10 @@ export const agentTeamRuns = sqliteTable('agent_team_runs', {
   desiredControlState: text('desired_control_state').$type<'none' | 'pause_requested' | 'cancel_requested'>().notNull().default('none'),
   langGraphThreadId: text('lang_graph_thread_id').notNull().unique(),
   outcome: text('outcome', { mode: 'json' }).$type<unknown>(),
+  // Run-level worktree evidence written by the Worktree Manager stage
+  // (orchestration v4); retained on conflict, failure, or interruption.
+  worktreeBasePath: text('worktree_base_path'),
+  runBranch: text('run_branch'),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
   finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),

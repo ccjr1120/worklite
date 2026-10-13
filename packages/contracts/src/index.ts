@@ -1223,7 +1223,8 @@ export type AgentTeamRole =
   | 'developer'
   | 'test_author'
   | 'test_runner'
-  | 'reviewer';
+  | 'reviewer'
+  | 'worktree-manager';
 
 export type AgentTeamMode = 'plan_only' | 'validate_existing' | 'implement_and_validate';
 
@@ -1243,6 +1244,25 @@ export type AgentTeamDevelopmentAssignmentInput = {
   title: string;
   scopeSummary: string;
   ownedPaths: string[];
+};
+
+// Worktree Manager setup phase output, validated by the runtime before any
+// filesystem effect is executed from it.
+export type AgentTeamWorktreeManagerSetupOutput = {
+  baseWorktreePath: string;
+  runBranch: string;
+  lanes: Array<{
+    laneId: string;
+    worktreePath: string;
+    branch: string;
+  }>;
+};
+
+// Worktree Manager teardown phase output. 'retain' keeps every worktree and
+// branch for manual resolution and requires a diagnostic reason.
+export type AgentTeamWorktreeManagerTeardownOutput = {
+  action: 'merge-and-cleanup' | 'retain';
+  reason?: string;
 };
 
 export type AgentTeamDevelopmentAssignment = {
@@ -1269,6 +1289,8 @@ export type AgentTeamView = {
   processId: string;
   processVersion: string;
   roles: AgentTeamRoleConfiguration[];
+  // Maximum number of simultaneously active Runs; dispatches beyond it queue FIFO.
+  maxConcurrentRuns: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -1279,7 +1301,7 @@ export type AgentTeamVersionMetadata = {
   createdAt: string;
   developerExecution?: ProjectExecutorLaunchView | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3;
+  orchestrationVersion?: 1 | 2 | 3 | 4;
 };
 
 export type AgentTeamTaskAttemptStatus =
@@ -1432,6 +1454,10 @@ export type AgentTeamRunView = {
   activities: AgentTeamRunEvent[];
   progress: AgentTeamRunProgress;
   outcome: AgentTeamRunOutcome | null;
+  // Run-level worktree evidence recorded by the Worktree Manager stage; null
+  // for Runs on orchestration versions without it or before setup completes.
+  worktreeBasePath: string | null;
+  runBranch: string | null;
   createdAt: string;
   updatedAt: string;
   finishedAt: string | null;
@@ -1686,6 +1712,7 @@ export type AgentTeamDocumentDownloadView = {
 
 export type UpdateAgentTeamRequest = {
   roles?: AgentTeamRoleConfiguration[];
+  maxConcurrentRuns?: number;
 };
 
 export type CreateAgentTeamRunRequest = {

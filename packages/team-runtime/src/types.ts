@@ -6,7 +6,8 @@ export type AgentTeamRole =
   | 'developer'
   | 'test_author'
   | 'test_runner'
-  | 'reviewer';
+  | 'reviewer'
+  | 'worktree-manager';
 
 export type AgentTeamPendingInput = {
   id: string;
@@ -123,7 +124,7 @@ export type AgentTeamGraphDelegate = {
 
 export type AgentTeamGraphOptions = {
   maxRepairRounds?: number;
-  orchestrationVersion?: 1 | 2 | 3;
+  orchestrationVersion?: 1 | 2 | 3 | 4;
   developerIds?: readonly string[];
   developerConcurrency?: number;
 };
