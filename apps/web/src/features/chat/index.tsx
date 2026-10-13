@@ -90,7 +90,7 @@ function ChatWorkspace() {
   const [workflowRun, setWorkflowRun] = useState<ActiveWorkflowRun | null>(null);
   const [draft, setDraft] = useState(() => conversationDrafts.get(selectedConversationId ?? 'new')?.draft ?? '');
   const [settingsOpen, setSettingsOpen] = useState(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories');
-  const [settingsSection, setSettingsSection] = useState<'channels' | 'configuration' | 'memories'>(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories' ? locationSearch.view : 'channels');
+  const [settingsSection, setSettingsSection] = useState<'channels' | 'configuration' | 'memories'>(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories' ? locationSearch.view : 'configuration');
   const [configSelection, setConfigSelection] = useState('');
   // '' means the executor's own local default; a non-empty value is a declared Gateway public model id.
   const [executorModels, setExecutorModels] = useState<Record<ProjectExecutor, string>>({ claude: '', codex: '' });
@@ -740,7 +740,7 @@ function ChatWorkspace() {
         crumbs={[{ label: 'Chat' }]}
         status={headerStatus ? <StatusBadge key={headerStatus.key} status={headerStatus.key} label={headerStatus.label} /> : undefined}
         actions={(
-          <Button type="button" variant="ghost" size="icon-compact" aria-label={t('assistant:settings.open')} onClick={() => openSettings('channels')}>
+          <Button type="button" variant="ghost" size="icon-compact" aria-label={t('assistant:settings.open')} onClick={() => openSettings('configuration')}>
             <Settings className="size-4" />
           </Button>
         )}
@@ -802,13 +802,13 @@ function ChatWorkspace() {
           <Tabs value={settingsSection} onValueChange={changeSettingsSection} className="min-h-0 flex-1 flex-col gap-0">
             <div className="px-6 pt-2">
               <TabsList>
-                <TabsTrigger value="channels">{t('assistant:settings.channels')}</TabsTrigger>
                 <TabsTrigger value="configuration">{t('assistant:settings.configuration')}</TabsTrigger>
+                <TabsTrigger value="channels">{t('assistant:settings.channels')}</TabsTrigger>
                 <TabsTrigger value="memories">{t('assistant:settings.memories')}</TabsTrigger>
               </TabsList>
             </div>
             <TabsContent value="channels" className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-              <ChannelConfiguration onOpenWeb={() => selectConversation(null)} />
+              <ChannelConfiguration />
             </TabsContent>
             <TabsContent value="configuration" className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
               <Configuration providers={providersQuery.data ?? []} selection={configSelection}
