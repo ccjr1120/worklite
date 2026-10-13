@@ -1,5 +1,5 @@
 import { useDeferredValue, useMemo, useState } from 'react';
-import { LoaderCircle, MessageSquarePlus, Search } from 'lucide-react';
+import { MessageSquarePlus, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ChatConversationSummary } from '@worklite/contracts';
 import { useChatChannelsQuery, useChatConversationsQuery } from '@/api/queries';
@@ -12,6 +12,10 @@ import { focusRingInset } from '@/components/ui/interaction';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
 import { cn } from '@/lib/utils';
+
+// The history list shows only the most recent conversations; the server returns them
+// newest first, so its first page already covers this cap.
+const RECENT_LIMIT = 15;
 
 type Group = { id: 'live' | 'today' | 'earlier'; items: ChatConversationSummary[] };
 
@@ -42,7 +46,7 @@ export function ConversationList({ selectedId, onSelect, onNew }: { selectedId: 
   const [channel, setChannel] = useState('all');
   const channels = useChatChannelsQuery();
   const query = useChatConversationsQuery(useDeferredValue(search), channel === 'all' ? '' : channel);
-  const items = useMemo(() => [...new Map((query.data?.pages.flatMap((page) => page.items) ?? []).map((item) => [item.id, item])).values()], [query.data]);
+  const items = useMemo(() => [...new Map((query.data?.pages.flatMap((page) => page.items) ?? []).map((item) => [item.id, item])).values()].slice(0, RECENT_LIMIT), [query.data]);
   const groups = useMemo(() => groupConversations(items), [items]);
   const filtered = Boolean(search || channel !== 'all');
   const channelName = (id: string) => channels.data?.find((entry) => entry.id === id)?.name ?? id;
@@ -119,9 +123,7 @@ export function ConversationList({ selectedId, onSelect, onNew }: { selectedId: 
             ))}
           </div>
         )}
-        {query.hasNextPage ? <Button className="mt-3 w-full" variant="ghost" size="compact" onClick={() => void query.fetchNextPage()} disabled={query.isFetchingNextPage}>{query.isFetchingNextPage ? <LoaderCircle className="size-4 motion-safe:animate-spin" /> : null}{t('history.more')}</Button> : null}
         {query.isError && query.data ? <div className="space-y-2 p-2"><p role="alert" className="text-[13px] text-danger">{t('history.loadFailed')}</p><Button variant="ghost" size="compact" onClick={() => void query.refetch()}>{t('history.retry')}</Button></div> : null}
-        {query.isFetchNextPageError && !query.isError ? <p role="alert" className="p-2 text-[13px] text-danger">{t('history.loadFailed')}</p> : null}
       </div>
     </div>
   );
