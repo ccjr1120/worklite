@@ -153,6 +153,7 @@
     "description": "选择此工作区中已配置的模型。",
     "model": "提供商和模型",
     "placeholder": "选择已配置的模型",
+    "executors": "执行器",
     "executorModel": {
       "claude": "Claude Code 项目任务默认模型",
       "codex": "Codex 项目任务默认模型"
@@ -191,8 +192,6 @@
   "channels": {
     "feishuBound": "飞书会话 · 网页回复也会同步到飞书",
     "waiting": "消息已接收，等待渠道开始处理。",
-    "webDescription": "直接在网页对话，支持流式回复、Markdown 和澄清选项。",
-    "openWeb": "打开对话",
     "loadFailed": "无法加载渠道配置。",
     "feishuUnbound": "飞书历史 · 当前渠道未绑定，回复仅在网页显示",
     "feishuDisconnected": "飞书会话 · 渠道未连接，投递等待连接恢复",
