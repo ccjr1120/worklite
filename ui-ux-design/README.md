@@ -90,6 +90,10 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-10-13 - Stable Chat settings Dialog
+
+- The [Chat](pages/chat/workspace/DESIGN.md) settings Dialog keeps one fixed height across its Channels, Configuration and Memories sections and scrolls section content internally with a stable scrollbar gutter, so switching sections no longer resizes or shifts the Dialog. Configuration no longer offers Skill or MCP server selection; its copy keys are removed. No new token.
+
 ### 2026-10-12 - Chat long-term memory
 
 - The [Chat](pages/chat/workspace/DESIGN.md) settings Dialog gains a Memories section listing saved workspace long-term memories with per-entry deletion and a `view=memories` deep link; saving and correcting memories happens in conversation through the protected platform tools.

@@ -160,12 +160,8 @@
     },
     "executorDefault": "跟随执行器默认",
     "saving": "保存中...",
-    "mcpServers": "项目执行器 MCP 服务器",
-    "mcpServersHint": "所选服务器仅供委派的项目任务使用。",
     "prompt": "补充提示词",
     "nextTurn": "离开输入框后保存，从下一轮对话生效。",
-    "skills": "项目执行器 Skills",
-    "builtIn": "Chat 平台操作",
     "saveFailed": "配置未保存，请重试。",
     "loadFailed": "无法加载配置。"
   },

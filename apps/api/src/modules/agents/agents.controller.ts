@@ -83,7 +83,10 @@ export class AgentsController {
       send({ sequence: 0, executionId, data: { kind: 'snapshot', execution }, createdAt: new Date().toISOString() });
     }
     const latest = await this.executions.get(request, 'personal', agentId, executionId);
-    if (latest.status === 'completed' || latest.status === 'failed' || latest.status === 'cancelled') {
+    // Background project tasks outlive the turn; keep delivering their progress and the
+    // automatic report turn, matching the browser's observation rule.
+    const activeProjectTasks = latest.toolCalls.some((call) => call.projectTask && (call.projectTask.status === 'running' || call.projectTask.status === 'waiting_for_input'));
+    if ((latest.status === 'completed' || latest.status === 'failed' || latest.status === 'cancelled') && !activeProjectTasks) {
       cleanup();
       response.end();
     }

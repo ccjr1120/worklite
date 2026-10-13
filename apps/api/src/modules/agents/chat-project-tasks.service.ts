@@ -6,7 +6,6 @@ import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { agentExecutions, chatConfigurations, chatProjectOperations, chatProjectTasks, chatProjectTaskSubscriptions, type Database, type StoredProjectExecutor, type StoredProjectExecutorLaunch, type StoredProjectExecutorModelSource } from '@worklite/db';
 import type { AnswerAgentQuestionRequest, ChatProjectOperationDetailView, ChatProjectTaskView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
-import { decryptSecret } from '../plugins/plugins.service';
 import { ClaudeCodeError } from './claude-code.service';
 import { CodexAppServerError } from './codex-app-server.service';
 import { ProjectExecutorService } from './project-executor.service';
@@ -300,8 +299,9 @@ export class ChatProjectTasksService {
       const output = await this.executors.execute({
         owner: 'chat', workspaceId: task.workspaceId, launch, model: task.model || null,
         projectDirectory: workingDirectory,
-        skills: capabilities.skills.filter((skill) => skill.id !== 'sk_worklite_platform'),
-        mcpServers: capabilities.mcpServers.map((server) => ({ id: server.id, name: server.name, endpoint: server.endpoint, allowedTools: server.allowedTools, ...(server.authSecret ? { authToken: decryptSecret(server.authSecret) } : {}) })),
+        // Chat hands no Skills or MCP servers to its executor, including from snapshots captured before selection was removed.
+        skills: [],
+        mcpServers: [],
         systemPrompt: [
           `Execute this Chat-owned project task independently of Agent Team. Work entirely inside the current working directory, which is the task's dedicated workspace, and never switch to another checkout of the same repository. Follow the captured project instructions in the pinned reference files and discover additional applicable project instructions. Existing project confirmation, verification and service-lifecycle constraints remain authoritative; WorkLite adds no proposal confirmation or command grants. Keep work within the user task. Use supplied review findings and approved scope to check the affected code and make the requested changes without repeating the complete review. Inspect the actual working tree and prior effects before taking over interrupted work. Explain concrete progress as work proceeds. Never perform WorkLite installation, build, upgrade-runner or service replacement; its independent managed runner owns deployment.${task.worktreePath ? ' Commit your finished changes on the current branch before returning; the platform merges that branch back automatically.' : ''} Return JSON: {"status":"succeeded","summary":"..."} or {"status":"waiting_for_input","pendingInput":{"question":"..."}}. Ask only for material missing information or authorization; evidence and clarification answers do not authorize unrelated work.`,
           configuration?.extensionPrompt,
