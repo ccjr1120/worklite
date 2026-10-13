@@ -15,15 +15,7 @@
       "claude": "Claude Code",
       "codex": "Codex"
     },
-    "instances": {
-      "label": "额外 Developer 实例",
-      "name": "实例名称",
-      "add": "添加 Developer 实例",
-      "remove": "移除实例"
-    },
-    "concurrency": {
-      "label": "Developer 并行上限"
-    }
+    "parallelism": "运行时并行度由 Planner 按每次执行的任务拆分决定，最多 4 个 Developer 并行。"
   },
   "run": {
     "loading": "正在加载 Agent Team 执行",
@@ -109,6 +101,7 @@
       "finish": "结束"
     },
     "assignments": "开发任务 {{completed}}/{{total}}",
+    "percent": "{{percent}}%",
     "activeDevelopers": "进行中的 Developer",
     "pendingQuestions": "{{count}} 个待回答问题",
     "waitingReason": {

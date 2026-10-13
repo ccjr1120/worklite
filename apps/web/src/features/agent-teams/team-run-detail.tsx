@@ -28,6 +28,7 @@ import { ApiError, api, parseAgentTeamRunEvent, parseCommandEvent } from '@/api/
 import { agentTeamRunQueryKey, useAgentTeamRunQuery } from '@/api/queries';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { CopyableId } from '@/components/copyable-id';
+import { StreamingMarkdown } from '@/components/ai/streaming-markdown';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
 import { PageHeading } from '@/components/page-heading';
@@ -36,6 +37,7 @@ import { StatusBadge, toStatusKey } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Field } from '@/components/ui/field';
+import { Progress } from '@/components/ui/progress';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -80,6 +82,15 @@ type TaskDeltaPayload = {
   taskKey: string;
   delta: string;
 };
+
+type MemberOutputGroup = {
+  taskAttemptId: string;
+  taskKey: string;
+  text: string;
+  lastSequence: number;
+};
+
+const ACTIVE_ATTEMPT_STATUSES = new Set<AgentTeamTaskAttemptView['status']>(['running', 'waiting_for_input', 'waiting_for_recovery']);
 
 type RunStatusPayload = {
   status: string;
@@ -153,11 +164,39 @@ function ContentDisclosure({ summary, content }: { summary: string; content: str
   );
 }
 
-function RunProgressSection({ progress }: { progress: AgentTeamRunProgress }) {
+function MemberOutputGroupView({ group, owner, active }: { group: MemberOutputGroup; owner: AgentTeamTaskAttemptView | undefined; active: boolean }) {
   const { t } = useTranslation('agentTeams');
+  const [open, setOpen] = useState(active);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <Button type="button" variant="secondary" size="compact" className="w-full max-w-full justify-start text-left">
+          <span className="min-w-0 truncate">
+            <span className="font-mono">{group.taskKey}</span>
+            {owner ? ` · ${t(ROLE_LABELS[owner.role])}` : ''}
+            {owner?.assignmentTitle ? ` · ${owner.assignmentTitle}` : ''}
+          </span>
+          {active ? <LoaderCircle className="ml-1 size-3 shrink-0 motion-safe:animate-spin" aria-hidden="true" /> : null}
+          <ChevronRight className={cn('ml-auto size-3 shrink-0 transition-transform duration-[120ms]', open && 'rotate-90')} aria-hidden="true" />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="mt-2 max-h-96 overflow-auto rounded-md border border-border bg-surface-subtle p-3">
+          <StreamingMarkdown content={group.text} streaming={active} className="text-xs leading-5" />
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function RunProgressSection({ progress }: { progress: AgentTeamRunProgress }) {  const { t } = useTranslation('agentTeams');
   return (
     <section className="mt-4 rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-run-progress">
-      <h2 id="agent-team-run-progress" className="text-sm font-semibold">{t('progress.title')}</h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 id="agent-team-run-progress" className="text-sm font-semibold">{t('progress.title')}</h2>
+        <span className="text-sm font-medium tabular-nums">{t('progress.percent', { percent: progress.percent })}</span>
+      </div>
+      <Progress value={progress.percent} className="mt-2" />
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px]">
         <span>{t('progress.phase')}: <span className="font-medium">{t(`progress.phaseValue.${progress.phase}`)}</span></span>
         <span>{t('progress.nextStep')}: <span className="font-medium">{t(`progress.nextStepValue.${progress.nextStep}`)}</span></span>
@@ -649,14 +688,27 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
     }
   }
 
-  const memberOutput = useMemo(
-    () => events.flatMap((event) => {
-      if (event.type !== 'task.delta') return [];
+  const memberOutput = useMemo(() => {
+    const groups = new Map<string, MemberOutputGroup>();
+    for (const event of events) {
+      if (event.type !== 'task.delta') continue;
       const payload = taskDeltaOf(event.payload);
-      return payload ? [{ event, payload }] : [];
-    }),
-    [events],
-  );
+      if (!payload || !payload.delta.trim()) continue;
+      const existing = groups.get(payload.taskAttemptId);
+      if (existing) {
+        existing.text += payload.delta;
+        existing.lastSequence = event.sequence;
+      } else {
+        groups.set(payload.taskAttemptId, {
+          taskAttemptId: payload.taskAttemptId,
+          taskKey: payload.taskKey,
+          text: payload.delta,
+          lastSequence: event.sequence,
+        });
+      }
+    }
+    return [...groups.values()];
+  }, [events]);
 
   if (runQuery.isLoading) {
     return (
@@ -706,14 +758,14 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
   );
   const uncertainOperations = run.operations.filter((operation) => operation.status === 'uncertain');
   const taskById = new Map(run.tasks.map((task) => [task.id, task]));
-  const laneOf = (payload: TaskDeltaPayload) => taskById.get(payload.taskAttemptId)?.developerId ?? payload.taskKey;
+  const laneOf = (group: MemberOutputGroup) => taskById.get(group.taskAttemptId)?.developerId ?? group.taskKey;
   const lanes = new Map<string, string>();
-  for (const { payload } of memberOutput) {
-    const lane = laneOf(payload);
-    if (!lanes.has(lane)) lanes.set(lane, taskById.get(payload.taskAttemptId)?.assignmentTitle ?? lane);
+  for (const group of memberOutput) {
+    const lane = laneOf(group);
+    if (!lanes.has(lane)) lanes.set(lane, taskById.get(group.taskAttemptId)?.assignmentTitle ?? lane);
   }
   const activeLane = laneFilter && lanes.has(laneFilter) ? laneFilter : '';
-  const visibleOutput = activeLane ? memberOutput.filter(({ payload }) => laneOf(payload) === activeLane) : memberOutput;
+  const visibleOutput = activeLane ? memberOutput.filter((group) => laneOf(group) === activeLane) : memberOutput;
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
@@ -853,18 +905,12 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
                 ) : null}
               </div>
             </div>
-            <div className="mt-3 max-h-[520px] overflow-y-auto" role="log" aria-live="polite">
-              {visibleOutput.length === 0 ? <p className="text-[13px] text-muted-foreground">{t('output.empty')}</p> : visibleOutput.map(({ event, payload }) => {
-                const owner = taskById.get(payload.taskAttemptId);
+            <div className="mt-3 max-h-[520px] space-y-2 overflow-y-auto" role="log" aria-live="polite">
+              {visibleOutput.length === 0 ? <p className="text-[13px] text-muted-foreground">{t('output.empty')}</p> : visibleOutput.map((group) => {
+                const owner = taskById.get(group.taskAttemptId);
+                const active = Boolean(owner && ACTIVE_ATTEMPT_STATUSES.has(owner.status));
                 return (
-                <article key={event.sequence} className="border-b border-border py-2 last:border-b-0">
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span className="font-mono break-all">{payload.taskKey}</span>
-                    <span>{owner ? t(ROLE_LABELS[owner.role]) : null}</span>
-                    {owner?.assignmentTitle ? <span className="min-w-0 break-all">{owner.assignmentTitle}</span> : null}
-                  </div>
-                  <pre className="mt-1 min-w-0 font-mono text-xs whitespace-pre-wrap break-words">{payload.delta}</pre>
-                </article>
+                  <MemberOutputGroupView key={`${group.taskAttemptId}:${active ? 'active' : 'settled'}`} group={group} owner={owner} active={active} />
                 );
               })}
             </div>

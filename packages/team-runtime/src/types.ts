@@ -21,6 +21,13 @@ export type AgentTeamPendingInputAnswer = {
 
 export type AgentTeamPendingInputAnswerMap = Record<string, AgentTeamPendingInputAnswer>;
 
+export type AgentTeamDevelopmentAssignmentInput = {
+  developerId?: string;
+  title: string;
+  scopeSummary: string;
+  ownedPaths: string[];
+};
+
 export type AgentTeamDevelopmentAssignment = {
   developerId: string;
   title: string;
@@ -101,7 +108,7 @@ export type AgentTeamTaskResult =
       changedFiles: string[];
       completedAssignedWork: boolean;
       criterionAssessments: AgentTeamCriterionAssessment[];
-      developmentAssignments?: AgentTeamDevelopmentAssignment[];
+      developmentAssignments?: AgentTeamDevelopmentAssignmentInput[];
       repairRequest?: AgentTeamRepairRequest;
       repairRequests?: AgentTeamTargetedRepairRequest[];
     }
@@ -116,7 +123,7 @@ export type AgentTeamGraphDelegate = {
 
 export type AgentTeamGraphOptions = {
   maxRepairRounds?: number;
-  orchestrationVersion?: 1 | 2;
+  orchestrationVersion?: 1 | 2 | 3;
   developerIds?: readonly string[];
   developerConcurrency?: number;
 };

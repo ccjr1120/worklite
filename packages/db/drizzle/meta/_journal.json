@@ -215,8 +215,36 @@
     {
       "idx": 30,
       "version": "6",
+      "when": 1791504000000,
+      "tag": "0031_executor_default_models",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1791590400000,
+      "tag": "0032_chat_team_run_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1791776827000,
+      "tag": "0033_chat_memories",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1791798579077,
+      "tag": "0034_task_worktrees",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
       "when": 1791860400000,
-      "tag": "0031_chat_attachments",
+      "tag": "0035_chat_attachments",
       "breakpoints": true
     }
   ]

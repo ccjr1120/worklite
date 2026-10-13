@@ -377,7 +377,9 @@ async function run(state, id) {
   let stage = 'upgrade initialization';
   const targetUrl = `http://127.0.0.1:${previous.ports[1]}/api/upgrades/runtime`;
   async function verifyTargetOwnership() {
-    const response = await fetchForUpgrade(targetUrl, { signal: AbortSignal.timeout(3000) }, 'Target runtime ownership check');
+    // The target API can stall for several seconds while the host is under build load;
+    // 3s aborts an otherwise healthy runtime. Ownership is still verified after the wait.
+    const response = await fetchForUpgrade(targetUrl, { signal: AbortSignal.timeout(15000) }, 'Target runtime ownership check');
     if (!response.ok) throw new Error(`Target runtime ownership check returned HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}.`);
     const ownership = await response.json();
     if (ownership.releaseHash !== previous.releaseHash || ownership.wrapperPid !== previous.pid) throw new Error('Target listeners are not owned by the recorded managed runtime.');

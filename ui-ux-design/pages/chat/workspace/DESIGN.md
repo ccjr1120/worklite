@@ -2,7 +2,7 @@
 
 ## Route
 
-`/chat`, with validated `view=conversation|channels|configuration` and optional `conversation` selection. `view=conversation` is the normal body state; the two non-conversation values open the settings Dialog directly on their named section.
+`/chat`, with validated `view=conversation|channels|configuration|memories` and optional `conversation` selection. `view=conversation` is the normal body state; the non-conversation values open the settings Dialog directly on their named section.
 
 ## Design Source
 
@@ -21,6 +21,7 @@
 - `apps/web/src/features/chat/conversation-list.tsx`
 - `apps/web/src/features/chat/records.tsx`
 - `apps/web/src/features/chat/channel-configuration.tsx`
+- `apps/web/src/features/chat/memories.tsx`
 - `apps/web/src/features/chat/task-messages.tsx`
 - `apps/api/src/modules/agents/chat-conversations.service.ts`
 - `apps/web/src/components/ai/streaming-markdown-view.tsx`
@@ -40,13 +41,13 @@ A full-height conversation-only Chat workspace has a stable context bar, searcha
 
 The conversation list separates live work from history. An **In progress** group pinned at the top holds conversations whose status is running, waiting for input, or queued; each row carries a leading status mark (an animated brand live dot for running, a pulsing amber mark for waiting, a dashed mark for queued) and a `brand-subtle` tint. Below it, **Today** and **Earlier** groups hold settled conversations with quiet leading marks: a green check for completed, a red cross for failed, a slash for cancelled. Group headers show a count. A conversation moves between groups with a short fade as its server status changes. The conversation header shows the shared status badge for the selected conversation, and the sidebar Chat destination shows the live dot while the In progress group is non-empty. The complete evidence pane opens below the conversation header and scrolls within its own region; ordinary replies stay readable. Below `md`, the conversation list opens in a labelled navigation drawer, preserving the full transcript width. Both themes use shared semantic tokens; ordinary icons and secondary actions stay neutral. Chat replaces Home's bottom composer and the shell floating Chat Bot.
 
-A project task tool call remains one inline disclosure. Its collapsed row shows the first line of the captured goal, shared task status, project directory, model and executor (Codex or Claude Code); a live task also shows its latest persisted activity and total activity count rather than a context-free running label. Expansion reveals a metadata grid, phase counts and the latest 20 persisted executor activities with their command, file or tool summaries, journaled operations retained from tasks recorded before native executors, the Markdown result, a red failure reason, and raw task JSON only behind a second collapsed disclosure. Each operation's full retained input and output loads when its own detail control opens; the task and execution snapshot never carry those result bodies. The transcript does not render raw JSON merely because the task row is expanded.
+A project task tool call remains one inline disclosure. Its collapsed row shows the first line of the captured goal, shared task status, project directory, model and executor (Codex or Claude Code); a live task also shows a server-derived stage chip (starting, working, responding, or waiting — never a fabricated percentage), its latest persisted activity and total activity count rather than a context-free running label. Expansion reveals a metadata grid, phase counts and executor activities grouped per phase or tool call into foldable sections with text rendered as Markdown, journaled operations retained from tasks recorded before native executors, the Markdown result, a red failure reason, and raw task JSON only behind a second collapsed disclosure. The expanded list loads the latest 20 activities first and pages the full persisted history on demand, with a visible note when the server truncates an oversized history. Each operation's full retained input and output loads when its own detail control opens; the task and execution snapshot never carry those result bodies. The transcript does not render raw JSON merely because the task row is expanded.
 
-The Dialog uses internal Channels and Configuration sections. Channels owns the existing Web and Feishu setup; Configuration owns model, prompt and the Skill/MCP selection handed to the delegated project executor; custom capabilities do not execute in Chat. The main workspace height and conversation content remain stable while the Dialog opens and closes. Cancelling uses the existing neutral Send-or-Stop target while executing. While waiting for an ordinary answer, one neutral Cancel button sits beside Send. Cancel progress stays on that control; input and conversation content remain in place. No new design token is introduced.
+The Dialog uses internal Channels, Configuration and Memories sections. Channels owns the existing Web and Feishu setup; Configuration owns the default executor, model and extension prompt. There is no Skill or MCP server selection: project executors only receive a model choice from Chat, and custom capabilities do not execute in Chat. Memories lists the workspace long-term memories Chat saved during conversations — each entry's full text, its last-updated time and one delete action; saving and correcting memories happens in conversation, not in this Dialog. The Dialog has one fixed height, `min(40rem, 85vh)`, independent of the active section; the header and section tabs stay in place, and the active section scrolls within the remaining region with a stable scrollbar gutter, so switching sections changes only the content and never resizes, re-centres or horizontally shifts the Dialog. The main workspace height and conversation content remain stable while the Dialog opens and closes. Cancelling uses the existing neutral Send-or-Stop target while executing. While waiting for an ordinary answer, one neutral Cancel button sits beside Send. Cancel progress stays on that control; input and conversation content remain in place. No new design token is introduced.
 
 ## Interaction Contract
 
-- Independent task feedback: a Chat turn's completion or failure does not settle a delegated Team Run. Its task card automatically observes intake and Run status, displays retained failure reasons and pending questions, and keeps the existing task-detail link as the action for answering a Team question. Read failures remain local to the task card. Failed submissions without a task reference remain visible in chronological order.
+- Independent task feedback: a Chat turn's completion or failure does not settle a delegated Team Run. Its task card automatically observes intake and Run status, displays the Run's current phase and server-derived completion percentage, retained failure reasons and pending questions, and keeps the existing task-detail link as the action for answering a Team question. A dispatched Team Run's terminal success or failure is additionally reported once by an automatic assistant reply in the same conversation; cancelled Runs and Team questions are not auto-reported. Read failures remain local to the task card. Failed submissions without a task reference remain visible in chronological order.
 - Project task progress text: display the latest complete public executor message below its disclosure header while no final result is available, including after failure or cancellation. Expansion retains public messages in the existing activity list. The header names the captured executor, and existing semantic surfaces, status cues and reduced-motion behavior apply in both themes. No new control or action is added.
 
 - Chronological transcript: messages, tool calls including project task disclosures, Team, Workflow and upgrade task cards (failed dispatches included), a just-started Workflow run, received Feishu messages awaiting execution, the pending question and the cancelled or failed turn note all appear in one sequence ordered by their own timestamps. No category is pinned to the end of the transcript; only unsent queued messages, which have not happened yet, follow the sequence.
@@ -73,7 +74,8 @@ The Dialog uses internal Channels and Configuration sections. Channels owns the 
 - Feishu conversation: identify the bound channel before submission. Web can continue its Agent execution; the adapter projects replies into the same Feishu-bound conversation. Non-Codex Team command grants still require the task-bound authoritative form and cannot originate from ordinary chat prose.
 - Records: load the full execution snapshot, stored Agent events, inbound and outbound receipts, selected actions/forms, submissions, rendered outbound cards, safe errors and delivery identifiers. Reveal raw saved fields only on deliberate disclosure. Provide full text copy/download; never truncate evidence or model-returned reply content. Related Team/Workflow tasks link to their authoritative detail routes.
 - Freshness: execution SSE and five-second conversation/record queries recover observable changes automatically, retaining current content and reader scroll. No manual refresh control. Older history is explicitly paged, with no hidden final cap.
-- Settings Dialog: the context-bar settings icon opens the Dialog on its last route-selected section; `view=channels` and `view=configuration` deep links do the same. Selecting an internal section updates the validated route value without replacing the selected conversation. Escape or the Dialog close affordance returns to `view=conversation`, restores focus to the settings control, and leaves the mounted conversation body unchanged.
+- Settings Dialog: the context-bar settings icon opens the Dialog on its last route-selected section; `view=channels`, `view=configuration` and `view=memories` deep links do the same. Selecting an internal section updates the validated route value without replacing the selected conversation. Escape or the Dialog close affordance returns to `view=conversation`, restores focus to the settings control, and leaves the mounted conversation body unchanged.
+- Memories: the Dialog's Memories section lists every saved long-term memory with its full text and last-updated time; deletion is one control-local action per entry without a confirmation dialog, and a failed delete stays beside the list as an inline error. Saving and correcting memories belongs to the conversation itself; the Dialog adds no edit control.
 - Configuration: open the Dialog's Configuration section directly or from the unconfigured composer setup action. Save at the activated control, keep durable request failures beside it, and retain immutable per-turn configuration snapshots. New turns use the latest revision; answers/retries retain their accepted snapshot.
 - Channels: reuse the approved Feishu QR and manual setup interactions inside the Dialog's Channels section; the adapter owns identity, connection and platform-specific presentation. Web conversation needs no channel registration.
 - Slash commands: retain `/new`, `/resume` and `/log` as shortcuts for visible conversation capabilities. History comes from the server. Slash commands do not replace the Settings Dialog. Escape dismisses inner menus and selections; an open history Sheet or settings Dialog owns Escape and focus while open.
@@ -82,7 +84,7 @@ The Dialog uses internal Channels and Configuration sections. Channels owns the 
 
 | State | Behavior |
 | --- | --- |
-| Team task | Observe intake and Run separately from Chat; show task status, pending question or failure and the existing details link. Retain cached state and show a local error when a read fails. |
+| Team task | Observe intake and Run separately from Chat; show task status, current phase and completion percentage, pending question or failure and the existing details link. A terminal Run is reported once by an automatic assistant reply. Retain cached state and show a local error when a read fails. |
 | Failed dispatch | Keep the submitted message and safe error visible even when no task reference was created. |
 | Redeployment | Show preparation, preflight, handoff, switch, recovery and terminal outcomes in the same conversation; reconnect after cutover without resubmitting. A proposal waits for an explicit redeploy request rather than a confirmation button. |
 | Historical Shell call | Keep stored command evidence and explicit interrupted-command recovery inspectable; new direct Shell execution is unavailable. |
@@ -121,6 +123,7 @@ The Dialog uses internal Channels and Configuration sections. Channels owns the 
 | `assistant:records.*` | Action, State or Constraint according to individual key |
 | `assistant:composer.*` / `assistant:queue.*` / `assistant:execution.*` | Action, State or Recovery according to individual key |
 | `assistant:settings.*` | Action, State or Constraint according to individual key |
+| `assistant:memories.*` | Action, State or Recovery according to individual key |
 | `assistant:configuration.*` | Action, State or Constraint according to individual key |
 | `plugins:feishu.*` | Reused channel Action, State, Constraint or Recovery |
 
@@ -131,6 +134,14 @@ The settings control, Dialog heading, internal section tabs, history controls, i
 ## Coverage Status
 
 2026-10-13 image attachments: source inspection found Markdown images rendered by the renderer's default image component, which shows an English “Image not available” fallback and a hover download control, and no server channel for images, so executors could only report local paths. The implementation adds the attachment channel and replaces the image component with the bounded inline image and the dual-theme expired placeholder. The user authorized the type check, unit tests and build; browser appearance was not checked.
+
+2026-10-13 settings Dialog stability and Configuration scope: source inspection found the Dialog sized only by `max-h-[85vh]`, so its vertically centred height followed the active section and jumped when switching between sections. The Dialog now has a fixed height with internal section scrolling and a stable scrollbar gutter, using existing tokens in both themes. The Skill and MCP server selections were removed from Configuration along with their copy keys. Only the Web type check and lint are run; no browser interaction, test suite or build.
+
+2026-10-12 worktree-parallel project tasks: git-backed tasks run in per-task worktrees and the task detail view shows the worktree path, branch and merge status (`assistant:codex.worktree` / `mergeStatus.*`). Same-directory tasks run in parallel without a cap; non-git directories keep the one-active-task rule. No type check, browser interaction, build, test or deployment was run.
+
+2026-10-12 long-term memory: the settings Dialog gains a Memories section listing each saved memory's full text and last-updated time with one delete action per entry; loading, empty, load-failure and delete-failure states reuse the shared skeleton, retry and inline-error patterns. `view=memories` joins the validated deep links. The authorized `pnpm typecheck` and `pnpm test` commands passed; no browser interaction, build or deployment was run.
+
+2026-10-10 per-executor default models: the Chat settings Dialog gains two Select controls under the model selection — Claude Code and Codex project-task default models — each listing the follow-the-executor-default choice plus Gateway public models filtered to that executor's protocol (`assistant:configuration.executorModel.*` / `executorDefault`, covered by the existing `assistant:configuration.*` inventory row). Selection saves immediately through the existing revision-checked update path and rolls back on failure, matching the model Select's interaction. Only the authorized type check is run; no browser interaction, live save, build or test suite.
 
 2026-10-10 background project tasks: source inspection found `project_task` awaited inside the turn, so the conversation stayed running and new messages queued until the executor finished, and a task question locked the whole conversation. The implementation settles the turn at task start, moves questions onto the task and adds task-scoped answer and cancel controls using existing neutral controls and semantic tokens in both themes. Only the permitted type check is run; no browser interaction, live executor run, build or test suite.
 
@@ -177,9 +188,16 @@ Source comparison 2026-10-04: the old embedded surface supports persisted messag
 ### 2026-10-13
 
 - Rendered attachment images inline in replies and task output, with an “图片已过期” placeholder for expired or missing attachments, using existing semantic tokens in both themes.
+- Fixed the settings Dialog height across sections with internal scrolling and a stable scrollbar gutter, and removed Configuration's Skill and MCP server selections.
+
+### 2026-10-12
+
+- Added a Memories section to the Chat settings Dialog listing workspace long-term memories with delete, and a validated `view=memories` deep link.
+- Project tasks in git repositories run in per-task worktrees with unlimited same-directory parallelism and automatic merge-back on success; the task detail view shows the worktree path, branch and merge outcome.
 
 ### 2026-10-10
 
+- Added a server-derived stage chip to the project task disclosure header, grouped foldable Markdown streaming sections in its expanded activity list with on-demand full-history paging, and phase plus completion percentage on Team task cards; a settled Chat-dispatched Team Run is reported once by an automatic assistant reply.
 - Project tasks run in the background: the turn settles at task start, the composer stays sendable, the task disclosure gains Cancel task and an inline answer for task questions, Stop cancels all active tasks, and settled tasks are reported by an automatic reply. Only the permitted type check is run.
 
 ### 2026-10-09

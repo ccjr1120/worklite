@@ -171,6 +171,7 @@ export type ChatSubmissionView = {
   reference: ChatTaskReference | null;
   outputMessageId: string | null;
   renderedCard: Record<string, unknown> | null;
+  renderedTaskCards?: Record<string, Record<string, unknown>> | null;
   settled: boolean;
   error: string | null;
   createdAt: string;
@@ -186,13 +187,34 @@ export type ChatConversationRecords = {
   deliveries: Array<{ id: string; messageId: string | null }>;
 };
 
+export type ChatMemoryView = {
+  id: string;
+  content: string;
+  sourceConversationId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ChatMemoryList = {
+  items: ChatMemoryView[];
+};
+
+export type SaveChatMemoryRequest = {
+  content: string;
+  sourceConversationId?: string;
+};
+
+export type UpdateChatMemoryRequest = {
+  content: string;
+};
+
 export type PluginTestResult = {
   enabled: boolean;
   status: 'available' | 'missing' | 'failed';
 };
 
 export type AgentView = {
-  chatConfiguration?: { revision: number; extensionPrompt: string; defaultExecutor: ProjectExecutor };
+  chatConfiguration?: { revision: number; extensionPrompt: string; defaultExecutor: ProjectExecutor; defaultExecutorModels: Partial<Record<ProjectExecutor, string>> };
   id: string;
   workspaceSlug: string;
   kind: 'system' | 'custom';
@@ -281,8 +303,8 @@ export type AgentToolCallStatus = 'running' | 'completed' | 'failed' | 'cancelle
 export type ProjectExecutor = 'codex' | 'claude';
 
 export type ProjectExecutorLaunchView =
-  | { executor: 'codex'; commandArguments: string[]; home: string; model: string; modelProvider: string; settings: Record<string, unknown> }
-  | { executor: 'claude'; commandArguments: string[]; baseUrl: string; model: string | null };
+  | { executor: 'codex'; commandArguments: string[]; home: string; model: string; modelProvider: string; settings: Record<string, unknown>; modelSource?: 'task' | 'configuration' | 'executor' }
+  | { executor: 'claude'; commandArguments: string[]; baseUrl: string; model: string | null; modelSource?: 'task' | 'configuration' | 'executor' };
 
 export type ChatAttachmentView = {
   id: string; fileName: string; mimeType: string; size: number;
@@ -297,11 +319,15 @@ export type ChatProjectTaskView = {
   launch?: ProjectExecutorLaunchView;
   id: string; executionId: string; goal: string; projectDirectory: string; model: string;
   status: 'running' | 'waiting_for_input' | 'waiting_for_recovery' | 'succeeded' | 'failed' | 'cancelled';
+  stage: 'starting' | 'working' | 'responding' | 'waiting' | 'succeeded' | 'failed' | 'cancelled';
   configurationRevision: number; pendingQuestion: AgentPendingQuestion | null;
-  activityCount: number; activityPhases: Record<string, number>; activities: Array<Record<string, unknown>>; result: string; error: string | null;
+  activityCount: number; activityPhases: Record<string, number>; activities: Array<Record<string, unknown>>; activitiesTruncated?: boolean; result: string; error: string | null;
   progressText: string;
   operationCount: number; operationStatuses: Record<string, number>;
   operations: Array<{ key: string; toolName: string; status: 'reserved' | 'completed' | 'uncertain' | 'failed'; commandExecutionId: string | null; inputSummary: string | null; failureReason: string | null }>;
+  // Worktree isolation for git-backed tasks; null/absent for legacy and non-git tasks.
+  worktreePath?: string | null; worktreeBranch?: string | null; baseBranch?: string | null; baseCommit?: string | null;
+  mergeStatus?: 'not_attempted' | 'merging' | 'merged' | 'merged_cleanup_pending' | 'conflict' | 'skipped_not_git'; mergeError?: string | null;
   createdAt: string; updatedAt: string;
 };
 
@@ -402,6 +428,8 @@ export type UpdateAgentRequest = Partial<CreateAgentRequest> & {
   providerId?: string | null;
   extensionPrompt?: string;
   defaultExecutor?: ProjectExecutor;
+  // Declared default Gateway public model per executor: a string sets it, null clears it, an omitted key keeps it.
+  defaultExecutorModels?: Partial<Record<ProjectExecutor, string | null>>;
   expectedConfigurationRevision?: number;
 };
 
@@ -1199,18 +1227,6 @@ export type AgentTeamRole =
 
 export type AgentTeamMode = 'plan_only' | 'validate_existing' | 'implement_and_validate';
 
-export type AgentTeamDeveloperInstanceConfiguration = {
-  developerId: string;
-  label: string;
-  publicModelId: string;
-  instructions: string;
-  entryPoints: string[];
-  skillIds: string[];
-  mcpServerIds: string[];
-  toolNames: string[];
-  executor?: ProjectExecutor;
-};
-
 export type AgentTeamRoleConfiguration = {
   role: AgentTeamRole;
   publicModelId: string;
@@ -1220,8 +1236,13 @@ export type AgentTeamRoleConfiguration = {
   mcpServerIds: string[];
   toolNames: string[];
   executor?: ProjectExecutor;
-  developerInstances?: AgentTeamDeveloperInstanceConfiguration[];
-  developerConcurrency?: number;
+};
+
+export type AgentTeamDevelopmentAssignmentInput = {
+  developerId?: string;
+  title: string;
+  scopeSummary: string;
+  ownedPaths: string[];
 };
 
 export type AgentTeamDevelopmentAssignment = {
@@ -1238,6 +1259,7 @@ export type AgentTeamRunProgress = {
   completedAssignments: number;
   activeDeveloperIds: string[];
   waitingReason: 'user_input' | 'pause_boundary' | null;
+  percent: number;
 };
 
 export type AgentTeamView = {
@@ -1257,7 +1279,7 @@ export type AgentTeamVersionMetadata = {
   createdAt: string;
   developerExecution?: ProjectExecutorLaunchView | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2;
+  orchestrationVersion?: 1 | 2 | 3;
 };
 
 export type AgentTeamTaskAttemptStatus =
@@ -1369,7 +1391,7 @@ export type AgentTeamTaskResult =
       changedFiles: string[];
       completedAssignedWork: boolean;
       criterionAssessments: AgentTeamCriterionAssessment[];
-      developmentAssignments?: AgentTeamDevelopmentAssignment[];
+      developmentAssignments?: AgentTeamDevelopmentAssignmentInput[];
       repairRequests?: Array<{ developerId: string; instruction: string }>;
       repairRequest?: {
         taskKey: string;

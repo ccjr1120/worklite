@@ -2,7 +2,9 @@ export { Command, isInterrupted } from '@langchain/langgraph';
 export { createSqliteCheckpointer } from './checkpointer';
 export {
   createTeamGraph,
+  DEVELOPER_LANE_IDS,
   normalizeDevelopmentAssignments,
+  normalizeDynamicDevelopmentAssignments,
   requestTeamInput,
   toGraphResult,
 } from './graph';

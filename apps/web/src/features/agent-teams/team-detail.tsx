@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import * as SelectPrimitive from '@radix-ui/react-select';
 import { useNavigate } from '@tanstack/react-router';
-import { LoaderCircle, Plus, X } from 'lucide-react';
+import { LoaderCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type {
-  AgentTeamDeveloperInstanceConfiguration,
   AgentTeamRole,
   AgentTeamRoleConfiguration,
   AgentTeamView,
@@ -25,7 +24,6 @@ import { SaveIndicator } from '@/components/save-indicator';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Field } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
@@ -44,8 +42,6 @@ const ROLE_TOOLS: Record<AgentTeamRole, string[]> = {
   test_runner: ['bash', 'read', 'write', 'glob', 'grep'],
   reviewer: ['read', 'glob', 'grep', 'process_reference'],
 };
-const MAX_DEVELOPER_INSTANCES = 3;
-const MAX_DEVELOPER_CONCURRENCY = 4;
 const EXECUTORS: ProjectExecutor[] = ['claude', 'codex'];
 
 type EditableRoleFields = Pick<AgentTeamRoleConfiguration, 'instructions' | 'entryPoints' | 'skillIds' | 'mcpServerIds' | 'toolNames'>;
@@ -63,15 +59,6 @@ function toDraftRoles(roles: readonly AgentTeamRoleConfiguration[]): AgentTeamRo
       mcpServerIds: source?.mcpServerIds ?? [],
       toolNames: source?.toolNames ?? [],
       ...(source?.executor ? { executor: source.executor } : {}),
-      ...(source?.developerInstances
-        ? {
-            developerInstances: source.developerInstances.map((instance) => ({
-              ...instance,
-              publicModelId: instance.publicModelId || TEAM_MODEL_SENTINEL,
-            })),
-          }
-        : {}),
-      ...(source?.developerConcurrency !== undefined ? { developerConcurrency: source.developerConcurrency } : {}),
     };
   });
 }
@@ -80,7 +67,7 @@ function toPersistedRoles(roles: readonly AgentTeamRoleConfiguration[]): AgentTe
   return ROLE_ORDER.map((role) => {
     const source = roles.find((item) => item.role === role);
     if (!source) throw new Error(`The ${role} role configuration is missing.`);
-    const base: AgentTeamRoleConfiguration = {
+    return {
       role,
       publicModelId: source.publicModelId === TEAM_MODEL_SENTINEL ? '' : source.publicModelId,
       instructions: source.instructions,
@@ -90,29 +77,7 @@ function toPersistedRoles(roles: readonly AgentTeamRoleConfiguration[]): AgentTe
       toolNames: source.toolNames,
       ...(source.executor ? { executor: source.executor } : {}),
     };
-    if (role !== 'developer') return base;
-    return {
-      ...base,
-      ...(source.developerInstances
-        ? {
-            developerInstances: source.developerInstances.map((instance) => ({
-              ...instance,
-              publicModelId: instance.publicModelId === TEAM_MODEL_SENTINEL ? '' : instance.publicModelId,
-              entryPoints: instance.entryPoints.filter(Boolean),
-            })),
-          }
-        : {}),
-      ...(source.developerConcurrency !== undefined ? { developerConcurrency: source.developerConcurrency } : {}),
-    };
   });
-}
-
-function nextDeveloperId(instances: readonly AgentTeamDeveloperInstanceConfiguration[]): string {
-  const used = new Set(instances.map((instance) => instance.developerId));
-  for (let index = 2; ; index += 1) {
-    const candidate = `developer_${index}`;
-    if (!used.has(candidate)) return candidate;
-  }
 }
 
 function ExecutorSelect({ id, value, onChange }: { id: string; value: ProjectExecutor; onChange: (value: ProjectExecutor) => void }) {
@@ -304,45 +269,6 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
     markUnsaved();
   }
 
-  function updateInstance(role: AgentTeamRole, developerId: string, changes: Partial<AgentTeamDeveloperInstanceConfiguration>) {
-    const source = roleDrafts.find((item) => item.role === role);
-    updateRole(role, {
-      developerInstances: (source?.developerInstances ?? []).map((instance) => (
-        instance.developerId === developerId ? { ...instance, ...changes } : instance
-      )),
-    });
-  }
-
-  function addInstance(role: AgentTeamRoleConfiguration) {
-    const instances = role.developerInstances ?? [];
-    if (instances.length >= MAX_DEVELOPER_INSTANCES) return;
-    const developerId = nextDeveloperId(instances);
-    const suffix = developerId.replace(/^developer_/, '');
-    updateRole(role.role, {
-      developerInstances: [
-        ...instances,
-        {
-          developerId,
-          label: `Developer ${suffix}`,
-          publicModelId: TEAM_MODEL_SENTINEL,
-          instructions: role.instructions,
-          entryPoints: [],
-          skillIds: [],
-          mcpServerIds: [],
-          toolNames: [],
-          executor: 'claude',
-        },
-      ],
-      developerConcurrency: role.developerConcurrency ?? Math.min(instances.length + 2, 2),
-    });
-  }
-
-  function removeInstance(role: AgentTeamRoleConfiguration, developerId: string) {
-    updateRole(role.role, {
-      developerInstances: (role.developerInstances ?? []).filter((instance) => instance.developerId !== developerId),
-    });
-  }
-
   async function saveTeam(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving) return;
@@ -501,86 +427,9 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
                 </div>
               </div>
               {role.role === 'developer' ? (
-                <div className="mt-3 space-y-3 border-t border-border pt-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h4 className="text-xs font-medium text-foreground">{t('team.instances.label')}</h4>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="compact"
-                      disabled={(role.developerInstances ?? []).length >= MAX_DEVELOPER_INSTANCES}
-                      onClick={() => addInstance(role)}
-                    >
-                      <Plus className="size-4" aria-hidden="true" />
-                      {t('team.instances.add')}
-                    </Button>
-                  </div>
-                  {(role.developerInstances ?? []).map((instance) => (
-                    <div key={instance.developerId} className="min-w-0 space-y-3 rounded-lg border border-border bg-surface-subtle/40 p-3">
-                      <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
-                        <Field label={t('team.instances.name')} htmlFor={`agent-team-instance-label-${instance.developerId}`}>
-                          <Input
-                            id={`agent-team-instance-label-${instance.developerId}`}
-                            value={instance.label}
-                            onChange={(event) => updateInstance(role.role, instance.developerId, { label: event.target.value })}
-                          />
-                        </Field>
-                        <Field label={t('team.executor.label')} htmlFor={`agent-team-instance-executor-${instance.developerId}`}>
-                          <ExecutorSelect
-                            id={`agent-team-instance-executor-${instance.developerId}`}
-                            value={instance.executor ?? 'claude'}
-                            onChange={(value) => updateInstance(role.role, instance.developerId, { executor: value })}
-                          />
-                        </Field>
-                        <Field label={t('model.label')} htmlFor={`agent-team-instance-model-${instance.developerId}`}>
-                          <ModelSelect
-                            id={`agent-team-instance-model-${instance.developerId}`}
-                            value={instance.publicModelId}
-                            modelGroups={modelGroups}
-                            onChange={(value) => updateInstance(role.role, instance.developerId, { publicModelId: value })}
-                          />
-                        </Field>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-compact"
-                          aria-label={t('team.instances.remove')}
-                          onClick={() => removeInstance(role, instance.developerId)}
-                        >
-                          <X aria-hidden="true" />
-                        </Button>
-                      </div>
-                      <details className="border-t border-border pt-3">
-                        <summary className="w-fit cursor-pointer rounded-sm text-[13px] font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45">
-                          {t('team.advanced')}
-                        </summary>
-                        <AdvancedRoleFields
-                          idPrefix={`agent-team-instance-${instance.developerId}`}
-                          tools={ROLE_TOOLS.developer}
-                          value={instance}
-                          onChange={(changes) => updateInstance(role.role, instance.developerId, changes)}
-                        />
-                      </details>
-                    </div>
-                  ))}
-                  {(role.developerInstances ?? []).length > 0 ? (
-                    <Field label={t('team.concurrency.label')} htmlFor="agent-team-developer-concurrency">
-                      <Select
-                        value={String(role.developerConcurrency ?? 2)}
-                        onValueChange={(value) => updateRole(role.role, { developerConcurrency: Number(value) })}
-                      >
-                        <SelectTrigger id="agent-team-developer-concurrency">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Array.from({ length: MAX_DEVELOPER_CONCURRENCY }, (_, index) => index + 1).map((count) => (
-                            <SelectItem key={count} value={String(count)}>{count}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                  ) : null}
-                </div>
+                <p className="mt-3 border-t border-border pt-3 text-[13px] text-muted-foreground">
+                  {t('team.parallelism')}
+                </p>
               ) : null}
               <details className="mt-3 border-t border-border pt-3">
                 <summary className="w-fit cursor-pointer rounded-sm text-[13px] font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45">

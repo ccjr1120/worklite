@@ -35,7 +35,7 @@ let roundRobinCursor = 0;
 function databasePath(): string { const configured = process.env.PORTKEY_GATEWAY_DB_PATH?.trim(); return configured ? resolve(process.cwd(), configured) : resolve(process.cwd(), '../../.data/deployment/worklite-gateway.db'); }
 function db(): BetterSqlite3.Database {
   if (database) return database;
-  const path = databasePath(); mkdirSync(dirname(path), { recursive: true }); database = new BetterSqlite3(path); database.pragma('busy_timeout = 5000');
+  const path = databasePath(); mkdirSync(dirname(path), { recursive: true }); database = new BetterSqlite3(path); database.pragma('journal_mode = WAL'); database.pragma('busy_timeout = 5000');
   database.exec(`DROP TABLE IF EXISTS codex_auth_credentials; CREATE TABLE IF NOT EXISTS codex_accounts (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, auto_pause_on_expired INTEGER NOT NULL DEFAULT 1,
     concurrency INTEGER NOT NULL DEFAULT 1, priority INTEGER NOT NULL DEFAULT 50, rate_multiplier REAL NOT NULL DEFAULT 1,

@@ -1,11 +1,14 @@
 import { createHash } from 'node:crypto';
 import { attachmentImagesAsText } from '../../agents/chat-attachments.service';
+import type { ChatProjectTaskView } from '@worklite/contracts';
 
 export type FeishuAction =
   | { kind: 'intake'; teamId: string; intakeSubmissionId: string; field: 'goal' | 'projectDirectory' | 'mode'; answer?: string }
   | { kind: 'answer'; runId: string; pendingInputId: string; scopeRevision: number }
   | { kind: 'agent_answer'; executionId: string; questionId: string; answer?: string; recoveryDecision?: 'adopt_command' | 'mark_failed'; newConversation?: boolean }
   | { kind: 'control'; domain: 'team' | 'workflow' | 'conversation'; runId: string; action: 'pause' | 'resume' | 'cancel' | 'retry'; taskKey?: string }
+  | { kind: 'project_task_answer'; taskId: string; questionId: string; answer?: string }
+  | { kind: 'project_task_control'; taskId: string; action: 'cancel' }
   | { kind: 'recovery'; runId: string; operationKey: string; decision: 'adopt_command' | 'mark_failed' | 'replay' }
   | { kind: 'delivery' };
 
@@ -103,3 +106,82 @@ export const statusText: Record<string, string> = {
   waiting_for_recovery: '等待确认执行结果',
   paused: '已暂停', succeeded: '已完成', completed: '已完成', failed: '执行失败', cancelled: '已取消', timed_out: '执行超时',
 };
+
+export const stageText: Record<string, string> = {
+  starting: '正在启动', working: '正在执行', responding: '正在回复', waiting: '等待输入',
+  succeeded: '已完成', failed: '执行失败', cancelled: '已取消',
+};
+
+const TASK_ACTIVITY_LINES = 5;
+const TASK_RESULT_LIMIT = 3000;
+
+// One card per project task, mirroring the Web task panel: executor, model, stage, latest
+// progress, an item-by-item recent-activity list, the task's own question form and cancel control.
+export function renderTaskCard(submissionId: string, task: ChatProjectTaskView): SavedCard {
+  const actions: Record<string, FeishuAction> = {};
+  const button = (label: string, action: FeishuAction, form = false) => {
+    const key = createHash('sha256').update(JSON.stringify(action)).digest('hex');
+    actions[key] = action;
+    return {
+      tag: 'button', text: text(label), type: 'default',
+      ...(form ? { name: `submit_${key}`, form_action_type: 'submit' } : {}),
+      behaviors: [{ type: 'callback', value: { submissionId, actionKey: key } }],
+    };
+  };
+  const executorName = task.executor === 'codex' ? 'Codex' : task.executor === 'claude' ? 'Claude Code' : '项目任务';
+  const elements: Record<string, unknown>[] = [];
+  const progressLine = (task.progressText ?? '').trim().split(/\r?\n/, 1)[0] ?? '';
+  const status = [statusText[task.status] ?? task.status, stageText[task.stage] ?? task.stage, progressLine].filter(Boolean).join(' · ');
+  elements.push({
+    tag: 'div', element_id: 'status', text: { ...text(status), text_size: 'notation', text_color: 'default' },
+    ...(['running', 'waiting_for_input'].includes(task.status) ? { icon: { tag: 'standard_icon', token: 'loading_outlined', color: 'grey' } } : {}),
+  });
+  const goal = task.goal.length > 500 ? `${task.goal.slice(0, 497)}…` : task.goal;
+  elements.push({ tag: 'markdown', element_id: 'goal', content: goal });
+  const recent = task.activities.slice(-TASK_ACTIVITY_LINES);
+  if (recent.length) {
+    const lines = recent.map((activity) => {
+      const summary = typeof activity.summary === 'string' && activity.summary.trim() ? activity.summary
+        : typeof activity.text === 'string' && activity.text.trim() ? activity.text.trim().split(/\r?\n/, 1)[0]
+          : typeof activity.toolName === 'string' ? activity.toolName
+            : '';
+      const phase = typeof activity.phase === 'string' ? activity.phase : '';
+      return `- ${[phase, summary].filter(Boolean).join(' · ')}`.slice(0, 200);
+    });
+    elements.push({ tag: 'markdown', element_id: 'activity', content: `${lines.join('\n')}\n\n共 ${task.activityCount} 条活动记录` });
+  }
+  const outcome = attachmentImagesAsText([task.error, task.result].filter(Boolean).join('\n\n'));
+  if (outcome) elements.push({ tag: 'markdown', element_id: 'result', content: outcome.length > TASK_RESULT_LIMIT ? `${outcome.slice(0, TASK_RESULT_LIMIT)}…\n\n完整结果见 Web 任务卡片。` : outcome });
+  let replyAction: FeishuAction | undefined;
+  let questionText: string | undefined;
+  const buttons: ReturnType<typeof button>[] = [];
+  if (task.status === 'waiting_for_input' && task.pendingQuestion) {
+    const action: FeishuAction = { kind: 'project_task_answer', taskId: task.id, questionId: task.pendingQuestion.id };
+    replyAction = action;
+    questionText = task.pendingQuestion.question;
+    elements.push({ tag: 'markdown', element_id: 'question', content: attachmentImagesAsText(task.pendingQuestion.question) });
+    elements.push({ tag: 'form', element_id: 'answer_form', name: 'task_answer', elements: [
+      { tag: 'input', name: 'answer', input_type: 'multiline_text', label: text('回答'), placeholder: text('补充当前任务需要的信息'), required: true },
+      button('提交回答', action, true),
+    ] });
+  }
+  if (task.status === 'running' || task.status === 'waiting_for_input') {
+    buttons.push(button('取消任务', { kind: 'project_task_control', taskId: task.id, action: 'cancel' }));
+  }
+  for (let index = 0; index < buttons.length; index += 3) {
+    elements.push({ tag: 'column_set', element_id: `actions_${index}`, flex_mode: 'flow', columns: buttons.slice(index, index + 3).map((item) => ({ tag: 'column', width: 'weighted', weight: 1, elements: [item] })) });
+  }
+  return {
+    card: {
+      schema: '2.0', config: {
+        update_multi: true, streaming_mode: false,
+        streaming_config: { print_frequency_ms: { default: 30 }, print_step: { default: 2 }, print_strategy: 'fast' },
+        summary: { content: status },
+      },
+      header: { title: text(`${executorName} · ${task.model || '默认模型'}`), template: 'grey' },
+      body: { elements },
+    },
+    actions, content: outcome || goal,
+    ...(replyAction ? { replyAction, questionText } : {}),
+  };
+}

@@ -30,7 +30,7 @@ Send one request, action budget one — sending text to Chat. Ordinary conversat
 
 ## Layout
 
-One updated card per accepted submission, using Feishu’s native layout and theme in light and dark modes. Dialogue cards have no header, mode footer, resource menu or successful-completion label. A separate native text status precedes the reply only while queued, thinking, responding, processing, waiting, failed or cancelled. Active progress pairs a neutral native loading icon with its text; the icon is not assumed to rotate. Model replies use the native fast typewriter display. Team and Workflow execution details use a default-collapsed native panel, while the current task/step, outcome, failures, questions, QR images and controls remain visible. Question options use native neutral buttons; with options, free-text answers use ordinary chat rather than an additional form. Questions without options retain an answer form. Task cards show executor progress and question controls. Files are separate native file messages. Web configuration uses shared Field, Input, Button and status semantics in both themes.
+One reply card per accepted submission plus one task card per project task dispatched in that turn, using Feishu’s native layout and theme in light and dark modes. Content is split across cards instead of clustered into one: the reply card carries status, streamed reply, pending question and conversation controls; each task card carries that task's executor, model, stage, status, latest progress text, an item-by-item list of recent activities with their total count, the task's own pending-question form and its cancel control. Dialogue cards have no header, mode footer, resource menu or successful-completion label. A separate native text status precedes the reply only while queued, thinking, responding, processing, waiting, failed or cancelled. Active progress pairs a neutral native loading icon with its text; the icon is not assumed to rotate. Model replies use the native fast typewriter display on the reply card only; task cards update without streaming. Team and Workflow execution details use a default-collapsed native panel, while the current task/step, outcome, failures, questions, QR images and controls remain visible. A Team task card's status line carries the Run's current phase and server-derived completion percentage (for example `正在执行 · 开发 2/4`), and each task row inside details keeps its latest public progress text. Question options use native neutral buttons; with options, free-text answers use ordinary chat rather than an additional form. Questions without options retain an answer form. Task cards show executor progress and question controls. Files are separate native file messages. Web configuration uses shared Field, Input, Button and status semantics in both themes.
 
 ## Interaction Contract
 
@@ -44,7 +44,7 @@ Chat Codex and Team developer share direct execution without WorkLite proposal o
 
 - Message: persist the receipt and ordinary reply placeholder atomically before acknowledging; show queued state before dispatch, retain it behind an active master turn, and replace its content with progress and the final reply. Do not echo the user’s message as loading content.
 - Choice: display only options supplied by the master’s current pending question. Clicking answers that bound question and resumes the current request; direct text is also accepted. Clear obsolete controls after answering. No persistent target switching.
-- Rendering: use stable component ids and update status and reply independently. Structural changes replace the CardKit entity content. Close streaming before pending-question interaction, tool processing and terminal updates; renew it while model output continues past the platform window. Successful ordinary replies remove progress. Keep the existing single message per submission.
+- Rendering: use stable component ids and update status and reply independently. Structural changes replace the CardKit entity content. Close streaming before pending-question interaction, tool processing and terminal updates; renew it while model output continues past the platform window. Successful ordinary replies remove progress. The reply card and each task card are separate CardKit entities and messages: each task card is created lazily when its task first appears, keeps its own persisted transport, sequence and idempotency identity, and updates only when its fingerprint changes.
 - Details: one native expansion reveals Team task attempts or Workflow node execution statuses; expansion is optional and adds no action to the primary task. Updating status or reply must not replace the detail panel.
 - Progress: show `正在思考…` before model text, `正在回复…` during streamed text, and `正在处理…` during tools. Replace progress with the final reply. Preserve partial text and a safe reason on failure or cancellation; expose only applicable recovery and execution controls.
 - Task answer: reply to the task card or submit its input; the server verifies its bound pending question and scope.
@@ -65,7 +65,7 @@ Chat Codex and Team developer share direct execution without WorkLite proposal o
 | Empty | First text opens a master conversation. |
 | No results | No idle resource menu exists. The master describes an unavailable requested capability in dialogue. |
 | Error | Show a credential-safe reason and task-bound recovery outside the collapsed panel; keep partial reply text and close streaming. |
-| Busy | Update one card with native streamed reply text and a separate concise progress component. Show pending-choice buttons only while that question is active; successful ordinary replies retain only their content. |
+| Busy | Update the reply card with native streamed reply text and a separate concise progress component; each active project task updates its own task card with stage, progress text and recent activities. Show pending-choice buttons only while that question is active; successful ordinary replies retain only their content. |
 | Offline | Retain inbound submissions, CardKit identifiers and sequenced pending updates for reconnect; retry an unacknowledged pending UUID and payload before newer updates. A classified platform rejection is recorded and allows a new sequenced delivery, including reopening an expired stream. |
 | Upgrade | Show a non-executing proposal, or authorized deployment with preflight, handoff, switching, recovery and final outcome; cutover may briefly disconnect. No confirmation control. |
 | Long content | Send the complete result as a native file when it exceeds the card content threshold; show a state message while a long reply is generating. |
@@ -85,6 +85,11 @@ Chat Codex and Team developer share direct execution without WorkLite proposal o
 | Native card operation failure reason | Recovery |
 | `执行详情` | Action |
 | Task/step names and execution statuses inside details | State |
+| Task card stage labels (`正在启动` / `正在执行` / `正在回复` / waiting and terminal labels) | State |
+| Task card activity list items and activity count | State |
+| `取消任务` on a task card | Action |
+| Task card answer form labels (`回答` / `提交回答`) | Action |
+| Run phase and completion percentage on Team task cards | State |
 | `等待重新部署指令` / `部署已启动` / deployment phases and outcomes | State |
 | Upgrade version / progress / result | State |
 
@@ -93,6 +98,8 @@ Chat Codex and Team developer share direct execution without WorkLite proposal o
 Use native text labels for every card action and status. Input labels are explicit. Do not rely on color, icons or hover alone. Web form fields retain keyboard focus while status updates. Details use native keyboard-accessible expansion. Native text uses default theme-aware color; no fixed light/dark palettes or custom animation is added. Typewriter rendering is owned by the Feishu client; its reduced-motion behavior remains unverified, and all progress retains static text cues.
 
 ## Coverage Status
+
+2026-10-12 multi-card display source change: one submission now renders one reply card plus one task card per dispatched project task; each task card shows executor, model, stage, status, latest progress text, an item-by-item recent-activity list with total count, the task's pending-question form and cancel control, and persists its own CardKit transport. Full activity history beyond the recent window stays Web-only. No runtime, Feishu client, type check, test, build or deployment was performed.
 
 2026-10-08 authorized deployment of Chat-requested redeployment: `pnpm deploy:local` incremented the public version from 0.1.3 to 0.1.4. Gateway/Web builds, API compilation during isolated startup, preflight on ports 23490–23492 and target readiness on ports 23390–23392 passed before replacement completed. This uses the ordinary local deployment entry and does not initialize a managed baseline. No Feishu client interaction, live Chat redeploy request, browser check, standalone type check or test suite was run.
 
@@ -127,6 +134,14 @@ This change removes fixed mode menus, adds current-question options and concise 
 Platform rendering, granted permissions, live connection behavior and keyboard/screen-reader behavior remain unverified; no runtime or platform verification was authorized. Inbound images, voice, files and group messages are outside the implemented scope. Web configuration now uses a loading skeleton and local retry. Request-error placement and unrelated plugin differences remain recorded in its page specification.
 
 ## Changelog
+
+### 2026-10-12
+
+- Split each submission's display into one reply card plus one task card per project task, with per-card persisted transports, fingerprint-gated updates, task-bound answer forms and cancel controls, and web-parity executor progress fields.
+
+### 2026-10-10
+
+- Added the Run's current phase and server-derived completion percentage to Team task card status lines and per-task progress text inside the details panel.
 
 ### 2026-10-07
 

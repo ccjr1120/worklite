@@ -19,7 +19,7 @@ function service(environment: Record<string, string> = {}): ChatAttachmentsServi
 }
 
 // Applies the real attachment migration to a minimal schema; the full migration chain is not needed here.
-const MIGRATION = readFileSync(resolve(__dirname, '../../../../../packages/db/drizzle/0031_chat_attachments.sql'), 'utf8');
+const MIGRATION = readFileSync(resolve(__dirname, '../../../../../packages/db/drizzle/0035_chat_attachments.sql'), 'utf8');
 
 beforeEach(() => {
   dataDirectory = mkdtempSync(join(tmpdir(), 'worklite-attachments-'));

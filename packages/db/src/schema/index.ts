@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index, integer, primaryKey, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text, unique, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 const timestamp = (name: string) => integer(name, { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`);
 
@@ -71,8 +71,11 @@ export const chatSubmissions = sqliteTable('chat_submissions', {
   reference: text('reference', { mode: 'json' }).$type<StoredChatTaskReference>(),
   outputMessageId: text('output_message_id'),
   renderedCard: text('rendered_card', { mode: 'json' }).$type<Record<string, unknown>>(),
+  // Per-project-task Feishu cards of this submission, keyed by task id; each entry carries its own transport.
+  renderedTaskCards: text('rendered_task_cards', { mode: 'json' }).$type<Record<string, Record<string, unknown>>>(),
   deliveryFingerprint: text('delivery_fingerprint'),
   settled: integer('settled', { mode: 'boolean' }).notNull().default(false),
+  reportedAt: integer('reported_at', { mode: 'timestamp_ms' }),
   error: text('error'),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
@@ -373,6 +376,7 @@ export type StoredProjectExecutor = 'codex' | 'claude';
 export type StoredChatCapabilities = {
   revision: number;
   defaultExecutor?: StoredProjectExecutor;
+  defaultExecutorModels?: Partial<Record<StoredProjectExecutor, string>>;
   agent: { id: string; providerId: string | null; model: string; systemPrompt: string };
   skills: Array<{ id: string; name: string; instructions: string; files: Array<{ path: string; content: string }> }>;
   mcpServers: Array<{ id: string; name: string; endpoint: string; authSecret: string | null; allowedTools: string[] }>;
@@ -383,11 +387,22 @@ export const chatConfigurations = sqliteTable('chat_bot_configurations', {
   revision: integer('revision').notNull(),
   extensionPrompt: text('extension_prompt').notNull().default(''),
   defaultExecutor: text('default_executor').$type<StoredProjectExecutor>().notNull().default('claude'),
+  // Per-executor declared default Gateway public model ids; an absent key falls back to the executor's own default.
+  defaultExecutorModels: text('default_executor_models', { mode: 'json' }).$type<Partial<Record<StoredProjectExecutor, string>>>().notNull().default({}),
   providerId: text('provider_id'), model: text('model').notNull(),
   skillIds: text('skill_ids', { mode: 'json' }).$type<string[]>().notNull(),
   mcpServerIds: text('mcp_server_ids', { mode: 'json' }).$type<string[]>().notNull(),
   createdAt: timestamp('created_at'),
 }, (table) => [primaryKey({ columns: [table.workspaceId, table.revision] })]);
+
+export const chatMemories = sqliteTable('chat_memories', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  content: text('content').notNull(),
+  sourceConversationId: text('source_conversation_id'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (table) => [index('chat_memories_workspace_updated_idx').on(table.workspaceId, table.updatedAt)]);
 
 export type StoredChatExecutionAuthorization = {
   id: string;
@@ -436,9 +451,12 @@ export const agentToolCalls = sqliteTable('agent_tool_calls', {
 
 // Captured launch of a project executor. Codex always uses the ~/.codex-cli home through the WorkLite Gateway;
 // Claude Code uses the operator's ~/.claude configuration, whose effective base URL must be the Gateway.
+// model is the effective model for the task and modelSource states where it came from: the task parameter,
+// the Chat configuration's declared default for that executor, or the executor's own local default.
+export type StoredProjectExecutorModelSource = 'task' | 'configuration' | 'executor';
 export type StoredProjectExecutorLaunch =
-  | { executor: 'codex'; commandArguments: string[]; home: string; model: string; modelProvider: string; settings: Record<string, unknown> }
-  | { executor: 'claude'; commandArguments: string[]; baseUrl: string; model: string | null };
+  | { executor: 'codex'; commandArguments: string[]; home: string; model: string; modelProvider: string; settings: Record<string, unknown>; modelSource?: StoredProjectExecutorModelSource }
+  | { executor: 'claude'; commandArguments: string[]; baseUrl: string; model: string | null; modelSource?: StoredProjectExecutorModelSource };
 
 export type StoredChatProjectTaskSnapshot = {
   launch?: StoredProjectExecutorLaunch;
@@ -460,8 +478,24 @@ export const chatProjectTasks = sqliteTable('chat_codex_tasks', {
   result: text('result').notNull().default(''), error: text('error'),
   // Set once the conversation has reported this background task's outcome or question.
   reportedAt: integer('reported_at', { mode: 'timestamp_ms' }),
+  // Worktree isolation: git-backed tasks execute in their own worktree and merge back on success.
+  worktreePath: text('worktree_path'),
+  worktreeBranch: text('worktree_branch'),
+  baseBranch: text('base_branch'),
+  baseCommit: text('base_commit'),
+  mergeStatus: text('merge_status').$type<'not_attempted' | 'merging' | 'merged' | 'merged_cleanup_pending' | 'conflict' | 'skipped_not_git'>().notNull().default('not_attempted'),
+  mergeError: text('merge_error'),
   createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
 }, (table) => [index('chat_codex_tasks_execution_idx').on(table.executionId)]);
+
+// One-shot cross-conversation subscriptions to a project task's settlement report.
+export const chatProjectTaskSubscriptions = sqliteTable('chat_project_task_subscriptions', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  taskId: text('task_id').notNull().references(() => chatProjectTasks.id, { onDelete: 'cascade' }),
+  subscriberExecutionId: text('subscriber_execution_id').notNull().references(() => agentExecutions.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at'),
+}, (table) => [uniqueIndex('chat_project_task_subscriptions_unique').on(table.taskId, table.subscriberExecutionId)]);
 
 // Operation journal of tasks recorded before executors used native tools; retained as read-only evidence.
 export const chatProjectOperations = sqliteTable('chat_codex_operations', {
@@ -571,7 +605,7 @@ export type StoredAgentTeamVersionSnapshot = {
   processVersion: string;
   developerExecution: StoredProjectExecutorLaunch | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2;
+  orchestrationVersion?: 1 | 2 | 3;
   roles: StoredAgentTeamRoleConfiguration[];
   processFiles: Array<{ path: string; content: string }>;
   recipeDefaults: StoredAgentTeamRecipeDefaults;
@@ -810,3 +844,4 @@ export type AgentTeamPendingInput = typeof agentTeamPendingInputs.$inferSelect;
 export type AgentTeamOperation = typeof agentTeamOperations.$inferSelect;
 export type Artifact = typeof artifacts.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;
+export type ChatMemory = typeof chatMemories.$inferSelect;

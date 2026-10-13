@@ -154,22 +154,32 @@
     "description": "选择此工作区中已配置的模型。",
     "model": "提供商和模型",
     "placeholder": "选择已配置的模型",
+    "executorModel": {
+      "claude": "Claude Code 项目任务默认模型",
+      "codex": "Codex 项目任务默认模型"
+    },
+    "executorDefault": "跟随执行器默认",
     "saving": "保存中...",
-    "mcpServers": "项目执行器 MCP 服务器",
-    "mcpServersHint": "所选服务器仅供委派的项目任务使用。",
     "prompt": "补充提示词",
     "nextTurn": "离开输入框后保存，从下一轮对话生效。",
-    "skills": "项目执行器 Skills",
-    "builtIn": "Chat 平台操作",
     "saveFailed": "配置未保存，请重试。",
     "loadFailed": "无法加载配置。"
   },
   "settings": {
     "open": "打开 Chat 设置",
     "title": "Chat 设置",
-    "description": "管理通信渠道和模型执行配置。",
+    "description": "管理通信渠道、模型执行配置和长期记忆。",
     "channels": "Channels",
-    "configuration": "配置"
+    "configuration": "配置",
+    "memories": "记忆"
+  },
+  "memories": {
+    "hint": "Chat 在对话中保存的长期记忆，会在之后的每轮对话中生效。",
+    "empty": "暂无已保存的记忆。",
+    "delete": "删除",
+    "deleteFailed": "无法删除记忆，请重试。",
+    "loading": "正在加载记忆",
+    "loadFailed": "无法加载记忆。"
   },
   "workflowRun": {
     "requestFailed": "无法创建 Workflow 执行。",
@@ -226,6 +236,7 @@
     "adopt": "采用已有命令结果",
     "markFailed": "标记操作失败",
     "cancelTask": "取消任务",
+    "cancelFailed": "无法取消任务，请重试。",
     "answerQuestion": "回答",
     "answerPlaceholder": "输入对任务问题的回答…",
     "answerFailed": "无法提交回答，请重试。",
@@ -234,6 +245,8 @@
     "collapse": "收起项目任务详情",
     "goal": "任务目标",
     "projectDirectory": "项目目录",
+    "worktree": "任务 worktree",
+    "mergeStatus": { "merging": "正在合并", "merged": "已合并回原分支", "merged_cleanup_pending": "已合并，worktree 待清理", "conflict": "合并冲突，已保留", "skipped_not_git": "非 Git 目录" },
     "model": "模型",
     "executor": "执行器",
     "executorName": { "codex": "Codex", "claude": "Claude Code" },
@@ -247,8 +260,23 @@
     "launchNotCaptured": "未捕获",
     "latestActivity": "最近活动：{{activity}}（{{count}} 条）",
     "starting": "正在启动执行器...",
+    "stage": {
+      "starting": "启动中",
+      "working": "执行中",
+      "responding": "回复中",
+      "waiting": "等待输入",
+      "succeeded": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消"
+    },
     "activities": "活动时间线（{{count}}）",
     "recentActivities": "仅显示最近 {{count}} 条活动",
+    "activitiesTruncated": "活动过多，仅显示最近 {{count}} 条。",
+    "activityGroup": {
+      "messages": "回复与消息（{{count}}）",
+      "tools": "工具与命令（{{count}}）",
+      "lifecycle": "生命周期（{{count}}）"
+    },
     "noActivities": "暂无已保存活动。",
     "operations": "操作记录（{{count}}）",
     "recentOperations": "仅显示最近 {{count}} 条操作",
