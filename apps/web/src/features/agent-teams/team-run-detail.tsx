@@ -63,6 +63,7 @@ const ROLE_LABELS = {
   test_author: 'role.test_author',
   test_runner: 'role.test_runner',
   reviewer: 'role.reviewer',
+  'worktree-manager': 'role.worktree_manager',
 } as const;
 
 const DESIRED_CONTROL_LABELS = {
@@ -841,6 +842,18 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
             <dt className="text-muted-foreground">{t('run.project')}</dt>
             <dd className="mt-1 font-mono break-all">{run.projectDirectory}</dd>
           </div>
+          {run.worktreeBasePath ? (
+            <div className="md:col-span-2">
+              <dt className="text-muted-foreground">{t('run.worktreeBasePath')}</dt>
+              <dd className="mt-1 font-mono break-all">{run.worktreeBasePath}</dd>
+            </div>
+          ) : null}
+          {run.runBranch ? (
+            <div>
+              <dt className="text-muted-foreground">{t('run.runBranch')}</dt>
+              <dd className="mt-1 font-mono break-all">{run.runBranch}</dd>
+            </div>
+          ) : null}
           <div className="md:col-span-2 xl:col-span-3">
             <dt className="text-muted-foreground">{t('run.commands')}</dt>
             <dd className="mt-1">

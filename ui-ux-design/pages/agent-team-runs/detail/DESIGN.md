@@ -31,7 +31,7 @@ Understand and continue the current run. Reading costs no action: the persisted 
 
 ## Layout
 
-The page uses the full Workspace page width with a `1200px` maximum. The heading and execution controls are followed by a progress header naming the current phase, a thin progress bar with the server-derived completion percentage (terminal-only 100), next step, completed and total development assignments, active Developers, and the waiting reason, then immutable TeamVersion metadata, mode, intent, project directory, command grants, and scope revision. The main desktop grid places active work — pending input or recovery, then task attempts — in a wider primary column and documents, operations, and criterion assessments in a supporting column. Development task attempts carry their Developer and assignment title beside the task key and show the attempt's latest public progress text while it runs; test authoring, test execution, and review attempts remain single tasks after the fan-in. Pending input panels name their owning task attempt. The live member output occupies a fixed reading column with its own bounded scroll region and a lane filter that scopes it to one Developer lane; deltas are grouped per task attempt into foldable sections — the active attempt stays expanded, settled attempts fold — with text rendered as Markdown and tool or command activity collapsed to compact rows, instead of one raw preformatted stream. Columns stack below `1024px`. Documents and command evidence use disclosures with bounded preformatted regions rather than expanding the page.
+The page uses the full Workspace page width with a `1200px` maximum. The heading and execution controls are followed by a progress header naming the current phase, a thin progress bar with the server-derived completion percentage (terminal-only 100), next step, completed and total development assignments, active Developers, and the waiting reason, then immutable TeamVersion metadata, mode, intent, project directory, command grants, and scope revision. Orchestration v4 Runs additionally carry immutable worktree evidence in the metadata: the Run-level base worktree path and run branch recorded by the Worktree Manager. Worktree Manager setup and teardown appear as task attempts with their own role label, and their structured path and branch output remains readable as immutable task result evidence. The main desktop grid places active work — pending input or recovery, then task attempts — in a wider primary column and documents, operations, and criterion assessments in a supporting column. Development task attempts carry their Developer and assignment title beside the task key and show the attempt's latest public progress text while it runs; test authoring, test execution, and review attempts remain single tasks after the fan-in. Pending input panels name their owning task attempt. The live member output occupies a fixed reading column with its own bounded scroll region and a lane filter that scopes it to one Developer lane; deltas are grouped per task attempt into foldable sections — the active attempt stays expanded, settled attempts fold — with text rendered as Markdown and tool or command activity collapsed to compact rows, instead of one raw preformatted stream. Columns stack below `1024px`. Documents and command evidence use disclosures with bounded preformatted regions rather than expanding the page.
 
 ## Interaction Contract
 
@@ -85,6 +85,8 @@ The page distinguishes execution status from criterion assessment. `succeeded` i
 | `agentTeams:run.modeValue.*` | State |
 | `agentTeams:run.intent` | Constraint |
 | `agentTeams:run.project` | State |
+| `agentTeams:run.worktreeBasePath` | State |
+| `agentTeams:run.runBranch` | State |
 | `agentTeams:run.commands` | Constraint |
 | `agentTeams:run.noCommands` | State |
 | `agentTeams:run.scopeRevision` | State |
@@ -160,6 +162,7 @@ The page distinguishes execution status from criterion assessment. `succeeded` i
 | `agentTeams:role.test_author` | State |
 | `agentTeams:role.test_runner` | State |
 | `agentTeams:role.reviewer` | State |
+| `agentTeams:role.worktree_manager` | State |
 | `agentTeams:controls.pause` | Action |
 | `agentTeams:controls.pausing` | State |
 | `agentTeams:controls.resume` | Action |
@@ -180,6 +183,8 @@ The heading hierarchy moves from Run title to section titles. Controls are nativ
 
 ## Coverage Status
 
+2026-10-13 source comparison for orchestration v4 worktree evidence: the metadata section renders the Run-level base worktree path and run branch when the server records them, and Worktree Manager setup/teardown attempts render through the shared role label and task result disclosure. The `worktreeBasePath`/`runBranch` fields and the `worktree-manager` role are declared against the pinned cross-package contract and take effect when the packages and API lanes merge. Web type check (tsc --noEmit and locale key check) passed; no browser, runtime, accessibility-tool or real-Run verification was authorized or performed.
+
 2026-10-10 source comparison for progress visualization: the progress header adds a thin progress bar with the server-derived completion percentage, and live member output groups deltas per task attempt into foldable Markdown sections (active attempt expanded, tool/command activity as compact rows) while retaining the lane filter. No browser, runtime, accessibility-tool, type check or real-Run verification was authorized or performed.
 
 2026-10-10 source comparison: the progress header follows the heading and controls and names phase, next step, assignment completion, active Developers and waiting reason; development attempts show Developer, assignment title and latest progressText; pending input panels attribute their owning attempt; a lane filter scopes live member output when more than one lane exists. Web type check (tsc --noEmit and locale key check) passed; no browser, runtime, accessibility-tool or real-Run verification was authorized or performed.
@@ -191,6 +196,10 @@ The heading hierarchy moves from Run title to section titles. Controls are nativ
 Source-level audit: 2026-10-03. The source selects the Conversation tab and `openConversation` label when `run.originatingConversationId` is present; direct-origin Runs return to the Configuration tab with `openTeam`. No other difference was found in the source-level comparison of route, observation, mutation, replay, evidence, copy, token, responsive, and accessibility structure. Only source review occurred; no browser, accessibility-tool, runtime, acceptance, or real-Run verification was performed.
 
 ## Changelog
+
+### 2026-10-13 - Worktree Manager evidence
+
+- Orchestration v4 Runs show the Worktree Manager setup and teardown as labelled task attempts, and the metadata section records the Run-level base worktree path and run branch as immutable evidence.
 
 ### 2026-10-10 - Progress percentage and readable streaming output
 

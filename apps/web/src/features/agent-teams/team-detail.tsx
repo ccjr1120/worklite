@@ -6,10 +6,10 @@ import { useTranslation } from 'react-i18next';
 import type {
   AgentTeamRole,
   AgentTeamRoleConfiguration,
-  AgentTeamView,
   ProjectExecutor,
 } from '@worklite/contracts';
 import { ApiError, api } from '@/api/client';
+import { DEFAULT_MAX_CONCURRENT_RUNS, type TeamConcurrencyView } from '@/api/agent-team-contract';
 import {
   agentTeamQueryKey,
   useAgentTeamQuery,
@@ -24,6 +24,7 @@ import { SaveIndicator } from '@/components/save-indicator';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Field } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
@@ -232,6 +233,8 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
   const mcpServersQuery = useMcpServersQuery(workspaceSlug);
   const [draftTeamId, setDraftTeamId] = useState('');
   const [roleDrafts, setRoleDrafts] = useState<AgentTeamRoleConfiguration[]>([]);
+  const [preservedRoles, setPreservedRoles] = useState<AgentTeamRoleConfiguration[]>([]);
+  const [maxConcurrentRunsDraft, setMaxConcurrentRunsDraft] = useState(String(DEFAULT_MAX_CONCURRENT_RUNS));
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'unsaved'>('saved');
   const [saveNotice, setSaveNotice] = useState('');
   const [saving, setSaving] = useState(false);
@@ -242,6 +245,8 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
     if (!teamQuery.data || draftTeamId === teamQuery.data.id) return;
     setDraftTeamId(teamQuery.data.id);
     setRoleDrafts(toDraftRoles(teamQuery.data.roles));
+    setPreservedRoles(teamQuery.data.roles.filter((role) => !ROLE_ORDER.includes(role.role)));
+    setMaxConcurrentRunsDraft(String(teamQuery.data.maxConcurrentRuns ?? DEFAULT_MAX_CONCURRENT_RUNS));
     setSaveState('saved');
     setSaveNotice('');
     setSaveError('');
@@ -278,9 +283,18 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
     setSaveError('');
     const draftRevision = draftRevisionRef.current;
     try {
-      const saved: AgentTeamView = await api.updateAgentTeam(teamId, { roles: toPersistedRoles(roleDrafts) });
+      const parsedLimit = Number.parseInt(maxConcurrentRunsDraft, 10);
+      const maxConcurrentRuns = Number.isFinite(parsedLimit) && parsedLimit >= 1 ? parsedLimit : DEFAULT_MAX_CONCURRENT_RUNS;
+      const saved: TeamConcurrencyView = await api.updateAgentTeam(teamId, {
+        roles: [...toPersistedRoles(roleDrafts), ...preservedRoles],
+        maxConcurrentRuns,
+      });
       const draftsChangedDuringSave = draftRevisionRef.current !== draftRevision;
       setRoleDrafts((current) => (draftsChangedDuringSave ? current : toDraftRoles(saved.roles)));
+      if (!draftsChangedDuringSave) {
+        setPreservedRoles(saved.roles.filter((role) => !ROLE_ORDER.includes(role.role)));
+        setMaxConcurrentRunsDraft(String(saved.maxConcurrentRuns ?? DEFAULT_MAX_CONCURRENT_RUNS));
+      }
       setSaveState(draftsChangedDuringSave ? 'unsaved' : 'saved');
       setSaveNotice(draftsChangedDuringSave ? '' : t('team.updated'));
       queryClient.setQueryData(agentTeamQueryKey(teamId), saved);
@@ -397,6 +411,26 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
             </dl>
         </section>
         <form id="agent-team-configuration" className="mt-4 space-y-4" onSubmit={saveTeam}>
+        <section className="min-w-0 rounded-xl border border-border bg-surface p-4 shadow-xs">
+          <Field
+            label={t('team.maxConcurrentRuns.label')}
+            htmlFor="agent-team-max-concurrent-runs"
+            hint={t('team.maxConcurrentRuns.hint')}
+          >
+            <Input
+              id="agent-team-max-concurrent-runs"
+              type="number"
+              min={1}
+              step={1}
+              className="w-32"
+              value={maxConcurrentRunsDraft}
+              onChange={(event) => {
+                setMaxConcurrentRunsDraft(event.target.value);
+                markUnsaved();
+              }}
+            />
+          </Field>
+        </section>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-semibold">{t('team.roles')}</h2>
           {saveNotice ? <p role="status">{saveNotice}</p> : null}
