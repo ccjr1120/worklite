@@ -508,6 +508,14 @@ export const chatProjectOperations = sqliteTable('chat_codex_operations', {
   createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
 }, (table) => [index('chat_codex_operations_task_idx').on(table.taskId)]);
 
+// Image files referenced from Chat messages and task results; bytes live under <data>/chat-attachments/<id>.
+// Conversation and task references are provenance only, so expiry rather than cascade owns removal.
+export const chatAttachments = sqliteTable('chat_attachments', {
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  fileName: text('file_name').notNull(), mimeType: text('mime_type').notNull(), size: integer('size').notNull(),
+  conversationId: text('conversation_id'), projectTaskId: text('project_task_id'),
+  createdAt: timestamp('created_at'), expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+}, (table) => [index('chat_attachments_expires_idx').on(table.expiresAt)]);
 
 export const scheduledAgentTasks = sqliteTable('scheduled_agent_tasks', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }), label: text('label').notNull(), prompt: text('prompt').notNull(), intervalSeconds: integer('interval_seconds').notNull(), nextRunAt: timestamp('next_run_at'), activeExecutionId: text('active_execution_id'), lastRunAt: timestamp('last_run_at'), lastStatus: text('last_status').$type<'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled'>(), unread: integer('unread', { mode: 'boolean' }).notNull().default(false), running: integer('running', { mode: 'boolean' }).notNull().default(false), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),

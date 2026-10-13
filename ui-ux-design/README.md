@@ -90,6 +90,10 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-10-13 - Chat image attachments
+
+- The [Chat](pages/chat/workspace/DESIGN.md) transcript renders attachment images inline and shows an expired placeholder for missing or expired ones. Adds the `assistant:attachment.expired` copy key; no new token.
+
 ### 2026-10-13 - Stable Chat settings Dialog
 
 - The [Chat](pages/chat/workspace/DESIGN.md) settings Dialog keeps one fixed height across its Channels, Configuration and Memories sections and scrolls section content internally with a stable scrollbar gutter, so switching sections no longer resizes or shifts the Dialog. Configuration no longer offers Skill or MCP server selection; its copy keys are removed. No new token.

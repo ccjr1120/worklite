@@ -16,6 +16,11 @@ const RECENT_ACTIVITY_LIMIT = 20;
 const FULL_ACTIVITY_LIMIT = 500;
 const RECENT_OPERATION_LIMIT = 50;
 
+const attachmentUploadUrl = (task: Task) => {
+  const apiUrl = process.env.WORKLITE_API_URL ?? `http://127.0.0.1:${process.env.API_PORT ?? 23391}/api`;
+  return `${apiUrl}/chat/attachments?${new URLSearchParams({ projectTaskId: task.id, conversationId: task.executionId }).toString()}`;
+};
+
 // The card stage is derived from the executor's own activity stream; no percentage is
 // fabricated because a project task has no known denominator.
 function deriveTaskStage(task: Task): ChatProjectTaskView['stage'] {
@@ -304,10 +309,11 @@ export class ChatProjectTasksService {
         mcpServers: [],
         systemPrompt: [
           `Execute this Chat-owned project task independently of Agent Team. Work entirely inside the current working directory, which is the task's dedicated workspace, and never switch to another checkout of the same repository. Follow the captured project instructions in the pinned reference files and discover additional applicable project instructions. Existing project confirmation, verification and service-lifecycle constraints remain authoritative; WorkLite adds no proposal confirmation or command grants. Keep work within the user task. Use supplied review findings and approved scope to check the affected code and make the requested changes without repeating the complete review. Inspect the actual working tree and prior effects before taking over interrupted work. Explain concrete progress as work proceeds. Never perform WorkLite installation, build, upgrade-runner or service replacement; its independent managed runner owns deployment.${task.worktreePath ? ' Commit your finished changes on the current branch before returning; the platform merges that branch back automatically.' : ''} Return JSON: {"status":"succeeded","summary":"..."} or {"status":"waiting_for_input","pendingInput":{"question":"..."}}. Ask only for material missing information or authorization; evidence and clarification answers do not authorize unrelated work.`,
+          'To show an image such as a screenshot in your report, upload the file as the raw request body to attachmentUploadUrl from the input with its image media type, for example `curl -sS --data-binary @shot.png -H \'Content-Type: image/png\' "<attachmentUploadUrl>&fileName=shot.png"`. Only PNG, JPEG, GIF and WebP up to 10 MB are accepted. Put the returned `markdown` value, such as ![shot.png](/api/chat/attachments/att_…), in the summary exactly as returned; never reference local file paths or file:// URLs as images. Uploaded images expire with the request logs.',
           configuration?.extensionPrompt,
         ].filter(Boolean).join('\n\n'),
         references: task.snapshot.projectInstructions.map((instruction) => ({ path: `project-instructions/${instruction.path}`, content: instruction.content })),
-        input: JSON.stringify({ goal: task.goal, projectDirectory: workingDirectory, ...(task.answers.length ? { answers: task.answers } : {}), ...(previousEvidence ? { previousEvidence } : {}) }),
+        input: JSON.stringify({ goal: task.goal, projectDirectory: workingDirectory, taskId: task.id, attachmentUploadUrl: attachmentUploadUrl(task), ...(task.answers.length ? { answers: task.answers } : {}), ...(previousEvidence ? { previousEvidence } : {}) }),
         signal,
         onEvent: (detail) => activity(detail),
       });

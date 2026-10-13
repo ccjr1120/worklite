@@ -1,6 +1,9 @@
 import { Streamdown } from 'streamdown';
 import 'streamdown/styles.css';
 import { cn } from '@/lib/utils';
+import { MarkdownImage } from './markdown-image';
+
+const components = { img: MarkdownImage };
 
 type StreamingMarkdownViewProps = {
   content: string;
@@ -21,6 +24,7 @@ function StreamingMarkdownView({
       skipHtml
       dir="auto"
       controls={{ code: { copy: true }, table: { copy: true } }}
+      components={components}
       className={cn(
         'min-w-0 break-words text-sm leading-6',
         '[&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0',

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { attachmentImagesAsText } from '../../agents/chat-attachments.service';
 import type { ChatProjectTaskView } from '@worklite/contracts';
 
 export type FeishuAction =
@@ -73,15 +74,16 @@ export function renderCard(submissionId: string, state: CardState): SavedCard {
     ...(['正在思考…', '正在回复…', '正在处理…', '正在执行', '正在启动'].includes(state.status)
       ? { icon: { tag: 'standard_icon', token: 'loading_outlined', color: 'grey' } } : {}),
   });
-  if (state.content || state.conversation) elements.push({ tag: 'markdown', element_id: 'reply', content: state.content || ' ' });
+  // Card Markdown images need a Feishu img_key, so WorkLite attachment images become a note pointing to Web.
+  if (state.content || state.conversation) elements.push({ tag: 'markdown', element_id: 'reply', content: attachmentImagesAsText(state.content) || ' ' });
   if (state.details) elements.push({
     tag: 'collapsible_panel', element_id: 'details', expanded: false,
     header: { title: text('执行详情'), icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined' } },
-    elements: [{ tag: 'markdown', element_id: 'task_details', content: state.details }],
+    elements: [{ tag: 'markdown', element_id: 'task_details', content: attachmentImagesAsText(state.details) }],
   });
   if (state.imageKey) elements.push({ tag: 'img', element_id: 'task_qr', img_key: state.imageKey, alt: text('扫码完成当前任务') });
   if (state.question) {
-    elements.push({ tag: 'markdown', element_id: 'question', content: state.question.text });
+    elements.push({ tag: 'markdown', element_id: 'question', content: attachmentImagesAsText(state.question.text) });
     if (!state.question.replyOnly) elements.push({ tag: 'form', element_id: 'answer_form', name: 'task_answer', elements: [
       { tag: 'input', name: 'answer', input_type: 'multiline_text', label: text('回答'), placeholder: text('补充当前任务需要的信息'), required: true },
       ...(state.question.commands ? [{ tag: 'input', name: 'commands', input_type: 'multiline_text', label: text('授权执行的完整命令（可选，每行一条）'), placeholder: text('只有在此明确提交的命令才会获得授权') }] : []),
@@ -148,7 +150,7 @@ export function renderTaskCard(submissionId: string, task: ChatProjectTaskView):
     });
     elements.push({ tag: 'markdown', element_id: 'activity', content: `${lines.join('\n')}\n\n共 ${task.activityCount} 条活动记录` });
   }
-  const outcome = [task.error, task.result].filter(Boolean).join('\n\n');
+  const outcome = attachmentImagesAsText([task.error, task.result].filter(Boolean).join('\n\n'));
   if (outcome) elements.push({ tag: 'markdown', element_id: 'result', content: outcome.length > TASK_RESULT_LIMIT ? `${outcome.slice(0, TASK_RESULT_LIMIT)}…\n\n完整结果见 Web 任务卡片。` : outcome });
   let replyAction: FeishuAction | undefined;
   let questionText: string | undefined;
@@ -157,7 +159,7 @@ export function renderTaskCard(submissionId: string, task: ChatProjectTaskView):
     const action: FeishuAction = { kind: 'project_task_answer', taskId: task.id, questionId: task.pendingQuestion.id };
     replyAction = action;
     questionText = task.pendingQuestion.question;
-    elements.push({ tag: 'markdown', element_id: 'question', content: task.pendingQuestion.question });
+    elements.push({ tag: 'markdown', element_id: 'question', content: attachmentImagesAsText(task.pendingQuestion.question) });
     elements.push({ tag: 'form', element_id: 'answer_form', name: 'task_answer', elements: [
       { tag: 'input', name: 'answer', input_type: 'multiline_text', label: text('回答'), placeholder: text('补充当前任务需要的信息'), required: true },
       button('提交回答', action, true),
