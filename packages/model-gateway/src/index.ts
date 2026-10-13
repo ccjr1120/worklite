@@ -2,6 +2,12 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { APICallError, generateText, InvalidToolInputError, isStepCount, JSONParseError, jsonSchema, NoOutputGeneratedError, Output, streamText, ToolLoopAgent, tool, wrapLanguageModel, type LanguageModel, type LanguageModelCallEndEvent, type LanguageModelUsage, type ModelMessage, type PrepareStepFunction, type ToolExecutionEndEvent, type ToolSet } from 'ai';
 
+// The Anthropic protocol requires max_tokens and the AI SDK defaults it to 4096
+// when unset, which silently truncates long Agent outputs (for example a
+// Planner's JSON plan) mid-response. Give Agent loops a larger default budget;
+// callers can still override through maxOutputTokens.
+const DEFAULT_AGENT_MAX_OUTPUT_TOKENS = 32_768;
+
 export type ModelProviderConfig =
   | {
       id: string;
@@ -239,7 +245,7 @@ export class AiSdkModelGateway implements ModelGateway {
       messages: context.messages as ModelMessage[],
       tools: Object.keys(tools).length > 0 ? tools as never : undefined,
       providerOptions: Object.keys(openaiProviderOptions).length > 0 ? { openai: openaiProviderOptions } : undefined,
-      maxOutputTokens: request.maxOutputTokens,
+      maxOutputTokens: request.maxOutputTokens ?? DEFAULT_AGENT_MAX_OUTPUT_TOKENS,
       abortSignal: request.abortSignal,
     };
 
@@ -357,7 +363,7 @@ export class AiSdkModelGateway implements ModelGateway {
       output: request.jsonOutput ? Output.json({ name: 'response' }) : undefined,
       tools: Object.keys(tools).length > 0 ? tools : undefined,
       providerOptions: Object.keys(openaiProviderOptions).length > 0 ? { openai: openaiProviderOptions } : undefined,
-      maxOutputTokens: request.maxOutputTokens,
+      maxOutputTokens: request.maxOutputTokens ?? DEFAULT_AGENT_MAX_OUTPUT_TOKENS,
       abortSignal: request.abortSignal,
       maxRetries: 0,
       stopWhen: isStepCount(maxToolRounds + 1),

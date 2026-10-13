@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { and, asc, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ChatProjectTaskView, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, WorkflowNodeActivityDetail, WorkliteScriptResult } from '@worklite/contracts';
-import { agentExecutionEvents, agentExecutions, chatConfigurations, agentMcpServers, mcpServers, agents, agentSkills, agentSubSessions, agentToolCalls, auditLogs, chatProjectTasks, chatSubmissions, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage, insertAgentToolResults, normalizeAgentModelMessages } from '@worklite/db';
+import { agentExecutionEvents, agentExecutions, chatConfigurations, chatMemories, agentMcpServers, mcpServers, agents, agentSkills, agentSubSessions, agentToolCalls, auditLogs, chatProjectTasks, chatSubmissions, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage, insertAgentToolResults, normalizeAgentModelMessages } from '@worklite/db';
 import { createModelGateway, type GatewayAgentMessage, type GatewayToolDefinition, type GatewayToolResultOutput } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
@@ -18,6 +18,7 @@ import { BuiltinAgentToolsService } from './builtin-agent-tools.service';
 import { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
 import { CODEX_CLI_AGENT_ID, CODEX_CLI_PLUGIN_ID, PluginsService, decryptSecret } from '../plugins/plugins.service';
 import { CHAT_PROJECT_TASK_ANSWER_TOOL, CHAT_PROJECT_TASK_CANCEL_TOOL, CHAT_PROJECT_TASK_TOOL, ChatProjectTasksService } from './chat-project-tasks.service';
+import { formatChatMemoriesPrompt, selectChatMemoriesForPrompt } from './chat-memories.service';
 import { ClaudeCodeError } from './claude-code.service';
 import { CodexAppServerError } from './codex-app-server.service';
 import { CommandsService } from '../commands/commands.service';
@@ -89,6 +90,13 @@ export class AgentExecutionsService implements OnModuleInit {
     }
     for (const task of this.projectTasks.unreportedSettled()) {
       this.scheduleProjectTaskReport(task.workspaceId, task.executionId, task.id, 5000);
+    }
+    // Interrupted mid-merge tasks are reconciled first so their checkout is usable, then their
+    // failure reports run through the ordinary sweep above on the next boot; subscriptions of
+    // already-settled tasks are scheduled here.
+    await this.projectTasks.reconcileInterruptedMerges().catch((error) => this.logger.warn(`Worktree merge reconciliation failed: ${error instanceof Error ? error.message : String(error)}`));
+    for (const pending of this.projectTasks.pendingSubscriptionReports()) {
+      this.scheduleSubscriptionReport(pending.task.workspaceId, pending.subscriberExecutionId, pending.task.id, pending.subscriptionId, 5000);
     }
   }
 
@@ -742,7 +750,7 @@ export class AgentExecutionsService implements OnModuleInit {
     // Dispatch-and-return: the executor runs in the background while this turn settles immediately.
     this.startProjectTaskBackground(workspaceId, executionId, call.id);
     this.db.transaction((transaction) => {
-      transaction.update(agentToolCalls).set({ status: 'completed', output: `项目任务已在后台启动（taskId: ${task.id}，目录: ${task.projectDirectory}）。本轮对话可立即继续回答用户；任务进展持续显示在任务卡片中，完成、失败或需要用户回答时会自动汇报，无需等待或轮询。`, finishedAt: new Date() }).where(and(eq(agentToolCalls.id, call.id), eq(agentToolCalls.status, 'running'))).run();
+      transaction.update(agentToolCalls).set({ status: 'completed', output: `项目任务已在后台启动（taskId: ${task.id}，目录: ${task.projectDirectory}${task.worktreePath ? `，任务 worktree: ${task.worktreePath}（分支 ${task.worktreeBranch}，成功后自动合并回 ${task.baseBranch} 并移除 worktree）` : ''}）。本轮对话可立即继续回答用户；任务进展持续显示在任务卡片中，完成、失败或需要用户回答时会自动汇报，无需等待或轮询。`, finishedAt: new Date() }).where(and(eq(agentToolCalls.id, call.id), eq(agentToolCalls.status, 'running'))).run();
       transaction.insert(auditLogs).values({ id: `audit_${randomUUID()}`, workspaceId, action: 'chat_project_task.dispatched', resource: call.id, metadata: { executionId, taskId: call.id } }).run();
     });
     await this.publishSnapshotForExecution(workspaceId, executionId);
@@ -754,7 +762,7 @@ export class AgentExecutionsService implements OnModuleInit {
       const view = this.projectTasks.view(taskId);
       const backend = [...view.activities].reverse().find((activity) => typeof activity.commandExecutionId === 'string' && /^(codex|claude)\./.test(String(activity.phase)));
       // The originating tool call has already settled, so progress linkage updates without a status guard.
-      await this.db.update(agentToolCalls).set({ workingDirectory: view.projectDirectory, commandExecutionId: typeof backend?.commandExecutionId === 'string' ? backend.commandExecutionId : null }).where(eq(agentToolCalls.id, taskId));
+      await this.db.update(agentToolCalls).set({ workingDirectory: view.worktreePath ?? view.projectDirectory, commandExecutionId: typeof backend?.commandExecutionId === 'string' ? backend.commandExecutionId : null }).where(eq(agentToolCalls.id, taskId));
       await this.publishSnapshotForExecution(workspaceId, executionId);
     }, (settled) => this.scheduleProjectTaskReport(workspaceId, executionId, settled.id))
       .catch((error) => this.logger.warn(`Chat project task ${taskId} background run failed: ${error instanceof Error ? error.message : String(error)}`));
@@ -778,17 +786,17 @@ export class AgentExecutionsService implements OnModuleInit {
     const task = await this.db.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get();
     if (!task || task.reportedAt) return;
     if (task.status !== 'succeeded' && task.status !== 'failed' && task.status !== 'waiting_for_input') return;
+    // Fan out to cross-conversation subscriptions independently of the owning conversation's state.
+    for (const subscription of this.projectTasks.subscriptionsFor(taskId)) {
+      this.scheduleSubscriptionReport(workspaceId, subscription.subscriberExecutionId, taskId, subscription.id);
+    }
     const execution = await this.loadExecution(workspaceId, CHAT_AGENT_ID, executionId);
     if (execution.status === 'running' || execution.status === 'waiting_for_input') {
       // A conversation blocked for hours keeps its unreported marker for the startup sweep instead of polling forever.
       if (deferredAttempts < 240) this.scheduleProjectTaskReport(workspaceId, executionId, taskId, 15000, deferredAttempts + 1);
       return;
     }
-    const note = task.status === 'waiting_for_input'
-      ? `[后台项目任务提醒] 任务 ${task.id}（目录 ${task.projectDirectory}）正在等待用户回答：${task.pendingQuestion?.question ?? ''}（questionId: ${task.pendingQuestion?.id ?? ''}）。请简要转述该问题，并说明用户可以直接在任务卡片中回答；不要向用户复述本提醒本身。`
-      : task.status === 'succeeded'
-        ? `[后台项目任务提醒] 任务 ${task.id}（目录 ${task.projectDirectory}）已完成。任务结果摘要：${task.result ?? ''}。请用简短回复向用户汇报该结果；不要向用户复述本提醒本身。`
-        : `[后台项目任务提醒] 任务 ${task.id}（目录 ${task.projectDirectory}）失败。错误：${task.error ?? '未知错误'}。请用简短回复向用户汇报失败原因；不要向用户复述本提醒本身。`;
+    const note = buildTaskReportNote(task, false);
     let accepted = false;
     this.db.transaction((transaction) => {
       const updated = transaction.update(agentExecutions).set({
@@ -808,6 +816,93 @@ export class AgentExecutionsService implements OnModuleInit {
     await this.publishSnapshotForExecution(workspaceId, executionId);
     // The report turn runs outside an HTTP request; the workspace and model runtime resolve without one.
     this.schedule({} as Request, 'personal', executionId);
+  }
+
+  // New subscriptions on an already-settled task report immediately rather than at next boot.
+  scheduleSettledSubscriptionReports(workspaceId: string, taskId: string): void {
+    const task = this.db.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get();
+    if (!task || (task.status !== 'succeeded' && task.status !== 'failed' && task.status !== 'waiting_for_input')) return;
+    for (const subscription of this.projectTasks.subscriptionsFor(taskId)) {
+      this.scheduleSubscriptionReport(workspaceId, subscription.subscriberExecutionId, taskId, subscription.id);
+    }
+  }
+
+  private scheduleSubscriptionReport(workspaceId: string, executionId: string, taskId: string, subscriptionId: string, delayMs = 0, deferredAttempts = 0): void {
+    const key = `sub:${subscriptionId}`;
+    if (this.projectTaskReportTimers.has(key)) return;
+    const timer = setTimeout(() => {
+      this.projectTaskReportTimers.delete(key);
+      void this.reportProjectTaskToSubscriber(workspaceId, executionId, taskId, subscriptionId, deferredAttempts)
+        .catch((error) => this.logger.warn(`Chat project task ${taskId} subscription report failed: ${error instanceof Error ? error.message : String(error)}`));
+    }, delayMs);
+    this.projectTaskReportTimers.set(key, timer);
+  }
+
+  // The same report mechanism as the owning conversation, into a subscribed conversation; the
+  // subscription row is consumed once the report is accepted.
+  private async reportProjectTaskToSubscriber(workspaceId: string, executionId: string, taskId: string, subscriptionId: string, deferredAttempts = 0): Promise<void> {
+    const task = await this.db.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get();
+    if (!task || task.status === 'cancelled') {
+      this.projectTasks.consumeSubscription(subscriptionId);
+      return;
+    }
+    if (task.status === 'running') {
+      // The task was answered and re-ran after its previous settle; keep the one-shot
+      // subscription armed for the next settlement.
+      if (deferredAttempts < 240) this.scheduleSubscriptionReport(workspaceId, executionId, taskId, subscriptionId, 15000, deferredAttempts + 1);
+      return;
+    }
+    if (task.status !== 'succeeded' && task.status !== 'failed' && task.status !== 'waiting_for_input') return;
+    const execution = await this.loadExecution(workspaceId, CHAT_AGENT_ID, executionId);
+    if (execution.status === 'running' || execution.status === 'waiting_for_input') {
+      if (deferredAttempts < 240) this.scheduleSubscriptionReport(workspaceId, executionId, taskId, subscriptionId, 15000, deferredAttempts + 1);
+      return;
+    }
+    const note = buildTaskReportNote(task, true);
+    let accepted = false;
+    this.db.transaction((transaction) => {
+      const updated = transaction.update(agentExecutions).set({
+        status: 'running', phase: 'model', errorCode: null, error: null,
+        modelMessages: [...execution.modelMessages, { role: 'user', content: note }],
+        updatedAt: new Date(),
+      }).where(and(eq(agentExecutions.id, executionId), inArray(agentExecutions.status, ['completed', 'cancelled', 'failed']))).run();
+      if (updated.changes === 0) return;
+      accepted = true;
+      transaction.insert(auditLogs).values({ id: `audit_${randomUUID()}`, workspaceId, action: `chat_project_task.${task.status}`, resource: taskId, metadata: { executionId, taskId, report: true, subscriptionId } }).run();
+    });
+    if (!accepted) {
+      if (deferredAttempts < 240) this.scheduleSubscriptionReport(workspaceId, executionId, taskId, subscriptionId, 15000, deferredAttempts + 1);
+      return;
+    }
+    this.projectTasks.consumeSubscription(subscriptionId);
+    await this.publishSnapshotForExecution(workspaceId, executionId);
+    this.schedule({} as Request, 'personal', executionId);
+  }
+
+  // One automatic report turn per settled Team Run dispatched from this conversation. The caller
+  // (ChatTeamRunReportsService) owns submission resolution, the note content and busy-deferral.
+  async reportTeamRunSettled(workspaceId: string, executionId: string, submissionId: string, note: string): Promise<'reported' | 'busy'> {
+    const execution = await this.loadExecution(workspaceId, CHAT_AGENT_ID, executionId);
+    if (execution.status === 'running' || execution.status === 'waiting_for_input') return 'busy';
+    let accepted = false;
+    let busy = false;
+    this.db.transaction((transaction) => {
+      const updated = transaction.update(agentExecutions).set({
+        status: 'running', phase: 'model', errorCode: null, error: null,
+        modelMessages: [...execution.modelMessages, { role: 'user', content: note }],
+        updatedAt: new Date(),
+      }).where(and(eq(agentExecutions.id, executionId), inArray(agentExecutions.status, ['completed', 'cancelled', 'failed']))).run();
+      if (updated.changes === 0) { busy = true; return; }
+      accepted = true;
+      transaction.update(chatSubmissions).set({ reportedAt: new Date() }).where(eq(chatSubmissions.id, submissionId)).run();
+      transaction.insert(auditLogs).values({ id: `audit_${randomUUID()}`, workspaceId, action: 'chat_team_run.reported', resource: submissionId, metadata: { executionId, submissionId, report: true } }).run();
+    });
+    if (busy) return 'busy';
+    if (!accepted) return 'reported';
+    await this.publishSnapshotForExecution(workspaceId, executionId);
+    // The report turn runs outside an HTTP request; the workspace and model runtime resolve without one.
+    this.schedule({} as Request, 'personal', executionId);
+    return 'reported';
   }
 
   private async executeProjectTaskControlTool(request: Request, workspaceSlug: string, workspaceId: string, executionId: string, call: typeof agentToolCalls.$inferSelect): Promise<void> {
@@ -869,10 +964,13 @@ export class AgentExecutionsService implements OnModuleInit {
     const [configuration] = transaction.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, workspaceId)).orderBy(desc(chatConfigurations.revision)).limit(1).all();
     if (!agent || !configuration) throw new ConflictException('Chat configuration is unavailable.');
     const selected = transaction.select({ id: skills.id, name: skills.name, instructions: skills.instructions }).from(agentSkills).innerJoin(skills, eq(agentSkills.skillId, skills.id)).where(and(eq(agentSkills.agentId, agentId), eq(skills.workspaceId, workspaceId))).all();
+    const memories = transaction.select({ content: chatMemories.content }).from(chatMemories).where(eq(chatMemories.workspaceId, workspaceId)).orderBy(desc(chatMemories.updatedAt)).all();
+    const memoriesPrompt = formatChatMemoriesPrompt(selectChatMemoriesForPrompt(memories));
     return {
       revision: configuration.revision,
       defaultExecutor: configuration.defaultExecutor,
-      agent: { id: agent.id, providerId: agent.providerId, model: agent.model, systemPrompt: [agent.systemPrompt, configuration.extensionPrompt].filter(Boolean).join('\n\nUser capability extensions:\n') },
+      defaultExecutorModels: configuration.defaultExecutorModels,
+      agent: { id: agent.id, providerId: agent.providerId, model: agent.model, systemPrompt: [agent.systemPrompt, configuration.extensionPrompt].filter(Boolean).join('\n\nUser capability extensions:\n') + (memoriesPrompt ? `\n\n${memoriesPrompt}` : '') },
       skills: selected.map((skill) => ({ ...skill, files: transaction.select({ path: skillFiles.path, content: skillFiles.content }).from(skillFiles).where(eq(skillFiles.skillId, skill.id)).all() })),
       mcpServers: transaction.select({ id: mcpServers.id, name: mcpServers.name, endpoint: mcpServers.endpoint, authSecret: mcpServers.authSecret, allowedTools: mcpServers.allowedToolNames }).from(agentMcpServers).innerJoin(mcpServers, eq(agentMcpServers.mcpServerId, mcpServers.id)).where(and(eq(agentMcpServers.agentId, agentId), eq(mcpServers.workspaceId, workspaceId))).all(),
     };
@@ -1204,4 +1302,22 @@ function createPendingQuestion(input: unknown): AgentPendingQuestion {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+// The model-only settlement note appended to the owning conversation or to a subscribed one.
+// Worktree merge outcomes travel in the note so the report can state where the changes landed.
+function buildTaskReportNote(task: typeof chatProjectTasks.$inferSelect, subscribed: boolean): string {
+  const prefix = subscribed ? '[订阅项目任务提醒]' : '[后台项目任务提醒]';
+  const mergeNote = task.mergeStatus === 'merged' ? `改动已自动合并回分支 ${task.baseBranch ?? ''}，任务 worktree 已移除。`
+    : task.mergeStatus === 'merged_cleanup_pending' ? `改动已自动合并回分支 ${task.baseBranch ?? ''}；worktree ${task.worktreePath ?? ''} 未能自动清理，请手动删除。`
+      : task.mergeStatus === 'conflict' ? ''
+        : task.worktreePath ? `任务改动保留在 worktree ${task.worktreePath}（分支 ${task.worktreeBranch ?? ''}）。`
+          : '';
+  if (task.status === 'waiting_for_input') {
+    return `${prefix} 任务 ${task.id}（目录 ${task.projectDirectory}）正在等待用户回答：${task.pendingQuestion?.question ?? ''}（questionId: ${task.pendingQuestion?.id ?? ''}）。${mergeNote}请简要转述该问题，并说明用户可以直接在任务卡片中回答；不要向用户复述本提醒本身。`;
+  }
+  if (task.status === 'succeeded') {
+    return `${prefix} 任务 ${task.id}（目录 ${task.projectDirectory}）已完成。${mergeNote}任务结果摘要：${task.result ?? ''}。请用简短回复向用户汇报该结果；不要向用户复述本提醒本身。`;
+  }
+  return `${prefix} 任务 ${task.id}（目录 ${task.projectDirectory}）失败。错误：${task.error ?? '未知错误'}。请用简短回复向用户汇报失败原因；不要向用户复述本提醒本身。`;
 }

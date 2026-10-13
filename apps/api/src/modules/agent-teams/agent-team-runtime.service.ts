@@ -55,9 +55,11 @@ import {
   Command,
   createSqliteCheckpointer,
   createTeamGraph,
+  DEVELOPER_LANE_IDS,
   getBmadTeaProcessManifest,
   isInterrupted,
   type AgentTeamDevelopmentAssignment,
+  type AgentTeamDevelopmentAssignmentInput,
   type AgentTeamPendingInputAnswer,
   type AgentTeamProjectInstructionFile,
   type AgentTeamTargetedRepairRequest,
@@ -76,6 +78,7 @@ import {
   type AgentInvocationOperationJournal,
 } from '../agents/isolated-agent-invocation.service';
 import { ProjectExecutorService } from '../agents/project-executor.service';
+import { enqueueTaskMerge, ensureTaskWorktree, inspectGitRepository, mergeTaskWorktree, type PreparedTaskWorktree } from '../agents/git-worktree';
 import { AgentTeamOperationJournalService } from './agent-team-operation-journal.service';
 import {
   AGENT_TEAM_PROCESS_ID,
@@ -752,21 +755,16 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       content: await readBmadTeaProcessFile(file.path),
     })));
     const developerRole = configuredRoles.find((role) => role.role === 'developer');
-    const developerInstances = developerRole?.developerInstances ?? [];
     const developerExecution = await this.executors.captureLaunch(developerRole?.executor ?? 'claude', null);
-    const developerExecutions: NonNullable<StoredAgentTeamVersionSnapshot['developerExecutions']> = {
-      [RESERVED_DEVELOPER_ID]: developerExecution,
-    };
-    for (const instance of developerInstances) {
-      developerExecutions[instance.developerId] = await this.executors.captureLaunch(instance.executor ?? 'claude', null);
-    }
     return {
       processId: AGENT_TEAM_PROCESS_ID,
       processVersion: AGENT_TEAM_PROCESS_VERSION,
       processFiles,
       developerExecution,
-      developerExecutions,
-      orchestrationVersion: 2,
+      // v3 lanes share the role's single captured launch; the Planner decides
+      // how many of the fixed pool lanes actually execute per Run.
+      developerExecutions: { [RESERVED_DEVELOPER_ID]: developerExecution },
+      orchestrationVersion: 3,
       roles: await Promise.all(configuredRoles.map(async (role) => {
         const entryPointContent = await Promise.all(role.entryPoints.map((path) => readBmadTeaProcessFile(path)));
         const processReferences = processReferencePaths(role.role, manifest);
@@ -776,18 +774,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           publicModelId: role.publicModelId.trim() || (role.role === 'developer' ? '' : this.config.get<string>('AGENT_TEAM_DEFAULT_PUBLIC_MODEL_ID')?.trim() || ''),
           processReferences,
           instructions: [role.instructions, ...entryPointContent].filter(Boolean).join('\n\n---\n\n'),
-          ...(role.role === 'developer'
-            ? {
-              developerInstances: await Promise.all(developerInstances.map(async (instance) => ({
-                ...instance,
-                processReferences,
-                instructions: [instance.instructions, ...(await Promise.all(instance.entryPoints.map((path) => readBmadTeaProcessFile(path))))].filter(Boolean).join('\n\n---\n\n'),
-              }))),
-            }
-            : {}),
         };
       })),
-      recipeDefaults: { maxRepairRounds: 2, maxDeveloperConcurrency: developerRole?.developerConcurrency },
+      recipeDefaults: { maxRepairRounds: 2 },
     };
   }
 
@@ -1044,14 +1033,18 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private createGraph(run: AgentTeamRun, version: AgentTeamVersion) {
-    const developerRole = version.snapshot.roles.find((role) => role.role === 'developer');
+    const snapshot = version.snapshot;
+    const orchestrationVersion = snapshot.orchestrationVersion ?? 1;
+    const developerRole = snapshot.roles.find((role) => role.role === 'developer');
     return createTeamGraph({
       executeTask: async (request) => this.executeTask(run.workspaceId, version, request),
     }, this.checkpointer, {
-      maxRepairRounds: version.snapshot.recipeDefaults.maxRepairRounds,
-      orchestrationVersion: version.snapshot.orchestrationVersion ?? 1,
-      developerIds: versionDeveloperIds(version.snapshot),
-      developerConcurrency: version.snapshot.recipeDefaults.maxDeveloperConcurrency ?? developerRole?.developerConcurrency,
+      maxRepairRounds: snapshot.recipeDefaults.maxRepairRounds,
+      orchestrationVersion,
+      developerIds: orchestrationVersion === 3 ? DEVELOPER_LANE_IDS : versionDeveloperIds(snapshot),
+      developerConcurrency: orchestrationVersion === 3
+        ? DEVELOPER_LANE_IDS.length
+        : snapshot.recipeDefaults.maxDeveloperConcurrency ?? developerRole?.developerConcurrency,
     });
   }
 
@@ -1071,118 +1064,150 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const controller = this.abortControllers.get(request.runId);
     const signal = controller?.signal ?? new AbortController().signal;
     const commandIds = new Set<string>();
-    if (taskRole === 'developer') {
-      const developerId = request.developerId ?? RESERVED_DEVELOPER_ID;
-      const execution = version.snapshot.developerExecutions?.[developerId]
-        ?? (developerId === RESERVED_DEVELOPER_ID ? version.snapshot.developerExecution : undefined);
-      if (!execution || !('executor' in execution)) throw new Error('This Team version has no captured developer executor. Start a new Team Run.');
-      const instance = developerId === RESERVED_DEVELOPER_ID
-        ? undefined
-        : role.developerInstances?.find((candidate) => candidate.developerId === developerId);
-      if (developerId !== RESERVED_DEVELOPER_ID && !instance) {
-        throw new Error(`Developer instance ${developerId} was not captured by this Team version.`);
-      }
-      const developerRole = instance ?? role;
-      const model = developerRole.publicModelId.trim() || (execution.executor === 'codex' ? execution.model : null);
-      if (model) await this.executors.requireModel(workspaceId, execution.executor, model);
-      const references = await Promise.all((developerRole.processReferences ?? []).map(async (path) => ({ path, content: await this.readCapturedProcessFile(version, path) })));
-      const output = await this.executors.execute({
-        owner: 'team',
-        workspaceId,
-        launch: execution,
-        model,
-        systemPrompt: taskSystemPrompt(developerRole.instructions, true, developerPromptAddition(request)),
-        input: JSON.stringify(taskContext(request, true)),
-        projectDirectory: request.projectDirectory,
-        skills: developerRole.skills,
-        mcpServers: (await this.resources.workflowMcpRuntimes(workspaceId, developerRole.mcpServers.map((server) => server.id)))
-          .map((runtime) => {
-            const snapshot = developerRole.mcpServers.find((server) => server.id === runtime.id);
-            return snapshot ? { ...runtime, name: snapshot.name, allowedTools: snapshot.allowedToolNames } : runtime;
-          }),
-        references,
-        signal,
-        correlation: { source: 'team', teamRunId: request.runId, teamTaskAttemptId: attempt.id },
-        onEvent: (activity) => {
-          commandIds.add(activity.commandExecutionId);
-          this.appendEvent(this.db, request.runId, 'task.activity', {
+    const orchestrationVersion = version.snapshot.orchestrationVersion ?? 1;
+    // Each developer lane works in its own git worktree (when the project is a git repository)
+    // and merges back on completion through the shared serialized queue.
+    let laneWorktree: PreparedTaskWorktree | null = null;
+
+    const produceOutput = async (correction?: string): Promise<string> => {
+      if (taskRole === 'developer') {
+        const developerId = request.developerId ?? RESERVED_DEVELOPER_ID;
+        // v3 lanes share the role's single captured launch; only v2 snapshots
+        // carry per-instance launches and configurations.
+        const execution = version.snapshot.developerExecutions?.[developerId]
+          ?? (orchestrationVersion === 3 ? version.snapshot.developerExecutions?.[RESERVED_DEVELOPER_ID] : undefined)
+          ?? (developerId === RESERVED_DEVELOPER_ID ? version.snapshot.developerExecution : undefined);
+        if (!execution || !('executor' in execution)) throw new Error('This Team version has no captured developer executor. Start a new Team Run.');
+        const instance = orchestrationVersion !== 3 && developerId !== RESERVED_DEVELOPER_ID
+          ? role.developerInstances?.find((candidate) => candidate.developerId === developerId)
+          : undefined;
+        if (orchestrationVersion !== 3 && developerId !== RESERVED_DEVELOPER_ID && !instance) {
+          throw new Error(`Developer instance ${developerId} was not captured by this Team version.`);
+        }
+        const developerRole = instance ?? role;
+        const model = developerRole.publicModelId.trim() || (execution.executor === 'codex' ? execution.model : null);
+        if (model) await this.executors.requireModel(workspaceId, execution.executor, model);
+        laneWorktree ??= await this.prepareDeveloperLane(run, attempt.id);
+        const laneNote = laneWorktree ? `You work in your lane's dedicated git worktree (${laneWorktree.worktreePath}) on branch ${laneWorktree.worktreeBranch}; stay inside it and commit your finished changes on that branch before returning.` : null;
+        const promptAddition = [developerPromptAddition(request), laneNote].filter(Boolean).join('\n\n') || undefined;
+        const references = await Promise.all((developerRole.processReferences ?? []).map(async (path) => ({ path, content: await this.readCapturedProcessFile(version, path) })));
+        return this.executors.execute({
+          owner: 'team',
+          workspaceId,
+          launch: execution,
+          model,
+          systemPrompt: taskSystemPrompt(developerRole.instructions, true, promptAddition),
+          input: JSON.stringify(taskContext(request, true, correction)),
+          projectDirectory: laneWorktree?.worktreePath ?? request.projectDirectory,
+          skills: developerRole.skills,
+          mcpServers: (await this.resources.workflowMcpRuntimes(workspaceId, developerRole.mcpServers.map((server) => server.id)))
+            .map((runtime) => {
+              const snapshot = developerRole.mcpServers.find((server) => server.id === runtime.id);
+              return snapshot ? { ...runtime, name: snapshot.name, allowedTools: snapshot.allowedToolNames } : runtime;
+            }),
+          references,
+          signal,
+          correlation: { source: 'team', teamRunId: request.runId, teamTaskAttemptId: attempt.id },
+          onEvent: (activity) => {
+            commandIds.add(activity.commandExecutionId);
+            this.appendEvent(this.db, request.runId, 'task.activity', {
+              taskAttemptId: attempt.id,
+              taskKey,
+              ...taskAttribution(request),
+              ...activity,
+            });
+          },
+          onTextDelta: (delta) => this.appendEvent(this.db, request.runId, 'task.delta', {
             taskAttemptId: attempt.id,
             taskKey,
             ...taskAttribution(request),
-            ...activity,
-          });
+            delta,
+          }),
+        });
+      }
+      const scopedJournal = this.operations.forAttempt({
+        workspaceId,
+        runId: request.runId,
+        taskAttemptId: attempt.id,
+      });
+      const operationJournal: AgentInvocationOperationJournal = {
+        ...scopedJournal,
+        findOperation: async (operationKey) => {
+          const record = await scopedJournal.findOperation(operationKey);
+          recordCompletedCommand(record, commandIds);
+          return record;
         },
+        findReplayOperation: async (taskKey, replayOperationKey) => {
+          const record = await scopedJournal.findReplayOperation(taskKey, replayOperationKey);
+          recordCompletedCommand(record, commandIds);
+          return record;
+        },
+        completeOperation: async (operationKey, result, commandId) => {
+          const record = await scopedJournal.completeOperation(operationKey, result, commandId);
+          recordCompletedCommand(record, commandIds);
+          return record;
+        },
+      };
+      return this.invocations.execute({
+        workspaceId,
+        publicModelId: role.publicModelId,
+        systemPrompt: taskSystemPrompt(role.instructions, false, rolePromptAddition(taskRole, version.snapshot)),
+        context: taskContext(request, false, correction),
+        skills: role.skills,
+        mcpRuntimes: (await this.resources.workflowMcpRuntimes(workspaceId, role.mcpServers.map((server) => server.id)))
+          .map((runtime) => {
+            const snapshot = role.mcpServers.find((server) => server.id === runtime.id);
+            return snapshot
+              ? { ...runtime, name: snapshot.name, allowedTools: snapshot.allowedToolNames }
+              : runtime;
+          }),
+        builtinToolNames: role.toolNames,
+        role: taskRole,
+        projectDirectory: request.projectDirectory,
+        authorizedCommands: request.authorizedCommands,
+        processReferencePaths: role.processReferences ?? [],
+        readProcessReference: (path) => this.readCapturedProcessFile(version, path),
+        signal,
+        jsonOutput: true,
+        correlation: { source: 'team', teamRunId: request.runId, teamTaskAttemptId: attempt.id },
+        // The upstream proxy closes a request that has not produced its first byte within
+        // ~120s, and time-to-first-byte grows with the prompt: requests past ~200KB (~70k
+        // tokens) stalled for 70-120s and then failed. Bound each tool result and the rolling
+        // context so a long tool loop stays well inside that window; the oldest tool
+        // exchanges are dropped first and the task context message is always kept.
+        limits: { maxToolResultChars: 30_000, maxContextTokens: 30_000 },
+        operation: { taskKey, journal: operationJournal },
         onTextDelta: (delta) => this.appendEvent(this.db, request.runId, 'task.delta', {
           taskAttemptId: attempt.id,
           taskKey,
           ...taskAttribution(request),
           delta,
         }),
+        onSkillScript: (activity) => {
+          commandIds.add(activity.commandExecutionId);
+        },
+        onBuiltinTool: (activity) => {
+          commandIds.add(activity.commandExecutionId);
+        },
       });
-      return this.finishExecutorOutput(request, workspaceId, attempt.id, taskKey, output, commandIds);
-    }
-    const scopedJournal = this.operations.forAttempt({
-      workspaceId,
-      runId: request.runId,
-      taskAttemptId: attempt.id,
-    });
-    const operationJournal: AgentInvocationOperationJournal = {
-      ...scopedJournal,
-      findOperation: async (operationKey) => {
-        const record = await scopedJournal.findOperation(operationKey);
-        recordCompletedCommand(record, commandIds);
-        return record;
-      },
-      findReplayOperation: async (taskKey, replayOperationKey) => {
-        const record = await scopedJournal.findReplayOperation(taskKey, replayOperationKey);
-        recordCompletedCommand(record, commandIds);
-        return record;
-      },
-      completeOperation: async (operationKey, result, commandId) => {
-        const record = await scopedJournal.completeOperation(operationKey, result, commandId);
-        recordCompletedCommand(record, commandIds);
-        return record;
-      },
     };
-    const output = await this.invocations.execute({
-      workspaceId,
-      publicModelId: role.publicModelId,
-      systemPrompt: taskSystemPrompt(role.instructions, false, rolePromptAddition(taskRole, version.snapshot)),
-      context: taskContext(request, false),
-      skills: role.skills,
-      mcpRuntimes: (await this.resources.workflowMcpRuntimes(workspaceId, role.mcpServers.map((server) => server.id)))
-        .map((runtime) => {
-          const snapshot = role.mcpServers.find((server) => server.id === runtime.id);
-          return snapshot
-            ? { ...runtime, name: snapshot.name, allowedTools: snapshot.allowedToolNames }
-            : runtime;
-        }),
-      builtinToolNames: role.toolNames,
-      role: taskRole,
-      projectDirectory: request.projectDirectory,
-      authorizedCommands: request.authorizedCommands,
-      processReferencePaths: role.processReferences ?? [],
-      readProcessReference: (path) => this.readCapturedProcessFile(version, path),
-      signal,
-      jsonOutput: true,
-      correlation: { source: 'team', teamRunId: request.runId, teamTaskAttemptId: attempt.id },
-      limits: { maxToolResultChars: 100_000 },
-      operation: { taskKey, journal: operationJournal },
-      onTextDelta: (delta) => this.appendEvent(this.db, request.runId, 'task.delta', {
-        taskAttemptId: attempt.id,
-        taskKey,
-        ...taskAttribution(request),
-        delta,
-      }),
-      onSkillScript: (activity) => {
-        commandIds.add(activity.commandExecutionId);
-      },
-      onBuiltinTool: (activity) => {
-        commandIds.add(activity.commandExecutionId);
-      },
-    });
 
-    return this.finishExecutorOutput(request, workspaceId, attempt.id, taskKey, output, commandIds);
+    // A role output that fails validation earns exactly one corrective
+    // re-invocation carrying the parse error before the attempt fails.
+    let correction: string | undefined;
+    for (let parseAttempt = 0; ; parseAttempt += 1) {
+      try {
+        const output = await produceOutput(correction);
+        return await this.finishExecutorOutput(request, workspaceId, attempt.id, taskKey, output, commandIds, laneWorktree);
+      } catch (error) {
+        if (!(error instanceof TaskOutputValidationError) || parseAttempt >= 1) throw error;
+        correction = [
+          `Your previous reply could not be accepted: ${error.message}`,
+          `Previous reply excerpt: ${error.outputExcerpt}`,
+          'Return exactly one JSON object whose "status" is exactly one of: "waiting_for_input", "completed".',
+        ].join('\n');
+      }
+    }
   }
 
   private async finishExecutorOutput(
@@ -1192,17 +1217,55 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     taskKey: string,
     output: string,
     commandIds: ReadonlySet<string>,
+    laneWorktree?: PreparedTaskWorktree | null,
   ): Promise<AgentTeamTaskResult> {
     const parsed = parseTaskOutput(output, taskKey);
     if (parsed.status === 'waiting_for_input') {
       return this.finishWaitingAttempt(request, workspaceId, attemptId, parsed);
     }
     validateUpstreamDocuments(parsed.documents, request.upstream);
+    if (laneWorktree) await this.mergeDeveloperLane(request.runId, attemptId, taskKey, laneWorktree);
     const result: Extract<AgentTeamTaskResult, { status: 'completed' }> = {
       ...parsed,
       commandIds: [...commandIds],
     };
     return this.finishCompletedAttempt(request, workspaceId, attemptId, result);
+  }
+
+  // A git-backed lane creates (or reuses, on resume) its own worktree keyed by the attempt.
+  private async prepareDeveloperLane(run: AgentTeamRun, attemptId: string): Promise<PreparedTaskWorktree | null> {
+    const repository = await inspectGitRepository(run.projectDirectory);
+    if (!repository?.branch) return null;
+    const suffix = attemptId.replace(/[^a-zA-Z0-9]/g, '').slice(-8).toLowerCase();
+    const worktree = await ensureTaskWorktree({ ...repository, branch: repository.branch }, suffix);
+    this.appendEvent(this.db, run.id, 'task.activity', {
+      taskAttemptId: attemptId, phase: 'worktree.prepared',
+      worktreePath: worktree.worktreePath, worktreeBranch: worktree.worktreeBranch, baseBranch: worktree.baseBranch,
+    });
+    return worktree;
+  }
+
+  // A completed lane merges its branch back through the shared serialized queue; a conflict
+  // fails the attempt with the conflicting file list and retains the worktree for manual resolution.
+  private async mergeDeveloperLane(runId: string, attemptId: string, taskKey: string, worktree: PreparedTaskWorktree): Promise<void> {
+    const run = await this.getRun(runId);
+    const outcome = await enqueueTaskMerge(run.projectDirectory, worktree.baseBranch, () => mergeTaskWorktree({
+      projectDirectory: run.projectDirectory,
+      worktreePath: worktree.worktreePath,
+      worktreeBranch: worktree.worktreeBranch,
+      baseBranch: worktree.baseBranch,
+    }).catch((error: unknown): { status: 'conflict'; error: string } => ({
+      status: 'conflict',
+      error: `自动合并 lane 分支 ${worktree.worktreeBranch} 时出现意外错误（${error instanceof Error ? error.message : String(error)}）；worktree ${worktree.worktreePath} 与分支已保留，请手动合并后清理。`,
+    })));
+    this.appendEvent(this.db, runId, 'task.activity', {
+      taskAttemptId: attemptId, taskKey,
+      phase: outcome.status === 'merged' ? 'worktree.merged' : 'worktree.merge_conflict',
+      worktreePath: worktree.worktreePath, worktreeBranch: worktree.worktreeBranch, baseBranch: worktree.baseBranch,
+      cleanupPending: outcome.status === 'merged' ? outcome.cleanupPending : undefined,
+      error: outcome.status === 'conflict' ? outcome.error : undefined,
+    });
+    if (outcome.status === 'conflict') throw new Error(outcome.error);
   }
 
   private async readCapturedProcessFile(version: AgentTeamVersion, path: string): Promise<string> {
@@ -2052,6 +2115,21 @@ function developerPromptAddition(request: AgentTeamTaskRequest): string | undefi
 }
 
 function rolePromptAddition(role: AgentTeamRole, snapshot: StoredAgentTeamVersionSnapshot): string | undefined {
+  if (snapshot.orchestrationVersion === 3) {
+    if (role === 'planner') {
+      return [
+        `This Team Run may use up to ${DEVELOPER_LANE_IDS.length} Developers working in parallel; decide how many the task actually needs.`,
+        'To split the implementation, add "developmentAssignments":[{"title":"...","scopeSummary":"...","ownedPaths":["path/or/prefix"]}] to the completed response. Assignments carry no developerId and map to Developers in order, their ownedPaths must not overlap, and each Developer must receive an independent, self-contained slice. Omit the field when a single Developer suffices.',
+      ].join('\n');
+    }
+    if (role === 'reviewer') {
+      return [
+        'Development may have been executed by multiple Developers in parallel; each development result names its Developer.',
+        'To request repairs, add "repairRequests":[{"developerId":"...","instruction":"specific repair instruction"}] targeting only the Developers that must change their own work. Do not use the legacy repairRequest field.',
+      ].join('\n');
+    }
+    return undefined;
+  }
   const developerIds = versionDeveloperIds(snapshot);
   if (developerIds.length < 2) return undefined;
   if (role === 'planner') {
@@ -2073,7 +2151,7 @@ function rolePromptAddition(role: AgentTeamRole, snapshot: StoredAgentTeamVersio
 function taskSystemPrompt(instructions: string, executor: boolean, addition?: string): string {
   const prompt = `${instructions}
 
-You are executing one WorkLite Agent Team task. Use tools only when the captured role configuration and project authorization permit them. Return exactly one JSON object.
+You are executing one WorkLite Agent Team task. Use tools only when the captured role configuration and project authorization permit them. Return exactly one JSON object whose "status" is exactly one of: "waiting_for_input", "completed".
 
 Follow the captured project instructions supplied in the task context, and discover additional applicable AGENTS.md or AGENTS_WORKFLOW.md files before changing or assessing project files. If a project rule or missing user decision requires explicit authorization for an action, return the waiting_for_input response instead of taking that action. ${executor ? 'You run as a project executor in the project directory with your own native tools. WorkLite requires neither proposal confirmation nor exact-command grants. A previous attempt may have changed the project; inspect its actual state rather than assuming earlier work is absent or complete. Read pinned process references from the files listed in the system prompt.' : 'If a required shell command is not present verbatim in authorizedCommands, return the waiting_for_input response instead of calling bash. Use process_reference only with one of the exact pinned paths listed in the system prompt.'} Map the process package's project root to projectDirectory and its process output location to outputDirectory. The output directory is managed by WorkLite: return documents in JSON rather than writing planning output there directly.
 
@@ -2087,8 +2165,9 @@ Use an empty changedFiles array when the task changed no project files. Set comp
   return addition ? `${prompt}\n\n${addition}` : prompt;
 }
 
-function taskContext(request: AgentTeamTaskRequest, executor: boolean): unknown {
+function taskContext(request: AgentTeamTaskRequest, executor: boolean, correction?: string): unknown {
   return {
+    ...(correction ? { correction } : {}),
     task: {
       ...request.taskDefinition,
       mode: request.mode,
@@ -2127,7 +2206,29 @@ function modeAuthorization(mode: AgentTeamMode): string {
   return 'Read and modify the declared project only within the confirmed implementation scope, and run only checks authorized by the user and project instructions.';
 }
 
+class TaskOutputValidationError extends Error {
+  readonly outputExcerpt: string;
+
+  constructor(message: string, output: string) {
+    super(message);
+    this.name = 'TaskOutputValidationError';
+    this.outputExcerpt = output.slice(0, 500);
+  }
+}
+
 function parseTaskOutput(output: string, taskKey: string): AgentTeamTaskResult {
+  try {
+    return parseTaskOutputUnsafe(output, taskKey);
+  } catch (error) {
+    if (error instanceof TaskOutputValidationError) throw error;
+    throw new TaskOutputValidationError(
+      error instanceof Error ? error.message : String(error),
+      output,
+    );
+  }
+}
+
+function parseTaskOutputUnsafe(output: string, taskKey: string): AgentTeamTaskResult {
   let value: RawTaskOutput;
   try {
     value = JSON.parse(output) as RawTaskOutput;
@@ -2144,7 +2245,9 @@ function parseTaskOutput(output: string, taskKey: string): AgentTeamTaskResult {
       pendingInput: { id: `placeholder_${randomUUID()}`, question, scopeRevision: 0 },
     };
   }
-  if (value?.status !== 'completed') throw new Error('The Agent Team role returned an unsupported task status.');
+  if (value?.status !== 'completed') {
+    throw new Error(`The Agent Team role returned an unsupported task status: ${JSON.stringify(value?.status)}.`);
+  }
   if (typeof value.completedAssignedWork !== 'boolean') {
     throw new Error('The Agent Team role did not report assigned-work completion.');
   }
@@ -2230,14 +2333,11 @@ function parseRepairRequest(value: unknown): Extract<AgentTeamTaskResult, { stat
   return { taskKey: 'development', instruction: request.instruction.trim() };
 }
 
-function parseDevelopmentAssignments(value: unknown): AgentTeamDevelopmentAssignment[] | undefined {
+function parseDevelopmentAssignments(value: unknown): AgentTeamDevelopmentAssignmentInput[] | undefined {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) throw new Error('The planner returned invalid development assignments.');
   return value.map((item) => {
-    const assignment = item as Partial<AgentTeamDevelopmentAssignment>;
-    if (typeof assignment.developerId !== 'string' || !assignment.developerId.trim()) {
-      throw new Error('A development assignment developerId is required.');
-    }
+    const assignment = item as Partial<AgentTeamDevelopmentAssignmentInput>;
     if (typeof assignment.title !== 'string' || !assignment.title.trim()) {
       throw new Error('A development assignment title is required.');
     }
@@ -2248,7 +2348,9 @@ function parseDevelopmentAssignments(value: unknown): AgentTeamDevelopmentAssign
       throw new Error('A development assignment owned path list must be strings.');
     }
     return {
-      developerId: assignment.developerId.trim(),
+      ...(typeof assignment.developerId === 'string' && assignment.developerId.trim()
+        ? { developerId: assignment.developerId.trim() }
+        : {}),
       title: assignment.title.trim(),
       scopeSummary: assignment.scopeSummary,
       ownedPaths: assignment.ownedPaths as string[],
@@ -2364,11 +2466,16 @@ function deriveRunProgress(
   const planningRow = [...activeRows].reverse()
     .find((row) => row.taskKey === 'planning' && completedResultOf(row));
   const planningResult = planningRow ? completedResultOf(planningRow) : undefined;
-  const assignments: AgentTeamDevelopmentAssignment[] = planningResult?.developmentAssignments?.length
+  // v3 planner output carries no developerId; assignments map to lanes in order.
+  const rawAssignments = planningResult?.developmentAssignments?.length
     ? planningResult.developmentAssignments
     : planningResult
-      ? [{ developerId: RESERVED_DEVELOPER_ID, title: 'Development', scopeSummary: '', ownedPaths: [] }]
+      ? [{ title: 'Development', scopeSummary: '', ownedPaths: [] }]
       : [];
+  const assignments: AgentTeamDevelopmentAssignment[] = rawAssignments.map((assignment, index) => ({
+    ...assignment,
+    developerId: assignment.developerId ?? DEVELOPER_LANE_IDS[index] ?? RESERVED_DEVELOPER_ID,
+  }));
 
   // A repair round targets only the lanes named by the latest completed review.
   const reviewRow = [...activeRows].reverse().find((row) =>
@@ -2412,14 +2519,28 @@ function deriveRunProgress(
   const terminal = isTerminalRunStatus(run.status);
   const inFlight = activeRows.filter((row) =>
     row.status === 'running' || row.status === 'waiting_for_input' || row.status === 'waiting_for_recovery');
+  const latest = [...activeRows].reverse().find((row) => completedResultOf(row) || row.status === 'failed');
   let phase: AgentTeamRunProgress['phase'];
   if (terminal) phase = 'terminal';
   else if (run.status === 'waiting_for_input') phase = 'waiting';
   else if (inFlight.length > 0) phase = phaseOfTaskKey(inFlight[inFlight.length - 1].taskKey);
   else {
-    const latest = [...activeRows].reverse().find((row) => completedResultOf(row) || row.status === 'failed');
     phase = latest ? phaseOfTaskKey(latest.taskKey) : 'planning';
   }
+
+  // Percent derives from the coarse phase ladder; a repair round keeps the
+  // development index, and only assignment completion refines the fraction.
+  const PHASE_ORDER: ReadonlyArray<Exclude<AgentTeamRunProgress['phase'], 'terminal' | 'waiting' | 'repair'>> =
+    ['planning', 'test_design', 'development', 'test_authoring', 'test_execution', 'review'];
+  const workPhase = inFlight.length > 0
+    ? phaseOfTaskKey(inFlight[inFlight.length - 1].taskKey)
+    : latest ? phaseOfTaskKey(latest.taskKey) : 'planning';
+  const ladderPhase = workPhase === 'repair' ? 'development' : workPhase;
+  const phaseIndex = Math.max(0, PHASE_ORDER.indexOf(ladderPhase as (typeof PHASE_ORDER)[number]));
+  const fraction = (workPhase === 'development' || workPhase === 'repair') && assignments.length > 0
+    ? completedAssignments / assignments.length
+    : 0;
+  const percent = terminal ? 100 : Math.min(99, Math.round((100 * (phaseIndex + fraction)) / PHASE_ORDER.length));
 
   const activeDeveloperIds = terminal
     ? []
@@ -2441,6 +2562,7 @@ function deriveRunProgress(
   return {
     phase,
     nextStep,
+    percent,
     totalAssignments: assignments.length,
     completedAssignments,
     activeDeveloperIds,

@@ -10,6 +10,20 @@ export function useChatChannelsQuery() {
   return useQuery({ queryKey: ['chat-channels'], queryFn: api.chatChannels });
 }
 
+export const chatMemoriesQueryKey = ['chat-memories'] as const;
+
+export function useChatMemoriesQuery(enabled: boolean) {
+  return useQuery({ queryKey: chatMemoriesQueryKey, queryFn: api.chatMemories, enabled });
+}
+
+export function useDeleteChatMemoryMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (memoryId: string) => api.deleteChatMemory(memoryId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: chatMemoriesQueryKey }),
+  });
+}
+
 export function useChatConversationsQuery(search = '', channel = '') {
   return useInfiniteQuery({
     queryKey: [...chatConversationsQueryKey, search, channel],

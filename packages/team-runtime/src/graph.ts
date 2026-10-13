@@ -10,6 +10,7 @@ import {
 import type {
   AgentTeamCriterionAssessment,
   AgentTeamDevelopmentAssignment,
+  AgentTeamDevelopmentAssignmentInput,
   AgentTeamDocument,
   AgentTeamGraphDelegate,
   AgentTeamGraphOptions,
@@ -307,6 +308,16 @@ function inputNode() {
 }
 
 export function createTeamGraph(delegate: AgentTeamGraphDelegate, checkpointer: BaseCheckpointSaver | undefined, options: AgentTeamGraphOptions = {}) {
+  if (options.orchestrationVersion === 3) {
+    // Version 3 runs the v2 topology over the fixed lane pool; the Planner's
+    // assignment count alone decides how many lanes execute, so dispatch
+    // capacity equals the pool size and pending lanes are assignment-driven.
+    return createTeamGraphV2(delegate, checkpointer, {
+      ...options,
+      developerIds: DEVELOPER_LANE_IDS,
+      developerConcurrency: DEVELOPER_LANE_IDS.length,
+    });
+  }
   return options.orchestrationVersion === 2
     ? createTeamGraphV2(delegate, checkpointer, options)
     : createTeamGraphV1(delegate, checkpointer, options);
@@ -369,6 +380,9 @@ function createTeamGraphV1(delegate: AgentTeamGraphDelegate, checkpointer: BaseC
 
 const RESERVED_DEVELOPER_ID = 'developer';
 
+/** Fixed v3 lane pool; assignments map onto it in Planner output order. */
+export const DEVELOPER_LANE_IDS = ['developer', 'developer-2', 'developer-3', 'developer-4'] as const;
+
 function safeGraphNodeName(developerId: string): string {
   return developerId.replace(/[^A-Za-z0-9_-]+/g, '_');
 }
@@ -414,6 +428,48 @@ export function normalizeDevelopmentAssignments(
     if (!known.has(developerId)) throw new Error(`Development assignment references unknown Developer ${developerId || '(empty)'}.`);
     if (seenDeveloperIds.has(developerId)) throw new Error(`Developer ${developerId} has more than one development assignment.`);
     seenDeveloperIds.add(developerId);
+    const title = typeof item.title === 'string' ? item.title.trim() : '';
+    const scopeSummary = typeof item.scopeSummary === 'string' ? item.scopeSummary.trim() : '';
+    if (!title || !scopeSummary) throw new Error('A development assignment requires a title and scope summary.');
+    const ownedPaths = normalizeOwnedPaths(item.ownedPaths, developerId);
+    for (const path of ownedPaths) {
+      if (seenPaths.some((previous) => pathsOverlap(previous, path))) {
+        throw new Error(`Development assignments overlap on path ${path}.`);
+      }
+      seenPaths.push(path);
+    }
+    assignments.push({ developerId, title, scopeSummary, ownedPaths });
+  }
+  return assignments;
+}
+
+/**
+ * v3 Planner assignments carry no developer id; they map onto the fixed lane
+ * pool in output order. Omitting assignments runs a single default lane.
+ */
+export function normalizeDynamicDevelopmentAssignments(
+  value: readonly AgentTeamDevelopmentAssignmentInput[] | undefined,
+  laneIds: readonly string[],
+): AgentTeamDevelopmentAssignment[] {
+  if (value === undefined) {
+    return [{
+      developerId: laneIds[0]!,
+      title: 'Implementation',
+      scopeSummary: 'The complete confirmed implementation scope.',
+      ownedPaths: ['.'],
+    }];
+  }
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error('At least one development assignment is required.');
+  }
+  if (value.length > laneIds.length) {
+    throw new Error(`At most ${laneIds.length} parallel development assignments are allowed.`);
+  }
+  const assignments: AgentTeamDevelopmentAssignment[] = [];
+  const seenPaths: string[] = [];
+  for (const [index, item] of value.entries()) {
+    if (!item || typeof item !== 'object') throw new Error('A development assignment must be an object.');
+    const developerId = laneIds[index]!;
     const title = typeof item.title === 'string' ? item.title.trim() : '';
     const scopeSummary = typeof item.scopeSummary === 'string' ? item.scopeSummary.trim() : '';
     if (!title || !scopeSummary) throw new Error('A development assignment requires a title and scope summary.');
@@ -577,10 +633,11 @@ function createTeamGraphV2(
   const maxRepairRounds = options.maxRepairRounds ?? 2;
   const developerIds = options.developerIds?.length ? options.developerIds : [RESERVED_DEVELOPER_ID];
   const configuredConcurrency = Math.max(1, Math.min(4, options.developerConcurrency ?? Math.min(developerIds.length, 2)));
+  const dynamicLanes = options.orchestrationVersion === 3;
   const graph = new StateGraph(teamV2State)
-    .addNode('planner', async (state) => executeDevelopmentTask(state, delegate, 'planner', 'planning', developerIds))
+    .addNode('planner', async (state) => executeDevelopmentTask(state, delegate, 'planner', 'planning', developerIds, dynamicLanes))
     .addNode('planner_input', inputNode())
-    .addNode('test_designer', async (state) => executeDevelopmentTask(state, delegate, 'test_designer', 'test_design', developerIds))
+    .addNode('test_designer', async (state) => executeDevelopmentTask(state, delegate, 'test_designer', 'test_design', developerIds, dynamicLanes))
     .addNode('test_designer_input', inputNode())
     .addNode('development_dispatcher', async (state) => dispatchDevelopment(state, developerIds))
     .addNode('development_join', async (state) => aggregateDevelopment(
@@ -725,6 +782,7 @@ function executeDevelopmentTask(
   role: AgentTeamRole,
   taskKey: string,
   developerIds: readonly string[],
+  dynamicLanes: boolean,
 ): Promise<Partial<AgentTeamGraphState>> {
   if (role === 'planner') {
     return (async () => {
@@ -733,10 +791,12 @@ function executeDevelopmentTask(
         const completed = result.taskResults.planning;
         return {
           ...result,
-          developmentAssignments: normalizeDevelopmentAssignments(
-            completed.developmentAssignments,
-            developerIds,
-          ),
+          developmentAssignments: dynamicLanes
+            ? normalizeDynamicDevelopmentAssignments(completed.developmentAssignments, developerIds)
+            : normalizeDevelopmentAssignments(
+              completed.developmentAssignments as AgentTeamDevelopmentAssignment[] | undefined,
+              developerIds,
+            ),
         };
       }
       return result;

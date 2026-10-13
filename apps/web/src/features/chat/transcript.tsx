@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentToolCallView, ChatConversationView, ChatProjectTaskView, ChatSubmissionView, RunView, WorkflowView } from '@worklite/contracts';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import { isLiveStatus, StatusBadge, toStatusKey, type StatusKey } from '@/components/status-badge';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
@@ -33,6 +34,17 @@ function codexFirstLine(value: string): string {
 function codexActivityText(activity: CodexActivity, key: string): string | null {
   const value = activity[key];
   return typeof value === 'string' && value.trim() ? value : null;
+}
+
+type CodexActivityGroup = 'messages' | 'tools' | 'lifecycle';
+
+// Groups persisted executor activities for the expanded detail view: reply text,
+// tool/command work, and lifecycle markers. Mirrors the server-side stage derivation.
+function codexActivityGroup(activity: CodexActivity): CodexActivityGroup {
+  const phase = codexActivityText(activity, 'phase') ?? '';
+  if (phase.endsWith('agent_message') || (phase.endsWith('item_completed') && codexActivityText(activity, 'text'))) return 'messages';
+  if (/tool_started|tool_completed|mcp\.call|project\.tool|item_started|item_completed/.test(phase)) return 'tools';
+  return 'lifecycle';
 }
 
 function CodexOperationDisclosure({ taskId, operation }: { taskId: string; operation: CodexOperation }) {
@@ -322,6 +334,37 @@ function WorkflowRunRow({ run, workflow, input }: { run: RunView; workflow: Work
   );
 }
 
+function CodexActivityGroupSection({ groupKey, items, describeActivity, locale }: { groupKey: CodexActivityGroup; items: CodexActivity[]; describeActivity: (activity: CodexActivity) => string; locale: AppLocale }) {
+  const { t } = useTranslation('assistant');
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <Button type="button" variant="secondary" size="compact" className="w-full max-w-full justify-start text-left">
+          <span className="min-w-0 truncate">{t(`codex.activityGroup.${groupKey}`, { count: items.length })}</span>
+          <ChevronRight className={cn('ml-auto size-3 shrink-0 transition-transform duration-[120ms]', open && 'rotate-90')} aria-hidden="true" />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <ol className="mt-1 max-h-64 space-y-1 overflow-y-auto rounded-md border border-border bg-surface-subtle/50 p-2">
+          {items.map((activity, index) => {
+            const createdAt = codexActivityText(activity, 'createdAt');
+            return (
+              <li key={`${createdAt ?? codexActivityText(activity, 'phase') ?? 'activity'}-${index}`} className="flex gap-2 py-1">
+                <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden="true" />
+                <div className="min-w-0 flex-1">
+                  {codexActivityText(activity, 'text') ? <MessageResponse content={codexActivityText(activity, 'text')!} enabled /> : <p className="break-words text-xs font-medium">{describeActivity(activity)}</p>}
+                  {createdAt ? <p className="mt-0.5 text-[11px] text-muted-foreground">{formatDateTime(createdAt, locale)}</p> : null}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
   const { t } = useTranslation('assistant');
   const { locale } = useLocale();
@@ -336,6 +379,20 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
   useEffect(() => {
     if (expandRequest?.id === task.id) setExpanded(true);
   }, [expandRequest, task.id]);
+  // Expanding the detail view lazy-loads the full persisted activity log (the embedded
+  // task payload only carries the recent window used by the collapsed row).
+  const [fullActivities, setFullActivities] = useState<CodexActivity[] | null>(null);
+  const [activitiesTruncated, setActivitiesTruncated] = useState(false);
+  useEffect(() => {
+    if (!expanded || fullActivities) return;
+    let cancelled = false;
+    api.chatProjectTask(task.id, 'full').then((view) => {
+      if (cancelled) return;
+      setFullActivities(view.activities);
+      setActivitiesTruncated(Boolean(view.activitiesTruncated));
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [expanded, fullActivities, task.id]);
   const statusKey = toStatusKey(task.status);
   const live = isLiveStatus(task.status);
   const pendingQuestion = task.status === 'waiting_for_input' ? task.pendingQuestion : null;
@@ -372,7 +429,9 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
   const executorName = task.executor ? t(`codex.executorName.${task.executor}`) : t('codex.launchNotCaptured');
   const modelSummary = t('codex.modelLaunch', { model: task.model || t('codex.defaultModel'), mode: executorName });
   const latestActivity = task.activities.at(-1) ?? null;
-  const visibleActivities = task.activities;
+  const visibleActivities = fullActivities ?? task.activities;
+  const activityGroups: Record<CodexActivityGroup, CodexActivity[]> = { messages: [], tools: [], lifecycle: [] };
+  for (const activity of visibleActivities) activityGroups[codexActivityGroup(activity)].push(activity);
   const visibleOperations = task.operations;
   const rawJson = rawOpen ? JSON.stringify(task, null, 2) : '';
 
@@ -433,6 +492,9 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
               <span className="font-normal text-muted-foreground">{goalSummary}</span>
             </span>
             <StatusBadge status={statusKey} label={t(`status.${task.status}`)} />
+            {task.stage !== 'succeeded' && task.stage !== 'failed' && task.stage !== 'cancelled' ? (
+              <Badge variant="brand">{t(`codex.stage.${task.stage}`)}</Badge>
+            ) : null}
           </span>
           <span className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             <span className="max-w-full truncate font-mono" title={task.projectDirectory}>{task.projectDirectory}</span>
@@ -487,6 +549,17 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
               <dt className="font-medium text-muted-foreground">{t('codex.projectDirectory')}</dt>
               <dd className="mt-1 break-all font-mono">{task.projectDirectory}</dd>
             </div>
+            {task.worktreePath ? (
+              <div className="min-w-0 sm:col-span-2">
+                <dt className="font-medium text-muted-foreground">{t('codex.worktree')}</dt>
+                <dd className="mt-1 break-all font-mono">
+                  {task.worktreePath}
+                  {task.worktreeBranch ? `（${task.worktreeBranch}）` : ''}
+                  {task.mergeStatus && task.mergeStatus !== 'not_attempted' ? ` · ${t(`codex.mergeStatus.${task.mergeStatus}`)}` : ''}
+                  {task.mergeError ? ` · ${task.mergeError}` : ''}
+                </dd>
+              </div>
+            ) : null}
             <div className="min-w-0">
               <dt className="font-medium text-muted-foreground">{t('codex.model')}</dt>
               <dd className="mt-1 break-all font-mono">{task.model}</dd>
@@ -520,24 +593,18 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
           <section>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-xs font-medium">{t('codex.activities', { count: task.activityCount })}</h3>
-              {task.activityCount > task.activities.length ? <p className="text-[11px] text-muted-foreground">{t('codex.recentActivities', { count: task.activities.length })}</p> : null}
+              {activitiesTruncated ? <p className="text-[11px] text-muted-foreground">{t('codex.activitiesTruncated', { count: visibleActivities.length })}</p> : !fullActivities && task.activityCount > task.activities.length ? <p className="text-[11px] text-muted-foreground">{t('codex.recentActivities', { count: task.activities.length })}</p> : null}
             </div>
             {activityPhaseSummary.length ? <p className="mt-1 text-[11px] text-muted-foreground">{activityPhaseSummary.join('　/　')}</p> : null}
             {visibleActivities.length > 0 ? (
-              <ol className="mt-2 max-h-64 space-y-1 overflow-y-auto rounded-md border border-border bg-surface-subtle/50 p-2">
-                {visibleActivities.map((activity, index) => {
-                  const createdAt = codexActivityText(activity, 'createdAt');
-                  return (
-                    <li key={`${createdAt ?? codexActivityText(activity, 'phase') ?? 'activity'}-${index}`} className="flex gap-2 py-1">
-                      <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden="true" />
-                      <div className="min-w-0 flex-1">
-                        {codexActivityText(activity, 'text') ? <MessageResponse content={codexActivityText(activity, 'text')!} enabled /> : <p className="break-words text-xs font-medium">{describeActivity(activity)}</p>}
-                        {createdAt ? <p className="mt-0.5 text-[11px] text-muted-foreground">{formatDateTime(createdAt, locale)}</p> : null}
-                      </div>
-                    </li>
-                  );
+              <div className="mt-2 space-y-2">
+                {(['messages', 'tools', 'lifecycle'] as const).map((groupKey) => {
+                  const items = activityGroups[groupKey];
+                  return items.length > 0 ? (
+                    <CodexActivityGroupSection key={groupKey} groupKey={groupKey} items={items} describeActivity={describeActivity} locale={locale} />
+                  ) : null;
                 })}
-              </ol>
+              </div>
             ) : <p className="mt-2 text-xs text-muted-foreground">{t('codex.noActivities')}</p>}
           </section>
 

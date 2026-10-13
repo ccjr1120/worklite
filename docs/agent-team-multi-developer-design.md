@@ -361,7 +361,7 @@ START
 
 - 不创建 Team creation/deletion API，不引入第二个内置 Team。
 - 不把 Test Author、Test Runner 或 Reviewer 改为多实例。
-- 不引入独立工作目录、Git worktree、自动合并或文件系统沙箱。
+- ~~不引入独立工作目录、Git worktree、自动合并或文件系统沙箱。~~ （2026-10-12 起被取代：Developer lane 在 git 仓库下各自运行于独立 worktree，成功后经串行合并队列合并回原分支并移除 worktree，规则与 Chat 项目任务一致，见 `docs/project-architecture/README.md` 同日 Changelog。文件系统沙箱仍不引入。）
 - 不把 Developer 原生工具效果纳入 operation journal。
 - 不改变一条 Run 一个 active Run、一个 LangGraph thread 的边界。
 - 不做数据迁移；旧 immutable TeamVersion 按原文读取并保持旧图语义。

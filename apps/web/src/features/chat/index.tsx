@@ -2,7 +2,7 @@ import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { ChevronRight, List, Plus, ScrollText, Settings, ShieldAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AgentExecutionView, AgentToolCallView, DispatchChatRequest, RunView, WorkflowView } from '@worklite/contracts';
+import type { AgentExecutionView, AgentToolCallView, DispatchChatRequest, ProjectExecutor, RunView, WorkflowView } from '@worklite/contracts';
 import { ApiError, api, parseAgentExecutionEvent } from '@/api/client';
 import { chatConversationsQueryKey, useAgentQuery, useChatConversationQuery, useMcpServersQuery, useModelProvidersQuery, useSkillsQuery, useWorkflowsQuery } from '@/api/queries';
 import { Conversation, ConversationContent } from '@/components/ai-elements/conversation';
@@ -15,6 +15,7 @@ import { queryClient } from '@/lib/query-client';
 import { cn } from '@/lib/utils';
 import { Composer, SLASH_COMMANDS, type SlashCommand } from './composer';
 import { Configuration } from './configuration';
+import { Memories } from './memories';
 import { downloadExecutionLog } from './execution-log';
 import { ConversationList } from './conversation-list';
 import { ConversationRecords } from './records';
@@ -90,9 +91,11 @@ function ChatWorkspace() {
   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowView | null>(null);
   const [workflowRun, setWorkflowRun] = useState<ActiveWorkflowRun | null>(null);
   const [draft, setDraft] = useState(() => conversationDrafts.get(selectedConversationId ?? 'new')?.draft ?? '');
-  const [settingsOpen, setSettingsOpen] = useState(locationSearch.view === 'channels' || locationSearch.view === 'configuration');
-  const [settingsSection, setSettingsSection] = useState<'channels' | 'configuration'>(locationSearch.view === 'channels' || locationSearch.view === 'configuration' ? locationSearch.view : 'channels');
+  const [settingsOpen, setSettingsOpen] = useState(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories');
+  const [settingsSection, setSettingsSection] = useState<'channels' | 'configuration' | 'memories'>(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories' ? locationSearch.view : 'channels');
   const [configSelection, setConfigSelection] = useState('');
+  // '' means the executor's own local default; a non-empty value is a declared Gateway public model id.
+  const [executorModels, setExecutorModels] = useState<Record<ProjectExecutor, string>>({ claude: '', codex: '' });
   const [selectedMcpServerIds, setSelectedMcpServerIds] = useState<string[]>([]);
   const [configSaving, setConfigSaving] = useState(false);
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
@@ -125,9 +128,10 @@ function ChatWorkspace() {
     setSelectedMcpServerIds(agentQuery.data.mcpServers.map((server) => server.id));
     setSelectedSkillIds(agentQuery.data.skills.map((skill) => skill.id));
     setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
+    setExecutorModels({ claude: agentQuery.data.chatConfiguration?.defaultExecutorModels?.claude ?? '', codex: agentQuery.data.chatConfiguration?.defaultExecutorModels?.codex ?? '' });
   }, [agentQuery.data]);
 
-  const saveConfiguration = async (selection: string, mcpServerIds: string[], skillIds = selectedSkillIds, prompt = extensionPrompt) => {
+  const saveConfiguration = async (selection: string, mcpServerIds: string[], skillIds = selectedSkillIds, prompt = extensionPrompt, models = executorModels) => {
     if (configSaving) return;
     const separator = selection.indexOf('::');
     setConfigSaving(true);
@@ -137,6 +141,7 @@ function ChatWorkspace() {
         providerId: separator >= 0 ? selection.slice(0, separator) : null,
         model: separator >= 0 ? selection.slice(separator + 2) : '', mcpServerIds, skillIds,
         extensionPrompt: prompt, expectedConfigurationRevision: agentQuery.data?.chatConfiguration?.revision,
+        defaultExecutorModels: { claude: models.claude || null, codex: models.codex || null },
       });
       queryClient.setQueryData(['agent', CHAT_AGENT_ID], saved);
     } catch (cause) {
@@ -145,11 +150,12 @@ function ChatWorkspace() {
         setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
         setSelectedMcpServerIds(agentQuery.data.mcpServers.map((server) => server.id));
         setSelectedSkillIds(agentQuery.data.skills.map((skill) => skill.id));
+        setExecutorModels({ claude: agentQuery.data.chatConfiguration?.defaultExecutorModels?.claude ?? '', codex: agentQuery.data.chatConfiguration?.defaultExecutorModels?.codex ?? '' });
       }
     } finally { setConfigSaving(false); }
   };
 
-  function openSettings(section: 'channels' | 'configuration') {
+  function openSettings(section: 'channels' | 'configuration' | 'memories') {
     setSettingsSection(section);
     setSettingsOpen(true);
     void navigate({ to: '/chat', search: { view: section, conversation: selectedConversationId ?? undefined } });
@@ -161,7 +167,7 @@ function ChatWorkspace() {
   }
 
   function changeSettingsSection(value: string) {
-    if (value !== 'channels' && value !== 'configuration') return;
+    if (value !== 'channels' && value !== 'configuration' && value !== 'memories') return;
     setSettingsSection(value);
     void navigate({ to: '/chat', search: { view: value, conversation: selectedConversationId ?? undefined } });
   }
@@ -208,7 +214,7 @@ function ChatWorkspace() {
   useEffect(() => {
     const id = typeof locationSearch.conversation === 'string' ? locationSearch.conversation : null;
     if (id && id !== selectedConversationId) selectConversation(id);
-    if (locationSearch.view === 'configuration' || locationSearch.view === 'channels') {
+    if (locationSearch.view === 'configuration' || locationSearch.view === 'channels' || locationSearch.view === 'memories') {
       setSettingsSection(locationSearch.view);
       setSettingsOpen(true);
     } else setSettingsOpen(false);
@@ -805,6 +811,7 @@ function ChatWorkspace() {
               <TabsList>
                 <TabsTrigger value="channels">{t('assistant:settings.channels')}</TabsTrigger>
                 <TabsTrigger value="configuration">{t('assistant:settings.configuration')}</TabsTrigger>
+                <TabsTrigger value="memories">{t('assistant:settings.memories')}</TabsTrigger>
               </TabsList>
             </div>
             <TabsContent value="channels" className="min-h-0 flex-1 overflow-y-auto">
@@ -813,12 +820,16 @@ function ChatWorkspace() {
             <TabsContent value="configuration" className="min-h-0 flex-1 overflow-y-auto">
               <Configuration providers={providersQuery.data ?? []} mcpServers={mcpServersQuery.data ?? []} selection={configSelection}
                 onSelectionChange={(value) => { setConfigSelection(value); void saveConfiguration(value, selectedMcpServerIds); }}
+                executorModels={executorModels} onExecutorModelChange={(executor, value) => { const next = { ...executorModels, [executor]: value }; setExecutorModels(next); void saveConfiguration(configSelection, selectedMcpServerIds, selectedSkillIds, extensionPrompt, next); }}
                 selectedMcpServerIds={selectedMcpServerIds} onMcpServersChange={(ids) => { setSelectedMcpServerIds(ids); void saveConfiguration(configSelection, ids); }}
                 skills={skillsQuery.data ?? []} selectedSkillIds={selectedSkillIds} onSkillsChange={(ids) => { setSelectedSkillIds(ids); void saveConfiguration(configSelection, selectedMcpServerIds, ids); }}
                 extensionPrompt={extensionPrompt} onPromptChange={setExtensionPrompt} onPromptSave={() => { if (extensionPrompt !== (agentQuery.data?.chatConfiguration?.extensionPrompt ?? '')) void saveConfiguration(configSelection, selectedMcpServerIds); }}
                 saving={configSaving} error={configError} loading={agentQuery.isLoading || providersQuery.isLoading || skillsQuery.isLoading || mcpServersQuery.isLoading}
                 loadFailed={agentQuery.isError || providersQuery.isError || skillsQuery.isError || mcpServersQuery.isError}
                 onReload={() => { void agentQuery.refetch(); void providersQuery.refetch(); void skillsQuery.refetch(); void mcpServersQuery.refetch(); }} />
+            </TabsContent>
+            <TabsContent value="memories" className="min-h-0 flex-1 overflow-y-auto">
+              <Memories />
             </TabsContent>
           </Tabs>
         </DialogContent>

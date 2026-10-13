@@ -35,6 +35,14 @@ type PreparedArtifactNode = {
   output: unknown;
 };
 
+// Streaming deltas are merged before persistence: one row per flush instead of one
+// row per token, which previously made every Agent run hold the database write lock
+// almost continuously. Replay concatenates the same text either way.
+const DELTA_FLUSH_MS = 250;
+const DELTA_FLUSH_CHARS = 64 * 1024;
+
+type DeltaBuffer = { nodeId: string; nodeRunId: string; text: string; timer: NodeJS.Timeout };
+
 class RunCancelledError extends Error {
   constructor() {
     super('Workflow run cancelled.');
@@ -50,6 +58,7 @@ export class RunsService {
   private readonly activeRuns = new Map<string, AbortController>();
   private readonly listeners = new Set<RunListener>();
   private readonly eventQueues = new Map<string, Promise<void>>();
+  private readonly deltaBuffers = new Map<string, DeltaBuffer>();
   private readonly pendingCompletions = new Set<string>();
   private completionFlush: Promise<void> | null = null;
 
@@ -792,6 +801,52 @@ export class RunsService {
   }
 
   private async publish(runId: string, type: RunProgressEvent['type'], payload: unknown): Promise<void> {
+    if (type === 'node.delta') {
+      this.bufferDelta(runId, payload);
+      return;
+    }
+    // A non-delta event must not overtake text that was streamed before it.
+    this.flushDeltaBuffers(runId);
+    await this.persistEvent(runId, type, payload);
+  }
+
+  private bufferDelta(runId: string, payload: unknown): void {
+    const record = asRecord(payload);
+    const nodeRunId = typeof record?.nodeRunId === 'string' ? record.nodeRunId : null;
+    const delta = typeof record?.delta === 'string' ? record.delta : '';
+    if (!nodeRunId || !delta) return;
+    const key = `${runId}:${nodeRunId}`;
+    const existing = this.deltaBuffers.get(key);
+    if (existing) {
+      existing.text += delta;
+      if (existing.text.length >= DELTA_FLUSH_CHARS) this.flushDelta(key);
+      return;
+    }
+    const timer = setTimeout(() => this.flushDelta(key), DELTA_FLUSH_MS);
+    timer.unref();
+    this.deltaBuffers.set(key, {
+      nodeId: typeof record?.nodeId === 'string' ? record.nodeId : '',
+      nodeRunId,
+      text: delta,
+      timer,
+    });
+  }
+
+  private flushDelta(key: string): void {
+    const buffer = this.deltaBuffers.get(key);
+    if (!buffer) return;
+    this.deltaBuffers.delete(key);
+    clearTimeout(buffer.timer);
+    void this.persistEvent(key.slice(0, key.indexOf(':')), 'node.delta', { nodeId: buffer.nodeId, nodeRunId: buffer.nodeRunId, delta: buffer.text });
+  }
+
+  private flushDeltaBuffers(runId: string): void {
+    for (const key of [...this.deltaBuffers.keys()]) {
+      if (key.startsWith(`${runId}:`)) this.flushDelta(key);
+    }
+  }
+
+  private async persistEvent(runId: string, type: RunProgressEvent['type'], payload: unknown): Promise<void> {
     const previous = this.eventQueues.get(runId) ?? Promise.resolve();
     const next = previous.then(async () => {
       const [row] = await this.db.insert(workflowRunEvents).values({ runId, sequence: sql<number>`coalesce((select max(sequence) from workflow_run_events where run_id = ${runId}), 0) + 1`, type, payload: sanitizeWorkflowImages(payload) }).returning();

@@ -90,6 +90,9 @@ function getDatabase(): BetterSqlite3.Database {
   const path = databasePath();
   mkdirSync(dirname(path), { recursive: true });
   database = new BetterSqlite3(path);
+  // WAL keeps /logs and stats reads off the write lock that every captured request
+  // body insert takes; rollback mode serialized all gateway traffic behind them.
+  database.pragma('journal_mode = WAL');
   database.pragma('busy_timeout = 5000');
   database.exec(`
     CREATE TABLE IF NOT EXISTS gateway_providers (
@@ -184,8 +187,16 @@ export function prepareGatewayDatabase(): void {
   target.pragma('incremental_vacuum');
 }
 
+// Pruning runs at most once per minute: it previously ran after every captured
+// request, adding a second write transaction (and fsync) to each LLM call.
+const REQUEST_LOG_PRUNE_INTERVAL_MS = 60_000;
+let requestLogsPrunedAt = 0;
+
 function pruneRequestLogs(target: BetterSqlite3.Database): void {
-  target.prepare('DELETE FROM gateway_request_logs WHERE occurred_at < ?').run(Date.now() - REQUEST_LOG_RETENTION_MS);
+  const now = Date.now();
+  if (now - requestLogsPrunedAt < REQUEST_LOG_PRUNE_INTERVAL_MS) return;
+  requestLogsPrunedAt = now;
+  target.prepare('DELETE FROM gateway_request_logs WHERE occurred_at < ?').run(now - REQUEST_LOG_RETENTION_MS);
 }
 
 function secretKey(): Buffer {
@@ -532,6 +543,12 @@ type GatewayRequestLogRow = {
   response_body: string | null;
 };
 
+type GatewayRequestLogListRow = Omit<GatewayRequestLogRow, 'request_body' | 'response_body'>;
+
+// The list view never reads the captured bodies: selecting them pulled ~25 MB from
+// disk per page. Only the single-log detail query fetches them.
+const REQUEST_LOG_LIST_COLUMNS = 'id, occurred_at, provider_name, model, endpoint, status, duration_ms, streaming, source, workflow_run_id, node_run_id, team_run_id, team_task_attempt_id, team_operation_key, prompt_tokens, completion_tokens, total_tokens, response_kind';
+
 export function recordRequestLog(input: {
   id?: string | null;
   provider: string;
@@ -615,7 +632,7 @@ function requestLogResponse(row: GatewayRequestLogRow): GatewayRequestLogRespons
   return { kind: 'json', body: parseStoredJson(row.response_body) };
 }
 
-function requestLogListItem(row: GatewayRequestLogRow) {
+function requestLogListItem(row: GatewayRequestLogListRow) {
   return {
     id: row.id,
     occurredAt: new Date(row.occurred_at).toISOString(),
@@ -686,7 +703,7 @@ export function requestLogs(query: GatewayTimeRangeQuery & {
   const requested = Number(query.limit ?? REQUEST_LOG_PAGE_LIMIT);
   const limit = Number.isSafeInteger(requested) && requested > 0 ? Math.min(requested, REQUEST_LOG_PAGE_LIMIT) : REQUEST_LOG_PAGE_LIMIT;
   const where = `WHERE ${conditions.join(' AND ')}`;
-  const rows = database.prepare(`SELECT * FROM gateway_request_logs ${where} ORDER BY occurred_at DESC, id DESC LIMIT ?`).all(...values, limit + 1) as GatewayRequestLogRow[];
+  const rows = database.prepare(`SELECT ${REQUEST_LOG_LIST_COLUMNS} FROM gateway_request_logs ${where} ORDER BY occurred_at DESC, id DESC LIMIT ?`).all(...values, limit + 1) as GatewayRequestLogListRow[];
   const page = rows.slice(0, limit);
   const last = page.at(-1);
   return {

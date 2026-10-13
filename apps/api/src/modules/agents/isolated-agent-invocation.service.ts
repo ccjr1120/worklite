@@ -104,7 +104,7 @@ type IsolatedAgentInvocationRequest = {
   onBuiltinTool?: (activity: AgentInvocationBuiltinActivity) => void | Promise<void>;
   jsonOutput?: boolean;
   correlation?: GatewayCorrelation;
-  limits?: { maxToolCalls?: number; maxToolRounds?: number; maxToolResultChars?: number };
+  limits?: { maxToolCalls?: number; maxToolRounds?: number; maxToolResultChars?: number; maxContextTokens?: number };
   operation?: {
     taskKey: string;
     journal: AgentInvocationOperationJournal;
@@ -202,6 +202,7 @@ export class IsolatedAgentInvocationService {
       mcpTools,
       maxToolRounds: maxRounds,
       maxToolCalls: request.limits?.maxToolCalls,
+      maxContextTokens: request.limits?.maxContextTokens,
       abortSignal: request.signal,
       onTextDelta: request.onTextDelta,
       onModelRound: request.onModelRound,
@@ -221,7 +222,11 @@ export class IsolatedAgentInvocationService {
   ): Promise<WorkflowAgentToolResult> {
     request.signal.throwIfAborted();
     this.validateProcessReference(request, call);
-    this.validateTeamToolAuthorization(request, call);
+    // An unauthorized bash command never executed, so the rejection carries no uncertain
+    // effect: hand it back as tool feedback instead of failing the attempt. The role can
+    // then pick an authorized command or ask for the grant through waiting_for_input.
+    const authorizationError = this.teamCommandAuthorizationError(request, call);
+    if (authorizationError) return { type: 'error-text', value: authorizationError };
     if (!request.operation) {
       return (await this.runToolEffect(request, assignedSkills, mcpTools, selectedBuiltinToolNames, call)).output;
     }
@@ -453,15 +458,14 @@ export class IsolatedAgentInvocationService {
     return { output: { type: 'text', value: boundedToolResult(value, request.limits?.maxToolResultChars) } };
   }
 
-  private validateTeamToolAuthorization(
+  private teamCommandAuthorizationError(
     request: IsolatedAgentInvocationRequest,
     call: WorkflowAgentToolCall,
-  ): void {
-    if (!request.role || !request.projectDirectory || call.toolName !== 'bash') return;
+  ): string | null {
+    if (!request.role || !request.projectDirectory || call.toolName !== 'bash') return null;
     const command = requiredString((call.input as { command?: unknown } | null)?.command, 'command');
-    if (!request.authorizedCommands?.includes(command)) {
-      throw new BadRequestException('The exact shell command is not authorized for this project task.');
-    }
+    if (request.authorizedCommands?.includes(command)) return null;
+    return `The exact shell command is not authorized for this project task: ${command}. Do not call it again; either use a command listed in authorizedCommands, or return a waiting_for_input response naming the exact command you need so the user can grant it.`;
   }
 
   private validateProcessReference(

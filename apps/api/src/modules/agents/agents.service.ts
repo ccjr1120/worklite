@@ -3,9 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { AgentVersionView, AgentView, CreateAgentRequest, ModelProviderView, UpdateAgentRequest } from '@worklite/contracts';
-import { agentExecutions, chatConfigurations, agentMcpServers, agentVersions, agents, agentSkills, mcpServers, scheduledAgentTasks, skills, type Database } from '@worklite/db';
+import { agentExecutions, chatConfigurations, agentMcpServers, agentVersions, agents, agentSkills, mcpServers, scheduledAgentTasks, skills, type Database, type StoredProjectExecutor } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
+import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { WorkspaceService } from '../teams/teams.service';
+import { PROJECT_EXECUTOR_PROTOCOLS } from './project-executor.types';
 
 const WORKLITE_PLATFORM_SKILL_ID = 'sk_worklite_platform';
 const CODEX_CLI_AGENT_ID = 'agt_codex_cli_chat';
@@ -26,6 +28,7 @@ export class AgentsService {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     private readonly workspaces: WorkspaceService,
+    private readonly resources: WorkspaceResourcesService,
   ) {}
 
   async list(request: Request, workspaceSlug: string): Promise<AgentView[]> {
@@ -52,7 +55,7 @@ export class AgentsService {
     const view = this.toView(row.agent, workspaceSlug, row.agent.providerId ? gatewayNames.get(row.agent.providerId) ?? null : null, assignments, latest);
     if (agentId === 'agt_system_helper_chat') {
       const [configuration] = await this.db.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
-      if (configuration) view.chatConfiguration = { revision: configuration.revision, extensionPrompt: configuration.extensionPrompt, defaultExecutor: configuration.defaultExecutor };
+      if (configuration) view.chatConfiguration = { revision: configuration.revision, extensionPrompt: configuration.extensionPrompt, defaultExecutor: configuration.defaultExecutor, defaultExecutorModels: configuration.defaultExecutorModels };
     }
     return view;
   }
@@ -132,7 +135,7 @@ export class AgentsService {
     if (existing.kind === 'system') {
 
       const isChat = existing.id === 'agt_system_helper_chat';
-      const fields = ['providerId', 'model', 'mcpServerIds', ...(isChat ? ['skillIds', 'extensionPrompt', 'defaultExecutor', 'expectedConfigurationRevision'] : [])];
+      const fields = ['providerId', 'model', 'mcpServerIds', ...(isChat ? ['skillIds', 'extensionPrompt', 'defaultExecutor', 'defaultExecutorModels', 'expectedConfigurationRevision'] : [])];
       if (Object.keys(input).some((key) => !fields.includes(key))) throw new BadRequestException('Unsupported built-in Agent configuration field.');
       const nextProviderId = input.providerId === undefined ? existing.providerId : input.providerId;
       const provider = await this.validateProvider(team.id, nextProviderId);
@@ -141,6 +144,20 @@ export class AgentsService {
       const model = provider ? requestedModel || provider.models[0] || '' : '';
       if (input.extensionPrompt !== undefined && typeof input.extensionPrompt !== 'string') throw new BadRequestException('An extension prompt must be text.');
       if (input.defaultExecutor !== undefined && input.defaultExecutor !== 'claude' && input.defaultExecutor !== 'codex') throw new BadRequestException('The default executor must be claude or codex.');
+      // Declared per-executor default models merge into the stored declarations; every declared model must
+      // speak the protocol its executor supports, including declarations kept from the previous revision.
+      const executorModelsPatch = input.defaultExecutorModels === undefined ? undefined : parseExecutorModelsPatch(input.defaultExecutorModels);
+      let mergedExecutorModels: Partial<Record<StoredProjectExecutor, string>> | undefined;
+      if (executorModelsPatch !== undefined) {
+        const [latest] = await this.db.select({ models: chatConfigurations.defaultExecutorModels }).from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
+        mergedExecutorModels = mergeExecutorModels(latest?.models, executorModelsPatch);
+        for (const executor of ['claude', 'codex'] as const) {
+          const declared = mergedExecutorModels[executor];
+          if (!declared) continue;
+          const runtime = await this.resources.publicModelRuntime(team.id, declared);
+          if (!PROJECT_EXECUTOR_PROTOCOLS[executor].includes(runtime.protocol)) throw new BadRequestException(`${executor === 'codex' ? 'Codex' : 'Claude Code'} 需要 ${PROJECT_EXECUTOR_PROTOCOLS[executor].join(' 或 ')} 协议的 Gateway 模型。`);
+        }
+      }
       const selectedSkills = input.skillIds?.filter((id) => id !== WORKLITE_PLATFORM_SKILL_ID);
       const selections = await this.validateAssignments(team.id, selectedSkills, input.mcpServerIds, true);
       this.db.transaction((transaction) => {
@@ -159,6 +176,7 @@ export class AgentsService {
           workspaceId: team.id, revision: (previous?.revision ?? 0) + 1,
           extensionPrompt: input.extensionPrompt === undefined ? previous?.extensionPrompt ?? '' : input.extensionPrompt,
           defaultExecutor: input.defaultExecutor ?? previous?.defaultExecutor ?? 'claude',
+          defaultExecutorModels: executorModelsPatch === undefined ? previous?.defaultExecutorModels ?? {} : mergeExecutorModels(previous?.defaultExecutorModels, executorModelsPatch),
           providerId: nextProviderId ?? null, model,
           skillIds: transaction.select({ id: agentSkills.skillId }).from(agentSkills).where(eq(agentSkills.agentId, agentId)).all().map(({ id }) => id),
           mcpServerIds: transaction.select({ id: agentMcpServers.mcpServerId }).from(agentMcpServers).where(eq(agentMcpServers.agentId, agentId)).all().map(({ id }) => id),
@@ -313,6 +331,28 @@ function normalizeResourceIds(input: unknown, resourceName: string): string[] {
   if (input === undefined) return [];
   if (!Array.isArray(input) || input.some((value) => typeof value !== 'string')) throw new BadRequestException(`${resourceName} selections must be an array of identifiers.`);
   return [...new Set(input.map((value) => value.trim()).filter(Boolean))];
+}
+
+// A string declares a model, null or an empty string clears the declaration; other keys are rejected.
+function parseExecutorModelsPatch(input: unknown): Partial<Record<StoredProjectExecutor, string | null>> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new BadRequestException('Default executor models must be an object keyed by executor.');
+  const patch: Partial<Record<StoredProjectExecutor, string | null>> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (key !== 'claude' && key !== 'codex') throw new BadRequestException('Default executor models must be keyed by claude or codex.');
+    if (value === null || (typeof value === 'string' && !value.trim())) patch[key] = null;
+    else if (typeof value === 'string') patch[key] = value.trim();
+    else throw new BadRequestException('A default executor model must be a Gateway public model id or null.');
+  }
+  return patch;
+}
+
+function mergeExecutorModels(current: Partial<Record<StoredProjectExecutor, string>> | undefined, patch: Partial<Record<StoredProjectExecutor, string | null>>): Partial<Record<StoredProjectExecutor, string>> {
+  const merged: Partial<Record<StoredProjectExecutor, string>> = { ...(current ?? {}) };
+  for (const [executor, model] of Object.entries(patch) as Array<[StoredProjectExecutor, string | null]>) {
+    if (model === null) delete merged[executor];
+    else merged[executor] = model;
+  }
+  return merged;
 }
 
 function toAgentVersionView(row: typeof agentVersions.$inferSelect): AgentVersionView {

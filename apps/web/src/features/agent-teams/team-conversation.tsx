@@ -28,6 +28,7 @@ import { ErrorState } from '@/components/error-state';
 import { StatusBadge, toStatusKey } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
+import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
@@ -723,15 +724,21 @@ export function TeamConversation({ teamId }: { teamId: string }) {
               </div>
             </dl>
             {activeRun.progress ? (
-              <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
-                <span>{t(`progress.phaseValue.${activeRun.progress.phase}`)}</span>
-                {activeRun.progress.totalAssignments > 0 ? (
-                  <span className="tabular-nums">{t('progress.assignments', { completed: activeRun.progress.completedAssignments, total: activeRun.progress.totalAssignments })}</span>
-                ) : null}
-                {activeRun.progress.activeDeveloperIds.length > 0 ? (
-                  <span className="min-w-0 font-mono text-xs break-all">{activeRun.progress.activeDeveloperIds.join(', ')}</span>
-                ) : null}
-                <span>{t('progress.nextStep')}: {t(`progress.nextStepValue.${activeRun.progress.nextStep}`)}</span>
+              <div className="mt-3">
+                <div className="flex items-center gap-2 text-[13px]">
+                  <span className="text-muted-foreground">{t(`progress.phaseValue.${activeRun.progress.phase}`)}</span>
+                  <Progress value={activeRun.progress.percent} className="max-w-40 flex-1" />
+                  <span className="font-medium tabular-nums">{t('progress.percent', { percent: activeRun.progress.percent })}</span>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
+                  {activeRun.progress.totalAssignments > 0 ? (
+                    <span className="tabular-nums">{t('progress.assignments', { completed: activeRun.progress.completedAssignments, total: activeRun.progress.totalAssignments })}</span>
+                  ) : null}
+                  {activeRun.progress.activeDeveloperIds.length > 0 ? (
+                    <span className="min-w-0 font-mono text-xs break-all">{activeRun.progress.activeDeveloperIds.join(', ')}</span>
+                  ) : null}
+                  <span>{t('progress.nextStep')}: {t(`progress.nextStepValue.${activeRun.progress.nextStep}`)}</span>
+                </div>
               </div>
             ) : null}
             {pendingQuestions.length > 0 ? (

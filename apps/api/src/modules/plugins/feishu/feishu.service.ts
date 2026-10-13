@@ -11,13 +11,18 @@ import { AgentTeamConversationService } from '../../agent-teams/agent-team-conve
 import { AgentTeamsService } from '../../agent-teams/agent-teams.service';
 import { RunsService } from '../../runs/runs.service';
 import { PluginsService } from '../plugins.service';
-import { renderCard, statusText, type CardButton, type CardState, type CardTransport, type CardUpdate, type FeishuAction, type FeishuCard, type SavedCard } from './feishu-cards';
+import { renderCard, renderTaskCard, statusText, type CardButton, type CardState, type CardTransport, type CardUpdate, type FeishuAction, type FeishuCard, type SavedCard } from './feishu-cards';
 import { runtimeAdmissionClosed, runtimeWritesFrozen } from '../../../infrastructure/runtime-upgrade-state';
 import { UpgradesService } from '../../upgrades/upgrades.service';
+import type { ChatProjectTaskView } from '@worklite/contracts';
 
 type FeishuActionReceipt = { accepted: true } | { accepted: false; reason: string };
 type Json = Record<string, unknown>;
 type Submission = typeof chatSubmissions.$inferSelect;
+// One submission delivers one reply card plus one card per project task; each task card persists
+// its own transport, message id and fingerprint inside the submission's rendered task cards.
+type TaskCardEntry = SavedCard & { messageId?: string; fingerprint?: string };
+type TaskCardMap = Record<string, TaskCardEntry>;
 const request = {} as Request;
 const record = (value: unknown): Json => value && typeof value === 'object' && !Array.isArray(value) ? value as Json : {};
 const string = (value: unknown): string => typeof value === 'string' ? value : '';
@@ -147,6 +152,15 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       const [parent] = await this.db.select().from(chatSubmissions).where(and(eq(chatSubmissions.chatId, chatId), eq(chatSubmissions.outputMessageId, replyTo))).limit(1);
       boundAction = (parent?.renderedCard as SavedCard | null)?.replyAction;
       parentSubmissionId = parent?.id;
+      if (!boundAction) {
+        // A reply to a task card stays bound to that task's pending question.
+        const candidates = await this.db.select().from(chatSubmissions).where(eq(chatSubmissions.chatId, chatId));
+        for (const candidate of candidates) {
+          const cards = (candidate.renderedTaskCards as TaskCardMap | null) ?? {};
+          const entry = Object.values(cards).find((card) => card.messageId === replyTo && card.replyAction);
+          if (entry?.replyAction) { boundAction = entry.replyAction; parentSubmissionId = candidate.id; break; }
+        }
+      }
     } else if (execution?.pendingQuestion) {
       boundAction = { kind: 'agent_answer', executionId: execution.id, questionId: execution.pendingQuestion.id };
     }
@@ -186,14 +200,21 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       return { accepted: false, reason: '任务卡片未关联对话' };
     }
     const saved = submission.renderedCard as SavedCard | null;
-    const selected = saved?.actions[actionKey];
+    const taskCards = (submission.renderedTaskCards as TaskCardMap | null) ?? {};
+    let selected = saved?.actions[actionKey];
+    if (!selected) {
+      for (const entry of Object.values(taskCards)) {
+        if (entry.actions?.[actionKey]) { selected = entry.actions[actionKey]; break; }
+      }
+    }
     if (!selected) {
       this.logger.warn(`Feishu card action rejected: action not found, eventId=${eventId}, chatId=${submission.chatId}, submissionId=${submission.id}, actionKey=${actionKey}.`);
       return { accepted: false, reason: '卡片操作不存在' };
     }
     const messageId = string(record(event.context).open_message_id);
-    if (messageId !== submission.outputMessageId) {
-      this.logger.warn(`Feishu card action rejected: message mismatch, eventId=${eventId}, chatId=${submission.chatId}, submissionId=${submission.id}, expectedMessageId=${submission.outputMessageId}, actualMessageId=${messageId}.`);
+    const allowedMessageIds = new Set([submission.outputMessageId, ...Object.values(taskCards).map((entry) => entry.messageId)].filter((value): value is string => Boolean(value)));
+    if (!allowedMessageIds.has(messageId)) {
+      this.logger.warn(`Feishu card action rejected: message mismatch, eventId=${eventId}, chatId=${submission.chatId}, submissionId=${submission.id}, actualMessageId=${messageId}.`);
       return { accepted: false, reason: '消息不匹配' };
     }
     // Persist only the server-rendered operation; callback fields cannot fabricate a Run or permission.
@@ -297,6 +318,10 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       const current = await this.executions.get(request, 'personal', CHAT_AGENT_ID, action.executionId);
       if (current.status !== 'waiting_for_input' || current.pendingQuestion?.id !== action.questionId) throw new ConflictException('This Agent question is no longer active.');
       await this.dispatchFromChannel({ submissionId: eventId, message: action.answer ?? answer, target: { kind: 'conversation' }, executionId: action.executionId, questionId: action.questionId, recoveryDecision: action.recoveryDecision, newConversation: action.newConversation }, chatId);
+    } else if (action.kind === 'project_task_answer') {
+      await this.executions.answerProjectTask(request, 'personal', action.taskId, { questionId: action.questionId, answer: action.answer ?? answer });
+    } else if (action.kind === 'project_task_control') {
+      if (action.action === 'cancel') await this.executions.cancelProjectTask(request, 'personal', action.taskId);
     } else if (action.kind === 'control') {
       if (action.domain === 'conversation') {
         const [turn] = await this.db.select({ reference: chatSubmissions.reference }).from(chatSubmissions).where(eq(chatSubmissions.id, parentId)).limit(1);
@@ -333,6 +358,8 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
     const reference = submission.reference;
     const state: CardState = { title: 'Chat', status: '已排队', content: submission.target.kind === 'conversation' ? '' : submission.message, buttons: [], conversation: submission.target.kind === 'conversation' };
     let terminal = false;
+    // Project tasks dispatched in this submission's conversation turn each get their own card.
+    let turnTasks: ChatProjectTaskView[] = [];
     const files: Array<{ id: string; name: string; content: string }> = [];
     if (submission.error) {
       state.status = '请求失败'; state.content = submission.error; terminal = true;
@@ -386,8 +413,12 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       }
       if (!reference.completionStatus && (execution.status === 'running' || execution.status === 'waiting_for_input')) state.buttons.push({ label: '停止本轮对话', action: { kind: 'control', domain: 'conversation', runId: execution.id, action: 'cancel' } });
       if ((!reference.completionStatus || reference.completionStatus === 'failed') && execution.status === 'failed') state.buttons.push({ label: '重试本轮对话', action: { kind: 'control', domain: 'conversation', runId: execution.id, action: 'retry' } });
-      const projectTasks = execution.toolCalls.flatMap((call) => call.projectTask ? [call.projectTask] : []);
-      if (projectTasks.length) state.details = projectTasks.map((task) => [(task.executor === 'codex' ? 'Codex' : task.executor === 'claude' ? 'Claude Code' : '项目任务') + ' · ' + (task.model || '默认模型'), task.goal, statusText[task.status] ?? task.status, ...task.activities.filter((item) => typeof item.commandExecutionId === 'string').map((item) => String(item.phase) + ': ' + String(item.commandExecutionId)), task.error ?? '', task.result].filter(Boolean).join('\n')).join('\n\n');
+      const projectTasks = execution.toolCalls.flatMap((call) => call.projectTask ? [{ task: call.projectTask, createdAt: call.createdAt }] : []);
+      // Attribute each task to this submission's turn by the turn's message window, so tasks from
+      // earlier turns do not duplicate cards onto later replies.
+      const windowStart = execution.messages[start]?.createdAt;
+      const windowEnd = end !== undefined ? execution.messages[end]?.createdAt : undefined;
+      turnTasks = projectTasks.filter(({ createdAt }) => (!windowStart || createdAt >= windowStart) && (!windowEnd || createdAt < windowEnd)).map(({ task }) => task);
       const shellCalls = execution.toolCalls.filter((call) => call.shell);
       if (shellCalls.length) state.details = [state.details, ...shellCalls.map((call) => ['Shell · ' + (statusText[call.status] ?? call.status), '工作目录：' + call.workingDirectory, call.shell!.command, 'Command：' + (call.commandExecutionId ?? '未启动'), '退出码：' + (call.exitCode ?? '无'), call.output].join('\n'))].filter(Boolean).join('\n\n');
       state.replyContent = state.content;
@@ -414,8 +445,13 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
         terminal = intake.status === 'failed';
       } else {
         const run = await this.teams.getRun(request, 'personal', intake.runId);
+        const phaseText: Record<string, string> = { planning: '规划中', test_design: '测试设计中', development: '开发中', test_authoring: '测试编写中', test_execution: '测试执行中', review: '审查中', repair: '修复中', waiting: '等待输入', terminal: '已结束' };
         state.status = statusText[run.status] ?? run.status;
-        state.details = run.tasks.map((task) => `- ${task.taskKey} · ${statusText[task.status] ?? task.status}`).join('\n');
+        if (run.progress && !['succeeded', 'failed', 'cancelled'].includes(run.status)) state.status += ` · ${phaseText[run.progress.phase] ?? run.progress.phase} ${run.progress.percent}%`;
+        state.details = run.tasks.map((task) => {
+          const progressLine = task.progressText.trim().split(/\r?\n/, 1)[0] ?? '';
+          return `- ${task.taskKey} · ${statusText[task.status] ?? task.status}${progressLine ? ` · ${progressLine}` : ''}`;
+        }).join('\n');
         const active = [...run.tasks].reverse().find((task) => task.retryable || ['running', 'waiting_for_input', 'waiting_for_recovery'].includes(task.status));
         state.content = `${run.intent}\n\n${active ? `当前任务：${active.taskKey}` : ''}`;
         if (run.status === 'failed' && active?.error) state.content += `\n\n${active.error}`;
@@ -473,25 +509,76 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
     const renewStream = saved.card.config.streaming_mode && transport?.streamingStartedAt != null
       && Date.now() - transport.streamingStartedAt >= 9 * 60_000;
     const cardUnchanged = !transport || JSON.stringify(saved.card) === JSON.stringify(transport.card);
-    if (fingerprint === submission.deliveryFingerprint && cardUnchanged && !transport?.pending && !renewStream) {
-      if (terminal) await this.db.update(chatSubmissions).set({ settled: true }).where(eq(chatSubmissions.id, submission.id));
+    // Each task card carries its own fingerprint; a pending update must be retried even when the
+    // rendered content is unchanged.
+    const taskCards = turnTasks.map((task) => ({ task, saved: renderTaskCard(submission.id, task), fingerprint: '' }));
+    for (const entry of taskCards) entry.fingerprint = digest(JSON.stringify(entry.saved));
+    const taskEntries = (submission.renderedTaskCards as TaskCardMap | null) ?? {};
+    const tasksChanged = taskCards.some(({ task, fingerprint: fp }) => fp !== taskEntries[task.id]?.fingerprint || taskEntries[task.id]?.transport?.pending);
+    const tasksTerminal = taskCards.every(({ task }) => ['succeeded', 'failed', 'cancelled'].includes(task.status));
+    if (fingerprint === submission.deliveryFingerprint && cardUnchanged && !transport?.pending && !renewStream && !tasksChanged) {
+      if (terminal && tasksTerminal) await this.db.update(chatSubmissions).set({ settled: true }).where(eq(chatSubmissions.id, submission.id));
       return;
     }
-    await this.deliverCard(submission, saved, renewStream);
-    await this.db.update(chatSubmissions).set({ deliveryFingerprint: fingerprint, settled: terminal, updatedAt: new Date() }).where(eq(chatSubmissions.id, submission.id));
+    await this.deliverCard(submission, 'reply', saved, renewStream);
+    for (const { task, saved: taskSaved, fingerprint: fp } of taskCards) {
+      const entry = this.slotSaved(submission, `task:${task.id}`) as TaskCardEntry | null;
+      if (fp === entry?.fingerprint && !entry?.transport?.pending) continue;
+      await this.deliverCard(submission, `task:${task.id}`, taskSaved, false);
+      const [current] = await this.db.select({ cards: chatSubmissions.renderedTaskCards }).from(chatSubmissions).where(eq(chatSubmissions.id, submission.id)).limit(1);
+      const cards: TaskCardMap = { ...((current?.cards as TaskCardMap | null) ?? {}) };
+      if (cards[task.id]) cards[task.id] = { ...cards[task.id], fingerprint: fp };
+      await this.db.update(chatSubmissions).set({ renderedTaskCards: cards as unknown as Record<string, Record<string, unknown>> }).where(eq(chatSubmissions.id, submission.id));
+      submission.renderedTaskCards = cards as unknown as Submission['renderedTaskCards'];
+    }
+    await this.db.update(chatSubmissions).set({ deliveryFingerprint: fingerprint, settled: terminal && tasksTerminal, updatedAt: new Date() }).where(eq(chatSubmissions.id, submission.id));
   }
 
-  private async persistCard(submissionId: string, saved: SavedCard, transport: CardTransport): Promise<void> {
-    await this.db.update(chatSubmissions).set({ renderedCard: { ...saved, transport } as unknown as Json }).where(eq(chatSubmissions.id, submissionId));
+  private slotSaved(submission: Submission, slotKey: string): SavedCard | null {
+    if (slotKey === 'reply') return submission.renderedCard as SavedCard | null;
+    const cards = (submission.renderedTaskCards as TaskCardMap | null) ?? {};
+    return cards[slotKey.slice(5)] ?? null;
   }
 
-  private async deliverCard(submission: Submission, saved: SavedCard, renewStream: boolean): Promise<void> {
+  private slotMessageId(submission: Submission, slotKey: string): string | null {
+    if (slotKey === 'reply') return submission.outputMessageId;
+    return (this.slotSaved(submission, slotKey) as TaskCardEntry | null)?.messageId ?? null;
+  }
+
+  private async persistCard(submission: Submission, slotKey: string, saved: SavedCard, transport: CardTransport): Promise<void> {
+    if (slotKey === 'reply') {
+      await this.db.update(chatSubmissions).set({ renderedCard: { ...saved, transport } as unknown as Json }).where(eq(chatSubmissions.id, submission.id));
+      return;
+    }
+    const taskId = slotKey.slice(5);
+    const [current] = await this.db.select({ cards: chatSubmissions.renderedTaskCards }).from(chatSubmissions).where(eq(chatSubmissions.id, submission.id)).limit(1);
+    const cards: TaskCardMap = { ...((current?.cards as TaskCardMap | null) ?? {}) };
+    cards[taskId] = { ...cards[taskId], ...saved, transport };
+    await this.db.update(chatSubmissions).set({ renderedTaskCards: cards as unknown as Record<string, Record<string, unknown>> }).where(eq(chatSubmissions.id, submission.id));
+    submission.renderedTaskCards = cards as unknown as Submission['renderedTaskCards'];
+  }
+
+  private async persistSlotMessageId(submission: Submission, slotKey: string, messageId: string): Promise<void> {
+    if (slotKey === 'reply') {
+      await this.db.update(chatSubmissions).set({ outputMessageId: messageId }).where(eq(chatSubmissions.id, submission.id));
+      submission.outputMessageId = messageId;
+      return;
+    }
+    const taskId = slotKey.slice(5);
+    const [current] = await this.db.select({ cards: chatSubmissions.renderedTaskCards }).from(chatSubmissions).where(eq(chatSubmissions.id, submission.id)).limit(1);
+    const cards: TaskCardMap = { ...((current?.cards as TaskCardMap | null) ?? {}) };
+    if (cards[taskId]) cards[taskId] = { ...cards[taskId], messageId };
+    await this.db.update(chatSubmissions).set({ renderedTaskCards: cards as unknown as Record<string, Record<string, unknown>> }).where(eq(chatSubmissions.id, submission.id));
+    submission.renderedTaskCards = cards as unknown as Submission['renderedTaskCards'];
+  }
+
+  private async deliverCard(submission: Submission, slotKey: string, saved: SavedCard, renewStream: boolean): Promise<void> {
     const client = this.client;
     if (!client) throw new Error('Feishu is disconnected.');
-    let transport = (submission.renderedCard as SavedCard | null)?.transport;
-    let messageId = submission.outputMessageId;
+    let transport = this.slotSaved(submission, slotKey)?.transport;
+    let messageId = this.slotMessageId(submission, slotKey);
     // Historical message cards have no CardKit identity. Do not convert them or send a second reply.
-    if (messageId && !transport) {
+    if (slotKey === 'reply' && messageId && !transport) {
       const reason = '此卡片来自旧版投递方式，请发送新请求以使用新版卡片。';
       await this.recordDelivery(submission.chatId!, `${submission.id}:legacy-card`, 'failed', { operation: 'card.update', messageId }, reason);
       throw new Error(reason);
@@ -506,15 +593,15 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
         if (!result.data?.card_id) { reason = '飞书接受了创建请求，但未返回卡片 ID。'; throw new Error(reason); }
         transport = { cardId: result.data.card_id, sequence: 0, card: saved.card, streamingStartedAt: saved.card.config.streaming_mode ? Date.now() : null };
         // Preserve the entity before any later send or receipt write can be interrupted.
-        await this.persistCard(submission.id, saved, transport);
-        await this.recordDelivery(submission.chatId!, `${submission.id}:entity`, 'done', { operation: 'card.create', cardId: transport.cardId, platform, card: saved.card });
+        await this.persistCard(submission, slotKey, saved, transport);
+        await this.recordDelivery(submission.chatId!, `${submission.id}:${slotKey}:entity`, 'done', { operation: 'card.create', cardId: transport.cardId, platform, card: saved.card });
       } catch (error) {
-        await this.recordDelivery(submission.chatId!, `${submission.id}:entity`, 'failed', { operation: 'card.create', platform, card: saved.card }, reason);
+        await this.recordDelivery(submission.chatId!, `${submission.id}:${slotKey}:entity`, 'failed', { operation: 'card.create', platform, card: saved.card }, reason);
         throw error;
       }
     }
     // Persist identity and action allow-list before sending or updating clickable content.
-    await this.persistCard(submission.id, saved, transport);
+    await this.persistCard(submission, slotKey, saved, transport);
     if (!messageId) {
       let reason = '飞书卡片发送暂时失败，恢复后将继续投递。';
       let platform: { code?: number; message?: string } | null = null;
@@ -522,72 +609,71 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
         const result = await client.im.v1.message.create({ params: { receive_id_type: 'chat_id' }, data: {
           receive_id: submission.chatId!, msg_type: 'interactive',
           content: JSON.stringify({ type: 'card', data: { card_id: transport.cardId } }),
-          uuid: digest(`card:${submission.id}`).slice(0, 32),
+          uuid: digest(`card:${submission.id}:${slotKey}`).slice(0, 32),
         } });
         platform = { code: result.code, message: result.msg };
         if (result.code) { reason = `飞书拒绝发送卡片（${result.code}）：${result.msg ?? ''}`; throw new Error(reason); }
         if (!result.data?.message_id) { reason = '飞书接受了发送请求，但未返回消息 ID。'; throw new Error(reason); }
         messageId = result.data.message_id;
-        await this.db.update(chatSubmissions).set({ outputMessageId: messageId }).where(eq(chatSubmissions.id, submission.id));
-        await this.recordDelivery(submission.chatId!, `${submission.id}:message`, 'done', {
+        await this.persistSlotMessageId(submission, slotKey, messageId);
+        await this.recordDelivery(submission.chatId!, `${submission.id}:${slotKey}:message`, 'done', {
           operation: 'card.send', messageId, cardId: transport.cardId, platform, card: transport.card,
         });
       } catch (error) {
-        await this.recordDelivery(submission.chatId!, `${submission.id}:message`, 'failed', { operation: 'card.send', cardId: transport.cardId, platform, card: transport.card }, reason);
+        await this.recordDelivery(submission.chatId!, `${submission.id}:${slotKey}:message`, 'failed', { operation: 'card.send', cardId: transport.cardId, platform, card: transport.card }, reason);
         throw error;
       }
     }
-    submission.outputMessageId = messageId;
-    await this.flushCardUpdate(submission, saved, transport);
+    await this.flushCardUpdate(submission, slotKey, saved, transport, messageId);
     const desired = saved.card;
     // Close before interaction changes, or explicitly reopen the platform's streaming window.
     if (transport.card.config.streaming_mode && (!desired.config.streaming_mode || renewStream)) {
       const config = { ...transport.card.config, streaming_mode: false };
-      await this.updateCard(submission, saved, transport, 'settings', JSON.stringify({ config }), { ...transport.card, config }, undefined, null);
+      await this.updateCard(submission, slotKey, saved, transport, 'settings', JSON.stringify({ config }), { ...transport.card, config }, undefined, null, messageId);
     }
     const current = transport.card;
     const sameStructure = JSON.stringify(current.header) === JSON.stringify(desired.header)
       && JSON.stringify(current.body.elements.map((element) => [element.element_id, element.tag]))
         === JSON.stringify(desired.body.elements.map((element) => [element.element_id, element.tag]));
     if (!sameStructure) {
-      await this.updateCard(submission, saved, transport, 'card', JSON.stringify(desired), desired, undefined,
-        desired.config.streaming_mode ? transport.streamingStartedAt ?? Date.now() : null);
+      await this.updateCard(submission, slotKey, saved, transport, 'card', JSON.stringify(desired), desired, undefined,
+        desired.config.streaming_mode ? transport.streamingStartedAt ?? Date.now() : null, messageId);
       return;
     }
     if (JSON.stringify(transport.card.config) !== JSON.stringify(desired.config) || renewStream) {
-      await this.updateCard(submission, saved, transport, 'settings', JSON.stringify({ config: desired.config }),
+      await this.updateCard(submission, slotKey, saved, transport, 'settings', JSON.stringify({ config: desired.config }),
         { ...transport.card, config: desired.config }, undefined,
-        desired.config.streaming_mode ? renewStream ? Date.now() : transport.streamingStartedAt ?? Date.now() : null);
+        desired.config.streaming_mode ? renewStream ? Date.now() : transport.streamingStartedAt ?? Date.now() : null, messageId);
     }
     for (const element of desired.body.elements) {
       const previous = transport.card.body.elements.find((item) => item.element_id === element.element_id);
       if (JSON.stringify(previous) === JSON.stringify(element)) continue;
       const next = { ...transport.card, body: { elements: transport.card.body.elements.map((item) => item.element_id === element.element_id ? element : item) } };
       if (element.element_id === 'reply' && desired.config.streaming_mode) {
-        await this.updateCard(submission, saved, transport, 'content', String(element.content), next, 'reply');
+        await this.updateCard(submission, slotKey, saved, transport, 'content', String(element.content), next, 'reply', undefined, messageId);
       } else if (element.element_id === 'details') {
         // Replace only the inner text, preserving the reader's native panel expansion.
         const detail = (element.elements as Json[])[0];
-        await this.updateCard(submission, saved, transport, 'element', JSON.stringify(detail), next, 'task_details');
+        await this.updateCard(submission, slotKey, saved, transport, 'element', JSON.stringify(detail), next, 'task_details', undefined, messageId);
       } else {
-        await this.updateCard(submission, saved, transport, 'element', JSON.stringify(element), next, String(element.element_id));
+        await this.updateCard(submission, slotKey, saved, transport, 'element', JSON.stringify(element), next, String(element.element_id), undefined, messageId);
       }
     }
   }
 
-  private async updateCard(submission: Submission, saved: SavedCard, transport: CardTransport,
+  private async updateCard(submission: Submission, slotKey: string, saved: SavedCard, transport: CardTransport,
     kind: CardUpdate['kind'], data: string, card: FeishuCard, elementId?: string,
-    streamingStartedAt = transport.streamingStartedAt): Promise<void> {
+    streamingStartedAt = transport.streamingStartedAt, messageId: string | null = null): Promise<void> {
     const sequence = transport.sequence + 1;
     transport.sequence = sequence;
     transport.pending = { kind, data, card, elementId, sequence, streamingStartedAt,
-      uuid: digest(`${submission.id}:${transport.cardId}:${sequence}`).slice(0, 32) };
+      uuid: digest(`${submission.id}:${slotKey}:${transport.cardId}:${sequence}`).slice(0, 32) };
     // Save the exact request first. A reconnect retries this UUID, payload and sequence before newer work.
-    await this.persistCard(submission.id, saved, transport);
-    await this.flushCardUpdate(submission, saved, transport);
+    await this.persistCard(submission, slotKey, saved, transport);
+    await this.flushCardUpdate(submission, slotKey, saved, transport, messageId);
   }
 
-  private async flushCardUpdate(submission: Submission, saved: SavedCard, transport: CardTransport): Promise<void> {
+  private async flushCardUpdate(submission: Submission, slotKey: string, saved: SavedCard, transport: CardTransport, messageId: string | null): Promise<void> {
     const pending = transport.pending;
     if (!pending) return;
     const client = this.client;
@@ -598,8 +684,8 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
     let reason = '飞书卡片更新暂时失败，恢复后将继续投递。';
     let platform: { code?: number; msg?: string } | null = null;
     let rejected = false;
-    const key = `${submission.id}:${transport.cardId}:${sequence}`;
-    const payload = { operation: `card.${pending.kind}`, cardId: transport.cardId, messageId: submission.outputMessageId, request: pending };
+    const key = `${submission.id}:${slotKey}:${transport.cardId}:${sequence}`;
+    const payload = { operation: `card.${pending.kind}`, cardId: transport.cardId, messageId, request: pending };
     try {
       const result = pending.kind === 'settings'
         ? await client.cardkit.v1.card.settings({ path, data: { settings: pending.data, sequence, uuid } })
@@ -614,7 +700,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       transport.card = pending.card;
       transport.streamingStartedAt = pending.streamingStartedAt;
       delete transport.pending;
-      await this.persistCard(submission.id, saved, transport);
+      await this.persistCard(submission, slotKey, saved, transport);
     } catch (error) {
       await this.recordDelivery(submission.chatId!, key, 'failed', { ...payload, platform }, reason);
       // A platform rejection is a known non-effect. Keep its sequence consumed locally;
@@ -622,7 +708,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       // Unknown transport outcomes retain the exact pending request for idempotent retry.
       if (rejected) {
         delete transport.pending;
-        await this.persistCard(submission.id, saved, transport);
+        await this.persistCard(submission, slotKey, saved, transport);
       }
       throw error;
     }

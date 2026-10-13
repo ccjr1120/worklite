@@ -30,7 +30,7 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 ## Page and Surface Specifications
 
 - [Home](pages/home/DESIGN.md), including the server-derived first-use sequence
-- [Chat](pages/chat/workspace/DESIGN.md), including direct Web conversation, Channels and full persisted evidence
+- [Chat](pages/chat/workspace/DESIGN.md), including direct Web conversation, Channels, workspace long-term memory management and full persisted evidence
 - Providers: [Model providers and Portkey Gateway](pages/model-providers/DESIGN.md), including the dedicated Codex Account Pool
 - Logs: [Gateway statistics and request logs](pages/logs/DESIGN.md), including the shared time range
 - Workflows: [List](pages/workflows/list/DESIGN.md), [Editor](pages/workflows/editor/DESIGN.md), [Versions](pages/workflows/versions/DESIGN.md)
@@ -89,6 +89,14 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-10-12 - Chat long-term memory
+
+- The [Chat](pages/chat/workspace/DESIGN.md) settings Dialog gains a Memories section listing saved workspace long-term memories with per-entry deletion and a `view=memories` deep link; saving and correcting memories happens in conversation through the protected platform tools.
+
+### 2026-10-10 - Task progress visualization and Planner-decided Developers
+
+- The [Chat](pages/chat/workspace/DESIGN.md) project task disclosure gains a server-derived stage chip and grouped foldable Markdown streaming with on-demand full history; Team task cards show phase and completion percentage, and a settled Chat-dispatched Team Run is reported once by an automatic reply. The [Team](pages/agent-teams/detail/DESIGN.md) configuration removes the Developer instance list and concurrency bound (the Planner decides 1-4 parallel lanes per Run), and the [Run detail](pages/agent-team-runs/detail/DESIGN.md) progress header gains a percentage bar while member output groups deltas per task attempt. [Feishu](surfaces/external-chat/feishu/DESIGN.md) Team cards carry the same phase and percentage.
 
 ### 2026-10-09 - Visible Chat question answers
 
