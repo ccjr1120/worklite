@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentToolCallView, DispatchChatRequest, RunView, WorkflowView } from '@worklite/contracts';
 import { ApiError, api, parseAgentExecutionEvent } from '@/api/client';
-import { chatConversationsQueryKey, useAgentQuery, useChatConversationQuery, useMcpServersQuery, useModelProvidersQuery, useSkillsQuery, useWorkflowsQuery } from '@/api/queries';
+import { chatConversationsQueryKey, useAgentQuery, useChatConversationQuery, useModelProvidersQuery, useWorkflowsQuery } from '@/api/queries';
 import { Conversation, ConversationContent } from '@/components/ai-elements/conversation';
 import { useLocale } from '@/components/locale-provider';
 import { useTheme } from '@/components/theme-provider';
@@ -61,13 +61,11 @@ function ChatWorkspace() {
   const navigate = useNavigate();
   const agentQuery = useAgentQuery(workspaceSlug, CHAT_AGENT_ID);
   const providersQuery = useModelProvidersQuery(workspaceSlug);
-  const mcpServersQuery = useMcpServersQuery(workspaceSlug);
   const workflowsQuery = useWorkflowsQuery(workspaceSlug);
   const { applyAppearancePreference } = useTheme();
   const { locale } = useLocale();
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(() => typeof locationSearch.conversation === 'string' ? locationSearch.conversation : readSelectedConversation());
   const conversationQuery = useChatConversationQuery(selectedConversationId);
-  const skillsQuery = useSkillsQuery(workspaceSlug);
   const [recordsOpen, setRecordsOpen] = useState(false);
   const pendingDispatch = useRef<{ signature: string; id: string } | null>(null);
   const dispatchRequest = useCallback(async (input: Omit<DispatchChatRequest, 'submissionId'>) => {
@@ -93,9 +91,7 @@ function ChatWorkspace() {
   const [settingsOpen, setSettingsOpen] = useState(locationSearch.view === 'channels' || locationSearch.view === 'configuration');
   const [settingsSection, setSettingsSection] = useState<'channels' | 'configuration'>(locationSearch.view === 'channels' || locationSearch.view === 'configuration' ? locationSearch.view : 'channels');
   const [configSelection, setConfigSelection] = useState('');
-  const [selectedMcpServerIds, setSelectedMcpServerIds] = useState<string[]>([]);
   const [configSaving, setConfigSaving] = useState(false);
-  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [extensionPrompt, setExtensionPrompt] = useState('');
   const [configError, setConfigError] = useState('');
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -122,12 +118,10 @@ function ChatWorkspace() {
   useEffect(() => {
     if (!agentQuery.data) return;
     setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
-    setSelectedMcpServerIds(agentQuery.data.mcpServers.map((server) => server.id));
-    setSelectedSkillIds(agentQuery.data.skills.map((skill) => skill.id));
     setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
   }, [agentQuery.data]);
 
-  const saveConfiguration = async (selection: string, mcpServerIds: string[], skillIds = selectedSkillIds, prompt = extensionPrompt) => {
+  const saveConfiguration = async (selection: string, prompt = extensionPrompt) => {
     if (configSaving) return;
     const separator = selection.indexOf('::');
     setConfigSaving(true);
@@ -135,17 +129,13 @@ function ChatWorkspace() {
     try {
       const saved = await api.updateAgent(workspaceSlug, CHAT_AGENT_ID, {
         providerId: separator >= 0 ? selection.slice(0, separator) : null,
-        model: separator >= 0 ? selection.slice(separator + 2) : '', mcpServerIds, skillIds,
+        model: separator >= 0 ? selection.slice(separator + 2) : '',
         extensionPrompt: prompt, expectedConfigurationRevision: agentQuery.data?.chatConfiguration?.revision,
       });
       queryClient.setQueryData(['agent', CHAT_AGENT_ID], saved);
     } catch (cause) {
       setConfigError(apiErrorMessage(cause, t('assistant:configuration.saveFailed')));
-      if (agentQuery.data) {
-        setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
-        setSelectedMcpServerIds(agentQuery.data.mcpServers.map((server) => server.id));
-        setSelectedSkillIds(agentQuery.data.skills.map((skill) => skill.id));
-      }
+      if (agentQuery.data) setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
     } finally { setConfigSaving(false); }
   };
 
@@ -727,7 +717,7 @@ function ChatWorkspace() {
             : visibleExecution?.status === 'running' ? { key: 'running', label: t('assistant:status.running') } : null;
   const canCancel = Boolean(workflowRunning || ((running || waitingForInput || activeProjectTasks) && !visibleExecution?.pendingQuestion?.recovery));
   const composerAvailable = Boolean(isConfigured || eligibleWorkflows.length > 0 || canCancel);
-  const composerLoading = agentQuery.isLoading || workflowsQuery.isLoading || mcpServersQuery.isLoading;
+  const composerLoading = agentQuery.isLoading || workflowsQuery.isLoading;
   const stopTarget = running || workflowRunning;
   const submitDisabled = stopTarget ? cancelling : busy || cancelling || (!draft.trim() && !selectedWorkflow && !stopTarget) || (!selectedWorkflow && !stopTarget && !isConfigured);
 
@@ -795,7 +785,7 @@ function ChatWorkspace() {
       </div>
       <Sheet open={switcherOpen} onOpenChange={setSwitcherOpen}><SheetContent side="left" className="flex w-80 flex-col p-0 pt-10 sm:max-w-80"><SheetHeader className="sr-only"><SheetTitle>{t('assistant:history.title')}</SheetTitle></SheetHeader><ConversationList selectedId={selectedConversationId} onSelect={selectConversation} onNew={() => selectConversation(null)} /></SheetContent></Sheet>
       <Dialog open={settingsOpen} onOpenChange={handleSettingsOpenChange}>
-        <DialogContent className="flex max-h-[85vh] w-[calc(100%-2rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0">
+        <DialogContent className="flex h-[min(40rem,85vh)] w-[calc(100%-2rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0">
           <DialogHeader className="px-6 pt-6">
             <DialogTitle>{t('assistant:settings.title')}</DialogTitle>
             <DialogDescription>{t('assistant:settings.description')}</DialogDescription>
@@ -807,18 +797,16 @@ function ChatWorkspace() {
                 <TabsTrigger value="configuration">{t('assistant:settings.configuration')}</TabsTrigger>
               </TabsList>
             </div>
-            <TabsContent value="channels" className="min-h-0 flex-1 overflow-y-auto">
+            <TabsContent value="channels" className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
               <ChannelConfiguration onOpenWeb={() => selectConversation(null)} />
             </TabsContent>
-            <TabsContent value="configuration" className="min-h-0 flex-1 overflow-y-auto">
-              <Configuration providers={providersQuery.data ?? []} mcpServers={mcpServersQuery.data ?? []} selection={configSelection}
-                onSelectionChange={(value) => { setConfigSelection(value); void saveConfiguration(value, selectedMcpServerIds); }}
-                selectedMcpServerIds={selectedMcpServerIds} onMcpServersChange={(ids) => { setSelectedMcpServerIds(ids); void saveConfiguration(configSelection, ids); }}
-                skills={skillsQuery.data ?? []} selectedSkillIds={selectedSkillIds} onSkillsChange={(ids) => { setSelectedSkillIds(ids); void saveConfiguration(configSelection, selectedMcpServerIds, ids); }}
-                extensionPrompt={extensionPrompt} onPromptChange={setExtensionPrompt} onPromptSave={() => { if (extensionPrompt !== (agentQuery.data?.chatConfiguration?.extensionPrompt ?? '')) void saveConfiguration(configSelection, selectedMcpServerIds); }}
-                saving={configSaving} error={configError} loading={agentQuery.isLoading || providersQuery.isLoading || skillsQuery.isLoading || mcpServersQuery.isLoading}
-                loadFailed={agentQuery.isError || providersQuery.isError || skillsQuery.isError || mcpServersQuery.isError}
-                onReload={() => { void agentQuery.refetch(); void providersQuery.refetch(); void skillsQuery.refetch(); void mcpServersQuery.refetch(); }} />
+            <TabsContent value="configuration" className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+              <Configuration providers={providersQuery.data ?? []} selection={configSelection}
+                onSelectionChange={(value) => { setConfigSelection(value); void saveConfiguration(value); }}
+                extensionPrompt={extensionPrompt} onPromptChange={setExtensionPrompt} onPromptSave={() => { if (extensionPrompt !== (agentQuery.data?.chatConfiguration?.extensionPrompt ?? '')) void saveConfiguration(configSelection); }}
+                saving={configSaving} error={configError} loading={agentQuery.isLoading || providersQuery.isLoading}
+                loadFailed={agentQuery.isError || providersQuery.isError}
+                onReload={() => { void agentQuery.refetch(); void providersQuery.refetch(); }} />
             </TabsContent>
           </Tabs>
         </DialogContent>

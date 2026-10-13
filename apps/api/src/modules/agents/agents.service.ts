@@ -8,6 +8,7 @@ import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 
 const WORKLITE_PLATFORM_SKILL_ID = 'sk_worklite_platform';
+const CHAT_AGENT_ID = 'agt_system_helper_chat';
 const CODEX_CLI_AGENT_ID = 'agt_codex_cli_chat';
 const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392);
 const GATEWAY_PROVIDER_URL = `http://127.0.0.1:${GATEWAY_PORT}/worklite/providers`;
@@ -50,7 +51,7 @@ export class AgentsService {
     const assignments = await this.loadAssignments(team.id, [row.agent.id]);
     const [latest] = await this.db.select({ id: agentVersions.id, version: agentVersions.version }).from(agentVersions).where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, team.id))).orderBy(desc(agentVersions.version)).limit(1);
     const view = this.toView(row.agent, workspaceSlug, row.agent.providerId ? gatewayNames.get(row.agent.providerId) ?? null : null, assignments, latest);
-    if (agentId === 'agt_system_helper_chat') {
+    if (agentId === CHAT_AGENT_ID) {
       const [configuration] = await this.db.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
       if (configuration) view.chatConfiguration = { revision: configuration.revision, extensionPrompt: configuration.extensionPrompt, defaultExecutor: configuration.defaultExecutor };
     }
@@ -131,8 +132,10 @@ export class AgentsService {
 
     if (existing.kind === 'system') {
 
-      const isChat = existing.id === 'agt_system_helper_chat';
-      const fields = ['providerId', 'model', 'mcpServerIds', ...(isChat ? ['skillIds', 'extensionPrompt', 'defaultExecutor', 'expectedConfigurationRevision'] : [])];
+      const isChat = existing.id === CHAT_AGENT_ID;
+      // Chat configuration has no Skill/MCP selection; its legacy assignment rows are retained but never rewritten.
+      const fields = ['providerId', 'model', ...(isChat ? ['extensionPrompt', 'defaultExecutor', 'expectedConfigurationRevision'] : ['mcpServerIds'])];
+      if (isChat && ('skillIds' in input || 'mcpServerIds' in input)) throw new BadRequestException('Chat configuration no longer accepts Skill or MCP server selections.');
       if (Object.keys(input).some((key) => !fields.includes(key))) throw new BadRequestException('Unsupported built-in Agent configuration field.');
       const nextProviderId = input.providerId === undefined ? existing.providerId : input.providerId;
       const provider = await this.validateProvider(team.id, nextProviderId);
@@ -141,8 +144,7 @@ export class AgentsService {
       const model = provider ? requestedModel || provider.models[0] || '' : '';
       if (input.extensionPrompt !== undefined && typeof input.extensionPrompt !== 'string') throw new BadRequestException('An extension prompt must be text.');
       if (input.defaultExecutor !== undefined && input.defaultExecutor !== 'claude' && input.defaultExecutor !== 'codex') throw new BadRequestException('The default executor must be claude or codex.');
-      const selectedSkills = input.skillIds?.filter((id) => id !== WORKLITE_PLATFORM_SKILL_ID);
-      const selections = await this.validateAssignments(team.id, selectedSkills, input.mcpServerIds, true);
+      const selections = await this.validateAssignments(team.id, undefined, input.mcpServerIds, true);
       this.db.transaction((transaction) => {
         const [previous] = transaction.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1).all();
         if (isChat && input.expectedConfigurationRevision !== undefined && input.expectedConfigurationRevision !== previous?.revision) throw new ConflictException('Chat configuration changed; inspect the current revision before updating.');
@@ -151,17 +153,13 @@ export class AgentsService {
           transaction.delete(agentMcpServers).where(eq(agentMcpServers.agentId, agentId)).run();
           if (selections.mcpServerIds.length) transaction.insert(agentMcpServers).values(selections.mcpServerIds.map((mcpServerId) => ({ agentId, mcpServerId }))).run();
         }
-        if (isChat && selections.skillIds !== undefined) {
-          transaction.delete(agentSkills).where(eq(agentSkills.agentId, agentId)).run();
-          transaction.insert(agentSkills).values([...selections.skillIds, WORKLITE_PLATFORM_SKILL_ID].map((skillId) => ({ agentId, skillId }))).run();
-        }
         if (isChat) transaction.insert(chatConfigurations).values({
           workspaceId: team.id, revision: (previous?.revision ?? 0) + 1,
           extensionPrompt: input.extensionPrompt === undefined ? previous?.extensionPrompt ?? '' : input.extensionPrompt,
           defaultExecutor: input.defaultExecutor ?? previous?.defaultExecutor ?? 'claude',
           providerId: nextProviderId ?? null, model,
-          skillIds: transaction.select({ id: agentSkills.skillId }).from(agentSkills).where(eq(agentSkills.agentId, agentId)).all().map(({ id }) => id),
-          mcpServerIds: transaction.select({ id: agentMcpServers.mcpServerId }).from(agentMcpServers).where(eq(agentMcpServers.agentId, agentId)).all().map(({ id }) => id),
+          skillIds: [WORKLITE_PLATFORM_SKILL_ID],
+          mcpServerIds: [],
         }).run();
       });
       return this.get(request, workspaceSlug, agentId);
@@ -299,8 +297,9 @@ export class AgentsService {
       model: row.model,
       providerId: row.providerId,
       providerName,
-      skills: assignments.skillsByAgent.get(row.id) ?? [],
-      mcpServers: assignments.mcpServersByAgent.get(row.id) ?? [],
+      // Chat exposes only its protected platform Skill; legacy Chat Skill/MCP assignment rows are not shown.
+      skills: (assignments.skillsByAgent.get(row.id) ?? []).filter((skill) => row.id !== CHAT_AGENT_ID || skill.id === WORKLITE_PLATFORM_SKILL_ID),
+      mcpServers: row.id === CHAT_AGENT_ID ? [] : assignments.mcpServersByAgent.get(row.id) ?? [],
       version: 'draft',
       latestVersionId: latestVersion?.id ?? null,
       latestVersion: latestVersion?.version ?? null,

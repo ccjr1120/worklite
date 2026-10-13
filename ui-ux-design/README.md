@@ -90,6 +90,10 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-10-13 - Stable Chat settings Dialog
+
+- The [Chat](pages/chat/workspace/DESIGN.md) settings Dialog keeps one fixed height across its Channels and Configuration sections and scrolls section content internally with a stable scrollbar gutter, so switching sections no longer resizes or shifts the Dialog. Configuration no longer offers Skill or MCP server selection; its copy keys are removed. No new token.
+
 ### 2026-10-09 - Visible Chat question answers
 
 - The [Chat](pages/chat/workspace/DESIGN.md) transcript keeps answered questions as a question line plus a user answer message, shows a submitted answer immediately, and restores it to the composer when it is rejected. No new token or copy key.
