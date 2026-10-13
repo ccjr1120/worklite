@@ -145,7 +145,7 @@ function appendCommandEvent(events: CommandExecutionEvent[], event: CommandExecu
   return [...events, event].sort((left, right) => left.sequence - right.sequence);
 }
 
-function ContentDisclosure({ summary, content }: { summary: string; content: string }) {
+function ContentDisclosure({ summary, content, markdown = false }: { summary: string; content: string; markdown?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -156,9 +156,15 @@ function ContentDisclosure({ summary, content }: { summary: string; content: str
         </Button>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <pre className="mt-2 max-h-96 overflow-auto rounded-md border border-border bg-surface-subtle p-3 font-mono text-xs whitespace-pre-wrap break-words">
-          {content}
-        </pre>
+        {markdown ? (
+          <div className="mt-2 max-h-96 overflow-auto rounded-md border border-border bg-surface-subtle p-3">
+            <StreamingMarkdown content={content} className="text-xs leading-5" />
+          </div>
+        ) : (
+          <pre className="mt-2 max-h-96 overflow-auto rounded-md border border-border bg-surface-subtle p-3 font-mono text-xs whitespace-pre-wrap break-words">
+            {content}
+          </pre>
+        )}
       </CollapsibleContent>
     </Collapsible>
   );
@@ -254,7 +260,7 @@ function PendingInputPanel({
   return (
     <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby={`agent-team-question-title-${pendingInput.id}`}>
       <h2 id={`agent-team-question-title-${pendingInput.id}`} className="text-sm font-semibold">{t('input.title')}</h2>
-      <p className="mt-2 text-[13px] whitespace-pre-wrap break-words">{pendingInput.question}</p>
+      <StreamingMarkdown content={pendingInput.question} className="mt-2 text-[13px]" />
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
         {owner ? <span>{t(ROLE_LABELS[owner.role])}</span> : null}
         {owner ? <span className="font-mono text-xs break-all">{owner.taskKey}</span> : null}
@@ -329,7 +335,7 @@ function OperationRecoveryPanel({
   return (
     <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby={`operation-recovery-${operation.operationKey}`}>
       <h2 id={`operation-recovery-${operation.operationKey}`} className="text-sm font-semibold">{t('recovery.title')}</h2>
-      {pendingInput ? <p className="mt-2 text-[13px] whitespace-pre-wrap break-words">{pendingInput.question}</p> : null}
+      {pendingInput ? <StreamingMarkdown content={pendingInput.question} className="mt-2 text-[13px]" /> : null}
       <dl className="mt-3 grid gap-3 text-[13px] sm:grid-cols-2">
         <div>
           <dt className="text-muted-foreground">{t('recovery.operation')}</dt>
@@ -421,7 +427,7 @@ function TaskPanel({
         <span className="text-[13px] text-muted-foreground">{t('tasks.attempt', { count: task.attemptIndex })}</span>
       </div>
       {task.progressText && (task.status === 'running' || task.status === 'waiting_for_input') ? (
-        <p className="mt-2 text-[13px] text-muted-foreground whitespace-pre-wrap break-words">{task.progressText}</p>
+        <StreamingMarkdown content={task.progressText} className="mt-2 text-[13px] text-muted-foreground" />
       ) : null}
       {task.error ? <p className="mt-2 text-[13px] text-danger" role="alert">{task.error}</p> : null}
       {completedResult ? (
@@ -935,7 +941,7 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
                       <dd className="mt-1 font-mono break-all">{document.upstreamDocumentKeys.length === 0 ? t('documents.noUpstreamKeys') : document.upstreamDocumentKeys.join(', ')}</dd>
                     </div>
                   </dl>
-                  <div className="mt-3"><ContentDisclosure summary={t('documents.content')} content={document.content} /></div>
+                  <div className="mt-3"><ContentDisclosure summary={t('documents.content')} content={document.content} markdown /></div>
                 </article>
               ))}
             </div>
@@ -954,7 +960,7 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
               <div className="mt-3 space-y-4 text-[13px]">
                 <div>
                   <h3 className="text-xs font-medium text-muted-foreground">{t('outcome.summary')}</h3>
-                  <p className="mt-1 whitespace-pre-wrap break-words">{run.outcome.summary}</p>
+                  <StreamingMarkdown content={run.outcome.summary} className="mt-1 text-[13px]" />
                 </div>
                 <div>
                   <h3 className="text-xs font-medium text-muted-foreground">{t('outcome.unresolved')}</h3>

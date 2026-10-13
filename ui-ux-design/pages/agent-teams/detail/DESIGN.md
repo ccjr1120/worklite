@@ -33,7 +33,7 @@ Saving Team configuration is a separate goal with one Save action. Editing confi
 
 ## Layout
 
-The page uses the full Workspace page width with a `1200px` maximum and two lightweight top tabs. The Conversation tab has a compact Team header, a chronological transcript with its own bounded scroll region, and a persistent composer at the bottom. Member messages are left-aligned and user messages right-aligned; speaker identity, alignment, and text cues distinguish speakers without colored message backgrounds. A new-task composer has a structured removable `@Coordinator` token inside the same bordered surface as its multiline input and Send control; pending answers omit the token because their destination is already known. The conversation uses its full width while no contextual Run, queued intake, recovery, or selected document needs an inspector. Pending intake options and Run questions render in the transcript beside their answers.
+The page uses the full Workspace page width with a `1200px` maximum and two lightweight top tabs. The Conversation tab has a compact Team header, a chronological transcript with its own bounded scroll region, and a persistent composer at the bottom. Member messages are left-aligned and user messages right-aligned; speaker identity, alignment, and text cues distinguish speakers without colored message backgrounds. A new-task composer has a structured removable `@Coordinator` token inside the same bordered surface as its multiline input and Send control; pending answers omit the token because their destination is already known. The conversation uses its full width while no contextual Run, queued intake, recovery, or selected document needs an inspector. Pending intake options and Run questions render in the transcript beside their answers. Coordinator and member questions, inspector question panels and the document viewer render through the shared safe Markdown renderer; user-authored messages stay plain text.
 
 When active Run, queued intake, operation recovery, or a selected document needs supporting controls, the desktop transcript shares the page with a contextual inspector. Below `1024px`, the transcript and inspector stack. The document viewer becomes an overlay below `768px`. The active Run inspector card summarizes parallel progress: current phase, server-derived completion percentage, completed and total development assignments, active Developers, next step, and the number of pending questions. Pending questions beyond the earliest render as inspector panels with their own answer inputs. The Configuration tab keeps process metadata and one Save action above a compact list of six roles. Each role shows its provider-grouped model selector in the list row; its instructions, entry points, Skills, MCP servers, and tools are disclosed only when that role's advanced settings are expanded. The Developer role additionally shows its executor selector; runtime parallelism is decided by the Planner per Run and is not configured here. The role list and its controls stack at narrow widths.
 
@@ -198,6 +198,8 @@ The tabs, mention token, transcript, composer, role disclosures, provider-groupe
 
 ## Coverage Status
 
+2026-10-13 Markdown for agent-authored text: source inspection found Coordinator and member questions, inspector question panels and the document viewer rendered as plain or preformatted text. They now use the shared `StreamingMarkdown` renderer (HTML skipped) with existing semantic tokens in both themes; user messages remain plain. Web type check and lint were run as requested; no browser verification.
+
 2026-10-10 source comparison for orchestration v3 and progress: the Developer role section carries only its executor selector (the extra-instance list and concurrency bound are removed because the Planner decides 1-4 parallel lanes per Run), and the active Run inspector card adds the server-derived completion percentage. No browser, runtime, accessibility-tool, type check or real-Run verification was authorized or performed.
 
 2026-10-10 source comparison: the Developer role section carries an executor selector, up to three extra Developer instances with per-instance label, executor, model and advanced fields, and a 1–4 concurrency bound shown only when instances exist; load and save preserve executor, instances and concurrency. The active Run inspector card shows the progress summary, multiple pending questions gain their own answer panels, and multiple retryable failures list one retry control per task key with Developer attribution. Web type check (tsc --noEmit and locale key check) passed; no browser, runtime, accessibility-tool or real-Run verification was authorized or performed.
@@ -209,6 +211,10 @@ The tabs, mention token, transcript, composer, role disclosures, provider-groupe
 Source-level audit: 2026-10-03. Differences found: none in route and tab state, default Coordinator routing, conditional contextual inspector, responsive stacking, provider-grouped model selectors, role-local advanced settings, save and error feedback, copy inventory, semantic tokens, or keyboard access. Only source review occurred; no browser, runtime, accessibility-tool, or real-Run verification was performed.
 
 ## Changelog
+
+### 2026-10-13 - Markdown for agent-authored text
+
+- Rendered Coordinator and member questions, inspector question panels and the document viewer through the shared safe Markdown renderer.
 
 ### 2026-10-10 - Planner-decided parallelism and progress percentage
 

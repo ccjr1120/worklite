@@ -31,7 +31,7 @@ Understand and continue the current run. Reading costs no action: the persisted 
 
 ## Layout
 
-The page uses the full Workspace page width with a `1200px` maximum. The heading and execution controls are followed by a progress header naming the current phase, a thin progress bar with the server-derived completion percentage (terminal-only 100), next step, completed and total development assignments, active Developers, and the waiting reason, then immutable TeamVersion metadata, mode, intent, project directory, command grants, and scope revision. The main desktop grid places active work — pending input or recovery, then task attempts — in a wider primary column and documents, operations, and criterion assessments in a supporting column. Development task attempts carry their Developer and assignment title beside the task key and show the attempt's latest public progress text while it runs; test authoring, test execution, and review attempts remain single tasks after the fan-in. Pending input panels name their owning task attempt. The live member output occupies a fixed reading column with its own bounded scroll region and a lane filter that scopes it to one Developer lane; deltas are grouped per task attempt into foldable sections — the active attempt stays expanded, settled attempts fold — with text rendered as Markdown and tool or command activity collapsed to compact rows, instead of one raw preformatted stream. Columns stack below `1024px`. Documents and command evidence use disclosures with bounded preformatted regions rather than expanding the page.
+The page uses the full Workspace page width with a `1200px` maximum. The heading and execution controls are followed by a progress header naming the current phase, a thin progress bar with the server-derived completion percentage (terminal-only 100), next step, completed and total development assignments, active Developers, and the waiting reason, then immutable TeamVersion metadata, mode, intent, project directory, command grants, and scope revision. The main desktop grid places active work — pending input or recovery, then task attempts — in a wider primary column and documents, operations, and criterion assessments in a supporting column. Development task attempts carry their Developer and assignment title beside the task key and show the attempt's latest public progress text while it runs; test authoring, test execution, and review attempts remain single tasks after the fan-in. Pending input panels name their owning task attempt. The live member output occupies a fixed reading column with its own bounded scroll region and a lane filter that scopes it to one Developer lane; deltas are grouped per task attempt into foldable sections — the active attempt stays expanded, settled attempts fold — with text rendered as Markdown and tool or command activity collapsed to compact rows, instead of one raw preformatted stream. Agent-authored text — task progress text, pending input and recovery questions, the outcome summary and Team document bodies — renders through the shared safe Markdown renderer; result JSON and command output stay preformatted. Columns stack below `1024px`. Documents and command evidence use disclosures with bounded regions rather than expanding the page.
 
 ## Interaction Contract
 
@@ -180,6 +180,8 @@ The heading hierarchy moves from Run title to section titles. Controls are nativ
 
 ## Coverage Status
 
+2026-10-13 Markdown for agent-authored text: source inspection found task progress text, pending input and recovery questions, the outcome summary and document bodies rendered as plain preformatted text. They now use the shared `StreamingMarkdown` renderer (HTML skipped) with existing semantic tokens in both themes; result JSON and command output remain preformatted. Web type check and lint were run as requested; no browser verification.
+
 2026-10-10 source comparison for progress visualization: the progress header adds a thin progress bar with the server-derived completion percentage, and live member output groups deltas per task attempt into foldable Markdown sections (active attempt expanded, tool/command activity as compact rows) while retaining the lane filter. No browser, runtime, accessibility-tool, type check or real-Run verification was authorized or performed.
 
 2026-10-10 source comparison: the progress header follows the heading and controls and names phase, next step, assignment completion, active Developers and waiting reason; development attempts show Developer, assignment title and latest progressText; pending input panels attribute their owning attempt; a lane filter scopes live member output when more than one lane exists. Web type check (tsc --noEmit and locale key check) passed; no browser, runtime, accessibility-tool or real-Run verification was authorized or performed.
@@ -191,6 +193,10 @@ The heading hierarchy moves from Run title to section titles. Controls are nativ
 Source-level audit: 2026-10-03. The source selects the Conversation tab and `openConversation` label when `run.originatingConversationId` is present; direct-origin Runs return to the Configuration tab with `openTeam`. No other difference was found in the source-level comparison of route, observation, mutation, replay, evidence, copy, token, responsive, and accessibility structure. Only source review occurred; no browser, accessibility-tool, runtime, acceptance, or real-Run verification was performed.
 
 ## Changelog
+
+### 2026-10-13 - Markdown for agent-authored text
+
+- Rendered task progress text, pending input and recovery questions, the outcome summary and document bodies through the shared safe Markdown renderer.
 
 ### 2026-10-10 - Progress percentage and readable streaming output
 

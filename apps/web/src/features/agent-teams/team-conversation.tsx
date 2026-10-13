@@ -25,6 +25,7 @@ import { agentTeamConversationQueryKey, useAgentTeamConversationQuery, useAgentT
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
+import { StreamingMarkdown } from '@/components/ai/streaming-markdown';
 import { StatusBadge, toStatusKey } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
@@ -138,7 +139,7 @@ function MessageItem({
     case 'coordinator_question':
       body = (
         <div className="min-w-0 space-y-3">
-          <p className="whitespace-pre-wrap break-words">{message.text}</p>
+          <StreamingMarkdown content={message.text} className="text-[13px]" />
           {message.options.length > 0 ? (
             <div className="flex flex-wrap gap-2" role="group" aria-label={message.text}>
               {message.options.map((option) => (
@@ -159,7 +160,7 @@ function MessageItem({
       );
       break;
     case 'member_question':
-      body = <p className="min-w-0 whitespace-pre-wrap break-words">{message.text}</p>;
+      body = <StreamingMarkdown content={message.text} className="text-[13px]" />;
       break;
     case 'status':
       body = <p className="min-w-0 whitespace-pre-wrap break-words">{message.text}</p>;
@@ -276,7 +277,7 @@ function DocumentViewer({ documentId, onClose }: { documentId: string; onClose: 
             onAction={() => void documentQuery.refetch()}
           />
         ) : (
-          <pre className="min-w-0 font-mono text-xs whitespace-pre-wrap break-words">{documentQuery.data?.content}</pre>
+          <StreamingMarkdown content={documentQuery.data?.content ?? ''} className="text-xs leading-5" />
         )}
       </div>
     </section>
@@ -321,7 +322,7 @@ function PendingQuestionPanel({
     <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby={`agent-team-extra-question-${input.pendingInputId}`}>
       <h2 id={`agent-team-extra-question-${input.pendingInputId}`} className="text-sm font-semibold">{t('input.title')}</h2>
       {attribution ? <p className="mt-1 text-xs text-muted-foreground">{attribution}</p> : null}
-      <p className="mt-2 text-[13px] whitespace-pre-wrap break-words">{input.question}</p>
+      <StreamingMarkdown content={input.question} className="mt-2 text-[13px]" />
       <form className="mt-3 space-y-3" onSubmit={submit}>
         <Field label={t('input.answer')} htmlFor={`agent-team-extra-answer-${input.pendingInputId}`}>
           <Textarea
@@ -792,7 +793,7 @@ export function TeamConversation({ teamId }: { teamId: string }) {
         {pendingInput?.kind === 'operation_recovery' ? (
           <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-conversation-recovery">
             <h2 id="agent-team-conversation-recovery" className="text-sm font-semibold">{t('recovery.title')}</h2>
-            <p className="mt-2 text-[13px] whitespace-pre-wrap break-words">{pendingInput.question}</p>
+            <StreamingMarkdown content={pendingInput.question} className="mt-2 text-[13px]" />
             <div className="mt-3">
               <Field label={t('recovery.decision')} htmlFor="agent-team-conversation-recovery-decision">
                 <Select value={recoveryDecision} onValueChange={(value) => setRecoveryDecision(value as RecoveryDecision)}>

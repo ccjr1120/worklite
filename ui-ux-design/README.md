@@ -90,6 +90,10 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-10-13 - Markdown for agent-authored card and Team text
+
+- The [Run detail](pages/agent-team-runs/detail/DESIGN.md) task progress text, questions, outcome summary and documents, the [Team](pages/agent-teams/detail/DESIGN.md) conversation questions and document viewer, and the [Chat](pages/chat/workspace/DESIGN.md) project task question render through the shared safe Markdown renderer. No new token.
+
 ### 2026-10-13 - Chat image attachments
 
 - The [Chat](pages/chat/workspace/DESIGN.md) transcript renders attachment images inline and shows an expired placeholder for missing or expired ones. Adds the `assistant:attachment.expired` copy key; no new token.

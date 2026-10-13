@@ -134,6 +134,8 @@ The settings control, Dialog heading, internal section tabs, history controls, i
 
 ## Coverage Status
 
+2026-10-13 project task question: source inspection found the inline project task question rendered as plain text while progress and result already used Markdown. It now uses the shared Markdown renderer; the transcript reply path is unchanged. Web type check and lint were run as requested; no browser verification.
+
 2026-10-13 settings Dialog ordering and grouping: source inspection found the tab order Channels, Configuration, Memories with Channels as the default section, the two executor default-model Selects as separate top-level fields, and Web listed as a selectable channel with a description and an open-conversation action. Configuration is now first and the default section opened by the settings icon, the executor Selects share one Executors fieldset, and the Channels list omits Web (`assistant:channels.webDescription` / `openWeb` removed, `assistant:configuration.executors` added). Existing tokens and controls keep both themes unchanged. Only the Web `tsc --noEmit` and locale key check are run; no browser interaction, build or test suite.
 
 2026-10-13 image attachments: source inspection found Markdown images rendered by the renderer's default image component, which shows an English “Image not available” fallback and a hover download control, and no server channel for images, so executors could only report local paths. The implementation adds the attachment channel and replaces the image component with the bounded inline image and the dual-theme expired placeholder. The user authorized the type check, unit tests and build; browser appearance was not checked.
@@ -190,6 +192,7 @@ Source comparison 2026-10-04: the old embedded surface supports persisted messag
 
 ### 2026-10-13
 
+- Rendered the inline project task question through the shared Markdown renderer.
 - Ordered the settings Dialog tabs Configuration, Channels, Memories with Configuration as the default section, grouped the Claude Code and Codex default models into one Executors block, and removed Web from the Channels list.
 - Capped the history list at the 15 most recent conversations and removed the load-more control; search and channel filters still query all server history.
 - Rendered attachment images inline in replies and task output, with an “图片已过期” placeholder for expired or missing attachments, using existing semantic tokens in both themes.

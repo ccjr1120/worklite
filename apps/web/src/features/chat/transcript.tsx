@@ -517,7 +517,7 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
       </button>
       {pendingQuestion ? (
         <div className="space-y-2 border-t border-border px-3 py-2.5">
-          <p className="whitespace-pre-wrap break-words text-[13px] font-medium">{pendingQuestion.question}</p>
+          <MessageResponse content={pendingQuestion.question} enabled className="text-[13px] font-medium" />
           <Textarea
             value={answerDraft}
             onChange={(event) => setAnswerDraft(event.target.value)}
