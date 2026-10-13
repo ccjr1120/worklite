@@ -23,6 +23,8 @@
 - `apps/web/src/features/chat/channel-configuration.tsx`
 - `apps/web/src/features/chat/task-messages.tsx`
 - `apps/api/src/modules/agents/chat-conversations.service.ts`
+- `apps/web/src/components/ai/streaming-markdown-view.tsx`
+- `apps/api/src/modules/agents/chat-attachments.service.ts`
 
 ## Purpose
 
@@ -58,6 +60,7 @@ The Dialog uses internal Channels and Configuration sections. Channels owns the 
 - Live observation: keep the transcript, composer, expanded tool rows and reader scroll mounted during background updates. One SSE connection observes both running and waiting states; initial connection starts at the latest snapshot and following deltas. Older snapshots cannot roll back current content, and repeated event delivery cannot append a delta twice.
 - Independent project task: keep progress, result and full execution evidence in the originating conversation. Reuse the existing tool disclosure and answer region. The executor starts directly from the requested project task without a WorkLite proposal confirmation or command form; Team developer uses the same executors. An interrupted task fails without automatic replay. Stop cancels the task; uncertainty retains a visible recovery question. Ordinary dialogue and both themes retain their existing layout.
 - Background project task: once a project task starts, its turn settles and the composer sends immediately instead of queueing, so the user can keep talking while the task runs. The execution SSE stays connected while any task of the conversation is active, and the task disclosure plus pinned bar keep updating. A live task disclosure shows one secondary compact “取消任务” action. A task question renders inside its own disclosure as the question text, an accessible textarea and a “回答” action; answers stay control-local with spinner and inline error, and the user may also answer in ordinary conversation. While the turn is settled but a task is active, the composer shows the existing square Stop control beside Send; activating it cancels every active task of the conversation through the same cancellation flow. When a task settles or asks a question, an automatic assistant reply reports it in the transcript without a user message. The conversation list treats a conversation with an active task as In progress.
+- Image attachments: a Markdown image in an assistant reply, task progress text or task result renders inline inside the shared Markdown renderer, bounded to the reading column width and a 24rem height with rounded corners and a `border` outline. Images load lazily, carry the Markdown description as their accessible name, and add no control. When an attachment is missing or expired, the image is replaced by a compact inline placeholder on `surface-subtle` with a `border` outline, an image-off icon and the state text “图片已过期”, so the cue is not color alone. Both themes use the same semantic tokens; no new token is introduced.
 - Project task evidence disclosure: expansion is one inspection action. The primary expanded content is structured task data; raw JSON remains a separate secondary disclosure and is serialized only when opened. The task view shows the latest 20 executor activities with phase counts; a retained historical operation fetches its complete journal result on demand. Long lists remain bounded without replacing or truncating the authoritative raw record.
 
 - Cancel: use the existing cancellation API once, without a confirmation dialog. Running turns use the square control; ordinary waiting turns retain Send and expose one adjacent Cancel. The shared Send/Stop primitive composes its own click with the Tooltip-trigger click; forwarded wrapper props cannot overwrite cancellation. The control shows a spinner and “取消中” immediately and prevents duplicate cancellation with its own cancelling state. An in-flight send or answer cannot disable Cancel once the server execution exists. Cancelling invalidates older UI request completions; binding an execution id or reloading its snapshot does not count as switching conversations and cannot strand the send busy state. Preserve the draft and messages, pause queued sends and invalidate server conversation queries on completion. If the server returns uncertain-effect recovery, retain its question and recovery choices instead of claiming cancellation settled the effect. Failure stays beside the composer.
@@ -96,6 +99,7 @@ The Dialog uses internal Channels and Configuration sections. Channels owns the 
 | Answered question | The question line stays in its assistant turn and the answer stays as a user message, in chronological order, after reload and in older conversations. |
 | Busy | Keep draft editable, preserve existing FIFO queue behavior, show concise inline processing and local disabled/busy controls. |
 | Offline | Retain current data, show reconnect state and resume existing streams without resubmitting requests. |
+| Image attachment | The image renders inline within the reply column; an expired or missing attachment shows the “图片已过期” placeholder in its place. |
 | Long content | Full message body wraps. Evidence uses bounded scrollable full text with copy/download. Only conversation titles/previews truncate. |
 | Channel waiting | A received Feishu message awaiting an execution remains visible with receipt status; queued messages do not disappear because they have no execution yet. |
 | Codex operation detail | Show control-local loading for the selected operation, then its complete retained input and output; keep the summary visible on failure and offer the same control to retry the read. |
@@ -108,6 +112,7 @@ The Dialog uses internal Channels and Configuration sections. Channels owns the 
 | `assistant:shell.command` / historical Shell evidence | Action or Constraint according to the label |
 | `assistant:codex.*` | Action, State, Constraint or Recovery according to the individual label |
 | `assistant:pinned.*` | Action or State according to the individual label |
+| `assistant:attachment.expired` | State |
 | `workspace:nav.chat` / `assistant:title` | State or Action according to the individual key |
 | `assistant:composer.cancel` | Action |
 | `assistant:composer.cancelling` | State |
@@ -124,6 +129,8 @@ The Dialog uses internal Channels and Configuration sections. Channels owns the 
 The settings control, Dialog heading, internal section tabs, history controls, input and Cancel have accessible names and visible shared focus rings. The Dialog traps focus, closes on Escape and returns focus to its activating control. Cancel uses icon and text state, and its spinner respects reduced motion. Pending answers remain keyboard reachable. State updates do not move focus or scroll the reader away from earlier messages. Project task disclosure triggers, operation detail/retry controls and the secondary raw-JSON trigger expose their expanded state and accessible names. The pinned bar is a labelled region; each row is a keyboard-reachable button naming its task and status, and returning to a card moves focus to it without animation under reduced motion.
 
 ## Coverage Status
+
+2026-10-13 image attachments: source inspection found Markdown images rendered by the renderer's default image component, which shows an English “Image not available” fallback and a hover download control, and no server channel for images, so executors could only report local paths. The implementation adds the attachment channel and replaces the image component with the bounded inline image and the dual-theme expired placeholder. The user authorized the type check, unit tests and build; browser appearance was not checked.
 
 2026-10-10 background project tasks: source inspection found `project_task` awaited inside the turn, so the conversation stayed running and new messages queued until the executor finished, and a task question locked the whole conversation. The implementation settles the turn at task start, moves questions onto the task and adds task-scoped answer and cancel controls using existing neutral controls and semantic tokens in both themes. Only the permitted type check is run; no browser interaction, live executor run, build or test suite.
 
@@ -166,6 +173,10 @@ Source comparison also covers generation guards for switched conversations, reta
 Source comparison 2026-10-04: the old embedded surface supports persisted messages, SSE, Skill/MCP activity, questions, retry, cancellation, Workflow mentions, queues and exports. The new source adds the full-page route and server conversation list, removes the silent browser history cap, places Feishu under Channels, exposes complete saved channel/Agent records and retains failed streamed text in the read model. The embedded surface and its fixed starter menu have been removed. Source coverage also includes standalone Web task submissions that have no Agent execution. The later deployment request authorized Gateway/Web/API compilation and isolated Web/API/Gateway readiness; these passed on 2026-10-04. Browser rendering, standalone type checking, test suites and live Feishu checks were not performed. Historical original Feishu envelopes were not saved and cannot be recovered; records show full retained data and newly saved safe platform context.
 
 ## Changelog
+
+### 2026-10-13
+
+- Rendered attachment images inline in replies and task output, with an “图片已过期” placeholder for expired or missing attachments, using existing semantic tokens in both themes.
 
 ### 2026-10-10
 

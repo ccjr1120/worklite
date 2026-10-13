@@ -324,5 +324,8 @@
   },
   "shell": {
     "command": "命令"
+  },
+  "attachment": {
+    "expired": "图片已过期"
   }
 }

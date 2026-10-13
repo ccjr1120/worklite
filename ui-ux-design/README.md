@@ -90,6 +90,10 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-10-13 - Chat image attachments
+
+- The [Chat](pages/chat/workspace/DESIGN.md) transcript renders attachment images inline and shows an expired placeholder for missing or expired ones. Adds the `assistant:attachment.expired` copy key; no new token.
+
 ### 2026-10-09 - Visible Chat question answers
 
 - The [Chat](pages/chat/workspace/DESIGN.md) transcript keeps answered questions as a question line plus a user answer message, shows a submitted answer immediately, and restores it to the composer when it is rejected. No new token or copy key.

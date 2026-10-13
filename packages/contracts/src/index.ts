@@ -284,6 +284,14 @@ export type ProjectExecutorLaunchView =
   | { executor: 'codex'; commandArguments: string[]; home: string; model: string; modelProvider: string; settings: Record<string, unknown> }
   | { executor: 'claude'; commandArguments: string[]; baseUrl: string; model: string | null };
 
+export type ChatAttachmentView = {
+  id: string; fileName: string; mimeType: string; size: number;
+  /** Same-origin API path, e.g. /api/chat/attachments/att_…; used as the Markdown image target. */
+  url: string;
+  markdown: string;
+  expiresAt: string;
+};
+
 export type ChatProjectTaskView = {
   executor: ProjectExecutor | null;
   launch?: ProjectExecutorLaunchView;
