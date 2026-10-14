@@ -253,6 +253,13 @@
       "when": 1791886006000,
       "tag": "0036_chat_read_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1791946800000,
+      "tag": "0037_agent_team_parallel_runs",
+      "breakpoints": true
     }
   ]
 }
