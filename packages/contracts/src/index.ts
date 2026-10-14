@@ -325,9 +325,9 @@ export type ChatProjectTaskView = {
   progressText: string;
   operationCount: number; operationStatuses: Record<string, number>;
   operations: Array<{ key: string; toolName: string; status: 'reserved' | 'completed' | 'uncertain' | 'failed'; commandExecutionId: string | null; inputSummary: string | null; failureReason: string | null }>;
-  // Worktree isolation for git-backed tasks; null/absent for legacy and non-git tasks.
+  // Worktree isolation for git-backed change tasks; null/absent for legacy, non-git and read-only tasks.
   worktreePath?: string | null; worktreeBranch?: string | null; baseBranch?: string | null; baseCommit?: string | null;
-  mergeStatus?: 'not_attempted' | 'merging' | 'merged' | 'merged_cleanup_pending' | 'conflict' | 'skipped_not_git'; mergeError?: string | null;
+  mergeStatus?: 'not_attempted' | 'merging' | 'merged' | 'merged_cleanup_pending' | 'conflict' | 'skipped_not_git' | 'skipped_read_only'; mergeError?: string | null;
   createdAt: string; updatedAt: string;
 };
 
