@@ -16,6 +16,7 @@ import type { TFunction } from 'i18next';
 import type {
   AgentTeamConversationMessage,
   AgentTeamConversationPendingInputView,
+  AgentTeamConversationRunStateView,
   AgentTeamMode,
   AgentTeamRunStatus,
   AgentTeamTaskAttemptStatus,
@@ -53,6 +54,7 @@ const ROLE_LABELS = {
   test_author: 'role.test_author',
   test_runner: 'role.test_runner',
   reviewer: 'role.reviewer',
+  'worktree-manager': 'role.worktree_manager',
 } as const;
 
 const MODE_LABELS = {
@@ -343,9 +345,161 @@ function PendingQuestionPanel({
   );
 }
 
-export function TeamConversation({ teamId }: { teamId: string }) {
+// One card per non-terminal Run. Each card owns its own control state so
+// concurrent Runs are paused, resumed, cancelled, and retried independently.
+function RunRecordCard({
+  run,
+  teamId,
+  pendingQuestions,
+  messages,
+}: {
+  run: AgentTeamConversationRunStateView;
+  teamId: string;
+  pendingQuestions: AgentTeamConversationPendingInputView[];
+  messages: AgentTeamConversationMessage[];
+}) {
   const { t } = useTranslation('agentTeams');
   const { t: tCommon } = useTranslation('common');
+  const [runAction, setRunAction] = useState<'pause' | 'resume' | 'cancel' | 'retry' | null>(null);
+  const [runActionError, setRunActionError] = useState('');
+  const [cancelOpen, setCancelOpen] = useState(false);
+
+  const runPendingQuestions = pendingQuestions.filter((input) => input.runId === run.runId);
+  const canPause = ['queued', 'running', 'waiting_for_input'].includes(run.status);
+  const canResume = run.status === 'paused';
+  const canCancel = !TERMINAL_RUN_STATUSES.has(run.status);
+  const retryableTaskKeys = run.retryableTaskKeys.length > 0 ? run.retryableTaskKeys : run.retryableTaskKey ? [run.retryableTaskKey] : [];
+  const canRetry = retryableTaskKeys.length > 0;
+  const retryAttribution = (taskKey: string) => {
+    const message = [...messages].reverse().find((candidate) => candidate.kind === 'run_state' && candidate.taskKey === taskKey && (candidate.assignmentTitle || candidate.developerId));
+    return message && message.kind === 'run_state' ? message.assignmentTitle ?? message.developerId : null;
+  };
+
+  async function updateRun(action: 'pause' | 'resume' | 'cancel' | 'retry', taskKey?: string) {
+    if (runAction) return;
+    setRunAction(action);
+    setRunActionError('');
+    try {
+      if (action === 'pause') await api.pauseAgentTeamRun(run.runId);
+      else if (action === 'resume') await api.resumeAgentTeamRun(run.runId);
+      else if (action === 'cancel') {
+        await api.cancelAgentTeamRun(run.runId);
+        setCancelOpen(false);
+      } else {
+        const target = taskKey ?? run.retryableTaskKey;
+        if (target) await api.retryAgentTeamTask(run.runId, target);
+      }
+      await queryClient.invalidateQueries({ queryKey: agentTeamConversationQueryKey(teamId) });
+    } catch (error: unknown) {
+      setRunActionError(error instanceof Error ? error.message : t('controls.failed'));
+    } finally {
+      setRunAction(null);
+    }
+  }
+
+  return (
+    <article className="rounded-lg border border-border bg-surface-subtle p-3" aria-label={t('conversation.workRecords')}>
+      <div className="flex flex-wrap items-center gap-2">
+        <ConversationStatusBadge status={run.status} />
+        <Link
+          to="/agent-team-runs/$runId"
+          params={{ runId: run.runId }}
+          className="text-[13px] font-medium text-brand-text hover:underline"
+        >
+          {t('conversation.openRun')}
+        </Link>
+      </div>
+      <dl className="mt-3 space-y-2 text-[13px]">
+        <div>
+          <dt className="text-muted-foreground">{t('conversation.project')}</dt>
+          <dd className="mt-1 font-mono break-all">{run.projectDirectory}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">{t('run.mode')}</dt>
+          <dd>{t(`conversation.mode.${run.mode}`)}</dd>
+        </div>
+      </dl>
+      {run.progress ? (
+        <div className="mt-3">
+          <div className="flex items-center gap-2 text-[13px]">
+            <span className="text-muted-foreground">{t(`progress.phaseValue.${run.progress.phase}`)}</span>
+            <Progress value={run.progress.percent} className="max-w-40 flex-1" />
+            <span className="font-medium tabular-nums">{t('progress.percent', { percent: run.progress.percent })}</span>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
+            {run.progress.totalAssignments > 0 ? (
+              <span className="tabular-nums">{t('progress.assignments', { completed: run.progress.completedAssignments, total: run.progress.totalAssignments })}</span>
+            ) : null}
+            {run.progress.activeDeveloperIds.length > 0 ? (
+              <span className="min-w-0 font-mono text-xs break-all">{run.progress.activeDeveloperIds.join(', ')}</span>
+            ) : null}
+            <span>{t('progress.nextStep')}: {t(`progress.nextStepValue.${run.progress.nextStep}`)}</span>
+          </div>
+        </div>
+      ) : null}
+      {runPendingQuestions.length > 0 ? (
+        <p className="mt-2 text-[13px] text-warning" role="status">{t('progress.pendingQuestions', { count: runPendingQuestions.length })}</p>
+      ) : null}
+      <div className="mt-4 flex flex-wrap gap-2">
+        {canPause ? (
+          <Button type="button" variant="secondary" size="compact" disabled={runAction !== null} onClick={() => void updateRun('pause')}>
+            {runAction === 'pause' ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <Pause className="size-4" aria-hidden="true" />}
+            {runAction === 'pause' ? t('controls.pausing') : t('controls.pause')}
+          </Button>
+        ) : null}
+        {canResume ? (
+          <Button type="button" variant="secondary" size="compact" disabled={runAction !== null} onClick={() => void updateRun('resume')}>
+            {runAction === 'resume' ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <Play className="size-4" aria-hidden="true" />}
+            {runAction === 'resume' ? t('controls.resuming') : t('controls.resume')}
+          </Button>
+        ) : null}
+        {canCancel ? (
+          <Button type="button" variant="destructive" size="compact" disabled={runAction !== null} onClick={() => setCancelOpen(true)}>
+            <Ban className="size-4" aria-hidden="true" />
+            {runAction === 'cancel' ? t('controls.cancelling') : t('controls.cancel')}
+          </Button>
+        ) : null}
+        {canRetry && retryableTaskKeys.length === 1 ? (
+          <Button type="button" size="compact" disabled={runAction !== null} onClick={() => void updateRun('retry', retryableTaskKeys[0])}>
+            {runAction === 'retry' ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <RefreshCw className="size-4" aria-hidden="true" />}
+            {runAction === 'retry' ? t('tasks.retrying') : t('tasks.retry')}
+          </Button>
+        ) : null}
+      </div>
+      {canRetry && retryableTaskKeys.length > 1 ? (
+        <ul className="mt-3 space-y-2">
+          {retryableTaskKeys.map((taskKey) => (
+            <li key={taskKey} className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="secondary" size="compact" disabled={runAction !== null} onClick={() => void updateRun('retry', taskKey)}>
+                {runAction === 'retry' ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <RefreshCw className="size-4" aria-hidden="true" />}
+                {runAction === 'retry' ? t('tasks.retrying') : t('tasks.retryTask', { taskKey })}
+              </Button>
+              {retryAttribution(taskKey) ? <span className="min-w-0 text-[13px] text-muted-foreground break-all">{retryAttribution(taskKey)}</span> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {runActionError ? <p className="mt-2 text-[13px] text-danger" role="alert">{runActionError}</p> : null}
+      <ConfirmDialog
+        open={cancelOpen}
+        onOpenChange={(open) => {
+          if (runAction !== 'cancel') setCancelOpen(open);
+        }}
+        title={t('controls.cancelTitle')}
+        description={t('controls.cancelDescription')}
+        confirmLabel={t('controls.cancelConfirm')}
+        cancelLabel={tCommon('actions.cancel')}
+        busyLabel={t('controls.cancelling')}
+        error={runActionError}
+        busy={runAction === 'cancel'}
+        onConfirm={() => void updateRun('cancel')}
+      />
+    </article>
+  );
+}
+
+export function TeamConversation({ teamId }: { teamId: string }) {
+  const { t } = useTranslation('agentTeams');
   const conversationQuery = useAgentTeamConversationQuery('personal', teamId);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
@@ -365,9 +519,6 @@ export function TeamConversation({ teamId }: { teamId: string }) {
   const [recoveryDecision, setRecoveryDecision] = useState<RecoveryDecision>('adopt_command');
   const [recovering, setRecovering] = useState(false);
   const [recoveryError, setRecoveryError] = useState('');
-  const [runAction, setRunAction] = useState<'pause' | 'resume' | 'cancel' | 'retry' | null>(null);
-  const [runActionError, setRunActionError] = useState('');
-  const [cancelOpen, setCancelOpen] = useState(false);
 
   useEffect(() => {
     const conversationId = conversationQuery.data?.id;
@@ -406,7 +557,7 @@ export function TeamConversation({ teamId }: { teamId: string }) {
     ? messages.filter((message): message is Extract<AgentTeamConversationMessage, { kind: 'coordinator_question' }> => message.kind === 'coordinator_question' && message.intakeId === activeIntake.id).at(-1) ?? null
     : null;
   const pendingInput = conversation?.pendingInput ?? null;
-  const activeRun = conversation?.activeRun ?? null;
+  const activeRuns = conversation?.activeRuns ?? [];
   const pendingQuestions = (conversation?.pendingInputs ?? []).filter((input) => input.kind === 'question');
   const extraPendingQuestions = pendingQuestions.filter((input) => input.pendingInputId !== pendingInput?.pendingInputId);
   const questionAttribution = (input: AgentTeamConversationPendingInputView) => {
@@ -456,19 +607,8 @@ export function TeamConversation({ teamId }: { teamId: string }) {
   const queuedRequest = activeIntake?.status === 'queued'
     ? messages.find((message): message is Extract<AgentTeamConversationMessage, { kind: 'task_request' }> => message.kind === 'task_request' && message.intakeId === activeIntake.id) ?? null
     : null;
-  const canPause = activeRun !== null && ['queued', 'running', 'waiting_for_input'].includes(activeRun.status);
-  const canResume = activeRun?.status === 'paused';
-  const canCancel = activeRun !== null && !TERMINAL_RUN_STATUSES.has(activeRun.status);
-  const retryableTaskKeys = activeRun
-    ? (activeRun.retryableTaskKeys.length > 0 ? activeRun.retryableTaskKeys : activeRun.retryableTaskKey ? [activeRun.retryableTaskKey] : [])
-    : [];
-  const canRetry = retryableTaskKeys.length > 0;
-  const retryAttribution = (taskKey: string) => {
-    const message = [...messages].reverse().find((candidate) => candidate.kind === 'run_state' && candidate.taskKey === taskKey && (candidate.assignmentTitle || candidate.developerId));
-    return message && message.kind === 'run_state' ? message.assignmentTitle ?? message.developerId : null;
-  };
   const hasContextualInspector = activeIntake?.status === 'queued'
-    || activeRun !== null
+    || activeRuns.length > 0
     || pendingInput?.kind === 'operation_recovery'
     || extraPendingQuestions.length > 0
     || selectedDocumentId !== null;
@@ -523,28 +663,6 @@ export function TeamConversation({ teamId }: { teamId: string }) {
     event.preventDefault();
     const commands = commandGrantQuestion ? commandDraftLines(authorizedCommands) : [];
     void sendConversation({ text, mentions: coordinatorMention, authorizedCommands: commands });
-  }
-
-  async function updateRun(action: 'pause' | 'resume' | 'cancel' | 'retry', taskKey?: string) {
-    if (!activeRun || runAction) return;
-    setRunAction(action);
-    setRunActionError('');
-    try {
-      if (action === 'pause') await api.pauseAgentTeamRun(activeRun.runId);
-      else if (action === 'resume') await api.resumeAgentTeamRun(activeRun.runId);
-      else if (action === 'cancel') {
-        await api.cancelAgentTeamRun(activeRun.runId);
-        setCancelOpen(false);
-      } else {
-        const target = taskKey ?? activeRun.retryableTaskKey;
-        if (target) await api.retryAgentTeamTask(activeRun.runId, target);
-      }
-      await queryClient.invalidateQueries({ queryKey: agentTeamConversationQueryKey(teamId) });
-    } catch (error: unknown) {
-      setRunActionError(error instanceof Error ? error.message : t('controls.failed'));
-    } finally {
-      setRunAction(null);
-    }
   }
 
   async function recoverOperation() {
@@ -700,90 +818,20 @@ export function TeamConversation({ teamId }: { teamId: string }) {
             <p className="mt-2 text-[13px] text-muted-foreground">{t('conversation.queuedWaiting')}</p>
           </section>
         ) : null}
-        {activeRun ? (
-          <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-run-state">
-            <h2 id="agent-team-run-state" className="text-sm font-semibold">{t('conversation.run')}</h2>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <ConversationStatusBadge status={activeRun.status} />
-              <Link
-                to="/agent-team-runs/$runId"
-                params={{ runId: activeRun.runId }}
-                className="text-[13px] font-medium text-brand-text hover:underline"
-              >
-                {t('conversation.openRun')}
-              </Link>
+        {activeRuns.length > 0 ? (
+          <section className="rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-work-records">
+            <h2 id="agent-team-work-records" className="text-sm font-semibold">{t('conversation.workRecords')}</h2>
+            <div className="mt-3 space-y-3">
+              {activeRuns.map((run) => (
+                <RunRecordCard
+                  key={run.runId}
+                  run={run}
+                  teamId={teamId}
+                  pendingQuestions={pendingQuestions}
+                  messages={messages}
+                />
+              ))}
             </div>
-            <dl className="mt-3 space-y-2 text-[13px]">
-              <div>
-                <dt className="text-muted-foreground">{t('conversation.project')}</dt>
-                <dd className="mt-1 font-mono break-all">{activeRun.projectDirectory}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">{t('run.mode')}</dt>
-                <dd>{t(`conversation.mode.${activeRun.mode}`)}</dd>
-              </div>
-            </dl>
-            {activeRun.progress ? (
-              <div className="mt-3">
-                <div className="flex items-center gap-2 text-[13px]">
-                  <span className="text-muted-foreground">{t(`progress.phaseValue.${activeRun.progress.phase}`)}</span>
-                  <Progress value={activeRun.progress.percent} className="max-w-40 flex-1" />
-                  <span className="font-medium tabular-nums">{t('progress.percent', { percent: activeRun.progress.percent })}</span>
-                </div>
-                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
-                  {activeRun.progress.totalAssignments > 0 ? (
-                    <span className="tabular-nums">{t('progress.assignments', { completed: activeRun.progress.completedAssignments, total: activeRun.progress.totalAssignments })}</span>
-                  ) : null}
-                  {activeRun.progress.activeDeveloperIds.length > 0 ? (
-                    <span className="min-w-0 font-mono text-xs break-all">{activeRun.progress.activeDeveloperIds.join(', ')}</span>
-                  ) : null}
-                  <span>{t('progress.nextStep')}: {t(`progress.nextStepValue.${activeRun.progress.nextStep}`)}</span>
-                </div>
-              </div>
-            ) : null}
-            {pendingQuestions.length > 0 ? (
-              <p className="mt-2 text-[13px] text-warning" role="status">{t('progress.pendingQuestions', { count: pendingQuestions.length })}</p>
-            ) : null}
-            <div className="mt-4 flex flex-wrap gap-2">
-              {canPause ? (
-                <Button type="button" variant="secondary" size="compact" disabled={runAction !== null} onClick={() => void updateRun('pause')}>
-                  {runAction === 'pause' ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <Pause className="size-4" aria-hidden="true" />}
-                  {runAction === 'pause' ? t('controls.pausing') : t('controls.pause')}
-                </Button>
-              ) : null}
-              {canResume ? (
-                <Button type="button" variant="secondary" size="compact" disabled={runAction !== null} onClick={() => void updateRun('resume')}>
-                  {runAction === 'resume' ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <Play className="size-4" aria-hidden="true" />}
-                  {runAction === 'resume' ? t('controls.resuming') : t('controls.resume')}
-                </Button>
-              ) : null}
-              {canCancel ? (
-                <Button type="button" variant="destructive" size="compact" disabled={runAction !== null} onClick={() => setCancelOpen(true)}>
-                  <Ban className="size-4" aria-hidden="true" />
-                  {runAction === 'cancel' ? t('controls.cancelling') : t('controls.cancel')}
-                </Button>
-              ) : null}
-              {canRetry && retryableTaskKeys.length === 1 ? (
-                <Button type="button" size="compact" disabled={runAction !== null} onClick={() => void updateRun('retry', retryableTaskKeys[0])}>
-                  {runAction === 'retry' ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <RefreshCw className="size-4" aria-hidden="true" />}
-                  {runAction === 'retry' ? t('tasks.retrying') : t('tasks.retry')}
-                </Button>
-              ) : null}
-            </div>
-            {canRetry && retryableTaskKeys.length > 1 ? (
-              <ul className="mt-3 space-y-2">
-                {retryableTaskKeys.map((taskKey) => (
-                  <li key={taskKey} className="flex flex-wrap items-center gap-2">
-                    <Button type="button" variant="secondary" size="compact" disabled={runAction !== null} onClick={() => void updateRun('retry', taskKey)}>
-                      {runAction === 'retry' ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <RefreshCw className="size-4" aria-hidden="true" />}
-                      {runAction === 'retry' ? t('tasks.retrying') : t('tasks.retryTask', { taskKey })}
-                    </Button>
-                    {retryAttribution(taskKey) ? <span className="min-w-0 text-[13px] text-muted-foreground break-all">{retryAttribution(taskKey)}</span> : null}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {runActionError ? <p className="mt-2 text-[13px] text-danger" role="alert">{runActionError}</p> : null}
           </section>
         ) : null}
         {extraPendingQuestions.map((input) => (
@@ -818,20 +866,6 @@ export function TeamConversation({ teamId }: { teamId: string }) {
         ) : null}
         {selectedDocumentId ? <DocumentViewer documentId={selectedDocumentId} onClose={() => setSelectedDocumentId(null)} /> : null}
       </aside> : null}
-      <ConfirmDialog
-        open={cancelOpen}
-        onOpenChange={(open) => {
-          if (runAction !== 'cancel') setCancelOpen(open);
-        }}
-        title={t('controls.cancelTitle')}
-        description={t('controls.cancelDescription')}
-        confirmLabel={t('controls.cancelConfirm')}
-        cancelLabel={tCommon('actions.cancel')}
-        busyLabel={t('controls.cancelling')}
-        error={runActionError}
-        busy={runAction === 'cancel'}
-        onConfirm={() => void updateRun('cancel')}
-      />
     </div>
   );
 }

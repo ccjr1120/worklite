@@ -35,7 +35,7 @@ Saving Team configuration is a separate goal with one Save action. Editing confi
 
 The page uses the full Workspace page width with a `1200px` maximum and two lightweight top tabs. The Conversation tab has a compact Team header, a chronological transcript with its own bounded scroll region, and a persistent composer at the bottom. Member messages are left-aligned and user messages right-aligned; speaker identity, alignment, and text cues distinguish speakers without colored message backgrounds. A new-task composer has a structured removable `@Coordinator` token inside the same bordered surface as its multiline input and Send control; pending answers omit the token because their destination is already known. The conversation uses its full width while no contextual Run, queued intake, recovery, or selected document needs an inspector. Pending intake options and Run questions render in the transcript beside their answers.
 
-When active Run, queued intake, operation recovery, or a selected document needs supporting controls, the desktop transcript shares the page with a contextual inspector. Below `1024px`, the transcript and inspector stack. The document viewer becomes an overlay below `768px`. The active Run inspector card summarizes parallel progress: current phase, server-derived completion percentage, completed and total development assignments, active Developers, next step, and the number of pending questions. Pending questions beyond the earliest render as inspector panels with their own answer inputs. The Configuration tab keeps process metadata and one Save action above a compact list of six roles. Each role shows its provider-grouped model selector in the list row; its instructions, entry points, Skills, MCP servers, and tools are disclosed only when that role's advanced settings are expanded. The Developer role additionally shows its executor selector; runtime parallelism is decided by the Planner per Run and is not configured here. The role list and its controls stack at narrow widths.
+When queued intake, one or more non-terminal Runs, operation recovery, or a selected document needs supporting controls, the desktop transcript shares the page with a contextual inspector. Below `1024px`, the transcript and inspector stack. The document viewer becomes an overlay below `768px`. Several Runs may be active concurrently; the work records inspector section renders one card per non-terminal Run, including a Run that waits for a free parallel slot, which shows the queued status with its text and icon cues. Each Run card summarizes its own parallel progress — current phase, server-derived completion percentage, completed and total development assignments, active Developers, next step, and the number of pending questions — and owns its lifecycle controls. Pending questions beyond the earliest render as inspector panels with their own answer inputs. The Configuration tab keeps process metadata, the parallel Run limit field, and one Save action above a compact list of six roles. Each role shows its provider-grouped model selector in the list row; its instructions, entry points, Skills, MCP servers, and tools are disclosed only when that role's advanced settings are expanded. The Developer role additionally shows its executor selector; runtime parallelism is decided by the Planner per Run and is not configured here. The role list and its controls stack at narrow widths.
 
 ## Interaction Contract
 
@@ -51,11 +51,12 @@ When active Run, queued intake, operation recovery, or a selected document needs
 | Open Run evidence | One status/action link opens `/agent-team-runs/:runId`; it does not mutate the Run. |
 | Open delivered file | One filename activation opens the immutable revision in the contextual viewer without changing transcript focus. |
 | Download file | One Download activation in the viewer exports the same immutable revision. |
-| Pause, Resume, or Cancel | Each independent control uses local progress and the existing Run API. No control is duplicated in the transcript. |
-| Retry failed task | Retry appears only when the active Run exposes a retryable task, uses local progress, and calls the existing Run API. When several assignments failed together, each control names its task key and Developer; any one triggers the same failure-barrier resume and successful sibling lanes never rerun. |
+| Pause, Resume, or Cancel | Each Run card carries its own independent controls; every control acts on its own Run with control-local progress and the existing Run API. No control is duplicated in the transcript. |
+| Retry failed task | Retry appears only on the card of a Run that exposes a retryable task, uses local progress, and calls the existing Run API. When several assignments failed together, each control names its task key and Developer; any one triggers the same failure-barrier resume and successful sibling lanes never rerun. |
 | Answer later pending question | Pending questions beyond the earliest each render an inspector panel with their own answer input and control-local progress; submitting answers exactly that pending input id. The composer continues to answer the earliest pending question. |
 | Save Team configuration | The Configuration tab Save control shows local progress, is disabled while saving, replaces the Team cache on success, and preserves local edits on failure. |
-| Edit a role field | Editing updates local configuration only and marks it unsaved. Role executors are preserved across load and save. |
+| Edit parallel Run limit | The numeric field updates local configuration only and marks it unsaved; Save is the sole commit control and persists `maxConcurrentRuns` (default 3, minimum 1). |
+| Edit a role field | Editing updates local configuration only and marks it unsaved. Role executors are preserved across load and save. Roles outside the displayed list are preserved unchanged across save. |
 | Select model, Skills, MCP servers, or tools | Selection updates the role locally; Save is the sole commit control. |
 | Expand role settings | One disclosure activation reveals that role's instructions, entry points, Skills, MCP servers, and tools. The disclosure is keyboard reachable and does not change saved configuration. |
 | Select role model | The selector groups available models by Provider name and stores the selected public model id; the change remains local until Save. |
@@ -71,7 +72,7 @@ Conversation and Run queries own freshness. The persisted conversation stream re
 | No task yet | Show an empty transcript state with `@Coordinator` selected by default in the composer; removing it is available for a message that should not start a Team task. No onboarding sequence is added. |
 | Intake in progress | Show the unanswered Coordinator question, preserve prior answers and submitted requests across reload, and offer only actual recent directories. |
 | Queued task request | A new Coordinator request remains visible as pending input while an active task has not settled. |
-| Queued or running Run | Show the responsible member and concise state. Raw model deltas, task JSON, command output, and document bodies stay out of the transcript. The active Run card shows the current phase, completion percentage, assignment completion, active Developers, next step, and pending-question count. |
+| Queued or running Run | Each non-terminal Run renders its own work record card with the responsible state, its own progress summary, and its own controls. Raw model deltas, task JSON, command output, and document bodies stay out of the transcript. A Run waiting for a free parallel slot shows the queued status with text and icon cues rather than color alone. |
 | Multiple pending questions | The composer answers the earliest pending question; the remaining questions render as inspector panels answered one by one. |
 | Waiting for input | Show the durable question from the responsible member. A general reply cannot replace operation recovery. |
 | Waiting for recovery | Show the existing structured adopt, fail, or replay decisions in the task context. |
@@ -111,7 +112,7 @@ The Team query owns configuration freshness. No manual refresh control is introd
 | `agentTeams:conversation.sending` | State |
 | `agentTeams:conversation.sendFailed` | Recovery |
 | `agentTeams:conversation.returnToEnd` | Action |
-| `agentTeams:conversation.run` | State |
+| `agentTeams:conversation.workRecords` | State |
 | `agentTeams:conversation.queuedTask` | State |
 | `agentTeams:conversation.queuedWaiting` | State |
 | `agentTeams:conversation.project` | State |
@@ -170,6 +171,8 @@ The Team query owns configuration freshness. No manual refresh control is introd
 | `agentTeams:team.process` | State |
 | `agentTeams:team.processId` | State |
 | `agentTeams:team.processVersion` | State |
+| `agentTeams:team.maxConcurrentRuns.label` | Constraint |
+| `agentTeams:team.maxConcurrentRuns.hint` | Constraint |
 | `agentTeams:team.roles` | State |
 | `agentTeams:team.advanced` | Action |
 | `agentTeams:model.default` | Action |
@@ -198,6 +201,8 @@ The tabs, mention token, transcript, composer, role disclosures, provider-groupe
 
 ## Coverage Status
 
+2026-10-13 source comparison for parallel Runs and the concurrency limit: the conversation inspector renders a work records section with one live card per non-terminal Run (several may be active concurrently; a Run waiting for a parallel slot shows the queued status with text and icon cues), and each card owns its lifecycle controls with control-local progress. The Configuration tab adds the `maxConcurrentRuns` numeric field (default 3) inside the single Save flow, and roles outside the displayed list survive a save unchanged. The conversation `activeRuns` list, `maxConcurrentRuns`, and the `worktree-manager` role are declared against the pinned cross-package contract and take effect when the packages and API lanes merge. Web type check (tsc --noEmit and locale key check) passed; no browser, runtime, accessibility-tool or real-Run verification was authorized or performed.
+
 2026-10-10 source comparison for orchestration v3 and progress: the Developer role section carries only its executor selector (the extra-instance list and concurrency bound are removed because the Planner decides 1-4 parallel lanes per Run), and the active Run inspector card adds the server-derived completion percentage. No browser, runtime, accessibility-tool, type check or real-Run verification was authorized or performed.
 
 2026-10-10 source comparison: the Developer role section carries an executor selector, up to three extra Developer instances with per-instance label, executor, model and advanced fields, and a 1–4 concurrency bound shown only when instances exist; load and save preserve executor, instances and concurrency. The active Run inspector card shows the progress summary, multiple pending questions gain their own answer panels, and multiple retryable failures list one retry control per task key with Developer attribution. Web type check (tsc --noEmit and locale key check) passed; no browser, runtime, accessibility-tool or real-Run verification was authorized or performed.
@@ -209,6 +214,11 @@ The tabs, mention token, transcript, composer, role disclosures, provider-groupe
 Source-level audit: 2026-10-03. Differences found: none in route and tab state, default Coordinator routing, conditional contextual inspector, responsive stacking, provider-grouped model selectors, role-local advanced settings, save and error feedback, copy inventory, semantic tokens, or keyboard access. Only source review occurred; no browser, runtime, accessibility-tool, or real-Run verification was performed.
 
 ## Changelog
+
+### 2026-10-13 - Parallel Runs and concurrency limit
+
+- Replaced the single active Run inspector card with a work records list: one live card per non-terminal Run, including queued Runs waiting for a parallel slot, each with its own progress summary and lifecycle controls.
+- Added the parallel Run limit field (`maxConcurrentRuns`, default 3) to the Configuration tab's single Save flow; roles outside the displayed list are preserved unchanged across save.
 
 ### 2026-10-10 - Planner-decided parallelism and progress percentage
 

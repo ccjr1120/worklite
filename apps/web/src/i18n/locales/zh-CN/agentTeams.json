@@ -15,7 +15,11 @@
       "claude": "Claude Code",
       "codex": "Codex"
     },
-    "parallelism": "运行时并行度由 Planner 按每次执行的任务拆分决定，最多 4 个 Developer 并行。"
+    "parallelism": "运行时并行度由 Planner 按每次执行的任务拆分决定，最多 4 个 Developer 并行。",
+    "maxConcurrentRuns": {
+      "label": "并行 Run 上限",
+      "hint": "同时运行的 Run 数量上限；达到上限后，新 Run 排队等待空位。"
+    }
   },
   "run": {
     "loading": "正在加载 Agent Team 执行",
@@ -50,6 +54,8 @@
     },
     "version": "团队版本",
     "project": "项目目录",
+    "worktreeBasePath": "基础 Worktree",
+    "runBranch": "Run 分支",
     "intent": "任务目标",
     "noCommands": "未授权命令",
     "scopeRevision": "授权范围版本",
@@ -210,7 +216,8 @@
     "developer": "Developer",
     "test_author": "Test Author",
     "test_runner": "Test Runner",
-    "reviewer": "Reviewer"
+    "reviewer": "Reviewer",
+    "worktree_manager": "Worktree Manager"
   },
   "loading": "正在加载 Agent Team",
   "loadFailed": "无法加载 Agent Team",
@@ -246,7 +253,7 @@
     "sending": "正在发送",
     "sendFailed": "无法发送消息",
     "returnToEnd": "回到最新消息",
-    "run": "当前执行",
+    "workRecords": "工作记录",
     "queuedTask": "排队任务",
     "queuedWaiting": "等待当前任务结束后自动开始。",
     "project": "项目目录",

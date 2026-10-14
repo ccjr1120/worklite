@@ -1,13 +1,10 @@
 import type {
   AgentView,
   AgentTeamView,
-  UpdateAgentTeamRequest,
   CreateAgentTeamRunRequest,
   CreateAgentTeamRunResponse,
-  AgentTeamConversationView,
   AgentTeamConversationEvent,
   AgentTeamDocumentView,
-  AgentTeamRunView,
   AgentTeamRunEvent,
   AnswerAgentTeamRunRequest,
   RecoverAgentTeamOperationRequest,
@@ -78,6 +75,7 @@ import type {
   ImportWorkflowRequest,
   PortableWorkflowDocument,
 } from '@worklite/contracts';
+import type { TeamConcurrencyView, TeamConversationRunsView, TeamRunDetailView, UpdateTeamConcurrencyRequest } from '@/api/agent-team-contract';
 
 export class ApiError extends Error {
   constructor(public readonly status: number, message: string, public readonly requestLogId?: string, public readonly testInput?: SystemOneTestInput) {
@@ -249,10 +247,10 @@ export const api = {
   },
   gatewayRequestLog: (requestLogId: string) => apiGet<GatewayRequestLogDetail>(`/api/portkey-gateway/request-logs/${encodeURIComponent(requestLogId)}`),
   agentTeams: () => apiGet<AgentTeamView[]>('/api/agent-teams'),
-  agentTeam: (teamId: string) => apiGet<AgentTeamView>(`/api/agent-teams/${encodeURIComponent(teamId)}`),
-  updateAgentTeam: (teamId: string, input: UpdateAgentTeamRequest) => apiPatch<AgentTeamView>(`/api/agent-teams/${encodeURIComponent(teamId)}`, input),
+  agentTeam: (teamId: string) => apiGet<TeamConcurrencyView>(`/api/agent-teams/${encodeURIComponent(teamId)}`),
+  updateAgentTeam: (teamId: string, input: UpdateTeamConcurrencyRequest) => apiPatch<TeamConcurrencyView>(`/api/agent-teams/${encodeURIComponent(teamId)}`, input),
   createAgentTeamRun: (teamId: string, input: CreateAgentTeamRunRequest) => apiPost<CreateAgentTeamRunResponse>(`/api/agent-teams/${encodeURIComponent(teamId)}/runs`, input),
-  agentTeamConversation: (teamId: string) => apiGet<AgentTeamConversationView>(`/api/agent-teams/${encodeURIComponent(teamId)}/conversation`),
+  agentTeamConversation: (teamId: string) => apiGet<TeamConversationRunsView>(`/api/agent-teams/${encodeURIComponent(teamId)}/conversation`),
   sendAgentTeamConversationMessage: (
     teamId: string,
     _input: SendAgentTeamConversationMessageRequest,
@@ -268,7 +266,7 @@ export const api = {
     }
     return response.blob();
   },
-  agentTeamRun: (runId: string) => apiGet<AgentTeamRunView>(`/api/agent-team-runs/${encodeURIComponent(runId)}`),
+  agentTeamRun: (runId: string) => apiGet<TeamRunDetailView>(`/api/agent-team-runs/${encodeURIComponent(runId)}`),
   agentTeamRunEventsUrl: (runId: string) => `/api/agent-team-runs/${encodeURIComponent(runId)}/events`,
   answerAgentTeamRun: (runId: string, input: AnswerAgentTeamRunRequest) => apiPost<AgentTeamRunActionResponse>(`/api/agent-team-runs/${encodeURIComponent(runId)}/answer`, input),
   recoverAgentTeamOperation: (runId: string, operationKey: string, input: RecoverAgentTeamOperationRequest) => apiPost<AgentTeamRunActionResponse>(`/api/agent-team-runs/${encodeURIComponent(runId)}/operations/${encodeURIComponent(operationKey)}/recovery`, input),
