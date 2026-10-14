@@ -6,6 +6,7 @@ import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { agentExecutions, chatConfigurations, chatProjectOperations, chatProjectTasks, chatProjectTaskSubscriptions, type Database, type StoredProjectExecutor, type StoredProjectExecutorLaunch, type StoredProjectExecutorModelSource } from '@worklite/db';
 import type { AnswerAgentQuestionRequest, ChatProjectOperationDetailView, ChatProjectTaskView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
+import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { ClaudeCodeError } from './claude-code.service';
 import { CodexAppServerError } from './codex-app-server.service';
 import { ProjectExecutorService } from './project-executor.service';
@@ -58,6 +59,7 @@ export class ChatProjectTasksService {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     private readonly executors: ProjectExecutorService,
+    private readonly resources: WorkspaceResourcesService,
   ) {}
 
   async capture(workspaceId: string, executionId: string, callId: string, input: unknown): Promise<Task> {
@@ -309,14 +311,19 @@ export class ChatProjectTasksService {
       const readOnlyInstruction = task.mergeStatus === 'skipped_read_only'
         ? ' This is a read-only investigation task: answer from reading and searching only, and do not create, modify or delete any file in the project directory or elsewhere.'
         : '';
-      const configuration = this.db.select({ extensionPrompt: chatConfigurations.extensionPrompt }).from(chatConfigurations)
+      const configuration = this.db.select({ extensionPrompt: chatConfigurations.extensionPrompt, projectTaskMcpServerIds: chatConfigurations.projectTaskMcpServerIds }).from(chatConfigurations)
         .where(and(eq(chatConfigurations.workspaceId, task.workspaceId), eq(chatConfigurations.revision, capabilities.revision))).get();
+      // Chat hands no Skills to its executor, including from snapshots captured before selection was removed.
+      // MCP servers declared in the Chat configuration are injected into Claude Code tasks only, through the
+      // shared per-task handover; their credentials are resolved in server memory and never enter the prompt.
+      const declaredMcpServers = launch.executor === 'claude' && configuration?.projectTaskMcpServerIds.length
+        ? await this.resources.workflowMcpRuntimes(task.workspaceId, configuration.projectTaskMcpServerIds)
+        : [];
       const output = await this.executors.execute({
         owner: 'chat', workspaceId: task.workspaceId, launch, model: task.model || null,
         projectDirectory: workingDirectory,
-        // Chat hands no Skills or MCP servers to its executor, including from snapshots captured before selection was removed.
         skills: [],
-        mcpServers: [],
+        mcpServers: declaredMcpServers,
         systemPrompt: [
           `Execute this Chat-owned project task independently of Agent Team. Work entirely inside the current working directory, which is the task's dedicated workspace, and never switch to another checkout of the same repository. Follow the captured project instructions in the pinned reference files and discover additional applicable project instructions. Existing project confirmation, verification and service-lifecycle constraints remain authoritative; WorkLite adds no proposal confirmation or command grants. Keep work within the user task. Use supplied review findings and approved scope to check the affected code and make the requested changes without repeating the complete review. Inspect the actual working tree and prior effects before taking over interrupted work. Explain concrete progress as work proceeds. Never perform WorkLite installation, build, upgrade-runner or service replacement; its independent managed runner owns deployment.${task.worktreePath ? ' Commit your finished changes on the current branch before returning; the platform merges that branch back automatically.' : ''}${readOnlyInstruction} Return JSON: {"status":"succeeded","summary":"..."} or {"status":"waiting_for_input","pendingInput":{"question":"..."}}. Ask only for material missing information or authorization; evidence and clarification answers do not authorize unrelated work.`,
           'To show an image such as a screenshot in your report, upload the file as the raw request body to attachmentUploadUrl from the input with its image media type, for example `curl -sS --data-binary @shot.png -H \'Content-Type: image/png\' "<attachmentUploadUrl>&fileName=shot.png"`. Only PNG, JPEG, GIF and WebP up to 10 MB are accepted. Put the returned `markdown` value, such as ![shot.png](/api/chat/attachments/att_…), in the summary exactly as returned; never reference local file paths or file:// URLs as images. Uploaded images expire with the request logs.',
@@ -333,7 +340,7 @@ export class ChatProjectTasksService {
       return this.mergeAndSettle(taskId, settlement);
     } catch (error) {
       if (signal.aborted) return this.update(taskId, { status: 'cancelled', pendingQuestion: null, reportedAt: new Date() });
-      return this.update(taskId, { status: 'failed', pendingQuestion: null, error: error instanceof CodexAppServerError || error instanceof ClaudeCodeError || error instanceof BadRequestException ? error.message : '项目任务执行失败，请查看关联的命令记录。' });
+      return this.update(taskId, { status: 'failed', pendingQuestion: null, error: error instanceof CodexAppServerError || error instanceof ClaudeCodeError || error instanceof BadRequestException || error instanceof NotFoundException ? error.message : '项目任务执行失败，请查看关联的命令记录。' });
     }
   }
 

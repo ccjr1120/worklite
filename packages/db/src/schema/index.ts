@@ -389,6 +389,8 @@ export const chatConfigurations = sqliteTable('chat_bot_configurations', {
   defaultExecutor: text('default_executor').$type<StoredProjectExecutor>().notNull().default('claude'),
   // Per-executor declared default Gateway public model ids; an absent key falls back to the executor's own default.
   defaultExecutorModels: text('default_executor_models', { mode: 'json' }).$type<Partial<Record<StoredProjectExecutor, string>>>().notNull().default({}),
+  // Workspace MCP servers injected into Claude Code project tasks; empty keeps the executor's launch unchanged.
+  projectTaskMcpServerIds: text('project_task_mcp_server_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
   providerId: text('provider_id'), model: text('model').notNull(),
   skillIds: text('skill_ids', { mode: 'json' }).$type<string[]>().notNull(),
   mcpServerIds: text('mcp_server_ids', { mode: 'json' }).$type<string[]>().notNull(),
