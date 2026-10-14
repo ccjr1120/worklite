@@ -478,12 +478,14 @@ export const chatProjectTasks = sqliteTable('chat_codex_tasks', {
   result: text('result').notNull().default(''), error: text('error'),
   // Set once the conversation has reported this background task's outcome or question.
   reportedAt: integer('reported_at', { mode: 'timestamp_ms' }),
-  // Worktree isolation: git-backed tasks execute in their own worktree and merge back on success.
+  // Worktree isolation: git-backed change tasks execute in their own worktree and merge back on
+  // success; read-only (`skipped_read_only`) and non-git (`skipped_not_git`) tasks run directly in
+  // the project directory with empty worktree fields and no merge.
   worktreePath: text('worktree_path'),
   worktreeBranch: text('worktree_branch'),
   baseBranch: text('base_branch'),
   baseCommit: text('base_commit'),
-  mergeStatus: text('merge_status').$type<'not_attempted' | 'merging' | 'merged' | 'merged_cleanup_pending' | 'conflict' | 'skipped_not_git'>().notNull().default('not_attempted'),
+  mergeStatus: text('merge_status').$type<'not_attempted' | 'merging' | 'merged' | 'merged_cleanup_pending' | 'conflict' | 'skipped_not_git' | 'skipped_read_only'>().notNull().default('not_attempted'),
   mergeError: text('merge_error'),
   createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
 }, (table) => [index('chat_codex_tasks_execution_idx').on(table.executionId)]);

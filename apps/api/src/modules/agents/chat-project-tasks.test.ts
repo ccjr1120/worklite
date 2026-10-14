@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest';
-import { extractTaskResult, settleChatProjectTask } from './chat-project-tasks.service';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, afterEach } from 'vitest';
+import { createDb, type Database } from '@worklite/db';
+import { ChatProjectTasksService, extractTaskResult, settleChatProjectTask } from './chat-project-tasks.service';
+import type { ProjectExecutorService } from './project-executor.service';
+import { removeTaskWorktree } from './git-worktree';
 
 describe('extractTaskResult', () => {
   it('parses a bare succeeded result', () => {
@@ -88,5 +95,121 @@ describe('settleChatProjectTask', () => {
     const settlement = settleChatProjectTask('{"status":"succeeded","summary":"截断', []);
     expect(settlement.status).toBe('succeeded');
     expect(settlement.status === 'succeeded' && settlement.error).toMatch('解析降级');
+  });
+});
+
+// capture() runs against an in-memory database with the minimal tables it touches, and real
+// temporary git repositories so the worktree behavior is exercised end to end.
+describe('ChatProjectTasksService.capture worktree behavior', () => {
+  const WORKSPACE_ID = 'workspace_personal';
+  const EXECUTION_ID = 'aex_capture_test';
+  const CAPABILITIES = JSON.stringify({
+    revision: 1,
+    agent: { id: 'agt_system_helper_chat', providerId: null, model: '', systemPrompt: '' },
+    skills: [], mcpServers: [],
+  });
+  const DDL = [
+    'CREATE TABLE workspaces (id text PRIMARY KEY NOT NULL)',
+    'CREATE TABLE agents (id text PRIMARY KEY NOT NULL)',
+    `CREATE TABLE agent_executions (
+      execution_authorization text, capability_snapshot text,
+      id text PRIMARY KEY NOT NULL, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      status text NOT NULL DEFAULT 'running', phase text NOT NULL DEFAULT 'model', error_code text,
+      model_messages text DEFAULT '[]' NOT NULL, display_messages text DEFAULT '[]' NOT NULL, plan text DEFAULT '[]' NOT NULL,
+      pending_question text, context_dropped integer DEFAULT 0 NOT NULL, error text,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL, updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL
+    )`,
+    'CREATE TABLE agent_tool_calls (id text PRIMARY KEY NOT NULL)',
+    `CREATE TABLE chat_codex_tasks (
+      id text PRIMARY KEY NOT NULL REFERENCES agent_tool_calls(id) ON DELETE CASCADE,
+      workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      execution_id text NOT NULL REFERENCES agent_executions(id) ON DELETE CASCADE,
+      goal text NOT NULL, project_directory text NOT NULL, model text NOT NULL, snapshot text NOT NULL,
+      status text NOT NULL, answers text DEFAULT '[]' NOT NULL, pending_question text,
+      activities text DEFAULT '[]' NOT NULL, result text DEFAULT '' NOT NULL, error text,
+      reported_at integer,
+      worktree_path text, worktree_branch text, base_branch text, base_commit text,
+      merge_status text DEFAULT 'not_attempted' NOT NULL, merge_error text,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL, updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL
+    )`,
+  ];
+
+  const dbs: Database[] = [];
+  const directories: string[] = [];
+
+  afterEach(() => {
+    for (const db of dbs.splice(0)) db.$client.close();
+    for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  });
+
+  function setup(): { service: ChatProjectTasksService; repository: string } {
+    const db = createDb(':memory:');
+    dbs.push(db);
+    for (const statement of DDL) db.$client.exec(statement);
+    db.$client.prepare('INSERT INTO workspaces (id) VALUES (?)').run(WORKSPACE_ID);
+    db.$client.prepare('INSERT INTO agents (id) VALUES (?)').run('agt_system_helper_chat');
+    db.$client.prepare('INSERT INTO agent_executions (id, workspace_id, agent_id, capability_snapshot) VALUES (?, ?, ?, ?)')
+      .run(EXECUTION_ID, WORKSPACE_ID, 'agt_system_helper_chat', CAPABILITIES);
+    for (const callId of ['acall_readonly', 'acall_change', 'acall_nongit', 'acall_bad']) {
+      db.$client.prepare('INSERT INTO agent_tool_calls (id) VALUES (?)').run(callId);
+    }
+    const root = mkdtempSync(join(tmpdir(), 'worklite-capture-'));
+    directories.push(root);
+    const repository = join(root, 'project');
+    execFileSync('git', ['init', repository]);
+    execFileSync('git', ['-C', repository, '-c', 'user.email=test@example.com', '-c', 'user.name=test', 'commit', '--allow-empty', '-m', 'init']);
+    const executors = {
+      captureLaunch: async () => ({ executor: 'claude' as const, commandArguments: [], baseUrl: 'http://127.0.0.1:23392', model: null }),
+    };
+    return { service: new ChatProjectTasksService(db, executors as unknown as ProjectExecutorService), repository };
+  }
+
+  function gitBranches(repository: string): string {
+    return execFileSync('git', ['-C', repository, 'branch', '--list', 'worklite/*'], { encoding: 'utf8' }).trim();
+  }
+
+  it('skips the worktree for a read-only task and records skipped_read_only', async () => {
+    const { service, repository } = setup();
+    const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_readonly', {
+      goal: '调查 worktree 创建逻辑在哪里', projectDirectory: repository, readOnly: true,
+    });
+
+    expect(task.worktreePath).toBeNull();
+    expect(task.worktreeBranch).toBeNull();
+    expect(task.mergeStatus).toBe('skipped_read_only');
+    expect(gitBranches(repository)).toBe('');
+  });
+
+  it('keeps worktree isolation for a default change task', async () => {
+    const { service, repository } = setup();
+    const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_change', {
+      goal: '修改 README 标题', projectDirectory: repository,
+    });
+
+    expect(task.worktreePath).toBeTruthy();
+    expect(task.worktreeBranch).toMatch(/^worklite\/task-/);
+    expect(task.mergeStatus).toBe('not_attempted');
+    expect(existsSync(task.worktreePath!)).toBe(true);
+    await removeTaskWorktree(repository, task.worktreePath!, task.worktreeBranch!);
+  });
+
+  it('keeps the non-git skip status regardless of readOnly', async () => {
+    const { service } = setup();
+    const plain = mkdtempSync(join(tmpdir(), 'worklite-capture-plain-'));
+    directories.push(plain);
+    const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_nongit', {
+      goal: '查看目录结构', projectDirectory: plain, readOnly: true,
+    });
+
+    expect(task.worktreePath).toBeNull();
+    expect(task.mergeStatus).toBe('skipped_not_git');
+  });
+
+  it('rejects a non-boolean readOnly', async () => {
+    const { service, repository } = setup();
+    await expect(service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_bad', {
+      goal: '调查', projectDirectory: repository, readOnly: 'yes',
+    })).rejects.toThrow('readOnly must be a boolean.');
   });
 });
