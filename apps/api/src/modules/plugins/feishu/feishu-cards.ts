@@ -3,7 +3,6 @@ import { attachmentImagesAsText } from '../../agents/chat-attachments.service';
 import type { ChatProjectTaskView } from '@worklite/contracts';
 
 export type FeishuAction =
-  | { kind: 'intake'; teamId: string; intakeSubmissionId: string; field: 'goal' | 'projectDirectory' | 'mode'; answer?: string }
   | { kind: 'answer'; runId: string; pendingInputId: string; scopeRevision: number }
   | { kind: 'agent_answer'; executionId: string; questionId: string; answer?: string; recoveryDecision?: 'adopt_command' | 'mark_failed'; newConversation?: boolean }
   | { kind: 'control'; domain: 'team' | 'workflow' | 'conversation'; runId: string; action: 'pause' | 'resume' | 'cancel' | 'retry'; taskKey?: string }

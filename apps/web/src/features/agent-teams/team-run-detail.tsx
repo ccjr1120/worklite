@@ -823,10 +823,10 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
               <Link
                 to="/agent-teams/$teamId"
                 params={{ teamId: run.teamId }}
-                search={run.originatingConversationId ? { tab: 'conversation' } : { tab: 'configuration' }}
+                search={{ tab: 'records' }}
                 className="font-medium text-brand-text hover:underline"
               >
-                {run.originatingConversationId ? t('openConversation') : t('openTeam')}
+                {t('openTeam')}
               </Link>
               <CopyableId value={run.teamVersion.id} />
               <span className="font-mono tabular-nums">v{run.teamVersion.version}</span>

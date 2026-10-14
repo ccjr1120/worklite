@@ -4,12 +4,12 @@ import { useNavigate } from '@tanstack/react-router';
 import { LoaderCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type {
+  AgentTeamView,
   AgentTeamRole,
   AgentTeamRoleConfiguration,
   ProjectExecutor,
 } from '@worklite/contracts';
 import { ApiError, api } from '@/api/client';
-import { DEFAULT_MAX_CONCURRENT_RUNS, type TeamConcurrencyView } from '@/api/agent-team-contract';
 import {
   agentTeamQueryKey,
   useAgentTeamQuery,
@@ -30,10 +30,11 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
-import { TeamConversation } from './team-conversation';
+import { TeamRecords } from './team-records';
 import { queryClient } from '@/lib/query-client';
 
 const TEAM_MODEL_SENTINEL = '__team_default__';
+const DEFAULT_MAX_CONCURRENT_RUNS = 3;
 const ROLE_ORDER: AgentTeamRole[] = ['planner', 'test_designer', 'developer', 'test_author', 'test_runner', 'reviewer'];
 const ROLE_TOOLS: Record<AgentTeamRole, string[]> = {
   planner: ['read', 'glob', 'grep', 'process_reference'],
@@ -223,7 +224,7 @@ function AdvancedRoleFields({ idPrefix, tools, value, onChange }: {
   );
 }
 
-export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversation' | 'configuration' }) {
+export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'records' | 'configuration' }) {
   const { t } = useTranslation('agentTeams');
   const navigate = useNavigate();
   const workspaceSlug = 'personal';
@@ -285,7 +286,7 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
     try {
       const parsedLimit = Number.parseInt(maxConcurrentRunsDraft, 10);
       const maxConcurrentRuns = Number.isFinite(parsedLimit) && parsedLimit >= 1 ? parsedLimit : DEFAULT_MAX_CONCURRENT_RUNS;
-      const saved: TeamConcurrencyView = await api.updateAgentTeam(teamId, {
+      const saved: AgentTeamView = await api.updateAgentTeam(teamId, {
         roles: [...toPersistedRoles(roleDrafts), ...preservedRoles],
         maxConcurrentRuns,
       });
@@ -369,7 +370,7 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
         className="mt-6"
         value={tab}
         onValueChange={(value) => {
-          if (value !== 'conversation' && value !== 'configuration') return;
+          if (value !== 'records' && value !== 'configuration') return;
           void navigate({
             to: '/agent-teams/$teamId',
             params: { teamId },
@@ -378,11 +379,11 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'conversa
         }}
       >
         <TabsList aria-label={t('title')}>
-          <TabsTrigger value="conversation">{t('conversation.tab')}</TabsTrigger>
+          <TabsTrigger value="records">{t('records.tab')}</TabsTrigger>
           <TabsTrigger value="configuration">{t('configuration.tab')}</TabsTrigger>
         </TabsList>
-        <TabsContent value="conversation" className="min-h-[560px]">
-          <TeamConversation teamId={teamId} />
+        <TabsContent value="records">
+          <TeamRecords teamId={teamId} />
         </TabsContent>
         <TabsContent value="configuration">
           {resourceErrors.length > 0 ? (

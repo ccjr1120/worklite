@@ -3,11 +3,11 @@ import { createHash } from 'node:crypto';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { ChatTaskReference, DispatchChatRequest, DispatchChatResponse } from '@worklite/contracts';
-import { agentExecutionEvents, agentExecutions, agentTeamConversationMessages, chatSubmissions, workflowVersions, workflows, type Database } from '@worklite/db';
+import { agentExecutionEvents, agentExecutions, chatSubmissions, workflowVersions, workflows, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from './agent-executions.service';
-import { AgentTeamConversationService } from '../agent-teams/agent-team-conversation.service';
+import { AgentTeamsService } from '../agent-teams/agent-teams.service';
 import { RunsService } from '../runs/runs.service';
 
 export const CHAT_AGENT_ID = 'agt_system_helper_chat';
@@ -21,7 +21,7 @@ export class ChatDispatchService {
     @Inject(DATABASE) private readonly db: Database,
     private readonly workspaces: WorkspaceService,
     private readonly executions: AgentExecutionsService,
-    private readonly conversations: AgentTeamConversationService,
+    private readonly teams: AgentTeamsService,
     private readonly runs: RunsService,
   ) {}
 
@@ -85,13 +85,10 @@ export class ChatDispatchService {
         await this.runs.createForVersion(request, version.id, { input: input.message }, { runId, accept: (transaction) => bind(transaction, { kind: 'workflow', runId, workflowVersionId: version.id }) });
       } else {
         const target = input.target;
-        const before = await this.conversations.getConversation(request, 'personal', target.teamId);
-        const intake = target.intakeSubmissionId ? before.intakes.find((item) => item.submissionId === target.intakeSubmissionId) : null;
-        const [alreadySent] = await this.db.select({ id: agentTeamConversationMessages.id }).from(agentTeamConversationMessages).where(and(eq(agentTeamConversationMessages.conversationId, before.id), eq(agentTeamConversationMessages.deduplicationKey, `send:${submission.id}`))).limit(1);
-        if (!alreadySent && target.intakeSubmissionId && (!intake || before.activeIntakeId !== intake.id || intake.status !== 'collecting' || target.intakeField && intake.unresolvedField !== target.intakeField)) throw new ConflictException('This Team intake question is no longer active.');
-        await this.conversations.sendMessage(request, 'personal', target.teamId, { submissionId: submission.id, text: input.message, ...(target.intakeSubmissionId ? {} : { mentions: ['coordinator'] }) });
-        // Team intake already persists its submission id, so replay after a crash cannot start a second Run.
-        this.db.transaction((transaction) => bind(transaction, { kind: 'team', teamId: target.teamId, intakeSubmissionId: target.intakeSubmissionId ?? submission.id }));
+        const runId = `atrun_chat_${createHash('sha256').update(workspace.id + ':' + submission.id).digest('hex')}`;
+        await this.teams.createRun(request, 'personal', target.teamId,
+          { intent: input.message, projectDirectory: target.projectDirectory, mode: target.mode },
+          { runId, accept: (transaction, id) => bind(transaction, { kind: 'team', teamId: target.teamId, runId: id }) });
       }
       const [accepted] = await this.db.select().from(chatSubmissions).where(eq(chatSubmissions.id, submission.id)).limit(1);
       if (!accepted.reference) throw new Error('Conversation dispatch did not commit a task reference.');

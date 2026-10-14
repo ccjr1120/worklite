@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { and, eq, gt, inArray, isNotNull, isNull, or } from 'drizzle-orm';
-import { agentTeamIntakes, agentTeamRuns, chatSubmissions, type Database } from '@worklite/db';
+import { and, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
+import { agentTeamRuns, chatSubmissions, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { AgentTeamRuntimeService } from '../agent-teams/agent-team-runtime.service';
 import { AgentExecutionsService } from './agent-executions.service';
@@ -11,7 +11,7 @@ const MAX_DEFERRED_ATTEMPTS = 240;
 // Reports the terminal outcome of a Chat-dispatched Team Run back into the originating
 // conversation, mirroring the background project task report. Cancelled Runs and
 // waiting_for_input Runs are not reported: cancellation is user-driven and pending
-// questions are already visible in the Team conversation and task card.
+// questions are already visible in the Run detail and task card.
 @Injectable()
 export class ChatTeamRunReportsService implements OnModuleInit {
   private readonly logger = new Logger(ChatTeamRunReportsService.name);
@@ -42,14 +42,14 @@ export class ChatTeamRunReportsService implements OnModuleInit {
   private async sweepSettledRuns(): Promise<void> {
     const rows = await this.db.select({ runId: agentTeamRuns.id })
       .from(chatSubmissions)
-      .innerJoin(agentTeamIntakes, eq(agentTeamIntakes.submissionId, chatSubmissions.id))
-      .innerJoin(agentTeamRuns, eq(agentTeamRuns.id, agentTeamIntakes.runId))
+      .innerJoin(agentTeamRuns, sql`${agentTeamRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
       .where(and(
         // reportedAt alone cannot gate a report: a retried Run settles again after the
         // first report, so only a settle newer than the last report counts as unreported.
         or(isNull(chatSubmissions.reportedAt), gt(agentTeamRuns.finishedAt, chatSubmissions.reportedAt)),
         isNotNull(chatSubmissions.executionId),
         inArray(agentTeamRuns.status, ['succeeded', 'failed']),
+        sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'team'`,
       ));
     for (const row of rows) await this.scheduleForRun(row.runId, 0);
   }
@@ -64,10 +64,9 @@ export class ChatTeamRunReportsService implements OnModuleInit {
       runStatus: agentTeamRuns.status,
       runFinishedAt: agentTeamRuns.finishedAt,
     })
-      .from(agentTeamIntakes)
-      .innerJoin(chatSubmissions, eq(chatSubmissions.id, agentTeamIntakes.submissionId))
-      .innerJoin(agentTeamRuns, eq(agentTeamRuns.id, agentTeamIntakes.runId))
-      .where(eq(agentTeamIntakes.runId, runId))
+      .from(chatSubmissions)
+      .innerJoin(agentTeamRuns, sql`${agentTeamRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
+      .where(and(eq(agentTeamRuns.id, runId), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'team'`))
       .limit(1);
     if (!row || !row.executionId || row.reference?.kind !== 'team') return;
     if (row.runStatus !== 'succeeded' && row.runStatus !== 'failed') return;

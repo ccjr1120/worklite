@@ -1,7 +1,7 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ChatProjectTaskView, ChatSubmissionView, RunView } from '@worklite/contracts';
-import { useAgentTeamConversationQuery, useAgentTeamRunQuery, useRunQuery, useWorkliteUpgradeQuery } from '@/api/queries';
+import { useAgentTeamRunQuery, useRunQuery, useWorkliteUpgradeQuery } from '@/api/queries';
 import { isLiveStatus, StatusDot, toStatusKey } from '@/components/status-badge';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { cn } from '@/lib/utils';
@@ -165,9 +165,7 @@ function usePinnedRowState(candidate: PinCandidate): RowState {
   const { t } = useTranslation('assistant');
   const reference = candidate.kind === 'submission' ? candidate.submission.reference : null;
   const workflow = useRunQuery('personal', reference?.kind === 'workflow' ? reference.runId : '', reference?.kind === 'workflow');
-  const team = useAgentTeamConversationQuery('personal', reference?.kind === 'team' ? reference.teamId : '');
-  const intake = reference?.kind === 'team' ? team.data?.intakes.find((item) => item.submissionId === reference.intakeSubmissionId) : undefined;
-  const teamRun = useAgentTeamRunQuery('personal', intake?.runId ?? '');
+  const teamRun = useAgentTeamRunQuery('personal', reference?.kind === 'team' ? reference.runId : '');
   const upgrade = useWorkliteUpgradeQuery(reference?.kind === 'upgrade' ? reference.jobId : '');
 
   if (candidate.kind === 'project') {
@@ -187,8 +185,7 @@ function usePinnedRowState(candidate: PinCandidate): RowState {
   }
   if (reference?.kind === 'team') {
     if (teamRun.data) return { live: isLiveStatus(teamRun.data.status), status: teamRun.data.status, title, progress: null };
-    const collecting = intake ? intake.status === 'queued' || intake.status === 'collecting' || intake.status === 'starting' : !submission.settled;
-    return { live: collecting, status: intake?.status === 'collecting' ? 'waiting_for_input' : intake?.status === 'failed' ? 'failed' : intake?.status === 'starting' ? 'running' : 'queued', title, progress: null };
+    return { live: !submission.settled, status: 'queued', title, progress: null };
   }
   if (reference?.kind === 'upgrade') {
     const job = upgrade.data;

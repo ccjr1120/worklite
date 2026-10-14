@@ -4,7 +4,7 @@
 
 `/agent-team-runs/:runId`
 
-The route is a direct immutable-evidence destination reached from its originating Team conversation or a retained Run link. It is not a top-level Run collection because the first release has no Team Run list API.
+The route is a direct immutable-evidence destination reached from the Team summary records endpoint or a retained Run link. It is not a full Run collection; the Team page reads only compact summary rows.
 
 ## Design Source
 
@@ -46,7 +46,7 @@ The page uses the full Workspace page width with a `1200px` maximum. The heading
 | Cancel | Cancel opens the shared destructive confirmation pattern, then shows local progress. Cancellation remains visible until active work settles. |
 | Retry failed task | Only a server-declared retryable active task renders Retry. Its control shows local progress and sends that task key. Successful predecessors are never rerun by the UI. |
 | Read command evidence | An operation with a linked Command loads its command, status, exit code, and bounded replayed output through the existing Command query and event stream. |
-| Open Team | The TeamVersion link returns to the originating Team conversation when that link is available, otherwise the direct Team route, without changing run state. |
+| Open Team | The TeamVersion link returns to the Team work records when that link is available, otherwise the direct Team route, without changing run state. |
 
 SSE transport failure is shown as a reconnecting state, not a run failure. The persisted Run query remains the recovery path if the stream cannot reconnect.
 
@@ -195,7 +195,7 @@ The heading hierarchy moves from Run title to section titles. Controls are nativ
 
 2026-10-08 source comparison: pending-input panels identify the owning task attempt and omit command-grant fields for the Codex developer, retaining ordinary answers and recovery. No runtime, browser, type check, build or test verification was authorized or performed.
 
-Source-level audit: 2026-10-03. The source selects the Conversation tab and `openConversation` label when `run.originatingConversationId` is present; direct-origin Runs return to the Configuration tab with `openTeam`. No other difference was found in the source-level comparison of route, observation, mutation, replay, evidence, copy, token, responsive, and accessibility structure. Only source review occurred; no browser, accessibility-tool, runtime, acceptance, or real-Run verification was performed.
+2026-10-13 source comparison: every Run returns to Team work records; Run task links resolve directly from the bound `runId`. Pending questions, controls, document delivery and progress remain Run-owned. Source review only; no browser, runtime, build or test verification was performed.
 
 ## Changelog
 
@@ -206,6 +206,10 @@ Source-level audit: 2026-10-03. The source selects the Conversation tab and `ope
 ### 2026-10-13 - Markdown for agent-authored text
 
 - Rendered task progress text, pending input and recovery questions, the outcome summary and document bodies through the shared safe Markdown renderer.
+
+### 2026-10-13
+
+- Team task references now bind directly to Run ids. Team has no conversation or intake; Chat Agent collects parameters and dispatches Runs. Run detail owns questions, command grants, documents and recovery, and returns to work records. No manual Team launch entry remains.
 
 ### 2026-10-10 - Progress percentage and readable streaming output
 
@@ -221,7 +225,7 @@ Source-level audit: 2026-10-03. The source selects the Conversation tab and `ope
 
 ### 2026-10-03 - Conversation origin
 
-- Defined the Run route as immutable execution evidence with a return link to the originating Team conversation when that link exists.
+- Defined the Run route as immutable execution evidence with a return link to the Team work records when that link exists.
 
 ### 2026-10-03 - Structured task evidence
 

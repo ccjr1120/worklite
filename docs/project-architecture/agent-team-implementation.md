@@ -2,7 +2,7 @@
 
 Date: 2026-10-03
 
-Status: The BMAD + TEA and LangGraph.js technology direction is confirmed and implemented through the authorized P2 runtime acceptance and P4 release assessment. The public REST/SSE boundary is implemented for the one built-in Team, including the durable Team conversation and managed-file delivery boundary; its direct Team and Team Run Web interfaces are also implemented. Team creation/deletion remains unavailable. The acceptance report below covers the authorized scenarios only; scenarios not listed as executed remain implementation requirements, and normal repository verification and service-lifecycle rules still apply.
+Status: The BMAD + TEA and LangGraph.js technology direction is confirmed and implemented through the authorized P2 runtime acceptance and P4 release assessment. The public REST/SSE boundary is implemented for one built-in Team, including summary work records, Run progress and managed-file delivery. The Web Team page lists records and configuration; Chat Agent alone starts Runs. Team collection, direct Run-creation and conversation routes are absent; Team creation/deletion remains unavailable. The acceptance report below covers the authorized scenarios only; scenarios not listed as executed remain implementation requirements, and normal repository verification and service-lifecycle rules still apply.
 
 Architecture authority: [Project Architecture](README.md#agent-team-implementation-direction). Applicable working rules: [AGENTS.md](../../AGENTS.md) and [AGENTS_WORKFLOW.md](../../AGENTS_WORKFLOW.md).
 
@@ -103,11 +103,11 @@ Accepted requirements and scope have explicit revisions. If requirements change,
 
 ## 4.4 Multi-Developer Orchestration
 
-The Developer role remains one of the six required role entries. Its optional `developerInstances` list describes up to three complete extra instances beyond the primary reserved id `developer`; `developerConcurrency` is clamped to 1–4 and defaults to `min(logicalDeveloperCount, 2)`. Omitting `developerInstances` in a PATCH preserves saved extras, while an explicit empty array clears them.
+The Developer role is one configuration shared by a fixed four-lane pool: `developer`, `developer-2`, `developer-3`, and `developer-4`. The Planner may emit one to four assignments with non-overlapping owned paths; the runtime maps them to lanes in order and starts only the assigned lanes. Every lane uses the role's single launch captured in the TeamVersion.
 
-A new TeamVersion uses `orchestrationVersion: 2`, captures a launch for every logical Developer in `developerExecutions`, retains the equivalent primary `developerExecution`, and records `recipeDefaults.maxDeveloperConcurrency`. Planner output supplies non-overlapping path-owned assignments for every required Developer. Development uses a deterministic LangGraph dispatcher and per-Developer branches; pending input and repair are assignment-specific, and downstream roles begin only after fan-in. Version 1 snapshots remain unchanged and use the serial graph.
+New TeamVersions use `orchestrationVersion: 4`. The graph runs Planner, Worktree Manager setup, Developer fan-out, Reviewer, and Worktree Manager teardown. The Worktree Manager validates the plan and records per-Run and per-lane worktree paths and branches. Version 1, 2, and 3 snapshots retain their own graphs for in-flight Runs.
 
-A parallel failure uses one retry barrier: successful siblings and predecessor attempts are not rerun, failed assignments in the same fan-out resume together, and unstarted assignments remain checkpoint-owned. Pause stops new dispatch, cancellation interrupts every Developer executor, and restart fails only running Developer attempts that cannot be confirmed in process. Joined results retain per-assignment evidence and fail on conflicting changed paths rather than silently overwriting them.
+A parallel failure uses one retry barrier: successful siblings and predecessor attempts are not rerun, failed assignments in the same fan-out resume together, and unstarted assignments remain dispatcher-owned. Pause stops new dispatch, cancellation interrupts every Developer executor, and restart fails only running Developer attempts that cannot be confirmed in process. Merge conflicts or failures retain worktrees and branches as Run evidence for recovery.
 
 ## 5. BMAD and TEA Process Packaging
 
@@ -129,7 +129,7 @@ Run-scoped planning material is materialized under the active profile's data roo
 
 ```mermaid
 flowchart TD
-    UI[Team interface and Chat Bot] --> API[Agent Teams API]
+    UI[Team records and Run detail; Chat Agent dispatch] --> API[Agent Teams API]
     API --> RT[Team runtime: LangGraph.js]
     RT --> CP[Persistent checkpoint store]
     RT --> INV[Shared isolated Agent invocation]
@@ -236,19 +236,15 @@ Review feedback creates specific, scoped tasks. It does not silently delete fail
 
 ## 10. Public API and Event Contract
 
-The following API routes are implemented. Names use `agent-teams` to distinguish Agent collaboration from workspace naming in existing services. General Team creation and deletion are outside the first built-in-template scope. The Web increment exposes the built-in Team through `/agent-teams/:teamId` and each resulting Run through `/agent-team-runs/:runId`; it adds no Team collection or Team management route.
+The following public API routes are implemented. Names use `agent-teams` to distinguish Agent collaboration from workspace naming in existing services. There is one built-in Team, with no Team collection, creation/deletion or manual Run creation route. Chat Agent dispatch is the only Run launch boundary.
 
-Run creation and pending-input answers expose the exact command grant set explicitly. An answer can include both text and zero or more exact commands; only the structured command list changes executable authorization.
+Chat Agent dispatch does not create command grants. A user can grant exact commands through Run detail controls or the current Feishu task card; pending-input answers carry any granted strings in a structured field, never in prose.
 
 | Route | Purpose |
 | --- | --- |
-| `GET /agent-teams` | Read available team configuration |
 | `GET /agent-teams/:teamId` | Read role and process configuration |
 | `PATCH /agent-teams/:teamId` | Save supported role configuration |
-| `GET /agent-teams/:teamId/conversation` | Read durable Team conversation and intake state |
-| `POST /agent-teams/:teamId/conversation/messages` | Submit a Coordinator mention, answer, or pending request idempotently |
-| `GET /agent-teams/:teamId/conversation/events` | Read live and replayed conversation SSE events |
-| `POST /agent-teams/:teamId/runs` | Capture TeamVersion and create a run atomically |
+| `GET /agent-teams/:teamId/runs` | Read compact goal, directory, mode, status and timestamp records |
 | `GET /agent-team-runs/:runId` | Read current run, task, document, and assessment state |
 | `GET /agent-team-documents/:documentId` | Read one immutable Team document and delivery metadata |
 | `GET /agent-team-documents/:documentId/download` | Download the materialized Team document file |
@@ -260,25 +256,25 @@ Run creation and pending-input answers expose the exact command grant set explic
 | `POST /agent-team-runs/:runId/cancel` | Cancel active and pending work |
 | `POST /agent-team-runs/:runId/tasks/:taskKey/retry` | Retry the server-declared failed active task |
 
-Run creation supplies intent, project directory, mode, and existing scope authorization. The API returns a run identifier immediately. Pending-input responses identify the current question and accepted scope revision; stale answers cannot resume a different pending operation. One Run is active at a time: a direct-origin active Run blocks a completed conversation intake as a queued request and that intake resumes automatically when the Run settles. A direct-origin Run's answers and evidence remain on the immutable Run record and are not projected into the Team conversation transcript.
+Chat dispatch supplies the goal, absolute existing project directory and mode; it creates the Run directly and atomically binds the stable submission id to its runId. Repeated delivery cannot create a second Run. Runs start while fewer than the configured `maxConcurrentRuns` (default 3) are active; additional Runs persist in a FIFO queue and start when an active Run reaches a terminal state. Pending-input responses identify the current question and accepted scope revision; stale answers cannot resume a different pending operation.
 
 Proposed Run states are `queued`, `running`, `waiting_for_input`, `paused`, `succeeded`, `failed`, and `cancelled`. A pause request remains a visible pending control state until the current attempt settles. Graph completion yields `succeeded`; infrastructure or task execution failure yields `failed`. Final criterion assessments remain separate.
 
-Events cover run state, task attempts, streamed member output, document commits and delivery, command links, input requests, and final assessments. Persist Run and conversation events before publishing them; replay uses browser-managed `Last-Event-ID`, and the conversation stream sends replayed persisted events in sequence before live events. A public snapshot exposes typed Team state, not raw LangGraph checkpoints. Conversation events own intake and chat projection before and after Run creation, but reference authoritative Run events rather than duplicating task deltas, JSON results, command output, or document bodies. `document.committed` proves immutable database commitment; `document.delivered` is emitted only after managed-file materialization succeeds, and `document.delivery_failed` is a distinct materialization failure that does not rerun the producing role. Document detail and download retry materialization of the immutable document before serving it.
+Events cover run state, task attempts, streamed member output, document commits and delivery, command links, input requests, and final assessments. Persist Run events before publishing them; replay uses browser-managed `Last-Event-ID` and sends persisted Run events in sequence before live events. A public snapshot exposes typed Team state, not raw LangGraph checkpoints. Chat submissions reference the authoritative Run and do not create a second progress history. `document.committed` proves immutable database commitment; `document.delivered` is emitted only after managed-file materialization succeeds, and `document.delivery_failed` is a distinct materialization failure that does not rerun the producing role. Document detail and download retry materialization of the immutable document before serving it.
 
 Team model requests need TeamRun and task-attempt correlation in Gateway transport logs. Extend the existing internal metadata path and credential-safe log filters rather than invent Workflow Run IDs for Team calls. Gateway request bodies retain their current three-day retention; durable Team activity survives independently.
 
 ## 11. Product Entry and Documentation Boundaries
 
-Submitting a Coordinator mention starts durable intake. The server deterministically gathers the goal, an absolute local project directory, and mode, then creates one authorized Run automatically. A still-valid remembered directory is reused silently; natural-language replies never grant commands. After creation, the conversation shows concise states, member questions, delivered filenames, and links to immutable Run evidence. A returned execution proposal lists the planned changes, tests, and commands. When additional authorization is required, one activation grants that scope and continues the suspended run. Already-granted authorization is reused; the user does not approve each role transition.
+Chat Agent starts a Team Run after collecting the goal, absolute project directory and mode. The Team page lists compact work records and opens Run detail. Feishu task cards show Run state, member questions, delivered filenames and controls. Natural-language replies never grant commands. A returned execution proposal lists the planned changes, tests, and commands. When additional authorization is required, one activation grants that scope and continues the suspended run. Already-granted authorization is reused; the user does not approve each role transition.
 
-The Team surface presents the goal, current work, task dependencies, member results, generated documents, changed files, and real test evidence. Progress is attached to the active work or control, and server events update state without a manual refresh. The first release uses a supplied team recipe; users do not need to construct a graph before starting.
+The Team record list presents goal, status, project directory, mode and timestamps; Run detail presents current work, task dependencies, member results, generated documents, changed files and actual execution evidence. Progress is attached to active work or a control, and Run events update state without a manual refresh. Only Chat Agent starts work; the first release uses a supplied team recipe.
 
 The user's request to explore independently of the current visual system is retained. This implementation plan describes functional interaction only. Detailed visual choices require a separate page design before UI code changes and must be stored under the existing `ui-ux-design/` structure. Proposed documentation locations are:
 
 - `ui-ux-design/pages/agent-teams/detail/DESIGN.md` for team configuration and starting work.
 - `ui-ux-design/pages/agent-team-runs/detail/DESIGN.md` for observing and continuing work.
-- The existing Chat Bot surface specification for its Team entry and run links.
+- The Chat workspace specification for Team dispatch and task links.
 
 The two page designs are now approved under those paths. Their Coverage Status fields remain verification results and must be updated only after source-level implementation review.
 
@@ -291,7 +287,7 @@ Estimates assume one developer familiar with WorkLite. They are planning estimat
 | P0: Pin and prove integration | Inspect upstream source and licenses; pin process and runtime versions; map process references; prototype existing model, tool, checkpoint, and interruption paths | A recorded dependency manifest, one Planner-to-Test-Designer handoff, durable pending input, and a demonstrated completed-command replay strategy | 2-3 days |
 | P1: Build shared execution and persistence | Extract isolated role invocation; add project context, effect journaling, continuation state, Team records, and persistent checkpoint integration | One ordered run resumes with preserved completed work and correctly handles uncertain effects | 4-6 days |
 | P2: Deliver the default process | Implement the three modes, selected BMAD and TEA workflows, evidence handoff, independent review, and finite repairs | A small real change and an existing-feature validation run produce traceable assessments | 4-5 days |
-| P3: Add APIs and product interaction | Implement typed APIs, SSE observation, durable Team conversation, file delivery, team configuration, run detail, and Chat Bot integration after page specifications | The user can plan, authorize scoped execution, inspect evidence, and continue without manually moving role outputs | 3-4 days |
+| P3: Add APIs and product interaction | Implement typed APIs, SSE observation, summary work records, file delivery, team configuration, Run detail, and Chat Agent dispatch after page specifications | The user can plan, authorize scoped execution, inspect evidence, and continue without manually moving role outputs | 3-4 days |
 | P4: Assess the release | Execute explicitly authorized acceptance checks and compare representative tasks with a single-Agent baseline | An evidence report covering completion, intervention, time, usage, false success claims, and recovery behavior | 2-3 days |
 
 Total planning estimate: 15-21 working days. Exact dependency versions, SQLite integration, and process reference packaging are P0 decisions. If their resolution changes the documented architecture, return to architecture discussion before proceeding.
@@ -429,7 +425,7 @@ References were consulted on 2026-10-03. They support the selected mechanisms; t
 - Documented bounded dispatch, assignment ownership, per-assignment pending input and repair, aggregate conflict handling, restart behavior, and same-fan-out retry.
 - Defined replay-compatible `developerId` task attribution and low-frequency `run.progress` events.
 
-### 2026-10-03 - Team conversation and file delivery
+### 2026-10-03 - Team conversation and file delivery (historical)
 
 - Added the Team-owned durable conversation boundary: one built-in Team context, idempotent intakes keyed by stable submission ids, ordered messages, and replayable conversation events.
 - Defined deterministic Coordinator intake and silent reuse of the latest still-valid local project directory, while retaining exact-string command authorization.

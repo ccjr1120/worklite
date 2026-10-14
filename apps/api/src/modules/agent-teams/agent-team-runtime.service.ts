@@ -34,9 +34,7 @@ import type {
   RecoverAgentTeamOperationRequest,
 } from '@worklite/contracts';
 import {
-  agentTeamConversations,
   agentTeamDocuments,
-  agentTeamIntakes,
   agentTeamOperations,
   agentTeamPendingInputs,
   agentTeamRunEvents,
@@ -126,7 +124,7 @@ const QUEUED_OR_ACTIVE_STATUSES = ['queued', ...SLOT_ACTIVE_STATUSES] as const;
 
 type Checkpointer = ReturnType<typeof createSqliteCheckpointer>;
 type AgentTeamDatabaseTransaction = Parameters<Parameters<Database['transaction']>[0]>[0];
-type AgentTeamRunOrigin = { intakeId: string; conversationId: string };
+type AgentTeamRunAcceptance = { runId: string; accept: (transaction: AgentTeamDatabaseTransaction, runId: string) => void };
 type AgentTeamEventListener = (event: AgentTeamRunEvent) => void;
 type RawTaskOutput = {
   status?: unknown;
@@ -192,7 +190,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   async createRun(
     workspaceId: string,
     request: CreateAgentTeamRunRequest,
-    origin?: AgentTeamRunOrigin,
+    acceptance: AgentTeamRunAcceptance,
   ): Promise<AgentTeamRunView> {
     assertRuntimeAdmission();
     const intent = request?.intent?.trim();
@@ -210,7 +208,10 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('Plan-only Agent Team runs cannot authorize commands.');
     }
 
-    const runId = `atrun_${randomUUID()}`;
+    const [existing] = await this.db.select({ id: agentTeamRuns.id }).from(agentTeamRuns)
+      .where(and(eq(agentTeamRuns.id, acceptance.runId), eq(agentTeamRuns.workspaceId, workspaceId))).limit(1);
+    if (existing) return this.getRunView(existing.id, workspaceId);
+    const runId = acceptance.runId;
     const versionId = `atver_${randomUUID()}`;
     const resolvedProjectDirectory = resolve(projectDirectory);
     const projectInstructions = await this.readProjectInstructions(resolvedProjectDirectory);
@@ -251,25 +252,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         scopeRevision: 1,
         langGraphThreadId: `atthread_${runId}`,
       }).run();
-      if (origin) {
-        const linkedIntakes = transaction.update(agentTeamIntakes).set({
-          runId,
-          unresolvedField: null,
-          updatedAt: now,
-        }).where(and(
-          eq(agentTeamIntakes.id, origin.intakeId),
-          eq(agentTeamIntakes.workspaceId, workspaceId),
-          eq(agentTeamIntakes.conversationId, origin.conversationId),
-          isNull(agentTeamIntakes.runId),
-        )).returning({ id: agentTeamIntakes.id }).all();
-        if (linkedIntakes.length !== 1) {
-          throw new NotFoundException('The Agent Team conversation intake was not found.');
-        }
-        transaction.update(agentTeamConversations).set({
-          latestProjectDirectory: resolvedProjectDirectory,
-          updatedAt: now,
-        }).where(eq(agentTeamConversations.id, origin.conversationId)).run();
-      }
+      acceptance.accept(transaction, runId);
       this.appendEvent(transaction, runId, 'run.status', { status: 'queued' });
     });
 
@@ -327,10 +310,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   async getRunView(runId: string, workspaceId?: string): Promise<AgentTeamRunView> {
     const run = await this.getRun(runId, workspaceId);
-    const [origin] = await this.db.select({ conversationId: agentTeamIntakes.conversationId })
-      .from(agentTeamIntakes)
-      .where(eq(agentTeamIntakes.runId, runId))
-      .limit(1);
     const [version] = await this.db.select().from(agentTeamVersions)
       .where(eq(agentTeamVersions.id, run.teamVersionId))
       .limit(1);
@@ -385,7 +364,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       desiredControlState: run.desiredControlState,
       tasks: taskRows.map((row) => toTaskAttemptView(row, progressTextByAttemptId.get(row.id) ?? '')),
       documents: documentRows.map(toDocumentView),
-      originatingConversationId: origin?.conversationId ?? null,
       pendingInputs: pendingRows.map(toPendingInputView),
       operations: operationRows.map(toOperationView),
       activities: activityRows.map((row) => ({ runId: row.runId, sequence: row.sequence, type: row.type, payload: row.payload, createdAt: row.createdAt.toISOString() })),

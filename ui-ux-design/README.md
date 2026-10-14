@@ -34,7 +34,7 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 - Providers: [Model providers and Portkey Gateway](pages/model-providers/DESIGN.md), including the dedicated Codex Account Pool
 - Logs: [Gateway statistics and request logs](pages/logs/DESIGN.md), including the shared time range
 - Workflows: [List](pages/workflows/list/DESIGN.md), [Editor](pages/workflows/editor/DESIGN.md), [Versions](pages/workflows/versions/DESIGN.md)
-- Agent Teams: [Detail](pages/agent-teams/detail/DESIGN.md), [Run detail](pages/agent-team-runs/detail/DESIGN.md)
+- Agent Teams: work records and configuration [Detail](pages/agent-teams/detail/DESIGN.md), [Run detail](pages/agent-team-runs/detail/DESIGN.md)
 - Runs: [Detail](pages/runs/detail/DESIGN.md), [Node logs](surfaces/workflow-run/node-logs/DESIGN.md)
 - Skills: [List](pages/skills/list/DESIGN.md), [Editor](pages/skills/editor/DESIGN.md)
 - MCP servers: [List](pages/mcp-servers/list/DESIGN.md), [Configuration](pages/mcp-servers/configuration/DESIGN.md)
@@ -70,7 +70,7 @@ The `/model-providers` page is the top-level Providers destination. It uses page
 
 `/logs` is the top-level Logs destination for Gateway transport observability. It uses page-level tabs for Statistics and Requests over one shared time range. Provider and model filters scope both views, model breakdowns open their matching requests, and failed Provider tests can focus the exact captured request. Providers configures what the Gateway dispatches to; Logs reads what it did.
 
-`/agent-teams/:teamId` is the direct destination for the one built-in Agent Team and defaults to its Team-owned Coordinator conversation, with Configuration in a validated top tab; there is no Team collection, creation, or deletion route. Conversation transport replays persisted events with `Last-Event-ID`, and a failed managed Team document can be redelivered through its detail or download route without rerunning its producing role. `/agent-team-runs/:runId` is its immutable-version evidence destination reached from the conversation or a retained Run link, not a top-level collection; direct-origin Run answers remain Run evidence and are not projected into the Team transcript. `/runs/:runId` is a Workflow Run log-reading destination reached from a Workflow's Run records dialog, not a top-level collection. There is no Run list route: Runs are reached through their Workflow. Provider request observability is not a Settings page: `/settings` keeps the WorkLite-owned Usage and Audit Log read models, which are business records over Runs and resource mutations rather than Gateway transport records.
+`/agent-teams/:teamId` is the direct destination for the one built-in Agent Team and defaults to summary work records, with Configuration in a validated top tab; there is no Team collection or manual Run creation route. Chat Agent dispatch is the only task entry and binds submissions directly to Run ids. A failed managed Team document can be redelivered through its detail or download route without rerunning its producing role. `/agent-team-runs/:runId` is the immutable-version evidence destination reached from a summary record or retained Run link, not a full Run collection. `/runs/:runId` is a Workflow Run log-reading destination reached from a Workflow's Run records dialog, not a top-level collection. There is no Run list route: Runs are reached through their Workflow. Provider request observability is not a Settings page: `/settings` keeps the WorkLite-owned Usage and Audit Log read models, which are business records over Runs and resource mutations rather than Gateway transport records.
 
 ## Shared Component Inventory
 
@@ -90,13 +90,14 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
-### 2026-10-13 - Parallel Team Runs and Worktree Manager evidence
+### 2026-10-13 - Team records and parallel Runs
 
-- The [Team](pages/agent-teams/detail/DESIGN.md) conversation inspector lists every non-terminal Run as a live work-record card, including queued Runs waiting for a parallel slot, and the Configuration tab gains the parallel Run limit (`maxConcurrentRuns`, default 3). The [Run detail](pages/agent-team-runs/detail/DESIGN.md) shows the Worktree Manager stage and the Run's immutable base worktree path and run branch evidence. No new token.
+- Team defaults to Records with linked Run progress, retains Configuration, and has no conversation or manual launch entry. Chat Agent dispatches directly to Runs. Records include Runs waiting for a parallel slot; `maxConcurrentRuns` defaults to 3 and controls FIFO queueing.
+- Run detail documents the Worktree Manager stage and immutable worktree path and branch evidence.
 
-### 2026-10-13 - Markdown for agent-authored card and Team text
+### 2026-10-13 - Markdown for agent-authored text
 
-- The [Run detail](pages/agent-team-runs/detail/DESIGN.md) task progress text, questions, outcome summary and documents, the [Team](pages/agent-teams/detail/DESIGN.md) conversation questions and document viewer, and the [Chat](pages/chat/workspace/DESIGN.md) project task question render through the shared safe Markdown renderer. No new token.
+- Run detail task progress, questions, outcomes and documents, plus Chat project task questions, render through the shared safe Markdown renderer.
 
 ### 2026-10-13 - Chat image attachments
 
@@ -211,13 +212,13 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ### 2026-10-03
 
-- Made the Agent Team Conversation the default direct Team experience and moved role setup to a Configuration tab.
+- The 2026-10-13 correction replaces the Team conversation with work records and keeps role setup under Configuration; Chat Agent owns new Run dispatch.
 - Added durable Coordinator intake, automatic Run creation, concise conversation execution state, delivered Team document files, contextual viewing, download, and a conversation-origin return link on Run evidence.
 - Removed the form-first Team launch behavior without retaining a compatibility alias.
 
 ### 2026-10-03
 
-- Added the direct built-in Agent Team and Team Run detail routes and specifications, including structured authorization, recovery, replayable observation, and the Chat Bot navigation starter.
+- Added direct built-in Agent Team and Team Run detail routes with structured authorization, recovery and replayable observation.
 
 
 ### 2026-09-24 - Run execution graph

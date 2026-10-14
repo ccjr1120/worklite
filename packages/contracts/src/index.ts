@@ -96,12 +96,12 @@ export type UpdatePluginRequest = {
 
 export type ChatTarget =
   | { kind: 'conversation' }
-  | { kind: 'team'; teamId: string; intakeSubmissionId?: string; intakeField?: 'goal' | 'projectDirectory' | 'mode' }
+  | { kind: 'team'; teamId: string; projectDirectory: string; mode: 'plan_only' | 'validate_existing' | 'implement_and_validate' }
   | { kind: 'workflow'; workflowId: string };
 
 export type ChatTaskReference =
   | { kind: 'conversation'; executionId: string; afterMessageId: string | null; afterSequence: number; untilMessageId?: string | null; completionStatus?: string; completionError?: string | null }
-  | { kind: 'team'; teamId: string; intakeSubmissionId: string }
+  | { kind: 'team'; teamId: string; runId: string }
   | { kind: 'workflow'; runId: string; workflowVersionId: string }
   | { kind: 'upgrade'; jobId: string };
 
@@ -1437,6 +1437,16 @@ export type AgentTeamRunOutcome = {
   criterionAssessments: AgentTeamCriterionAssessment[];
 };
 
+export type AgentTeamRunSummary = {
+  id: string;
+  intent: string;
+  projectDirectory: string;
+  mode: AgentTeamMode;
+  status: AgentTeamRunStatus;
+  createdAt: string;
+  finishedAt: string | null;
+};
+
 export type AgentTeamRunView = {
   id: string;
   teamId: string;
@@ -1450,7 +1460,6 @@ export type AgentTeamRunView = {
   desiredControlState: 'none' | 'pause_requested' | 'cancel_requested';
   tasks: AgentTeamTaskAttemptView[];
   documents: AgentTeamDocumentView[];
-  originatingConversationId: string | null;
   pendingInputs: AgentTeamPendingInputView[];
   operations: AgentTeamOperationView[];
   activities: AgentTeamRunEvent[];
@@ -1488,223 +1497,6 @@ export type AgentTeamRunEvent = {
   type: AgentTeamRunEventType;
   payload: unknown;
   createdAt: string;
-};
-
-export type AgentTeamConversationSpeaker = 'user' | 'coordinator' | 'member' | 'system';
-
-export type AgentTeamConversationDocument = {
-  id: string;
-  runId: string;
-  taskAttemptId: string;
-  taskKey: string | null;
-  role: AgentTeamRole | null;
-  key: string;
-  revision: number;
-  title: string;
-  fileName: string;
-};
-
-export type AgentTeamConversationMessage =
-  | {
-      id: string;
-      conversationId: string;
-      sequence: number;
-      intakeId: string | null;
-      runId: string | null;
-      speaker: 'user';
-      kind: 'task_request';
-      text: string;
-      createdAt: string;
-    }
-  | {
-      id: string;
-      conversationId: string;
-      sequence: number;
-      intakeId: string | null;
-      runId: string | null;
-      speaker: 'coordinator';
-      kind: 'coordinator_question';
-      field: 'goal' | 'projectDirectory' | 'mode';
-      text: string;
-      options: Array<{ value: string; label: string }>;
-      createdAt: string;
-    }
-  | {
-      id: string;
-      conversationId: string;
-      sequence: number;
-      intakeId: string | null;
-      runId: string | null;
-      speaker: 'user';
-      kind: 'answer';
-      field: 'goal' | 'projectDirectory' | 'mode';
-      text: string;
-      createdAt: string;
-    }
-  | {
-      id: string;
-      conversationId: string;
-      sequence: number;
-      intakeId: string | null;
-      runId: string | null;
-      speaker: 'user';
-      kind: 'note';
-      text: string;
-      createdAt: string;
-    }
-  | {
-      id: string;
-      conversationId: string;
-      sequence: number;
-      intakeId: string | null;
-      runId: string | null;
-      speaker: 'user';
-      kind: 'run_answer';
-      pendingInputId: string;
-      scopeRevision: number;
-      text: string;
-      authorizedCommands: string[];
-      createdAt: string;
-    }
-  | {
-      id: string;
-      conversationId: string;
-      sequence: number;
-      intakeId: string | null;
-      runId: string | null;
-      speaker: 'member';
-      kind: 'member_question';
-      role: AgentTeamRole;
-      taskKey: string | null;
-      developerId: string | null;
-      assignmentTitle: string | null;
-      pendingInputId: string;
-      scopeRevision: number;
-      kindDetail: 'question' | 'operation_recovery';
-      text: string;
-      operationKey: string | null;
-      createdAt: string;
-    }
-  | {
-      id: string;
-      conversationId: string;
-      sequence: number;
-      intakeId: string | null;
-      runId: string | null;
-      speaker: 'system';
-      kind: 'status';
-      text: string;
-      createdAt: string;
-    }
-  | {
-      id: string;
-      conversationId: string;
-      sequence: number;
-      intakeId: string | null;
-      runId: string | null;
-      speaker: 'member';
-      kind: 'file_delivery';
-      document: AgentTeamConversationDocument;
-      createdAt: string;
-    }
-  | {
-      id: string;
-      conversationId: string;
-      sequence: number;
-      intakeId: string | null;
-      runId: string | null;
-      speaker: 'system';
-      kind: 'delivery_failed';
-      document: AgentTeamConversationDocument;
-      error: string;
-      createdAt: string;
-    }
-  | {
-      id: string;
-      conversationId: string;
-      sequence: number;
-      intakeId: string | null;
-      runId: string | null;
-      speaker: 'system';
-      kind: 'run_state';
-      status: AgentTeamRunStatus;
-      taskStatus: AgentTeamTaskAttemptStatus | null;
-      role: AgentTeamRole | null;
-      taskKey: string | null;
-      developerId: string | null;
-      assignmentTitle: string | null;
-      outcomeSummary: string | null;
-      createdAt: string;
-    };
-
-export type AgentTeamConversationIntakeView = {
-  id: string;
-  submissionId: string;
-  goal: string | null;
-  projectDirectory: string | null;
-  mode: AgentTeamMode | null;
-  unresolvedField: 'goal' | 'projectDirectory' | 'mode' | null;
-  status: 'queued' | 'collecting' | 'starting' | 'started' | 'failed';
-  runId: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type AgentTeamConversationPendingInputView = {
-  runId: string;
-  pendingInputId: string;
-  taskAttemptId: string;
-  scopeRevision: number;
-  kind: 'question' | 'operation_recovery';
-  question: string;
-  operationKey: string | null;
-};
-
-export type AgentTeamConversationRunStateView = {
-  runId: string;
-  status: AgentTeamRunStatus;
-  mode: AgentTeamMode;
-  projectDirectory: string;
-  retryableTaskKey: string | null;
-  retryableTaskKeys: string[];
-  progress: AgentTeamRunProgress | null;
-};
-
-export type AgentTeamConversationView = {
-  id: string;
-  teamId: string;
-  latestProjectDirectory: string | null;
-  recentProjectDirectories: string[];
-  messages: AgentTeamConversationMessage[];
-  intakes: AgentTeamConversationIntakeView[];
-  activeIntakeId: string | null;
-  activeRun: AgentTeamConversationRunStateView | null;
-  pendingInput: AgentTeamConversationPendingInputView | null;
-  pendingInputs: AgentTeamConversationPendingInputView[];
-  lastSequence: number;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type AgentTeamConversationEventType = 'message' | 'intake.updated' | 'run.state';
-
-export type AgentTeamConversationEvent = {
-  conversationId: string;
-  sequence: number;
-  type: AgentTeamConversationEventType;
-  payload: unknown;
-  createdAt: string;
-};
-
-export type SendAgentTeamConversationMessageRequest = {
-  submissionId: string;
-  text: string;
-  mentions?: 'coordinator'[];
-  authorizedCommands?: string[];
-};
-
-export type SendAgentTeamConversationMessageResponse = {
-  conversation: AgentTeamConversationView;
 };
 
 export type AgentTeamDocumentDownloadView = {

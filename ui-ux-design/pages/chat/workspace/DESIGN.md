@@ -48,7 +48,7 @@ The Dialog uses internal Configuration, Channels and Memories sections, in that 
 
 ## Interaction Contract
 
-- Independent task feedback: a Chat turn's completion or failure does not settle a delegated Team Run. Its task card automatically observes intake and Run status, displays the Run's current phase and server-derived completion percentage, retained failure reasons and pending questions, and keeps the existing task-detail link as the action for answering a Team question. A dispatched Team Run's terminal success or failure is additionally reported once by an automatic assistant reply in the same conversation; cancelled Runs and Team questions are not auto-reported. Read failures remain local to the task card. Failed submissions without a task reference remain visible in chronological order.
+- Independent task feedback: a Chat turn's completion or failure does not settle a delegated Team Run. Its task card automatically observes the bound Run status, displays the Run's current phase and server-derived completion percentage, retained failure reasons and pending questions, and keeps the existing task-detail link as the action for answering a Team question. A dispatched Team Run's terminal success or failure is additionally reported once by an automatic assistant reply in the same conversation; cancelled Runs and Team questions are not auto-reported. Read failures remain local to the task card. Failed submissions without a task reference remain visible in chronological order.
 - Project task progress text: display the latest complete public executor message below its disclosure header while no final result is available, including after failure or cancellation. Expansion retains public messages in the existing activity list. The header names the captured executor, and existing semantic surfaces, status cues and reduced-motion behavior apply in both themes. No new control or action is added.
 
 - Chronological transcript: messages, tool calls including project task disclosures, Team, Workflow and upgrade task cards (failed dispatches included), a just-started Workflow run, received Feishu messages awaiting execution, the pending question and the cancelled or failed turn note all appear in one sequence ordered by their own timestamps. No category is pinned to the end of the transcript; only unsent queued messages, which have not happened yet, follow the sequence.
@@ -85,7 +85,7 @@ The Dialog uses internal Configuration, Channels and Memories sections, in that 
 
 | State | Behavior |
 | --- | --- |
-| Team task | Observe intake and Run separately from Chat; show task status, current phase and completion percentage, pending question or failure and the existing details link. A terminal Run is reported once by an automatic assistant reply. Retain cached state and show a local error when a read fails. |
+| Team task | Observe the bound Run separately from Chat; show task status, current phase and completion percentage, pending question or failure and the existing details link. A terminal Run is reported once by an automatic assistant reply. Retain cached state and show a local error when a read fails. |
 | Failed dispatch | Keep the submitted message and safe error visible even when no task reference was created. |
 | Redeployment | Show preparation, preflight, handoff, switch, recovery and terminal outcomes in the same conversation; reconnect after cutover without resubmitting. A proposal waits for an explicit redeploy request rather than a confirmation button. |
 | Historical Shell call | Keep stored command evidence and explicit interrupted-command recovery inspectable; new direct Shell execution is unavailable. |
@@ -150,7 +150,7 @@ The settings control, Dialog heading, internal section tabs, history controls, i
 
 2026-10-10 background project tasks: source inspection found `project_task` awaited inside the turn, so the conversation stayed running and new messages queued until the executor finished, and a task question locked the whole conversation. The implementation settles the turn at task start, moves questions onto the task and adds task-scoped answer and cancel controls using existing neutral controls and semantic tokens in both themes. Only the permitted type check is run; no browser interaction, live executor run, build or test suite.
 
-2026-10-09 execution-efficiency investigation: retained records show two cancelled project tasks spent about 22 and 12.5 minutes investigating without write activity. Source inspection found the full Chat prompt duplicated into executor context, public executor text omitted from task activity, Team intake queries without automatic freshness, and failed submissions without references omitted from the transcript. The approved change addresses those paths and reuses the existing dual-theme components. No type check, tests, build, browser check, deployment or service operation is authorized or performed for this change; live latency improvement remains unmeasured.
+2026-10-09 execution-efficiency investigation: retained records show two cancelled project tasks spent about 22 and 12.5 minutes investigating without write activity. Source inspection found the full Chat prompt duplicated into executor context, public executor text omitted from task activity, Team Run dispatch queries without automatic freshness, and failed submissions without references omitted from the transcript. The approved change addresses those paths and reuses the existing dual-theme components. No type check, tests, build, browser check, deployment or service operation is authorized or performed for this change; live latency improvement remains unmeasured.
 
 2026-10-09 chronological transcript and execution pin: source inspection found task cards, the just-started Workflow run and pending Feishu receipts rendered after every turn regardless of time, so a failed Team dispatch appeared below later messages, and the project task row still named `cx`/`cxo` launch modes. The implementation orders every transcript entry by timestamp and adds the pinned bar for unfinished executions. Only the permitted type check is run; no browser interaction, build or test suite.
 
@@ -193,6 +193,11 @@ Source comparison 2026-10-04: the old embedded surface supports persisted messag
 ### 2026-10-13
 
 - Rendered the inline project task question through the shared Markdown renderer.
+
+- Team task references now bind directly to Run ids. Team has no conversation or intake; Chat Agent collects parameters and dispatches Runs. Run detail owns questions, command grants, documents and recovery, and returns to work records. No manual Team launch entry remains.
+
+
+### 2026-10-13
 - Ordered the settings Dialog tabs Configuration, Channels, Memories with Configuration as the default section, grouped the Claude Code and Codex default models into one Executors block, and removed Web from the Channels list.
 - Capped the history list at the 15 most recent conversations and removed the load-more control; search and channel filters still query all server history.
 - Rendered attachment images inline in replies and task output, with an “图片已过期” placeholder for expired or missing attachments, using existing semantic tokens in both themes.

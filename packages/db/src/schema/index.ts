@@ -44,11 +44,11 @@ export const feishuRegistrations = sqliteTable('feishu_registrations', {
 
 export type StoredChatTarget =
   | { kind: 'conversation' }
-  | { kind: 'team'; teamId: string; intakeSubmissionId?: string; intakeField?: 'goal' | 'projectDirectory' | 'mode' }
+  | { kind: 'team'; teamId: string; projectDirectory: string; mode: 'plan_only' | 'validate_existing' | 'implement_and_validate' }
   | { kind: 'workflow'; workflowId: string };
 export type StoredChatTaskReference =
   | { kind: 'conversation'; executionId: string; afterMessageId: string | null; afterSequence: number; untilMessageId?: string | null; completionStatus?: string; completionError?: string | null }
-  | { kind: 'team'; teamId: string; intakeSubmissionId: string }
+  | { kind: 'team'; teamId: string; runId: string }
   | { kind: 'workflow'; runId: string; workflowVersionId: string }
   | { kind: 'upgrade'; jobId: string };
 

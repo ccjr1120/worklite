@@ -1,11 +1,12 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { Request } from 'express';
 import type {
   AgentTeamRole,
   AgentTeamRoleConfiguration,
   AgentTeamRunEvent,
   AgentTeamRunView,
+  AgentTeamRunSummary,
   AgentTeamView,
   AnswerAgentTeamRunRequest,
   CreateAgentTeamRunRequest,
@@ -14,6 +15,7 @@ import type {
 } from '@worklite/contracts';
 import {
   agentTeams,
+  agentTeamRuns,
   mcpServers,
   skillFiles,
   skills,
@@ -52,14 +54,6 @@ export class AgentTeamsService {
     private readonly runtime: AgentTeamRuntimeService,
   ) {}
 
-  async list(request: Request, workspaceSlug: string): Promise<AgentTeamView[]> {
-    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const rows = await this.db.select().from(agentTeams)
-      .where(eq(agentTeams.workspaceId, workspace.id))
-      .orderBy(asc(agentTeams.name));
-    return rows.map((row) => toTeamView(row));
-  }
-
   async get(request: Request, workspaceSlug: string, teamId: string): Promise<AgentTeamView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     return toTeamView(await this.getTeam(teamId, workspace.id));
@@ -86,15 +80,27 @@ export class AgentTeamsService {
     return toTeamView(updated);
   }
 
+  async records(request: Request, workspaceSlug: string, teamId: string): Promise<AgentTeamRunSummary[]> {
+    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.getTeam(teamId, workspace.id);
+    const rows = await this.db.select({ id: agentTeamRuns.id, intent: agentTeamRuns.intent,
+      projectDirectory: agentTeamRuns.projectDirectory, mode: agentTeamRuns.mode,
+      status: agentTeamRuns.status, createdAt: agentTeamRuns.createdAt, finishedAt: agentTeamRuns.finishedAt,
+    }).from(agentTeamRuns).where(and(eq(agentTeamRuns.teamId, teamId), eq(agentTeamRuns.workspaceId, workspace.id)))
+      .orderBy(desc(agentTeamRuns.createdAt));
+    return rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString(), finishedAt: row.finishedAt?.toISOString() ?? null }));
+  }
+
   async createRun(
     request: Request,
     workspaceSlug: string,
     teamId: string,
     input: CreateAgentTeamRunRequest,
+    acceptance: Parameters<AgentTeamRuntimeService['createRun']>[2],
   ): Promise<AgentTeamRunView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     await this.getTeam(teamId, workspace.id);
-    return this.runtime.createRun(workspace.id, input);
+    return this.runtime.createRun(workspace.id, input, acceptance);
   }
 
   async getRun(request: Request, workspaceSlug: string, runId: string): Promise<AgentTeamRunView> {

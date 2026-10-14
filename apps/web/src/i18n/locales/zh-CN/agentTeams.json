@@ -225,7 +225,7 @@
     "title": "Agent Team 不可用",
     "description": "此团队不存在，或当前工作区无法访问。"
   },
-  "openTeam": "打开团队配置",
+  "openTeam": "打开工作记录",
   "resources": {
     "providers": "模型提供商",
     "skills": "Skills",
@@ -237,55 +237,16 @@
     "status": "状态",
     "taskKey": "任务键"
   },
-  "conversation": {
-    "tab": "对话",
-    "title": "Agent Team 对话",
-    "empty": "发送 @Coordinator 消息以开始任务。",
-    "loadFailed": "无法加载 Agent Team 对话。",
-    "reconnecting": "对话事件流正在重新连接",
-    "mention": "@Coordinator",
-    "removeMention": "移除 @Coordinator",
-    "inputPlaceholder": "输入新任务或说明…",
-    "enterDirectory": "输入项目绝对路径…",
-    "invalidDirectory": "请输入 API 主机上的有效项目绝对路径。",
-    "answerPlaceholder": "输入完整回答…",
-    "send": "发送",
-    "sending": "正在发送",
-    "sendFailed": "无法发送消息",
-    "returnToEnd": "回到最新消息",
-    "workRecords": "工作记录",
-    "queuedTask": "排队任务",
-    "queuedWaiting": "等待当前任务结束后自动开始。",
-    "project": "项目目录",
-    "openRun": "打开执行证据",
-    "fileDeliveryFailed": "文档保存失败。",
-    "question": {
-      "mode": "请选择执行模式…"
-    },
-    "mode": {
-      "plan_only": "仅计划",
-      "validate_existing": "验证现有实现",
-      "implement_and_validate": "实现并验证"
-    },
-    "speaker": {
-      "user": "我",
-      "coordinator": "Coordinator",
-      "member": "团队成员",
-      "system": "系统"
-    },
-    "document": {
-      "title": "团队文档",
-      "loading": "正在加载文档",
-      "revision": "修订 {{count}}",
-      "download": "下载文档",
-      "downloading": "正在下载文档",
-      "downloadFailed": "无法下载文档",
-      "loadFailed": "无法加载文档",
-      "close": "关闭文档"
-    }
-  },
+
   "configuration": {
     "tab": "配置"
   },
-  "openConversation": "打开对话"
+  "records": {
+    "tab": "工作记录",
+    "empty": "暂无工作记录。",
+    "startInChat": "在 Chat 中发起团队任务",
+    "startedAt": "开始时间",
+    "finishedAt": "结束时间",
+    "loadFailed": "无法加载工作记录"
+  }
 }

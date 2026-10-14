@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useContext, useState } from 'react';
 import { LoaderCircle } from 'lucide-react';
 import type { ChatSubmissionView } from '@worklite/contracts';
-import { useAgentTeamConversationQuery, useAgentTeamRunQuery, useRunQuery, useWorkliteUpgradeQuery } from '@/api/queries';
+import { useAgentTeamRunQuery, useRunQuery, useWorkliteUpgradeQuery } from '@/api/queries';
 import { TaskLink } from './records';
 import { PinTrackingContext } from './pinned-executions';
 import { MessageResponse } from '@/components/ai-elements/message';
@@ -55,18 +55,9 @@ function TeamRunLink({ runId }: { runId: string }) {
 }
 
 function TeamTask({ submission }: { submission: ChatSubmissionView }) {
-  const { t } = useTranslation('assistant');
   const reference = submission.reference;
-  const query = useAgentTeamConversationQuery('personal', reference?.kind === 'team' ? reference.teamId : '');
-  const intake = reference?.kind === 'team' ? query.data?.intakes.find((item) => item.submissionId === reference.intakeSubmissionId) : null;
-  const question = intake ? query.data?.messages.slice().reverse().find((message) => message.kind === 'coordinator_question' && message.intakeId === intake.id) : null;
   return <div className="space-y-2">
-    {intake?.runId ? <TeamRunLink runId={intake.runId} /> : <>
-      <TaskLink reference={reference} />
-      {intake ? <StatusBadge status={toStatusKey(intake.status === 'collecting' ? 'waiting_for_input' : intake.status)} label={t(`status.${intake.status === 'collecting' ? 'waiting_for_input' : intake.status}`)} /> : query.isPending ? <p className="text-[13px] text-muted-foreground" role="status">{t('records.taskLoading')}</p> : null}
-      {intake?.status === 'collecting' && question?.kind === 'coordinator_question' ? <MessageResponse content={question.text} enabled /> : null}
-    </>}
-    {query.isError ? <p className="text-[13px] text-danger" role="alert">{t('records.taskLoadFailed')}</p> : null}
+    {reference?.kind === 'team' ? <TeamRunLink runId={reference.runId} /> : null}
     {typeof submission.renderedCard?.content === 'string' ? <MessageResponse content={submission.renderedCard.content} enabled /> : null}
   </div>;
 }

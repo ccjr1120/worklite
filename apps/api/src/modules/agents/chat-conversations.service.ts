@@ -2,7 +2,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from '@nes
 import { and, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import { CHAT_AGENT_ID, type AgentExecutionEventData, type ChatChannelView, type ChatConversationList, type ChatConversationRecords, type ChatConversationSummary, type ChatConversationView, type ChatSubmissionView } from '@worklite/contracts';
-import { agentExecutionEvents, agentExecutions, agentTeamIntakes, agentTeamRuns, chatProjectTasks, chatSubmissions, feishuChats, feishuDeliveries, feishuEvents, plugins, workflowRuns, type Database } from '@worklite/db';
+import { agentExecutionEvents, agentExecutions, agentTeamRuns, chatProjectTasks, chatSubmissions, feishuChats, feishuDeliveries, feishuEvents, plugins, workflowRuns, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from './agent-executions.service';
@@ -152,8 +152,7 @@ export class ChatConversationsService {
     const tasks = await this.db.select({ executionId: chatProjectTasks.executionId }).from(chatProjectTasks)
       .where(and(eq(chatProjectTasks.workspaceId, workspaceId), inArray(chatProjectTasks.status, ['running', 'waiting_for_input'])));
     const teamRuns = await this.db.select({ executionId: chatSubmissions.executionId }).from(chatSubmissions)
-      .innerJoin(agentTeamIntakes, eq(agentTeamIntakes.submissionId, chatSubmissions.id))
-      .innerJoin(agentTeamRuns, eq(agentTeamRuns.id, agentTeamIntakes.runId))
+      .innerJoin(agentTeamRuns, sql`${agentTeamRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
       .where(and(eq(chatSubmissions.workspaceId, workspaceId), isNotNull(chatSubmissions.executionId),
         notInArray(agentTeamRuns.status, ['succeeded', 'failed', 'cancelled'])));
     const workflows = await this.db.select({ executionId: chatSubmissions.executionId }).from(chatSubmissions)

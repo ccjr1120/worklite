@@ -26,7 +26,7 @@ Converse with the master Agent and run Team or published Workflow tasks from Fei
 
 ## Primary Task
 
-Send one request, action budget one — sending text to Chat. Ordinary conversation receives a natural reply. The master dispatches a clear Team or published Workflow request through the existing platform scripts. Only a material unresolved choice or missing information adds an answer action; a plan is not required to ask. Choices belong to this request and never select a mode for future messages. Exact-command authorization requires its own task-bound form submission.
+Send one request, action budget one — sending text to Chat. Ordinary conversation receives a natural reply. The master dispatches a clear Team or published Workflow request through the existing platform scripts. For Team work, it collects the absolute project directory and supported mode before creating a Run; a busy Team rejects dispatch. Only a material unresolved choice or missing information adds an answer action; a plan is not required to ask. Choices belong to this request and never select a mode for future messages. Exact-command authorization requires its own task-bound form submission.
 
 ## Layout
 
@@ -34,12 +34,12 @@ One reply card per accepted submission plus one task card per project task dispa
 
 ## Interaction Contract
 
-Chat Codex and Team developer share direct execution without WorkLite proposal or exact-command approval. Their questions collect material missing information and omit command-grant fields. Chat only orchestrates protected platform operations, Codex tasks, Team intake and published Workflows. Non-Codex Team roles retain their authorization controls.
+Chat Codex and Team developer share direct execution without WorkLite proposal or exact-command approval. Their questions collect material missing information and omit command-grant fields. Chat only orchestrates protected platform operations, Codex tasks, Team Run dispatch and published Workflows. Non-Codex Team roles retain their authorization controls.
 
 - New conversation intent: Chat asks a typed pending question after recognizing the user's request and shows one contextual “新对话” button. Clicking creates and selects the new persisted conversation; old history and task evidence remain. This action is absent from ordinary replies and disappears after acceptance. No permanent reply menu or text-command requirement is introduced.
 
 - Retired command question: a never-started Shell call waiting on removed per-command authorization is cancelled by the server, retaining its history and clearing the invalid question. The server persists the resulting snapshot for replay; later messages return to normal dialogue with no manual stop instruction or extra recovery button is required. Reserved effects still use explicit recovery.
-- Execution boundary: coding, repository investigation and local command tasks delegate directly to Codex; collaborative work uses Team intake and automation uses published Workflows. Chat has no direct host tools or custom Skill/MCP execution. Historical Shell evidence and explicit uncertain-effect recovery remain inspectable without starting another Command. This rule is shared by Web and Feishu.
+- Execution boundary: coding, repository investigation and local command tasks delegate directly to Codex; collaborative work uses Team Run dispatch and automation uses published Workflows. Chat has no direct host tools or custom Skill/MCP execution. Historical Shell evidence and explicit uncertain-effect recovery remain inspectable without starting another Command. This rule is shared by Web and Feishu.
 - Independent Codex task: keep progress, result and full execution evidence in the originating conversation. Reuse the existing tool disclosure and answer region. Codex starts from the clear user request without WorkLite proposal confirmation or a command form. An uncertain operation offers adopt-existing-result or mark-failed, without automatic replay. Stop cancels the task; uncertainty retains a visible recovery question. Ordinary dialogue and both themes retain their existing layout.
 
 - Message: persist the receipt and ordinary reply placeholder atomically before acknowledging; show queued state before dispatch, retain it behind an active master turn, and replace its content with progress and the final reply. Do not echo the user’s message as loading content.
@@ -134,6 +134,11 @@ This change removes fixed mode menus, adds current-question options and concise 
 Platform rendering, granted permissions, live connection behavior and keyboard/screen-reader behavior remain unverified; no runtime or platform verification was authorized. Inbound images, voice, files and group messages are outside the implemented scope. Web configuration now uses a loading skeleton and local retry. Request-error placement and unrelated plugin differences remain recorded in its page specification.
 
 ## Changelog
+
+### 2026-10-13
+
+- Team task references now bind directly to Run ids. Team has no conversation or intake; Chat Agent collects parameters and dispatches Runs. Run detail owns questions, command grants, documents and recovery, and returns to work records. No manual Team launch entry remains.
+
 
 ### 2026-10-12
 

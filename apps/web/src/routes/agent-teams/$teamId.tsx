@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { TeamDetailPage } from '@/features/agent-teams/team-detail';
 
-const AGENT_TEAM_TABS = ['conversation', 'configuration'] as const;
+const AGENT_TEAM_TABS = ['records', 'configuration'] as const;
 type AgentTeamTab = (typeof AGENT_TEAM_TABS)[number];
 type AgentTeamDetailSearch = {
   tab: AgentTeamTab;
@@ -13,7 +13,7 @@ function isAgentTeamTab(value: unknown): value is AgentTeamTab {
 
 export const Route = createFileRoute('/agent-teams/$teamId')({
   validateSearch: (search: Record<string, unknown>): AgentTeamDetailSearch => ({
-    tab: isAgentTeamTab(search.tab) ? search.tab : 'conversation',
+    tab: isAgentTeamTab(search.tab) ? search.tab : 'records',
   }),
   component: AgentTeamDetailRoute,
 });

@@ -2,7 +2,7 @@ import { forwardRef, Module } from '@nestjs/common';
 import { AgentsModule } from '../agents/agents.module';
 import { CommandsModule } from '../commands/commands.module';
 import { WorkspaceModule } from '../teams/teams.module';
-import { AgentTeamConversationService } from './agent-team-conversation.service';
+import { AgentTeamDocumentsService } from './agent-team-documents.service';
 import { AgentTeamOperationJournalService } from './agent-team-operation-journal.service';
 import { AgentTeamRuntimeService } from './agent-team-runtime.service';
 import {
@@ -16,11 +16,11 @@ import { AgentTeamsService } from './agent-teams.service';
   imports: [forwardRef(() => AgentsModule), CommandsModule, WorkspaceModule],
   controllers: [AgentTeamsController, AgentTeamRunsController, AgentTeamDocumentsController],
   providers: [
-    AgentTeamConversationService,
+    AgentTeamDocumentsService,
     AgentTeamOperationJournalService,
     AgentTeamRuntimeService,
     AgentTeamsService,
   ],
-  exports: [AgentTeamConversationService, AgentTeamOperationJournalService, AgentTeamRuntimeService, AgentTeamsService],
+  exports: [AgentTeamDocumentsService, AgentTeamOperationJournalService, AgentTeamRuntimeService, AgentTeamsService],
 })
 export class AgentTeamsModule {}

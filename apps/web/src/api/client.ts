@@ -1,15 +1,13 @@
 import type {
   AgentView,
   AgentTeamView,
-  CreateAgentTeamRunRequest,
-  CreateAgentTeamRunResponse,
-  AgentTeamConversationEvent,
+  UpdateAgentTeamRequest,
   AgentTeamDocumentView,
+  AgentTeamRunView,
+  AgentTeamRunSummary,
   AgentTeamRunEvent,
   AnswerAgentTeamRunRequest,
   RecoverAgentTeamOperationRequest,
-  SendAgentTeamConversationMessageRequest,
-  SendAgentTeamConversationMessageResponse,
   AgentTeamRunActionResponse,
   AgentExecutionView,
   AnswerAgentQuestionRequest,
@@ -75,7 +73,6 @@ import type {
   ImportWorkflowRequest,
   PortableWorkflowDocument,
 } from '@worklite/contracts';
-import type { TeamConcurrencyView, TeamConversationRunsView, TeamRunDetailView, UpdateTeamConcurrencyRequest } from '@/api/agent-team-contract';
 
 export class ApiError extends Error {
   constructor(public readonly status: number, message: string, public readonly requestLogId?: string, public readonly testInput?: SystemOneTestInput) {
@@ -246,16 +243,9 @@ export const api = {
     return apiGet<GatewayRequestLogList>(`/api/portkey-gateway/request-logs${suffix}`);
   },
   gatewayRequestLog: (requestLogId: string) => apiGet<GatewayRequestLogDetail>(`/api/portkey-gateway/request-logs/${encodeURIComponent(requestLogId)}`),
-  agentTeams: () => apiGet<AgentTeamView[]>('/api/agent-teams'),
-  agentTeam: (teamId: string) => apiGet<TeamConcurrencyView>(`/api/agent-teams/${encodeURIComponent(teamId)}`),
-  updateAgentTeam: (teamId: string, input: UpdateTeamConcurrencyRequest) => apiPatch<TeamConcurrencyView>(`/api/agent-teams/${encodeURIComponent(teamId)}`, input),
-  createAgentTeamRun: (teamId: string, input: CreateAgentTeamRunRequest) => apiPost<CreateAgentTeamRunResponse>(`/api/agent-teams/${encodeURIComponent(teamId)}/runs`, input),
-  agentTeamConversation: (teamId: string) => apiGet<TeamConversationRunsView>(`/api/agent-teams/${encodeURIComponent(teamId)}/conversation`),
-  sendAgentTeamConversationMessage: (
-    teamId: string,
-    _input: SendAgentTeamConversationMessageRequest,
-  ) => apiPost<SendAgentTeamConversationMessageResponse>(`/api/agent-teams/${encodeURIComponent(teamId)}/conversation/messages`),
-  agentTeamConversationEventsUrl: (teamId: string) => `/api/agent-teams/${encodeURIComponent(teamId)}/conversation/events`,
+  agentTeam: (teamId: string) => apiGet<AgentTeamView>(`/api/agent-teams/${encodeURIComponent(teamId)}`),
+  updateAgentTeam: (teamId: string, input: UpdateAgentTeamRequest) => apiPatch<AgentTeamView>(`/api/agent-teams/${encodeURIComponent(teamId)}`, input),
+  agentTeamRecords: (teamId: string) => apiGet<AgentTeamRunSummary[]>(`/api/agent-teams/${encodeURIComponent(teamId)}/runs`),
   agentTeamDocument: (documentId: string) => apiGet<AgentTeamDocumentView>(`/api/agent-team-documents/${encodeURIComponent(documentId)}`),
   downloadAgentTeamDocument: async (documentId: string): Promise<Blob> => {
     const response = await fetch(`/api/agent-team-documents/${encodeURIComponent(documentId)}/download`, {
@@ -266,7 +256,7 @@ export const api = {
     }
     return response.blob();
   },
-  agentTeamRun: (runId: string) => apiGet<TeamRunDetailView>(`/api/agent-team-runs/${encodeURIComponent(runId)}`),
+  agentTeamRun: (runId: string) => apiGet<AgentTeamRunView>(`/api/agent-team-runs/${encodeURIComponent(runId)}`),
   agentTeamRunEventsUrl: (runId: string) => `/api/agent-team-runs/${encodeURIComponent(runId)}/events`,
   answerAgentTeamRun: (runId: string, input: AnswerAgentTeamRunRequest) => apiPost<AgentTeamRunActionResponse>(`/api/agent-team-runs/${encodeURIComponent(runId)}/answer`, input),
   recoverAgentTeamOperation: (runId: string, operationKey: string, input: RecoverAgentTeamOperationRequest) => apiPost<AgentTeamRunActionResponse>(`/api/agent-team-runs/${encodeURIComponent(runId)}/operations/${encodeURIComponent(operationKey)}/recovery`, input),
@@ -322,17 +312,3 @@ export function parseAgentTeamRunEvent(value: string): AgentTeamRunEvent {
   return event as AgentTeamRunEvent;
 }
 
-export function parseAgentTeamConversationEvent(value: string): AgentTeamConversationEvent {
-  const event = JSON.parse(value) as Partial<AgentTeamConversationEvent>;
-  if (
-    typeof event.conversationId !== 'string'
-    || typeof event.sequence !== 'number'
-    || (event.type !== 'message' && event.type !== 'intake.updated' && event.type !== 'run.state')
-    || !event.payload
-    || typeof event.payload !== 'object'
-    || typeof event.createdAt !== 'string'
-  ) {
-    throw new Error('The Agent Team conversation event stream returned an invalid event.');
-  }
-  return event as AgentTeamConversationEvent;
-}

@@ -2,9 +2,7 @@
 
 ## Route
 
-`/agent-teams/:teamId?tab=conversation|configuration`
-
-The first release has one built-in Team. The workspace shell and Chat Bot starter link directly to its detail route; there is no Team collection page or creation/deletion action. Conversation is the default tab and selected tab state belongs to validated route search.
+`/agent-teams/:teamId?tab=records|configuration`. Records is the default. One built-in Team has no collection or creation/deletion surface.
 
 ## Design Source
 
@@ -20,72 +18,43 @@ The first release has one built-in Team. The workspace shell and Chat Bot starte
 
 - `apps/web/src/routes/agent-teams/$teamId.tsx`
 - `apps/web/src/features/agent-teams/team-detail.tsx`
+- `apps/web/src/features/agent-teams/team-records.tsx`
 
 ## Purpose
 
-Start software work through the Team-owned Coordinator conversation and keep role configuration available without making execution look like configuration setup.
+Find Team work and open its Run progress; configure the Team separately.
 
 ## Primary Task
 
-Start a scoped Team Run by sending a Coordinator task request. Action budget: one when goal, mode, and a valid remembered directory are already known. The developer uses the same direct Codex executor as Chat and incurs no WorkLite proposal confirmation or command-grant action. Developer clarification shows only its answer input; exact-command fields belong to non-Codex roles. Additional actions are charged only for values the server cannot infer: selecting or typing a directory, choosing an ambiguous mode, or answering a later durable question. Once required intake values exist, the server creates the Run without another Start control.
-
-Saving Team configuration is a separate goal with one Save action. Editing configuration never silently saves.
+Open a work record to inspect its progress. Action budget: one record activation. Only Chat Agent starts Team work; the page has no composer or manual launch action. Saving edited configuration is a separate goal with one Save action.
 
 ## Layout
 
-The page uses the full Workspace page width with a `1200px` maximum and two lightweight top tabs. The Conversation tab has a compact Team header, a chronological transcript with its own bounded scroll region, and a persistent composer at the bottom. Member messages are left-aligned and user messages right-aligned; speaker identity, alignment, and text cues distinguish speakers without colored message backgrounds. A new-task composer has a structured removable `@Coordinator` token inside the same bordered surface as its multiline input and Send control; pending answers omit the token because their destination is already known. The conversation uses its full width while no contextual Run, queued intake, recovery, or selected document needs an inspector. Pending intake options and Run questions render in the transcript beside their answers. Coordinator and member questions, inspector question panels and the document viewer render through the shared safe Markdown renderer; user-authored messages stay plain text.
-
-When queued intake, one or more non-terminal Runs, operation recovery, or a selected document needs supporting controls, the desktop transcript shares the page with a contextual inspector. Below `1024px`, the transcript and inspector stack. The document viewer becomes an overlay below `768px`. Several Runs may be active concurrently; the work records inspector section renders one card per non-terminal Run, including a Run that waits for a free parallel slot, which shows the queued status with its text and icon cues. Each Run card summarizes its own parallel progress — current phase, server-derived completion percentage, completed and total development assignments, active Developers, next step, and the number of pending questions — and owns its lifecycle controls. Pending questions beyond the earliest render as inspector panels with their own answer inputs. The Configuration tab keeps process metadata, the parallel Run limit field, and one Save action above a compact list of six roles. Each role shows its provider-grouped model selector in the list row; its instructions, entry points, Skills, MCP servers, and tools are disclosed only when that role's advanced settings are expanded. The Developer role additionally shows its executor selector; runtime parallelism is decided by the Planner per Run and is not configured here. The role list and its controls stack at narrow widths.
+Use the shared detail width up to 1200px and Records/Configuration tabs persisted in route search. Records is a compact list of linked rows showing goal, status, directory, execution mode, start time and end time. Queued Runs appear with their queued status and each row opens Run detail. Configuration includes `maxConcurrentRuns` (default 3, minimum 1) in the single Save flow. Narrow screens stack metadata without removing status or the Run link. Configuration retains the six-role list, provider-grouped model selectors and advanced disclosures, plus one Save action in the context bar. The Developer executor selector remains. Shared semantic tokens govern both light and dark modes.
 
 ## Interaction Contract
 
-| Action | Trigger and behavior |
+| Action | Behavior |
 | --- | --- |
-| Select tab | Conversation or Configuration updates validated route search and preserves the other tab's server-backed state. |
-| Insert Coordinator mention | The structured token can be selected with keyboard or pointer, remains removable, and is submitted with the message. Selection alone sends nothing. |
-| Send Coordinator request | One Send activation persists the request and starts durable intake. The control shows local progress; complete intake creates one Run automatically and appends Run state to this conversation. |
-| Select recent directory | One option activation submits the actual persisted directory selection and answers the current directory question. |
-| Enter directory | One text reply plus Send supplies an absolute local directory. Invalid input stays in the composer with a recovery message. |
-| Select mode | One inline option activation resolves an ambiguous execution scope. |
-| Answer pending question | A plain reply plus Send addresses the current pending input id and scope revision. |
-| Open Run evidence | One status/action link opens `/agent-team-runs/:runId`; it does not mutate the Run. |
-| Open delivered file | One filename activation opens the immutable revision in the contextual viewer without changing transcript focus. |
-| Download file | One Download activation in the viewer exports the same immutable revision. |
-| Pause, Resume, or Cancel | Each Run card carries its own independent controls; every control acts on its own Run with control-local progress and the existing Run API. No control is duplicated in the transcript. |
-| Retry failed task | Retry appears only on the card of a Run that exposes a retryable task, uses local progress, and calls the existing Run API. When several assignments failed together, each control names its task key and Developer; any one triggers the same failure-barrier resume and successful sibling lanes never rerun. |
-| Answer later pending question | Pending questions beyond the earliest each render an inspector panel with their own answer input and control-local progress; submitting answers exactly that pending input id. The composer continues to answer the earliest pending question. |
-| Save Team configuration | The Configuration tab Save control shows local progress, is disabled while saving, replaces the Team cache on success, and preserves local edits on failure. |
-| Edit parallel Run limit | The numeric field updates local configuration only and marks it unsaved; Save is the sole commit control and persists `maxConcurrentRuns` (default 3, minimum 1). |
-| Edit a role field | Editing updates local configuration only and marks it unsaved. Role executors are preserved across load and save. Roles outside the displayed list are preserved unchanged across save. |
-| Select model, Skills, MCP servers, or tools | Selection updates the role locally; Save is the sole commit control. |
-| Expand role settings | One disclosure activation reveals that role's instructions, entry points, Skills, MCP servers, and tools. The disclosure is keyboard reachable and does not change saved configuration. |
-| Select role model | The selector groups available models by Provider name and stores the selected public model id; the change remains local until Save. |
-| Open from Chat Bot | The Team starter performs one navigation activation and does not send a Chat Bot message or dispatch a Team Run. |
+| Select tab | Update validated route search without mutating configuration or Runs. |
+| Open record | Navigate to `/agent-team-runs/:runId` in one activation. |
+| Save configuration | Report progress on Save; replace cached Team on success and retain edits/error on failure. |
+| Expand role | Disclose instructions, entry points, Skills, MCP servers and tools without saving. |
+| Edit concurrent Run limit | Update `maxConcurrentRuns` locally; the single Save action commits the value and shows local progress. |
 
-Conversation and Run queries own freshness. The persisted conversation stream replays with `Last-Event-ID`, so no manual refresh control is introduced.
+The summary-record query keeps records fresh. It reads no task activity, event history or TeamVersion snapshot. No Team conversation query, stream, queue or historical projection remains.
 
 ## States
 
 | State | Behavior |
 | --- | --- |
-| Loading | Keep the page and composer geometry stable with content-shaped placeholders. |
-| No task yet | Show an empty transcript state with `@Coordinator` selected by default in the composer; removing it is available for a message that should not start a Team task. No onboarding sequence is added. |
-| Intake in progress | Show the unanswered Coordinator question, preserve prior answers and submitted requests across reload, and offer only actual recent directories. |
-| Queued task request | A new Coordinator request remains visible as pending input while an active task has not settled. |
-| Queued or running Run | Each non-terminal Run renders its own work record card with the responsible state, its own progress summary, and its own controls. Raw model deltas, task JSON, command output, and document bodies stay out of the transcript. A Run waiting for a free parallel slot shows the queued status with text and icon cues rather than color alone. |
-| Multiple pending questions | The composer answers the earliest pending question; the remaining questions render as inspector panels answered one by one. |
-| Waiting for input | Show the durable question from the responsible member. A general reply cannot replace operation recovery. |
-| Waiting for recovery | Show the existing structured adopt, fail, or replay decisions in the task context. |
-| Paused | Preserve messages and files and expose Resume and Cancel. |
-| File delivery failed | Show the delivery failure beside the document context; completed work and immutable document evidence remain readable. |
-| Run failed or cancelled | Preserve completed files and state the reason. Retry appears only for the server-declared eligible task. |
-| Completed | Preserve filenames and distinguish execution completion from unverified acceptance criteria. |
-| Mutation failure | Keep the draft or selection and report the failure beside the activated control. |
-| Load failure | Use the shared recoverable error state; durable conversation content remains absent only if the snapshot cannot load. |
-| Offline or reconnecting | Retain durable messages, show a reconnecting state, and replay without duplicate messages or deliveries. |
-| Long content | Wrap long paths and filenames, bound transcript scrolling, and open file bodies in an independently scrollable viewer. |
-
-The Team query owns configuration freshness. No manual refresh control is introduced.
+| Loading | Shared content-shaped placeholders retain page geometry. |
+| Empty | State that no work records exist and point to Chat for starting work. |
+| Error | Shared recoverable load error; preserve unaffected configuration. |
+| Busy | Configuration Save shows control-local progress. Record links remain independent. |
+| Offline | Inherits shared-states.md. |
+| Long content | Wrap goal and paths; stack row metadata on narrow screens. |
+| Queued record | Show the queued status and retain the Run detail link while waiting for a parallel slot. |
 
 ## Copy Inventory
 
@@ -96,74 +65,19 @@ The Team query owns configuration freshness. No manual refresh control is introd
 | `agentTeams:loadFailed` | Recovery |
 | `agentTeams:unavailable.title` | State |
 | `agentTeams:unavailable.description` | Recovery |
-| `agentTeams:conversation.tab` | Action |
 | `agentTeams:configuration.tab` | Action |
-| `agentTeams:conversation.title` | State |
-| `agentTeams:conversation.empty` | Recovery |
-| `agentTeams:conversation.loadFailed` | Recovery |
-| `agentTeams:conversation.reconnecting` | State |
-| `agentTeams:conversation.mention` | State |
-| `agentTeams:conversation.removeMention` | Action |
-| `agentTeams:conversation.inputPlaceholder` | Constraint |
-| `agentTeams:conversation.enterDirectory` | Constraint |
-| `agentTeams:conversation.invalidDirectory` | Recovery |
-| `agentTeams:conversation.answerPlaceholder` | Constraint |
-| `agentTeams:conversation.send` | Action |
-| `agentTeams:conversation.sending` | State |
-| `agentTeams:conversation.sendFailed` | Recovery |
-| `agentTeams:conversation.returnToEnd` | Action |
-| `agentTeams:conversation.workRecords` | State |
-| `agentTeams:conversation.queuedTask` | State |
-| `agentTeams:conversation.queuedWaiting` | State |
-| `agentTeams:conversation.project` | State |
-| `agentTeams:conversation.openRun` | Action |
-| `agentTeams:conversation.question.mode` | Constraint |
-| `agentTeams:conversation.mode.*` | Action |
-| `agentTeams:conversation.speaker.user` | State |
-| `agentTeams:conversation.speaker.coordinator` | State |
-| `agentTeams:conversation.speaker.member` | State |
-| `agentTeams:conversation.speaker.system` | State |
-| `agentTeams:conversation.fileDeliveryFailed` | Recovery |
-| `agentTeams:conversation.document.title` | State |
-| `agentTeams:conversation.document.loading` | State |
-| `agentTeams:conversation.document.loadFailed` | Recovery |
-| `agentTeams:conversation.document.revision` | State |
-| `agentTeams:conversation.document.download` | Action |
-| `agentTeams:conversation.document.downloading` | State |
-| `agentTeams:conversation.document.downloadFailed` | Recovery |
-| `agentTeams:conversation.document.close` | Action |
+| `agentTeams:records.tab` | Action |
+| `agentTeams:records.empty` | State |
+| `agentTeams:records.startInChat` | Action |
+| `agentTeams:records.startedAt` | State |
+| `agentTeams:records.finishedAt` | State |
+| `agentTeams:records.loadFailed` | Recovery |
 | `agentTeams:run.status.*` | State |
-| `agentTeams:run.mode` | State |
-| `agentTeams:input.commands` | Constraint |
-| `agentTeams:run.commandsPlaceholder` | Constraint |
-| `agentTeams:controls.failed` | Recovery |
-| `agentTeams:controls.pause` | Action |
-| `agentTeams:controls.pausing` | State |
-| `agentTeams:controls.resume` | Action |
-| `agentTeams:controls.resuming` | State |
-| `agentTeams:controls.cancel` | Action |
-| `agentTeams:controls.cancelling` | State |
-| `agentTeams:controls.cancelTitle` | Constraint |
-| `agentTeams:controls.cancelDescription` | Constraint |
-| `agentTeams:controls.cancelConfirm` | Action |
-| `agentTeams:tasks.retry` | Action |
-| `agentTeams:tasks.retrying` | State |
-| `agentTeams:tasks.retryTask` | Action |
-| `agentTeams:progress.phase.*` | State |
-| `agentTeams:progress.nextStep.*` | State |
-| `agentTeams:progress.assignments` | State |
-| `agentTeams:progress.percent` | State |
-| `agentTeams:progress.activeDevelopers` | State |
-| `agentTeams:progress.pendingQuestions` | State |
-| `agentTeams:progress.waitingReason.*` | State |
-| `agentTeams:recovery.title` | State |
-| `agentTeams:recovery.decision` | Constraint |
-| `agentTeams:recovery.adopt_command` | Action |
-| `agentTeams:recovery.mark_failed` | Action |
-| `agentTeams:recovery.replay` | Action |
-| `agentTeams:recovery.submit` | Action |
-| `agentTeams:recovery.submitting` | State |
-| `agentTeams:recovery.failed` | Recovery |
+| `agentTeams:run.modeValue.*` | State |
+| `agentTeams:resources.providers` | State |
+| `agentTeams:resources.skills` | State |
+| `agentTeams:resources.mcpServers` | State |
+| `agentTeams:resources.loadFailed` | Recovery |
 | `agentTeams:team.updated` | State |
 | `agentTeams:team.save` | Action |
 | `agentTeams:team.saving` | State |
@@ -174,6 +88,7 @@ The Team query owns configuration freshness. No manual refresh control is introd
 | `agentTeams:team.maxConcurrentRuns.label` | Constraint |
 | `agentTeams:team.maxConcurrentRuns.hint` | Constraint |
 | `agentTeams:team.roles` | State |
+| `agentTeams:team.parallelism` | State |
 | `agentTeams:team.advanced` | Action |
 | `agentTeams:model.default` | Action |
 | `agentTeams:model.label` | Constraint |
@@ -182,71 +97,24 @@ The Team query owns configuration freshness. No manual refresh control is introd
 | `agentTeams:team.executor.codex` | State |
 | `agentTeams:instructions.label` | Constraint |
 | `agentTeams:entryPoints.label` | Constraint |
-| `agentTeams:entryPoints.placeholder` | Constraint |
+| `agentTeams:entryPoints.placeholder` | Recovery |
 | `agentTeams:skills.label` | Constraint |
 | `agentTeams:skills.empty` | State |
 | `agentTeams:mcpServers.label` | Constraint |
 | `agentTeams:mcpServers.empty` | State |
 | `agentTeams:tools.label` | Constraint |
 | `agentTeams:role.*` | State |
-| `agentTeams:resources.providers` | State |
-| `agentTeams:resources.skills` | State |
-| `agentTeams:resources.mcpServers` | State |
-| `agentTeams:resources.loadFailed` | Recovery |
-| `common:actions.cancel` | Action |
 
 ## Accessibility
 
-The tabs, mention token, transcript, composer, role disclosures, provider-grouped model selectors, file link, viewer, download, and Run controls are keyboard reachable with visible shared focus rings. The selected `@Coordinator` token can be removed with its labelled control or Escape; model groups expose Provider labels to assistive technology. The transcript is a scrollable log-like region with accessible speaker labels; state changes use polite live regions while model deltas are not announced. File links expose their full accessible filename, the viewer retains a labelled close action, and SSE updates never move focus. Forms and option groups use visible labels, and all status text includes a non-color cue. Light and dark modes use the same neutral surfaces and semantic status tokens.
+Record links are keyboard reachable with visible focus. Status uses icon/text alongside color. Tab selection and configuration controls keep their existing accessible labels. Both themes and reduced-motion behavior inherit shared components.
 
 ## Coverage Status
 
-2026-10-13 source comparison for parallel Runs and the concurrency limit: the conversation inspector renders a work records section with one live card per non-terminal Run (several may be active concurrently; a Run waiting for a parallel slot shows the queued status with text and icon cues), and each card owns its lifecycle controls with control-local progress. The Configuration tab adds the `maxConcurrentRuns` numeric field (default 3) inside the single Save flow, and roles outside the displayed list survive a save unchanged. The conversation `activeRuns` list, `maxConcurrentRuns`, and the `worktree-manager` role are declared against the pinned cross-package contract and take effect when the packages and API lanes merge. Web type check (tsc --noEmit and locale key check) passed; no browser, runtime, accessibility-tool or real-Run verification was authorized or performed.
-
-2026-10-13 Markdown for agent-authored text: source inspection found Coordinator and member questions, inspector question panels and the document viewer rendered as plain or preformatted text. They now use the shared `StreamingMarkdown` renderer (HTML skipped) with existing semantic tokens in both themes; user messages remain plain. Web type check and lint were run as requested; no browser verification.
-
-2026-10-10 source comparison for orchestration v3 and progress: the Developer role section carries only its executor selector (the extra-instance list and concurrency bound are removed because the Planner decides 1-4 parallel lanes per Run), and the active Run inspector card adds the server-derived completion percentage. No browser, runtime, accessibility-tool, type check or real-Run verification was authorized or performed.
-
-2026-10-10 source comparison: the Developer role section carries an executor selector, up to three extra Developer instances with per-instance label, executor, model and advanced fields, and a 1–4 concurrency bound shown only when instances exist; load and save preserve executor, instances and concurrency. The active Run inspector card shows the progress summary, multiple pending questions gain their own answer panels, and multiple retryable failures list one retry control per task key with Developer attribution. Web type check (tsc --noEmit and locale key check) passed; no browser, runtime, accessibility-tool or real-Run verification was authorized or performed.
-
-2026-10-08 authorized deployment: Gateway and Web builds, API compilation, isolated startup on ports 23490–23492 and deployment readiness on ports 23390–23392 passed through pnpm deploy:local. The deployment platform snapshot reports shared direct Chat/Team Codex execution without WorkLite grants and Chat cancellation in running/waiting states. The original conversation remains cancelled with no pending question. Browser appearance, real Codex task execution, live cancellation interaction and Feishu client behavior were not tested; no test suite or standalone type check was run.
-
-2026-10-08 source comparison: Team developer shares direct Codex execution with Chat, and its Web conversation/Run and Feishu clarification surfaces omit command-grant fields. Non-Codex role fields remain. Runtime, browser, type check, build and test verification were not authorized or performed.
-
-Source-level audit: 2026-10-03. Differences found: none in route and tab state, default Coordinator routing, conditional contextual inspector, responsive stacking, provider-grouped model selectors, role-local advanced settings, save and error feedback, copy inventory, semantic tokens, or keyboard access. Only source review occurred; no browser, runtime, accessibility-tool, or real-Run verification was performed.
+2026-10-14 source comparison: the Team route defaults to Records and retains Configuration; the records query shows server Run summaries, including queued Runs, and opens Run detail. Configuration saves `maxConcurrentRuns` (default 3, minimum 1) through the single Save action. Chat is the only Run entry; there is no manual Run creation or Team conversation surface. Orchestration v4 worktree evidence remains on Run detail. Source review only; no browser, runtime, build, or test verification was performed.
 
 ## Changelog
 
-### 2026-10-13 - Parallel Runs and concurrency limit
+### 2026-10-13
 
-- Replaced the single active Run inspector card with a work records list: one live card per non-terminal Run, including queued Runs waiting for a parallel slot, each with its own progress summary and lifecycle controls.
-- Added the parallel Run limit field (`maxConcurrentRuns`, default 3) to the Configuration tab's single Save flow; roles outside the displayed list are preserved unchanged across save.
-
-### 2026-10-13 - Markdown for agent-authored text
-
-- Rendered Coordinator and member questions, inspector question panels and the document viewer through the shared safe Markdown renderer.
-
-### 2026-10-10 - Planner-decided parallelism and progress percentage
-
-- Removed the extra Developer instance list and concurrency bound from role configuration; runtime parallelism (1-4 lanes) is decided by the Planner per Run and shown as Run evidence. Added the completion percentage to the active Run progress summary.
-
-### 2026-10-10 - Parallel Developer configuration and progress
-
-- Added the Developer executor selector, extra Developer instance list (label, executor, model, advanced fields, add up to three, per-instance remove), and the Developer concurrency bound; role and instance executors survive load and save.
-- Added active-Run progress summary (phase, assignment completion, active Developers, next step, pending-question count), per-question inspector answer panels beyond the earliest pending question, and per-task retry controls when several assignments failed together.
-
-### 2026-10-08 - Shared direct Codex execution
-
-- Removed WorkLite proposal and command-grant steps for developer tasks; retained clarification and effect recovery.
-
-### 2026-10-03 - Team interaction and role configuration
-
-- Made Coordinator routing the default for new tasks and placed its removable token inside the composer surface.
-- Let the conversation use its full width when no contextual Run, queue, recovery, or document inspector is needed.
-- Replaced repeated expanded role cards with provider-grouped model selectors and role-local advanced settings disclosures.
-
-### 2026-10-03 - Team conversation
-
-- Replaced the form-first Start specification with the default Team-owned Coordinator conversation and a separate Configuration tab.
-- Added durable chat intake, one-action automatic Run creation, remembered directory reuse, concise execution projection, pending questions, file delivery, immutable document viewing, download, and Run evidence links.
-- Removed launch-form copy from the admitted inventory and documented conditional scrolling, reconnect replay, keyboard mentions, and accessibility requirements.
+- Replaced Team conversation, intake, historical projection and manual launch entries with linked Run records and separate role configuration. Chat Agent dispatches Team Runs; Run detail owns questions, command grants, documents and recovery.

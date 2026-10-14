@@ -7,7 +7,7 @@ import { chatSubmissions, feishuChats, feishuDeliveries, feishuEvents, type Data
 import { DATABASE } from '../../../infrastructure/database.module';
 import { AgentExecutionsService } from '../../agents/agent-executions.service';
 import { CHAT_AGENT_ID, ChatDispatchService } from '../../agents/chat-dispatch.service';
-import { AgentTeamConversationService } from '../../agent-teams/agent-team-conversation.service';
+import { AgentTeamDocumentsService } from '../../agent-teams/agent-team-documents.service';
 import { AgentTeamsService } from '../../agent-teams/agent-teams.service';
 import { RunsService } from '../../runs/runs.service';
 import { PluginsService } from '../plugins.service';
@@ -46,7 +46,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
     private readonly plugins: PluginsService,
     private readonly dispatches: ChatDispatchService,
     private readonly executions: AgentExecutionsService,
-    private readonly conversations: AgentTeamConversationService,
+    private readonly documents: AgentTeamDocumentsService,
     private readonly teams: AgentTeamsService,
     private readonly runs: RunsService,
     private readonly upgrades: UpgradesService,
@@ -58,8 +58,8 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       this.runs.subscribe((event) => {
         void this.db.update(chatSubmissions).set({ settled: false }).where(sql`json_extract(${chatSubmissions.reference}, '$.runId') = ${event.runId}`).then(() => undefined);
       }),
-      this.conversations.subscribe(() => {
-        void this.db.update(chatSubmissions).set({ settled: false }).where(sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'team'`).then(() => undefined);
+      this.teams.subscribe((event) => {
+        void this.db.update(chatSubmissions).set({ settled: false }).where(sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'team' and json_extract(${chatSubmissions.reference}, '$.runId') = ${event.runId}`).then(() => undefined);
       }),
     ];
     await this.connect();
@@ -301,10 +301,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
 
   private async applyAction(eventId: string, chatId: string, action: FeishuAction, form: Json, parentId: string): Promise<void> {
     const answer = string(form.answer).trim();
-    if (action.kind === 'intake') {
-      const [chat] = await this.db.select().from(feishuChats).where(eq(feishuChats.id, chatId)).limit(1);
-      await this.dispatchFromChannel({ submissionId: eventId, message: action.answer ?? answer, executionId: chat.executionId, target: { kind: 'team', teamId: action.teamId, intakeSubmissionId: action.intakeSubmissionId, intakeField: action.field } }, chatId);
-    } else if (action.kind === 'answer') {
+    if (action.kind === 'answer') {
       const run = await this.teams.getRun(request, 'personal', action.runId);
       const pending = run.pendingInputs.find((item) => item.id === action.pendingInputId);
       if (pending?.status === 'answered') return; // Acknowledgement may have been interrupted after the domain committed.
@@ -429,47 +426,32 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
         state.streaming = false;
       }
     } else if (reference?.kind === 'team') {
-      const conversation = await this.conversations.getConversation(request, 'personal', reference.teamId);
-      const intake = conversation.intakes.find((item) => item.submissionId === reference.intakeSubmissionId);
-      if (!intake) throw new Error('Team intake not found.');
       state.title = 'Chat · Agent Team';
-      state.status = statusText[intake.status] ?? intake.status;
-      state.content = intake.goal ?? submission.message;
-      if (!intake.runId) {
-        const question = [...conversation.messages].reverse().find((message) => message.kind === 'coordinator_question' && message.intakeId === intake.id);
-        if (intake.status === 'collecting' && question?.kind === 'coordinator_question') {
-          const action: FeishuAction = { kind: 'intake', teamId: reference.teamId, intakeSubmissionId: reference.intakeSubmissionId, field: question.field };
-          state.question = { text: question.text, action };
-          state.buttons.push(...question.options.map((option) => ({ label: option.label, action: { ...action, answer: option.value } as FeishuAction })));
-        }
-        terminal = intake.status === 'failed';
-      } else {
-        const run = await this.teams.getRun(request, 'personal', intake.runId);
-        const phaseText: Record<string, string> = { planning: '规划中', test_design: '测试设计中', development: '开发中', test_authoring: '测试编写中', test_execution: '测试执行中', review: '审查中', repair: '修复中', waiting: '等待输入', terminal: '已结束' };
-        state.status = statusText[run.status] ?? run.status;
-        if (run.progress && !['succeeded', 'failed', 'cancelled'].includes(run.status)) state.status += ` · ${phaseText[run.progress.phase] ?? run.progress.phase} ${run.progress.percent}%`;
-        state.details = run.tasks.map((task) => {
-          const progressLine = task.progressText.trim().split(/\r?\n/, 1)[0] ?? '';
-          return `- ${task.taskKey} · ${statusText[task.status] ?? task.status}${progressLine ? ` · ${progressLine}` : ''}`;
-        }).join('\n');
-        const active = [...run.tasks].reverse().find((task) => task.retryable || ['running', 'waiting_for_input', 'waiting_for_recovery'].includes(task.status));
-        state.content = `${run.intent}\n\n${active ? `当前任务：${active.taskKey}` : ''}`;
-        if (run.status === 'failed' && active?.error) state.content += `\n\n${active.error}`;
-        const pending = run.pendingInputs.find((item) => item.status === 'pending');
-        if (pending?.kind === 'question') state.question = { text: pending.question, action: { kind: 'answer', runId: run.id, pendingInputId: pending.id, scopeRevision: pending.scopeRevision }, commands: run.mode !== 'plan_only' && run.tasks.find((task) => task.id === pending.taskAttemptId)?.role !== 'developer' };
-        if (pending?.kind === 'operation_recovery' && pending.operationKey) {
-          state.content += `\n\n${pending.question}`;
-          state.buttons.push(...(['adopt_command', 'mark_failed', 'replay'] as const).map((decision) => ({ label: ({ adopt_command: '采用已执行结果', mark_failed: '标记操作失败', replay: '重新执行此操作' })[decision], action: { kind: 'recovery', runId: run.id, operationKey: pending.operationKey!, decision } as FeishuAction })));
-        }
-        this.controls(state.buttons, 'team', run.id, run.status, active?.retryable ? active.taskKey : undefined);
-        terminal = ['succeeded', 'failed', 'cancelled'].includes(run.status);
-        if (run.outcome) state.content += `\n\n${run.outcome.summary}${run.outcome.unresolvedIssues.length ? `\n\n待解决：\n${run.outcome.unresolvedIssues.map((issue) => `- ${issue}`).join('\n')}` : ''}`;
-        for (const document of run.documents) {
-          try {
-            const delivered = await this.conversations.downloadDocument(request, 'personal', document.id);
-            files.push({ id: `team:${document.id}`, name: delivered.fileName, content: delivered.content });
-          } catch { state.content += `\n\n文档「${document.title}」尚未完成文件交付，可重试交付。`; state.buttons.push({ label: '重试文件交付', action: { kind: 'delivery' } }); }
-        }
+      const run = await this.teams.getRun(request, 'personal', reference.runId);
+      const phaseText: Record<string, string> = { planning: '规划中', test_design: '测试设计中', development: '开发中', test_authoring: '测试编写中', test_execution: '测试执行中', review: '审查中', repair: '修复中', waiting: '等待输入', terminal: '已结束' };
+      state.status = statusText[run.status] ?? run.status;
+      if (run.progress && !['succeeded', 'failed', 'cancelled'].includes(run.status)) state.status += ` · ${phaseText[run.progress.phase] ?? run.progress.phase} ${run.progress.percent}%`;
+      state.details = run.tasks.map((task) => {
+        const progressLine = task.progressText.trim().split(/\r?\n/, 1)[0] ?? '';
+        return `- ${task.taskKey} · ${statusText[task.status] ?? task.status}${progressLine ? ` · ${progressLine}` : ''}`;
+      }).join('\n');
+      const active = [...run.tasks].reverse().find((task) => task.retryable || ['running', 'waiting_for_input', 'waiting_for_recovery'].includes(task.status));
+      state.content = `${run.intent}\n\n${active ? `当前任务：${active.taskKey}` : ''}`;
+      if (run.status === 'failed' && active?.error) state.content += `\n\n${active.error}`;
+      const pending = run.pendingInputs.find((item) => item.status === 'pending');
+      if (pending?.kind === 'question') state.question = { text: pending.question, action: { kind: 'answer', runId: run.id, pendingInputId: pending.id, scopeRevision: pending.scopeRevision }, commands: run.mode !== 'plan_only' && run.tasks.find((task) => task.id === pending.taskAttemptId)?.role !== 'developer' };
+      if (pending?.kind === 'operation_recovery' && pending.operationKey) {
+        state.content += `\n\n${pending.question}`;
+        state.buttons.push(...(['adopt_command', 'mark_failed', 'replay'] as const).map((decision) => ({ label: ({ adopt_command: '采用已执行结果', mark_failed: '标记操作失败', replay: '重新执行此操作' })[decision], action: { kind: 'recovery', runId: run.id, operationKey: pending.operationKey!, decision } as FeishuAction })));
+      }
+      this.controls(state.buttons, 'team', run.id, run.status, active?.retryable ? active.taskKey : undefined);
+      terminal = ['succeeded', 'failed', 'cancelled'].includes(run.status);
+      if (run.outcome) state.content += `\n\n${run.outcome.summary}${run.outcome.unresolvedIssues.length ? `\n\n待解决：\n${run.outcome.unresolvedIssues.map((issue) => `- ${issue}`).join('\n')}` : ''}`;
+      for (const document of run.documents) {
+        try {
+          const delivered = await this.documents.downloadDocument(request, 'personal', document.id);
+          files.push({ id: `team:${document.id}`, name: delivered.fileName, content: delivered.content });
+        } catch { state.content += `\n\n文档「${document.title}」尚未完成文件交付，可重试交付。`; state.buttons.push({ label: '重试文件交付', action: { kind: 'delivery' } }); }
       }
     } else if (reference?.kind === 'workflow') {
       let run = await this.runs.get(request, 'personal', reference.runId);
