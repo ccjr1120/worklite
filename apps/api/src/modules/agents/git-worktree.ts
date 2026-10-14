@@ -75,6 +75,20 @@ export async function ensureTaskWorktree(repository: GitRepositoryInfo & { branc
   return { worktreePath, worktreeBranch, baseBranch: repository.branch, baseCommit: repository.commit };
 }
 
+// Idempotent ensure with explicit path, branch, and start point (Team Run base worktrees and
+// lane sub-worktrees). An already-registered worktree at the path is reused; a leftover branch
+// without a worktree (interrupted earlier attempt) is attached instead of recreated.
+export async function ensureWorktreeAt(repositoryDirectory: string, worktreePath: string, worktreeBranch: string, startPoint: string): Promise<void> {
+  const existing = await git(repositoryDirectory, ['worktree', 'list', '--porcelain']).catch(() => '');
+  if (existing.split('\n').some((line) => line === `worktree ${worktreePath}`)) return;
+  const branchExists = await git(repositoryDirectory, ['rev-parse', '--verify', `refs/heads/${worktreeBranch}`]).then(() => true).catch(() => false);
+  if (branchExists) {
+    await git(repositoryDirectory, ['worktree', 'add', worktreePath, worktreeBranch]);
+    return;
+  }
+  await git(repositoryDirectory, ['worktree', 'add', '-b', worktreeBranch, worktreePath, startPoint]);
+}
+
 export type TaskMergeOutcome =
   | { status: 'merged'; cleanupPending: boolean }
   | { status: 'conflict'; error: string };

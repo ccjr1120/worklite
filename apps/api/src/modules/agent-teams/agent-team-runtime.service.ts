@@ -10,7 +10,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { and, asc, desc, eq, gt, inArray, isNull, ne } from 'drizzle-orm';
 import type {
   AgentTeamCriterionAssessment,
@@ -78,7 +78,7 @@ import {
   type AgentInvocationOperationJournal,
 } from '../agents/isolated-agent-invocation.service';
 import { ProjectExecutorService } from '../agents/project-executor.service';
-import { enqueueTaskMerge, ensureTaskWorktree, inspectGitRepository, mergeTaskWorktree, type PreparedTaskWorktree } from '../agents/git-worktree';
+import { enqueueTaskMerge, ensureTaskWorktree, ensureWorktreeAt, inspectGitRepository, mergeTaskWorktree, type PreparedTaskWorktree } from '../agents/git-worktree';
 import { AgentTeamOperationJournalService } from './agent-team-operation-journal.service';
 import {
   AGENT_TEAM_PROCESS_ID,
@@ -86,18 +86,31 @@ import {
   AGENT_TEAM_ROLE_INSTRUCTIONS,
   AGENT_TEAM_ROLE_TOOL_NAMES,
   BUILT_IN_AGENT_TEAM_ID,
+  DEFAULT_MAX_CONCURRENT_RUNS,
+  agentTeamContractRole,
+  type AgentTeamRuntimeRole,
 } from './agent-team-configuration';
+import {
+  createTeamGraphV4,
+  type AgentTeamGraphV4Delegate,
+  type AgentTeamLaneWorktree,
+  type AgentTeamTaskRequestV4,
+  type AgentTeamWorktreeSetupState,
+  type AgentTeamWorktreeTaskResult,
+} from './agent-team-graph-v4';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { CommandsService } from '../commands/commands.service';
 
 const MAX_TOOL_RESULT_CHARS = 100_000;
-const TASK_ROLES: Array<[RegExp, AgentTeamRole]> = [
+const TASK_ROLES: Array<[RegExp, AgentTeamRuntimeRole]> = [
   [/^repair_test_authoring_/, 'test_author'],
   [/^repair_test_execution_/, 'test_runner'],
   [/^repair_review_/, 'reviewer'],
   [/^repair_/, 'developer'],
   [/^planning$/, 'planner'],
   [/^test_design$/, 'test_designer'],
+  [/^worktree_setup$/, 'worktree-manager'],
+  [/^worktree_teardown$/, 'worktree-manager'],
   [/^development_join$/, 'developer'],
   [/^development_/, 'developer'],
   [/^development$/, 'developer'],
@@ -106,6 +119,10 @@ const TASK_ROLES: Array<[RegExp, AgentTeamRole]> = [
   [/^review$/, 'reviewer'],
 ];
 const RESERVED_DEVELOPER_ID = 'developer';
+
+// Run statuses that hold or wait for one of the team's parallel execution slots.
+const SLOT_ACTIVE_STATUSES = ['running', 'waiting_for_input', 'paused'] as const;
+const QUEUED_OR_ACTIVE_STATUSES = ['queued', ...SLOT_ACTIVE_STATUSES] as const;
 
 type Checkpointer = ReturnType<typeof createSqliteCheckpointer>;
 type AgentTeamDatabaseTransaction = Parameters<Parameters<Database['transaction']>[0]>[0];
@@ -123,7 +140,18 @@ type RawTaskOutput = {
   repairRequests?: unknown;
   developmentAssignments?: unknown;
   pendingInput?: unknown;
+  worktreeSetup?: unknown;
+  worktreeTeardown?: unknown;
 };
+
+// The agentTeamRuns.worktreeBasePath/runBranch and agentTeams.maxConcurrentRuns columns land
+// with the packages/db lane; access is bridged until that merge.
+type RunWorktreeColumns = { worktreeBasePath?: string | null; runBranch?: string | null };
+type TeamConcurrencyColumn = { maxConcurrentRuns?: number | null };
+
+function runWorktreeColumns(run: AgentTeamRun): RunWorktreeColumns {
+  return run as AgentTeamRun & RunWorktreeColumns;
+}
 
 @Injectable()
 export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
@@ -134,6 +162,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   private readonly eventListeners = new Set<AgentTeamEventListener>();
   private readonly transactionEvents = new Map<object, AgentTeamRunEvent[]>();
   private readonly documentDeliveries = new Map<string, Promise<void>>();
+  // Serializes queued-Run starts per team so the parallel cap is never oversubscribed.
+  private readonly runStarters = new Map<string, Promise<void>>();
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
@@ -184,7 +214,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const versionId = `atver_${randomUUID()}`;
     const resolvedProjectDirectory = resolve(projectDirectory);
     const projectInstructions = await this.readProjectInstructions(resolvedProjectDirectory);
-    const outputDirectory = this.runOutputDirectory(runId);
     const [team] = await this.db.select().from(agentTeams)
       .where(and(eq(agentTeams.id, BUILT_IN_AGENT_TEAM_ID), eq(agentTeams.workspaceId, workspaceId)))
       .limit(1);
@@ -193,16 +222,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const snapshot = await this.createVersionSnapshot(team.roles);
     const now = new Date();
     await this.transaction((transaction) => {
-      const [activeRun] = transaction.select({ id: agentTeamRuns.id })
-        .from(agentTeamRuns)
-        .where(and(
-          eq(agentTeamRuns.teamId, team.id),
-          inArray(agentTeamRuns.status, ['queued', 'running', 'waiting_for_input', 'paused']),
-        ))
-        .limit(1)
-        .all();
-      if (activeRun) throw new BadRequestException('The Agent Team already has an active Run.');
-
       const [latest] = transaction.select({ version: agentTeamVersions.version })
         .from(agentTeamVersions)
         .where(eq(agentTeamVersions.teamId, team.id))
@@ -221,6 +240,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         workspaceId,
         teamId: team.id,
         teamVersionId: versionId,
+        // Runs always enter as queued; the cap-aware starter begins them FIFO once a
+        // parallel slot is free (maxConcurrentRuns, default 3).
         status: 'queued',
         intent,
         projectDirectory: resolvedProjectDirectory,
@@ -252,9 +273,51 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       this.appendEvent(transaction, runId, 'run.status', { status: 'queued' });
     });
 
-    await mkdir(outputDirectory, { recursive: true });
-    this.scheduleExecution(runId, this.initialGraphInput(await this.getRun(runId)));
+    await this.maybeStartQueuedRuns(team.id);
     return this.getRunView(runId);
+  }
+
+  private async getMaxConcurrentRuns(teamId: string): Promise<number> {
+    const [team] = await this.db.select().from(agentTeams).where(eq(agentTeams.id, teamId)).limit(1);
+    const configured = (team as (typeof team & TeamConcurrencyColumn) | undefined)?.maxConcurrentRuns;
+    return typeof configured === 'number' && Number.isInteger(configured) && configured >= 1
+      ? configured
+      : DEFAULT_MAX_CONCURRENT_RUNS;
+  }
+
+  private maybeStartQueuedRuns(teamId: string): Promise<void> {
+    const serialized = (this.runStarters.get(teamId) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => this.startQueuedRuns(teamId));
+    this.runStarters.set(teamId, serialized);
+    void serialized.finally(() => { if (this.runStarters.get(teamId) === serialized) this.runStarters.delete(teamId); });
+    return serialized;
+  }
+
+  // Starts queued Runs in creation order while a parallel slot is free. A slot is held by a
+  // running, waiting, or paused Run, or by a queued Run whose execution is already scheduled.
+  private async startQueuedRuns(teamId: string): Promise<void> {
+    if (this.shuttingDown) return;
+    const cap = await this.getMaxConcurrentRuns(teamId);
+    for (;;) {
+      const activeRows = await this.db.select({ id: agentTeamRuns.id, status: agentTeamRuns.status })
+        .from(agentTeamRuns)
+        .where(and(
+          eq(agentTeamRuns.teamId, teamId),
+          inArray(agentTeamRuns.status, [...QUEUED_OR_ACTIVE_STATUSES]),
+        ))
+        .orderBy(asc(agentTeamRuns.createdAt));
+      const occupied = activeRows.filter((row) => row.status !== 'queued' || this.executions.has(row.id)).length;
+      if (occupied >= cap) return;
+      const next = activeRows.find((row) => row.status === 'queued' && !this.executions.has(row.id));
+      if (!next) return;
+      const run = await this.getRun(next.id);
+      if (run.desiredControlState !== 'none') return;
+      await mkdir(this.runOutputDirectory(run.id), { recursive: true });
+      // resumeInput picks the fresh graph input for a new Run and the checkpoint resume for
+      // a re-queued one (e.g. retry), so the starter covers both.
+      this.scheduleExecution(run.id, await this.resumeInput(run));
+    }
   }
 
   async deliverRunDocuments(runId: string, workspaceId?: string): Promise<void> {
@@ -297,6 +360,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         progressTextByAttemptId.set(payload.taskAttemptId, payload.text);
       }
     }
+    const worktree = runWorktreeColumns(run);
     return {
       id: run.id,
       teamId: run.teamId,
@@ -312,6 +376,10 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       intent: run.intent,
       projectDirectory: run.projectDirectory,
       mode: run.mode,
+      // Run worktree evidence: retained on conflict, failure, or interruption so the
+      // operator can resolve manually. Surfaced until the contracts lane adds the fields.
+      worktreeBasePath: worktree.worktreeBasePath ?? null,
+      runBranch: worktree.runBranch ?? null,
       authorizedCommands: run.authorizedCommands,
       scopeRevision: run.scopeRevision,
       desiredControlState: run.desiredControlState,
@@ -326,7 +394,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       createdAt: run.createdAt.toISOString(),
       updatedAt: run.updatedAt.toISOString(),
       finishedAt: run.finishedAt?.toISOString() ?? null,
-    };
+      // Excess fields bridged until the contracts lane adds worktreeBasePath/runBranch.
+    } as AgentTeamRunView;
   }
 
   async getRunProgress(runId: string): Promise<AgentTeamRunProgress | null> {
@@ -389,9 +458,11 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     }
 
     const version = await this.getVersion(run);
-    const orchestrationVersion = version.snapshot.orchestrationVersion ?? 1;
+    const orchestrationVersion: number = version.snapshot.orchestrationVersion ?? 1;
     let resumeInterruptId: string | undefined;
-    if (orchestrationVersion === 2) {
+    // Lane-based graphs (v2, v4) resume the exact interrupted input node by interrupt id so
+    // one lane's answer never lands in another lane's pending question.
+    if (orchestrationVersion === 2 || orchestrationVersion === 4) {
       const graph = this.createGraph(run, version);
       const snapshot = await graph.getState({ configurable: { thread_id: run.langGraphThreadId } });
       resumeInterruptId = snapshot.tasks
@@ -448,7 +519,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
     const resume = pendingInputAnswer(request.answer, answered);
     this.scheduleExecution(runId, new Command({
-      resume: orchestrationVersion === 2 ? { [resumeInterruptId as string]: resume } : resume,
+      resume: orchestrationVersion === 2 || orchestrationVersion === 4 ? { [resumeInterruptId as string]: resume } : resume,
     }));
     return this.getRunView(runId);
   }
@@ -602,7 +673,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     });
     if (!committed) throw new BadRequestException('The operation recovery decision was not committed.');
 
-    if (decision !== 'mark_failed') this.scheduleExecution(runId, null);
+    if (decision === 'mark_failed') await this.maybeStartQueuedRuns(run.teamId);
+    else this.scheduleExecution(runId, null);
     return this.getRunView(runId);
   }
 
@@ -706,35 +778,39 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           .where(eq(agentTeamTaskAttempts.id, row.id)).run();
       }
       transaction.update(agentTeamRuns).set({
-        status: 'running',
+        // Retry re-enters through the queue so a retried Run never oversubscribes the
+        // parallel cap; the starter resumes from the persisted checkpoint.
+        status: 'queued',
         desiredControlState: 'none',
         updatedAt: now,
         finishedAt: null,
       }).where(and(eq(agentTeamRuns.id, runId), eq(agentTeamRuns.status, 'failed'))).run();
-      this.appendEvent(transaction, runId, 'run.status', { status: 'running' });
+      this.appendEvent(transaction, runId, 'run.status', { status: 'queued' });
       this.appendProgressIfChanged(transaction, runId);
     });
 
-    this.scheduleExecution(runId, null);
+    await this.maybeStartQueuedRuns(run.teamId);
     return this.getRunView(runId);
   }
 
   private async initializeBuiltInTeam(): Promise<void> {
-    const [existing] = await this.db.select({ id: agentTeams.id }).from(agentTeams)
+    const [existing] = await this.db.select().from(agentTeams)
       .where(and(eq(agentTeams.id, BUILT_IN_AGENT_TEAM_ID), eq(agentTeams.workspaceId, 'workspace_personal')))
       .limit(1);
-    if (existing) return;
+    if (existing) {
+      // Orchestration v4 adds the worktree-manager role to previously initialized teams.
+      if (existing.roles.some((role) => role.role === 'worktree-manager')) return;
+      const roles: StoredAgentTeamRoleConfiguration[] = [
+        ...existing.roles,
+        defaultRoleConfiguration('worktree-manager'),
+      ];
+      await this.db.update(agentTeams).set({ roles, updatedAt: new Date() })
+        .where(eq(agentTeams.id, existing.id)).run();
+      return;
+    }
 
-    const manifest = getBmadTeaProcessManifest();
-    const roles = (Object.keys(AGENT_TEAM_ROLE_INSTRUCTIONS) as AgentTeamRole[]).map((role) => ({
-      role,
-      publicModelId: '',
-      instructions: AGENT_TEAM_ROLE_INSTRUCTIONS[role],
-      entryPoints: manifest.entryPoints[role] ?? [],
-      skills: [],
-      mcpServers: [],
-      toolNames: [...AGENT_TEAM_ROLE_TOOL_NAMES[role]],
-    }));
+    const roles = (Object.keys(AGENT_TEAM_ROLE_INSTRUCTIONS) as AgentTeamRuntimeRole[])
+      .map((role) => defaultRoleConfiguration(role));
     await this.db.insert(agentTeams).values({
       id: BUILT_IN_AGENT_TEAM_ID,
       workspaceId: 'workspace_personal',
@@ -764,7 +840,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       // v3 lanes share the role's single captured launch; the Planner decides
       // how many of the fixed pool lanes actually execute per Run.
       developerExecutions: { [RESERVED_DEVELOPER_ID]: developerExecution },
-      orchestrationVersion: 3,
+      // v4 adds the Worktree Manager (setup/teardown around the developer fan-out).
+      // The snapshot union widens to 4 with the packages lane; bridged until then.
+      orchestrationVersion: 4 as unknown as StoredAgentTeamVersionSnapshot['orchestrationVersion'],
       roles: await Promise.all(configuredRoles.map(async (role) => {
         const entryPointContent = await Promise.all(role.entryPoints.map((path) => readBmadTeaProcessFile(path)));
         const processReferences = processReferencePaths(role.role, manifest);
@@ -790,16 +868,16 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         await this.finishCancelledRun(run.id);
         continue;
       }
+      // Queued Runs start through the cap-aware starter (below) once interrupted running
+      // Runs have been reconciled and hold their slots again.
       if (run.status === 'queued') {
-        if (run.desiredControlState === 'pause_requested') {
-          await this.setRunStatus(run.id, 'paused');
-        } else {
-          await mkdir(this.runOutputDirectory(run.id), { recursive: true });
-          this.scheduleExecution(run.id, this.initialGraphInput(run));
-        }
+        if (run.desiredControlState === 'pause_requested') await this.setRunStatus(run.id, 'paused');
         continue;
       }
       if (!this.executions.has(run.id)) await this.reconcileInterruptedRun(run);
+    }
+    for (const teamId of new Set(runs.map((run) => run.teamId))) {
+      await this.maybeStartQueuedRuns(teamId);
     }
   }
 
@@ -875,7 +953,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (validState) await this.reconcileProjection(run, state);
     const interrupted = snapshot.tasks.some((task) => task.interrupts.length > 0);
     if (interrupted) {
-      if ((version.snapshot.orchestrationVersion ?? 1) === 2) {
+      const orchestrationVersion: number = version.snapshot.orchestrationVersion ?? 1;
+      if (orchestrationVersion === 2 || orchestrationVersion === 4) {
         const resume: Record<string, AgentTeamPendingInputAnswer> = {};
         let unanswered = false;
         for (const interrupt of snapshot.tasks.flatMap((task) => task.interrupts)) {
@@ -909,6 +988,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       if (!validState) {
         await this.failStaleAttempts(run.id, 'The Agent Team checkpoint was missing or empty.');
         await this.setRunStatus(run.id, 'failed');
+        await this.maybeStartQueuedRuns(run.teamId);
         return;
       }
       await this.finishSuccessfulRun(run.id, toGraphResult(state));
@@ -1034,13 +1114,23 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   private createGraph(run: AgentTeamRun, version: AgentTeamVersion) {
     const snapshot = version.snapshot;
-    const orchestrationVersion = snapshot.orchestrationVersion ?? 1;
+    const orchestrationVersion: number = snapshot.orchestrationVersion ?? 1;
+    // v4 runs the local Worktree Manager topology over the fixed lane pool.
+    if (orchestrationVersion === 4) {
+      const delegate: AgentTeamGraphV4Delegate = {
+        executeTask: async (request) => this.executeTask(run.workspaceId, version, request),
+      };
+      return createTeamGraphV4(delegate, this.checkpointer, {
+        maxRepairRounds: snapshot.recipeDefaults.maxRepairRounds,
+      });
+    }
     const developerRole = snapshot.roles.find((role) => role.role === 'developer');
     return createTeamGraph({
       executeTask: async (request) => this.executeTask(run.workspaceId, version, request),
     }, this.checkpointer, {
       maxRepairRounds: snapshot.recipeDefaults.maxRepairRounds,
-      orchestrationVersion,
+      // v4 returned above; the team-runtime union covers the remaining versions.
+      orchestrationVersion: orchestrationVersion as 1 | 2 | 3,
       developerIds: orchestrationVersion === 3 ? DEVELOPER_LANE_IDS : versionDeveloperIds(snapshot),
       developerConcurrency: orchestrationVersion === 3
         ? DEVELOPER_LANE_IDS.length
@@ -1061,33 +1151,55 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (attempt.status === 'completed' || attempt.status === 'waiting_for_input') {
       return attempt.result as AgentTeamTaskResult;
     }
+    // Non-git projects skip the Worktree Manager entirely; a teardown without a recorded
+    // setup is a no-op. Both produce a completed attempt so the Run evidence shows the skip.
+    if (taskKey === 'worktree_setup' || taskKey === 'worktree_teardown') {
+      const skipped = await this.shortCircuitWorktreeManager(run, request, workspaceId, attempt.id);
+      if (skipped) return skipped;
+    }
     const controller = this.abortControllers.get(request.runId);
     const signal = controller?.signal ?? new AbortController().signal;
     const commandIds = new Set<string>();
-    const orchestrationVersion = version.snapshot.orchestrationVersion ?? 1;
+    const orchestrationVersion: number = version.snapshot.orchestrationVersion ?? 1;
     // Each developer lane works in its own git worktree (when the project is a git repository)
-    // and merges back on completion through the shared serialized queue.
+    // and merges back on completion through the shared serialized queue. v4 lanes receive
+    // their worktree from the Worktree Manager setup instead of cutting their own.
     let laneWorktree: PreparedTaskWorktree | null = null;
+    let laneMergeTarget: { projectDirectory: string; baseBranch: string } | null = null;
+    const requestLane: AgentTeamLaneWorktree | undefined = (request as AgentTeamTaskRequestV4).laneWorktree;
 
     const produceOutput = async (correction?: string): Promise<string> => {
       if (taskRole === 'developer') {
         const developerId = request.developerId ?? RESERVED_DEVELOPER_ID;
-        // v3 lanes share the role's single captured launch; only v2 snapshots
+        // v3/v4 lanes share the role's single captured launch; only v2 snapshots
         // carry per-instance launches and configurations.
         const execution = version.snapshot.developerExecutions?.[developerId]
-          ?? (orchestrationVersion === 3 ? version.snapshot.developerExecutions?.[RESERVED_DEVELOPER_ID] : undefined)
+          ?? (orchestrationVersion === 3 || orchestrationVersion === 4 ? version.snapshot.developerExecutions?.[RESERVED_DEVELOPER_ID] : undefined)
           ?? (developerId === RESERVED_DEVELOPER_ID ? version.snapshot.developerExecution : undefined);
         if (!execution || !('executor' in execution)) throw new Error('This Team version has no captured developer executor. Start a new Team Run.');
-        const instance = orchestrationVersion !== 3 && developerId !== RESERVED_DEVELOPER_ID
+        const sharedLaunch = orchestrationVersion === 3 || orchestrationVersion === 4;
+        const instance = !sharedLaunch && developerId !== RESERVED_DEVELOPER_ID
           ? role.developerInstances?.find((candidate) => candidate.developerId === developerId)
           : undefined;
-        if (orchestrationVersion !== 3 && developerId !== RESERVED_DEVELOPER_ID && !instance) {
+        if (!sharedLaunch && developerId !== RESERVED_DEVELOPER_ID && !instance) {
           throw new Error(`Developer instance ${developerId} was not captured by this Team version.`);
         }
         const developerRole = instance ?? role;
         const model = developerRole.publicModelId.trim() || (execution.executor === 'codex' ? execution.model : null);
         if (model) await this.executors.requireModel(workspaceId, execution.executor, model);
-        laneWorktree ??= await this.prepareDeveloperLane(run, attempt.id);
+        if (!laneWorktree) {
+          if (requestLane) {
+            laneWorktree = {
+              worktreePath: requestLane.worktreePath,
+              worktreeBranch: requestLane.worktreeBranch,
+              baseBranch: requestLane.runBranch,
+              baseCommit: '',
+            };
+            laneMergeTarget = { projectDirectory: requestLane.baseWorktreePath, baseBranch: requestLane.runBranch };
+          } else {
+            laneWorktree = await this.prepareDeveloperLane(run, attempt.id);
+          }
+        }
         const laneNote = laneWorktree ? `You work in your lane's dedicated git worktree (${laneWorktree.worktreePath}) on branch ${laneWorktree.worktreeBranch}; stay inside it and commit your finished changes on that branch before returning.` : null;
         const promptAddition = [developerPromptAddition(request), laneNote].filter(Boolean).join('\n\n') || undefined;
         const references = await Promise.all((developerRole.processReferences ?? []).map(async (path) => ({ path, content: await this.readCapturedProcessFile(version, path) })));
@@ -1151,7 +1263,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       return this.invocations.execute({
         workspaceId,
         publicModelId: role.publicModelId,
-        systemPrompt: taskSystemPrompt(role.instructions, false, rolePromptAddition(taskRole, version.snapshot)),
+        systemPrompt: taskSystemPrompt(role.instructions, false, rolePromptAddition(taskRole, version.snapshot, request)),
         context: taskContext(request, false, correction),
         skills: role.skills,
         mcpRuntimes: (await this.resources.workflowMcpRuntimes(workspaceId, role.mcpServers.map((server) => server.id)))
@@ -1198,7 +1310,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     for (let parseAttempt = 0; ; parseAttempt += 1) {
       try {
         const output = await produceOutput(correction);
-        return await this.finishExecutorOutput(request, workspaceId, attempt.id, taskKey, output, commandIds, laneWorktree);
+        return await this.finishExecutorOutput(request, workspaceId, attempt.id, taskKey, output, commandIds, laneWorktree, laneMergeTarget);
       } catch (error) {
         if (!(error instanceof TaskOutputValidationError) || parseAttempt >= 1) throw error;
         correction = [
@@ -1218,18 +1330,23 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     output: string,
     commandIds: ReadonlySet<string>,
     laneWorktree?: PreparedTaskWorktree | null,
+    laneMergeTarget?: { projectDirectory: string; baseBranch: string } | null,
   ): Promise<AgentTeamTaskResult> {
     const parsed = parseTaskOutput(output, taskKey);
     if (parsed.status === 'waiting_for_input') {
       return this.finishWaitingAttempt(request, workspaceId, attemptId, parsed);
     }
     validateUpstreamDocuments(parsed.documents, request.upstream);
-    if (laneWorktree) await this.mergeDeveloperLane(request.runId, attemptId, taskKey, laneWorktree);
-    const result: Extract<AgentTeamTaskResult, { status: 'completed' }> = {
+    if (laneWorktree) await this.mergeDeveloperLane(request.runId, attemptId, taskKey, laneWorktree, laneMergeTarget);
+    const result: ParsedCompletedTaskResult = {
       ...parsed,
       commandIds: [...commandIds],
     };
-    return this.finishCompletedAttempt(request, workspaceId, attemptId, result);
+    // The Worktree Manager's validated output is executed by the runtime before the result
+    // commits: shape and convention errors throw TaskOutputValidationError (earning the
+    // single corrective re-invocation), git failures fail the attempt outright.
+    const executed = await this.applyWorktreeManagerOutput(request, attemptId, output, result);
+    return this.finishCompletedAttempt(request, workspaceId, attemptId, executed);
   }
 
   // A git-backed lane creates (or reuses, on resume) its own worktree keyed by the attempt.
@@ -1247,13 +1364,22 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   // A completed lane merges its branch back through the shared serialized queue; a conflict
   // fails the attempt with the conflicting file list and retains the worktree for manual resolution.
-  private async mergeDeveloperLane(runId: string, attemptId: string, taskKey: string, worktree: PreparedTaskWorktree): Promise<void> {
+  // v4 lanes merge into the Run base worktree (target override) instead of the original checkout.
+  private async mergeDeveloperLane(
+    runId: string,
+    attemptId: string,
+    taskKey: string,
+    worktree: PreparedTaskWorktree,
+    target?: { projectDirectory: string; baseBranch: string } | null,
+  ): Promise<void> {
     const run = await this.getRun(runId);
-    const outcome = await enqueueTaskMerge(run.projectDirectory, worktree.baseBranch, () => mergeTaskWorktree({
-      projectDirectory: run.projectDirectory,
+    const mergeDirectory = target?.projectDirectory ?? run.projectDirectory;
+    const mergeBase = target?.baseBranch ?? worktree.baseBranch;
+    const outcome = await enqueueTaskMerge(mergeDirectory, mergeBase, () => mergeTaskWorktree({
+      projectDirectory: mergeDirectory,
       worktreePath: worktree.worktreePath,
       worktreeBranch: worktree.worktreeBranch,
-      baseBranch: worktree.baseBranch,
+      baseBranch: mergeBase,
     }).catch((error: unknown): { status: 'conflict'; error: string } => ({
       status: 'conflict',
       error: `自动合并 lane 分支 ${worktree.worktreeBranch} 时出现意外错误（${error instanceof Error ? error.message : String(error)}）；worktree ${worktree.worktreePath} 与分支已保留，请手动合并后清理。`,
@@ -1261,11 +1387,203 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     this.appendEvent(this.db, runId, 'task.activity', {
       taskAttemptId: attemptId, taskKey,
       phase: outcome.status === 'merged' ? 'worktree.merged' : 'worktree.merge_conflict',
-      worktreePath: worktree.worktreePath, worktreeBranch: worktree.worktreeBranch, baseBranch: worktree.baseBranch,
+      worktreePath: worktree.worktreePath, worktreeBranch: worktree.worktreeBranch, baseBranch: mergeBase,
       cleanupPending: outcome.status === 'merged' ? outcome.cleanupPending : undefined,
       error: outcome.status === 'conflict' ? outcome.error : undefined,
     });
     if (outcome.status === 'conflict') throw new Error(outcome.error);
+  }
+
+  // Skips the Worktree Manager invocation when there is nothing it could manage: non-git
+  // projects have no worktrees to set up, and a teardown without a recorded setup has
+  // nothing to merge or clean. Returns the completed result when it short-circuited.
+  private async shortCircuitWorktreeManager(
+    run: AgentTeamRun,
+    request: AgentTeamTaskRequest,
+    workspaceId: string,
+    attemptId: string,
+  ): Promise<AgentTeamTaskResult | null> {
+    const { taskKey } = request.taskDefinition;
+    if (taskKey === 'worktree_setup') {
+      const repository = await inspectGitRepository(run.projectDirectory);
+      if (repository?.branch) return null;
+      this.appendEvent(this.db, run.id, 'task.activity', {
+        taskAttemptId: attemptId, taskKey,
+        phase: 'worktree.skipped', scope: 'run',
+        reason: 'The project directory is not a git repository on a branch; the Run works in place.',
+      });
+      return this.finishCompletedAttempt(request, workspaceId, attemptId, emptyWorktreeManagerResult());
+    }
+    if (runWorktreeColumns(run).worktreeBasePath) return null;
+    this.appendEvent(this.db, run.id, 'task.activity', {
+      taskAttemptId: attemptId, taskKey,
+      phase: 'worktree.skipped', scope: 'run',
+      reason: 'The Run recorded no worktree setup; there is nothing to tear down.',
+    });
+    return this.finishCompletedAttempt(request, workspaceId, attemptId, emptyWorktreeManagerResult());
+  }
+
+  private async applyWorktreeManagerOutput(
+    request: AgentTeamTaskRequest,
+    attemptId: string,
+    output: string,
+    result: ParsedCompletedTaskResult,
+  ): Promise<ParsedCompletedTaskResult> {
+    const { taskKey } = request.taskDefinition;
+    if (taskKey === 'worktree_setup') return this.executeWorktreeSetup(request, attemptId, output, result);
+    if (taskKey === 'worktree_teardown') return this.executeWorktreeTeardown(request, attemptId, output, result);
+    return result;
+  }
+
+  // Validates the declared layout against the fixed naming convention, then creates the base
+  // and lane worktrees idempotently and records them on the Run as evidence.
+  private async executeWorktreeSetup(
+    request: AgentTeamTaskRequest,
+    attemptId: string,
+    output: string,
+    result: ParsedCompletedTaskResult,
+  ): Promise<ParsedCompletedTaskResult> {
+    const declared = result.worktreeSetup;
+    if (!declared) {
+      throw new TaskOutputValidationError('The worktree-manager completed worktree_setup without a "worktreeSetup" layout.', output);
+    }
+    const run = await this.getRun(request.runId);
+    const repository = await inspectGitRepository(run.projectDirectory);
+    if (!repository?.branch) {
+      throw new Error('The Run worktree setup reached execution on a project that is not a git repository on a branch.');
+    }
+    const expected = expectedRunWorktreeLayout(run, request.developmentAssignments ?? []);
+    const problems: string[] = [];
+    if (declared.baseWorktreePath !== expected.baseWorktreePath) {
+      problems.push(`baseWorktreePath must be exactly ${expected.baseWorktreePath}`);
+    }
+    if (declared.runBranch !== expected.runBranch) {
+      problems.push(`runBranch must be exactly ${expected.runBranch}`);
+    }
+    const expectedLanes = new Map(expected.lanes.map((lane) => [lane.laneId, lane]));
+    const seenLanes = new Set<string>();
+    for (const lane of declared.lanes) {
+      const expectedLane = expectedLanes.get(lane.laneId);
+      if (!expectedLane) {
+        problems.push(`lanes must not include unassigned lane ${lane.laneId}`);
+        continue;
+      }
+      seenLanes.add(lane.laneId);
+      if (lane.worktreePath !== expectedLane.worktreePath) {
+        problems.push(`lane ${lane.laneId} worktreePath must be exactly ${expectedLane.worktreePath}`);
+      }
+      if (lane.branch !== expectedLane.branch) {
+        problems.push(`lane ${lane.laneId} branch must be exactly ${expectedLane.branch}`);
+      }
+    }
+    for (const laneId of expectedLanes.keys()) {
+      if (!seenLanes.has(laneId)) problems.push(`lanes is missing lane ${laneId}`);
+    }
+    if (problems.length > 0) {
+      throw new TaskOutputValidationError(`The worktree-manager layout violates the naming convention: ${problems.join('; ')}.`, output);
+    }
+
+    await ensureWorktreeAt(run.projectDirectory, expected.baseWorktreePath, expected.runBranch, repository.commit);
+    this.appendEvent(this.db, run.id, 'task.activity', {
+      taskAttemptId: attemptId, taskKey: 'worktree_setup',
+      phase: 'worktree.prepared', scope: 'run',
+      worktreePath: expected.baseWorktreePath, worktreeBranch: expected.runBranch, baseBranch: repository.branch,
+    });
+    for (const lane of expected.lanes) {
+      await ensureWorktreeAt(run.projectDirectory, lane.worktreePath, lane.branch, expected.runBranch);
+      this.appendEvent(this.db, run.id, 'task.activity', {
+        taskAttemptId: attemptId, taskKey: 'worktree_setup',
+        phase: 'worktree.prepared', scope: 'lane', laneId: lane.laneId,
+        worktreePath: lane.worktreePath, worktreeBranch: lane.branch, baseBranch: expected.runBranch,
+      });
+    }
+    // The Run carries its worktree evidence for the Web view and for conflict/failure reports.
+    // The columns land with the packages/db lane; bridged until that merge.
+    await this.db.update(agentTeamRuns).set({
+      worktreeBasePath: expected.baseWorktreePath,
+      runBranch: expected.runBranch,
+      updatedAt: new Date(),
+    } as Partial<typeof agentTeamRuns.$inferInsert>).where(eq(agentTeamRuns.id, run.id)).run();
+
+    const worktreeSetup: AgentTeamWorktreeSetupState = {
+      baseWorktreePath: expected.baseWorktreePath,
+      runBranch: expected.runBranch,
+      originalBranch: repository.branch,
+      lanes: expected.lanes,
+    };
+    return { ...result, worktreeSetup };
+  }
+
+  // Executes the teardown decision: merge the Run branch back into the project's original
+  // branch and clean up, or retain everything with a reason. A merge conflict fails the
+  // attempt, which fails the Run and retains all worktrees and branches as evidence.
+  private async executeWorktreeTeardown(
+    request: AgentTeamTaskRequest,
+    attemptId: string,
+    output: string,
+    result: ParsedCompletedTaskResult,
+  ): Promise<ParsedCompletedTaskResult> {
+    const declared = result.worktreeTeardown;
+    if (!declared) {
+      throw new TaskOutputValidationError('The worktree-manager completed worktree_teardown without a "worktreeTeardown" decision.', output);
+    }
+    const run = await this.getRun(request.runId);
+    const columns = runWorktreeColumns(run);
+    if (!columns.worktreeBasePath || !columns.runBranch) return result;
+    const worktreeBasePath = columns.worktreeBasePath;
+    const runBranch = columns.runBranch;
+
+    if (declared.action === 'retain') {
+      this.appendEvent(this.db, run.id, 'task.activity', {
+        taskAttemptId: attemptId, taskKey: 'worktree_teardown',
+        phase: 'worktree.retained', scope: 'run',
+        worktreePath: worktreeBasePath, worktreeBranch: runBranch,
+        reason: declared.reason ?? null,
+      });
+      return result;
+    }
+
+    const originalBranch = await this.runOriginalBranch(run.id);
+    if (!originalBranch) {
+      throw new Error(`The Run worktree setup result is missing the original branch; worktree ${worktreeBasePath} and branch ${runBranch} are retained.`);
+    }
+    const outcome = await enqueueTaskMerge(run.projectDirectory, originalBranch, () => mergeTaskWorktree({
+      projectDirectory: run.projectDirectory,
+      worktreePath: worktreeBasePath,
+      worktreeBranch: runBranch,
+      baseBranch: originalBranch,
+    }).catch((error: unknown): { status: 'conflict'; error: string } => ({
+      status: 'conflict',
+      error: `自动合并 Run 分支 ${runBranch} 时出现意外错误（${error instanceof Error ? error.message : String(error)}）；worktree ${worktreeBasePath} 与分支已保留，请手动合并后清理。`,
+    })));
+    this.appendEvent(this.db, run.id, 'task.activity', {
+      taskAttemptId: attemptId, taskKey: 'worktree_teardown',
+      phase: outcome.status === 'merged' ? 'worktree.merged' : 'worktree.merge_conflict',
+      scope: 'run',
+      worktreePath: worktreeBasePath, worktreeBranch: runBranch, baseBranch: originalBranch,
+      cleanupPending: outcome.status === 'merged' ? outcome.cleanupPending : undefined,
+      error: outcome.status === 'conflict' ? outcome.error : undefined,
+    });
+    if (outcome.status === 'conflict') throw new Error(outcome.error);
+    return result;
+  }
+
+  // The original branch is captured by the setup task result so teardown never guesses.
+  private async runOriginalBranch(runId: string): Promise<string | null> {
+    const [setup] = await this.db.select({ result: agentTeamTaskAttempts.result })
+      .from(agentTeamTaskAttempts)
+      .where(and(
+        eq(agentTeamTaskAttempts.runId, runId),
+        eq(agentTeamTaskAttempts.taskKey, 'worktree_setup'),
+        eq(agentTeamTaskAttempts.status, 'completed'),
+        eq(agentTeamTaskAttempts.active, true),
+      ))
+      .orderBy(desc(agentTeamTaskAttempts.attemptIndex))
+      .limit(1);
+    const worktreeSetup = (setup?.result as AgentTeamWorktreeTaskResult | null | undefined)?.worktreeSetup;
+    return typeof worktreeSetup?.originalBranch === 'string' && worktreeSetup.originalBranch
+      ? worktreeSetup.originalBranch
+      : null;
   }
 
   private async readCapturedProcessFile(version: AgentTeamVersion, path: string): Promise<string> {
@@ -1630,6 +1948,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       : formatError(error);
     await this.failActiveAttempts(runId, 'failed', reason);
     await this.setRunStatus(runId, 'failed');
+    await this.maybeStartQueuedRuns(run.teamId);
   }
 
   private async failActiveAttempts(
@@ -1719,7 +2038,14 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       this.appendEvent(transaction, runId, 'run.status', { status: 'succeeded', outcome });
       return true;
     });
-    if (committed || await this.getDesiredControlState(runId) !== 'cancel_requested') return;
+    if (committed) {
+      // A terminal Run frees its parallel slot; start the earliest queued Run (FIFO).
+      const [run] = await this.db.select({ teamId: agentTeamRuns.teamId }).from(agentTeamRuns)
+        .where(eq(agentTeamRuns.id, runId)).limit(1);
+      if (run) await this.maybeStartQueuedRuns(run.teamId);
+      return;
+    }
+    if (await this.getDesiredControlState(runId) !== 'cancel_requested') return;
     await this.failActiveAttempts(runId, 'cancelled', 'The Agent Team run was cancelled.');
     await this.finishCancelledRun(runId);
   }
@@ -1729,6 +2055,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     await this.db.update(agentTeamPendingInputs).set({ status: 'cancelled', updatedAt: now })
       .where(and(eq(agentTeamPendingInputs.runId, runId), eq(agentTeamPendingInputs.status, 'pending'))).run();
     await this.setRunStatus(runId, 'cancelled', undefined, 'none');
+    const [run] = await this.db.select({ teamId: agentTeamRuns.teamId }).from(agentTeamRuns)
+      .where(eq(agentTeamRuns.id, runId)).limit(1);
+    if (run) await this.maybeStartQueuedRuns(run.teamId);
   }
 
   private async setRunStatus(
@@ -2083,6 +2412,21 @@ function versionDeveloperIds(snapshot: StoredAgentTeamVersionSnapshot): string[]
   ];
 }
 
+// Default persisted configuration for one built-in Team role. The stored role union gains
+// 'worktree-manager' with the packages/db lane; bridged until that merge.
+function defaultRoleConfiguration(role: AgentTeamRuntimeRole): StoredAgentTeamRoleConfiguration {
+  const manifest = getBmadTeaProcessManifest();
+  return {
+    role: agentTeamContractRole(role) as StoredAgentTeamRoleConfiguration['role'],
+    publicModelId: '',
+    instructions: AGENT_TEAM_ROLE_INSTRUCTIONS[role],
+    entryPoints: manifest.entryPoints[role] ?? [],
+    skills: [],
+    mcpServers: [],
+    toolNames: [...AGENT_TEAM_ROLE_TOOL_NAMES[role]],
+  };
+}
+
 function taskAttribution(request: AgentTeamTaskRequest): { developerId?: string; assignmentTitle?: string } {
   return {
     ...(request.developerId ? { developerId: request.developerId } : {}),
@@ -2114,8 +2458,13 @@ function developerPromptAddition(request: AgentTeamTaskRequest): string | undefi
   return sections.length > 0 ? sections.join('\n\n') : undefined;
 }
 
-function rolePromptAddition(role: AgentTeamRole, snapshot: StoredAgentTeamVersionSnapshot): string | undefined {
-  if (snapshot.orchestrationVersion === 3) {
+function rolePromptAddition(
+  role: AgentTeamRuntimeRole,
+  snapshot: StoredAgentTeamVersionSnapshot,
+  request?: AgentTeamTaskRequest,
+): string | undefined {
+  const orchestrationVersion: number = snapshot.orchestrationVersion ?? 1;
+  if (orchestrationVersion === 3 || orchestrationVersion === 4) {
     if (role === 'planner') {
       return [
         `This Team Run may use up to ${DEVELOPER_LANE_IDS.length} Developers working in parallel; decide how many the task actually needs.`,
@@ -2127,6 +2476,9 @@ function rolePromptAddition(role: AgentTeamRole, snapshot: StoredAgentTeamVersio
         'Development may have been executed by multiple Developers in parallel; each development result names its Developer.',
         'To request repairs, add "repairRequests":[{"developerId":"...","instruction":"specific repair instruction"}] targeting only the Developers that must change their own work. Do not use the legacy repairRequest field.',
       ].join('\n');
+    }
+    if (orchestrationVersion === 4 && role === 'worktree-manager' && request) {
+      return worktreeManagerPromptAddition(request);
     }
     return undefined;
   }
@@ -2146,6 +2498,32 @@ function rolePromptAddition(role: AgentTeamRole, snapshot: StoredAgentTeamVersio
     ].join('\n');
   }
   return undefined;
+}
+
+// The Worktree Manager plans with exact values; the runtime validates them against this same
+// convention before executing any git effect.
+function worktreeManagerPromptAddition(request: AgentTeamTaskRequest): string {
+  const projectName = basename(request.projectDirectory);
+  const baseWorktreePath = join(dirname(request.projectDirectory), `${projectName}-run-${request.runId}`);
+  const runBranch = `worklite/run-${request.runId}`;
+  const lanes = (request.developmentAssignments ?? []).map((assignment) => ({
+    laneId: assignment.developerId,
+    worktreePath: `${baseWorktreePath}-dev-${assignment.developerId}`,
+    branch: `${runBranch}-dev-${assignment.developerId}`,
+  }));
+  const setup = [
+    'For the worktree_setup task, add a "worktreeSetup" object to the completed response with exactly these values (the runtime validates them and creates the worktrees idempotently):',
+    `"worktreeSetup":{"baseWorktreePath":${JSON.stringify(baseWorktreePath)},"runBranch":${JSON.stringify(runBranch)},"lanes":[${lanes.map((lane) => `{"laneId":${JSON.stringify(lane.laneId)},"worktreePath":${JSON.stringify(lane.worktreePath)},"branch":${JSON.stringify(lane.branch)}}`).join(',')}]}`,
+  ].join('\n');
+  const teardown = [
+    'For the worktree_teardown task, add "worktreeTeardown":{"action":"merge-and-cleanup"} to the completed response to merge the Run branch back into the project\'s original branch and remove the Run worktrees, or "worktreeTeardown":{"action":"retain","reason":"..."} to keep every worktree and branch when the evidence says something is wrong.',
+    'A merge conflict, failure, or interruption retains ALL worktrees and branches automatically and reports them as Run evidence; only choose "retain" when the review evidence itself demands it.',
+  ].join('\n');
+  return [
+    'This Team Run manages its git worktrees through you. You never run git commands: your validated structured output is executed by the runtime.',
+    setup,
+    teardown,
+  ].join('\n\n');
 }
 
 function taskSystemPrompt(instructions: string, executor: boolean, addition?: string): string {
@@ -2216,7 +2594,50 @@ class TaskOutputValidationError extends Error {
   }
 }
 
-function parseTaskOutput(output: string, taskKey: string): AgentTeamTaskResult {
+// Worktree Manager output shapes. The setup plan is validated against the fixed naming
+// convention before the runtime executes it; the executed payload additionally carries the
+// project's original branch (see AgentTeamWorktreeSetupState in agent-team-graph-v4).
+type WorktreeLanePlan = { laneId: string; worktreePath: string; branch: string };
+type WorktreeSetupPlan = { baseWorktreePath: string; runBranch: string; lanes: WorktreeLanePlan[]; originalBranch?: string };
+type WorktreeTeardownDecision = { action: 'merge-and-cleanup' | 'retain'; reason?: string };
+type ParsedCompletedTaskResult = Extract<AgentTeamTaskResult, { status: 'completed' }> & {
+  worktreeSetup?: WorktreeSetupPlan;
+  worktreeTeardown?: WorktreeTeardownDecision;
+};
+type ParsedTaskResult = ParsedCompletedTaskResult | Extract<AgentTeamTaskResult, { status: 'waiting_for_input' }>;
+
+function emptyWorktreeManagerResult(): ParsedCompletedTaskResult {
+  return {
+    status: 'completed',
+    documents: [],
+    unresolvedIssues: [],
+    commandIds: [],
+    changedFiles: [],
+    completedAssignedWork: true,
+    criterionAssessments: [],
+  };
+}
+
+// The fixed v4 Run worktree layout: base worktree ../<project>-run-<runId> on branch
+// worklite/run-<runId>, plus one lane worktree per development assignment.
+function expectedRunWorktreeLayout(
+  run: AgentTeamRun,
+  assignments: readonly AgentTeamDevelopmentAssignment[],
+): { baseWorktreePath: string; runBranch: string; lanes: WorktreeLanePlan[] } {
+  const baseWorktreePath = join(dirname(run.projectDirectory), `${basename(run.projectDirectory)}-run-${run.id}`);
+  const runBranch = `worklite/run-${run.id}`;
+  return {
+    baseWorktreePath,
+    runBranch,
+    lanes: assignments.map((assignment) => ({
+      laneId: assignment.developerId,
+      worktreePath: `${baseWorktreePath}-dev-${assignment.developerId}`,
+      branch: `${runBranch}-dev-${assignment.developerId}`,
+    })),
+  };
+}
+
+function parseTaskOutput(output: string, taskKey: string): ParsedTaskResult {
   try {
     return parseTaskOutputUnsafe(output, taskKey);
   } catch (error) {
@@ -2228,7 +2649,7 @@ function parseTaskOutput(output: string, taskKey: string): AgentTeamTaskResult {
   }
 }
 
-function parseTaskOutputUnsafe(output: string, taskKey: string): AgentTeamTaskResult {
+function parseTaskOutputUnsafe(output: string, taskKey: string): ParsedTaskResult {
   let value: RawTaskOutput;
   try {
     value = JSON.parse(output) as RawTaskOutput;
@@ -2253,6 +2674,8 @@ function parseTaskOutputUnsafe(output: string, taskKey: string): AgentTeamTaskRe
   }
   const developmentAssignments = parseDevelopmentAssignments(value.developmentAssignments);
   const repairRequests = parseRepairRequests(value.repairRequests);
+  const worktreeSetup = parseWorktreeSetupPlan(value.worktreeSetup);
+  const worktreeTeardown = parseWorktreeTeardownDecision(value.worktreeTeardown);
   return {
     status: 'completed',
     documents: parseDocuments(value.documents, taskKey),
@@ -2264,7 +2687,45 @@ function parseTaskOutputUnsafe(output: string, taskKey: string): AgentTeamTaskRe
     repairRequest: parseRepairRequest(value.repairRequest),
     ...(developmentAssignments ? { developmentAssignments } : {}),
     ...(repairRequests ? { repairRequests } : {}),
+    ...(worktreeSetup ? { worktreeSetup } : {}),
+    ...(worktreeTeardown ? { worktreeTeardown } : {}),
   };
+}
+
+function parseWorktreeSetupPlan(value: unknown): WorktreeSetupPlan | undefined {
+  if (value === undefined || value === null) return undefined;
+  const plan = value as Partial<WorktreeSetupPlan>;
+  if (typeof plan.baseWorktreePath !== 'string' || !plan.baseWorktreePath.trim()) {
+    throw new Error('The worktree-manager setup needs a baseWorktreePath.');
+  }
+  if (typeof plan.runBranch !== 'string' || !plan.runBranch.trim()) {
+    throw new Error('The worktree-manager setup needs a runBranch.');
+  }
+  if (!Array.isArray(plan.lanes)) throw new Error('The worktree-manager setup needs a lanes list.');
+  const lanes = plan.lanes.map((item) => {
+    const lane = item as Partial<WorktreeLanePlan>;
+    if (typeof lane.laneId !== 'string' || !lane.laneId.trim()
+      || typeof lane.worktreePath !== 'string' || !lane.worktreePath.trim()
+      || typeof lane.branch !== 'string' || !lane.branch.trim()) {
+      throw new Error('A worktree-manager lane needs a laneId, worktreePath, and branch.');
+    }
+    return { laneId: lane.laneId.trim(), worktreePath: lane.worktreePath.trim(), branch: lane.branch.trim() };
+  });
+  return { baseWorktreePath: plan.baseWorktreePath.trim(), runBranch: plan.runBranch.trim(), lanes };
+}
+
+function parseWorktreeTeardownDecision(value: unknown): WorktreeTeardownDecision | undefined {
+  if (value === undefined || value === null) return undefined;
+  const decision = value as Partial<WorktreeTeardownDecision>;
+  if (decision.action !== 'merge-and-cleanup' && decision.action !== 'retain') {
+    throw new Error('The worktree-manager teardown action must be "merge-and-cleanup" or "retain".');
+  }
+  if (decision.reason !== undefined && typeof decision.reason !== 'string') {
+    throw new Error('The worktree-manager teardown reason must be text.');
+  }
+  return decision.reason?.trim()
+    ? { action: decision.action, reason: decision.reason.trim() }
+    : { action: decision.action };
 }
 
 function parseDocuments(value: unknown, taskKey: string): AgentTeamDocument[] {
@@ -2510,6 +2971,8 @@ function deriveRunProgress(
     if (/^repair_/.test(taskKey)) return 'repair';
     if (taskKey === 'planning') return 'planning';
     if (taskKey === 'test_design') return 'test_design';
+    // Worktree setup prepares development; teardown finalizes after review (the default).
+    if (taskKey === 'worktree_setup') return 'development';
     if (taskKey === 'development' || taskKey.startsWith('development_')) return 'development';
     if (taskKey === 'test_authoring') return 'test_authoring';
     if (taskKey === 'test_execution') return 'test_execution';
@@ -2656,7 +3119,7 @@ function taskKeyForDocument(
 }
 
 function roleForTaskKey(taskKey: string): AgentTeamRole {
-  return TASK_ROLES.find(([pattern]) => pattern.test(taskKey))?.[1] ?? 'reviewer';
+  return agentTeamContractRole(TASK_ROLES.find(([pattern]) => pattern.test(taskKey))?.[1] ?? 'reviewer');
 }
 
 function fingerprint(value: unknown): string {
