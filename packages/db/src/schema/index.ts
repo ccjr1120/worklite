@@ -346,6 +346,9 @@ export type StoredAgentDisplayMessage = {
   role: 'user' | 'assistant';
   content: string;
   createdAt: string;
+  // A summary divider marks where a /summarize compressed the model context; its content
+  // retains the generated summary so a later summarize can build on it.
+  kind?: 'summary_divider';
 };
 
 export type StoredAgentPlanStep = {
@@ -386,6 +389,8 @@ export const chatConfigurations = sqliteTable('chat_bot_configurations', {
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   revision: integer('revision').notNull(),
   extensionPrompt: text('extension_prompt').notNull().default(''),
+  // Custom /summarize prompt; an empty string falls back to the built-in default at summarize time.
+  summarizePrompt: text('summarize_prompt').notNull().default(''),
   defaultExecutor: text('default_executor').$type<StoredProjectExecutor>().notNull().default('claude'),
   // Per-executor declared default Gateway public model ids; an absent key falls back to the executor's own default.
   defaultExecutorModels: text('default_executor_models', { mode: 'json' }).$type<Partial<Record<StoredProjectExecutor, string>>>().notNull().default({}),

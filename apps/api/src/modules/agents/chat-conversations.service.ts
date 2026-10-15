@@ -1,11 +1,19 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { and, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
-import { CHAT_AGENT_ID, type AgentExecutionEventData, type ChatChannelView, type ChatConversationList, type ChatConversationRecords, type ChatConversationSummary, type ChatConversationView, type ChatSubmissionView } from '@worklite/contracts';
-import { agentExecutionEvents, agentExecutions, agentTeamRuns, chatProjectTasks, chatSubmissions, feishuChats, feishuDeliveries, feishuEvents, plugins, workflowRuns, type Database } from '@worklite/db';
+import { CHAT_AGENT_ID, type AgentExecutionEventData, type AgentExecutionView, type ChatChannelView, type ChatConversationList, type ChatConversationRecords, type ChatConversationSummary, type ChatConversationView, type ChatSubmissionView } from '@worklite/contracts';
+import { agentExecutionEvents, agentExecutions, agentTeamRuns, agentToolCalls, agents, chatConfigurations, chatProjectTasks, chatSubmissions, feishuChats, feishuDeliveries, feishuEvents, plugins, workflowRuns, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
+import { createModelGateway } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
+import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { AgentExecutionsService } from './agent-executions.service';
+
+// The default summarize prompt gives a fresh conversation everything a reader who never saw the
+// original transcript needs to continue it; the goal is stated, the shape is the model's choice.
+// A non-empty summarizePrompt from Chat configuration replaces it verbatim — no placeholders.
+const DEFAULT_SUMMARIZE_SYSTEM_PROMPT = '用户会提供一段完整的对话记录。总结这段对话，使一位没有看过它的助手仅凭你的总结就能无缝接续工作：保留关键结论、已做的决定、重要上下文与约束，以及尚未完成的事项。使用与对话相同的语言，只输出总结正文。';
 
 @Injectable()
 export class ChatConversationsService {
@@ -13,6 +21,7 @@ export class ChatConversationsService {
     @Inject(DATABASE) private readonly db: Database,
     private readonly workspaces: WorkspaceService,
     private readonly executions: AgentExecutionsService,
+    private readonly resources: WorkspaceResourcesService,
   ) {}
 
   channels(): ChatChannelView[] {
@@ -144,6 +153,46 @@ export class ChatConversationsService {
       submissions,
       deliveries: deliveries.map(({ id, messageId }) => ({ id, messageId })),
     };
+  }
+
+  // Summarizing compresses the conversation in place: the generated summary becomes the
+  // execution's whole stored model context, and a persisted divider marks the compression
+  // point in the visible history. Earlier display messages stay readable but no longer
+  // reach the model; a later summarize builds on the retained summary after the last divider.
+  async summarize(request: Request, id: string): Promise<AgentExecutionView> {
+    const workspace = await this.workspaces.getWorkspace(request, 'personal');
+    const [execution] = await this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, id), eq(agentExecutions.workspaceId, workspace.id), eq(agentExecutions.agentId, CHAT_AGENT_ID))).limit(1);
+    if (!execution) throw new NotFoundException('Chat conversation not found.');
+    if (execution.status === 'running' || execution.status === 'waiting_for_input') throw new ConflictException('Wait for the current turn to finish before summarizing.');
+    const [unresolvedToolCall] = await this.db.select({ id: agentToolCalls.id }).from(agentToolCalls).where(and(eq(agentToolCalls.executionId, execution.id), eq(agentToolCalls.resultAppended, false))).limit(1);
+    if (unresolvedToolCall) throw new ConflictException('请先重试本轮对话，处理尚未结束的工具调用；外部效果不会自动重跑。');
+    const dividerIndex = execution.displayMessages.reduce((latest, message, index) => message.kind === 'summary_divider' ? index : latest, -1);
+    const transcriptParts: string[] = [];
+    if (dividerIndex >= 0) transcriptParts.push(`Earlier summary:\n${execution.displayMessages[dividerIndex].content}`);
+    for (const message of execution.displayMessages.slice(dividerIndex + 1)) {
+      if (message.kind === 'summary_divider') continue;
+      transcriptParts.push(`${message.role === 'user' ? 'User' : 'Assistant'}:\n${message.content}`);
+    }
+    const transcript = transcriptParts.join('\n\n').trim();
+    if (!transcript) throw new BadRequestException('This conversation has no messages to summarize.');
+    const [agent] = await this.db.select().from(agents).where(and(eq(agents.id, CHAT_AGENT_ID), eq(agents.workspaceId, workspace.id))).limit(1);
+    if (!agent?.providerId || !agent.model) throw new ConflictException('Configure a model provider and model before running this Agent.');
+    const [configuration] = await this.db.select({ summarizePrompt: chatConfigurations.summarizePrompt }).from(chatConfigurations).where(eq(chatConfigurations.workspaceId, workspace.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
+    const runtime = await this.resources.providerRuntime(request, 'personal', agent.providerId, agent.model);
+    const { text } = await createModelGateway().streamText({
+      provider: runtime.provider,
+      model: runtime.model,
+      systemPrompt: configuration?.summarizePrompt.trim() || DEFAULT_SUMMARIZE_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: transcript }],
+    }).result;
+    const summary = text.trim();
+    const divider: StoredAgentDisplayMessage = { id: `msg_${randomUUID()}`, role: 'assistant', content: summary, createdAt: new Date().toISOString(), kind: 'summary_divider' };
+    const modelMessages: StoredAgentModelMessage[] = [{ role: 'user', content: `Summary of the conversation so far, as the starting context for the rest of this conversation:\n\n${summary}` }];
+    const updated = await this.db.update(agentExecutions).set({ modelMessages, displayMessages: [...execution.displayMessages, divider], updatedAt: new Date() })
+      .where(and(eq(agentExecutions.id, execution.id), inArray(agentExecutions.status, ['completed', 'failed', 'cancelled'])));
+    if (updated.changes === 0) throw new ConflictException('This conversation changed while it was being summarized. Try again.');
+    await this.executions.publishSnapshotForExecution(workspace.id, execution.id);
+    return this.executions.get(request, 'personal', CHAT_AGENT_ID, execution.id);
   }
 
   // Execution ids whose conversation owns background work that is still active: a running

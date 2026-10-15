@@ -90,6 +90,11 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-10-15 - Chat /summarize command
+
+- The [Chat](pages/chat/workspace/DESIGN.md) composer `/summarize` command summarizes the current conversation in place (`POST /chat/conversations/:id/summarize`): the server replaces the execution's model context with the generated summary and appends a persisted summary divider to the transcript, so the reader continues in the same conversation without navigation while earlier history stays visible above the divider.
+- The summarize prompt becomes configurable: the settings Dialog's Configuration section gains an optional 总结提示词 textarea (empty restores the built-in default), saved through the existing revision-checked Chat configuration channel; the server uses a configured value verbatim as the summarize system prompt.
+
 ### 2026-10-13 - Team records and parallel Runs
 
 - Team defaults to Records with linked Run progress, retains Configuration, and has no conversation or manual launch entry. Chat Agent dispatches directly to Runs. Records include Runs waiting for a parallel slot; `maxConcurrentRuns` defaults to 3 and controls FIFO queueing.

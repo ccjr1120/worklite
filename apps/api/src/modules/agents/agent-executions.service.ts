@@ -1094,7 +1094,7 @@ export class AgentExecutionsService implements OnModuleInit {
     await this.publishSnapshotForExecution(workspaceId, executionId);
   }
 
-  private async publishSnapshotForExecution(workspaceId: string, executionId: string): Promise<void> {
+  async publishSnapshotForExecution(workspaceId: string, executionId: string): Promise<void> {
     const [execution] = await this.db.select(agentExecutionViewColumns).from(agentExecutions).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.workspaceId, workspaceId))).limit(1);
     if (!execution) return;
     const view = await this.toView(execution);

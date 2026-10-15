@@ -27,7 +27,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CHAT_AGENT_ID } from '@worklite/contracts';
-import { AssistantTurn, buildTimeline, CancelledNote, FailureNote, QuestionNote, QueueRows, TranscriptSkeleton, UserMessage, WorkflowRunRow } from './transcript';
+import { AssistantTurn, buildTimeline, CancelledNote, FailureNote, QuestionNote, QueueRows, SummaryDivider, TranscriptSkeleton, UserMessage, WorkflowRunRow } from './transcript';
 
 const INCOMPLETE_SKILL_REQUEST = 'The model returned an incomplete Skill request. Its JSON ended before the request was complete.';
 const INVALID_SKILL_REQUEST = 'The model returned an invalid Skill request. Its arguments could not be parsed or did not match the required structure.';
@@ -103,6 +103,7 @@ function ChatWorkspace() {
   const [executorModels, setExecutorModels] = useState<Record<ProjectExecutor, string>>({ claude: '', codex: '' });
   const [configSaving, setConfigSaving] = useState(false);
   const [extensionPrompt, setExtensionPrompt] = useState('');
+  const [summarizePrompt, setSummarizePrompt] = useState('');
   const [configError, setConfigError] = useState('');
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [showAllTimeline, setShowAllTimeline] = useState(false);
@@ -130,10 +131,11 @@ function ChatWorkspace() {
     if (!agentQuery.data) return;
     setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
     setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
+    setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
     setExecutorModels({ claude: agentQuery.data.chatConfiguration?.defaultExecutorModels?.claude ?? '', codex: agentQuery.data.chatConfiguration?.defaultExecutorModels?.codex ?? '' });
   }, [agentQuery.data]);
 
-  const saveConfiguration = async (selection: string, prompt = extensionPrompt, models = executorModels) => {
+  const saveConfiguration = async (selection: string, prompt = extensionPrompt, models = executorModels, summarize = summarizePrompt) => {
     if (configSaving) return;
     const separator = selection.indexOf('::');
     setConfigSaving(true);
@@ -142,7 +144,7 @@ function ChatWorkspace() {
       const saved = await api.updateAgent(workspaceSlug, CHAT_AGENT_ID, {
         providerId: separator >= 0 ? selection.slice(0, separator) : null,
         model: separator >= 0 ? selection.slice(separator + 2) : '',
-        extensionPrompt: prompt, expectedConfigurationRevision: agentQuery.data?.chatConfiguration?.revision,
+        extensionPrompt: prompt, summarizePrompt: summarize, expectedConfigurationRevision: agentQuery.data?.chatConfiguration?.revision,
         defaultExecutorModels: { claude: models.claude || null, codex: models.codex || null },
       });
       queryClient.setQueryData(['agent', CHAT_AGENT_ID], saved);
@@ -150,6 +152,7 @@ function ChatWorkspace() {
       setConfigError(apiErrorMessage(cause, t('assistant:configuration.saveFailed')));
       if (agentQuery.data) {
         setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
+        setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
         setExecutorModels({ claude: agentQuery.data.chatConfiguration?.defaultExecutorModels?.claude ?? '', codex: agentQuery.data.chatConfiguration?.defaultExecutorModels?.codex ?? '' });
       }
     } finally { setConfigSaving(false); }
@@ -450,7 +453,7 @@ function ChatWorkspace() {
     if (busy || cancelling || (!trimmedMessage && !selectedWorkflow)) return;
     const generation = mainRequestGenerationRef.current;
     const command = trimmedMessage.toLowerCase();
-    if (command === '/log' || command === '/new' || command === '/resume') {
+    if (command === '/log' || command === '/new' || command === '/resume' || command === '/summarize') {
       runCommand(command);
       return;
     }
@@ -586,7 +589,7 @@ function ChatWorkspace() {
   }
 
   function runCommand(command: SlashCommand) {
-    if (command === '/new' || command === '/resume') pendingDispatch.current = null;
+    if (command === '/new' || command === '/resume' || command === '/summarize') pendingDispatch.current = null;
     setDraft('');
     setSlashDismissed(true);
     if (command === '/log') {
@@ -630,7 +633,36 @@ function ChatWorkspace() {
       selectConversation(null);
       return;
     }
+    if (command === '/summarize') {
+      void summarizeCurrent();
+      return;
+    }
     setSwitcherOpen(true);
+  }
+
+  // Summarizing compresses the current conversation in place: the server replaces the
+  // execution's model context with the summary and appends a persisted divider, and the
+  // returned snapshot refreshes the transcript without leaving the page.
+  async function summarizeCurrent() {
+    if (busy || cancelling) return;
+    if (!visibleExecution) {
+      setError(t('assistant:summarize.empty'));
+      return;
+    }
+    const generation = mainRequestGenerationRef.current;
+    setBusy(true);
+    setError('');
+    try {
+      const next = await api.summarizeChatConversation(visibleExecution.id);
+      if (generation !== mainRequestGenerationRef.current) return;
+      setExecution(next);
+      void queryClient.invalidateQueries({ queryKey: chatConversationsQueryKey });
+    } catch (cause) {
+      if (generation !== mainRequestGenerationRef.current) return;
+      setError(apiErrorMessage(cause, t('assistant:summarize.failed')));
+    } finally {
+      if (generation === mainRequestGenerationRef.current) setBusy(false);
+    }
   }
 
   // Escape dismisses exactly one layer per press, innermost first, so recovering from a
@@ -781,6 +813,7 @@ function ChatWorkspace() {
                   {visibleTimeline.map((entry, index) => {
                     switch (entry.kind) {
                       case 'user': return <UserMessage key={entry.item.id} message={entry.item} />;
+                      case 'summaryDivider': return <SummaryDivider key={entry.item.id} label={t('assistant:summarize.divider')} />;
                       case 'assistant': return <AssistantTurn key={entry.segments[0].item.id} segments={entry.segments} working={showWorkingInLastTurn && index === visibleTimeline.length - 1} markdownEnabled />;
                       case 'task': return <TaskCard key={entry.submission.id} submission={entry.submission} />;
                       case 'workflowRun': return <WorkflowRunRow key={entry.active.run.id} run={entry.active.run} workflow={entry.active.workflow} input={entry.active.input} />;
@@ -831,6 +864,7 @@ function ChatWorkspace() {
                 onSelectionChange={(value) => { setConfigSelection(value); void saveConfiguration(value); }}
                 executorModels={executorModels} onExecutorModelChange={(executor, value) => { const next = { ...executorModels, [executor]: value }; setExecutorModels(next); void saveConfiguration(configSelection, extensionPrompt, next); }}
                 extensionPrompt={extensionPrompt} onPromptChange={setExtensionPrompt} onPromptSave={() => { if (extensionPrompt !== (agentQuery.data?.chatConfiguration?.extensionPrompt ?? '')) void saveConfiguration(configSelection); }}
+                summarizePrompt={summarizePrompt} onSummarizePromptChange={setSummarizePrompt} onSummarizePromptSave={() => { if (summarizePrompt !== (agentQuery.data?.chatConfiguration?.summarizePrompt ?? '')) void saveConfiguration(configSelection); }}
                 saving={configSaving} error={configError} loading={agentQuery.isLoading || providersQuery.isLoading}
                 loadFailed={agentQuery.isError || providersQuery.isError}
                 onReload={() => { void agentQuery.refetch(); void providersQuery.refetch(); }} />

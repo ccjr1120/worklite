@@ -187,6 +187,8 @@ export type ChatConversationRecords = {
   deliveries: Array<{ id: string; messageId: string | null }>;
 };
 
+export type SummarizeChatConversationResponse = AgentExecutionView;
+
 export type ChatMemoryView = {
   id: string;
   content: string;
@@ -214,7 +216,7 @@ export type PluginTestResult = {
 };
 
 export type AgentView = {
-  chatConfiguration?: { revision: number; extensionPrompt: string; defaultExecutor: ProjectExecutor; defaultExecutorModels: Partial<Record<ProjectExecutor, string>>; projectTaskMcpServerIds: string[] };
+  chatConfiguration?: { revision: number; extensionPrompt: string; summarizePrompt: string; defaultExecutor: ProjectExecutor; defaultExecutorModels: Partial<Record<ProjectExecutor, string>>; projectTaskMcpServerIds: string[] };
   id: string;
   workspaceSlug: string;
   kind: 'system' | 'custom';
@@ -280,6 +282,9 @@ export type AgentExecutionMessage = {
   role: 'user' | 'assistant';
   content: string;
   createdAt: string;
+  // A summary divider marks where a /summarize compressed the model context; it is a
+  // transcript marker persisted among the display messages, not a spoken message.
+  kind?: 'summary_divider';
 };
 
 export type AgentPlanStep = {
@@ -427,6 +432,8 @@ export type CreateAgentVersionRequest = Record<string, never>;
 export type UpdateAgentRequest = Partial<CreateAgentRequest> & {
   providerId?: string | null;
   extensionPrompt?: string;
+  // Custom prompt for /summarize; an omitted key keeps it, an empty string restores the built-in default.
+  summarizePrompt?: string;
   defaultExecutor?: ProjectExecutor;
   // Declared default Gateway public model per executor: a string sets it, null clears it, an omitted key keeps it.
   defaultExecutorModels?: Partial<Record<ProjectExecutor, string | null>>;

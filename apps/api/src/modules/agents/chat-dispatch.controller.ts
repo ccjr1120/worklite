@@ -60,6 +60,9 @@ export class ChatDispatchController {
   @Get('conversations/:id/records')
   records(@Req() request: Request, @Param('id') id: string) { return this.conversations.records(request, id); }
 
+  @Post('conversations/:id/summarize')
+  summarize(@Req() request: Request, @Param('id') id: string) { return this.conversations.summarize(request, id); }
+
   @Post('dispatch')
   dispatch(@Req() request: Request, @Body() input: DispatchChatRequest) {
     return this.dispatches.dispatch(request, input);

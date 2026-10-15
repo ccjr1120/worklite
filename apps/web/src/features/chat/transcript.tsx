@@ -80,6 +80,7 @@ type ActiveWorkflowRun = { workflow: WorkflowView; run: RunView; input: string }
 type TimelineEntry =
   | { kind: 'user'; item: TranscriptMessage }
   | { kind: 'assistant'; segments: TurnSegment[] }
+  | { kind: 'summaryDivider'; item: TranscriptMessage }
   | { kind: 'task'; submission: ChatSubmissionView }
   | { kind: 'workflowRun'; active: ActiveWorkflowRun }
   | { kind: 'receipt'; receipt: PendingReceipt }
@@ -104,7 +105,11 @@ function buildTimeline(sources: {
   const timed: TimedEntry[] = [];
   const push = (at: string, entry: TimedEntry['entry']) => timed.push({ at, order: timed.length, entry });
   const execution = sources.execution;
-  for (const item of execution?.messages ?? []) push(item.createdAt, { kind: 'segment', segment: { kind: 'message', item } });
+  for (const item of execution?.messages ?? []) {
+    // A summary divider is a marker between turns, never a spoken message in a turn.
+    if (item.kind === 'summary_divider') { push(item.createdAt, { kind: 'summaryDivider', item }); continue; }
+    push(item.createdAt, { kind: 'segment', segment: { kind: 'message', item } });
+  }
   for (const item of execution?.toolCalls ?? []) {
     if (!item.question) { push(item.createdAt, { kind: 'segment', segment: { kind: 'tool', item } }); continue; }
     // An active question is represented only by the pending question note. A settled one stays
@@ -249,6 +254,18 @@ function CancelledNote() {
     </p>
   );
 }
+
+// A summarize divider separates the compressed history from the continuing conversation.
+// It is a persisted state marker, not a message, so it renders without an identity mark.
+const SummaryDivider = memo(function SummaryDivider({ label }: { label: string }) {
+  return (
+    <div className="wl-fade flex items-center gap-3 py-3" role="separator" aria-label={label}>
+      <div className="h-px flex-1 bg-border" aria-hidden="true" />
+      <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
+      <div className="h-px flex-1 bg-border" aria-hidden="true" />
+    </div>
+  );
+});
 
 function FailureNote({ execution, message, onRetry, retryDisabled, locale }: { execution: AgentExecutionView | null; message: string; onRetry: () => void; retryDisabled: boolean; locale: AppLocale }) {
   const { t } = useTranslation('assistant');
@@ -741,5 +758,5 @@ function StandardToolCallPanel({ call }: { call: AgentToolCallView }) {
   );
 }
 
-export { AssistantTurn, buildTimeline, CancelledNote, codexFirstLine, FailureNote, QuestionNote, QueueRows, TranscriptSkeleton, UserMessage, WorkflowRunRow };
+export { AssistantTurn, buildTimeline, CancelledNote, codexFirstLine, FailureNote, QuestionNote, QueueRows, SummaryDivider, TranscriptSkeleton, UserMessage, WorkflowRunRow };
 export type { ActiveWorkflowRun, TimelineEntry };

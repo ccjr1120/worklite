@@ -1,4 +1,4 @@
-import { ArrowUp, Download, History, LoaderCircle, Play, Plus, Square, X } from 'lucide-react';
+import { ArrowUp, Download, History, LoaderCircle, Play, Plus, Sparkles, Square, X } from 'lucide-react';
 import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { WorkflowView } from '@worklite/contracts';
@@ -10,12 +10,13 @@ import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
-type SlashCommand = '/log' | '/new' | '/resume';
+type SlashCommand = '/log' | '/new' | '/resume' | '/summarize';
 
-const SLASH_COMMANDS: Array<{ value: SlashCommand; icon: typeof Download; descriptionKey: 'commands.logDescription' | 'commands.newDescription' | 'commands.resumeDescription' }> = [
+const SLASH_COMMANDS: Array<{ value: SlashCommand; icon: typeof Download; descriptionKey: 'commands.logDescription' | 'commands.newDescription' | 'commands.resumeDescription' | 'commands.summarizeDescription' }> = [
   { value: '/log', icon: Download, descriptionKey: 'commands.logDescription' },
   { value: '/new', icon: Plus, descriptionKey: 'commands.newDescription' },
   { value: '/resume', icon: History, descriptionKey: 'commands.resumeDescription' },
+  { value: '/summarize', icon: Sparkles, descriptionKey: 'commands.summarizeDescription' },
 ];
 
 type ComposerProps = {
@@ -26,7 +27,7 @@ type ComposerProps = {
   onFocus: () => void;
   selectedWorkflow: WorkflowView | null;
   onRemoveWorkflow: () => void;
-  commandMatches: Array<{ value: SlashCommand; icon: typeof Download; descriptionKey: 'commands.logDescription' | 'commands.newDescription' | 'commands.resumeDescription' }>;
+  commandMatches: Array<{ value: SlashCommand; icon: typeof Download; descriptionKey: 'commands.logDescription' | 'commands.newDescription' | 'commands.resumeDescription' | 'commands.summarizeDescription' }>;
   commandMenuOpen: boolean;
   onRunCommand: (command: SlashCommand) => void;
   mentionMatches: WorkflowView[];

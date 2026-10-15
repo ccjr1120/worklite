@@ -24,7 +24,13 @@
     "empty": "没有匹配的命令。",
     "logDescription": "仅将当前对话下载为 Markdown。",
     "newDescription": "新建对话，保留当前记录。",
-    "resumeDescription": "切换到服务端保存的会话。"
+    "resumeDescription": "切换到服务端保存的会话。",
+    "summarizeDescription": "总结当前对话并压缩上下文，之后在此继续。"
+  },
+  "summarize": {
+    "divider": "以上对话已总结，后续将基于总结继续",
+    "empty": "当前没有可总结的对话。",
+    "failed": "无法总结当前对话，请稍后重试。"
   },
   "speaker": {
     "you": "你",
@@ -163,6 +169,8 @@
     "saving": "保存中...",
     "prompt": "补充提示词",
     "nextTurn": "离开输入框后保存，从下一轮对话生效。",
+    "summarizePrompt": "总结提示词",
+    "summarizePromptHint": "留空使用默认提示词，离开输入框后保存，从下一次 /summarize 生效。",
     "saveFailed": "配置未保存，请重试。",
     "loadFailed": "无法加载配置。"
   },

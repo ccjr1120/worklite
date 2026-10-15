@@ -56,7 +56,7 @@ export class AgentsService {
     const view = this.toView(row.agent, workspaceSlug, row.agent.providerId ? gatewayNames.get(row.agent.providerId) ?? null : null, assignments, latest);
     if (agentId === CHAT_AGENT_ID) {
       const [configuration] = await this.db.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
-      if (configuration) view.chatConfiguration = { revision: configuration.revision, extensionPrompt: configuration.extensionPrompt, defaultExecutor: configuration.defaultExecutor, defaultExecutorModels: configuration.defaultExecutorModels, projectTaskMcpServerIds: configuration.projectTaskMcpServerIds };
+      if (configuration) view.chatConfiguration = { revision: configuration.revision, extensionPrompt: configuration.extensionPrompt, summarizePrompt: configuration.summarizePrompt, defaultExecutor: configuration.defaultExecutor, defaultExecutorModels: configuration.defaultExecutorModels, projectTaskMcpServerIds: configuration.projectTaskMcpServerIds };
     }
     return view;
   }
@@ -137,7 +137,7 @@ export class AgentsService {
 
       const isChat = existing.id === CHAT_AGENT_ID;
       // Chat configuration has no Skill/MCP selection; its legacy assignment rows are retained but never rewritten.
-      const fields = ['providerId', 'model', ...(isChat ? ['extensionPrompt', 'defaultExecutor', 'defaultExecutorModels', 'projectTaskMcpServerIds', 'expectedConfigurationRevision'] : ['mcpServerIds'])];
+      const fields = ['providerId', 'model', ...(isChat ? ['extensionPrompt', 'summarizePrompt', 'defaultExecutor', 'defaultExecutorModels', 'projectTaskMcpServerIds', 'expectedConfigurationRevision'] : ['mcpServerIds'])];
       if (isChat && ('skillIds' in input || 'mcpServerIds' in input)) throw new BadRequestException('Chat configuration no longer accepts Skill or MCP server selections.');
       if (Object.keys(input).some((key) => !fields.includes(key))) throw new BadRequestException('Unsupported built-in Agent configuration field.');
       const nextProviderId = input.providerId === undefined ? existing.providerId : input.providerId;
@@ -146,6 +146,7 @@ export class AgentsService {
       if (provider && requestedModel && !provider.models.includes(requestedModel)) throw new BadRequestException('The selected model is not configured for this provider.');
       const model = provider ? requestedModel || provider.models[0] || '' : '';
       if (input.extensionPrompt !== undefined && typeof input.extensionPrompt !== 'string') throw new BadRequestException('An extension prompt must be text.');
+      if (input.summarizePrompt !== undefined && typeof input.summarizePrompt !== 'string') throw new BadRequestException('A summarize prompt must be text.');
       if (input.defaultExecutor !== undefined && input.defaultExecutor !== 'claude' && input.defaultExecutor !== 'codex') throw new BadRequestException('The default executor must be claude or codex.');
       // Declared per-executor default models merge into the stored declarations; every declared model must
       // speak the protocol its executor supports, including declarations kept from the previous revision.
@@ -177,6 +178,7 @@ export class AgentsService {
         if (isChat) transaction.insert(chatConfigurations).values({
           workspaceId: team.id, revision: (previous?.revision ?? 0) + 1,
           extensionPrompt: input.extensionPrompt === undefined ? previous?.extensionPrompt ?? '' : input.extensionPrompt,
+          summarizePrompt: input.summarizePrompt === undefined ? previous?.summarizePrompt ?? '' : input.summarizePrompt,
           defaultExecutor: input.defaultExecutor ?? previous?.defaultExecutor ?? 'claude',
           defaultExecutorModels: executorModelsPatch === undefined ? previous?.defaultExecutorModels ?? {} : mergeExecutorModels(previous?.defaultExecutorModels, executorModelsPatch),
           projectTaskMcpServerIds: projectTaskMcpServerIds ?? previous?.projectTaskMcpServerIds ?? [],
