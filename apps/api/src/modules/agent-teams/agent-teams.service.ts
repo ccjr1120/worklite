@@ -298,6 +298,7 @@ function toTeamView(row: AgentTeam): AgentTeamView {
     description: row.description,
     processId: row.processId,
     processVersion: row.processVersion,
+    maxConcurrentRuns: row.maxConcurrentRuns,
     // Stored roles predating orchestration v3 may still carry the removed
     // developerInstances/developerConcurrency fields; reads drop them and the
     // next save persists the clean shape.

@@ -93,7 +93,6 @@ import {
   type AgentTeamGraphV4Delegate,
   type AgentTeamLaneWorktree,
   type AgentTeamTaskRequestV4,
-  type AgentTeamWorktreeSetupState,
   type AgentTeamWorktreeTaskResult,
 } from './agent-team-graph-v4';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
@@ -134,6 +133,7 @@ type RawTaskOutput = {
   changedFiles?: unknown;
   completedAssignedWork?: unknown;
   criterionAssessments?: unknown;
+  projectGitDecisions?: unknown;
   repairRequest?: unknown;
   repairRequests?: unknown;
   developmentAssignments?: unknown;
@@ -198,7 +198,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const mode = request?.mode;
     if (!intent) throw new BadRequestException('A TeamRun intent is required.');
     if (!projectDirectory || !isAbsolute(projectDirectory)) {
-      throw new BadRequestException('An absolute project directory is required.');
+      throw new BadRequestException('An absolute workspace directory is required.');
     }
     if (mode !== 'plan_only' && mode !== 'validate_existing' && mode !== 'implement_and_validate') {
       throw new BadRequestException('A supported TeamRun mode is required.');
@@ -440,7 +440,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     let resumeInterruptId: string | undefined;
     // Lane-based graphs (v2, v4) resume the exact interrupted input node by interrupt id so
     // one lane's answer never lands in another lane's pending question.
-    if (orchestrationVersion === 2 || orchestrationVersion === 4) {
+    if (orchestrationVersion === 2 || orchestrationVersion === 4 || orchestrationVersion === 5) {
       const graph = this.createGraph(run, version);
       const snapshot = await graph.getState({ configurable: { thread_id: run.langGraphThreadId } });
       resumeInterruptId = snapshot.tasks
@@ -497,7 +497,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
     const resume = pendingInputAnswer(request.answer, answered);
     this.scheduleExecution(runId, new Command({
-      resume: orchestrationVersion === 2 || orchestrationVersion === 4 ? { [resumeInterruptId as string]: resume } : resume,
+      resume: orchestrationVersion === 2 || orchestrationVersion === 4 || orchestrationVersion === 5 ? { [resumeInterruptId as string]: resume } : resume,
     }));
     return this.getRunView(runId);
   }
@@ -815,12 +815,11 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       processVersion: AGENT_TEAM_PROCESS_VERSION,
       processFiles,
       developerExecution,
-      // v3 lanes share the role's single captured launch; the Planner decides
-      // how many of the fixed pool lanes actually execute per Run.
+      // v5 reuses the fixed four-lane Developer pool. The Planner chooses how many
+      // assignments execute; each lane shares the role's captured launch.
       developerExecutions: { [RESERVED_DEVELOPER_ID]: developerExecution },
-      // v4 adds the Worktree Manager (setup/teardown around the developer fan-out).
-      // The snapshot union widens to 4 with the packages lane; bridged until then.
-      orchestrationVersion: 4 as unknown as StoredAgentTeamVersionSnapshot['orchestrationVersion'],
+      // v5 adds the advisory Worktree Manager strategy stage around the developer fan-out.
+      orchestrationVersion: 5,
       roles: await Promise.all(configuredRoles.map(async (role) => {
         const entryPointContent = await Promise.all(role.entryPoints.map((path) => readBmadTeaProcessFile(path)));
         const processReferences = processReferencePaths(role.role, manifest);
@@ -932,7 +931,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const interrupted = snapshot.tasks.some((task) => task.interrupts.length > 0);
     if (interrupted) {
       const orchestrationVersion: number = version.snapshot.orchestrationVersion ?? 1;
-      if (orchestrationVersion === 2 || orchestrationVersion === 4) {
+      if (orchestrationVersion === 2 || orchestrationVersion === 4 || orchestrationVersion === 5) {
         const resume: Record<string, AgentTeamPendingInputAnswer> = {};
         let unanswered = false;
         for (const interrupt of snapshot.tasks.flatMap((task) => task.interrupts)) {
@@ -1093,8 +1092,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   private createGraph(run: AgentTeamRun, version: AgentTeamVersion) {
     const snapshot = version.snapshot;
     const orchestrationVersion: number = snapshot.orchestrationVersion ?? 1;
-    // v4 runs the local Worktree Manager topology over the fixed lane pool.
-    if (orchestrationVersion === 4) {
+    // v4 and v5 run the app-local Worktree Manager topology over the fixed lane pool.
+    if (orchestrationVersion === 4 || orchestrationVersion === 5) {
       const delegate: AgentTeamGraphV4Delegate = {
         executeTask: async (request) => this.executeTask(run.workspaceId, version, request),
       };
@@ -1107,7 +1106,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       executeTask: async (request) => this.executeTask(run.workspaceId, version, request),
     }, this.checkpointer, {
       maxRepairRounds: snapshot.recipeDefaults.maxRepairRounds,
-      // v4 returned above; the team-runtime union covers the remaining versions.
+      // v4/v5 use the app-local graph above; v5 sets up an advisory strategy document
+      // and leaves the worktree state empty so Developer lanes run in the workspace.
       orchestrationVersion: orchestrationVersion as 1 | 2 | 3,
       developerIds: orchestrationVersion === 3 ? DEVELOPER_LANE_IDS : versionDeveloperIds(snapshot),
       developerConcurrency: orchestrationVersion === 3
@@ -1129,19 +1129,19 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (attempt.status === 'completed' || attempt.status === 'waiting_for_input') {
       return attempt.result as AgentTeamTaskResult;
     }
-    // Non-git projects skip the Worktree Manager entirely; a teardown without a recorded
-    // setup is a no-op. Both produce a completed attempt so the Run evidence shows the skip.
-    if (taskKey === 'worktree_setup' || taskKey === 'worktree_teardown') {
+    const orchestrationVersion: number = version.snapshot.orchestrationVersion ?? 1;
+    // v5 uses the Worktree Manager as an advisory project-strategy planner. It does not
+    // inspect one assumed Git root or invoke the v4 worktree lifecycle.
+    if (orchestrationVersion === 4 && (taskKey === 'worktree_setup' || taskKey === 'worktree_teardown')) {
       const skipped = await this.shortCircuitWorktreeManager(run, request, workspaceId, attempt.id);
       if (skipped) return skipped;
     }
     const controller = this.abortControllers.get(request.runId);
     const signal = controller?.signal ?? new AbortController().signal;
     const commandIds = new Set<string>();
-    const orchestrationVersion: number = version.snapshot.orchestrationVersion ?? 1;
-    // Each developer lane works in its own git worktree (when the project is a git repository)
-    // and merges back on completion through the shared serialized queue. v4 lanes receive
-    // their worktree from the Worktree Manager setup instead of cutting their own.
+    // v1-v3 lanes use the historical runtime-managed worktree and merge paths. v4 lanes
+    // receive their worktree from the Worktree Manager setup; v5 delegates Git choices to
+    // the Developer executor and starts it in the supplied workspace root.
     let laneWorktree: PreparedTaskWorktree | null = null;
     let laneMergeTarget: { projectDirectory: string; baseBranch: string } | null = null;
     const requestLane: AgentTeamLaneWorktree | undefined = (request as AgentTeamTaskRequestV4).laneWorktree;
@@ -1149,13 +1149,13 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const produceOutput = async (correction?: string): Promise<string> => {
       if (taskRole === 'developer') {
         const developerId = request.developerId ?? RESERVED_DEVELOPER_ID;
-        // v3/v4 lanes share the role's single captured launch; only v2 snapshots
+        // v3/v4/v5 lanes share the role's single captured launch; only v2 snapshots
         // carry per-instance launches and configurations.
         const execution = version.snapshot.developerExecutions?.[developerId]
-          ?? (orchestrationVersion === 3 || orchestrationVersion === 4 ? version.snapshot.developerExecutions?.[RESERVED_DEVELOPER_ID] : undefined)
+          ?? (orchestrationVersion === 3 || orchestrationVersion === 4 || orchestrationVersion === 5 ? version.snapshot.developerExecutions?.[RESERVED_DEVELOPER_ID] : undefined)
           ?? (developerId === RESERVED_DEVELOPER_ID ? version.snapshot.developerExecution : undefined);
         if (!execution || !('executor' in execution)) throw new Error('This Team version has no captured developer executor. Start a new Team Run.');
-        const sharedLaunch = orchestrationVersion === 3 || orchestrationVersion === 4;
+        const sharedLaunch = orchestrationVersion === 3 || orchestrationVersion === 4 || orchestrationVersion === 5;
         const instance = !sharedLaunch && developerId !== RESERVED_DEVELOPER_ID
           ? role.developerInstances?.find((candidate) => candidate.developerId === developerId)
           : undefined;
@@ -1165,7 +1165,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         const developerRole = instance ?? role;
         const model = developerRole.publicModelId.trim() || (execution.executor === 'codex' ? execution.model : null);
         if (model) await this.executors.requireModel(workspaceId, execution.executor, model);
-        if (!laneWorktree) {
+        if (!laneWorktree && orchestrationVersion !== 5) {
           if (requestLane) {
             laneWorktree = {
               worktreePath: requestLane.worktreePath,
@@ -1179,7 +1179,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           }
         }
         const laneNote = laneWorktree ? `You work in your lane's dedicated git worktree (${laneWorktree.worktreePath}) on branch ${laneWorktree.worktreeBranch}; stay inside it and commit your finished changes on that branch before returning.` : null;
-        const promptAddition = [developerPromptAddition(request), laneNote].filter(Boolean).join('\n\n') || undefined;
+        const promptAddition = [developerPromptAddition(request), rolePromptAddition('developer', version.snapshot, request), laneNote].filter(Boolean).join('\n\n') || undefined;
         const references = await Promise.all((developerRole.processReferences ?? []).map(async (path) => ({ path, content: await this.readCapturedProcessFile(version, path) })));
         return this.executors.execute({
           owner: 'team',
@@ -1288,7 +1288,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     for (let parseAttempt = 0; ; parseAttempt += 1) {
       try {
         const output = await produceOutput(correction);
-        return await this.finishExecutorOutput(request, workspaceId, attempt.id, taskKey, output, commandIds, laneWorktree, laneMergeTarget);
+        return await this.finishExecutorOutput(request, workspaceId, attempt.id, taskKey, output, commandIds, laneWorktree, laneMergeTarget, orchestrationVersion);
       } catch (error) {
         if (!(error instanceof TaskOutputValidationError) || parseAttempt >= 1) throw error;
         correction = [
@@ -1309,6 +1309,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     commandIds: ReadonlySet<string>,
     laneWorktree?: PreparedTaskWorktree | null,
     laneMergeTarget?: { projectDirectory: string; baseBranch: string } | null,
+    orchestrationVersion = 1,
   ): Promise<AgentTeamTaskResult> {
     const parsed = parseTaskOutput(output, taskKey);
     if (parsed.status === 'waiting_for_input') {
@@ -1323,7 +1324,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     // The Worktree Manager's validated output is executed by the runtime before the result
     // commits: shape and convention errors throw TaskOutputValidationError (earning the
     // single corrective re-invocation), git failures fail the attempt outright.
-    const executed = await this.applyWorktreeManagerOutput(request, attemptId, output, result);
+    const executed = orchestrationVersion === 5
+      ? { ...result, worktreeSetup: undefined, worktreeTeardown: undefined }
+      : await this.applyWorktreeManagerOutput(request, attemptId, output, result);
     return this.finishCompletedAttempt(request, workspaceId, attemptId, executed);
   }
 
@@ -1483,11 +1486,11 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       updatedAt: new Date(),
     } as Partial<typeof agentTeamRuns.$inferInsert>).where(eq(agentTeamRuns.id, run.id)).run();
 
-    const worktreeSetup: AgentTeamWorktreeSetupState = {
+    const worktreeSetup: WorktreeSetupPlan = {
       baseWorktreePath: expected.baseWorktreePath,
       runBranch: expected.runBranch,
       originalBranch: repository.branch,
-      lanes: expected.lanes,
+      lanes: expected.lanes.map((lane) => ({ ...lane })),
     };
     return { ...result, worktreeSetup };
   }
@@ -2442,7 +2445,16 @@ function rolePromptAddition(
   request?: AgentTeamTaskRequest,
 ): string | undefined {
   const orchestrationVersion: number = snapshot.orchestrationVersion ?? 1;
-  if (orchestrationVersion === 3 || orchestrationVersion === 4) {
+  if (orchestrationVersion === 3 || orchestrationVersion === 4 || orchestrationVersion === 5) {
+    if (orchestrationVersion === 5 && role === 'planner') {
+      return [
+        `This Team Run may use up to ${DEVELOPER_LANE_IDS.length} Developers working in parallel; decide how many the task actually needs.`,
+        'The supplied projectDirectory is a workspace root. It may contain several repositories, project directories, or none at the root; identify the relevant project roots before planning and do not assume the workspace root is one Git repository.',
+        'For every development assignment, name the relevant project directory in its title or scopeSummary and use ownedPaths relative to the supplied workspace root, including the project path prefix. Keep ownedPaths non-overlapping across all assignments.',
+        'The Worktree Manager will provide an advisory per-project Git strategy. Do not require a branch or worktree for every project.',
+        'To split the implementation, add "developmentAssignments":[{"title":"...","scopeSummary":"...","ownedPaths":["path/or/prefix"]}] to the completed response. Assignments carry no developerId and map to Developers in order; omit the field when a single Developer suffices.',
+      ].join('\n');
+    }
     if (role === 'planner') {
       return [
         `This Team Run may use up to ${DEVELOPER_LANE_IDS.length} Developers working in parallel; decide how many the task actually needs.`,
@@ -2454,6 +2466,16 @@ function rolePromptAddition(
         'Development may have been executed by multiple Developers in parallel; each development result names its Developer.',
         'To request repairs, add "repairRequests":[{"developerId":"...","instruction":"specific repair instruction"}] targeting only the Developers that must change their own work. Do not use the legacy repairRequest field.',
       ].join('\n');
+    }
+    if (orchestrationVersion === 5 && role === 'developer') {
+      return [
+        'The supplied projectDirectory is a workspace root and may contain multiple independent repositories. Inspect each assigned project and its local instructions before acting.',
+        'Choose per project whether to stay on its current branch, switch to or create a feature branch, or use a worktree. The Worktree Manager document is advice; adjust it when the actual repository state or assigned work calls for a different choice.',
+        'A worktree is scoped to one project, never the whole multi-project workspace. WorkLite does not create or merge worktrees or branches for this Run. Use your native tools for any Git operations you decide to perform. If you select a worktree, decide whether and when to integrate its changes so later Team roles can inspect and test them. Include projectGitDecisions in the completed response, with one entry per affected project: {"projectPath":"workspace-relative/path","strategy":"no_git|current_branch|feature_branch|worktree","branch":"optional","worktreePath":"optional"}. Report the selected strategy, branch or worktree path, and outcome.',
+      ].join('\n');
+    }
+    if (orchestrationVersion === 5 && role === 'worktree-manager' && request?.taskDefinition.taskKey === 'worktree_setup') {
+      return projectStrategyPlannerPromptAddition(request);
     }
     if (orchestrationVersion === 4 && role === 'worktree-manager' && request) {
       return worktreeManagerPromptAddition(request);
@@ -2476,6 +2498,15 @@ function rolePromptAddition(
     ].join('\n');
   }
   return undefined;
+}
+
+function projectStrategyPlannerPromptAddition(request: AgentTeamTaskRequest): string {
+  return [
+    'For orchestration v5, this is an advisory strategy-planning task. It supersedes any older task-goal or role instruction that describes WorkLite-created worktrees or teardown. The supplied projectDirectory is a workspace root that may contain multiple projects and repositories; inspect the workspace and the Planner assignments without assuming the root itself is a Git repository.',
+    'Return a document with key "project_workspace_strategy" and title "Project workspace strategy". In its content, list each affected project directory and recommend one of: work in the current branch, switch to or create a feature branch, or use a worktree for that project. Explain the choice briefly in light of the assigned work and parallel Developers.',
+    'A worktree recommendation applies to its project only, never to the entire workspace. No Git action is required or authorized by this recommendation. Developers inspect actual repository state and may choose another strategy. WorkLite will not create, merge, or clean up branches or worktrees for this Run.',
+    'Do not return worktreeSetup or worktreeTeardown fields. Complete with the strategy document in documents; report uncertainty as an unresolved issue rather than inventing repository state.',
+  ].join('\n');
 }
 
 // The Worktree Manager plans with exact values; the runtime validates them against this same
@@ -2651,6 +2682,7 @@ function parseTaskOutputUnsafe(output: string, taskKey: string): ParsedTaskResul
     throw new Error('The Agent Team role did not report assigned-work completion.');
   }
   const developmentAssignments = parseDevelopmentAssignments(value.developmentAssignments);
+  const projectGitDecisions = parseProjectGitDecisions(value.projectGitDecisions);
   const repairRequests = parseRepairRequests(value.repairRequests);
   const worktreeSetup = parseWorktreeSetupPlan(value.worktreeSetup);
   const worktreeTeardown = parseWorktreeTeardownDecision(value.worktreeTeardown);
@@ -2662,12 +2694,40 @@ function parseTaskOutputUnsafe(output: string, taskKey: string): ParsedTaskResul
     changedFiles: parseStrings(value.changedFiles, 'changed file'),
     completedAssignedWork: value.completedAssignedWork,
     criterionAssessments: parseAssessments(value.criterionAssessments),
+    ...(projectGitDecisions ? { projectGitDecisions } : {}),
     repairRequest: parseRepairRequest(value.repairRequest),
     ...(developmentAssignments ? { developmentAssignments } : {}),
     ...(repairRequests ? { repairRequests } : {}),
     ...(worktreeSetup ? { worktreeSetup } : {}),
     ...(worktreeTeardown ? { worktreeTeardown } : {}),
   };
+}
+
+function parseProjectGitDecisions(
+  value: unknown,
+): Extract<AgentTeamTaskResult, { status: 'completed' }>['projectGitDecisions'] {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new Error('projectGitDecisions must be an array.');
+  return value.map((item) => {
+    const decision = item as { projectPath?: unknown; strategy?: unknown; branch?: unknown; worktreePath?: unknown };
+    if (typeof decision?.projectPath !== 'string' || !decision.projectPath.trim()) {
+      throw new Error('Each projectGitDecisions entry needs a projectPath.');
+    }
+    if (!['no_git', 'current_branch', 'feature_branch', 'worktree'].includes(String(decision.strategy))) {
+      throw new Error('Each projectGitDecisions entry needs a supported strategy.');
+    }
+    for (const field of ['branch', 'worktreePath'] as const) {
+      if (decision[field] !== undefined && typeof decision[field] !== 'string') {
+        throw new Error(`projectGitDecisions ${field} must be text when supplied.`);
+      }
+    }
+    return {
+      projectPath: decision.projectPath.trim(),
+      strategy: decision.strategy as 'no_git' | 'current_branch' | 'feature_branch' | 'worktree',
+      ...(typeof decision.branch === 'string' && decision.branch.trim() ? { branch: decision.branch.trim() } : {}),
+      ...(typeof decision.worktreePath === 'string' && decision.worktreePath.trim() ? { worktreePath: decision.worktreePath.trim() } : {}),
+    };
+  });
 }
 
 function parseWorktreeSetupPlan(value: unknown): WorktreeSetupPlan | undefined {

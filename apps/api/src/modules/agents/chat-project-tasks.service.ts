@@ -10,7 +10,7 @@ import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { ClaudeCodeError } from './claude-code.service';
 import { CodexAppServerError } from './codex-app-server.service';
 import { ProjectExecutorService } from './project-executor.service';
-import { enqueueTaskMerge, inspectGitRepository, mergeTaskWorktree, prepareTaskWorktree, reconcileInterruptedMerge, removeTaskWorktree } from './git-worktree';
+import { enqueueTaskMerge, mergeTaskWorktree, reconcileInterruptedMerge } from './git-worktree';
 
 type Task = typeof chatProjectTasks.$inferSelect;
 const RECENT_ACTIVITY_LIMIT = 20;
@@ -36,8 +36,8 @@ function deriveTaskStage(task: Task): ChatProjectTaskView['stage'] {
 
 export const CHAT_PROJECT_TASK_TOOL = {
   name: 'project_task',
-  description: 'Execute coding, repository investigation and local command requests by delegating the complete user task, relevant existing review findings and approved scope to a project executor, Codex or Claude Code, independently of Agent Team. This is the default for project work; do not first search files or run commands in Chat. The task runs in the background: the turn continues immediately after dispatch, progress stays visible on the task card, and completion or a task question is reported to the user automatically without polling. Tasks in the same project directory run in parallel: a task inside a git repository works in its own captured worktree and merges back automatically on success, while a directory outside git keeps one active task at a time. Set readOnly true when the goal is purely investigative — reading, searching, explaining or troubleshooting without any file changes; a read-only task skips the worktree and runs directly in the project directory with no merge. Omit readOnly (or set false) whenever the task may create, modify or delete files. Inspect previous task effects before taking over. Set executor only when the user names Codex or Claude Code; otherwise the Chat configuration\'s default executor applies. Omit model to use the Chat configuration\'s declared default model for that executor, falling back to the executor\'s own configured default; a requested model must be a Gateway public id on a protocol that executor supports. The executor works natively in the task working directory with its own tools, without WorkLite proposal confirmation or individual command grants.',
-  inputSchema: { type: 'object', additionalProperties: false, required: ['goal', 'projectDirectory'], properties: { goal: { type: 'string' }, projectDirectory: { type: 'string' }, readOnly: { type: 'boolean', description: 'True only for a purely investigative task that reads, searches, explains or troubleshoots without changing any file; it then runs directly in the project directory without a worktree or merge. Omit when the task may change files.' }, executor: { type: 'string', enum: ['claude', 'codex'] }, model: { type: 'string' } } },
+  description: 'Execute coding, repository investigation and local command requests by delegating the complete user task, relevant existing review findings and approved scope to a project executor, Codex or Claude Code, independently of Agent Team. This is the default for project work; do not first search files or run commands in Chat. The absolute projectDirectory may be one repository or a workspace containing multiple projects, and need not itself be a Git repository. The executor inspects relevant projects and decides per project whether to work on the current branch, switch to or create a feature branch, or use a project-specific worktree. WorkLite does not create branches or worktrees, merge branches, or clean up executor-managed Git state for new tasks. If a worktree is chosen, it belongs to one project rather than wrapping the whole workspace. The task runs in the background: the turn continues immediately after dispatch, progress stays visible on the task card, and completion or a task question is reported to the user automatically without polling. Each model response may contain at most one project_task call, optionally alongside update_plan; never batch separate project_task calls. For one goal spanning multiple projects, use one call with their common workspace root. Tasks in the same workspace may run in parallel when dispatched separately; inspect previous task effects and actual workspace state before taking over or overlapping work. Set readOnly true when the goal is purely investigative — reading, searching, explaining or troubleshooting without any file changes; it adds a read-only instruction to the executor. Omit readOnly (or set false) whenever the task may create, modify or delete files. Set executor only when the user names Codex or Claude Code; otherwise the Chat configuration\'s default executor applies. Omit model to use the Chat configuration\'s declared default model for that executor, falling back to the executor\'s own configured default; a requested model must be a Gateway public id on a protocol that executor supports. The executor works natively in the supplied workspace with its own tools, without WorkLite proposal confirmation or individual command grants, and reports the project and Git strategy used.',
+  inputSchema: { type: 'object', additionalProperties: false, required: ['goal', 'projectDirectory'], properties: { goal: { type: 'string' }, projectDirectory: { type: 'string', description: 'Absolute repository or workspace root directory; it may contain multiple projects and need not itself be a Git repository.' }, readOnly: { type: 'boolean', description: 'True only for a purely investigative task that must not change files; it adds a read-only instruction. It does not select a Git strategy.' }, executor: { type: 'string', enum: ['claude', 'codex'] }, model: { type: 'string' } } },
 } as const;
 
 export const CHAT_PROJECT_TASK_ANSWER_TOOL = {
@@ -73,25 +73,12 @@ export class ChatProjectTasksService {
     if (value?.readOnly !== undefined && typeof value.readOnly !== 'boolean') throw new BadRequestException('readOnly must be a boolean.');
     const readOnly = value?.readOnly === true;
     const requestedModel = value?.model === undefined ? null : required(value.model, 'model');
-    if (!isAbsolute(directory)) throw new BadRequestException('A project task requires an absolute project directory.');
+    if (!isAbsolute(directory)) throw new BadRequestException('A project task requires an absolute workspace directory.');
     const projectDirectory = resolve(directory);
     const directoryStat = await stat(projectDirectory).catch((error: NodeJS.ErrnoException) => {
       throw new BadRequestException(`无法访问项目目录 ${projectDirectory}（${error.code ?? '未知文件系统错误'}）。`);
     });
     if (!directoryStat.isDirectory()) throw new BadRequestException(`项目路径不是目录：${projectDirectory}。`);
-    // Git-backed change tasks run in their own worktree, so same-directory tasks proceed in
-    // parallel without a cap. A read-only task skips the worktree and runs directly in the project
-    // directory: it writes nothing, so reading a checkout with another task's in-progress changes
-    // is safe. Non-git directories keep native execution and the one-active-task rule.
-    const repository = await inspectGitRepository(projectDirectory);
-    if (!repository) {
-      const concurrent = this.db.select({ id: chatProjectTasks.id }).from(chatProjectTasks)
-        .where(and(eq(chatProjectTasks.workspaceId, workspaceId), eq(chatProjectTasks.projectDirectory, projectDirectory), inArray(chatProjectTasks.status, ['running', 'waiting_for_input']))).get();
-      if (concurrent) throw new ConflictException('该目录不是 Git 仓库，无法创建任务隔离 worktree；同一目录同一时间只允许一个执行中的任务，请等待其结束或取消后再发起。');
-    } else if (!repository.branch && !readOnly) {
-      // A read-only task creates no worktree, so a detached HEAD does not block it.
-      throw new BadRequestException(`项目目录 ${projectDirectory} 处于 detached HEAD，无法创建任务 worktree；请先切换到一个分支。`);
-    }
     if (!execution?.capabilitySnapshot) throw new ConflictException('This Chat turn has no captured capabilities; start a new turn.');
     const executor: StoredProjectExecutor = (value.executor as StoredProjectExecutor | undefined) ?? execution.capabilitySnapshot.defaultExecutor ?? 'claude';
     // Model precedence: task parameter, then the Chat configuration's declared default for this
@@ -109,25 +96,12 @@ export class ChatProjectTasksService {
       try { projectInstructions.push({ path, content: await readFile(join(projectDirectory, path), 'utf8') }); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }
-    // Create the worktree only after every other validation has passed, so a rejected capture
-    // never leaves one behind; a failed insert removes it again below. A read-only git task
-    // captures no worktree and is recorded as skipped_read_only instead.
-    const worktree = repository?.branch && !readOnly ? await prepareTaskWorktree({ ...repository, branch: repository.branch }, callId).catch((error: unknown) => {
-      throw new BadRequestException(`无法为任务创建 worktree：${error instanceof Error ? error.message : String(error)}`);
-    }) : null;
-    try {
-      return this.db.insert(chatProjectTasks).values({
-        id: callId, workspaceId, executionId, goal, projectDirectory, model: model ?? '',
-        snapshot: { launch: capturedLaunch, projectInstructions, capabilities: execution.capabilitySnapshot }, status: 'running',
-        worktreePath: worktree?.worktreePath ?? null, worktreeBranch: worktree?.worktreeBranch ?? null,
-        baseBranch: worktree?.baseBranch ?? null, baseCommit: worktree?.baseCommit ?? null,
-        mergeStatus: worktree ? 'not_attempted' : repository ? 'skipped_read_only' : 'skipped_not_git',
-      }).returning().get();
-    } catch (error) {
-      // A failed capture must not leave a stray worktree behind.
-      if (worktree) await removeTaskWorktree(projectDirectory, worktree.worktreePath, worktree.worktreeBranch).catch(() => undefined);
-      throw error;
-    }
+    return this.db.insert(chatProjectTasks).values({
+      id: callId, workspaceId, executionId, goal, projectDirectory, model: model ?? '',
+      snapshot: { launch: capturedLaunch, projectInstructions, capabilities: execution.capabilitySnapshot, readOnly }, status: 'running',
+      worktreePath: null, worktreeBranch: null, baseBranch: null, baseCommit: null,
+      mergeStatus: 'not_attempted',
+    }).returning().get();
   }
 
   async run(taskId: string, onProgress: () => Promise<void>, onSettled?: (task: Task) => void): Promise<Task> {
@@ -304,12 +278,14 @@ export class ChatProjectTasksService {
       const launch = task.snapshot.launch;
       if (!launch || !('executor' in launch)) throw new BadRequestException('此旧任务未记录执行器；请创建新任务，已有记录仍保留。');
       const capabilities = task.snapshot.capabilities;
-      // Git-backed change tasks execute inside their captured worktree; the original directory
-      // stays on the record for display and merge-back. A read-only task runs directly in the
-      // project directory and must not write to it.
+      // Historical tasks with a captured WorkLite worktree keep their recorded merge path.
+      // New tasks run from the supplied workspace root, and readOnly remains an instruction.
       const workingDirectory = task.worktreePath ?? task.projectDirectory;
-      const readOnlyInstruction = task.mergeStatus === 'skipped_read_only'
+      const readOnlyInstruction = task.snapshot.readOnly === true || task.mergeStatus === 'skipped_read_only'
         ? ' This is a read-only investigation task: answer from reading and searching only, and do not create, modify or delete any file in the project directory or elsewhere.'
+        : '';
+      const legacyWorktreeInstruction = task.worktreePath
+        ? `The task was captured with the historical WorkLite-managed worktree ${task.worktreePath} on branch ${task.worktreeBranch ?? ''}; commit your finished changes there so the recorded legacy merge path can handle them.`
         : '';
       const configuration = this.db.select({ extensionPrompt: chatConfigurations.extensionPrompt, projectTaskMcpServerIds: chatConfigurations.projectTaskMcpServerIds }).from(chatConfigurations)
         .where(and(eq(chatConfigurations.workspaceId, task.workspaceId), eq(chatConfigurations.revision, capabilities.revision))).get();
@@ -325,7 +301,7 @@ export class ChatProjectTasksService {
         skills: [],
         mcpServers: declaredMcpServers,
         systemPrompt: [
-          `Execute this Chat-owned project task independently of Agent Team. Work entirely inside the current working directory, which is the task's dedicated workspace, and never switch to another checkout of the same repository. Follow the captured project instructions in the pinned reference files and discover additional applicable project instructions. Existing project confirmation, verification and service-lifecycle constraints remain authoritative; WorkLite adds no proposal confirmation or command grants. Keep work within the user task. Use supplied review findings and approved scope to check the affected code and make the requested changes without repeating the complete review. Inspect the actual working tree and prior effects before taking over interrupted work. Explain concrete progress as work proceeds. Never perform WorkLite installation, build, upgrade-runner or service replacement; its independent managed runner owns deployment.${task.worktreePath ? ' Commit your finished changes on the current branch before returning; the platform merges that branch back automatically.' : ''}${readOnlyInstruction} Return JSON: {"status":"succeeded","summary":"..."} or {"status":"waiting_for_input","pendingInput":{"question":"..."}}. Ask only for material missing information or authorization; evidence and clarification answers do not authorize unrelated work.`,
+          `Execute this Chat-owned project task independently of Agent Team. The supplied working directory is a workspace root: it may contain multiple projects or repositories and need not itself be a Git repository. Inspect the relevant project directories, their applicable instructions, actual working trees and prior task effects before changing files or taking over interrupted work. Decide independently for each relevant project whether to use its current branch, switch to or create a feature branch, or create a worktree for that project. Do not assume every project needs a worktree, and do not create one around the entire workspace. WorkLite does not create branches or worktrees, merge branches, or clean up Git state for new tasks; you own any Git operations you choose and should report the project paths, strategy, branch or worktree paths, and outcome in your summary. Follow captured workspace-root instructions in the pinned reference files and discover additional applicable project instructions. Existing project confirmation, verification and service-lifecycle constraints remain authoritative; WorkLite adds no proposal confirmation or command grants. Keep work within the user task. Use supplied review findings and approved scope to check affected code without repeating the complete review. Explain concrete progress as work proceeds. Never perform WorkLite installation, build, upgrade-runner or service replacement; its independent managed runner owns deployment.${legacyWorktreeInstruction}${readOnlyInstruction} Return JSON: {"status":"succeeded","summary":"..."} or {"status":"waiting_for_input","pendingInput":{"question":"..."}}. Ask only for material missing information or authorization; evidence and clarification answers do not authorize unrelated work.`,
           'To show an image such as a screenshot in your report, upload the file as the raw request body to attachmentUploadUrl from the input with its image media type, for example `curl -sS --data-binary @shot.png -H \'Content-Type: image/png\' "<attachmentUploadUrl>&fileName=shot.png"`. Only PNG, JPEG, GIF and WebP up to 10 MB are accepted. Put the returned `markdown` value, such as ![shot.png](/api/chat/attachments/att_…), in the summary exactly as returned; never reference local file paths or file:// URLs as images. Uploaded images expire with the request logs.',
           configuration?.extensionPrompt,
         ].filter(Boolean).join('\n\n'),

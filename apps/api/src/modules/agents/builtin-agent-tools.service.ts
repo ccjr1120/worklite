@@ -9,6 +9,7 @@ type StartOptions = { cwd?: string; reserveCommand?: CommandReservation };
 const READ_ONLY_TOOL_NAMES = ['read', 'glob', 'grep', 'process_reference'];
 const ROLE_ALLOWED_TOOL_NAMES: Record<AgentTeamRole, readonly string[]> = {
   planner: READ_ONLY_TOOL_NAMES,
+  'worktree-manager': READ_ONLY_TOOL_NAMES,
   test_designer: READ_ONLY_TOOL_NAMES,
   developer: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference'],
   test_author: ['read', 'write', 'glob', 'grep', 'process_reference'],

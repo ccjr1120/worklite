@@ -65,6 +65,13 @@ export type AgentTeamDocument = {
   upstreamDocumentKeys: string[];
 };
 
+export type AgentTeamProjectGitDecision = {
+  projectPath: string;
+  strategy: 'no_git' | 'current_branch' | 'feature_branch' | 'worktree';
+  branch?: string;
+  worktreePath?: string;
+};
+
 export type AgentTeamInputDocumentVersion = {
   key: string;
   contentFingerprint: string;
@@ -109,6 +116,7 @@ export type AgentTeamTaskResult =
       changedFiles: string[];
       completedAssignedWork: boolean;
       criterionAssessments: AgentTeamCriterionAssessment[];
+      projectGitDecisions?: AgentTeamProjectGitDecision[];
       developmentAssignments?: AgentTeamDevelopmentAssignmentInput[];
       repairRequest?: AgentTeamRepairRequest;
       repairRequests?: AgentTeamTargetedRepairRequest[];

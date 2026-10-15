@@ -330,7 +330,7 @@ export type ChatProjectTaskView = {
   progressText: string;
   operationCount: number; operationStatuses: Record<string, number>;
   operations: Array<{ key: string; toolName: string; status: 'reserved' | 'completed' | 'uncertain' | 'failed'; commandExecutionId: string | null; inputSummary: string | null; failureReason: string | null }>;
-  // Worktree isolation for git-backed change tasks; null/absent for legacy, non-git and read-only tasks.
+  // Historical WorkLite-managed worktree isolation; new project tasks leave these fields empty.
   worktreePath?: string | null; worktreeBranch?: string | null; baseBranch?: string | null; baseCommit?: string | null;
   mergeStatus?: 'not_attempted' | 'merging' | 'merged' | 'merged_cleanup_pending' | 'conflict' | 'skipped_not_git' | 'skipped_read_only'; mergeError?: string | null;
   createdAt: string; updatedAt: string;
@@ -1310,7 +1310,7 @@ export type AgentTeamVersionMetadata = {
   createdAt: string;
   developerExecution?: ProjectExecutorLaunchView | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3 | 4;
+  orchestrationVersion?: 1 | 2 | 3 | 4 | 5;
 };
 
 export type AgentTeamTaskAttemptStatus =
@@ -1413,6 +1413,13 @@ export type AgentTeamTaskResultDocument = {
   upstreamDocumentKeys: string[];
 };
 
+export type AgentTeamProjectGitDecision = {
+  projectPath: string;
+  strategy: 'no_git' | 'current_branch' | 'feature_branch' | 'worktree';
+  branch?: string;
+  worktreePath?: string;
+};
+
 export type AgentTeamTaskResult =
   | {
       status: 'completed';
@@ -1422,6 +1429,7 @@ export type AgentTeamTaskResult =
       changedFiles: string[];
       completedAssignedWork: boolean;
       criterionAssessments: AgentTeamCriterionAssessment[];
+      projectGitDecisions?: AgentTeamProjectGitDecision[];
       developmentAssignments?: AgentTeamDevelopmentAssignmentInput[];
       repairRequests?: Array<{ developerId: string; instruction: string }>;
       repairRequest?: {

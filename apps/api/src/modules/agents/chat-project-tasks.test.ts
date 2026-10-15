@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
 import { createDb, type Database } from '@worklite/db';
 import { ChatProjectTasksService, extractTaskResult, settleChatProjectTask } from './chat-project-tasks.service';
 import type { ProjectExecutorService } from './project-executor.service';
-import { removeTaskWorktree } from './git-worktree';
+import type { WorkspaceResourcesService } from '../teams/team-resources.service';
 
 describe('extractTaskResult', () => {
   it('parses a bare succeeded result', () => {
@@ -98,9 +98,9 @@ describe('settleChatProjectTask', () => {
   });
 });
 
-// capture() runs against an in-memory database with the minimal tables it touches, and real
-// temporary git repositories so the worktree behavior is exercised end to end.
-describe('ChatProjectTasksService.capture worktree behavior', () => {
+// capture() runs against an in-memory database with the minimal tables it touches and accepts
+// both Git repositories and workspace directories without mutating their Git state.
+describe('ChatProjectTasksService.capture workspace behavior', () => {
   const WORKSPACE_ID = 'workspace_personal';
   const EXECUTION_ID = 'aex_capture_test';
   const CAPABILITIES = JSON.stringify({
@@ -162,14 +162,15 @@ describe('ChatProjectTasksService.capture worktree behavior', () => {
     const executors = {
       captureLaunch: async () => ({ executor: 'claude' as const, commandArguments: [], baseUrl: 'http://127.0.0.1:23392', model: null }),
     };
-    return { service: new ChatProjectTasksService(db, executors as unknown as ProjectExecutorService), repository };
+    const resources = { workflowMcpRuntimes: async () => [] } as unknown as WorkspaceResourcesService;
+    return { service: new ChatProjectTasksService(db, executors as unknown as ProjectExecutorService, resources), repository };
   }
 
   function gitBranches(repository: string): string {
     return execFileSync('git', ['-C', repository, 'branch', '--list', 'worklite/*'], { encoding: 'utf8' }).trim();
   }
 
-  it('skips the worktree for a read-only task and records skipped_read_only', async () => {
+  it('runs a read-only task at the workspace root without selecting a Git strategy', async () => {
     const { service, repository } = setup();
     const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_readonly', {
       goal: '调查 worktree 创建逻辑在哪里', projectDirectory: repository, readOnly: true,
@@ -177,24 +178,25 @@ describe('ChatProjectTasksService.capture worktree behavior', () => {
 
     expect(task.worktreePath).toBeNull();
     expect(task.worktreeBranch).toBeNull();
-    expect(task.mergeStatus).toBe('skipped_read_only');
+    expect(task.mergeStatus).toBe('not_attempted');
+    expect(task.snapshot.readOnly).toBe(true);
     expect(gitBranches(repository)).toBe('');
   });
 
-  it('keeps worktree isolation for a default change task', async () => {
+  it('does not force a worktree for a default change task', async () => {
     const { service, repository } = setup();
     const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_change', {
       goal: '修改 README 标题', projectDirectory: repository,
     });
 
-    expect(task.worktreePath).toBeTruthy();
-    expect(task.worktreeBranch).toMatch(/^worklite\/task-/);
+    expect(task.worktreePath).toBeNull();
+    expect(task.worktreeBranch).toBeNull();
     expect(task.mergeStatus).toBe('not_attempted');
-    expect(existsSync(task.worktreePath!)).toBe(true);
-    await removeTaskWorktree(repository, task.worktreePath!, task.worktreeBranch!);
+    expect(task.snapshot.readOnly).toBe(false);
+    expect(gitBranches(repository)).toBe('');
   });
 
-  it('keeps the non-git skip status regardless of readOnly', async () => {
+  it('accepts a non-git workspace without a special merge status', async () => {
     const { service } = setup();
     const plain = mkdtempSync(join(tmpdir(), 'worklite-capture-plain-'));
     directories.push(plain);
@@ -203,7 +205,8 @@ describe('ChatProjectTasksService.capture worktree behavior', () => {
     });
 
     expect(task.worktreePath).toBeNull();
-    expect(task.mergeStatus).toBe('skipped_not_git');
+    expect(task.mergeStatus).toBe('not_attempted');
+    expect(task.snapshot.readOnly).toBe(true);
   });
 
   it('rejects a non-boolean readOnly', async () => {

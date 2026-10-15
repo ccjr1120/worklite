@@ -469,6 +469,7 @@ export type StoredChatProjectTaskSnapshot = {
   launch?: StoredProjectExecutorLaunch;
   projectInstructions: Array<{ path: string; content: string }>;
   capabilities: StoredChatCapabilities;
+  readOnly?: boolean;
 };
 
 // Table names keep their original codex prefix as persisted identifiers.
@@ -485,9 +486,8 @@ export const chatProjectTasks = sqliteTable('chat_codex_tasks', {
   result: text('result').notNull().default(''), error: text('error'),
   // Set once the conversation has reported this background task's outcome or question.
   reportedAt: integer('reported_at', { mode: 'timestamp_ms' }),
-  // Worktree isolation: git-backed change tasks execute in their own worktree and merge back on
-  // success; read-only (`skipped_read_only`) and non-git (`skipped_not_git`) tasks run directly in
-  // the project directory with empty worktree fields and no merge.
+  // Historical WorkLite-managed worktree evidence. New Chat project tasks let the executor
+  // choose per-project Git operations and leave these fields empty.
   worktreePath: text('worktree_path'),
   worktreeBranch: text('worktree_branch'),
   baseBranch: text('base_branch'),
@@ -615,7 +615,7 @@ export type StoredAgentTeamVersionSnapshot = {
   processVersion: string;
   developerExecution: StoredProjectExecutorLaunch | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3 | 4;
+  orchestrationVersion?: 1 | 2 | 3 | 4 | 5;
   roles: StoredAgentTeamRoleConfiguration[];
   processFiles: Array<{ path: string; content: string }>;
   recipeDefaults: StoredAgentTeamRecipeDefaults;

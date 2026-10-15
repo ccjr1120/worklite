@@ -8,6 +8,13 @@ export class TooManyToolCallsError extends Error {
   }
 }
 
+export class InvalidAgentToolRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidAgentToolRequestError';
+  }
+}
+
 export type ExecutionFailure = { message: string; code: AgentExecutionErrorCode; phase: AgentExecutionPhase };
 
 export function executionFailure(error: unknown): ExecutionFailure {
@@ -20,6 +27,7 @@ export function executionFailure(error: unknown): ExecutionFailure {
   }
   if (error instanceof Error && error.name === 'AI_MissingToolResultsError') return { message: 'The Agent conversation was missing a tool result. Retry repairs the recorded tool exchange before contacting the model.', code: 'missing_tool_results', phase: 'model' };
   if (error instanceof TooManyToolCallsError) return { message: 'The model requested too many tools in one step. Retry so the Agent can continue with fewer tool calls.', code: 'too_many_tool_calls', phase: 'model' };
+  if (error instanceof InvalidAgentToolRequestError) return { message: error.message, code: 'invalid_tool_request', phase: 'model' };
   if (error instanceof Error && error.message === 'Skill execution failed') return { message: 'The Agent Skill script could not be completed.', code: 'skill', phase: 'skill' };
   return { message: 'The Agent could not complete this turn because an internal execution error occurred. Retry the request.', code: 'internal', phase: 'model' };
 }

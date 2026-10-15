@@ -29,11 +29,10 @@ import type {
 import type { AgentTeamRuntimeRole } from './agent-team-configuration';
 
 /**
- * Orchestration version 4 graph. The team-runtime package owns v1-v3 and is owned by
- * another lane in this change, so the v4 topology lives in apps/api and reuses the
- * package's exported helpers. v4 = v3 lane fan-out plus the Worktree Manager:
- * planner → test_designer → worktree_setup → developer fan-out → join → test_author
- * → test_runner → reviewer → (repair: dispatcher) → worktree_teardown → END.
+ * App-local graph shell for orchestration v4 and v5. Version 4 keeps the managed
+ * Worktree Manager setup/teardown lifecycle. Version 5 uses the setup task for an
+ * advisory per-project strategy document; with no runtime worktree state, teardown
+ * is skipped and Developer lanes run from the supplied workspace root.
  */
 
 export type AgentTeamWorktreeLane = {
@@ -291,7 +290,7 @@ function taskGoal(
     test_author: 'Author only authorized tests for the implemented behavior using the existing framework.',
     test_runner: 'Run only authorized checks and report their actual outcomes and evidence.',
     reviewer: 'Independently assess changed files and test evidence against the acceptance criteria.',
-    'worktree-manager': 'Plan the Run worktree layout or decide its teardown exactly per your instructions; the runtime executes the git effects.',
+    'worktree-manager': 'Complete the captured Worktree Manager task exactly as specified by the orchestration version.',
   };
   return isRepair ? `${goals[role]} Repair instruction: ${repairInstruction ?? ''}` : goals[role];
 }
@@ -304,7 +303,7 @@ function expectedResultKind(role: AgentTeamRuntimeRole): string {
     test_author: 'test_automation_record',
     test_runner: 'execution_evidence',
     reviewer: 'review_assessment',
-    'worktree-manager': 'worktree_layout',
+    'worktree-manager': 'Worktree Manager result specified by the orchestration version',
   };
   return kinds[role];
 }
