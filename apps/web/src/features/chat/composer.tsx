@@ -1,5 +1,5 @@
 import { ArrowUp, Download, History, LoaderCircle, Play, Plus, Sparkles, Square, X } from 'lucide-react';
-import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { type CompositionEvent as ReactCompositionEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { WorkflowView } from '@worklite/contracts';
 import { PromptInput, PromptInputSubmit, PromptInputTextarea } from '@/components/ai-elements/prompt-input';
@@ -24,6 +24,8 @@ type ComposerProps = {
   onDraftChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
   onKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+  onCompositionStart: (event: ReactCompositionEvent<HTMLTextAreaElement>) => void;
+  onCompositionEnd: (event: ReactCompositionEvent<HTMLTextAreaElement>) => void;
   onFocus: () => void;
   selectedWorkflow: WorkflowView | null;
   onRemoveWorkflow: () => void;
@@ -49,7 +51,7 @@ type ComposerProps = {
 // and scroll-into-view have one implementation. cmdk does not own an input here:
 // filtering follows the composer text and keyboard focus never leaves the textarea.
 function Composer({
-  draft, onDraftChange, onSubmit, onKeyDown, onFocus,
+  draft, onDraftChange, onSubmit, onKeyDown, onCompositionStart, onCompositionEnd, onFocus,
   selectedWorkflow, onRemoveWorkflow,
   commandMatches, commandMenuOpen, onRunCommand,
   mentionMatches, mentionMenuOpen, onSelectMention,
@@ -89,6 +91,8 @@ function Composer({
               onValueChange={onDraftChange}
               onFocus={onFocus}
               onKeyDown={onKeyDown}
+              onCompositionStart={onCompositionStart}
+              onCompositionEnd={onCompositionEnd}
               placeholder={waitingForInput ? t('composer.answerPlaceholder') : t('composer.placeholder')}
               role="combobox"
               aria-expanded={menuOpen}

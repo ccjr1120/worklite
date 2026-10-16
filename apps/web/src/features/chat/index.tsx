@@ -1,6 +1,6 @@
 import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { ChevronRight, List, Plus, ScrollText, Settings, ShieldAlert } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CompositionEvent as ReactCompositionEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentToolCallView, ChatConversationView, ChatSubmissionView, DispatchChatRequest, ProjectExecutor, RunView, WorkflowView } from '@worklite/contracts';
 import { ApiError, api, parseAgentExecutionEvent } from '@/api/client';
@@ -45,6 +45,12 @@ const NO_RECEIPTS: PendingReceipt[] = [];
 // The transcript mounts only the newest entries until the reader asks for the rest, so opening a
 // long conversation does not mount its whole history at once.
 const RECENT_TIMELINE_COUNT = 30;
+// Chrome delivers the composition-confirming Enter keydown while isComposing is still true, but
+// WebKit — Safari and the desktop WKWebView shell — fires compositionend before that keydown, so
+// isComposing is already false when it arrives. Both events belong to one IME confirmation
+// gesture and are dispatched back to back, so an Enter landing within this window of
+// compositionend is still a candidate confirmation and must not send.
+const COMPOSITION_ENTER_GUARD_MS = 30;
 
 function readSelectedConversation() {
   try { return window.localStorage.getItem('worklite.chat.selected'); } catch { return null; }
@@ -125,6 +131,7 @@ function ChatWorkspace() {
   const appliedResultIdsRef = useRef(new Set<string>());
   const mainRequestGenerationRef = useRef(0);
   const observedEventRef = useRef({ executionId: '', sequence: 0 });
+  const imeCompositionRef = useRef({ active: false, endedAt: -Infinity });
   const isConfigured = Boolean(agentQuery.data?.providerId && agentQuery.data?.model);
 
   useEffect(() => {
@@ -681,6 +688,20 @@ function ChatWorkspace() {
   }
 
 
+  function handleCompositionStart() {
+    imeCompositionRef.current.active = true;
+  }
+
+  function handleCompositionEnd(event: ReactCompositionEvent<HTMLTextAreaElement>) {
+    imeCompositionRef.current.active = false;
+    imeCompositionRef.current.endedAt = event.timeStamp;
+  }
+
+  function isImeComposing(event: ReactKeyboardEvent<HTMLTextAreaElement>): boolean {
+    if (event.nativeEvent.isComposing || imeCompositionRef.current.active) return true;
+    return event.timeStamp - imeCompositionRef.current.endedAt < COMPOSITION_ENTER_GUARD_MS;
+  }
+
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Escape') {
       if (handleEscape()) event.preventDefault();
@@ -691,7 +712,7 @@ function ChatWorkspace() {
       return;
     }
     if (event.key === 'Enter' && !event.shiftKey) {
-      if (event.nativeEvent.isComposing) return;
+      if (isImeComposing(event)) return;
       event.preventDefault();
       if (mentionMenuOpen) {
         const workflow = mentionMatches.find((item) => `mention:${item.id}` === activeValue) ?? mentionMatches[0];
@@ -835,6 +856,7 @@ function ChatWorkspace() {
             </div>
             {recordsOpen ? null : loadingConversation || composerLoading ? <p className="px-4 py-3 text-[13px] text-muted-foreground" role="status">{t('assistant:composer.loading')}</p> : selectedWithoutExecution ? <p className="border-t border-border px-4 py-3 text-[13px] text-muted-foreground">{t(selected?.channel === 'feishu' ? 'assistant:channels.waiting' : 'assistant:history.taskRecord')}</p> : composerAvailable ? (
               <Composer draft={draft} onDraftChange={(value) => { setDraft(value); setSlashDismissed(false); setMentionDismissed(false); setActiveValue(''); }} onSubmit={submit} onKeyDown={handleComposerKeyDown} onFocus={() => {}}
+                onCompositionStart={handleCompositionStart} onCompositionEnd={handleCompositionEnd}
                 selectedWorkflow={selectedWorkflow} onRemoveWorkflow={() => setSelectedWorkflow(null)} commandMatches={commandMatches} commandMenuOpen={commandMenuOpen} onRunCommand={runCommand}
                 mentionMatches={mentionMatches} mentionMenuOpen={mentionMenuOpen} onSelectMention={selectMention} activeValue={activeValue} onActiveValueChange={setActiveValue}
                 onDismissMenus={() => { setSlashDismissed(true); setMentionDismissed(true); }} running={stopTarget} busy={busy || cancelling} canCancel={canCancel} cancelling={cancelling} submitDisabled={submitDisabled} waitingForInput={Boolean(waitingForInput)} onStop={() => void cancelExecution()} />
