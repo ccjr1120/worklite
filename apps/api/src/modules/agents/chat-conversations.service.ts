@@ -157,7 +157,8 @@ export class ChatConversationsService {
 
   // Summarizing compresses the conversation in place: the generated summary becomes the
   // execution's whole stored model context, and a persisted divider marks the compression
-  // point in the visible history. Earlier display messages stay readable but no longer
+  // point in the visible history, preceded by a user echo of the /summarize command so the
+  // trigger stays visible. Earlier display messages stay readable but no longer
   // reach the model; a later summarize builds on the retained summary after the last divider.
   async summarize(request: Request, id: string): Promise<AgentExecutionView> {
     const workspace = await this.workspaces.getWorkspace(request, 'personal');
@@ -186,9 +187,13 @@ export class ChatConversationsService {
       messages: [{ role: 'user', content: transcript }],
     }).result;
     const summary = text.trim();
+    // The slash command is intercepted by the composer and never becomes a visible message,
+    // so the server records it as an ordinary user display message just before the divider:
+    // the history then reads "user: /summarize → divider" while the model context stays untouched.
+    const commandEcho: StoredAgentDisplayMessage = { id: `msg_${randomUUID()}`, role: 'user', content: '/summarize', createdAt: new Date().toISOString() };
     const divider: StoredAgentDisplayMessage = { id: `msg_${randomUUID()}`, role: 'assistant', content: summary, createdAt: new Date().toISOString(), kind: 'summary_divider' };
     const modelMessages: StoredAgentModelMessage[] = [{ role: 'user', content: `Summary of the conversation so far, as the starting context for the rest of this conversation:\n\n${summary}` }];
-    const updated = await this.db.update(agentExecutions).set({ modelMessages, displayMessages: [...execution.displayMessages, divider], updatedAt: new Date() })
+    const updated = await this.db.update(agentExecutions).set({ modelMessages, displayMessages: [...execution.displayMessages, commandEcho, divider], updatedAt: new Date() })
       .where(and(eq(agentExecutions.id, execution.id), inArray(agentExecutions.status, ['completed', 'failed', 'cancelled'])));
     if (updated.changes === 0) throw new ConflictException('This conversation changed while it was being summarized. Try again.');
     await this.executions.publishSnapshotForExecution(workspace.id, execution.id);

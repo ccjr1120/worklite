@@ -813,7 +813,7 @@ function ChatWorkspace() {
                   {visibleTimeline.map((entry, index) => {
                     switch (entry.kind) {
                       case 'user': return <UserMessage key={entry.item.id} message={entry.item} />;
-                      case 'summaryDivider': return <SummaryDivider key={entry.item.id} label={t('assistant:summarize.divider')} />;
+                      case 'summaryDivider': return <SummaryDivider key={entry.item.id} label={t('assistant:summarize.divider')} message={entry.item} />;
                       case 'assistant': return <AssistantTurn key={entry.segments[0].item.id} segments={entry.segments} working={showWorkingInLastTurn && index === visibleTimeline.length - 1} markdownEnabled />;
                       case 'task': return <TaskCard key={entry.submission.id} submission={entry.submission} />;
                       case 'workflowRun': return <WorkflowRunRow key={entry.active.run.id} run={entry.active.run} workflow={entry.active.workflow} input={entry.active.input} />;

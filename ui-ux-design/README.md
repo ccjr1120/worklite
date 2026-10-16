@@ -90,6 +90,10 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-10-16 - Chat summary visibility
+
+- The [Chat](pages/chat/workspace/DESIGN.md) `/summarize` command now leaves a visible trace: the server persists a user echo of the command before the summary divider, and a divider carrying the summary text offers an expand toggle that reveals the full summary in place; a divider without content stays a plain marker.
+
 ### 2026-10-15 - Chat /summarize command
 
 - The [Chat](pages/chat/workspace/DESIGN.md) composer `/summarize` command summarizes the current conversation in place (`POST /chat/conversations/:id/summarize`): the server replaces the execution's model context with the generated summary and appends a persisted summary divider to the transcript, so the reader continues in the same conversation without navigation while earlier history stays visible above the divider.

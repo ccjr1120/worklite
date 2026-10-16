@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import { Ban, ChevronDown, ChevronRight, CircleX, FileCode2, Hourglass, LoaderCircle, MessageCircleQuestion, MessageSquareText, Play, RefreshCw, ShieldAlert, X } from 'lucide-react';
-import { memo, useContext, useEffect, useState } from 'react';
+import { memo, useContext, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentToolCallView, ChatConversationView, ChatProjectTaskView, ChatSubmissionView, RunView, WorkflowView } from '@worklite/contracts';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
@@ -257,12 +257,46 @@ function CancelledNote() {
 
 // A summarize divider separates the compressed history from the continuing conversation.
 // It is a persisted state marker, not a message, so it renders without an identity mark.
-const SummaryDivider = memo(function SummaryDivider({ label }: { label: string }) {
+// A divider whose message carries the summary text toggles that text in place; one without
+// content stays a plain marker.
+const SummaryDivider = memo(function SummaryDivider({ label, message }: { label: string; message: TranscriptMessage }) {
+  const { t } = useTranslation('assistant');
+  const [expanded, setExpanded] = useState(false);
+  const contentId = useId();
+  const summary = message.content.trim();
+  if (!summary) {
+    return (
+      <div className="wl-fade flex items-center gap-3 py-3" role="separator" aria-label={label}>
+        <div className="h-px flex-1 bg-border" aria-hidden="true" />
+        <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
+        <div className="h-px flex-1 bg-border" aria-hidden="true" />
+      </div>
+    );
+  }
   return (
-    <div className="wl-fade flex items-center gap-3 py-3" role="separator" aria-label={label}>
-      <div className="h-px flex-1 bg-border" aria-hidden="true" />
-      <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
-      <div className="h-px flex-1 bg-border" aria-hidden="true" />
+    <div className="wl-fade py-3">
+      <div className="flex items-center gap-3" role="separator" aria-label={label}>
+        <div className="h-px flex-1 bg-border" aria-hidden="true" />
+        <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
+        <div className="h-px flex-1 bg-border" aria-hidden="true" />
+      </div>
+      <div className="mt-1 flex justify-center">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={contentId}
+          onClick={() => setExpanded((value) => !value)}
+          className={cn('inline-flex items-center gap-1 rounded-sm px-2 py-0.5 text-xs text-muted-foreground hover:bg-surface-subtle hover:text-foreground', focusRingInset)}
+        >
+          {expanded ? t('summarize.hideSummary') : t('summarize.showSummary')}
+          <ChevronDown className={cn('size-3 transition-transform duration-[120ms]', expanded && 'rotate-180')} aria-hidden="true" />
+        </button>
+      </div>
+      {expanded ? (
+        <div id={contentId} className="wl-fade mt-2 rounded-lg border border-border bg-surface px-4 py-3">
+          <MessageResponse content={summary} enabled />
+        </div>
+      ) : null}
     </div>
   );
 });
