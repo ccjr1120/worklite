@@ -83,6 +83,12 @@ Each operator invocation of `pnpm deploy:local` increments the patch component o
 
 Authenticated workspace routes do not include a locale segment. The Web application uses one fixed Chinese resource set (`zh-CN`) and does not expose, persist, or synchronize a locale preference. API contracts, persisted domain values, identifiers, logs, and externally supplied content remain language-neutral.
 
+### Desktop Client
+
+- The desktop client is a thin Tauri v2 shell (`src-tauri/`) around the existing web application. It bundles no local services and stores no local data.
+- In development it loads the Web-only development profile (`http://localhost:3390`); release builds load a configurable remote deployment URL (`build.frontendDist` in `src-tauri/tauri.conf.json`, a placeholder until a fixed public deployment address exists).
+- The shell owns only the native window, application icon and name, and the Tauri notification plugin; all API traffic continues to reach the managed deployment API exactly as in a browser.
+
 ### API and Execution
 
 - NestJS for the HTTP API.
@@ -685,8 +691,10 @@ worklite/
 |   |-- nginx/
 |   `-- compose.yaml
 |-- docs/
-|   `-- project-architecture/
-|       `-- README.md
+|   |-- project-architecture/
+|   |   `-- README.md
+|   `-- desktop/                    # Desktop client development and build guide
+|-- src-tauri/                      # Tauri v2 desktop shell around the web application
 |-- scripts/
 |-- AGENTS.md
 |-- AGENTS_WORKFLOW.md
@@ -734,6 +742,10 @@ Workflows support a versioned portable JSON envelope for moving editable definit
 Import validates the envelope, structured edge conditions, and bounded-cycle constraints, resolves every Skill and MCP server reference against the destination workspace, and creates a new mutable draft. Missing or ambiguous references reject the entire import. Import never overwrites an existing workflow, publishes a version, or enables a schedule.
 
 ## Changelog
+
+### 2026-10-16 — Tauri desktop client shell
+
+- Added a Tauri v2 desktop client at `src-tauri/` that loads the existing web application in a native window. Development targets the Web-only development profile (`http://localhost:3390`); release builds load a configurable remote deployment URL, held as a documented placeholder until a fixed public address exists. The shell introduces no local services, local persistence, or new API surface.
 
 ### 2026-10-14 — Chat project-task dispatch contract
 

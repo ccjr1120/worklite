@@ -1,0 +1,18 @@
+[package]
+name = "worklite"
+version = "0.1.0"
+description = "WorkLite desktop client"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-notification = "2"
+
+[features]
+# This feature is required for production builds that ship a local frontend.
+# WorkLite loads a remote URL instead, but the feature must stay defined
+# because `tauri build` references it in the default configuration.
+custom-protocol = ["tauri/custom-protocol"]

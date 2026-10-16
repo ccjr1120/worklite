@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for the WorkLite main window.",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://localhost:3390",
+      "https://worklite.example.com"
+    ]
+  },
+  "permissions": [
+    "core:default",
+    "notification:default"
+  ]
+}
