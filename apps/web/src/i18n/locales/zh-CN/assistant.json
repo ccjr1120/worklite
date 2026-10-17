@@ -83,18 +83,13 @@
   },
   "history": {
     "title": "会话",
-    "description": "服务端保存的全部渠道会话。",
     "empty": "暂无会话，直接发送消息开始。",
-    "noMatch": "没有匹配的对话。",
-    "searchPlaceholder": "搜索会话内容…",
     "untitled": "未命名对话",
     "new": "新对话",
     "channel": "渠道",
-    "allChannels": "全部渠道",
     "loading": "正在加载会话",
     "loadFailed": "无法加载会话记录。",
     "retry": "重试",
-    "clear": "清除筛选",
     "groups": {
       "live": "进行中",
       "today": "今天",

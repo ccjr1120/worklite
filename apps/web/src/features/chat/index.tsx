@@ -1,5 +1,5 @@
 import { useNavigate, useRouterState } from '@tanstack/react-router';
-import { ChevronRight, List, Plus, ScrollText, Settings, ShieldAlert } from 'lucide-react';
+import { Brain, ChevronRight, List, Plus, Radio, ScrollText, Settings, ShieldAlert, SlidersHorizontal } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type CompositionEvent as ReactCompositionEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentToolCallView, ChatConversationView, ChatSubmissionView, DispatchChatRequest, ProjectExecutor, RunView, WorkflowView } from '@worklite/contracts';
@@ -25,7 +25,6 @@ import { PinnedExecutionBar, PinTrackingContext, usePinTracking, type PinCandida
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CHAT_AGENT_ID } from '@worklite/contracts';
 import { AssistantTurn, buildTimeline, CancelledNote, FailureNote, QuestionNote, QueueRows, SummaryDivider, TranscriptSkeleton, UserMessage, WorkflowRunRow } from './transcript';
 
@@ -45,6 +44,15 @@ const NO_RECEIPTS: PendingReceipt[] = [];
 // The transcript mounts only the newest entries until the reader asks for the rest, so opening a
 // long conversation does not mount its whole history at once.
 const RECENT_TIMELINE_COUNT = 30;
+
+type SettingsSection = 'channels' | 'configuration' | 'memories';
+// The settings Dialog switches sections through a slim left rail rather than top tabs;
+// each entry keeps its validated `view=` deep link of the same name.
+const SETTINGS_SECTIONS: { value: SettingsSection; icon: typeof SlidersHorizontal }[] = [
+  { value: 'configuration', icon: SlidersHorizontal },
+  { value: 'channels', icon: Radio },
+  { value: 'memories', icon: Brain },
+];
 // Chrome delivers the composition-confirming Enter keydown while isComposing is still true, but
 // WebKit — Safari and the desktop WKWebView shell — fires compositionend before that keydown, so
 // isComposing is already false when it arrives. Both events belong to one IME confirmation
@@ -103,7 +111,7 @@ function ChatWorkspace() {
   const [workflowRun, setWorkflowRun] = useState<ActiveWorkflowRun | null>(null);
   const [draft, setDraft] = useState(() => conversationDrafts.get(selectedConversationId ?? 'new')?.draft ?? '');
   const [settingsOpen, setSettingsOpen] = useState(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories');
-  const [settingsSection, setSettingsSection] = useState<'channels' | 'configuration' | 'memories'>(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories' ? locationSearch.view : 'configuration');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories' ? locationSearch.view : 'configuration');
   const [configSelection, setConfigSelection] = useState('');
   // '' means the executor's own local default; a non-empty value is a declared Gateway public model id.
   const [executorModels, setExecutorModels] = useState<Record<ProjectExecutor, string>>({ claude: '', codex: '' });
@@ -165,7 +173,7 @@ function ChatWorkspace() {
     } finally { setConfigSaving(false); }
   };
 
-  function openSettings(section: 'channels' | 'configuration' | 'memories') {
+  function openSettings(section: SettingsSection) {
     setSettingsSection(section);
     setSettingsOpen(true);
     void navigate({ to: '/chat', search: { view: section, conversation: selectedConversationId ?? undefined } });
@@ -176,8 +184,7 @@ function ChatWorkspace() {
     if (!open) void navigate({ to: '/chat', search: { view: 'conversation', conversation: selectedConversationId ?? undefined } });
   }
 
-  function changeSettingsSection(value: string) {
-    if (value !== 'channels' && value !== 'configuration' && value !== 'memories') return;
+  function changeSettingsSection(value: SettingsSection) {
     setSettingsSection(value);
     void navigate({ to: '/chat', search: { view: value, conversation: selectedConversationId ?? undefined } });
   }
@@ -870,31 +877,44 @@ function ChatWorkspace() {
             <DialogTitle>{t('assistant:settings.title')}</DialogTitle>
             <DialogDescription>{t('assistant:settings.description')}</DialogDescription>
           </DialogHeader>
-          <Tabs value={settingsSection} onValueChange={changeSettingsSection} className="min-h-0 flex-1 flex-col gap-0">
-            <div className="px-6 pt-2">
-              <TabsList>
-                <TabsTrigger value="configuration">{t('assistant:settings.configuration')}</TabsTrigger>
-                <TabsTrigger value="channels">{t('assistant:settings.channels')}</TabsTrigger>
-                <TabsTrigger value="memories">{t('assistant:settings.memories')}</TabsTrigger>
-              </TabsList>
+          <div className="flex min-h-0 flex-1">
+            <nav aria-label={t('assistant:settings.title')} className="flex w-14 shrink-0 flex-col gap-1 px-3 pb-6 pt-4 sm:w-44">
+              {SETTINGS_SECTIONS.map((section) => {
+                const selected = settingsSection === section.value;
+                return (
+                  <button
+                    key={section.value}
+                    type="button"
+                    aria-current={selected ? 'true' : undefined}
+                    aria-label={t(`assistant:settings.${section.value}`)}
+                    onClick={() => changeSettingsSection(section.value)}
+                    className={cn(
+                      'wl-press flex items-center justify-center gap-2 rounded-md px-2.5 py-2 text-left text-[13px] sm:justify-start',
+                      selected ? 'bg-brand-subtle font-semibold' : 'text-muted-foreground hover:bg-surface-subtle hover:text-foreground',
+                      focusRingInset,
+                    )}
+                  >
+                    <section.icon className={cn('size-4 shrink-0', selected && 'text-brand-text')} aria-hidden="true" />
+                    <span className="hidden truncate sm:inline">{t(`assistant:settings.${section.value}`)}</span>
+                  </button>
+                );
+              })}
+            </nav>
+            <div className="min-h-0 min-w-0 flex-1 overflow-y-auto border-l border-border [scrollbar-gutter:stable]">
+              {settingsSection === 'channels' ? <ChannelConfiguration /> : null}
+              {settingsSection === 'configuration' ? (
+                <Configuration providers={providersQuery.data ?? []} selection={configSelection}
+                  onSelectionChange={(value) => { setConfigSelection(value); void saveConfiguration(value); }}
+                  executorModels={executorModels} onExecutorModelChange={(executor, value) => { const next = { ...executorModels, [executor]: value }; setExecutorModels(next); void saveConfiguration(configSelection, extensionPrompt, next); }}
+                  extensionPrompt={extensionPrompt} onPromptChange={setExtensionPrompt} onPromptSave={() => { if (extensionPrompt !== (agentQuery.data?.chatConfiguration?.extensionPrompt ?? '')) void saveConfiguration(configSelection); }}
+                  summarizePrompt={summarizePrompt} onSummarizePromptChange={setSummarizePrompt} onSummarizePromptSave={() => { if (summarizePrompt !== (agentQuery.data?.chatConfiguration?.summarizePrompt ?? '')) void saveConfiguration(configSelection); }}
+                  saving={configSaving} error={configError} loading={agentQuery.isLoading || providersQuery.isLoading}
+                  loadFailed={agentQuery.isError || providersQuery.isError}
+                  onReload={() => { void agentQuery.refetch(); void providersQuery.refetch(); }} />
+              ) : null}
+              {settingsSection === 'memories' ? <Memories /> : null}
             </div>
-            <TabsContent value="channels" className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-              <ChannelConfiguration />
-            </TabsContent>
-            <TabsContent value="configuration" className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-              <Configuration providers={providersQuery.data ?? []} selection={configSelection}
-                onSelectionChange={(value) => { setConfigSelection(value); void saveConfiguration(value); }}
-                executorModels={executorModels} onExecutorModelChange={(executor, value) => { const next = { ...executorModels, [executor]: value }; setExecutorModels(next); void saveConfiguration(configSelection, extensionPrompt, next); }}
-                extensionPrompt={extensionPrompt} onPromptChange={setExtensionPrompt} onPromptSave={() => { if (extensionPrompt !== (agentQuery.data?.chatConfiguration?.extensionPrompt ?? '')) void saveConfiguration(configSelection); }}
-                summarizePrompt={summarizePrompt} onSummarizePromptChange={setSummarizePrompt} onSummarizePromptSave={() => { if (summarizePrompt !== (agentQuery.data?.chatConfiguration?.summarizePrompt ?? '')) void saveConfiguration(configSelection); }}
-                saving={configSaving} error={configError} loading={agentQuery.isLoading || providersQuery.isLoading}
-                loadFailed={agentQuery.isError || providersQuery.isError}
-                onReload={() => { void agentQuery.refetch(); void providersQuery.refetch(); }} />
-            </TabsContent>
-            <TabsContent value="memories" className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-              <Memories />
-            </TabsContent>
-          </Tabs>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

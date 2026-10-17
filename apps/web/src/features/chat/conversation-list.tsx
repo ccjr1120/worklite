@@ -1,21 +1,15 @@
-import { useDeferredValue, useMemo, useState } from 'react';
-import { MessageSquarePlus, Search } from 'lucide-react';
+import { useMemo } from 'react';
+import { MessageSquarePlus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ChatConversationSummary } from '@worklite/contracts';
 import { useChatChannelsQuery, useChatConversationsQuery } from '@/api/queries';
 import { isLiveStatus, StatusDot, toStatusKey } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { focusRingInset } from '@/components/ui/interaction';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
 import { cn } from '@/lib/utils';
-
-// The history list shows only the most recent conversations; the server returns them
-// newest first, so its first page already covers this cap.
-const RECENT_LIMIT = 15;
 
 type Group = { id: 'live' | 'today' | 'earlier'; items: ChatConversationSummary[] };
 
@@ -42,30 +36,16 @@ function rowStatusKey(status: ChatConversationSummary['status']) {
 export function ConversationList({ selectedId, onSelect, onNew }: { selectedId: string | null; onSelect: (id: string) => void; onNew: () => void }) {
   const { t } = useTranslation('assistant');
   const { locale } = useLocale();
-  const [search, setSearch] = useState('');
-  const [channel, setChannel] = useState('all');
   const channels = useChatChannelsQuery();
-  const query = useChatConversationsQuery(useDeferredValue(search), channel === 'all' ? '' : channel);
-  const items = useMemo(() => [...new Map((query.data?.pages.flatMap((page) => page.items) ?? []).map((item) => [item.id, item])).values()].slice(0, RECENT_LIMIT), [query.data]);
+  const query = useChatConversationsQuery();
+  const items = useMemo(() => [...new Map((query.data?.pages.flatMap((page) => page.items) ?? []).map((item) => [item.id, item])).values()], [query.data]);
   const groups = useMemo(() => groupConversations(items), [items]);
-  const filtered = Boolean(search || channel !== 'all');
   const channelName = (id: string) => channels.data?.find((entry) => entry.id === id)?.name ?? id;
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
-      <div className="space-y-2.5 p-3">
+      <div className="p-3">
         <Button variant="secondary" className="w-full justify-start" onClick={onNew}><MessageSquarePlus className="size-4" />{t('history.new')}</Button>
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('history.searchPlaceholder')} aria-label={t('history.searchPlaceholder')} className="h-9 pl-8" />
-        </div>
-        <Select value={channel} onValueChange={setChannel}>
-          <SelectTrigger aria-label={t('history.channel')} className="h-9"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t('history.allChannels')}</SelectItem>
-            {channels.data?.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
       </div>
       <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
         {query.isLoading ? (
@@ -73,9 +53,8 @@ export function ConversationList({ selectedId, onSelect, onNew }: { selectedId: 
         ) : query.isError && !query.data ? (
           <div className="space-y-2 p-2"><p role="alert" className="text-sm text-danger">{t('history.loadFailed')}</p><Button variant="secondary" size="compact" onClick={() => void query.refetch()}>{t('history.retry')}</Button></div>
         ) : items.length === 0 ? (
-          <div className="wl-enter space-y-2 px-3 py-8 text-center">
-            <p className="text-[13px] text-muted-foreground">{t(filtered ? 'history.noMatch' : 'history.empty')}</p>
-            {filtered ? <Button variant="ghost" size="compact" onClick={() => { setSearch(''); setChannel('all'); }}>{t('history.clear')}</Button> : null}
+          <div className="wl-enter px-3 py-8 text-center">
+            <p className="text-[13px] text-muted-foreground">{t('history.empty')}</p>
           </div>
         ) : (
           <div className="space-y-4" aria-label={t('history.title')}>

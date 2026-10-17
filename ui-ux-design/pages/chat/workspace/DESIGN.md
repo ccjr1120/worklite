@@ -206,6 +206,11 @@ Source comparison 2026-10-04: the old embedded surface supports persisted messag
 
 ### 2026-10-16
 
+- Removed the conversation-list search input and channel Select together with their state and locale keys; the history list now shows every conversation the server's first page returns, unfiltered.
+- Replaced the settings Dialog's top tabs with a slim left section rail (icon-and-label items, icon-only below `sm`, shared selected-navigation treatment); Configuration, Channels and Memories keep their order, fixed Dialog height and `view=` deep links.
+
+### 2026-10-16
+
 - Made the summary visible and the command traceable: the server records `/summarize` as a persisted user echo message before the divider, and a divider whose message carries the summary text gains an expand toggle (`assistant:summarize.showSummary` / `hideSummary`) that reveals the full summary in place through the shared Markdown renderer; a divider without content stays a plain marker.
 
 ### 2026-10-15

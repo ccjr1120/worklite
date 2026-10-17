@@ -90,6 +90,10 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-10-16 - Chat history filters and settings section rail
+
+- The [Chat](pages/chat/workspace/DESIGN.md) conversation list drops its search input and channel filter and renders the full first page of server history; the settings Dialog switches its Configuration, Channels and Memories sections through a slim left rail instead of top tabs, keeping the `view=` deep links.
+
 ### 2026-10-16 - Chat summary visibility
 
 - The [Chat](pages/chat/workspace/DESIGN.md) `/summarize` command now leaves a visible trace: the server persists a user echo of the command before the summary divider, and a divider carrying the summary text offers an expand toggle that reveals the full summary in place; a divider without content stays a plain marker.

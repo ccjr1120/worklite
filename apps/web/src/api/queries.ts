@@ -24,11 +24,11 @@ export function useDeleteChatMemoryMutation() {
   });
 }
 
-export function useChatConversationsQuery(search = '', channel = '') {
+export function useChatConversationsQuery() {
   return useInfiniteQuery({
-    queryKey: [...chatConversationsQueryKey, search, channel],
+    queryKey: chatConversationsQueryKey,
     initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) => api.chatConversations({ cursor: pageParam, search, channel }),
+    queryFn: ({ pageParam }) => api.chatConversations({ cursor: pageParam }),
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     refetchInterval: 5_000,
   });
