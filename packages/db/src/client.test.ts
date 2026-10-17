@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDb, initializeDatabase } from './client';
 import * as schema from './schema';
@@ -64,5 +64,20 @@ describe('initializeDatabase restart recovery', () => {
         }],
       },
     ]);
+  });
+
+  it('registers the Workflow Agent model replacement platform tool', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+
+    const [script] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/replace-workflow-agent-models.mjs'))).limit(1);
+    const [manifest] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/tools.json'))).limit(1);
+    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
+
+    expect(script.content).toContain('/draft/model-replacement');
+    const tools = JSON.parse(manifest.content) as Record<string, { name: string; inputSchema: { required: string[] } }>;
+    expect(tools['scripts/replace-workflow-agent-models.mjs'].name).toBe('replace_workflow_agent_models');
+    expect(tools['scripts/replace-workflow-agent-models.mjs'].inputSchema.required).toEqual(['workflowId', 'fromModel', 'toModel']);
+    expect(chat.systemPrompt).toContain('replace_workflow_agent_models');
   });
 });

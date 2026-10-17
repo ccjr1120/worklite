@@ -7,6 +7,7 @@ import type {
   CreateWorkflowRequest,
   ImportWorkflowRequest,
   PortableWorkflowDocument,
+  ReplaceWorkflowDraftAgentModelsRequest,
   WorkflowDefinition,
   WorkflowDashboardBinding,
   WorkflowDashboardElement,
@@ -35,6 +36,7 @@ import {
 import { listWorkflowNodeCapabilities, validateWorkflowControlFlow, workflowEdgeRequiresComparisonValue, type WorkflowNodeCapability, type WorkflowPortDefinition } from '@worklite/workflow-engine';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
+import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { WorkflowSchedulesService } from './workflow-schedules.service';
 
 @Injectable()
@@ -43,6 +45,7 @@ export class WorkflowsService {
     @Inject(DATABASE) private readonly db: Database,
     private readonly workspaces: WorkspaceService,
     private readonly schedules: WorkflowSchedulesService,
+    private readonly resources: WorkspaceResourcesService,
   ) {}
 
   async list(request: Request, workspaceSlug: string): Promise<WorkflowView[]> {
@@ -159,26 +162,66 @@ export class WorkflowsService {
   }
 
   async applyOperations(request: Request, workspaceSlug: string, workflowId: string, input: ApplyWorkflowDraftOperationsRequest): Promise<WorkflowDetailView> {
+    if (!input || typeof input.baseRevisionId !== 'string' || (!Array.isArray(input.operations) && !input.plan)) throw new BadRequestException('A base revision and workflow operations or plan are required.');
+    return this.applyDraftOperations(request, workspaceSlug, workflowId, input.baseRevisionId, async (snapshot) => ({
+      operations: (input.plan ? buildPlanOperations(snapshot, input.plan) : input.operations) ?? [],
+      source: input.plan ? 'assistant' : input.source ?? 'manual',
+      sourceInstruction: input.sourceInstruction,
+    }));
+  }
+
+  async replaceDraftAgentModels(request: Request, workspaceSlug: string, workflowId: string, input: ReplaceWorkflowDraftAgentModelsRequest): Promise<WorkflowDetailView> {
+    if (!input || typeof input.baseRevisionId !== 'string' || typeof input.fromModel !== 'string' || typeof input.toModel !== 'string') throw new BadRequestException('A base revision, source model, and target model are required.');
+    const fromModel = input.fromModel.trim();
+    const toModel = input.toModel.trim();
+    if (!fromModel || !toModel) throw new BadRequestException('Source and target public model ids are required.');
+    if (fromModel === toModel) throw new BadRequestException('Source and target model ids must differ.');
+    if (input.nodeIds !== undefined && (!Array.isArray(input.nodeIds) || input.nodeIds.length === 0 || input.nodeIds.some((id) => typeof id !== 'string' || !id.trim()))) throw new BadRequestException('Selected node ids must be a non-empty array of non-empty strings.');
+    const selectedNodeIds = input.nodeIds ? [...new Set(input.nodeIds.map((id) => id.trim()))] : undefined;
+    return this.applyDraftOperations(request, workspaceSlug, workflowId, input.baseRevisionId, async (snapshot) => {
+      await this.resources.assertPublicAgentModel(toModel);
+      if (selectedNodeIds) {
+        for (const nodeId of selectedNodeIds) {
+          const node = snapshot.nodes.find((candidate) => candidate.id === nodeId);
+          if (!node) throw new BadRequestException(`Selected Workflow node ${nodeId} was not found.`);
+          if (node.type !== 'worklite/agent') throw new BadRequestException(`Selected Workflow node ${nodeId} is not an Agent node.`);
+        }
+      }
+      const selected = selectedNodeIds ? new Set(selectedNodeIds) : null;
+      const operations = snapshot.nodes.flatMap((node): WorkflowEditOperation[] => {
+        if (node.type !== 'worklite/agent' || (selected && !selected.has(node.id)) || !isRecord(node.config) || node.config.model !== fromModel) return [];
+        return [{ type: 'updateNode', nodeId: node.id, patch: { config: { ...node.config, model: toModel } } }];
+      });
+      if (operations.length === 0) throw new BadRequestException(`No selected Agent node uses the source model ${fromModel}.`);
+      return { operations, source: input.source ?? 'manual', sourceInstruction: input.sourceInstruction };
+    });
+  }
+
+  private async applyDraftOperations(
+    request: Request,
+    workspaceSlug: string,
+    workflowId: string,
+    baseRevisionId: string,
+    prepare: (snapshot: StoredWorkflowDefinition) => Promise<{ operations: WorkflowEditOperation[]; source: 'manual' | 'assistant'; sourceInstruction?: string }>,
+  ): Promise<WorkflowDetailView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const workflow = await this.findWorkflow(workspace.id, workflowId);
     if (!workflow) throw new NotFoundException('Workflow not found');
-    if (!input || typeof input.baseRevisionId !== 'string' || (!Array.isArray(input.operations) && !input.plan)) throw new BadRequestException('A base revision and workflow operations or plan are required.');
     await this.ensureDraft(workflow);
     const draft = await this.loadDraft(workspace.id, workflowId);
-    if (!draft || draft.currentRevisionId !== input.baseRevisionId) throw new ConflictException('The workflow draft changed. Reload it before applying edits.');
-    const currentRevision = await this.loadRevision(workspace.id, input.baseRevisionId);
+    if (!draft || draft.currentRevisionId !== baseRevisionId) throw new ConflictException('The workflow draft changed. Reload it before applying edits.');
+    const currentRevision = await this.loadRevision(workspace.id, baseRevisionId);
     if (!currentRevision) throw new ConflictException('The workflow base revision is unavailable.');
-    const operations = input.plan ? buildPlanOperations(currentRevision.snapshot, input.plan) : input.operations;
-    if (!operations || operations.length === 0) throw new BadRequestException('At least one workflow operation is required.');
+    const { operations, source, sourceInstruction } = await prepare(currentRevision.snapshot);
+    if (operations.length === 0) throw new BadRequestException('At least one workflow operation is required.');
     const nextDefinition = applyOperations(currentRevision.snapshot, operations);
     validateDefinition(nextDefinition, false);
     await this.validateWorkspaceReferences(workspace.id, nextDefinition);
     const revisionId = `wfr_${randomUUID()}`;
-    const revisionSource = input.plan ? 'assistant' : input.source ?? 'manual';
     await this.db.transaction((transaction) => {
       const current = transaction.select({ currentRevisionId: workflowDrafts.currentRevisionId }).from(workflowDrafts).where(and(eq(workflowDrafts.id, draft.id), eq(workflowDrafts.workspaceId, workspace.id))).limit(1).all()[0];
-      if (!current || current.currentRevisionId !== input.baseRevisionId) throw new ConflictException('The workflow draft changed. Reload it before applying edits.');
-      transaction.insert(workflowEditRevisions).values({ id: revisionId, workspaceId: workspace.id, workflowId, draftId: draft.id, parentRevisionId: input.baseRevisionId, source: revisionSource, sourceInstruction: input.sourceInstruction, operations: operations as StoredWorkflowEditOperation[], snapshot: nextDefinition }).run();
+      if (!current || current.currentRevisionId !== baseRevisionId) throw new ConflictException('The workflow draft changed. Reload it before applying edits.');
+      transaction.insert(workflowEditRevisions).values({ id: revisionId, workspaceId: workspace.id, workflowId, draftId: draft.id, parentRevisionId: baseRevisionId, source, sourceInstruction, operations: operations as StoredWorkflowEditOperation[], snapshot: nextDefinition }).run();
       transaction.update(workflowDrafts).set({ currentRevisionId: revisionId, definition: nextDefinition, updatedAt: new Date() }).where(eq(workflowDrafts.id, draft.id)).run();
       transaction.update(workflows).set({ updatedAt: new Date() }).where(eq(workflows.id, workflowId)).run();
     });

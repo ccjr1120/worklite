@@ -456,6 +456,8 @@ The persisted definition includes the schema version, an optional workflow-input
 
 Workflow draft operations are exposed through `POST /workflows/:workflowId/draft/operations` with a required `baseRevisionId`. The response returns the authoritative draft, revision identifier, and undo/redo availability. `POST /workflows/:workflowId/draft/undo` and `POST /workflows/:workflowId/draft/redo` move the server-owned draft pointer without mutating immutable revision snapshots. A stale base revision is rejected so concurrent browser tabs or assistant edits cannot silently overwrite one another.
 
+Workflow drafts also expose the validated maintenance operation `POST /workflows/:workflowId/draft/model-replacement` for repairing obsolete Workflow Agent model references. The request carries a required `baseRevisionId`, exact public `fromModel` and `toModel` ids, and an optional `nodeIds` selection. The server rejects a stale base revision, identical source and target models, an unknown or non-Agent selected node, a selection with no exact source-model match, and a target model that fails the existing Workflow Agent public-model validation. It converts every selected `worklite/agent` node whose current `config.model` exactly equals `fromModel` into ordinary typed node-update operations and applies them through the same atomic draft validation and immutable `EditRevision` transaction as other edits. The operation changes only the mutable draft; published WorkflowVersions, schedules, and historical Runs remain unchanged.
+
 Workflow deletion is permanent. Deleting a Workflow removes its mutable draft, edit revisions, immutable published versions, schedule, run history, node runs, and run events in one workspace-scoped operation. Artifacts are retained and detached because their Workflow and Run references use `ON DELETE SET NULL`. There is no recycle bin, soft deletion, compatibility alias, or restoration path.
 
 Workspace resource deletion follows one explicit lifecycle policy. There is no standalone Agent deletion flow: Chat runtime records are protected, while Workflow Agent configuration is deleted with its draft or immutable Workflow version. Skills and MCP servers may be deleted only when no Workflow draft or immutable version references the resource. Provider deletion remains owned by the Gateway. Artifact deletion permanently removes the Artifact record and its WorkLite-managed object when one exists. Runs, immutable Agent and Workflow versions, audit logs, and built-in Plugins are not independently deletable.
@@ -742,6 +744,12 @@ Workflows support a versioned portable JSON envelope for moving editable definit
 Import validates the envelope, structured edge conditions, and bounded-cycle constraints, resolves every Skill and MCP server reference against the destination workspace, and creates a new mutable draft. Missing or ambiguous references reject the entire import. Import never overwrites an existing workflow, publishes a version, or enables a schedule.
 
 ## Changelog
+
+### 2026-10-17 — Workflow draft Agent model replacement
+
+- Added `POST /workflows/:workflowId/draft/model-replacement`, a base-revision-checked maintenance operation that replaces an exact public model id on selected or all `worklite/agent` nodes in the mutable draft after validating the target model through the existing Agent model rules.
+- Reused ordinary typed node-update operations, draft validation, and immutable `EditRevision` persistence; published versions, schedules, and historical Runs remain unchanged.
+- Added a typed protected Chat platform tool for the same repair flow so Chat can read the current draft revision and invoke the validated API without direct graph or database access.
 
 ### 2026-10-16 — Tauri desktop client shell
 

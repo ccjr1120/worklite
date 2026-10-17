@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
-import type { ApplyWorkflowDraftOperationsRequest, CreateWorkflowRequest, ImportWorkflowRequest } from '@worklite/contracts';
+import type { ApplyWorkflowDraftOperationsRequest, CreateWorkflowRequest, ImportWorkflowRequest, ReplaceWorkflowDraftAgentModelsRequest } from '@worklite/contracts';
 import { WorkflowSchedulesService } from './workflow-schedules.service';
 import { WorkflowsService } from './workflows.service';
 
@@ -51,6 +51,11 @@ export class WorkflowsController {
   @Post(':workflowId/draft/operations')
   applyOperations(@Req() request: Request, @Param('workflowId') workflowId: string, @Body() body: ApplyWorkflowDraftOperationsRequest) {
     return this.workflows.applyOperations(request, 'personal', workflowId, body);
+  }
+
+  @Post(':workflowId/draft/model-replacement')
+  replaceDraftAgentModels(@Req() request: Request, @Param('workflowId') workflowId: string, @Body() body: ReplaceWorkflowDraftAgentModelsRequest) {
+    return this.workflows.replaceDraftAgentModels(request, 'personal', workflowId, body);
   }
 
   @Post(':workflowId/draft/undo')

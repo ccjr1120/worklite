@@ -776,6 +776,15 @@ export type ApplyWorkflowDraftOperationsRequest = {
   sourceInstruction?: string;
 };
 
+export type ReplaceWorkflowDraftAgentModelsRequest = {
+  baseRevisionId: string;
+  fromModel: string;
+  toModel: string;
+  nodeIds?: string[];
+  source?: 'manual' | 'assistant';
+  sourceInstruction?: string;
+};
+
 export type CreateWorkflowRequest = {
   name: string;
   definition?: WorkflowDefinition;
