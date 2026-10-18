@@ -928,6 +928,32 @@ export class AgentExecutionsService implements OnModuleInit {
     return 'reported';
   }
 
+  // One progress report turn while the conversation has active background work. Unlike the
+  // one-shot settlement reports nothing is recorded per task or Run: the caller
+  // (ChatProgressReportsService) throttles by change signature and interval. A cancelled
+  // conversation stops receiving progress reports, matching the cancel-stops-reporting rule.
+  async reportActiveWorkProgress(workspaceId: string, executionId: string, note: string): Promise<'reported' | 'busy' | 'unavailable'> {
+    const execution = await this.loadExecution(workspaceId, CHAT_AGENT_ID, executionId).catch(() => null);
+    if (!execution || execution.status === 'cancelled') return 'unavailable';
+    if (execution.status === 'running' || execution.status === 'waiting_for_input') return 'busy';
+    let accepted = false;
+    this.db.transaction((transaction) => {
+      const updated = transaction.update(agentExecutions).set({
+        status: 'running', phase: 'model', errorCode: null, error: null,
+        modelMessages: [...execution.modelMessages, { role: 'user', content: note }],
+        updatedAt: new Date(),
+      }).where(and(eq(agentExecutions.id, executionId), inArray(agentExecutions.status, ['completed', 'failed']))).run();
+      if (updated.changes === 0) return;
+      accepted = true;
+      transaction.insert(auditLogs).values({ id: `audit_${randomUUID()}`, workspaceId, action: 'chat_progress.reported', resource: executionId, metadata: { executionId, report: 'progress' } }).run();
+    });
+    if (!accepted) return 'busy';
+    await this.publishSnapshotForExecution(workspaceId, executionId);
+    // The report turn runs outside an HTTP request; the workspace and model runtime resolve without one.
+    this.schedule({} as Request, 'personal', executionId);
+    return 'reported';
+  }
+
   private async executeProjectTaskControlTool(request: Request, workspaceSlug: string, workspaceId: string, executionId: string, call: typeof agentToolCalls.$inferSelect): Promise<void> {
     const input = call.input as { taskId?: unknown; questionId?: unknown; answer?: unknown };
     const taskId = typeof input?.taskId === 'string' ? input.taskId : '';

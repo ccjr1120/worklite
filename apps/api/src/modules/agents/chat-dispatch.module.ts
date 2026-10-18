@@ -7,9 +7,10 @@ import { ChatDispatchService } from './chat-dispatch.service';
 import { ChatDispatchController } from './chat-dispatch.controller';
 import { ChatConversationsService } from './chat-conversations.service';
 import { ChatTeamRunReportsService } from './chat-team-run-reports.service';
+import { ChatProgressReportsService } from './chat-progress-reports.service';
 
 @Module({
   imports: [WorkspaceModule, forwardRef(() => AgentsModule), forwardRef(() => AgentTeamsModule), forwardRef(() => RunsModule)],
-  providers: [ChatDispatchService, ChatConversationsService, ChatTeamRunReportsService], controllers: [ChatDispatchController], exports: [ChatDispatchService],
+  providers: [ChatDispatchService, ChatConversationsService, ChatTeamRunReportsService, ChatProgressReportsService], controllers: [ChatDispatchController], exports: [ChatDispatchService],
 })
 export class ChatDispatchModule {}

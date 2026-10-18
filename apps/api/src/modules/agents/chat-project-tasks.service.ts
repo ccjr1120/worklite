@@ -23,8 +23,9 @@ const attachmentUploadUrl = (task: Task) => {
 };
 
 // The card stage is derived from the executor's own activity stream; no percentage is
-// fabricated because a project task has no known denominator.
-function deriveTaskStage(task: Task): ChatProjectTaskView['stage'] {
+// fabricated because a project task has no known denominator. Exported for the periodic
+// progress report, which summarizes active tasks with the same stage vocabulary.
+export function deriveTaskStage(task: Task): ChatProjectTaskView['stage'] {
   if (task.status === 'succeeded' || task.status === 'failed' || task.status === 'cancelled') return task.status;
   if (task.status === 'waiting_for_input' || task.status === 'waiting_for_recovery') return 'waiting';
   const latest = [...task.activities].reverse().find((activity) => typeof activity.phase === 'string');
