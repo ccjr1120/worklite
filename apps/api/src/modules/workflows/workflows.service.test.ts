@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Request } from 'express';
-import { createDb, initializeDatabase, workflowEditRevisions, workflowVersions, type Database, type StoredWorkflowDefinition } from '@worklite/db';
+import { createDb, initializeDatabase, artifacts, homeBoardAssignments, homeBoardCategories, workflowDrafts, workflowEditRevisions, workflowRuns, workflowSchedules, workflowVersions, workflows, type Database, type StoredWorkflowDefinition } from '@worklite/db';
 import type { WorkflowDetailView } from '@worklite/contracts';
 import { WorkspaceService } from '../teams/teams.service';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
@@ -198,6 +198,169 @@ describe('WorkflowsService draft Agent model replacement', () => {
       toModel: 'GLM/glm-5.3',
     })).rejects.toBeInstanceOf(BadRequestException);
     expect(assertPublicAgentModel).not.toHaveBeenCalled();
+  });
+});
+
+describe('WorkflowsService deletion', () => {
+  function addVersion(workflowId: string, id = 'wfv_delete_test') {
+    db!.insert(workflowVersions).values({
+      id,
+      workspaceId: 'workspace_personal',
+      workflowId,
+      version: 1,
+      published: true,
+      schemaVersion: 4,
+      nodes: definition().nodes,
+      definition: definition(),
+      publishedAt: new Date(),
+      publishedBy: 'You',
+    }).run();
+    return id;
+  }
+
+  function addRun(workflowId: string, workflowVersionId: string, status: 'queued' | 'running' | 'paused' | 'waiting_for_input' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out', id = 'run_delete_test') {
+    db!.insert(workflowRuns).values({
+      id,
+      workspaceId: 'workspace_personal',
+      workflowId,
+      workflowVersionId,
+      status,
+      input: {},
+      ...(status === 'succeeded' || status === 'failed' || status === 'cancelled' || status === 'timed_out' ? { finishedAt: new Date() } : {}),
+    }).run();
+    return id;
+  }
+
+  function addSchedule(workflowId: string, workflowVersionId: string, enabled: boolean) {
+    db!.insert(workflowSchedules).values({
+      id: 'wfs_delete_test',
+      workspaceId: 'workspace_personal',
+      workflowId,
+      workflowVersionId,
+      intervalSeconds: 300,
+      enabled,
+      running: false,
+      nextRunAt: new Date(Date.now() + 300_000),
+    }).run();
+  }
+
+  function addHomeAssignment(workflowId: string) {
+    db!.insert(homeBoardCategories).values({
+      id: 'hbcat_delete_test',
+      workspaceId: 'workspace_personal',
+      name: 'Delete test',
+      position: 0,
+    }).run();
+    db!.insert(homeBoardAssignments).values({
+      workspaceId: 'workspace_personal',
+      workflowId,
+      categoryId: 'hbcat_delete_test',
+    }).run();
+  }
+
+  async function expectWorkflowExists(workflowId: string) {
+    expect(await db!.select().from(workflows).where(eq(workflows.id, workflowId))).toHaveLength(1);
+  }
+
+  it('deletes a Workflow and retains its Artifact with detached references', async () => {
+    const { workflows: service, created } = await setup();
+    const versionId = addVersion(created.id);
+    const runId = addRun(created.id, versionId, 'succeeded');
+    db!.insert(artifacts).values({
+      id: 'art_delete_test',
+      workspaceId: 'workspace_personal',
+      workflowId: created.id,
+      runId,
+      name: 'Result',
+      type: 'json',
+      content: '{"ok":true}',
+    }).run();
+
+    await service.delete(request, 'personal', created.id);
+
+    expect(await db!.select().from(workflows).where(eq(workflows.id, created.id))).toHaveLength(0);
+    expect(await db!.select().from(workflowDrafts).where(eq(workflowDrafts.workflowId, created.id))).toHaveLength(0);
+    expect(await db!.select().from(workflowEditRevisions).where(eq(workflowEditRevisions.workflowId, created.id))).toHaveLength(0);
+    expect(await db!.select().from(workflowVersions).where(eq(workflowVersions.workflowId, created.id))).toHaveLength(0);
+    expect(await db!.select().from(workflowRuns).where(eq(workflowRuns.workflowId, created.id))).toHaveLength(0);
+    const [artifact] = await db!.select().from(artifacts).where(eq(artifacts.id, 'art_delete_test'));
+    expect(artifact).toMatchObject({ workflowId: null, runId: null });
+  });
+
+  it('rejects an active Run even when force is requested', async () => {
+    const { workflows: service, created } = await setup();
+    const versionId = addVersion(created.id);
+    const runId = addRun(created.id, versionId, 'running');
+
+    await expect(service.delete(request, 'personal', created.id, { force: true })).rejects.toThrow(`Run ${runId} is running`);
+
+    await expectWorkflowExists(created.id);
+    expect(await db!.select().from(workflowRuns).where(eq(workflowRuns.id, runId))).toHaveLength(1);
+  });
+
+  it('rejects an enabled schedule by default', async () => {
+    const { workflows: service, created } = await setup();
+    const versionId = addVersion(created.id);
+    addSchedule(created.id, versionId, true);
+
+    await expect(service.delete(request, 'personal', created.id)).rejects.toThrow('schedule is active');
+
+    await expectWorkflowExists(created.id);
+    expect(await db!.select().from(workflowSchedules).where(eq(workflowSchedules.workflowId, created.id))).toHaveLength(1);
+  });
+
+  it('rejects a Home board category assignment by default', async () => {
+    const { workflows: service, created } = await setup();
+    addVersion(created.id);
+    addHomeAssignment(created.id);
+
+    await expect(service.delete(request, 'personal', created.id)).rejects.toThrow('Home board category');
+
+    await expectWorkflowExists(created.id);
+    expect(await db!.select().from(homeBoardAssignments).where(eq(homeBoardAssignments.workflowId, created.id))).toHaveLength(1);
+  });
+
+  it('force deletes schedule, Home assignment, versions and run history together', async () => {
+    const { workflows: service, created } = await setup();
+    const versionId = addVersion(created.id);
+    addSchedule(created.id, versionId, true);
+    addHomeAssignment(created.id);
+    const runId = addRun(created.id, versionId, 'succeeded');
+    db!.insert(artifacts).values({
+      id: 'art_force_delete_test',
+      workspaceId: 'workspace_personal',
+      workflowId: created.id,
+      runId,
+      name: 'Forced result',
+      type: 'markdown',
+      content: '# Result',
+    }).run();
+
+    await service.delete(request, 'personal', created.id, { force: true });
+
+    expect(await db!.select().from(workflows).where(eq(workflows.id, created.id))).toHaveLength(0);
+    expect(await db!.select().from(workflowSchedules).where(eq(workflowSchedules.workflowId, created.id))).toHaveLength(0);
+    expect(await db!.select().from(homeBoardAssignments).where(eq(homeBoardAssignments.workflowId, created.id))).toHaveLength(0);
+    expect(await db!.select().from(workflowVersions).where(eq(workflowVersions.workflowId, created.id))).toHaveLength(0);
+    expect(await db!.select().from(workflowRuns).where(eq(workflowRuns.workflowId, created.id))).toHaveLength(0);
+    expect(await db!.select().from(homeBoardCategories).where(eq(homeBoardCategories.id, 'hbcat_delete_test'))).toHaveLength(1);
+    const [artifact] = await db!.select().from(artifacts).where(eq(artifacts.id, 'art_force_delete_test'));
+    expect(artifact).toMatchObject({ workflowId: null, runId: null });
+  });
+
+  it('rolls back every earlier delete when the transaction fails', async () => {
+    const { workflows: service, created } = await setup();
+    const versionId = addVersion(created.id);
+    addSchedule(created.id, versionId, true);
+    const runId = addRun(created.id, versionId, 'succeeded');
+    db!.$client.exec(`CREATE TRIGGER fail_workflow_run_delete BEFORE DELETE ON workflow_runs BEGIN SELECT RAISE(ABORT, 'forced workflow delete failure'); END`);
+
+    await expect(service.delete(request, 'personal', created.id, { force: true })).rejects.toThrow('forced workflow delete failure');
+
+    await expectWorkflowExists(created.id);
+    expect(await db!.select().from(workflowSchedules).where(eq(workflowSchedules.workflowId, created.id))).toHaveLength(1);
+    expect(await db!.select().from(workflowRuns).where(eq(workflowRuns.id, runId))).toHaveLength(1);
+    expect(await db!.select().from(workflowVersions).where(eq(workflowVersions.workflowId, created.id))).toHaveLength(1);
   });
 });
 

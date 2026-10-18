@@ -80,4 +80,21 @@ describe('initializeDatabase restart recovery', () => {
     expect(tools['scripts/replace-workflow-agent-models.mjs'].inputSchema.required).toEqual(['workflowId', 'fromModel', 'toModel']);
     expect(chat.systemPrompt).toContain('replace_workflow_agent_models');
   });
+
+  it('registers the guarded Workflow deletion platform tool', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+
+    const [script] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/delete-workflow.mjs'))).limit(1);
+    const [manifest] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/tools.json'))).limit(1);
+    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
+
+    expect(script.content).toContain("raw.confirm !== true");
+    expect(script.content).toContain("method: 'DELETE'");
+    const tools = JSON.parse(manifest.content) as Record<string, { name: string; inputSchema: { required: string[]; properties: Record<string, { default?: boolean }> } }>;
+    expect(tools['scripts/delete-workflow.mjs'].name).toBe('delete_workflow');
+    expect(tools['scripts/delete-workflow.mjs'].inputSchema.required).toEqual(['workflowId', 'confirm']);
+    expect(tools['scripts/delete-workflow.mjs'].inputSchema.properties.force.default).toBe(false);
+    expect(chat.systemPrompt).toContain('delete_workflow');
+  });
 });

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import type { ApplyWorkflowDraftOperationsRequest, CreateWorkflowRequest, ImportWorkflowRequest, ReplaceWorkflowDraftAgentModelsRequest } from '@worklite/contracts';
 import { WorkflowSchedulesService } from './workflow-schedules.service';
@@ -39,8 +39,8 @@ export class WorkflowsController {
   }
 
   @Delete(':workflowId')
-  delete(@Req() request: Request, @Param('workflowId') workflowId: string) {
-    return this.workflows.delete(request, 'personal', workflowId);
+  delete(@Req() request: Request, @Param('workflowId') workflowId: string, @Query('force') force?: string) {
+    return this.workflows.delete(request, 'personal', workflowId, { force: force === 'true' });
   }
 
   @Get(':workflowId/schedule')

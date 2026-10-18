@@ -208,7 +208,7 @@ async function copyData(source, destination, moduleRoot) {
         mkdirSync(dirname(to), { recursive: true });
         const header = Buffer.alloc(16); const fd = openSync(from, 'r');
         const { readSync } = await import('node:fs'); readSync(fd, header, 0, 16, 0); closeSync(fd);
-        if (header.toString() === 'SQLite format 3\0') { const database = new SQLite(from, { readonly: true }); try { await database.backup(to); } finally { database.close(); } }
+        if (header.toString() === 'SQLite format 3\0') { const database = new SQLite(from, { readonly: true }); try { await database.backup(to, { progress: () => 0x7fffffff }); } finally { database.close(); } }
         else cpSync(from, to);
       }
     }

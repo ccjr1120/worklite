@@ -20,6 +20,7 @@ import type {
 } from '@worklite/contracts';
 import {
   emptyWorkflowDefinition,
+  homeBoardAssignments,
   workflowDrafts,
   workflowEditRevisions,
   workflowVersions,
@@ -137,13 +138,24 @@ export class WorkflowsService {
     return this.create(request, workspaceSlug, { name, definition });
   }
 
-  async delete(request: Request, workspaceSlug: string, workflowId: string): Promise<void> {
+  async delete(request: Request, workspaceSlug: string, workflowId: string, options: { force?: boolean } = {}): Promise<void> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const workflow = await this.findWorkflow(workspace.id, workflowId);
     if (!workflow) throw new NotFoundException('Workflow not found');
     await this.db.transaction((transaction) => {
+      const scope = and(eq(workflowRuns.workspaceId, workspace.id), eq(workflowRuns.workflowId, workflowId));
+      const [activeRun] = transaction.select({ id: workflowRuns.id, status: workflowRuns.status }).from(workflowRuns)
+        .where(and(scope, inArray(workflowRuns.status, ['queued', 'running', 'paused', 'waiting_for_input']))).limit(1).all();
+      if (activeRun) throw new ConflictException(`Cannot delete this Workflow while Run ${activeRun.id} is ${activeRun.status}. Wait for it to finish or cancel it first.`);
+      const [schedule] = transaction.select().from(workflowSchedules)
+        .where(and(eq(workflowSchedules.workspaceId, workspace.id), eq(workflowSchedules.workflowId, workflowId))).limit(1).all();
+      if (!options.force && schedule && (schedule.enabled || schedule.running)) throw new ConflictException('Cannot delete this Workflow while its schedule is active. Disable the Timer and publish the change, or retry with force=true.');
+      const [assignment] = transaction.select().from(homeBoardAssignments)
+        .where(and(eq(homeBoardAssignments.workspaceId, workspace.id), eq(homeBoardAssignments.workflowId, workflowId))).limit(1).all();
+      if (!options.force && assignment) throw new ConflictException('Cannot delete this Workflow while it is assigned to a Home board category. Remove the assignment or retry with force=true.');
       transaction.delete(workflowSchedules).where(and(eq(workflowSchedules.workspaceId, workspace.id), eq(workflowSchedules.workflowId, workflowId))).run();
-      transaction.delete(workflowRuns).where(and(eq(workflowRuns.workspaceId, workspace.id), eq(workflowRuns.workflowId, workflowId))).run();
+      transaction.delete(homeBoardAssignments).where(and(eq(homeBoardAssignments.workspaceId, workspace.id), eq(homeBoardAssignments.workflowId, workflowId))).run();
+      transaction.delete(workflowRuns).where(scope).run();
       transaction.delete(workflowEditRevisions).where(and(eq(workflowEditRevisions.workspaceId, workspace.id), eq(workflowEditRevisions.workflowId, workflowId))).run();
       transaction.delete(workflowDrafts).where(and(eq(workflowDrafts.workspaceId, workspace.id), eq(workflowDrafts.workflowId, workflowId))).run();
       transaction.delete(workflowVersions).where(and(eq(workflowVersions.workspaceId, workspace.id), eq(workflowVersions.workflowId, workflowId))).run();
