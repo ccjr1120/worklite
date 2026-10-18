@@ -10,6 +10,7 @@ import type { SkillScriptRunnerService } from '../skills/skill-script-runner.ser
 import type { McpClientService } from '../mcp-servers/mcp-client.service';
 import { WorkflowSchedulesService } from './workflow-schedules.service';
 import { WorkflowsService } from './workflows.service';
+import { HomeBoardCategoriesService } from '../home/home-board-categories.service';
 
 let db: Database | undefined;
 
@@ -60,7 +61,7 @@ async function setup(assertPublicAgentModel = vi.fn<(model: string) => Promise<v
   const resources = { assertPublicAgentModel } as unknown as WorkspaceResourcesService;
   const workflows = new WorkflowsService(db, workspaces, {} as WorkflowSchedulesService, resources);
   const created = await workflows.create(request, 'personal', { name: 'Model repair', definition: definition() });
-  return { workflows, created, assertPublicAgentModel };
+  return { workflows, created, assertPublicAgentModel, workspaces };
 }
 
 function node(view: WorkflowDetailView, id: string) {
@@ -318,6 +319,26 @@ describe('WorkflowsService deletion', () => {
 
     await expectWorkflowExists(created.id);
     expect(await db!.select().from(homeBoardAssignments).where(eq(homeBoardAssignments.workflowId, created.id))).toHaveLength(1);
+  });
+
+  it('deletes without force after a Home board assignment is removed', async () => {
+    const { workflows: service, created, workspaces } = await setup();
+    addVersion(created.id);
+    addHomeAssignment(created.id);
+    const home = new HomeBoardCategoriesService(db!, workspaces);
+
+    await expect(service.delete(request, 'personal', created.id)).rejects.toThrow('Home board category');
+
+    const preferences = await home.assign(request, { workflowId: created.id, categoryId: null });
+    expect(preferences.categories).toHaveLength(1);
+    expect(preferences.categories[0]).toMatchObject({ id: 'hbcat_delete_test', workflowIds: [] });
+    expect(await db!.select().from(homeBoardAssignments).where(eq(homeBoardAssignments.workflowId, created.id))).toHaveLength(0);
+
+    await service.delete(request, 'personal', created.id);
+
+    expect(await db!.select().from(workflows).where(eq(workflows.id, created.id))).toHaveLength(0);
+    expect(await db!.select().from(homeBoardAssignments).where(eq(homeBoardAssignments.workflowId, created.id))).toHaveLength(0);
+    expect(await db!.select().from(homeBoardCategories).where(eq(homeBoardCategories.id, 'hbcat_delete_test'))).toHaveLength(1);
   });
 
   it('force deletes schedule, Home assignment, versions and run history together', async () => {

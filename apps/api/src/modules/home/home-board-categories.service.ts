@@ -76,8 +76,12 @@ export class HomeBoardCategoriesService {
     if (typeof workflowId !== 'string' || !workflowId) throw new BadRequestException('A Workflow id is required.');
     if (input.categoryId !== null && (typeof input.categoryId !== 'string' || !input.categoryId)) throw new BadRequestException('A category id or null is required.');
 
-    await this.getDashboardWorkflow(workspace.id, workflowId);
-    if (input.categoryId !== null) await this.getCategory(workspace.id, input.categoryId);
+    if (input.categoryId === null) {
+      await this.getWorkflow(workspace.id, workflowId);
+    } else {
+      await this.getDashboardWorkflow(workspace.id, workflowId);
+      await this.getCategory(workspace.id, input.categoryId);
+    }
 
     const categoryId = input.categoryId;
     const now = new Date();
@@ -108,9 +112,14 @@ export class HomeBoardCategoriesService {
     return category;
   }
 
-  private async getDashboardWorkflow(workspaceId: string, workflowId: string) {
+  private async getWorkflow(workspaceId: string, workflowId: string) {
     const [workflow] = await this.db.select({ id: workflows.id }).from(workflows).where(and(eq(workflows.workspaceId, workspaceId), eq(workflows.id, workflowId))).limit(1);
     if (!workflow) throw new NotFoundException('Workflow not found.');
+    return workflow;
+  }
+
+  private async getDashboardWorkflow(workspaceId: string, workflowId: string) {
+    await this.getWorkflow(workspaceId, workflowId);
     const [version] = await this.db.select({ definition: workflowVersions.definition }).from(workflowVersions)
       .where(and(eq(workflowVersions.workspaceId, workspaceId), eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.published, true)))
       .orderBy(desc(workflowVersions.version))
