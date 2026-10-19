@@ -50,6 +50,7 @@ export function AgentTeamGroupChatPage({ groupId }: { groupId: string }) {
   const [activeValue, setActiveValue] = useState('');
   const [directoryDialogOpen, setDirectoryDialogOpen] = useState(false);
   const imeCompositionRef = useRef({ active: false, endedAt: 0 });
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (!groupId) return;
@@ -62,7 +63,10 @@ export function AgentTeamGroupChatPage({ groupId }: { groupId: string }) {
     return () => events.close();
   }, [groupId, groupQuery.data?.teamId, queryClient]);
 
-  const roles = useMemo(() => teamQuery.data?.roles.map((role) => role.role) ?? ROLE_ORDER, [teamQuery.data?.roles]);
+  const roles = useMemo(() => {
+    const configured = teamQuery.data?.roles.map((role) => role.role) ?? ROLE_ORDER;
+    return ['team-manager' as AgentTeamRoleId, ...configured.filter((role) => role !== 'team-manager')];
+  }, [teamQuery.data?.roles]);
   const roleName = (role: string) => {
     const configured = teamQuery.data?.roles.find((item) => item.role === role);
     return configured?.displayName ?? (ROLE_ORDER.includes(role) ? t(`role.${roleTranslationKey(role)}`) : role);
@@ -79,6 +83,7 @@ export function AgentTeamGroupChatPage({ groupId }: { groupId: string }) {
     setDraft(atIndex >= 0 ? draft.slice(0, atIndex) : draft);
     setRecipientToken(role);
     setMentionDismissed(true);
+    composerInputRef.current?.focus();
   }
 
   function handleCompositionStart() {
@@ -302,6 +307,7 @@ export function AgentTeamGroupChatPage({ groupId }: { groupId: string }) {
                   </span>
                 ) : null}
                 <PromptInputTextarea
+                  ref={composerInputRef}
                   className="min-w-32 basis-40 border-0 bg-transparent px-1 shadow-none focus:border-transparent focus:ring-0"
                   id="agent-team-group-message"
                   name="group-message"

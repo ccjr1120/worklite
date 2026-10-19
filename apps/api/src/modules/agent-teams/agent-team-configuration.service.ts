@@ -50,10 +50,12 @@ export class AgentTeamConfigurationService {
     }
     const roles = input.roles === undefined ? team.roles : await this.resolveRoles(workspaceId, input.roles);
     if (input.roles !== undefined) {
+      // Protection means non-deletable with a fixed typed tool set, not a locked model:
+      // the Team Manager publicModelId stays configurable through the Team save path.
+      const comparable = (role: StoredAgentTeamRoleConfiguration) => JSON.stringify({ ...toPublicRole(role), publicModelId: '' });
       const protectedRole = team.roles.find((role) => role.role === 'team-manager');
       const requestedProtectedRole = roles.find((role) => role.role === 'team-manager');
-      if (!protectedRole || !requestedProtectedRole
-        || JSON.stringify(toPublicRole(protectedRole)) !== JSON.stringify(toPublicRole(requestedProtectedRole))) {
+      if (!protectedRole || !requestedProtectedRole || comparable(protectedRole) !== comparable(requestedProtectedRole)) {
         throw new BadRequestException('The Team Manager role is protected.');
       }
     }

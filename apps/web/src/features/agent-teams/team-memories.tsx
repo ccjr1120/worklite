@@ -1,40 +1,31 @@
-import { useState, type FormEvent } from 'react';
+import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import type { AgentTeamRoleId } from '@worklite/contracts';
 import { api } from '@/api/client';
-import { agentTeamMemoriesQueryKey, useAgentTeamMemoriesQuery, useAgentTeamQuery, useAgentTeamRepositoriesQuery } from '@/api/queries';
+import { agentTeamMemoriesQueryKey, useAgentTeamMemoriesQuery, useAgentTeamRepositoriesQuery } from '@/api/queries';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 
 const TEAM_SCOPE = '__team_scope__';
-const ALL_ROLES = '__all_roles__';
-const BUILT_IN_ROLE_IDS = ['planner', 'test_designer', 'developer', 'test_author', 'test_runner', 'reviewer', 'worktree-manager', 'team-manager'];
 
+// Rendered inside the Team Manager section of the configuration form, so every
+// control is type="button" and creation runs from click handlers instead of a
+// nested form element.
 export function TeamMemoriesSettings({ teamId }: { teamId: string }) {
   const { t } = useTranslation('agentTeams');
   const queryClient = useQueryClient();
   const memoriesQuery = useAgentTeamMemoriesQuery(teamId);
-  const teamQuery = useAgentTeamQuery('personal', teamId);
   const repositoriesQuery = useAgentTeamRepositoriesQuery(teamId);
   const [content, setContent] = useState('');
   const [repositoryId, setRepositoryId] = useState(TEAM_SCOPE);
-  const [role, setRole] = useState(ALL_ROLES);
   const [editingId, setEditingId] = useState('');
   const [editContent, setEditContent] = useState('');
   const [workingId, setWorkingId] = useState('');
   const [error, setError] = useState('');
 
-  function roleName(role: string): string {
-    const configured = teamQuery.data?.roles.find((item) => item.role === role);
-    if (configured?.displayName) return configured.displayName;
-    return BUILT_IN_ROLE_IDS.includes(role) ? t(`role.${role.replaceAll('-', '_')}`) : role;
-  }
-
-  async function createMemory(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function createMemory() {
     const value = content.trim();
     if (!value || workingId) return;
     setWorkingId('create');
@@ -43,7 +34,7 @@ export function TeamMemoriesSettings({ teamId }: { teamId: string }) {
       await api.createAgentTeamMemory(teamId, {
         content: value,
         repositoryId: repositoryId === TEAM_SCOPE ? null : repositoryId,
-        role: role === ALL_ROLES ? null : role as AgentTeamRoleId,
+        role: null,
       });
       await queryClient.invalidateQueries({ queryKey: agentTeamMemoriesQueryKey(teamId) });
       setContent('');
@@ -86,13 +77,11 @@ export function TeamMemoriesSettings({ teamId }: { teamId: string }) {
   }
 
   return (
-    <section className="mt-4 min-w-0 space-y-4 rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-memories">
-      <div>
-        <h2 id="agent-team-memories" className="text-sm font-semibold">{t('memories.title')}</h2>
-        <p className="mt-1 text-[13px] text-muted-foreground">{t('memories.description')}</p>
-      </div>
-      {error ? <p className="text-[13px] text-danger" role="alert">{error}</p> : null}
-      <form className="space-y-3" onSubmit={(event) => void createMemory(event)}>
+    <div className="mt-4 border-t border-border pt-4" aria-labelledby="agent-team-memories">
+      <h3 id="agent-team-memories" className="text-sm font-semibold">{t('memories.title')}</h3>
+      <p className="mt-1 text-[13px] text-muted-foreground">{t('memories.description')}</p>
+      {error ? <p className="mt-2 text-[13px] text-danger" role="alert">{error}</p> : null}
+      <div className="mt-3 space-y-3">
         <Field label={t('memories.content')} htmlFor="agent-team-memory-content">
           <Textarea id="agent-team-memory-content" className="min-h-20" value={content} onChange={(event) => setContent(event.target.value)} placeholder={t('memories.placeholder')} />
         </Field>
@@ -106,29 +95,20 @@ export function TeamMemoriesSettings({ teamId }: { teamId: string }) {
               </SelectContent>
             </Select>
           </Field>
-          <Field label={t('memories.role')} htmlFor="agent-team-memory-role">
-            <Select value={role} onValueChange={setRole}>
-              <SelectTrigger id="agent-team-memory-role"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_ROLES}>{t('memories.allRoles')}</SelectItem>
-                {(teamQuery.data?.roles ?? []).map((item) => <SelectItem key={item.role} value={item.role}>{roleName(item.role)}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </Field>
         </div>
-        <Button type="submit" size="compact" disabled={!content.trim() || workingId === 'create'}>
+        <Button type="button" size="compact" disabled={!content.trim() || workingId === 'create'} onClick={() => void createMemory()}>
           {workingId === 'create' ? t('memories.saving') : t('memories.add')}
         </Button>
-      </form>
+      </div>
 
-      {memoriesQuery.isLoading ? <p className="text-[13px] text-muted-foreground">{t('memories.loading')}</p> : null}
-      {memoriesQuery.isError ? <p className="text-[13px] text-danger">{t('memories.loadFailed')}</p> : null}
-      {!memoriesQuery.isLoading && !memoriesQuery.isError && (memoriesQuery.data ?? []).length === 0 ? <p className="text-[13px] text-muted-foreground">{t('memories.empty')}</p> : null}
-      <ul className="divide-y divide-border rounded-lg border border-border">
+      {memoriesQuery.isLoading ? <p className="mt-3 text-[13px] text-muted-foreground">{t('memories.loading')}</p> : null}
+      {memoriesQuery.isError ? <p className="mt-3 text-[13px] text-danger">{t('memories.loadFailed')}</p> : null}
+      {!memoriesQuery.isLoading && !memoriesQuery.isError && (memoriesQuery.data ?? []).length === 0 ? <p className="mt-3 text-[13px] text-muted-foreground">{t('memories.empty')}</p> : null}
+      <ul className="mt-3 divide-y divide-border rounded-lg border border-border empty:hidden">
         {(memoriesQuery.data ?? []).map((memory) => (
           <li key={memory.id} className="space-y-2 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-              <span>{memory.repositoryName ? `${memory.repositoryName} · ${memory.repositoryDirectory}` : t('memories.allRepositories')} · {memory.role ? roleName(memory.role) : t('memories.allRoles')}</span>
+              <span>{memory.repositoryName ? `${memory.repositoryName} · ${memory.repositoryDirectory}` : t('memories.allRepositories')}</span>
               <span>{new Date(memory.updatedAt).toLocaleString()}</span>
             </div>
             {editingId === memory.id ? (
@@ -137,15 +117,15 @@ export function TeamMemoriesSettings({ teamId }: { teamId: string }) {
             <div className="flex flex-wrap gap-2">
               {editingId === memory.id ? (
                 <>
-                  <Button size="compact" disabled={!editContent.trim() || workingId === memory.id} onClick={() => void saveMemory(memory.id)}>{workingId === memory.id ? t('memories.saving') : t('memories.save')}</Button>
-                  <Button size="compact" variant="outline" disabled={workingId === memory.id} onClick={() => { setEditingId(''); setEditContent(''); }}>{t('memories.cancel')}</Button>
+                  <Button type="button" size="compact" disabled={!editContent.trim() || workingId === memory.id} onClick={() => void saveMemory(memory.id)}>{workingId === memory.id ? t('memories.saving') : t('memories.save')}</Button>
+                  <Button type="button" size="compact" variant="outline" disabled={workingId === memory.id} onClick={() => { setEditingId(''); setEditContent(''); }}>{t('memories.cancel')}</Button>
                 </>
-              ) : <Button size="compact" variant="outline" disabled={Boolean(workingId)} onClick={() => { setEditingId(memory.id); setEditContent(memory.content); }}>{t('memories.edit')}</Button>}
-              <Button size="compact" variant="outline" disabled={Boolean(workingId)} onClick={() => void removeMemory(memory.id)}>{workingId === memory.id ? t('memories.deleting') : t('memories.delete')}</Button>
+              ) : <Button type="button" size="compact" variant="outline" disabled={Boolean(workingId)} onClick={() => { setEditingId(memory.id); setEditContent(memory.content); }}>{t('memories.edit')}</Button>}
+              <Button type="button" size="compact" variant="outline" disabled={Boolean(workingId)} onClick={() => void removeMemory(memory.id)}>{workingId === memory.id ? t('memories.deleting') : t('memories.delete')}</Button>
             </div>
           </li>
         ))}
       </ul>
-    </section>
+    </div>
   );
 }

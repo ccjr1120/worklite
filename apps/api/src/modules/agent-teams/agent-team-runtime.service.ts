@@ -3171,10 +3171,6 @@ function taskContext(request: AgentTeamTaskRequest, executor: boolean, correctio
     : request.groupContext?.repositories.map((repository) => repository.id) ?? [];
   const selectedRepositorySet = new Set(selectedRepositoryIds);
   const selectedRepositories = request.groupContext?.repositories.filter((repository) => selectedRepositorySet.has(repository.id)) ?? [];
-  const selectedMemoryRepositorySet = new Set(selectedRepositories.map((repository) => repository.memoryRepositoryId));
-  const selectedMemories = request.groupContext?.memories.filter((memory) =>
-    (!memory.role || memory.role === request.taskDefinition.role)
-    && (!memory.repositoryId || selectedMemoryRepositorySet.has(memory.repositoryId))) ?? [];
   return {
     ...(correction ? { correction } : {}),
     task: {
@@ -3217,7 +3213,6 @@ function taskContext(request: AgentTeamTaskRequest, executor: boolean, correctio
         ...(request.groupContext.knownRepositories?.length
           ? { knownRepositories: request.groupContext.knownRepositories }
           : {}),
-        memories: selectedMemories.map(({ id, content }) => ({ id, content })),
         transcriptPolicy: 'The group transcript is visible to the user but omitted here. Only this request and explicitly handed-off context belong to your input.',
       },
     } : {}),
@@ -3231,8 +3226,12 @@ function groupRolePromptAddition(
   if (!request.groupContext || !isGroupOrchestrationVersion(snapshot.orchestrationVersion)) return undefined;
   if (snapshot.orchestrationVersion === 7 && request.taskDefinition.role === 'team-manager') {
     const roles = snapshot.roles.map((role) => `${role.role}${role.displayName ? ` (${role.displayName})` : ''}`).join(', ');
+    const workingPractice = snapshot.workingPractice?.trim();
+    const memories = teamManagerMemoryProjection(request.groupContext?.memories ?? []);
     return [
       'This is the narrowed Chat inside Agent Team. Manage only this Team’s roles, working practice, concurrency setting and Team memories through the provided Team management tools.',
+      ...(workingPractice ? [`Team working practice:\n${workingPractice}`] : []),
+      ...(memories ? [`Team memories:\n${memories}`] : []),
       'Do not request or reveal project paths, read or change project files, run Commands, use Skills, call MCP servers, manage Chat memory, or change unrelated workspace resources.',
       'The Team Manager role is protected. Changes to Team configuration apply to future Runs; the current Run keeps its captured version. A newly created role can receive work in a later message after it appears in the active role list.',
       `Roles captured by this Run: ${roles}.`,
@@ -3240,14 +3239,32 @@ function groupRolePromptAddition(
     ].join('\n');
   }
   return [
-    snapshot.workingPractice?.trim() ? `Team working practice:\n${snapshot.workingPractice.trim()}` : '',
     'Group messages are scoped by recipient and repository. Do not assume another role can see your message or that a visible transcript entry is model input.',
     'Pause, resume, cancel and retry requests are handled by the control service and are never normal task instructions.',
-    'Team long-term memory is separate from Chat memory. Only the Team Manager may add, update, or delete Team memory; other roles must not claim to save memory.',
+    'Team long-term memory is separate from Chat memory and belongs to the Team Manager. Only the Team Manager receives Team memories and may add, update, or delete them; other roles must not claim to read or save memory.',
     request.taskDefinition.role === 'worktree-manager'
       ? 'In orchestration v6 and v7, provide advisory per-project Git strategy guidance only. Do not create, merge, or clean branches or worktrees; the project executor chooses and performs Git operations after inspecting each project.'
       : '',
   ].filter(Boolean).join('\n\n');
+}
+
+// Team memories belong to the Team Manager: its turns receive a bounded
+// projection of the captured Team/repository-scoped memories, mirroring Chat's
+// memory projection. Legacy role-scoped entries are never injected.
+const TEAM_MEMORY_PROMPT_ENTRIES = 50;
+const TEAM_MEMORY_PROMPT_CHARS = 6000;
+
+function teamManagerMemoryProjection(memories: Array<{ role: string | null; content: string }>): string {
+  const lines: string[] = [];
+  let total = 0;
+  for (const memory of memories) {
+    if (memory.role) continue;
+    const content = memory.content.trim();
+    if (!content || lines.length >= TEAM_MEMORY_PROMPT_ENTRIES || total + content.length > TEAM_MEMORY_PROMPT_CHARS) break;
+    lines.push(`- ${content}`);
+    total += content.length;
+  }
+  return lines.join('\n');
 }
 
 function modeAuthorization(mode: AgentTeamMode): string {

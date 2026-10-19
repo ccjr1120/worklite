@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, asc, desc, eq } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
-import type { AgentTeamRoleId, AgentTeamRoleConfiguration, AgentTeamView } from '@worklite/contracts';
+import type { AgentTeamRoleConfiguration, AgentTeamView } from '@worklite/contracts';
 import {
   agentTeamGroupEvents,
   agentTeamMemories,
@@ -11,7 +11,7 @@ import {
 import type { GatewayToolDefinition, WorkflowAgentToolCall } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { AgentTeamConfigurationService } from './agent-team-configuration.service';
-import { BUILT_IN_AGENT_TEAM_ID, isValidAgentTeamRoleId } from './agent-team-configuration';
+import { BUILT_IN_AGENT_TEAM_ID } from './agent-team-configuration';
 
 const emptyObject = { type: 'object', additionalProperties: false, properties: {} };
 const string = { type: 'string' };
@@ -19,13 +19,13 @@ const strings = { type: 'array', items: string };
 
 const definitions: GatewayToolDefinition[] = [
   { name: 'team_get_configuration', description: 'Read current Agent Team settings, every active role configuration, and canonical repository ids and names for memory scope. Project directory paths are not returned.', inputSchema: emptyObject },
-  { name: 'team_update_settings', description: 'Update Team workingPractice and/or maxConcurrentRuns for future Runs.', inputSchema: { type: 'object', additionalProperties: false, properties: { workingPractice: { type: 'string', description: 'Shared Team working-practice text captured by future group Runs.' }, maxConcurrentRuns: { type: 'integer', minimum: 1, description: 'Maximum concurrent Runs; additional Runs queue FIFO.' } } } },
+  { name: 'team_update_settings', description: 'Update the Team Manager workingPractice and/or maxConcurrentRuns for future Runs.', inputSchema: { type: 'object', additionalProperties: false, properties: { workingPractice: { type: 'string', description: 'Team Manager working-practice text captured by future group Runs and injected into the Manager turns.' }, maxConcurrentRuns: { type: 'integer', minimum: 1, description: 'Maximum concurrent Runs; additional Runs queue FIFO.' } } } },
   { name: 'team_create_role', description: 'Create a configured Team work role. The server assigns its stable role id; provide a human-readable displayName. An empty publicModelId uses the Team default. New roles affect future Runs.', inputSchema: { type: 'object', additionalProperties: false, required: ['displayName', 'publicModelId', 'instructions'], properties: { displayName: string, publicModelId: { type: 'string', description: 'Gateway public model id, or an empty string to use the Team default.' }, instructions: string, entryPoints: { ...strings, description: 'Supported BMAD/TEA process entry points for this role.' }, skillIds: { ...strings, description: 'Current workspace Skill ids to capture for this role.' }, mcpServerIds: { ...strings, description: 'Current workspace MCP server ids to capture for this role.' }, toolNames: { ...strings, description: 'Allowed built-in tool names for this role.' }, executor: { type: 'string', enum: ['claude', 'codex'], description: 'Optional project executor; omit to use the WorkLite Agent.' } } } },
   { name: 'team_update_role', description: 'Update one active work role. Use its role id from team_get_configuration. Team Manager is protected and cannot be changed through this tool. Set executor to null to remove a project executor from a non-Developer role; Developer always uses Claude Code or Codex.', inputSchema: { type: 'object', additionalProperties: false, required: ['role'], properties: { role: { type: 'string', description: 'Active work-role id from team_get_configuration.' }, displayName: string, publicModelId: string, instructions: string, entryPoints: strings, skillIds: strings, mcpServerIds: strings, toolNames: strings, executor: { type: ['string', 'null'], enum: ['claude', 'codex', null], description: 'Set null to remove the project executor from a non-Developer role. Developer always remains project-executor-backed and defaults to Claude Code.' } } } },
-  { name: 'team_delete_role', description: 'Delete one work role. Its memory entries remain stored and are no longer injected into role context. Team Manager is protected.', inputSchema: { type: 'object', additionalProperties: false, required: ['role'], properties: { role: { type: 'string', description: 'Active work-role id from team_get_configuration.' } } } },
-  { name: 'team_list_memories', description: 'List Team long-term memories. Optionally filter by canonical repository id or role id from team_get_configuration.', inputSchema: { type: 'object', additionalProperties: false, properties: { repositoryId: { type: 'string', description: 'Canonical repository id from team_get_configuration.repositories.' }, role: { type: 'string', description: 'Active role id from team_get_configuration.roles.' } } } },
-  { name: 'team_create_memory', description: 'Create a Team memory, optionally scoped to a canonical repository and role. This is Team-only memory, separate from Chat memory.', inputSchema: { type: 'object', additionalProperties: false, required: ['content'], properties: { content: string, repositoryId: { type: 'string', description: 'Optional canonical repository id from team_get_configuration.repositories; omit for all repositories.' }, role: { type: 'string', description: 'Optional active role id from team_get_configuration.roles; omit for all roles.' } } } },
-  { name: 'team_update_memory', description: 'Update a Team memory content or its repository and role scope. Set a scope field to null to clear that scope.', inputSchema: { type: 'object', additionalProperties: false, required: ['memoryId'], properties: { memoryId: { type: 'string', description: 'Team memory id from team_list_memories.' }, content: string, repositoryId: { type: ['string', 'null'], description: 'Canonical repository id from team_get_configuration.repositories; null clears the scope.' }, role: { type: ['string', 'null'], description: 'Active role id from team_get_configuration.roles; null clears the scope.' } } } },
+  { name: 'team_delete_role', description: 'Delete one work role. Team Manager is protected.', inputSchema: { type: 'object', additionalProperties: false, required: ['role'], properties: { role: { type: 'string', description: 'Active work-role id from team_get_configuration.' } } } },
+  { name: 'team_list_memories', description: 'List Team long-term memories, optionally filtered by canonical repository id from team_get_configuration. Team memories belong to the Team Manager and are injected into its own turns only.', inputSchema: { type: 'object', additionalProperties: false, properties: { repositoryId: { type: 'string', description: 'Canonical repository id from team_get_configuration.repositories.' } } } },
+  { name: 'team_create_memory', description: 'Create a Team memory, optionally scoped to a canonical repository. This is Team Manager memory, separate from Chat memory.', inputSchema: { type: 'object', additionalProperties: false, required: ['content'], properties: { content: string, repositoryId: { type: 'string', description: 'Optional canonical repository id from team_get_configuration.repositories; omit for all repositories.' } } } },
+  { name: 'team_update_memory', description: 'Update a Team memory content or its repository scope. Set repositoryId to null to clear the scope.', inputSchema: { type: 'object', additionalProperties: false, required: ['memoryId'], properties: { memoryId: { type: 'string', description: 'Team memory id from team_list_memories.' }, content: string, repositoryId: { type: ['string', 'null'], description: 'Canonical repository id from team_get_configuration.repositories; null clears the scope.' } } } },
   { name: 'team_delete_memory', description: 'Delete one Team memory by id from team_list_memories.', inputSchema: { type: 'object', additionalProperties: false, required: ['memoryId'], properties: { memoryId: string } } },
 ];
 
@@ -99,28 +99,25 @@ export class AgentTeamManagerToolsService {
           .from(agentTeamMemories).leftJoin(agentTeamRepositories, eq(agentTeamRepositories.id, agentTeamMemories.repositoryId))
           .where(and(eq(agentTeamMemories.workspaceId, input.workspaceId), eq(agentTeamMemories.teamId, team.id)))
           .orderBy(desc(agentTeamMemories.updatedAt));
-        const role = optionalRole(args?.role);
         const repositoryId = args?.repositoryId === undefined ? undefined : requiredString(args.repositoryId, 'repositoryId');
-        return JSON.stringify(rows.filter(({ memory }) => (role === undefined || memory.role === role)
-        && (repositoryId === undefined || memory.repositoryId === repositoryId)).map(({ memory, repositoryName }) => ({
+        return JSON.stringify(rows.filter(({ memory }) => repositoryId === undefined || memory.repositoryId === repositoryId).map(({ memory, repositoryName }) => ({
           id: memory.id, repositoryId: memory.repositoryId, repositoryName: repositoryName ?? null,
-          role: memory.role, content: memory.content, sourceMessageId: memory.sourceMessageId,
+          content: memory.content, sourceMessageId: memory.sourceMessageId,
           createdAt: memory.createdAt?.toISOString() ?? null, updatedAt: memory.updatedAt?.toISOString() ?? null,
         })));
       }
       case 'team_create_memory': {
         const content = requiredString(args?.content, 'content');
         const repositoryId = optionalString(args?.repositoryId, 'repositoryId');
-        const role = optionalRole(args?.role);
-        await this.assertMemoryScope(input.workspaceId, team.id, repositoryId ?? null, role);
+        await this.assertMemoryScope(input.workspaceId, team.id, repositoryId ?? null);
         const id = `atmemory_${createHash('sha256').update(JSON.stringify([input.runId, input.taskKey, input.call.toolName, input.call.input])).digest('hex').slice(0, 32)}`;
         await this.db.insert(agentTeamMemories).values({
-          id, workspaceId: input.workspaceId, teamId: team.id, repositoryId: repositoryId ?? null, role: role ?? null,
+          id, workspaceId: input.workspaceId, teamId: team.id, repositoryId: repositoryId ?? null, role: null,
           content, sourceMessageId: input.sourceMessageId, createdAt: new Date(), updatedAt: new Date(),
         }).onConflictDoNothing();
         const [memory] = await this.db.select().from(agentTeamMemories).where(eq(agentTeamMemories.id, id)).limit(1);
         await this.appendMemoryEvent(input.groupId, { memoryId: id, operation: 'created' });
-        return JSON.stringify(memory ? { id: memory.id, content: memory.content, repositoryId: memory.repositoryId, role: memory.role } : { id });
+        return JSON.stringify(memory ? { id: memory.id, content: memory.content, repositoryId: memory.repositoryId } : { id });
       }
       case 'team_update_memory': {
         const memoryId = requiredString(args?.memoryId, 'memoryId');
@@ -130,12 +127,11 @@ export class AgentTeamManagerToolsService {
         if (!existing) throw new NotFoundException('Agent Team memory not found.');
         const content = args?.content === undefined ? existing.content : requiredString(args.content, 'content');
         const repositoryId = args?.repositoryId === undefined ? existing.repositoryId : optionalString(args.repositoryId, 'repositoryId') ?? null;
-        const role = args?.role === undefined ? existing.role : optionalRole(args.role) ?? null;
-        await this.assertMemoryScope(input.workspaceId, team.id, repositoryId, role);
-        const [updated] = await this.db.update(agentTeamMemories).set({ content, repositoryId, role, updatedAt: new Date() })
+        await this.assertMemoryScope(input.workspaceId, team.id, repositoryId);
+        const [updated] = await this.db.update(agentTeamMemories).set({ content, repositoryId, updatedAt: new Date() })
           .where(eq(agentTeamMemories.id, memoryId)).returning();
         await this.appendMemoryEvent(input.groupId, { memoryId, operation: 'updated' });
-        return JSON.stringify({ id: updated!.id, content: updated!.content, repositoryId: updated!.repositoryId, role: updated!.role });
+        return JSON.stringify({ id: updated!.id, content: updated!.content, repositoryId: updated!.repositoryId });
       }
       case 'team_delete_memory': {
         const memoryId = requiredString(args?.memoryId, 'memoryId');
@@ -151,16 +147,12 @@ export class AgentTeamManagerToolsService {
     }
   }
 
-  private async assertMemoryScope(workspaceId: string, teamId: string, repositoryId: string | null, role?: AgentTeamRoleId | null): Promise<void> {
+  private async assertMemoryScope(workspaceId: string, teamId: string, repositoryId: string | null): Promise<void> {
     if (repositoryId) {
       const [repository] = await this.db.select({ id: agentTeamRepositories.id }).from(agentTeamRepositories).where(and(
         eq(agentTeamRepositories.id, repositoryId), eq(agentTeamRepositories.teamId, teamId), eq(agentTeamRepositories.workspaceId, workspaceId),
       )).limit(1);
       if (!repository) throw new BadRequestException('The memory repository is not available for this Agent Team.');
-    }
-    if (role) {
-      const team = await this.configuration.getTeam(workspaceId, teamId);
-      if (!team.roles.some((item) => item.role === role)) throw new BadRequestException('Choose an active Team role for this memory.');
     }
   }
 
@@ -205,12 +197,6 @@ function optionalStrings(value: unknown, field: string): string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || !item.trim())) throw new BadRequestException(`${field} must be an array of non-empty strings.`);
   return [...new Set(value.map((item) => (item as string).trim()))];
-}
-
-function optionalRole(value: unknown): AgentTeamRoleId | undefined {
-  if (value === null || value === '') return undefined;
-  if (!isValidAgentTeamRoleId(value)) throw new BadRequestException('A valid Agent Team role id is required.');
-  return value;
 }
 
 function parseExecutor(value: unknown): 'claude' | 'codex' {

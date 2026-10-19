@@ -13,16 +13,13 @@ import { ApiError, api } from '@/api/client';
 import {
   agentTeamQueryKey,
   useAgentTeamQuery,
-  useMcpServersQuery,
   useModelProvidersQuery,
-  useSkillsQuery,
 } from '@/api/queries';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
 import { PageHeading } from '@/components/page-heading';
 import { SaveIndicator } from '@/components/save-indicator';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -36,30 +33,12 @@ import { queryClient } from '@/lib/query-client';
 const TEAM_MODEL_SENTINEL = '__team_default__';
 const DEFAULT_MAX_CONCURRENT_RUNS = 3;
 const BUILT_IN_ROLES: AgentTeamRoleId[] = ['planner', 'test_designer', 'developer', 'test_author', 'test_runner', 'reviewer', 'worktree-manager', 'team-manager'];
-const ROLE_TOOLS: Partial<Record<string, string[]>> = {
-  planner: ['read', 'glob', 'grep', 'process_reference'],
-  test_designer: ['read', 'glob', 'grep', 'process_reference'],
-  developer: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference'],
-  test_author: ['read', 'write', 'glob', 'grep', 'process_reference'],
-  test_runner: ['bash', 'read', 'write', 'glob', 'grep'],
-  reviewer: ['read', 'glob', 'grep', 'process_reference'],
-  'worktree-manager': ['read', 'glob', 'grep', 'process_reference'],
-  'team-manager': [],
-};
-const CUSTOM_ROLE_TOOLS = ['bash', 'read', 'write', 'glob', 'grep', 'process_reference'];
 const EXECUTORS: ProjectExecutor[] = ['claude', 'codex'];
-
-type EditableRoleFields = Pick<AgentTeamRoleConfiguration, 'instructions' | 'entryPoints' | 'skillIds' | 'mcpServerIds' | 'toolNames'>;
 
 function toDraftRoles(roles: readonly AgentTeamRoleConfiguration[]): AgentTeamRoleConfiguration[] {
   return roles.map((source) => ({
     ...source,
     publicModelId: source.publicModelId || TEAM_MODEL_SENTINEL,
-    instructions: source.instructions ?? '',
-    entryPoints: source.entryPoints ?? [],
-    skillIds: source.skillIds ?? [],
-    mcpServerIds: source.mcpServerIds ?? [],
-    toolNames: source.toolNames ?? [],
   }));
 }
 
@@ -114,111 +93,12 @@ function ModelSelect({ id, value, modelGroups, onChange, disabled }: {
   );
 }
 
-function AdvancedRoleFields({ idPrefix, tools, value, onChange }: {
-  idPrefix: string;
-  tools: string[];
-  value: EditableRoleFields;
-  onChange: (changes: Partial<EditableRoleFields>) => void;
-}) {
-  const { t } = useTranslation('agentTeams');
-  const skillsQuery = useSkillsQuery('personal');
-  const mcpServersQuery = useMcpServersQuery('personal');
-
-  function toggleSelection(selected: string[], item: string, checked: boolean) {
-    return checked ? [...selected, item] : selected.filter((existing) => existing !== item);
-  }
-
-  return (
-    <div className="mt-4 grid gap-4 xl:grid-cols-2">
-      <Field label={t('entryPoints.label')} htmlFor={`${idPrefix}-entry-points`}>
-        <Textarea
-          id={`${idPrefix}-entry-points`}
-          className="min-h-20"
-          value={value.entryPoints.join('\n')}
-          placeholder={t('entryPoints.placeholder')}
-          onChange={(event) => onChange({
-            entryPoints: event.target.value.split(/\r?\n/).map((line) => line.trim()),
-          })}
-        />
-      </Field>
-      <Field label={t('instructions.label')} htmlFor={`${idPrefix}-instructions`}>
-        <Textarea
-          id={`${idPrefix}-instructions`}
-          className="min-h-32"
-          value={value.instructions}
-          onChange={(event) => onChange({ instructions: event.target.value })}
-        />
-      </Field>
-      <fieldset className="min-w-0 space-y-2">
-        <legend className="text-xs font-medium text-foreground">{t('skills.label')}</legend>
-        {skillsQuery.isLoading ? <Skeleton className="h-20 w-full" /> : (skillsQuery.data ?? []).length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">{t('skills.empty')}</p>
-        ) : (skillsQuery.data ?? []).map((skill) => (
-          <label key={skill.id} htmlFor={`${idPrefix}-skill-${skill.id}`} className="flex min-w-0 items-start gap-2 text-[13px]">
-            <Checkbox
-              id={`${idPrefix}-skill-${skill.id}`}
-              className="mt-0.5"
-              checked={value.skillIds.includes(skill.id)}
-              onCheckedChange={(checked) => onChange({
-                skillIds: toggleSelection(value.skillIds, skill.id, checked === true),
-              })}
-            />
-            <span className="min-w-0">
-              <span className="block font-medium">{skill.name}</span>
-              <span className="block font-mono text-xs break-all text-muted-foreground">{skill.id}</span>
-            </span>
-          </label>
-        ))}
-      </fieldset>
-      <fieldset className="min-w-0 space-y-2">
-        <legend className="text-xs font-medium text-foreground">{t('mcpServers.label')}</legend>
-        {mcpServersQuery.isLoading ? <Skeleton className="h-20 w-full" /> : (mcpServersQuery.data ?? []).length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">{t('mcpServers.empty')}</p>
-        ) : (mcpServersQuery.data ?? []).map((server) => (
-          <label key={server.id} htmlFor={`${idPrefix}-mcp-${server.id}`} className="flex min-w-0 items-start gap-2 text-[13px]">
-            <Checkbox
-              id={`${idPrefix}-mcp-${server.id}`}
-              className="mt-0.5"
-              checked={value.mcpServerIds.includes(server.id)}
-              onCheckedChange={(checked) => onChange({
-                mcpServerIds: toggleSelection(value.mcpServerIds, server.id, checked === true),
-              })}
-            />
-            <span className="min-w-0">
-              <span className="block font-medium">{server.name}</span>
-              <span className="block font-mono text-xs break-all text-muted-foreground">{server.id}</span>
-            </span>
-          </label>
-        ))}
-      </fieldset>
-      <fieldset className="min-w-0 xl:col-span-2">
-        <legend className="text-xs font-medium text-foreground">{t('tools.label')}</legend>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {tools.map((tool) => (
-            <label key={tool} className="flex items-center gap-2 text-[13px]">
-              <Checkbox
-                checked={value.toolNames.includes(tool)}
-                onCheckedChange={(checked) => onChange({
-                  toolNames: toggleSelection(value.toolNames, tool, checked === true),
-                })}
-              />
-              <span className="font-mono break-all">{tool}</span>
-            </label>
-          ))}
-        </div>
-      </fieldset>
-    </div>
-  );
-}
-
 export function TeamDetailPage({ teamId, view }: { teamId: string; view: 'records' | 'configuration' }) {
   const { t } = useTranslation('agentTeams');
   const navigate = useNavigate();
   const workspaceSlug = 'personal';
   const teamQuery = useAgentTeamQuery(workspaceSlug, teamId);
   const providersQuery = useModelProvidersQuery(workspaceSlug);
-  const skillsQuery = useSkillsQuery(workspaceSlug);
-  const mcpServersQuery = useMcpServersQuery(workspaceSlug);
   const [draftTeamId, setDraftTeamId] = useState('');
   const [roleDrafts, setRoleDrafts] = useState<AgentTeamRoleConfiguration[]>([]);
   const [maxConcurrentRunsDraft, setMaxConcurrentRunsDraft] = useState(String(DEFAULT_MAX_CONCURRENT_RUNS));
@@ -347,14 +227,11 @@ export function TeamDetailPage({ teamId, view }: { teamId: string; view: 'record
   }
 
   const team = teamQuery.data;
-  const resourceErrors = [
-    providersQuery.isError ? { label: t('resources.providers'), refetch: providersQuery.refetch } : null,
-    skillsQuery.isError ? { label: t('resources.skills'), refetch: skillsQuery.refetch } : null,
-    mcpServersQuery.isError ? { label: t('resources.mcpServers'), refetch: mcpServersQuery.refetch } : null,
-  ].filter(Boolean) as Array<{ label: string; refetch: () => Promise<unknown> }>;
   const crumbs = view === 'configuration'
     ? [{ label: t('title'), to: `/agent-teams/${teamId}` }, { label: team.name }, { label: t('configuration.title') }]
     : [{ label: t('title') }, { label: team.name }];
+  const managerRole = roleDrafts.find((role) => role.role === 'team-manager');
+  const workRoles = roleDrafts.filter((role) => role.role !== 'team-manager');
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
@@ -394,19 +271,14 @@ export function TeamDetailPage({ teamId, view }: { teamId: string; view: 'record
       />
       {view === 'records' ? <TeamRecords teamId={teamId} /> : (
         <div className="mt-6">
-          {resourceErrors.length > 0 ? (
-            <div className="space-y-3">
-              {resourceErrors.map((resource) => (
-                <ErrorState
-                  key={resource.label}
-                  title={resource.label}
-                  description={t('resources.loadFailed')}
-                  onAction={() => void resource.refetch()}
-                />
-              ))}
-            </div>
+          {providersQuery.isError ? (
+            <ErrorState
+              title={t('resources.providers')}
+              description={t('resources.loadFailed')}
+              onAction={() => void providersQuery.refetch()}
+            />
           ) : null}
-          <section className="min-w-0 rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-process">
+          <section className="mt-4 min-w-0 rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-process">
             <h2 id="agent-team-process" className="text-sm font-semibold">{t('team.process')}</h2>
             <dl className="mt-3 grid gap-3 text-[13px] sm:grid-cols-2">
               <div>
@@ -440,25 +312,41 @@ export function TeamDetailPage({ teamId, view }: { teamId: string; view: 'record
                 />
               </Field>
             </section>
-            <section className="min-w-0 rounded-xl border border-border bg-surface p-4 shadow-xs">
-              <Field label={t('team.workingPractice.label')} htmlFor="agent-team-working-practice" hint={t('team.workingPractice.hint')}>
-                <Textarea
-                  id="agent-team-working-practice"
-                  className="min-h-28"
-                  value={workingPracticeDraft}
-                  onChange={(event) => {
-                    setWorkingPracticeDraft(event.target.value);
-                    markUnsaved();
-                  }}
-                />
-              </Field>
-            </section>
+            {managerRole ? (
+              <section className="min-w-0 rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="agent-team-manager">
+                <h2 id="agent-team-manager" className="text-sm font-semibold">{t('role.team_manager')}</h2>
+                <div className="mt-3 max-w-md">
+                  <Field label={t('model.label')} htmlFor="agent-team-model-team-manager">
+                    <ModelSelect
+                      id="agent-team-model-team-manager"
+                      value={managerRole.publicModelId}
+                      modelGroups={modelGroups}
+                      onChange={(value) => updateRole('team-manager', { publicModelId: value })}
+                    />
+                  </Field>
+                </div>
+                <div className="mt-4 border-t border-border pt-4">
+                  <Field label={t('team.workingPractice.label')} htmlFor="agent-team-working-practice" hint={t('team.workingPractice.hint')}>
+                    <Textarea
+                      id="agent-team-working-practice"
+                      className="min-h-28"
+                      value={workingPracticeDraft}
+                      onChange={(event) => {
+                        setWorkingPracticeDraft(event.target.value);
+                        markUnsaved();
+                      }}
+                    />
+                  </Field>
+                </div>
+                <TeamMemoriesSettings teamId={team.id} />
+              </section>
+            ) : null}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-sm font-semibold">{t('team.roles')}</h2>
               {saveNotice ? <p role="status">{saveNotice}</p> : null}
             </div>
             <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
-              {roleDrafts.map((role) => (
+              {workRoles.map((role) => (
                 <section key={role.role} className="min-w-0 p-4" aria-labelledby={`agent-team-role-${role.role}`}>
                   <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(10rem,0.7fr)_minmax(0,1fr)] sm:items-center">
                     <h3 id={`agent-team-role-${role.role}`} className="text-sm font-semibold">{role.displayName ?? (BUILT_IN_ROLES.includes(role.role) ? t(`role.${role.role.replaceAll('-', '_')}`) : role.role)}</h3>
@@ -471,40 +359,24 @@ export function TeamDetailPage({ teamId, view }: { teamId: string; view: 'record
                           onChange={(value) => updateRole(role.role, { publicModelId: value })}
                         />
                       </Field>
-                      {role.role !== 'team-manager' ? (
-                        <Field label={t('team.executor.label')} htmlFor={`agent-team-executor-${role.role}`}>
-                          <ExecutorSelect
-                            id={`agent-team-executor-${role.role}`}
-                            value={role.role === 'developer' ? role.executor ?? 'claude' : role.executor ?? 'model'}
-                            onChange={(value) => updateRole(role.role, { executor: value === 'model' ? null : value })}
-                          />
-                        </Field>
-                      ) : null}
+                      <Field label={t('team.executor.label')} htmlFor={`agent-team-executor-${role.role}`}>
+                        <ExecutorSelect
+                          id={`agent-team-executor-${role.role}`}
+                          value={role.role === 'developer' ? role.executor ?? 'claude' : role.executor ?? 'model'}
+                          onChange={(value) => updateRole(role.role, { executor: value === 'model' ? null : value })}
+                        />
+                      </Field>
                     </div>
                   </div>
-                  {role.role === 'team-manager' ? (
-                    <p className="mt-3 border-t border-border pt-3 text-[13px] text-muted-foreground">{t('team.managerProtected')}</p>
-                  ) : role.role === 'developer' ? (
+                  {role.role === 'developer' ? (
                     <p className="mt-3 border-t border-border pt-3 text-[13px] text-muted-foreground">
                       {t('team.parallelism')}
                     </p>
                   ) : null}
-                  {role.role === 'team-manager' ? null : <details className="mt-3 border-t border-border pt-3">
-                    <summary className="w-fit cursor-pointer rounded-sm text-[13px] font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45">
-                      {t('team.advanced')}
-                    </summary>
-                    <AdvancedRoleFields
-                      idPrefix={`agent-team-${role.role}`}
-                      tools={ROLE_TOOLS[role.role] ?? CUSTOM_ROLE_TOOLS}
-                      value={role}
-                      onChange={(changes) => updateRole(role.role, changes)}
-                    />
-                  </details>}
                 </section>
               ))}
             </div>
           </form>
-          <TeamMemoriesSettings teamId={team.id} />
         </div>
       )}
     </div>

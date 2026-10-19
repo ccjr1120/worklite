@@ -1,7 +1,7 @@
 # Agent Team 任务群聊技术设计
 
 日期：2026-10-19  
-状态：Team 群聊与 v7 Team Manager 已按 2026-10-19 授权实现，未执行运行验证。Team Manager 是 Team 群内仅管理当前 Team 的缩小版 Chat；主 Chat 也可通过受保护的 WorkLite 平台工具直接管理 Team 配置、角色和记忆。  
+状态：Team 群聊与 v7 Team Manager 已按 2026-10-19 授权实现，未执行运行验证。Team Manager 是 Team 群内仅管理当前 Team 的缩小版 Chat；主 Chat 也可通过受保护的 WorkLite 平台工具直接管理 Team 配置、角色和记忆。2026-10-19 更新：工作方式与 Team 记忆改为 Team Manager 私有，仅注入 Manager 自己的回合，工作角色不再接收；Team Manager 的模型可配置，保护含义仅为不可删除与固定 typed 工具集。  
 架构入口：[Project Architecture](README.md#agent-team-implementation-direction)
 
 本文记录已确认的产品方向和当前实现边界；既有角色图、授权和 Run 生命周期仍见 [Agent Team Implementation Plan](agent-team-implementation.md)。当前新群聊 Run 使用 v7，历史 v1–v6 Run 保持原快照与生命周期。
@@ -32,7 +32,7 @@
 | 群消息与运行证据 | 群页显示持久化消息；Run 详情保存任务尝试与执行证据 | 消息与 Run 分开保存，Run 通过 groupId 关联 |
 | 上游文件 | handoff 传摘要和不可变文档引用；角色按需读取 | 文档全文不会因交接自动注入下游上下文 |
 | Developer | 保留单一角色配置，最多四项 Developer assignment 并行 | 并行数量是 Run 证据，不是多个角色配置 |
-| Team 记忆与工作方式 | 配置页管理记忆与工作方式；新 Run 捕获匹配快照 | 记忆可按 Team、仓库和角色限定；无自动记忆写入工具 |
+| Team 记忆与工作方式 | 配置页管理记忆与工作方式；新 Run 捕获匹配快照 | 记忆按 Team、仓库限定，仅注入 Team Manager 自己的回合；无自动记忆写入工具 |
 
 源码依据：`agent-team-groups.service.ts`、`agent-team-graph-v6.ts`、`agent-team-runtime.service.ts`、`agent-teams.controller.ts`，以及 `packages/db/src/schema/index.ts` 和 `packages/team-runtime/src/types.ts`。这里只做源码对照，不代表运行验证通过。
 
@@ -42,7 +42,7 @@
 
 Task Group 属于 Team，承载一个工作记录的对话；每条新的用户任务消息创建一个有明确执行范围的 Run。同一群可以有多个 Run，任务、尝试和文件始终能追溯到自己的 Run。这样空群不需要伪造运行参数，完成后的群也能接受追加工作，而历史 Run 的结果仍然明确。
 
-每个 Run 由一个 LangGraph 线程推进。新用户消息创建 Run；自动角色 handoff 在同一图线程内推进，不会新建另一个 Run。群 transcript 作为用户可读记录保存，角色输入只由当前消息、显式 handoff、所选仓库、工作方式、匹配记忆和按需读取的文件组成。浏览器发送消息和控制命令并观察状态。Workflow 调度器不推进 Team Run。
+每个 Run 由一个 LangGraph 线程推进。新用户消息创建 Run；自动角色 handoff 在同一图线程内推进，不会新建另一个 Run。群 transcript 作为用户可读记录保存，角色输入只由当前消息、显式 handoff、所选仓库和按需读取的文件组成；工作方式与匹配记忆只属于 Team Manager 的回合。浏览器发送消息和控制命令并观察状态。Workflow 调度器不推进 Team Run。
 
 动态交接的参考是 LangGraph.js 官方 [handoff 实现](https://github.com/langchain-ai/langgraphjs/blob/main/libs/langgraph-swarm/src/handoff.ts)：它用 `Command({ goto, graph: Command.PARENT, update })` 表示目标节点和状态更新。WorkLite 没有引入 `langgraph-swarm`；当前锁定的 `@langchain/langgraph@1.4.18` 上，角色把结构化 handoff 放入任务结果，由 v6 图节点验证并更新目标角色与仓库范围。上下文按收件范围自行组装，不复制示例中的共享消息历史。
 
@@ -71,7 +71,7 @@ flowchart TD
     O --> E
 ```
 
-群创建成功即可进入，群列表能显示没有 Run 的记录。未指定角色的普通消息由团队配置的默认接手角色处理；首版默认 Planner。消息不要求预选仓库：零仓库消息创建空范围 Run 而不是失败。空范围 Run 不带项目目录启动，模型循环角色收到 Team 级已知仓库候选，能从消息、记忆、工作方式或候选中确定绝对目录时在结果中返回 `repositoryDirectories`，不能确定时通过既有 pending-input 边界在群内询问；Developer 等执行器角色无法空目录启动，其任务由运行时直接产生目录问题而不调用执行器。角色不得静默借用另一项任务的目录。
+群创建成功即可进入，群列表能显示没有 Run 的记录。未指定角色的普通消息由团队配置的默认接手角色处理；首版默认 Planner。消息不要求预选仓库：零仓库消息创建空范围 Run 而不是失败。空范围 Run 不带项目目录启动，模型循环角色收到 Team 级已知仓库候选，能从消息或候选中确定绝对目录时在结果中返回 `repositoryDirectories`，不能确定时通过既有 pending-input 边界在群内询问；Developer 等执行器角色无法空目录启动，其任务由运行时直接产生目录问题而不调用执行器。角色不得静默借用另一项任务的目录。
 
 Chat 发起与 Web 发起使用同一服务入口和提交标识，重复交付返回同一记录或任务。Chat 向已有群追加消息必须显式绑定群，而不能把其后所有普通 Chat 消息自动转给该群。
 
@@ -93,16 +93,16 @@ Chat 发起与 Web 发起使用同一服务入口和提交标识，重复交付�
 | 用户暂停 Developer | 是 | 控制处理器；不注入 Planner，也不作为普通对话注入 Developer |
 | Developer 的仓库 A 任务进展 | 是，标明仓库和任务 | 对应任务及明确接收交接的角色 |
 | Reviewer 向 Developer 提交整改 | 是 | 指定 Developer 任务，携带对应评审文件版本 |
-| 仓库 A 的项目记忆 | 记忆管理中可见 | 范围包含 A 的任务 |
+| 仓库 A 的项目记忆 | 记忆管理中可见 | 范围包含 A 的 Team Manager 回合 |
 | 明确的跨仓库交接 | 是，列出涉及仓库 | 接收任务获授权的仓库集合和显式附件 |
 
 暂停、继续和取消作用于选中的整个 Run；群内其他 Run 独立运行。当前运行图没有跨 Run 依赖调度，控制消息只写入群 transcript，不会作为普通模型输入。
 
 ### 5.3 每次调用的输入
 
-输入由角色配置、当前任务目标与授权范围、绑定仓库的项目指令、当前角色收到的消息、相关记忆快照、显式交接摘要和文件版本引用组成。接手角色只通过显式交接和明确选择的仓库获得上游信息。工作群完整 transcript 不自动进入任务提示词。
+输入由角色配置、当前任务目标与授权范围、绑定仓库的项目指令、当前角色收到的消息、显式交接摘要和文件版本引用组成；工作方式与记忆快照只注入 Team Manager。接手角色只通过显式交接和明确选择的仓库获得上游信息。工作群完整 transcript 不自动进入任务提示词。
 
-Run 捕获创建时的群上下文、工作方式和候选记忆快照；运行时再根据当前角色与 handoff 仓库范围筛选。之后修改记忆或配置不改变已运行 Run 的快照。重试恢复失败的活动任务；“重新执行”会将原始用户请求作为新群消息发送，并创建新的 Run。
+Run 捕获创建时的群上下文、工作方式和候选记忆快照；运行时按 handoff 仓库范围筛选，工作方式与记忆仅进入 Team Manager 的上下文。之后修改记忆或配置不改变已运行 Run 的快照。重试恢复失败的活动任务；“重新执行”会将原始用户请求作为新群消息发送，并创建新的 Run。
 
 ## 6. 角色控制与用户中途参与
 
@@ -147,13 +147,13 @@ WorkLite 不创建、合并或清理新的 Git 资源。执行器依据各仓库
 
 ## 9. 团队记忆与工作方式
 
-记忆包含内容、Team ID、可选 canonical Team repository ID、可选角色、可选来源消息及创建／更新时间。仓库与角色范围可以组合：只有两项都匹配的任务可以读取。群内仓库 ID 映射到团队级稳定仓库 ID，因此同一 Team 的不同工作群可以显式复用同一仓库记忆。团队通用记忆必须明确选择为通用，不能从一个仓库的经验自动扩大到全团队。
+记忆包含内容、Team ID、可选 canonical Team repository ID、可选来源消息及创建／更新时间。记忆属于 Team Manager：只有范围匹配的 Manager 回合可以读取，工作角色不再获得记忆注入。群内仓库 ID 映射到团队级稳定仓库 ID，因此同一 Team 的不同工作群可以显式复用同一仓库记忆。团队通用记忆必须明确选择为通用，不能从一个仓库的经验自动扩大到全团队。历史角色范围的记忆保留可读、可删除，但不再注入任何 Run。
 
-用户在 Team Configuration 页查看、新增、修改、删除记忆；目前角色没有记忆写入工具，也不会自动保存经验。临时进度与一次性暂停命令属于任务记录，不进入长期记忆。
+用户在 Team Configuration 页查看、新增、修改、删除记忆；Team Manager 通过 typed operations 管理记忆，其他角色没有记忆写入工具，也不会自动保存经验。临时进度与一次性暂停命令属于任务记录，不进入长期记忆。
 
-角色使用的记忆记录在调用快照中。删除记忆使后续调用不再读取，但不会伪造地改写已完成执行的证据。Team 记忆与 Chat 记忆分属各自域，跨域共享必须显式引用，不能整体互相注入。
+Team Manager 回合使用的记忆投影记录在调用快照中。删除记忆使后续调用不再读取，但不会伪造地改写已完成执行的证据。Team 记忆与 Chat 记忆分属各自域，跨域共享必须显式引用，不能整体互相注入。
 
-工作方式以 Team 级自然语言字段保存，结合已有角色职责与 `maxConcurrentRuns` 使用。新 Run 捕获当时的工作方式和角色版本；运行中不静默替换。测试、部署和其他项目操作仍受用户授权及项目规则约束。
+工作方式以 Team 级自然语言字段保存，是 Team Manager 自己的工作方式，随记忆投影一起注入 Manager 的回合，不再注入工作角色。新 Run 捕获当时的工作方式和角色版本；运行中不静默替换。测试、部署和其他项目操作仍受用户授权及项目规则约束。
 
 ## 10. 持久化设计
 
@@ -169,7 +169,7 @@ WorkLite 不创建、合并或清理新的 Git 资源。执行器依据各仓库
 | TeamRun | 新增 groupId、groupMessageId、targetRole、repositoryIds、groupContext；保留已有授权和生命周期 |
 | TeamTask／TaskAttempt | 复用既有 Run 任务和尝试表；动态角色交接作为同一 Run 的连续任务 |
 | TeamDocumentVersion | 复用现有不可变 Team 文档及按需读取、文件交付边界 |
-| TeamMemory | teamId、可选 Team repository／role scope、content、sourceMessageId 和更新时间 |
+| TeamMemory | teamId、可选 Team repository scope、content、sourceMessageId 和更新时间；历史 role scope 保留存储但不再注入 |
 
 消息提交与待投递记录同一事务提交；交接与接收任务创建使用同一幂等标识。SSE 发布在事务完成后发生。事件序号只用于观察和重连，不作为再执行命令。
 
@@ -188,11 +188,11 @@ LangGraph checkpoint 保存控制流，数据库任务记录保存领域状态�
 | `GET /agent-team-groups/:groupId/events` | SSE 增量观察，支持 `Last-Event-ID` |
 | `POST /agent-team-groups/:groupId/controls` | 对群内 Run 执行 pause、resume、cancel、retry、reexecute；可传 `targetRole` |
 | `POST /agent-team-groups/:groupId/runs/:runId/answer` | 回答 Run 中带 pendingInputId 与 scopeRevision 的问题；可携带绝对 `directories` 绑定该 Run 的仓库范围 |
-| `GET/POST/PATCH/DELETE /agent-teams/:teamId/memories[/:memoryId]` | Team、仓库和角色范围的用户管理记忆 |
+| `GET/POST/PATCH/DELETE /agent-teams/:teamId/memories[/:memoryId]` | Team、仓库范围的用户管理记忆 |
 | `PATCH /agent-teams/:teamId` | 保存角色、工作方式与并发设置 |
 | `GET /agent-team-documents/:documentId[/{download}]` | 读取或下载不可变 Team 文件 |
 
-角色通过结构化任务结果里的 `handoff` 描述下一个角色、目标及 repositoryIds；运行时校验目标角色和仓库范围后推进同一 Run。空范围 Run 的角色还可以在结果中返回 `repositoryDirectories`，由运行时注册并绑定到该 Run 范围。角色通过 `read_team_document` 按需读指定文件版本。记忆通过 Team 配置页由用户管理，目前没有 Agent 写入工具。Developer 内部并行派发携带路径和仓库归属。
+角色通过结构化任务结果里的 `handoff` 描述下一个角色、目标及 repositoryIds；运行时校验目标角色和仓库范围后推进同一 Run。空范围 Run 的角色还可以在结果中返回 `repositoryDirectories`，由运行时注册并绑定到该 Run 范围。角色通过 `read_team_document` 按需读指定文件版本。记忆通过 Team 配置页或 Team Manager typed operations 管理，其他角色没有记忆写入工具。Developer 内部并行派发携带路径和仓库归属。
 
 Chat 通过 `dispatch_task` 创建并绑定群与 Run；`inspect_agent_team_records` 列出群，`inspect_agent_team_group` 读取 transcript 与 Run 摘要，`control_agent_team_group` 控制选定 Run，`update_agent_team` 可保存 workingPractice。脚本与 `scripts/tools.json` 描述和输入 schema 同步，并在 Chat 提示词、`worklite-platform` Skill 与能力快照中说明。Feishu 和 WeChat 仍是 Chat 渠道，不因此成为 Agent Team 多人群聊。
 
@@ -225,18 +225,18 @@ Web 工作记录现以 Task Group 为单位；调用方通过 groupId 进入聊�
 - Chat dispatch 用稳定 submissionId 绑定 groupId 与 runId；工作记录 list route 返回 group 摘要。
 - 新 Run 的 v7 图能够在捕获的动态角色目录中根据结构化 handoff 转给另一角色，handoff 只带摘要与不可变文件引用；Team Manager 只得到 Team 配置、角色和记忆工具。
 - Developer assignment 可使用最多四个并行 lane，并通过 repositoryIds 保持每项任务仓库范围；其他配置了 project executor 的角色使用其捕获的执行器处理所分配任务。
-- Work-role prompt 不接收完整 transcript；仅收到当前消息、handoff 摘要、显式文件引用、所选仓库指令和范围匹配的记忆。Team Manager 不接收仓库上下文或项目路径。
+- Work-role prompt 不接收完整 transcript；仅收到当前消息、handoff 摘要、显式文件引用和所选仓库指令。Team Manager 不接收仓库上下文或项目路径，但其回合注入工作方式和范围匹配的记忆投影。
 - 群控制 `targetRole` 只筛选所选 Run；暂停、继续和取消仍然作用于该 Run，retry 只重试 Run 标记的失败活动任务。
-- Team/repository/role 记忆可由 Team 配置页或 Team Manager 增删改查，新 Run 捕获当时的工作方式和候选记忆；没有 Agent 自动记忆写入工具。
+- Team/repository 记忆可由 Team 配置页或 Team Manager 增删改查，新 Run 捕获当时的工作方式和候选记忆并仅注入 Team Manager；没有自动记忆写入工具。
 - v1–v6 的已捕获 TeamVersion 仍走原图；v6/v7 中断的原生 project-executor 调用不自动重放。
 
-以上为源码覆盖，未执行浏览器、运行时、测试或构建检查。后续验证应检查默认 Team Manager 和直接 Team 工具、Chat 幂等绑定、v7 动态 handoff、角色/仓库记忆过滤、Developer fan-out、Run 控制和历史版本恢复。
+以上为源码覆盖，未执行浏览器、运行时、测试或构建检查。后续验证应检查默认 Team Manager 和直接 Team 工具、Chat 幂等绑定、v7 动态 handoff、仓库记忆过滤与 Manager 记忆投影、Developer fan-out、Run 控制和历史版本恢复。
 
 这些是后续实施验收要求，不构成当前运行测试、构建、浏览器检查或服务操作的授权。
 
 ## 15. 实际运行边界
 
-- 用户通过配置页直接维护长期记忆；角色不自动提出或保存记忆。通用记忆、Team repository 范围和角色范围均由用户显式选择。
+- 用户通过配置页直接维护长期记忆；角色不自动提出或保存记忆。通用记忆与 Team repository 范围均由用户显式选择。
 - 每条用户任务消息创建一个可追溯 Run，群记录汇总多个 Run。自动 handoff 在发起它的 Run 内继续执行；群内新消息创建独立 Run，不加入另一 Run 的中途输入。
 - `targetRole` 控制 Run 的当前角色筛选。它不能在一个动态 Run 内只暂停某个角色步骤；暂停或取消会作用于被选中的整个 Run。各 Run 之间互不共享 transcript 输入。
 - v6/v7 自动 handoff 最多 16 跳。达到上限时当前 Run 完成并留下群状态消息，用户可通过新的群消息继续。
@@ -246,12 +246,12 @@ Web 工作记录现以 Task Group 为单位；调用方通过 groupId 进入聊�
 
 ## 16. Team Manager 与动态角色目录（v7）
 
-Team Manager 是一个受保护的 Team 角色，在群聊中以 `@team-manager` 访问；未指定角色的群消息默认送给它。它沿用 Chat 的模型对话与 typed platform operation 形态，但 capability snapshot 只包含当前 built-in Team 的配置与记忆工具；它不取得 Chat 的其他工作区管理能力，也看不到项目路径，不取得项目文件、Commands、Skills 或 MCP。管理调用作为 Team Run 的工具活动和 operation evidence 保存。主 Chat 是可独立管理 Team 的工作区 Agent：对于纯配置、角色或 Team 记忆请求，它直接调用受保护的 WorkLite 平台工具，不要求项目目录，也不创建 Team Run。
+Team Manager 是一个受保护的 Team 角色，在群聊中以 `@team-manager` 访问；未指定角色的群消息默认送给它。它沿用 Chat 的模型对话与 typed platform operation 形态，与 Chat 一样把工作方式和有界 Team 记忆投影注入自己的系统上下文，但 capability snapshot 只包含当前 built-in Team 的配置与记忆工具；它不取得 Chat 的其他工作区管理能力，也看不到项目路径，不取得项目文件、Commands、Skills 或 MCP。管理调用作为 Team Run 的工具活动和 operation evidence 保存。主 Chat 是可独立管理 Team 的工作区 Agent：对于纯配置、角色或 Team 记忆请求，它直接调用受保护的 WorkLite 平台工具，不要求项目目录，也不创建 Team Run。
 
-Team Manager 可读取 Team 配置与角色目录，更新 `workingPractice` 和 `maxConcurrentRuns`，创建、修改、删除 work roles，并读取、新增、修改、删除 Team/repository/role-scoped memories。初始 Planner、Test Designer、Developer、Test Author、Test Runner、Reviewer 和 Worktree Manager 都是可管理的普通 work roles。只有 `team-manager` 是系统保护角色。创建时由服务端生成稳定 opaque role id，并接收显示名、模型、指令、entry points、工具、Skill/MCP 选择和可选 project executor。Team 管理工具对 role、model、tool、Skill 和 MCP 引用使用既有资源验证；manager 的 tool allowlist 固定，由服务端注入，不可通过角色配置扩权。
+Team Manager 可读取 Team 配置与角色目录，更新 `workingPractice` 和 `maxConcurrentRuns`，创建、修改、删除 work roles，并读取、新增、修改、删除 Team/repository-scoped memories。初始 Planner、Test Designer、Developer、Test Author、Test Runner、Reviewer 和 Worktree Manager 都是可管理的普通 work roles。只有 `team-manager` 是系统保护角色。创建时由服务端生成稳定 opaque role id，并接收显示名、模型、指令、entry points、工具、Skill/MCP 选择和可选 project executor。Team 管理工具对 role、model、tool、Skill 和 MCP 引用使用既有资源验证；manager 的 tool allowlist 固定，由服务端注入，不可通过角色配置扩权。
 
 v7 TeamVersion 捕获完整 active role directory、workingPractice、记忆候选和每个已配置 project-executor role 的启动快照。未显式指定接收角色的 Chat dispatch 首先送到 Team Manager；Manager 可直接答复 Team 配置问题，也可将开发任务 handoff 到快照内存在的 work role。Developer 的开发任务可拆成最多四项内部 assignment；其他角色在配置了 project executor 时，通过捕获的 executor 执行分配给它的任务。群聊 `@` 菜单展示 Team Manager 和当前 work roles。删除或更新角色、配置、记忆只影响之后新建的 TeamVersion；当前 Manager Run 使用其开始时捕获的 snapshot。任何 handoff 到不在该 Run 快照中的 role 都被拒绝。
 
-角色 id 由闭合 enum 改为持久化 string；初始角色保留已有 id。已有 Team roles JSON、Run context text 和 version snapshot 已用 JSON 或 text 存储，故此次不新增 SQL migration。新 v7 版本采用动态 role id 和 role-specific executor launch map；v1–v6 的图、Role enum values 和 executor behavior 保持原样，不重写历史数据。被删除 role 的记忆保留可读和可删除，但在相同 role id 未重新配置前不注入新 Run。
+角色 id 由闭合 enum 改为持久化 string；初始角色保留已有 id。已有 Team roles JSON、Run context text 和 version snapshot 已用 JSON 或 text 存储，故此次不新增 SQL migration。新 v7 版本采用动态 role id 和 role-specific executor launch map；v1–v6 的图、Role enum values 和 executor behavior 保持原样，不重写历史数据。历史角色范围的记忆保留可读和可删除，但不再注入任何 Run。
 
 实现包括 Team Manager runtime tool set、主 Chat 的 Team 平台工具，以及 role create/update/delete typed operations；这些工具与 `scripts/tools.json`、Chat built-in prompt、`worklite-platform` Skill 和 capability snapshot metadata 同步。角色管理操作不经过任意脚本或用户 Skill。Team Configuration 页面按 server role directory 渲染配置，群聊 mention menu 显示动态角色名与受保护 Team Manager，未指定角色时默认由 Team Manager 响应。部署、验证和运行服务管理继续受仓库的 Development Verification 约束。

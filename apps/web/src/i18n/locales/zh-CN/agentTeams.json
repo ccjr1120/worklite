@@ -7,7 +7,6 @@
     "saveFailed": "无法保存团队配置",
     "process": "流程",
     "roles": "角色配置",
-    "advanced": "高级设置",
     "processId": "流程 ID",
     "processVersion": "流程版本",
     "executor": {
@@ -17,10 +16,9 @@
       "codex": "Codex"
     },
     "parallelism": "运行时并行度由 Planner 按每次执行的任务拆分决定，最多 4 个 Developer 并行。",
-    "managerProtected": "Team Manager 是群聊中的窄版 Chat，只能管理当前团队的配置、角色和团队记忆；它本身受保护。",
     "workingPractice": {
-      "label": "团队工作方式",
-      "hint": "会随新工作记录捕获；包含角色协作方式、项目约定和交付偏好。"
+      "label": "工作方式",
+      "hint": "Team Manager 自己的工作方式；随新工作记录捕获，只注入 Manager 的执行。"
     },
     "maxConcurrentRuns": {
       "label": "并行 Run 上限",
@@ -198,24 +196,6 @@
     "default": "使用团队默认模型",
     "label": "角色模型"
   },
-  "instructions": {
-    "label": "角色指令"
-  },
-  "entryPoints": {
-    "label": "流程入口",
-    "placeholder": "每行一个流程路径"
-  },
-  "skills": {
-    "label": "Skills",
-    "empty": "暂无可用 Skill。"
-  },
-  "mcpServers": {
-    "label": "MCP 服务器",
-    "empty": "暂无可用 MCP 服务器。"
-  },
-  "tools": {
-    "label": "角色工具"
-  },
   "role": {
     "planner": "Planner",
     "test_designer": "Test Designer",
@@ -235,8 +215,6 @@
   "openTeam": "打开工作记录",
   "resources": {
     "providers": "模型提供商",
-    "skills": "Skills",
-    "mcpServers": "MCP 服务器",
     "loadFailed": "无法加载此角色配置资源。"
   },
   "metadata": {
@@ -244,7 +222,6 @@
     "status": "状态",
     "taskKey": "任务键"
   },
-
   "configuration": {
     "open": "配置",
     "backToRecords": "返回工作记录",
@@ -320,14 +297,12 @@
     "noRepositories": "尚未关联代码仓库"
   },
   "memories": {
-    "title": "Agent Team 记忆",
-    "description": "只保存稳定的项目约定、角色偏好和已确认经验；运行中的消息不会自动成为记忆。",
+    "title": "记忆",
+    "description": "Team Manager 的长期记忆，只注入 Manager 的执行；保存稳定的项目约定、协作偏好和已确认经验。",
     "content": "记忆内容",
     "placeholder": "写下一条希望后续工作沿用的内容",
     "repository": "代码仓库范围",
     "allRepositories": "全部仓库",
-    "role": "角色范围",
-    "allRoles": "全部角色",
     "add": "添加记忆",
     "saving": "正在保存",
     "save": "保存修改",
@@ -336,10 +311,10 @@
     "cancel": "取消编辑",
     "delete": "删除",
     "deleting": "正在删除",
-    "empty": "还没有团队记忆。",
-    "loading": "正在加载团队记忆",
-    "loadFailed": "无法加载团队记忆",
-    "saveFailed": "无法保存团队记忆",
-    "deleteFailed": "无法删除团队记忆"
+    "empty": "还没有记忆。",
+    "loading": "正在加载记忆",
+    "loadFailed": "无法加载记忆",
+    "saveFailed": "无法保存记忆",
+    "deleteFailed": "无法删除记忆"
   }
 }
