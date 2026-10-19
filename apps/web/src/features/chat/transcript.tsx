@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import { Activity, Ban, ChevronDown, ChevronRight, CircleX, FileCode2, Hourglass, LoaderCircle, MessageCircleQuestion, MessageSquareText, Play, RefreshCw, ShieldAlert, X } from 'lucide-react';
-import { memo, useContext, useEffect, useId, useState } from 'react';
+import { memo, createContext, useContext, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentToolCallView, ChatConversationView, ChatProjectTaskView, ChatSubmissionView, RunView, WorkflowView } from '@worklite/contracts';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
@@ -186,6 +186,11 @@ const AssistantTurn = memo(function AssistantTurn({ segments, working, markdownE
   );
 }, (left, right) => left.working === right.working && left.markdownEnabled === right.markdownEnabled && sameSegments(left.segments, right.segments));
 
+// Expansion is one shared choice for the whole conversation: every progress card follows it,
+// so a later periodic report keeps the reader's current selection. The owner resets it to the
+// compact default when the conversation changes or the page reloads.
+export const ProgressReportExpansionContext = createContext<{ expanded: boolean; toggle: () => void }>({ expanded: false, toggle: () => undefined });
+
 function ProgressReportCard({ message, report, streaming, markdownEnabled }: {
   message: TranscriptMessage;
   report: NonNullable<TranscriptMessage['progressReport']>;
@@ -194,30 +199,52 @@ function ProgressReportCard({ message, report, streaming, markdownEnabled }: {
 }) {
   const { t } = useTranslation('assistant');
   const { locale } = useLocale();
+  const { expanded, toggle } = useContext(ProgressReportExpansionContext);
   const titleId = useId();
+  const contentId = useId();
+  // The collapsed line keeps the "work is alive" signal: the count plus the most recently
+  // changed item, chosen by the captured update time rather than list order.
+  const latest = report.items.reduce<typeof report.items[number] | null>((current, item) => (item.updatedAt ?? '') >= (current?.updatedAt ?? '') ? item : current, null);
   return (
-    <article className="my-2 rounded-xl border border-border bg-surface p-3.5 shadow-xs" aria-labelledby={titleId} aria-busy={streaming || undefined}>
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <h3 id={titleId} className="flex items-center gap-2 text-sm font-semibold">
-          <Activity className="size-4 text-muted-foreground" aria-hidden="true" />
-          {t('progress.title')}
-        </h3>
-        <time dateTime={message.createdAt} className="ml-auto text-xs text-muted-foreground">{formatDateTime(message.createdAt, locale)}</time>
-      </header>
-      <ul className="mt-3 space-y-2.5">
-        {report.items.map((item) => (
-          <li key={`${item.kind}:${item.id}`} className="flex items-start gap-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-xs text-muted-foreground">{t(`progress.kind.${item.kind}`)}</p>
-              <p className="break-words text-sm font-medium leading-5">{item.title}</p>
-            </div>
-            <StatusBadge status={toStatusKey(item.status)} className="shrink-0" />
-          </li>
-        ))}
-      </ul>
-      <div className="mt-3 border-t border-border pt-3">
-        <MessageResponse content={message.content} enabled={markdownEnabled} className={streaming ? 'wl-caret' : undefined} />
-      </div>
+    <article className="my-2" aria-labelledby={titleId} aria-busy={streaming || undefined}>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={contentId}
+        aria-label={expanded ? t('progress.collapse') : t('progress.expand')}
+        onClick={toggle}
+        className={cn('flex min-h-9 w-full items-center gap-2.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-left shadow-xs hover:bg-surface-subtle/70', surfaceInteraction, focusRingInset)}
+      >
+        <Activity className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate text-[13px]">
+          <span id={titleId} className="font-medium">{t('progress.title')}</span>
+          <span className="text-muted-foreground"> · {t('progress.compactCount', { count: report.items.length })}</span>
+          {latest ? <span className="text-muted-foreground"> · {t('progress.compactLatest', { title: latest.title })}</span> : null}
+        </span>
+        <time dateTime={message.createdAt} className="shrink-0 text-xs text-muted-foreground">{formatDateTime(message.createdAt, locale)}</time>
+        <ChevronDown className={cn('size-4 shrink-0 text-muted-foreground transition-transform duration-[200ms] ease-[var(--ease-out)]', !expanded && '-rotate-90')} aria-hidden="true" />
+      </button>
+      {expanded ? (
+        <div id={contentId} className="wl-fade mt-2 rounded-xl border border-border bg-surface p-3.5 shadow-xs">
+          <ul className="space-y-2.5">
+            {report.items.map((item) => (
+              <li key={`${item.kind}:${item.id}`} className="flex items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-muted-foreground">{t(`progress.kind.${item.kind}`)}</p>
+                  <p className="break-words text-sm font-medium leading-5">{item.title}</p>
+                  <p className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground">{item.id}</p>
+                  {item.stage ? <p className="mt-0.5 text-xs text-muted-foreground">{t('progress.stage', { stage: item.kind === 'task' ? t(`codex.stage.${item.stage}`, { defaultValue: item.stage }) : item.stage })}</p> : null}
+                  {item.progress ? <p className="mt-0.5 break-words text-xs text-muted-foreground">{item.progress}</p> : null}
+                </div>
+                <StatusBadge status={toStatusKey(item.status)} className="shrink-0" />
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3 border-t border-border pt-3">
+            <MessageResponse content={message.content} enabled={markdownEnabled} className={streaming ? 'wl-caret' : undefined} />
+          </div>
+        </div>
+      ) : null}
     </article>
   );
 }
