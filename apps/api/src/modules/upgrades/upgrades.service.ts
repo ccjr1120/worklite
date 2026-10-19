@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Headers, Inject, Injectable, NotFoundException, OnModuleInit, Param, Post, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, Inject, Injectable, Logger, NotFoundException, OnModuleInit, Param, Post, UnauthorizedException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -31,6 +31,7 @@ type UpgradeJob = {
 
 @Injectable()
 export class UpgradesService implements OnModuleInit {
+  private readonly logger = new Logger(UpgradesService.name);
   private recoveryTimer?: ReturnType<typeof setInterval>;
   constructor(@Inject(DATABASE) private readonly db: Database, private readonly modules: ModuleRef) {}
 
@@ -133,6 +134,17 @@ export class UpgradesService implements OnModuleInit {
     const job = this.load(id);
     if (job.phase !== 'succeeded') throw new BadRequestException('Upgrade has not succeeded.');
     await this.modules.get<FeishuService>('FEISHU_UPGRADE_TRANSPORT', { strict: false }).connect();
+    // A WeChat reconnect failure must not fail the upgrade completion itself; the monitor
+    // also self-heals after a freeze, so this is a best-effort immediate reconnect.
+    const wechat = this.modules.get<WechatService | undefined>('WECHAT_UPGRADE_TRANSPORT', { strict: false });
+    if (wechat) {
+      try {
+        await wechat.connect();
+      } catch (error) {
+        const summary = error instanceof Error ? error.message : typeof error;
+        this.logger.warn(`WeChat reconnect after upgrade ${id} failed: ${summary}`);
+      }
+    }
     return { connected: true };
   }
 

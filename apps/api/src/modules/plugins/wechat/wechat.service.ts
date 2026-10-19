@@ -6,7 +6,7 @@ import type { Request } from 'express';
 import type { WechatLoginView } from '@worklite/contracts';
 import { chatSubmissions, externalChats, wechatEvents, type Database } from '@worklite/db';
 import { DATABASE } from '../../../infrastructure/database.module';
-import { assertRuntimeAdmission, runtimeAdmissionClosed, runtimeWritesFrozen } from '../../../infrastructure/runtime-upgrade-state';
+import { assertRuntimeAdmission, runtimeAdmissionClosed, runtimeWritesFrozen, upgradePhase } from '../../../infrastructure/runtime-upgrade-state';
 import { AgentExecutionsService } from '../../agents/agent-executions.service';
 import { CHAT_AGENT_ID, ChatDispatchService } from '../../agents/chat-dispatch.service';
 import { AgentTeamsService } from '../../agent-teams/agent-teams.service';
@@ -37,10 +37,27 @@ const request = {} as Request;
 const record = (value: unknown): Json => value && typeof value === 'object' && !Array.isArray(value) ? value as Json : {};
 const string = (value: unknown): string => typeof value === 'string' ? value : '';
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve) => {
+  const onAbort = () => { clearTimeout(timer); resolve(); };
+  const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener('abort', onAbort, { once: true });
+});
 
 const LOGIN_TTL_MS = 5 * 60_000;
 const MAX_QR_REFRESHES = 2;
+// While a managed upgrade freezes runtime writes the monitor rechecks the phase on this
+// cadence instead of exiting, so the channel recovers by itself when the upgrade settles.
+export const WECHAT_MONITOR_FROZEN_RECHECK_MS = 1_000;
+// A brief outage shows as a recovering "connecting"; only a sustained outage earns "error",
+// so the channel never sits in a false perpetual connecting state.
+export const WECHAT_CONNECT_FAILURE_ESCALATION_MS = 10 * 60_000;
+
+export function monitorFailureState(failures: number, failingForMs: number): { status: 'connecting' | 'error'; reason: string } | null {
+  if (failures < 3) return null;
+  if (failingForMs >= WECHAT_CONNECT_FAILURE_ESCALATION_MS) return { status: 'error', reason: '微信连接持续失败，请检查网络或重新扫码登录。' };
+  return { status: 'connecting', reason: '微信连接暂时失败，正在自动重试。' };
+}
 // WeChat text messages are whole sends with no edit channel; overlong content is truncated
 // instead of split so one delivery state stays one platform message.
 const MAX_TEXT_BYTES = 3_500;
@@ -253,15 +270,33 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
   private async monitor(generation: number, initialBuf: string, state: (status: 'connecting' | 'connected' | 'error', reason?: string | null) => Promise<void>): Promise<void> {
     let syncBuf = initialBuf;
     let failures = 0;
+    let firstFailureAt = 0;
+    let frozenRechecks = 0;
     let timeoutMs = 35_000;
     while (generation === this.generation && !this.stopped) {
-      if (runtimeWritesFrozen()) break;
+      if (runtimeWritesFrozen()) {
+        // A managed upgrade freezes writes before switching processes; exiting here left
+        // the monitor permanently dead. Wait out the freeze so polling resumes by itself.
+        frozenRechecks += 1;
+        if (frozenRechecks === 1 || frozenRechecks % 30 === 0) {
+          this.logger.warn(`WeChat monitor paused by a runtime upgrade freeze (phase=${upgradePhase() ?? 'unknown'}, recheck=${frozenRechecks}); polling resumes automatically when the upgrade settles.`);
+        }
+        const wait = new AbortController();
+        this.monitorAbort = wait;
+        await sleep(WECHAT_MONITOR_FROZEN_RECHECK_MS, wait.signal);
+        continue;
+      }
+      if (frozenRechecks > 0) {
+        this.logger.log(`WeChat monitor resumed after ${frozenRechecks} upgrade-freeze rechecks.`);
+        frozenRechecks = 0;
+      }
       const abort = new AbortController();
       this.monitorAbort = abort;
       try {
         const updates = await getUpdates(this.fetchImpl, { baseUrl: this.baseUrl, token: this.token, syncBuf, timeoutMs, signal: abort.signal });
         if (generation !== this.generation || this.stopped) break;
         failures = 0;
+        firstFailureAt = 0;
         if (updates.longpollingTimeoutMs) timeoutMs = updates.longpollingTimeoutMs;
         for (const raw of updates.msgs) await this.receiveMessage(raw);
         if (updates.getUpdatesBuf !== syncBuf) {
@@ -278,7 +313,16 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
           break;
         }
         failures += 1;
-        if (failures >= 3) await state('connecting', '微信连接暂时失败，正在自动重试。');
+        if (!firstFailureAt) firstFailureAt = Date.now();
+        const failingForMs = Date.now() - firstFailureAt;
+        const failure = monitorFailureState(failures, failingForMs);
+        if (failure) {
+          await state(failure.status, failure.reason);
+          if (failure.status === 'error') {
+            const summary = error instanceof Error ? error.message : typeof error;
+            this.logger.warn(`WeChat connection failing for ${Math.round(failingForMs / 1_000)}s (attempt ${failures}): ${summary}`);
+          }
+        }
         await sleep(failures >= 3 ? 30_000 : 2_000);
       }
     }
