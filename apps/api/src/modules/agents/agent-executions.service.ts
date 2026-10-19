@@ -18,7 +18,7 @@ import { BuiltinAgentToolsService } from './builtin-agent-tools.service';
 import { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
 import { CODEX_CLI_AGENT_ID, CODEX_CLI_PLUGIN_ID, PluginsService, decryptSecret } from '../plugins/plugins.service';
 import { CHAT_PROJECT_TASK_ANSWER_TOOL, CHAT_PROJECT_TASK_CANCEL_TOOL, CHAT_PROJECT_TASK_TOOL, ChatProjectTasksService } from './chat-project-tasks.service';
-import { formatChatMemoriesPrompt, selectChatMemoriesForPrompt } from './chat-memories.service';
+import { buildChatMemoriesPrompt } from './chat-memories.service';
 import { ClaudeCodeError } from './claude-code.service';
 import { CodexAppServerError } from './codex-app-server.service';
 import { CommandsService } from '../commands/commands.service';
@@ -1015,8 +1015,8 @@ export class AgentExecutionsService implements OnModuleInit {
     if (!agent || !configuration) throw new ConflictException('Chat configuration is unavailable.');
     // Chat has no Skill/MCP selection: only the protected platform Skill is captured; legacy assignment rows are ignored.
     const selected = transaction.select({ id: skills.id, name: skills.name, instructions: skills.instructions }).from(agentSkills).innerJoin(skills, eq(agentSkills.skillId, skills.id)).where(and(eq(agentSkills.agentId, agentId), eq(skills.workspaceId, workspaceId), eq(skills.id, WORKLITE_PLATFORM_SKILL_ID))).all();
-    const memories = transaction.select({ content: chatMemories.content }).from(chatMemories).where(eq(chatMemories.workspaceId, workspaceId)).orderBy(desc(chatMemories.updatedAt)).all();
-    const memoriesPrompt = formatChatMemoriesPrompt(selectChatMemoriesForPrompt(memories));
+    const memories = transaction.select({ id: chatMemories.id, content: chatMemories.content, category: chatMemories.category }).from(chatMemories).where(eq(chatMemories.workspaceId, workspaceId)).orderBy(desc(chatMemories.updatedAt)).all();
+    const memoriesPrompt = buildChatMemoriesPrompt(memories);
     return {
       revision: configuration.revision,
       defaultExecutor: configuration.defaultExecutor,

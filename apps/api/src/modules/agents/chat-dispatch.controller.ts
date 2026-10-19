@@ -69,9 +69,15 @@ export class ChatDispatchController {
   }
 
   @Get('memories')
-  async listMemories(@Req() request: Request) {
+  async listMemories(@Req() request: Request, @Query('category') category?: string) {
     const workspace = await this.workspaces.getWorkspace(request, 'personal');
-    return this.memories.list(workspace.id);
+    return this.memories.list(workspace.id, { category: category as SaveChatMemoryRequest['category'] });
+  }
+
+  @Get('memories/:id')
+  async getMemory(@Req() request: Request, @Param('id') id: string) {
+    const workspace = await this.workspaces.getWorkspace(request, 'personal');
+    return this.memories.get(workspace.id, id);
   }
 
   @Post('memories')

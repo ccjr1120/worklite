@@ -430,10 +430,15 @@ export const chatConfigurations = sqliteTable('chat_bot_configurations', {
   createdAt: timestamp('created_at'),
 }, (table) => [primaryKey({ columns: [table.workspaceId, table.revision] })]);
 
+// Keep in sync with CHAT_MEMORY_CATEGORIES in @worklite/contracts, which owns the
+// category metadata (injection behavior) shared by the API and Web client.
+export type ChatMemoryCategory = 'rule' | 'preference' | 'project' | 'project_state' | 'workflow' | 'other';
+
 export const chatMemories = sqliteTable('chat_memories', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   content: text('content').notNull(),
+  category: text('category').$type<ChatMemoryCategory>().notNull().default('other'),
   sourceConversationId: text('source_conversation_id'),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),

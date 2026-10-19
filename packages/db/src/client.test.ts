@@ -97,4 +97,22 @@ describe('initializeDatabase restart recovery', () => {
     expect(tools['scripts/delete-workflow.mjs'].inputSchema.properties.force.default).toBe(false);
     expect(chat.systemPrompt).toContain('delete_workflow');
   });
+
+  it('registers categorized Chat memory platform tools', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+
+    const [manifest] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/tools.json'))).limit(1);
+    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
+
+    const categories = ['rule', 'preference', 'project', 'project_state', 'workflow', 'other'];
+    const tools = JSON.parse(manifest.content) as Record<string, { name: string; inputSchema: { required?: string[]; properties: Record<string, { enum?: string[] }> } }>;
+    expect(tools['scripts/list-memories.mjs'].inputSchema.properties.category.enum).toEqual(categories);
+    expect(tools['scripts/list-memories.mjs'].inputSchema.required ?? []).not.toContain('category');
+    expect(tools['scripts/save-memory.mjs'].inputSchema.properties.category.enum).toEqual(categories);
+    expect(tools['scripts/save-memory.mjs'].inputSchema.required).toEqual(['content']);
+    expect(tools['scripts/update-memory.mjs'].inputSchema.properties.category.enum).toEqual(categories);
+    expect(tools['scripts/update-memory.mjs'].inputSchema.required).toEqual(['memoryId']);
+    expect(chat.systemPrompt).toContain('project-category memories');
+  });
 });

@@ -207,9 +207,24 @@ export type ChatConversationRecords = {
 
 export type SummarizeChatConversationResponse = AgentExecutionView;
 
+// Single source for Chat memory categories and their prompt-injection behavior;
+// the API, platform tools and Web management surface all derive from this declaration.
+export const CHAT_MEMORY_CATEGORIES = ['rule', 'preference', 'project', 'project_state', 'workflow', 'other'] as const;
+export type ChatMemoryCategory = (typeof CHAT_MEMORY_CATEGORIES)[number];
+export const CHAT_MEMORY_CATEGORY_META: Record<ChatMemoryCategory, { injection: 'always' | 'on_demand' }> = {
+  rule: { injection: 'always' },
+  preference: { injection: 'always' },
+  project: { injection: 'on_demand' },
+  project_state: { injection: 'on_demand' },
+  workflow: { injection: 'on_demand' },
+  other: { injection: 'on_demand' },
+};
+export const CHAT_MEMORY_DEFAULT_CATEGORY: ChatMemoryCategory = 'preference';
+
 export type ChatMemoryView = {
   id: string;
   content: string;
+  category: ChatMemoryCategory;
   sourceConversationId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -221,11 +236,13 @@ export type ChatMemoryList = {
 
 export type SaveChatMemoryRequest = {
   content: string;
+  category?: ChatMemoryCategory;
   sourceConversationId?: string;
 };
 
 export type UpdateChatMemoryRequest = {
-  content: string;
+  content?: string;
+  category?: ChatMemoryCategory;
 };
 
 export type PluginTestResult = {

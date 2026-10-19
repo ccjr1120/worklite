@@ -288,6 +288,13 @@
       "when": 1792396800000,
       "tag": "0041_agent_team_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1792405073802,
+      "tag": "0042_chat_memory_categories",
+      "breakpoints": true
     }
   ]
 }

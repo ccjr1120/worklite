@@ -42,7 +42,7 @@ Use worklite/branch@1 for reusable JSON routing: it requires a value input, pass
 Workflow Run lifecycle supports pause for queued or running Runs via POST /runs/:runId/pause and resume for paused Runs or scheduler-state-backed cancelled Runs via POST /runs/:runId/resume; the detailed Run's server-owned resumable flag is authoritative. Pause and continuation have no checkpoint inside the active invocation: resume reruns that invocation from its start without rerunning successful predecessors, does not pause waiting_for_input Runs, and a cancelled Run without persisted scheduler state is not resumable. A paused Run keeps its event stream open, survives an API restart as paused, remains cancellable, and blocks overlapping scheduled execution; cancellation and later continuation remain Run evidence.
 There is one built-in Agent Team. Web work records open persistent group chats; creating one opens an empty group where the user addresses a role with @. Chat dispatch creates a group and sends the original request to the protected Team Manager by default or to an explicitly named work role, after collecting an absolute existing project directory and supported mode. For direct Team configuration, role, or memory requests, use the Team platform tools without dispatching project work. The group route is the collaboration surface; its bound Run owns progress, pending questions and immutable execution evidence. Every accepted Chat submission binds atomically to its group and Run, so repeated delivery cannot create another task. Inspect a group for messages and inspect its Run for progress, questions and execution evidence. Group handoffs carry a concise summary and immutable Team document references; the next role reads those files on demand instead of receiving upstream document bodies automatically. Messages and task inputs are scoped by addressed role and selected repositories, so paused Developer messages do not enter Planner context. Developer remains one public role and one captured executor configuration; a group Run may fan out to up to four internal Developer assignments. The user can pause, resume, cancel, retry or re-execute work from the group and continue a completed group with a new @role message. Team memories and working practice are separate from Chat memory and are captured for each new Run. A process interruption fails active group role work without automatic replay; inspect repository state before retrying or re-executing. Team Runs beyond the configured maxConcurrentRuns (default 3) are persisted and started FIFO. Non-developer exact command grants remain user-owned and are never inferred from prose. Historical orchestration v1–v6 Runs keep their captured graphs, lifecycle and evidence, including the v4 worktree lifecycle, v5 advisory per-project strategy plan, and v6 dynamic handoffs with Developer fan-out. A Chat-dispatched group reports terminal success or failure once through its bound Run; cancelled Runs and pending questions are not auto-reported. The former Team conversation and intake tables remain unused historical data without compatibility routes or migration.
 Chat lives at /chat and owns Agent configuration, conversation and execution. Web, Feishu and WeChat are communication channels. Feishu is the feishu-bot transport adapter configured at /chat?view=channels. It accepts text and card actions from one configured user in private chat, uses an outbound SDK connection, and delivers updated replies, task questions and controls, QR images, Team documents and Workflow Artifacts. It does not accept group, voice, image or file input. Direct users to Chat Channels to scan and create a Feishu PersonalAgent application: platform confirmation saves encrypted credentials automatically and binds the application-scoped open id when supplied. If it is missing, only that binding must be completed in the form before connection. Existing enterprise applications can be entered manually. Saved credentials do not prove bot usability; bot permissions, long-connection message/card subscriptions and publication still need platform setup. Registration is resumable across API restarts and suppressed during isolated upgrade preflight. Never launch registration, read registration secrets or ask for credentials through chat or scripts; application registration is separate from user OAuth. Web, Feishu and WeChat conversations use the same Agent runtime; Chat lists all persisted histories and can inspect or continue a selected execution. Unrelated conversations are never automatically merged. A Web reply in a Feishu-bound conversation is also delivered through Feishu. The old floating Chat Bot and Home composer are removed. WeChat is the wechat-bot transport adapter configured at /chat?view=channels: the user scans a QR code to log in through the iLink protocol, the scanning user becomes the one allowed user, and the adapter accepts private text messages and delivers whole text replies, conversation question prompts and task status notifications. It does not support group chat, media, cards or streaming; a stale login requires a fresh QR scan. The WeChat Official Account capability is a separate article-publishing plugin, not this channel.
-Long-term memory is workspace-level: when the user explicitly states a durable preference or fact or asks to remember something, save it with save_memory; correct it with update_memory, remove a wrong or obsolete entry with delete_memory, and review entries with list_memories. Never save transient task details. Saved memories are injected into the prompt each turn; apply them naturally without reciting them.
+Long-term memory is workspace-level and categorized: when the user explicitly states a durable preference or fact or asks to remember something, save it with save_memory, choosing a category (rule for standing rules and hard constraints, preference for user preferences, project for project indexes, project_state for project status, workflow for ways of working, other otherwise); correct it with update_memory, remove a wrong or obsolete entry with delete_memory, and review or read entries with list_memories. Never save transient task details. Rule and preference memories are injected into the prompt each turn; apply them naturally without reciting them. Memories of other categories appear only as an id/category/summary catalog: when a request names a specific project or involves development, debugging, research or deployment work, read the project-category memories through list_memories before acting, and read any catalog entry's full text by its id when it looks relevant.
 Never ask the user to paste API keys, tokens, passwords, or other secrets into conversation or tool input. Provider credentials must be entered in the dedicated secure form.
 Before claiming a platform operation completed, wait for the tool result. Keep responses concise and practical.`;
 
@@ -95,8 +95,8 @@ Persistent group chats are the collaboration surface. Web work records open an e
 
 ## Long-term memory
 
-- save_memory persists one durable user preference, fact or correction the user explicitly stated or asked to remember; never save transient task details, and never ask the user to confirm a memory they just stated.
-- update_memory replaces an entry by id and delete_memory removes one; list_memories reviews them. Memories appear in the prompt automatically from the next turn, so do not restate their contents in replies.
+- save_memory persists one durable user preference, fact or correction the user explicitly stated or asked to remember; never save transient task details, and never ask the user to confirm a memory they just stated. Choose the matching category: rule (standing rules and hard constraints), preference (user preferences, the default), project (project indexes), project_state (project status), workflow (ways of working) or other.
+- update_memory replaces an entry's content and/or category by id and delete_memory removes one; list_memories reviews entries and reads full text, filtered by category or by memoryId. Only rule and preference memories are injected into the prompt in full from the next turn; other categories appear as an id/category/summary catalog and are read on demand — for a request that names a project or involves development work, read the project-category memories first. Do not restate memory contents in replies.
 
 ## Credentials and boundaries
 
@@ -492,14 +492,19 @@ const WORKLITE_PLATFORM_TOOL_SPECS: Array<[path: string, description: string, in
       { type: 'string', pattern: '^/workflows/.+', description: '/workflows/<workflowId-or-name>' },
     ] },
   }, ['target'])],
-  ['scripts/list-memories.mjs', 'List the workspace long-term memories saved from earlier conversations, most recently updated first. Saved memories are already injected into the prompt; call this only when the user asks to review them or before updating one.', toolInput()],
+  ['scripts/list-memories.mjs', 'Read workspace long-term memories saved from earlier conversations, most recently updated first. Rule and preference memories are already injected into the prompt in full; other categories appear as a catalog, so filter by category or pass memoryId to read full text on demand — for project or development requests, read the project category before acting.', toolInput({
+    category: { type: 'string', enum: ['rule', 'preference', 'project', 'project_state', 'workflow', 'other'], description: 'Optional category filter.' },
+    memoryId: toolString('Optional memory id from the prompt catalog or a previous list; returns that single entry\'s full text.'),
+  })],
   ['scripts/save-memory.mjs', 'Save one durable user preference, fact or correction the user explicitly stated or asked to remember, so it applies to every later conversation. Do not save transient task details. The workspace holds at most 100 memories; when saving is rejected, list memories and delete an obsolete entry first.', toolInput({
     content: toolString('One self-contained memory in the user\'s language.'),
+    category: { type: 'string', enum: ['rule', 'preference', 'project', 'project_state', 'workflow', 'other'], description: 'Memory category; defaults to preference. rule and preference are always injected into the prompt; other categories are read on demand.' },
   }, ['content'])],
-  ['scripts/update-memory.mjs', 'Replace the content of one saved long-term memory identified by its id from list_memories.', toolInput({
+  ['scripts/update-memory.mjs', 'Replace the content and/or category of one saved long-term memory identified by its id from list_memories. At least one of content or category is required.', toolInput({
     memoryId: toolString('Memory id from list_memories.'),
     content: toolString('Replacement content.'),
-  }, ['memoryId', 'content'])],
+    category: { type: 'string', enum: ['rule', 'preference', 'project', 'project_state', 'workflow', 'other'], description: 'Replacement category.' },
+  }, ['memoryId'])],
   ['scripts/delete-memory.mjs', 'Delete one saved long-term memory identified by its id from list_memories, when it is wrong or obsolete.', toolInput({
     memoryId: toolString('Memory id from list_memories.'),
   }, ['memoryId'])],
@@ -1136,26 +1141,40 @@ const action = await call('/navigation/resolve', { method: 'POST', body: { targe
 print({ worklite: action });
 `],
   ['scripts/list-memories.mjs', `#!/usr/bin/env node
-import { call, noInput, print } from './lib.mjs';
-noInput();
-const data = await call('/chat/memories');
-print({ worklite: { type: 'snapshot' }, data });
+import { call, exactKeys, input, oneOf, optionalString, print } from './lib.mjs';
+const raw = input(false);
+exactKeys(raw, ['category', 'memoryId']);
+const CATEGORIES = ['rule', 'preference', 'project', 'project_state', 'workflow', 'other'];
+const category = raw.category === undefined ? undefined : oneOf(raw.category, 'category', CATEGORIES);
+const memoryId = optionalString(raw.memoryId, 'memoryId', 240);
+if (memoryId) {
+  const data = await call('/chat/memories/' + encodeURIComponent(memoryId));
+  print({ worklite: { type: 'snapshot' }, data });
+} else {
+  const data = await call('/chat/memories' + (category ? '?category=' + encodeURIComponent(category) : ''));
+  print({ worklite: { type: 'snapshot' }, data });
+}
 `],
   ['scripts/save-memory.mjs', `#!/usr/bin/env node
-import { call, exactKeys, input, print, requiredString } from './lib.mjs';
-const raw = input(); exactKeys(raw, ['content']);
+import { call, exactKeys, input, oneOf, print, requiredString } from './lib.mjs';
+const raw = input(); exactKeys(raw, ['content', 'category']);
 const content = requiredString(raw.content, 'content', 2000);
+const CATEGORIES = ['rule', 'preference', 'project', 'project_state', 'workflow', 'other'];
+const category = raw.category === undefined ? undefined : oneOf(raw.category, 'category', CATEGORIES);
 // The server conversation context records which conversation produced this memory.
 const sourceConversationId = process.env.WORKLITE_CHAT_EXECUTION_ID || undefined;
-const data = await call('/chat/memories', { method: 'POST', body: { content, ...(sourceConversationId ? { sourceConversationId } : {}) } });
+const data = await call('/chat/memories', { method: 'POST', body: { content, ...(category ? { category } : {}), ...(sourceConversationId ? { sourceConversationId } : {}) } });
 print({ worklite: { type: 'snapshot' }, data });
 `],
   ['scripts/update-memory.mjs', `#!/usr/bin/env node
-import { call, exactKeys, input, print, requiredString } from './lib.mjs';
-const raw = input(); exactKeys(raw, ['memoryId', 'content']);
+import { call, exactKeys, input, oneOf, optionalString, print, requiredString } from './lib.mjs';
+const raw = input(); exactKeys(raw, ['memoryId', 'content', 'category']);
 const memoryId = requiredString(raw.memoryId, 'memoryId', 240);
-const content = requiredString(raw.content, 'content', 2000);
-const data = await call('/chat/memories/' + encodeURIComponent(memoryId), { method: 'PATCH', body: { content } });
+const content = optionalString(raw.content, 'content', 2000);
+const CATEGORIES = ['rule', 'preference', 'project', 'project_state', 'workflow', 'other'];
+const category = raw.category === undefined ? undefined : oneOf(raw.category, 'category', CATEGORIES);
+if (content === undefined && category === undefined) throw new Error('At least one of content or category is required.');
+const data = await call('/chat/memories/' + encodeURIComponent(memoryId), { method: 'PATCH', body: { ...(content === undefined ? {} : { content }), ...(category === undefined ? {} : { category }) } });
 print({ worklite: { type: 'snapshot' }, data });
 `],
   ['scripts/delete-memory.mjs', `#!/usr/bin/env node

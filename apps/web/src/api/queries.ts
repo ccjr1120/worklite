@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
-import type { AssignHomeBoardRequest, CreateHomeBoardCategoryRequest, GatewayRequestLogQuery, GatewayTimeRange, UpdateHomeBoardCategoryRequest } from '@worklite/contracts';
+import type { AssignHomeBoardRequest, CreateHomeBoardCategoryRequest, GatewayRequestLogQuery, GatewayTimeRange, UpdateChatMemoryRequest, UpdateHomeBoardCategoryRequest } from '@worklite/contracts';
 
 export const workflowScheduleQueryKey = (workflowId: string) => ['workflow-schedule', workflowId] as const;
 export const pluginsQueryKey = () => ['plugins'] as const;
@@ -20,6 +20,14 @@ export function useDeleteChatMemoryMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (memoryId: string) => api.deleteChatMemory(memoryId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: chatMemoriesQueryKey }),
+  });
+}
+
+export function useUpdateChatMemoryMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ memoryId, input }: { memoryId: string; input: UpdateChatMemoryRequest }) => api.updateChatMemory(memoryId, input),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: chatMemoriesQueryKey }),
   });
 }
