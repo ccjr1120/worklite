@@ -474,7 +474,7 @@ export function normalizeDynamicDevelopmentAssignments(
     throw new Error(`At most ${laneIds.length} parallel development assignments are allowed.`);
   }
   const assignments: AgentTeamDevelopmentAssignment[] = [];
-  const seenPaths: string[] = [];
+  const seenPaths: Array<{ path: string; repositoryIds?: string[] }> = [];
   for (const [index, item] of value.entries()) {
     if (!item || typeof item !== 'object') throw new Error('A development assignment must be an object.');
     const developerId = laneIds[index]!;
@@ -482,13 +482,20 @@ export function normalizeDynamicDevelopmentAssignments(
     const scopeSummary = typeof item.scopeSummary === 'string' ? item.scopeSummary.trim() : '';
     if (!title || !scopeSummary) throw new Error('A development assignment requires a title and scope summary.');
     const ownedPaths = normalizeOwnedPaths(item.ownedPaths, developerId);
+    const repositoryIds: string[] | undefined = item.repositoryIds?.length
+      ? [...new Set<string>(item.repositoryIds)]
+      : undefined;
     for (const path of ownedPaths) {
-      if (seenPaths.some((previous) => pathsOverlap(previous, path))) {
+      if (seenPaths.some((previous) => {
+        const repositoriesOverlap = !previous.repositoryIds || !repositoryIds
+          || previous.repositoryIds.some((repositoryId) => repositoryIds.includes(repositoryId));
+        return repositoriesOverlap && pathsOverlap(previous.path, path);
+      })) {
         throw new Error(`Development assignments overlap on path ${path}.`);
       }
-      seenPaths.push(path);
+      seenPaths.push({ path, repositoryIds });
     }
-    assignments.push({ developerId, title, scopeSummary, ownedPaths });
+    assignments.push({ developerId, title, scopeSummary, ownedPaths, ...(repositoryIds ? { repositoryIds } : {}) });
   }
   return assignments;
 }

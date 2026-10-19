@@ -12,10 +12,16 @@
     "processVersion": "流程版本",
     "executor": {
       "label": "执行器",
+      "model": "WorkLite Agent（内置工具）",
       "claude": "Claude Code",
       "codex": "Codex"
     },
     "parallelism": "运行时并行度由 Planner 按每次执行的任务拆分决定，最多 4 个 Developer 并行。",
+    "managerProtected": "Team Manager 是群聊中的窄版 Chat，只能管理当前团队的配置、角色和团队记忆；它本身受保护。",
+    "workingPractice": {
+      "label": "团队工作方式",
+      "hint": "会随新工作记录捕获；包含角色协作方式、项目约定和交付偏好。"
+    },
     "maxConcurrentRuns": {
       "label": "并行 Run 上限",
       "hint": "同时运行的 Run 数量上限；达到上限后，新 Run 排队等待空位。"
@@ -217,7 +223,8 @@
     "test_author": "Test Author",
     "test_runner": "Test Runner",
     "reviewer": "Reviewer",
-    "worktree_manager": "Worktree Manager"
+    "worktree_manager": "Worktree Manager",
+    "team_manager": "Team Manager"
   },
   "loading": "正在加载 Agent Team",
   "loadFailed": "无法加载 Agent Team",
@@ -239,14 +246,100 @@
   },
 
   "configuration": {
-    "tab": "配置"
+    "open": "配置",
+    "backToRecords": "返回工作记录",
+    "title": "团队配置"
   },
   "records": {
-    "tab": "工作记录",
+    "title": "工作记录",
+    "description": "每条记录是一场可继续的任务群聊。",
     "empty": "暂无工作记录。",
+    "create": "新增工作记录",
+    "creating": "正在创建群聊",
+    "createFailed": "无法创建工作记录",
     "startInChat": "在 Chat 中发起团队任务",
     "startedAt": "开始时间",
     "finishedAt": "结束时间",
     "loadFailed": "无法加载工作记录"
+  },
+  "group": {
+    "untitled": "未命名工作记录",
+    "transcript": "工作记录群聊",
+    "backToRecords": "返回工作记录",
+    "backToBottom": "回到最新消息",
+    "empty": {
+      "title": "群聊已创建",
+      "description": "直接发送即可和 Team Manager 讨论配置、角色和记忆；输入 @ 选择工作角色以开始项目任务。"
+    },
+    "you": "你",
+    "system": "系统",
+    "recipient": "发送给角色",
+    "mention": {
+      "menuLabel": "选择接收角色",
+      "empty": "没有匹配的角色。",
+      "remove": "移除接收角色"
+    },
+    "messagePlaceholder": "发送消息给 Team Manager，或输入 @ 选择工作角色",
+    "send": "发送",
+    "sending": "正在发送",
+    "sendFailed": "无法发送群消息",
+    "noRoleTask": "群里还没有可操作的角色任务。",
+    "deliveryPending": "正在派发",
+    "deliveryFailed": "派发失败",
+    "repositories": "代码仓库",
+    "repositoryDirectory": "仓库绝对路径",
+    "addRepository": "添加仓库",
+    "addRepositoryHint": "添加的仓库进入群默认范围，后续消息自动覆盖。",
+    "repositoryAddFailed": "无法添加仓库",
+    "pause": "暂停",
+    "continue": "继续",
+    "stop": "取消",
+    "retry": "重试",
+    "reexecute": "重新执行",
+    "openRun": "执行详情",
+    "controlFailed": "无法操作角色任务",
+    "answerPlaceholder": "输入回答",
+    "answerDirectories": "项目目录（可选）",
+    "answerDirectoriesHint": "填写绝对路径会注册为群仓库并绑定到此任务。",
+    "authorizedCommands": "精确命令授权",
+    "authorizedCommandsHint": "每行填写一条完整命令；授权只作用于此工作记录。",
+    "commandsPlaceholder": "每行一条完整命令",
+    "answer": "提交回答",
+    "answering": "正在提交",
+    "answerFailed": "无法提交回答",
+    "loadFailed": "无法加载工作群聊",
+    "unavailable": {
+      "title": "工作记录不可用",
+      "description": "此工作记录不存在，或当前工作区无法访问。"
+    },
+    "status": {
+      "empty": "尚未开始"
+    },
+    "runCount": "{{count}} 次执行",
+    "noMessages": "暂无群消息。",
+    "noRepositories": "尚未关联代码仓库"
+  },
+  "memories": {
+    "title": "Agent Team 记忆",
+    "description": "只保存稳定的项目约定、角色偏好和已确认经验；运行中的消息不会自动成为记忆。",
+    "content": "记忆内容",
+    "placeholder": "写下一条希望后续工作沿用的内容",
+    "repository": "代码仓库范围",
+    "allRepositories": "全部仓库",
+    "role": "角色范围",
+    "allRoles": "全部角色",
+    "add": "添加记忆",
+    "saving": "正在保存",
+    "save": "保存修改",
+    "edit": "编辑",
+    "editContent": "修改记忆内容",
+    "cancel": "取消编辑",
+    "delete": "删除",
+    "deleting": "正在删除",
+    "empty": "还没有团队记忆。",
+    "loading": "正在加载团队记忆",
+    "loadFailed": "无法加载团队记忆",
+    "saveFailed": "无法保存团队记忆",
+    "deleteFailed": "无法删除团队记忆"
   }
 }

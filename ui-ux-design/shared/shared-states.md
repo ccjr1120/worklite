@@ -48,9 +48,15 @@ Truncate only summaries and provide expand, copy, download or details access. In
 
 ## Status Presentation
 
+Periodic Chat active-work feedback uses a labelled neutral card with the report timestamp, captured work titles, shared status badges and the model summary. Explicit report metadata accompanies both streamed text and persisted history; a report is a snapshot of work at that time, while the underlying task remains the live state source. The card adds no action and uses the same semantic tokens in both themes.
+
 Every execution and resource status renders through the shared `StatusBadge` and `StatusDot` components. A surface may map its domain status to a shared key (for example `succeeded` to `completed`, `timed_out` to `failed`) but must not define its own colors, icons, or labels for a shared meaning. Collections that hold both live and settled items group or pin live items first.
 
 ## Changelog
+
+### 2026-10-19 - Chat progress feedback
+
+- Defined a metadata-driven progress card for periodic active-work replies, retaining a consistent streamed and historical presentation and shared status semantics.
 
 ### 2026-10-08 - Status presentation
 

@@ -1,8 +1,8 @@
-# Agent Team Detail
+# Agent Team Work Records
 
 ## Route
 
-`/agent-teams/:teamId?tab=records|configuration`. Records is the default. One built-in Team has no collection or creation/deletion surface.
+`/agent-teams/:teamId`. Work records are the only page view. One built-in Team has no Team collection or creation/deletion surface.
 
 ## Design Source
 
@@ -17,44 +17,44 @@
 ## Implementation
 
 - `apps/web/src/routes/agent-teams/$teamId.tsx`
+- `apps/web/src/routes/agent-teams/$teamId.index.tsx`
 - `apps/web/src/features/agent-teams/team-detail.tsx`
 - `apps/web/src/features/agent-teams/team-records.tsx`
 
 ## Purpose
 
-Find Team work and open its Run progress; configure the Team separately.
+Find Team task groups and open their live conversation.
 
 ## Primary Task
 
-Open a work record to inspect its progress. Action budget: one record activation. Only Chat Agent starts Team work; the page has no composer or manual launch action. Saving edited configuration is a separate goal with one Save action.
+Open a work record to inspect its conversation. Action budget: one group activation. The single `New work record` action creates an empty group and opens it; work begins when the user addresses a role in the group. Chat may also start group work. The context bar's upper-right `Configuration` action opens the separate Team configuration page.
 
 ## Layout
 
-Use the shared detail width up to 1200px and Records/Configuration tabs persisted in route search. Records is a compact list of linked rows showing goal, status, directory, execution mode, start time and end time. Queued Runs appear with their queued status and each row opens Run detail. Configuration includes `maxConcurrentRuns` (default 3, minimum 1) in the single Save flow. Narrow screens stack metadata without removing status or the Run link. Configuration retains the six-role list, provider-grouped model selectors and advanced disclosures, plus one Save action in the context bar. The Developer executor selector remains. Shared semantic tokens govern both light and dark modes.
+Use the shared detail width up to 1200px. Work records are the sole body of this route, with no page tabs. The context bar places one secondary `Configuration` action at the upper right. Records are a compact list of task groups showing the title, latest message, status, repositories, Run count and update time. The toolbar has one `New work record` action. Narrow screens stack metadata without removing status or the group link. Shared semantic tokens govern both light and dark modes.
 
 ## Interaction Contract
 
 | Action | Behavior |
 | --- | --- |
-| Select tab | Update validated route search without mutating configuration or Runs. |
-| Open record | Navigate to `/agent-team-runs/:runId` in one activation. |
-| Save configuration | Report progress on Save; replace cached Team on success and retain edits/error on failure. |
-| Expand role | Disclose instructions, entry points, Skills, MCP servers and tools without saving. |
-| Edit concurrent Run limit | Update `maxConcurrentRuns` locally; the single Save action commits the value and shows local progress. |
+| Open configuration | Navigate to `/agent-teams/:teamId/configuration` from the context-bar action in one activation. |
+| Open record | Navigate to `/agent-team-groups/:groupId` in one activation. |
+| New work record | Create an empty task group and navigate to `/agent-team-groups/:groupId`; no goal/directory form precedes the group. |
+| Open Chat | Navigate to Chat from the empty-state link to start work there. |
 
-The summary-record query keeps records fresh. It reads no task activity, event history or TeamVersion snapshot. No Team conversation query, stream, queue or historical projection remains.
+The group-summary query keeps records fresh. It does not load message history, task activity or Run snapshots. The selected group route owns its messages and event stream.
 
 ## States
 
 | State | Behavior |
 | --- | --- |
 | Loading | Shared content-shaped placeholders retain page geometry. |
-| Empty | State that no work records exist and point to Chat for starting work. |
-| Error | Shared recoverable load error; preserve unaffected configuration. |
-| Busy | Configuration Save shows control-local progress. Record links remain independent. |
+| Empty | Keep `New work record` available and show the separate Chat entry. |
+| Error | Show the shared recoverable error; the separate configuration route remains available. |
+| Busy | Work-record creation shows control-local progress. Existing record links remain independent. |
 | Offline | Inherits shared-states.md. |
 | Long content | Wrap goal and paths; stack row metadata on narrow screens. |
-| Queued record | Show the queued status and retain the Run detail link while waiting for a parallel slot. |
+| Active group | Show server-derived group status and retain the group link. |
 
 ## Copy Inventory
 
@@ -65,12 +65,12 @@ The summary-record query keeps records fresh. It reads no task activity, event h
 | `agentTeams:loadFailed` | Recovery |
 | `agentTeams:unavailable.title` | State |
 | `agentTeams:unavailable.description` | Recovery |
-| `agentTeams:configuration.tab` | Action |
-| `agentTeams:records.tab` | Action |
+| `agentTeams:configuration.open` | Action |
 | `agentTeams:records.empty` | State |
 | `agentTeams:records.startInChat` | Action |
-| `agentTeams:records.startedAt` | State |
-| `agentTeams:records.finishedAt` | State |
+| `agentTeams:records.title` / `description` / `create` / `creating` | State / Action |
+| `agentTeams:records.createFailed` / `empty` / `loadFailed` | Recovery / State |
+| `agentTeams:group.untitled` / `noMessages` / `noRepositories` / `runCount` | State |
 | `agentTeams:records.loadFailed` | Recovery |
 | `agentTeams:run.status.*` | State |
 | `agentTeams:run.modeValue.*` | State |
@@ -78,42 +78,22 @@ The summary-record query keeps records fresh. It reads no task activity, event h
 | `agentTeams:resources.skills` | State |
 | `agentTeams:resources.mcpServers` | State |
 | `agentTeams:resources.loadFailed` | Recovery |
-| `agentTeams:team.updated` | State |
-| `agentTeams:team.save` | Action |
-| `agentTeams:team.saving` | State |
-| `agentTeams:team.saveFailed` | Recovery |
-| `agentTeams:team.process` | State |
-| `agentTeams:team.processId` | State |
-| `agentTeams:team.processVersion` | State |
-| `agentTeams:team.maxConcurrentRuns.label` | Constraint |
-| `agentTeams:team.maxConcurrentRuns.hint` | Constraint |
-| `agentTeams:team.roles` | State |
-| `agentTeams:team.parallelism` | State |
-| `agentTeams:team.advanced` | Action |
-| `agentTeams:model.default` | Action |
-| `agentTeams:model.label` | Constraint |
-| `agentTeams:team.executor.label` | Constraint |
-| `agentTeams:team.executor.claude` | State |
-| `agentTeams:team.executor.codex` | State |
-| `agentTeams:instructions.label` | Constraint |
-| `agentTeams:entryPoints.label` | Constraint |
-| `agentTeams:entryPoints.placeholder` | Recovery |
-| `agentTeams:skills.label` | Constraint |
-| `agentTeams:skills.empty` | State |
-| `agentTeams:mcpServers.label` | Constraint |
-| `agentTeams:mcpServers.empty` | State |
-| `agentTeams:tools.label` | Constraint |
 | `agentTeams:role.*` | State |
 
 ## Accessibility
 
-Record links are keyboard reachable with visible focus. Status uses icon/text alongside color. Tab selection and configuration controls keep their existing accessible labels. Both themes and reduced-motion behavior inherit shared components.
+Record links and the upper-right configuration action are keyboard reachable with visible focus. Status uses icon/text alongside color. Both themes and reduced-motion behavior inherit shared components.
 
 ## Coverage Status
 
-2026-10-14 source comparison: the Team route defaults to Records and retains Configuration; the records query shows server Run summaries, including queued Runs, and opens Run detail. Configuration saves `maxConcurrentRuns` (default 3, minimum 1) through the single Save action. Chat is the only Run entry; there is no manual Run creation or Team conversation surface. Orchestration v4 worktree evidence remains on Run detail. Source review only; no browser, runtime, build, or test verification was performed.
+2026-10-19 source comparison: Records are the only view on the Team route; the upper-right context-bar action opens the separate configuration route, and task groups open their conversation route. The list shows title, latest message, status, repositories, Run count and update time; the empty state keeps both the new-record action and its separate Chat link. No differences found against the documented layout and interactions. No browser, runtime, build, test or type-check verification was performed.
 
 ## Changelog
+
+### 2026-10-19
+
+- Replaced Run summary records with durable group records, added one-action empty group creation, and added working-practice and Team memory configuration.
+- Made work records the only view on the Team detail route and moved configuration to a separate route linked from the upper-right context bar action.
 
 ### 2026-10-13
 

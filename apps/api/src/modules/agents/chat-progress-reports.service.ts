@@ -7,7 +7,7 @@ import { AgentTeamRuntimeService } from '../agent-teams/agent-team-runtime.servi
 import { AgentExecutionsService } from './agent-executions.service';
 import { deriveTaskStage } from './chat-project-tasks.service';
 
-const TICK_MS = 30_000;
+const TICK_MS = 90_000;
 const ACTIVE_RUN_STATUSES = ['queued', 'running', 'paused'] as const;
 const TITLE_LIMIT = 80;
 const PROGRESS_TEXT_LIMIT = 160;
@@ -43,7 +43,7 @@ export function buildActiveWorkNote(items: ActiveWorkItem[]): string {
     }
     return `${index + 1}. 工作流运行 ${item.id}（${item.workflowName}）：${item.status}${item.currentNodeId ? `，当前节点 ${item.currentNodeId}` : ''}`;
   });
-  return `[活跃工作进展提醒] 当前对话仍有进行中的工作（约每 30 秒提醒一次，工作全部结束或无新进展时自动停止）：\n${lines.join('\n')}\n请基于以上信息用一两句话向用户汇报最新进展摘要；不要向用户复述本提醒本身；直接回复，不要调用工具。`;
+  return `[活跃工作进展提醒] 当前对话仍有进行中的工作（约每 90 秒提醒一次，工作全部结束或无新进展时自动停止）：\n${lines.join('\n')}\n请基于以上信息用一两句话向用户汇报最新进展摘要；不要向用户复述本提醒本身；直接回复，不要调用工具。`;
 }
 
 // Periodic progress reports for conversations with active background work: a running project
@@ -119,7 +119,14 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
     }
     const signature = activeWorkSignature(items);
     if (this.lastSignatures.get(target.executionId) === signature) return;
-    const result = await this.executions.reportActiveWorkProgress(target.workspaceId, target.executionId, buildActiveWorkNote(items));
+    const result = await this.executions.reportActiveWorkProgress(target.workspaceId, target.executionId, buildActiveWorkNote(items), {
+      items: items.map((item) => ({
+        kind: item.kind,
+        id: item.id,
+        title: item.kind === 'task' ? truncate(item.goal, TITLE_LIMIT) : item.kind === 'team' ? truncate(item.intent, TITLE_LIMIT) : item.workflowName,
+        status: item.kind === 'task' ? 'running' : item.status,
+      })),
+    });
     // busy leaves the marker unset so the next tick retries; reported and unavailable (the
     // conversation is gone or cancelled) both record the signature, so a cancelled conversation
     // stays silent until its visible work actually changes again.

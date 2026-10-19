@@ -33,6 +33,13 @@ export function PluginConfiguration({ pluginId, embedded = false }: { pluginId: 
   const [registrationError, setRegistrationError] = useState('');
   const [registrationQr, setRegistrationQr] = useState('');
   const [qrFailed, setQrFailed] = useState(false);
+  const [wechatUserId, setWechatUserId] = useState('');
+  const [wechatLoginBusy, setWechatLoginBusy] = useState<'starting' | 'cancelling' | null>(null);
+  const [wechatLoginError, setWechatLoginError] = useState('');
+  const [wechatQr, setWechatQr] = useState('');
+  const [wechatQrFailed, setWechatQrFailed] = useState(false);
+  const wechatLogin = plugin?.wechat?.login ?? null;
+  const wechatLoginOpen = wechatLogin?.status === 'pending' || wechatLogin?.status === 'scanned';
   const registration = plugin?.feishu?.registration;
   const registrationPending = registration?.status === 'pending';
   const registrationSavedId = registration?.status === 'completed' || registration?.status === 'needs_user_id' ? registration.id : null;
@@ -42,11 +49,12 @@ export function PluginConfiguration({ pluginId, embedded = false }: { pluginId: 
     setCommand(plugin.command);
     setFeishuAppId(plugin.feishu?.appId ?? '');
     setFeishuUserId(plugin.feishu?.allowedUserId ?? '');
+    setWechatUserId(plugin.wechat?.allowedUserId ?? '');
     setFeishuAppSecret('');
     setTestState(plugin.status);
     setSaveState('saved');
     setError('');
-  }, [plugin?.id, plugin?.command, plugin?.feishu?.appId, plugin?.feishu?.allowedUserId]); // eslint-disable-line react-hooks/exhaustive-deps -- unrelated status changes must not erase a typed secret.
+  }, [plugin?.id, plugin?.command, plugin?.feishu?.appId, plugin?.feishu?.allowedUserId, plugin?.wechat?.allowedUserId]); // eslint-disable-line react-hooks/exhaustive-deps -- unrelated status changes must not erase a typed secret.
 
   useEffect(() => {
     if (!registrationSavedId) return;
@@ -62,6 +70,61 @@ export function PluginConfiguration({ pluginId, embedded = false }: { pluginId: 
     }).catch(() => { if (!cancelled) setQrFailed(true); });
     return () => { cancelled = true; };
   }, [registration?.verificationUrl, registrationPending]);
+
+  useEffect(() => {
+    setWechatQr(''); setWechatQrFailed(false);
+    if (!wechatLogin?.qrCodeUrl || !wechatLoginOpen) return;
+    let cancelled = false;
+    void QRCode.toDataURL(wechatLogin.qrCodeUrl).then((source) => {
+      if (!cancelled) setWechatQr(source);
+    }).catch(() => { if (!cancelled) setWechatQrFailed(true); });
+    return () => { cancelled = true; };
+  }, [wechatLogin?.qrCodeUrl, wechatLoginOpen]);
+
+  async function startWechatLogin() {
+    if (wechatLoginBusy) return;
+    setWechatLoginBusy('starting'); setWechatLoginError('');
+    try {
+      const login = await api.startWechatLogin(pluginId);
+      await queryClient.cancelQueries({ queryKey: ['plugin', pluginId] });
+      queryClient.setQueryData(['plugin', pluginId], (current: typeof plugin) => current?.wechat ? { ...current, wechat: { ...current.wechat, login } } : current);
+      void queryClient.invalidateQueries({ queryKey: ['plugin', pluginId] });
+    } catch (cause) {
+      setWechatLoginError(cause instanceof Error ? cause.message : tPlugins('wechat.loginFailed'));
+    } finally { setWechatLoginBusy(null); }
+  }
+
+  async function cancelWechatLogin() {
+    if (wechatLoginBusy) return;
+    setWechatLoginBusy('cancelling'); setWechatLoginError('');
+    try {
+      const saved = await api.cancelWechatLogin(pluginId);
+      await queryClient.cancelQueries({ queryKey: ['plugin', pluginId] });
+      queryClient.setQueryData(['plugin', pluginId], saved);
+    } catch (cause) {
+      setWechatLoginError(cause instanceof Error ? cause.message : tPlugins('wechat.cancelFailed'));
+    } finally { setWechatLoginBusy(null); }
+  }
+
+  async function disconnectWechat() {
+    setConnectionPending(true); setError('');
+    try {
+      const saved = await api.disconnectWechat(pluginId);
+      queryClient.setQueryData(['plugin', pluginId], saved);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : tPlugins('wechat.disconnectFailed')); }
+    finally { setConnectionPending(false); }
+  }
+
+  async function saveWechat() {
+    if (saving || !wechatUserId.trim()) return;
+    setSaving(true); setError('');
+    try {
+      const saved = await api.updatePlugin(pluginId, { wechat: { allowedUserId: wechatUserId.trim() } });
+      queryClient.setQueryData(['plugin', pluginId], saved);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : tPlugins('config.saveFailed'));
+    } finally { setSaving(false); }
+  }
 
   async function startFeishuRegistration() {
     if (registrationBusy) return;
@@ -277,6 +340,37 @@ export function PluginConfiguration({ pluginId, embedded = false }: { pluginId: 
             <div role="status"><StatusBadge key={plugin.feishu.status} status={plugin.feishu.status === 'connecting' ? 'starting' : plugin.feishu.status} label={tPlugins(`feishu.status.${plugin.feishu.status}`)} /></div>
             {plugin.feishu.lastError ? <p className="text-[13px] text-danger" role="alert">{plugin.feishu.lastError}</p> : null}
             {plugin.feishu.status !== 'disconnected' ? <Button type="button" variant="ghost" disabled={connectionPending || registrationPending || Boolean(registrationBusy) || saving} onClick={() => void disconnectFeishu()}>{connectionPending ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <Unplug aria-hidden="true" />}{tPlugins('feishu.disconnect')}</Button> : null}
+          </section>
+        ) : null}
+        {pluginId === 'wechat-bot' && plugin.wechat ? (
+          <section className="space-y-4" aria-labelledby="wechat-heading">
+            <h2 id="wechat-heading" className="text-sm font-medium">{tPlugins('wechat.title')}</h2>
+            <p className="text-[13px] text-muted-foreground">{tPlugins('wechat.description')}</p>
+            <div role="status"><StatusBadge key={plugin.wechat.status} status={plugin.wechat.status === 'connecting' ? 'starting' : plugin.wechat.status} label={tPlugins(`wechat.status.${plugin.wechat.status}`)} /></div>
+            {plugin.wechat.lastError ? <p className="text-[13px] text-danger" role="alert">{plugin.wechat.lastError}</p> : null}
+            {wechatLoginOpen && wechatLogin ? (
+              <div className="space-y-3">
+                {wechatQr ? <img src={wechatQr} alt={tPlugins('wechat.qrAlt')} className="size-48 rounded border border-border bg-white object-contain p-2" /> : null}
+                {wechatQrFailed ? <p className="text-[13px] text-danger" role="alert">{tPlugins('wechat.qrFailed')}</p> : null}
+                <p className="text-sm" role="status" aria-live="polite">{tPlugins(`wechat.loginStatus.${wechatLogin.status}`)}</p>
+                <Button type="button" variant="ghost" onClick={() => void cancelWechatLogin()} disabled={Boolean(wechatLoginBusy)}>{wechatLoginBusy === 'cancelling' ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : null}{tPlugins('wechat.cancel')}</Button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {wechatLogin?.status === 'expired' || wechatLogin?.status === 'error' ? <p className="text-[13px] text-danger" role="alert">{wechatLogin.error ?? tPlugins(`wechat.loginStatus.${wechatLogin.status}`)}</p> : null}
+                {wechatLoginError ? <p className="text-[13px] text-danger" role="alert">{wechatLoginError}</p> : null}
+                <div className="flex flex-wrap gap-3">
+                  <Button type="button" onClick={() => void startWechatLogin()} disabled={Boolean(wechatLoginBusy) || connectionPending || saving}>{wechatLoginBusy === 'starting' ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <LogIn aria-hidden="true" />}{tPlugins(plugin.wechat.hasToken ? 'wechat.relogin' : 'wechat.login')}</Button>
+                  {plugin.wechat.status !== 'disconnected' ? <Button type="button" variant="ghost" disabled={connectionPending || Boolean(wechatLoginBusy) || saving} onClick={() => void disconnectWechat()}>{connectionPending ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <Unplug aria-hidden="true" />}{tPlugins('wechat.disconnect')}</Button> : null}
+                </div>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Field label={tPlugins('wechat.allowedUserId')} htmlFor="wechat-user-id" hint={tPlugins('wechat.allowedUserIdHint')}>
+                <Input id="wechat-user-id" value={wechatUserId} autoComplete="off" onChange={(event) => setWechatUserId(event.target.value)} />
+              </Field>
+              {wechatUserId.trim() !== plugin.wechat.allowedUserId ? <Button size="compact" onClick={() => void saveWechat()} disabled={saving || !wechatUserId.trim()}>{saving ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : null}{tCommon('actions.save')}</Button> : null}
+            </div>
           </section>
         ) : null}
         {pluginId === 'wechat-official-account' && plugin.officialAccount ? (

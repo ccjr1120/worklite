@@ -1,18 +1,29 @@
-import { BadRequestException, Body, Controller, Get, Header, Headers, Param, Patch, Post, Req, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Header, Headers, Param, Patch, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type {
   AgentTeamRunEvent,
   AnswerAgentTeamRunRequest,
+  AddAgentTeamGroupRepositoriesRequest,
+  AgentTeamGroupControlRequest,
+  AgentTeamGroupAnswerRequest,
+  AgentTeamGroupEvent,
+  CreateAgentTeamGroupRequest,
+  CreateAgentTeamMemoryRequest,
   RecoverAgentTeamOperationRequest,
+  SendAgentTeamGroupMessageRequest,
   UpdateAgentTeamRequest,
+  AgentTeamRoleConfiguration,
+  UpdateAgentTeamMemoryRequest,
 } from '@worklite/contracts';
 import { AgentTeamDocumentsService } from './agent-team-documents.service';
+import { AgentTeamGroupsService } from './agent-team-groups.service';
 import { AgentTeamsService } from './agent-teams.service';
 
 @Controller('agent-teams')
 export class AgentTeamsController {
   constructor(
     private readonly teams: AgentTeamsService,
+    private readonly groups: AgentTeamGroupsService,
   ) {}
 
   @Get(':teamId')
@@ -25,9 +36,137 @@ export class AgentTeamsController {
     return this.teams.update(request, 'personal', teamId, body);
   }
 
+  @Post(':teamId/roles')
+  createRole(@Req() request: Request, @Param('teamId') teamId: string, @Body() body: Omit<AgentTeamRoleConfiguration, 'role'>) {
+    return this.teams.createRole(request, 'personal', teamId, body);
+  }
+
+  @Patch(':teamId/roles/:roleId')
+  updateRole(@Req() request: Request, @Param('teamId') teamId: string, @Param('roleId') roleId: string, @Body() body: Partial<Omit<AgentTeamRoleConfiguration, 'role'>>) {
+    return this.teams.updateRole(request, 'personal', teamId, roleId, body);
+  }
+
+  @Delete(':teamId/roles/:roleId')
+  deleteRole(@Req() request: Request, @Param('teamId') teamId: string, @Param('roleId') roleId: string) {
+    return this.teams.deleteRole(request, 'personal', teamId, roleId);
+  }
+
   @Get(':teamId/runs')
   records(@Req() request: Request, @Param('teamId') teamId: string) {
     return this.teams.records(request, 'personal', teamId);
+  }
+
+  @Get(':teamId/groups')
+  groupsList(@Req() request: Request, @Param('teamId') teamId: string) {
+    return this.groups.list(request, 'personal', teamId);
+  }
+
+  @Post(':teamId/groups')
+  createGroup(@Req() request: Request, @Param('teamId') teamId: string, @Body() body: CreateAgentTeamGroupRequest) {
+    return this.groups.create(request, 'personal', teamId, body);
+  }
+
+  @Get(':teamId/repositories')
+  repositories(@Req() request: Request, @Param('teamId') teamId: string) {
+    return this.groups.repositories(request, 'personal', teamId);
+  }
+
+  @Get(':teamId/memories')
+  memories(@Req() request: Request, @Param('teamId') teamId: string) {
+    return this.groups.memories(request, 'personal', teamId);
+  }
+
+  @Post(':teamId/memories')
+  createMemory(@Req() request: Request, @Param('teamId') teamId: string, @Body() body: CreateAgentTeamMemoryRequest) {
+    return this.groups.createMemory(request, 'personal', teamId, body);
+  }
+
+  @Patch(':teamId/memories/:memoryId')
+  updateMemory(@Req() request: Request, @Param('teamId') teamId: string, @Param('memoryId') memoryId: string, @Body() body: UpdateAgentTeamMemoryRequest) {
+    return this.groups.updateMemory(request, 'personal', teamId, memoryId, body);
+  }
+
+  @Delete(':teamId/memories/:memoryId')
+  deleteMemory(@Req() request: Request, @Param('teamId') teamId: string, @Param('memoryId') memoryId: string) {
+    return this.groups.deleteMemory(request, 'personal', teamId, memoryId);
+  }
+}
+
+@Controller('agent-team-groups')
+export class AgentTeamGroupsController {
+  constructor(private readonly groups: AgentTeamGroupsService) {}
+
+  @Get(':groupId')
+  get(@Req() request: Request, @Param('groupId') groupId: string) {
+    return this.groups.get(request, 'personal', groupId);
+  }
+
+  @Post(':groupId/repositories')
+  repositories(@Req() request: Request, @Param('groupId') groupId: string, @Body() body: AddAgentTeamGroupRepositoriesRequest) {
+    return this.groups.addRepositories(request, 'personal', groupId, body);
+  }
+
+  @Get(':groupId/messages')
+  messages(@Req() request: Request, @Param('groupId') groupId: string) {
+    return this.groups.get(request, 'personal', groupId).then((group) => group.messages);
+  }
+
+  @Post(':groupId/messages')
+  sendMessage(@Req() request: Request, @Param('groupId') groupId: string, @Body() body: SendAgentTeamGroupMessageRequest) {
+    return this.groups.sendMessage(request, 'personal', groupId, body);
+  }
+
+  @Post(':groupId/controls')
+  control(@Req() request: Request, @Param('groupId') groupId: string, @Body() body: AgentTeamGroupControlRequest) {
+    return this.groups.control(request, 'personal', groupId, body);
+  }
+
+  @Post(':groupId/runs/:runId/answer')
+  answer(@Req() request: Request, @Param('groupId') groupId: string, @Param('runId') runId: string, @Body() body: AgentTeamGroupAnswerRequest) {
+    return this.groups.answer(request, 'personal', groupId, runId, body);
+  }
+
+  @Get(':groupId/events')
+  @Header('Cache-Control', 'no-cache, no-transform')
+  async events(
+    @Req() request: Request,
+    @Param('groupId') groupId: string,
+    @Headers('last-event-id') lastEventId: string | undefined,
+    @Res() response: Response,
+  ): Promise<void> {
+    let lastSequence = parseLastEventId(lastEventId);
+    await this.groups.get(request, 'personal', groupId);
+    response.status(200);
+    response.setHeader('Content-Type', 'text/event-stream');
+    response.setHeader('Connection', 'keep-alive');
+    response.setHeader('X-Accel-Buffering', 'no');
+    response.flushHeaders();
+    let closed = false;
+    let pending = false;
+    const send = async () => {
+      if (closed || pending) return;
+      pending = true;
+      try {
+        const events: AgentTeamGroupEvent[] = await this.groups.events(request, 'personal', groupId, lastSequence);
+        for (const event of events) {
+          if (event.sequence <= lastSequence) continue;
+          lastSequence = event.sequence;
+          response.write(`id: ${event.sequence}\ndata: ${JSON.stringify(event)}\n\n`);
+        }
+      } finally {
+        pending = false;
+      }
+    };
+    const poll = setInterval(() => { void send(); }, 1000);
+    const heartbeat = setInterval(() => response.write(': keep-alive\n\n'), 15_000);
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      clearInterval(poll);
+      clearInterval(heartbeat);
+    };
+    request.once('close', cleanup);
+    await send();
   }
 }
 

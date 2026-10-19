@@ -81,5 +81,33 @@
         "cancelled": "已取消扫码"
       }
     }
+  },
+  "wechat": {
+    "title": "微信连接",
+    "description": "使用微信扫码登录，在微信私聊中与 Chat 文字对话。仅扫码用户本人可以向 Chat 发送消息。",
+    "login": "扫码登录",
+    "relogin": "重新扫码登录",
+    "cancel": "取消扫码",
+    "disconnect": "断开微信连接",
+    "loginFailed": "无法开始微信扫码登录。",
+    "cancelFailed": "无法取消扫码，请重试。",
+    "disconnectFailed": "无法断开微信连接。",
+    "qrAlt": "微信登录二维码",
+    "qrFailed": "无法显示二维码，请重新扫码。",
+    "allowedUserId": "允许使用的用户 ID",
+    "allowedUserIdHint": "扫码登录时自动绑定扫码用户；仅该用户的私聊消息会被接收。",
+    "status": {
+      "disconnected": "未连接",
+      "connecting": "正在连接微信",
+      "connected": "已连接微信",
+      "error": "微信连接失败"
+    },
+    "loginStatus": {
+      "pending": "等待微信扫码",
+      "scanned": "已扫码，请在微信中确认登录",
+      "confirmed": "登录成功",
+      "expired": "二维码已过期，请重新扫码。",
+      "error": "扫码登录失败，请重试。"
+    }
   }
 }

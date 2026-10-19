@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { and, asc, desc, eq, gt, inArray, isNull, ne } from 'drizzle-orm';
 import type {
@@ -20,6 +20,7 @@ import type {
   AgentTeamOperationView,
   AgentTeamPendingInputView,
   AgentTeamRole,
+  AgentTeamRoleId,
   AgentTeamRunEvent,
   AgentTeamRunEventType,
   AgentTeamRunOutcome,
@@ -35,8 +36,14 @@ import type {
 } from '@worklite/contracts';
 import {
   agentTeamDocuments,
+  agentTeamGroupEvents,
+  agentTeamGroupMessages,
+  agentTeamGroups,
+  agentTeamMemories,
+  agentTeamGroupRepositories,
   agentTeamOperations,
   agentTeamPendingInputs,
+  agentTeamRepositories,
   agentTeamRunEvents,
   agentTeamRuns,
   agentTeamTaskAttempts,
@@ -68,6 +75,7 @@ import {
   type AgentTeamGraphState,
   type AgentTeamTaskRequest,
   type AgentTeamTaskResult,
+  type AgentTeamGroupRunContext,
 } from '@worklite/team-runtime';
 import { DATABASE } from '../../infrastructure/database.module';
 import {
@@ -78,6 +86,8 @@ import {
 import { ProjectExecutorService } from '../agents/project-executor.service';
 import { enqueueTaskMerge, ensureTaskWorktree, ensureWorktreeAt, inspectGitRepository, mergeTaskWorktree, type PreparedTaskWorktree } from '../agents/git-worktree';
 import { AgentTeamOperationJournalService } from './agent-team-operation-journal.service';
+import { AgentTeamConfigurationService } from './agent-team-configuration.service';
+import { AgentTeamManagerToolsService } from './agent-team-manager-tools.service';
 import {
   AGENT_TEAM_PROCESS_ID,
   AGENT_TEAM_PROCESS_VERSION,
@@ -97,9 +107,10 @@ import {
 } from './agent-team-graph-v4';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { CommandsService } from '../commands/commands.service';
+import { createAgentTeamGroupGraph, type AgentTeamGroupGraphInitial, type AgentTeamGroupGraphState } from './agent-team-graph-v6';
 
 const MAX_TOOL_RESULT_CHARS = 100_000;
-const TASK_ROLES: Array<[RegExp, AgentTeamRuntimeRole]> = [
+const TASK_ROLES: Array<[RegExp, AgentTeamRole]> = [
   [/^repair_test_authoring_/, 'test_author'],
   [/^repair_test_execution_/, 'test_runner'],
   [/^repair_review_/, 'reviewer'],
@@ -125,6 +136,15 @@ type Checkpointer = ReturnType<typeof createSqliteCheckpointer>;
 type AgentTeamDatabaseTransaction = Parameters<Parameters<Database['transaction']>[0]>[0];
 type AgentTeamRunAcceptance = { runId: string; accept: (transaction: AgentTeamDatabaseTransaction, runId: string) => void };
 type AgentTeamEventListener = (event: AgentTeamRunEvent) => void;
+type AgentTeamGroupRunRequest = {
+  groupId: string;
+  groupMessageId: string;
+  targetRole: AgentTeamRuntimeRole;
+  repositoryIds: string[];
+  intent: string;
+  mode: AgentTeamMode;
+  groupContext: NonNullable<AgentTeamRun['groupContext']>;
+};
 type RawTaskOutput = {
   status?: unknown;
   documents?: unknown;
@@ -140,6 +160,9 @@ type RawTaskOutput = {
   pendingInput?: unknown;
   worktreeSetup?: unknown;
   worktreeTeardown?: unknown;
+  message?: unknown;
+  handoff?: unknown;
+  repositoryDirectories?: unknown;
 };
 
 // The agentTeamRuns.worktreeBasePath/runBranch and agentTeams.maxConcurrentRuns columns land
@@ -170,6 +193,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     private readonly executors: ProjectExecutorService,
     private readonly resources: WorkspaceResourcesService,
     private readonly operations: AgentTeamOperationJournalService,
+    private readonly teamConfiguration: AgentTeamConfigurationService,
+    private readonly teamManagerTools: AgentTeamManagerToolsService,
     private readonly commands: CommandsService,
   ) {
     this.checkpointer = createSqliteCheckpointer(this.checkpointPath());
@@ -220,7 +245,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       .limit(1);
     if (!team) throw new NotFoundException('The built-in Agent Team was not found.');
 
-    const snapshot = await this.createVersionSnapshot(team.roles);
+    const snapshot = await this.createVersionSnapshot(team.roles, team.workingPractice, 5);
     const now = new Date();
     await this.transaction((transaction) => {
       const [latest] = transaction.select({ version: agentTeamVersions.version })
@@ -258,6 +283,236 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
     await this.maybeStartQueuedRuns(team.id);
     return this.getRunView(runId);
+  }
+
+  async createGroupRun(
+    workspaceId: string,
+    request: AgentTeamGroupRunRequest,
+    acceptance: AgentTeamRunAcceptance,
+  ): Promise<AgentTeamRunView> {
+    assertRuntimeAdmission();
+    const intent = request?.intent?.trim();
+    if (!intent) throw new BadRequestException('A group role task needs a message.');
+    if (!['plan_only', 'validate_existing', 'implement_and_validate'].includes(request.mode)) {
+      throw new BadRequestException('A supported Agent Team mode is required.');
+    }
+    if (!request.groupId || !request.groupMessageId || !request.targetRole || request.groupContext.groupId !== request.groupId) {
+      throw new BadRequestException('The Agent Team group context is incomplete.');
+    }
+    const repositories = request.groupContext.repositories.filter((repository) => request.repositoryIds.includes(repository.id));
+    // An empty selection is a valid empty-scope Run: the addressed role identifies the
+    // project directory from context or asks the user, and directories bind explicitly.
+    if (repositories.length !== new Set(request.repositoryIds).size
+      || repositories.some((repository) => !isAbsolute(repository.directory))) {
+      throw new BadRequestException('Select repositories that belong to this group task.');
+    }
+    const [existing] = await this.db.select({ id: agentTeamRuns.id }).from(agentTeamRuns)
+      .where(and(eq(agentTeamRuns.id, acceptance.runId), eq(agentTeamRuns.workspaceId, workspaceId))).limit(1);
+    if (existing) return this.getRunView(existing.id, workspaceId);
+
+    const [team] = await this.db.select().from(agentTeams)
+      .where(and(eq(agentTeams.id, BUILT_IN_AGENT_TEAM_ID), eq(agentTeams.workspaceId, workspaceId)))
+      .limit(1);
+    if (!team) throw new NotFoundException('The built-in Agent Team was not found.');
+    if (request.targetRole === 'team-manager') {
+      const managerRole = team.roles.find((role) => role.role === 'team-manager');
+      const hasConfiguredModel = Boolean(managerRole?.publicModelId.trim())
+        || Boolean(this.config.get<string>('AGENT_TEAM_DEFAULT_PUBLIC_MODEL_ID')?.trim());
+      if (!hasConfiguredModel) {
+        throw new BadRequestException('Team Manager 还没有配置模型，请先在团队配置中为 Team Manager 选择一个模型。');
+      }
+    }
+    const runId = acceptance.runId;
+    const versionId = `atver_${randomUUID()}`;
+    const snapshot = await this.createVersionSnapshot(team.roles, team.workingPractice, 7);
+    const primary = repositories[0];
+    const now = new Date();
+    await this.transaction((transaction) => {
+      const [latest] = transaction.select({ version: agentTeamVersions.version })
+        .from(agentTeamVersions).where(eq(agentTeamVersions.teamId, team.id))
+        .orderBy(desc(agentTeamVersions.version)).limit(1).all();
+      transaction.insert(agentTeamVersions).values({
+        id: versionId, workspaceId, teamId: team.id, version: (latest?.version ?? 0) + 1, snapshot,
+      }).run();
+      transaction.insert(agentTeamRuns).values({
+        id: runId,
+        workspaceId,
+        teamId: team.id,
+        teamVersionId: versionId,
+        groupId: request.groupId,
+        groupMessageId: request.groupMessageId,
+        targetRole: request.targetRole,
+        repositoryIds: request.repositoryIds,
+        groupContext: request.groupContext,
+        status: 'queued',
+        intent,
+        projectDirectory: primary ? resolve(primary.directory) : '',
+        projectInstructions: primary?.projectInstructions ?? [],
+        mode: request.mode,
+        authorizedCommands: [],
+        scopeRevision: 1,
+        langGraphThreadId: `atthread_${runId}`,
+        createdAt: now,
+        updatedAt: now,
+      }).run();
+      acceptance.accept(transaction, runId);
+      this.appendEvent(transaction, runId, 'run.status', { status: 'queued', groupId: request.groupId });
+    });
+    await this.maybeStartQueuedRuns(team.id);
+    return this.getRunView(runId);
+  }
+
+  readGroupProjectInstructions(directory: string): Promise<AgentTeamProjectInstructionFile[]> {
+    if (!isAbsolute(directory)) throw new BadRequestException('Repository directories must be absolute paths.');
+    return this.readProjectInstructions(resolve(directory));
+  }
+
+  private async normalizeBindingDirectories(value: readonly string[] | undefined): Promise<string[]> {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) throw new BadRequestException('Directories must be an array of absolute paths.');
+    const directories: string[] = [];
+    for (const candidate of value) {
+      if (typeof candidate !== 'string' || !isAbsolute(candidate.trim())) {
+        throw new BadRequestException('Directories must be absolute paths.');
+      }
+      const directory = resolve(candidate.trim());
+      let info;
+      try { info = await stat(directory); } catch { throw new BadRequestException(`Directory does not exist: ${directory}`); }
+      if (!info.isDirectory()) throw new BadRequestException(`Path is not a directory: ${directory}`);
+      directories.push(directory);
+    }
+    return [...new Set(directories)];
+  }
+
+  // Explicit directory binding: directories named by a user answer or identified by a role
+  // register as group repositories under the canonical Team identity and extend the Run's
+  // captured scope in one transaction, with the source recorded as group evidence.
+  async bindGroupDirectories(
+    runId: string,
+    directories: readonly string[],
+    source: 'answer' | 'role',
+  ): Promise<NonNullable<AgentTeamRun['groupContext']>['repositories']> {
+    const run = await this.getRun(runId);
+    if (!run.groupId || !run.groupContext) {
+      throw new BadRequestException('Only an Agent Team group Run can bind project directories.');
+    }
+    const prepared = await this.normalizeBindingDirectories(directories);
+    if (!prepared.length) return [];
+    const withInstructions = await Promise.all(prepared.map(async (directory) => ({
+      directory,
+      name: basename(directory) || directory,
+      projectInstructions: await this.readGroupProjectInstructions(directory),
+    })));
+    const bound: NonNullable<AgentTeamRun['groupContext']>['repositories'] = [];
+    await this.transaction((transaction) => {
+      const [current] = transaction.select().from(agentTeamRuns).where(eq(agentTeamRuns.id, runId)).limit(1).all();
+      if (!current?.groupId || !current.groupContext) {
+        throw new BadRequestException('Only an Agent Team group Run can bind project directories.');
+      }
+      const now = new Date();
+      const nextRepositoryIds = [...current.repositoryIds];
+      const nextContextRepositories = [...current.groupContext.repositories];
+      for (const repository of withInstructions) {
+        const [existingGroupRepository] = transaction.select().from(agentTeamGroupRepositories)
+          .where(and(eq(agentTeamGroupRepositories.groupId, current.groupId!), eq(agentTeamGroupRepositories.directory, repository.directory)))
+          .limit(1).all();
+        let entry: NonNullable<AgentTeamRun['groupContext']>['repositories'][number];
+        if (existingGroupRepository) {
+          entry = {
+            id: existingGroupRepository.id,
+            memoryRepositoryId: existingGroupRepository.teamRepositoryId,
+            name: existingGroupRepository.name,
+            directory: existingGroupRepository.directory,
+            projectInstructions: repository.projectInstructions,
+          };
+        } else {
+          const [teamRepository] = transaction.select({ id: agentTeamRepositories.id }).from(agentTeamRepositories)
+            .where(and(eq(agentTeamRepositories.teamId, current.teamId), eq(agentTeamRepositories.directory, repository.directory)))
+            .limit(1).all();
+          const teamRepositoryId = teamRepository?.id ?? `atrepo_${createHash('sha256').update(`${current.teamId}:${repository.directory}`).digest('hex')}`;
+          if (!teamRepository) transaction.insert(agentTeamRepositories).values({
+            id: teamRepositoryId,
+            workspaceId: current.workspaceId,
+            teamId: current.teamId,
+            name: repository.name,
+            directory: repository.directory,
+            createdAt: now,
+            updatedAt: now,
+          }).run();
+          const groupRepositoryId = `atrepo_${randomUUID()}`;
+          transaction.insert(agentTeamGroupRepositories).values({
+            id: groupRepositoryId,
+            workspaceId: current.workspaceId,
+            groupId: current.groupId!,
+            teamRepositoryId,
+            name: repository.name,
+            directory: repository.directory,
+            createdAt: now,
+          }).run();
+          entry = {
+            id: groupRepositoryId,
+            memoryRepositoryId: teamRepositoryId,
+            name: repository.name,
+            directory: repository.directory,
+            projectInstructions: repository.projectInstructions,
+          };
+        }
+        if (!nextContextRepositories.some((item) => item.id === entry.id)) nextContextRepositories.push(entry);
+        if (!nextRepositoryIds.includes(entry.id)) nextRepositoryIds.push(entry.id);
+        bound.push(entry);
+      }
+      transaction.update(agentTeamRuns).set({
+        repositoryIds: nextRepositoryIds,
+        groupContext: { ...current.groupContext, repositories: nextContextRepositories },
+        ...(current.projectDirectory ? {} : { projectDirectory: bound[0]!.directory }),
+        updatedAt: now,
+      }).where(eq(agentTeamRuns.id, runId)).run();
+      this.appendGroupMessage(transaction, {
+        workspaceId: current.workspaceId,
+        groupId: current.groupId!,
+        sender: 'system',
+        kind: 'status',
+        body: `已将项目目录绑定到本次任务：${withInstructions.map((repository) => repository.directory).join('、')}（${source === 'answer' ? '来自用户回答' : '由角色识别'}）。`,
+        runId,
+        repositoryIds: bound.map((repository) => repository.id),
+      });
+      this.appendGroupEvent(transaction, current.groupId!, 'repository.updated', {
+        repositories: withInstructions.map(({ directory, name }) => ({ directory, name })),
+        source,
+        runId,
+      });
+    });
+    return bound;
+  }
+
+  private async getTaskDocumentReferences(runId: string, taskKey: string) {
+    return this.db.select({ documentId: agentTeamDocuments.id, revision: agentTeamDocuments.revision, title: agentTeamDocuments.title })
+      .from(agentTeamDocuments)
+      .innerJoin(agentTeamTaskAttempts, eq(agentTeamDocuments.taskAttemptId, agentTeamTaskAttempts.id))
+      .where(and(
+        eq(agentTeamTaskAttempts.runId, runId),
+        eq(agentTeamTaskAttempts.taskKey, taskKey),
+        eq(agentTeamTaskAttempts.active, true),
+      ))
+      .orderBy(asc(agentTeamDocuments.createdAt));
+  }
+
+  private async readGroupDocumentForTask(
+    groupId: string,
+    documentId: string,
+    revision: number,
+    allowed: readonly { documentId: string; revision: number; title: string }[],
+  ): Promise<{ title: string; content: string }> {
+    if (!allowed.some((reference) => reference.documentId === documentId && reference.revision === revision)) {
+      throw new BadRequestException('The requested Team document version was not handed to this task.');
+    }
+    const [document] = await this.db.select().from(agentTeamDocuments)
+      .where(and(eq(agentTeamDocuments.id, documentId), eq(agentTeamDocuments.revision, revision))).limit(1);
+    if (!document) throw new NotFoundException('The Team document version was not found.');
+    const [sourceRun] = await this.db.select({ groupId: agentTeamRuns.groupId }).from(agentTeamRuns)
+      .where(eq(agentTeamRuns.id, document.runId)).limit(1);
+    if (sourceRun?.groupId !== groupId) throw new BadRequestException('The Team document belongs to another task group.');
+    return { title: document.title, content: document.content };
   }
 
   private async getMaxConcurrentRuns(teamId: string): Promise<number> {
@@ -343,12 +598,16 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     return {
       id: run.id,
       teamId: run.teamId,
+      groupId: run.groupId,
+      targetRole: run.targetRole,
+      repositoryIds: run.repositoryIds,
       teamVersion: {
         id: version.id,
         version: version.version,
         createdAt: version.createdAt.toISOString(),
         developerExecution: version.snapshot.developerExecution,
         developerExecutions: version.snapshot.developerExecutions,
+        projectExecutorLaunches: version.snapshot.projectExecutorLaunches,
         orchestrationVersion: version.snapshot.orchestrationVersion,
       },
       status: run.status,
@@ -434,13 +693,16 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (run.mode === 'plan_only' && grantedCommands.length > 0) {
       throw new BadRequestException('Plan-only Agent Team runs cannot authorize commands.');
     }
+    // Directories carried by an answer are validated before the answer is accepted, so an
+    // invalid path rejects the whole answer instead of consuming it.
+    const directories = await this.normalizeBindingDirectories(request?.directories);
 
     const version = await this.getVersion(run);
     const orchestrationVersion: number = version.snapshot.orchestrationVersion ?? 1;
     let resumeInterruptId: string | undefined;
     // Lane-based graphs (v2, v4) resume the exact interrupted input node by interrupt id so
     // one lane's answer never lands in another lane's pending question.
-    if (orchestrationVersion === 2 || orchestrationVersion === 4 || orchestrationVersion === 5) {
+    if (orchestrationVersion === 2 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7) {
       const graph = this.createGraph(run, version);
       const snapshot = await graph.getState({ configurable: { thread_id: run.langGraphThreadId } });
       resumeInterruptId = snapshot.tasks
@@ -489,15 +751,16 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         kind: 'question',
         answer: request.answer,
         ...(grantedCommands.length > 0 ? { authorizedCommands: grantedCommands } : {}),
+        ...(directories.length > 0 ? { directories } : {}),
       });
       this.appendProgressIfChanged(transaction, runId);
       return nextCommands;
     });
     if (!answered) throw new BadRequestException('The pending input is no longer active.');
 
-    const resume = pendingInputAnswer(request.answer, answered);
+    const resume = pendingInputAnswer(request.answer, answered, directories);
     this.scheduleExecution(runId, new Command({
-      resume: orchestrationVersion === 2 || orchestrationVersion === 4 || orchestrationVersion === 5 ? { [resumeInterruptId as string]: resume } : resume,
+      resume: orchestrationVersion === 2 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7 ? { [resumeInterruptId as string]: resume } : resume,
     }));
     return this.getRunView(runId);
   }
@@ -776,12 +1039,10 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       .where(and(eq(agentTeams.id, BUILT_IN_AGENT_TEAM_ID), eq(agentTeams.workspaceId, 'workspace_personal')))
       .limit(1);
     if (existing) {
-      // Orchestration v4 adds the worktree-manager role to previously initialized teams.
-      if (existing.roles.some((role) => role.role === 'worktree-manager')) return;
-      const roles: StoredAgentTeamRoleConfiguration[] = [
-        ...existing.roles,
-        defaultRoleConfiguration('worktree-manager'),
-      ];
+      const roles: StoredAgentTeamRoleConfiguration[] = [...existing.roles];
+      if (!roles.some((role) => role.role === 'worktree-manager')) roles.push(defaultRoleConfiguration('worktree-manager'));
+      if (!roles.some((role) => role.role === 'team-manager')) roles.push(defaultRoleConfiguration('team-manager'));
+      if (roles.length === existing.roles.length) return;
       await this.db.update(agentTeams).set({ roles, updatedAt: new Date() })
         .where(eq(agentTeams.id, existing.id)).run();
       return;
@@ -802,6 +1063,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   private async createVersionSnapshot(
     configuredRoles: StoredAgentTeamRoleConfiguration[],
+    workingPractice = '',
+    orchestrationVersion: 5 | 6 | 7 = 5,
   ): Promise<StoredAgentTeamVersionSnapshot> {
     const manifest = getBmadTeaProcessManifest();
     const processFiles = await Promise.all(manifest.files.map(async (file) => ({
@@ -810,6 +1073,12 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     })));
     const developerRole = configuredRoles.find((role) => role.role === 'developer');
     const developerExecution = await this.executors.captureLaunch(developerRole?.executor ?? 'claude', null);
+    const projectExecutorLaunches = orchestrationVersion === 7
+      ? Object.fromEntries(await Promise.all(configuredRoles.filter((role) => role.executor).map(async (role) => [
+        role.role,
+        await this.executors.captureLaunch(role.executor!, null),
+      ])))
+      : undefined;
     return {
       processId: AGENT_TEAM_PROCESS_ID,
       processVersion: AGENT_TEAM_PROCESS_VERSION,
@@ -818,15 +1087,17 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       // v5 reuses the fixed four-lane Developer pool. The Planner chooses how many
       // assignments execute; each lane shares the role's captured launch.
       developerExecutions: { [RESERVED_DEVELOPER_ID]: developerExecution },
-      // v5 adds the advisory Worktree Manager strategy stage around the developer fan-out.
-      orchestrationVersion: 5,
+      ...(projectExecutorLaunches ? { projectExecutorLaunches } : {}),
+      // v5 remains the ordinary fixed workflow; v6/v7 start from a persisted group message.
+      orchestrationVersion,
+      workingPractice,
       roles: await Promise.all(configuredRoles.map(async (role) => {
         const entryPointContent = await Promise.all(role.entryPoints.map((path) => readBmadTeaProcessFile(path)));
         const processReferences = processReferencePaths(role.role, manifest);
         return {
           ...role,
           // An empty developer model keeps the executor's own default instead of the Team default model.
-          publicModelId: role.publicModelId.trim() || (role.role === 'developer' ? '' : this.config.get<string>('AGENT_TEAM_DEFAULT_PUBLIC_MODEL_ID')?.trim() || ''),
+          publicModelId: role.publicModelId.trim() || (role.executor || role.role === 'developer' ? '' : this.config.get<string>('AGENT_TEAM_DEFAULT_PUBLIC_MODEL_ID')?.trim() || ''),
           processReferences,
           instructions: [role.instructions, ...entryPointContent].filter(Boolean).join('\n\n---\n\n'),
         };
@@ -862,6 +1133,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const version = await this.getVersion(run);
     const graph = this.createGraph(run, version);
     const snapshot = await graph.getState({ configurable: { thread_id: run.langGraphThreadId } });
+    if (isGroupOrchestrationVersion(version.snapshot.orchestrationVersion)) return null;
     const state = snapshot.values as AgentTeamGraphState | undefined;
     return isUsableGraphState(state, run) ? null : this.initialGraphInput(run);
   }
@@ -929,9 +1201,64 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const validState = isUsableGraphState(state, run);
     if (validState) await this.reconcileProjection(run, state);
     const interrupted = snapshot.tasks.some((task) => task.interrupts.length > 0);
+    if (isGroupOrchestrationVersion(version.snapshot.orchestrationVersion)) {
+      const groupState = snapshot.values as AgentTeamGroupGraphState | undefined;
+      const validGroupState = isUsableGroupGraphState(groupState, run);
+      const activeAttempts = await this.db.select({ id: agentTeamTaskAttempts.id }).from(agentTeamTaskAttempts)
+        .where(and(eq(agentTeamTaskAttempts.runId, run.id), eq(agentTeamTaskAttempts.active, true), eq(agentTeamTaskAttempts.status, 'running')));
+      if (activeAttempts.length > 0) {
+        await this.failStaleAttempts(run.id, 'The Agent Team process was interrupted while a role task was active. Inspect repository state before retrying; the task was not replayed.');
+        await this.transaction((transaction) => {
+          const [current] = transaction.select({ groupId: agentTeamRuns.groupId, workspaceId: agentTeamRuns.workspaceId })
+            .from(agentTeamRuns).where(eq(agentTeamRuns.id, run.id)).limit(1).all();
+          if (current?.groupId) this.appendGroupMessage(transaction, {
+            workspaceId: current.workspaceId,
+            groupId: current.groupId,
+            sender: 'system',
+            kind: 'status',
+            body: '服务中断时有角色任务正在运行。任务没有自动重放；请先检查仓库实际状态，再选择重试或重新执行。',
+            runId: run.id,
+          });
+        });
+        await this.setRunStatus(run.id, 'failed');
+        await this.maybeStartQueuedRuns(run.teamId);
+        return;
+      }
+      if (interrupted) {
+        const resume: Record<string, AgentTeamPendingInputAnswer> = {};
+        let unanswered = false;
+        for (const interrupt of snapshot.tasks.flatMap((task) => task.interrupts)) {
+          const pendingInputId = (interrupt.value as { id?: unknown } | undefined)?.id;
+          const answeredInput = validGroupState && typeof pendingInputId === 'string'
+            ? await this.findAnsweredInput(run, pendingInputId)
+            : undefined;
+          if (answeredInput && interrupt.id) resume[interrupt.id] = answeredInput;
+          else unanswered = true;
+        }
+        if (Object.keys(resume).length > 0) {
+          await this.setRunStatus(run.id, unanswered ? 'waiting_for_input' : 'running', undefined, 'none');
+          this.scheduleExecution(run.id, new Command({ resume }));
+          return;
+        }
+        await this.setRunStatus(run.id, 'waiting_for_input');
+        return;
+      }
+      if (!validGroupState) {
+        await this.failStaleAttempts(run.id, 'The Agent Team checkpoint was missing or empty.');
+        await this.setRunStatus(run.id, 'failed');
+        await this.maybeStartQueuedRuns(run.teamId);
+        return;
+      }
+      if (snapshot.next.length === 0) await this.finishGroupRunSuccessful(run.id, groupState);
+      else {
+        await this.setRunStatus(run.id, 'running', undefined, 'none');
+        this.scheduleExecution(run.id, null);
+      }
+      return;
+    }
     if (interrupted) {
       const orchestrationVersion: number = version.snapshot.orchestrationVersion ?? 1;
-      if (orchestrationVersion === 2 || orchestrationVersion === 4 || orchestrationVersion === 5) {
+      if (orchestrationVersion === 2 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7) {
         const resume: Record<string, AgentTeamPendingInputAnswer> = {};
         let unanswered = false;
         for (const interrupt of snapshot.tasks.flatMap((task) => task.interrupts)) {
@@ -1017,7 +1344,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     await this.deliverDocuments(run.id);
   }
 
-  private scheduleExecution(runId: string, input: AgentTeamGraphState | Command | null): void {
+  private scheduleExecution(runId: string, input: AgentTeamGraphState | AgentTeamGroupGraphState | Command | null): void {
     if (this.shuttingDown || this.executions.has(runId)) return;
     const execution = this.executeGraph(runId, input)
       .catch(async (error) => {
@@ -1031,7 +1358,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     void execution;
   }
 
-  private async executeGraph(runId: string, input: AgentTeamGraphState | Command | null): Promise<void> {
+  private async executeGraph(runId: string, input: AgentTeamGraphState | AgentTeamGroupGraphState | Command | null): Promise<void> {
     const run = await this.getRun(runId);
     const version = await this.getVersion(run);
     const graph = this.createGraph(run, version);
@@ -1083,15 +1410,37 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     const snapshot = await graph.getState({ configurable: { thread_id: run.langGraphThreadId } });
-    const completedState = snapshot.values as AgentTeamGraphState;
-    const documents = completedState.documents ?? [];
+    const completedState = snapshot.values as AgentTeamGraphState | AgentTeamGroupGraphState;
     await this.deliverDocuments(runId);
-    await this.finishSuccessfulRun(runId, toGraphResult(completedState));
+    if (isGroupOrchestrationVersion(version.snapshot.orchestrationVersion)) {
+      await this.finishGroupRunSuccessful(runId, completedState as AgentTeamGroupGraphState);
+    } else {
+      await this.finishSuccessfulRun(runId, toGraphResult(completedState as AgentTeamGraphState));
+    }
   }
 
   private createGraph(run: AgentTeamRun, version: AgentTeamVersion) {
     const snapshot = version.snapshot;
     const orchestrationVersion: number = snapshot.orchestrationVersion ?? 1;
+    if (isGroupOrchestrationVersion(orchestrationVersion)) {
+      if (!run.groupContext) throw new Error('This Agent Team group Run has no captured group context. Start a new Run.');
+      const initial: AgentTeamGroupGraphInitial = {
+        runId: run.id,
+        intent: run.intent,
+        mode: run.mode,
+        projectDirectory: run.projectDirectory,
+        outputDirectory: this.runOutputDirectory(run.id),
+        scopeRevision: run.scopeRevision,
+        authorizedCommands: run.authorizedCommands,
+        projectInstructions: run.projectInstructions,
+        groupContext: run.groupContext as AgentTeamGroupRunContext,
+      };
+      return createAgentTeamGroupGraph({
+        executeTask: async (request) => this.executeTask(run.workspaceId, version, request),
+        documentReferences: (runId, taskKey) => this.getTaskDocumentReferences(runId, taskKey),
+        bindGroupDirectories: (runId, directories, source) => this.bindGroupDirectories(runId, directories, source),
+      }, this.checkpointer, initial);
+    }
     // v4 and v5 run the app-local Worktree Manager topology over the fixed lane pool.
     if (orchestrationVersion === 4 || orchestrationVersion === 5) {
       const delegate: AgentTeamGraphV4Delegate = {
@@ -1125,11 +1474,30 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const { role: taskRole, taskKey } = request.taskDefinition;
     const role = version.snapshot.roles.find((item) => item.role === taskRole);
     if (!role) throw new Error(`Agent Team role ${taskRole} was not captured by this version.`);
+    if (taskRole === 'team-manager' && (!request.groupContext || version.snapshot.orchestrationVersion !== 7)) {
+      throw new Error('Team Manager is available only in new Agent Team group Runs.');
+    }
+    if (taskRole === 'team-manager' && !role.publicModelId.trim()) {
+      throw new Error('Team Manager 还没有配置模型，请先在团队配置中为 Team Manager 选择一个模型。');
+    }
     const attempt = await this.prepareTaskAttempt(run, request);
     if (attempt.status === 'completed' || attempt.status === 'waiting_for_input') {
       return attempt.result as AgentTeamTaskResult;
     }
     const orchestrationVersion: number = version.snapshot.orchestrationVersion ?? 1;
+    // A v6/v7 project-executor task cannot launch without a real directory. On an
+    // empty-scope Run the runtime raises the directory question itself; an answer that
+    // carries directories binds them and the task re-runs with a real project directory.
+    if (isGroupOrchestrationVersion(orchestrationVersion) && role.executor && !request.projectDirectory.trim()) {
+      return this.finishWaitingAttempt(request, workspaceId, attempt.id, {
+        status: 'waiting_for_input',
+        pendingInput: {
+          id: `placeholder_${randomUUID()}`,
+          question: '这项开发任务还没有绑定的项目目录。请提供该任务的绝对项目目录；在回答中附带目录会将其注册并绑定到本次任务。',
+          scopeRevision: 0,
+        },
+      });
+    }
     // v5 uses the Worktree Manager as an advisory project-strategy planner. It does not
     // inspect one assumed Git root or invoke the v4 worktree lifecycle.
     if (orchestrationVersion === 4 && (taskKey === 'worktree_setup' || taskKey === 'worktree_teardown')) {
@@ -1147,15 +1515,16 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const requestLane: AgentTeamLaneWorktree | undefined = (request as AgentTeamTaskRequestV4).laneWorktree;
 
     const produceOutput = async (correction?: string): Promise<string> => {
-      if (taskRole === 'developer') {
+      if (taskRole === 'developer' || (orchestrationVersion === 7 && role.executor)) {
         const developerId = request.developerId ?? RESERVED_DEVELOPER_ID;
         // v3/v4/v5 lanes share the role's single captured launch; only v2 snapshots
         // carry per-instance launches and configurations.
-        const execution = version.snapshot.developerExecutions?.[developerId]
-          ?? (orchestrationVersion === 3 || orchestrationVersion === 4 || orchestrationVersion === 5 ? version.snapshot.developerExecutions?.[RESERVED_DEVELOPER_ID] : undefined)
+        const roleExecution = orchestrationVersion === 7 ? version.snapshot.projectExecutorLaunches?.[taskRole] : undefined;
+        const execution = roleExecution ?? version.snapshot.developerExecutions?.[developerId]
+          ?? (orchestrationVersion === 3 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7 ? version.snapshot.developerExecutions?.[RESERVED_DEVELOPER_ID] : undefined)
           ?? (developerId === RESERVED_DEVELOPER_ID ? version.snapshot.developerExecution : undefined);
         if (!execution || !('executor' in execution)) throw new Error('This Team version has no captured developer executor. Start a new Team Run.');
-        const sharedLaunch = orchestrationVersion === 3 || orchestrationVersion === 4 || orchestrationVersion === 5;
+        const sharedLaunch = orchestrationVersion === 3 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7;
         const instance = !sharedLaunch && developerId !== RESERVED_DEVELOPER_ID
           ? role.developerInstances?.find((candidate) => candidate.developerId === developerId)
           : undefined;
@@ -1165,7 +1534,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         const developerRole = instance ?? role;
         const model = developerRole.publicModelId.trim() || (execution.executor === 'codex' ? execution.model : null);
         if (model) await this.executors.requireModel(workspaceId, execution.executor, model);
-        if (!laneWorktree && orchestrationVersion !== 5) {
+        if (!laneWorktree && orchestrationVersion !== 5 && orchestrationVersion !== 6 && orchestrationVersion !== 7) {
           if (requestLane) {
             laneWorktree = {
               worktreePath: requestLane.worktreePath,
@@ -1179,8 +1548,14 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           }
         }
         const laneNote = laneWorktree ? `You work in your lane's dedicated git worktree (${laneWorktree.worktreePath}) on branch ${laneWorktree.worktreeBranch}; stay inside it and commit your finished changes on that branch before returning.` : null;
-        const promptAddition = [developerPromptAddition(request), rolePromptAddition('developer', version.snapshot, request), laneNote].filter(Boolean).join('\n\n') || undefined;
-        const references = await Promise.all((developerRole.processReferences ?? []).map(async (path) => ({ path, content: await this.readCapturedProcessFile(version, path) })));
+        const promptAddition = [developerPromptAddition(request), rolePromptAddition('developer', version.snapshot, request), groupRolePromptAddition(version.snapshot, request), laneNote].filter(Boolean).join('\n\n') || undefined;
+        const references = await Promise.all([
+          ...(developerRole.processReferences ?? []).map(async (path) => ({ path, content: await this.readCapturedProcessFile(version, path) })),
+          ...(request.groupContext ? request.fileReferences ?? [] : []).map(async (reference) => ({
+            path: `team-documents/${reference.documentId}-v${reference.revision}.md`,
+            content: (await this.readGroupDocumentForTask(run.groupId!, reference.documentId, reference.revision, request.fileReferences ?? [])).content,
+          })),
+        ]);
         return this.executors.execute({
           owner: 'team',
           workspaceId,
@@ -1241,22 +1616,43 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       return this.invocations.execute({
         workspaceId,
         publicModelId: role.publicModelId,
-        systemPrompt: taskSystemPrompt(role.instructions, false, rolePromptAddition(taskRole, version.snapshot, request)),
+        systemPrompt: taskRole === 'team-manager'
+          ? teamManagerSystemPrompt(groupRolePromptAddition(version.snapshot, request))
+          : taskSystemPrompt(role.instructions, false, [rolePromptAddition(taskRole, version.snapshot, request), groupRolePromptAddition(version.snapshot, request)].filter(Boolean).join('\n\n') || undefined),
         context: taskContext(request, false, correction),
-        skills: role.skills,
-        mcpRuntimes: (await this.resources.workflowMcpRuntimes(workspaceId, role.mcpServers.map((server) => server.id)))
+        skills: taskRole === 'team-manager' ? [] : role.skills,
+        mcpRuntimes: taskRole === 'team-manager' ? [] : (await this.resources.workflowMcpRuntimes(workspaceId, role.mcpServers.map((server) => server.id)))
           .map((runtime) => {
             const snapshot = role.mcpServers.find((server) => server.id === runtime.id);
             return snapshot
               ? { ...runtime, name: snapshot.name, allowedTools: snapshot.allowedToolNames }
               : runtime;
           }),
-        builtinToolNames: role.toolNames,
+        builtinToolNames: taskRole === 'team-manager' ? [] : isGroupOrchestrationVersion(orchestrationVersion) ? [...role.toolNames, 'read_team_document'] : role.toolNames,
+        ...(taskRole === 'team-manager' ? {
+          managedTools: this.teamManagerTools.toolDefinitions(),
+          executeManagedTool: (call) => this.teamManagerTools.execute({
+            workspaceId,
+            groupId: request.groupContext!.groupId,
+            runId: request.runId,
+            taskKey,
+            sourceMessageId: request.groupContext!.initialMessageId,
+            call,
+          }),
+        } : {}),
         role: taskRole,
-        projectDirectory: request.projectDirectory,
-        authorizedCommands: request.authorizedCommands,
-        processReferencePaths: role.processReferences ?? [],
+        projectDirectory: taskRole === 'team-manager' ? '' : request.projectDirectory,
+        authorizedCommands: taskRole === 'team-manager' ? [] : request.authorizedCommands,
+        processReferencePaths: taskRole === 'team-manager' ? [] : role.processReferences ?? [],
         readProcessReference: (path) => this.readCapturedProcessFile(version, path),
+        ...(request.groupContext && taskRole !== 'team-manager' ? {
+          readTeamDocument: async (documentId: string, revision: number) => this.readGroupDocumentForTask(
+            request.groupContext!.groupId,
+            documentId,
+            revision,
+            request.fileReferences ?? [],
+          ),
+        } : {}),
         signal,
         jsonOutput: true,
         correlation: { source: 'team', teamRunId: request.runId, teamTaskAttemptId: attempt.id },
@@ -1288,7 +1684,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     for (let parseAttempt = 0; ; parseAttempt += 1) {
       try {
         const output = await produceOutput(correction);
-        return await this.finishExecutorOutput(request, workspaceId, attempt.id, taskKey, output, commandIds, laneWorktree, laneMergeTarget, orchestrationVersion);
+        return await this.finishExecutorOutput(request, workspaceId, attempt.id, taskKey, output, commandIds, laneWorktree, laneMergeTarget, orchestrationVersion, version.snapshot.roles.map((item) => item.role));
       } catch (error) {
         if (!(error instanceof TaskOutputValidationError) || parseAttempt >= 1) throw error;
         correction = [
@@ -1310,8 +1706,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     laneWorktree?: PreparedTaskWorktree | null,
     laneMergeTarget?: { projectDirectory: string; baseBranch: string } | null,
     orchestrationVersion = 1,
+    supportedRoleIds: readonly string[] = [],
   ): Promise<AgentTeamTaskResult> {
-    const parsed = parseTaskOutput(output, taskKey);
+    const parsed = parseTaskOutput(output, taskKey, supportedRoleIds);
     if (parsed.status === 'waiting_for_input') {
       return this.finishWaitingAttempt(request, workspaceId, attemptId, parsed);
     }
@@ -1324,7 +1721,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     // The Worktree Manager's validated output is executed by the runtime before the result
     // commits: shape and convention errors throw TaskOutputValidationError (earning the
     // single corrective re-invocation), git failures fail the attempt outright.
-    const executed = orchestrationVersion === 5
+    const executed = orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7
       ? { ...result, worktreeSetup: undefined, worktreeTeardown: undefined }
       : await this.applyWorktreeManagerOutput(request, attemptId, output, result);
     return this.finishCompletedAttempt(request, workspaceId, attemptId, executed);
@@ -1701,6 +2098,22 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         taskKey: request.taskDefinition.taskKey,
         ...taskAttribution(request),
       });
+      const [run] = transaction.select({ groupId: agentTeamRuns.groupId, repositoryIds: agentTeamRuns.repositoryIds })
+        .from(agentTeamRuns).where(eq(agentTeamRuns.id, request.runId)).limit(1).all();
+      if (run?.groupId) {
+        this.appendGroupMessage(transaction, {
+          workspaceId,
+          groupId: run.groupId,
+          sender: 'role',
+          senderRole: request.taskDefinition.role,
+          recipientRole: request.taskDefinition.role,
+          kind: 'question',
+          body: result.pendingInput.question,
+          runId: request.runId,
+          taskAttemptId: attemptId,
+          repositoryIds: request.assignment?.repositoryIds ?? run.repositoryIds,
+        });
+      }
       this.appendProgressIfChanged(transaction, request.runId);
     });
     return Promise.resolve(persistedResult);
@@ -1732,6 +2145,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         eq(agentTeamTaskAttempts.status, 'running'),
       )).returning().all();
       if (updated.length === 0) throw new Error('The Agent Team task attempt is no longer running.');
+      const fileReferences: Array<{ documentId: string; revision: number; title: string }> = [];
       for (const document of result.documents) {
         const [latest] = transaction.select({ revision: agentTeamDocuments.revision })
           .from(agentTeamDocuments)
@@ -1739,8 +2153,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           .orderBy(desc(agentTeamDocuments.revision))
           .limit(1).all();
         const revision = (latest?.revision ?? 0) + 1;
+        const documentId = `atdoc_${randomUUID()}`;
         transaction.insert(agentTeamDocuments).values({
-          id: `atdoc_${randomUUID()}`,
+          id: documentId,
           workspaceId,
           runId: request.runId,
           taskAttemptId: attemptId,
@@ -1750,6 +2165,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           content: document.content,
           upstreamDocumentKeys: document.upstreamDocumentKeys,
         }).run();
+        fileReferences.push({ documentId, revision, title: document.title });
         this.appendEvent(transaction, request.runId, 'document.committed', {
           taskAttemptId: attemptId,
           taskKey,
@@ -1763,6 +2179,25 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         ...taskAttribution(request),
         result,
       });
+      const [run] = transaction.select({ groupId: agentTeamRuns.groupId, repositoryIds: agentTeamRuns.repositoryIds, workspaceId: agentTeamRuns.workspaceId })
+        .from(agentTeamRuns).where(eq(agentTeamRuns.id, request.runId)).limit(1).all();
+      if (run?.groupId) {
+        const body = result.message?.trim()
+          || (result.documents.length > 0 ? `已提交文件：${result.documents.map((document) => document.title).join('、')}` : '任务已完成。');
+        this.appendGroupMessage(transaction, {
+          workspaceId: run.workspaceId,
+          groupId: run.groupId,
+          sender: 'role',
+          senderRole: request.taskDefinition.role,
+          recipientRole: result.handoff?.role,
+          kind: result.handoff ? 'handoff' : 'text',
+          body,
+          runId: request.runId,
+          taskAttemptId: attemptId,
+          repositoryIds: request.assignment?.repositoryIds ?? run.repositoryIds,
+          fileReferences,
+        });
+      }
       this.appendProgressIfChanged(transaction, request.runId);
     });
     await this.deliverDocuments(request.runId);
@@ -1929,6 +2364,23 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       : formatError(error);
     await this.failActiveAttempts(runId, 'failed', reason);
     await this.setRunStatus(runId, 'failed');
+    // A graph-level failure never reaches the per-task completion paths that normally post a
+    // group message, so the group transcript would otherwise show nothing beyond the task
+    // band's status change. Post the failure directly into the transcript the reader is
+    // already watching.
+    if (run.groupId) {
+      const groupId = run.groupId;
+      await this.transaction((transaction) => {
+        this.appendGroupMessage(transaction, {
+          workspaceId: run.workspaceId,
+          groupId,
+          sender: 'system',
+          kind: 'status',
+          body: reason,
+          runId,
+        });
+      });
+    }
     await this.maybeStartQueuedRuns(run.teamId);
   }
 
@@ -2031,6 +2483,120 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     await this.finishCancelledRun(runId);
   }
 
+  private async finishGroupRunSuccessful(runId: string, state: AgentTeamGroupGraphState): Promise<void> {
+    const attempts = await this.db.select().from(agentTeamTaskAttempts)
+      .where(and(eq(agentTeamTaskAttempts.runId, runId), eq(agentTeamTaskAttempts.active, true)))
+      .orderBy(asc(agentTeamTaskAttempts.createdAt));
+    const unresolvedIssues = attempts.flatMap((attempt) => {
+      const result = attempt.result as { unresolvedIssues?: unknown } | null;
+      return Array.isArray(result?.unresolvedIssues)
+        ? result.unresolvedIssues.filter((issue): issue is string => typeof issue === 'string')
+        : [];
+    });
+    const outcome: AgentTeamRunOutcome = {
+      summary: state.handoffLimitReached
+        ? 'Stopped after the automatic handoff limit; the group can continue with a new message.'
+        : 'The addressed Agent Team role work completed.',
+      unresolvedIssues,
+      criterionAssessments: [],
+    };
+    const now = new Date();
+    const committed = await this.transaction((transaction) => {
+      const [run] = transaction.select({ groupId: agentTeamRuns.groupId, teamId: agentTeamRuns.teamId, workspaceId: agentTeamRuns.workspaceId })
+        .from(agentTeamRuns).where(eq(agentTeamRuns.id, runId)).limit(1).all();
+      if (!run) return false;
+      const [desired] = transaction.select({ desiredControlState: agentTeamRuns.desiredControlState })
+        .from(agentTeamRuns).where(eq(agentTeamRuns.id, runId)).limit(1).all();
+      if (desired?.desiredControlState === 'cancel_requested') return false;
+      const updated = transaction.update(agentTeamRuns).set({
+        status: 'succeeded', outcome, desiredControlState: 'none', updatedAt: now, finishedAt: now,
+      }).where(and(eq(agentTeamRuns.id, runId), ne(agentTeamRuns.desiredControlState, 'cancel_requested'))).returning().all();
+      if (updated.length === 0) return false;
+      this.appendEvent(transaction, runId, 'run.status', { status: 'succeeded', outcome });
+      if (run.groupId) {
+        this.appendGroupEvent(transaction, run.groupId, 'run.updated', { runId, status: 'succeeded' });
+        if (state.handoffLimitReached) {
+          this.appendGroupMessage(transaction, {
+            workspaceId: run.workspaceId,
+            groupId: run.groupId,
+            sender: 'system',
+            kind: 'status',
+            body: '自动交接达到 16 次上限，当前执行已停止。你可以在群里继续 @角色 发起下一项工作。',
+            runId,
+          });
+        }
+      }
+      return true;
+    });
+    if (committed) await this.maybeStartQueuedRuns((await this.getRun(runId)).teamId);
+    else if (await this.getDesiredControlState(runId) === 'cancel_requested') {
+      await this.failActiveAttempts(runId, 'cancelled', 'The Agent Team run was cancelled.');
+      await this.finishCancelledRun(runId);
+    }
+  }
+
+  private appendGroupMessage(
+    transaction: AgentTeamDatabaseTransaction,
+    input: {
+      workspaceId: string;
+      groupId: string;
+      sender: 'user' | 'role' | 'system';
+      senderRole?: AgentTeamRuntimeRole;
+      recipientRole?: AgentTeamRuntimeRole;
+      kind: 'text' | 'question' | 'handoff' | 'control' | 'status' | 'file';
+      body: string;
+      runId?: string;
+      taskAttemptId?: string;
+      repositoryIds?: string[];
+      fileReferences?: Array<{ documentId: string; revision: number; title: string }>;
+      submissionId?: string;
+      deliveryStatus?: 'pending' | 'delivered' | 'failed';
+    },
+  ): void {
+    const [latest] = transaction.select({ sequence: agentTeamGroupMessages.sequence })
+      .from(agentTeamGroupMessages).where(eq(agentTeamGroupMessages.groupId, input.groupId))
+      .orderBy(desc(agentTeamGroupMessages.sequence)).limit(1).all();
+    const now = new Date();
+    const message = {
+      id: `atmsg_${randomUUID()}`,
+      workspaceId: input.workspaceId,
+      groupId: input.groupId,
+      sequence: (latest?.sequence ?? 0) + 1,
+      sender: input.sender,
+      senderRole: input.senderRole ?? null,
+      recipientRole: input.recipientRole ?? null,
+      kind: input.kind,
+      body: input.body,
+      runId: input.runId ?? null,
+      taskAttemptId: input.taskAttemptId ?? null,
+      repositoryIds: input.repositoryIds ?? [],
+      fileReferences: input.fileReferences ?? [],
+      submissionId: input.submissionId ?? null,
+      deliveryStatus: input.deliveryStatus ?? 'delivered',
+      createdAt: now,
+    };
+    transaction.insert(agentTeamGroupMessages).values(message).run();
+    this.appendGroupEvent(transaction, input.groupId, 'message', { message });
+    transaction.update(agentTeamGroups).set({ updatedAt: now }).where(eq(agentTeamGroups.id, input.groupId)).run();
+  }
+
+  private appendGroupEvent(
+    transaction: AgentTeamDatabaseTransaction,
+    groupId: string,
+    type: 'message' | 'repository.updated' | 'run.updated' | 'memory.updated',
+    payload: Record<string, unknown>,
+  ): void {
+    const [latest] = transaction.select({ sequence: agentTeamGroupEvents.sequence })
+      .from(agentTeamGroupEvents).where(eq(agentTeamGroupEvents.groupId, groupId))
+      .orderBy(desc(agentTeamGroupEvents.sequence)).limit(1).all();
+    transaction.insert(agentTeamGroupEvents).values({
+      groupId,
+      sequence: (latest?.sequence ?? 0) + 1,
+      type,
+      payload,
+    }).run();
+  }
+
   private async finishCancelledRun(runId: string): Promise<void> {
     const now = new Date();
     await this.db.update(agentTeamPendingInputs).set({ status: 'cancelled', updatedAt: now })
@@ -2057,6 +2623,12 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     }).where(eq(agentTeamRuns.id, runId)).returning();
     if (row) {
       await this.appendEvent(this.db, runId, 'run.status', { status, ...(outcome ? { outcome } : {}) });
+      if (row.groupId) {
+        await this.transaction((transaction) => {
+          this.appendGroupEvent(transaction, row.groupId!, 'run.updated', { runId, status });
+          transaction.update(agentTeamGroups).set({ updatedAt: now }).where(eq(agentTeamGroups.id, row.groupId!)).run();
+        });
+      }
       this.appendProgressIfChanged(this.db, runId);
     }
   }
@@ -2259,9 +2831,10 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 }
 
 function processReferencePaths(
-  role: AgentTeamRole,
+  role: AgentTeamRoleId,
   manifest: ReturnType<typeof getBmadTeaProcessManifest>,
 ): string[] {
+  if (!['planner', 'test_designer', 'developer', 'test_author', 'test_runner', 'reviewer', 'worktree-manager'].includes(role)) return [];
   const prefixes = role === 'test_designer' || role === 'test_author'
     ? ['upstream/tea/', 'licenses/']
     : ['upstream/bmad/', 'licenses/'];
@@ -2393,18 +2966,18 @@ function versionDeveloperIds(snapshot: StoredAgentTeamVersionSnapshot): string[]
   ];
 }
 
-// Default persisted configuration for one built-in Team role. The stored role union gains
-// 'worktree-manager' with the packages/db lane; bridged until that merge.
+// Default persisted configuration for one built-in Team role.
 function defaultRoleConfiguration(role: AgentTeamRuntimeRole): StoredAgentTeamRoleConfiguration {
   const manifest = getBmadTeaProcessManifest();
   return {
     role: agentTeamContractRole(role) as StoredAgentTeamRoleConfiguration['role'],
+    ...(role === 'team-manager' ? { displayName: 'Team Manager' } : {}),
     publicModelId: '',
-    instructions: AGENT_TEAM_ROLE_INSTRUCTIONS[role],
+    instructions: AGENT_TEAM_ROLE_INSTRUCTIONS[role] ?? `You are the ${role} role in the Agent Team. Complete the addressed task and report the result clearly.`,
     entryPoints: manifest.entryPoints[role] ?? [],
     skills: [],
     mcpServers: [],
-    toolNames: [...AGENT_TEAM_ROLE_TOOL_NAMES[role]],
+    toolNames: [...(AGENT_TEAM_ROLE_TOOL_NAMES[role] ?? [])],
   };
 }
 
@@ -2445,6 +3018,19 @@ function rolePromptAddition(
   request?: AgentTeamTaskRequest,
 ): string | undefined {
   const orchestrationVersion: number = snapshot.orchestrationVersion ?? 1;
+  if (orchestrationVersion === 6 || orchestrationVersion === 7) {
+    return [
+      'This is a message addressed to your one configured Agent Team role. Complete the stated goal or ask one specific question when blocked.',
+      `To pass work onward, include a handoff object with a role id captured by this Team version and a specific goal. Omit handoff when your work is complete or you are waiting for the user.`,
+      role === 'developer'
+        ? 'When implementation should split safely, return up to four developmentAssignments with non-overlapping ownedPaths and optional repositoryIds, and hand off to developer. WorkLite runs those assignments in parallel using this same captured Developer configuration.'
+        : 'Use developmentAssignments only when assigning implementation work to the single configured Developer role; each assignment must state its repository scope and non-overlapping paths.',
+      request?.projectDirectory?.trim()
+        ? ''
+        : 'This task has no bound project directory yet. Identify the absolute project directory from the message, the Team known repositories listed in the task context, Team memories, or working practice, and return identified directories as "repositoryDirectories":["/absolute/path"] in the completed response; WorkLite registers them as group repositories and binds them to this Run. If you cannot determine the directory, return waiting_for_input with one specific question asking the user for the absolute project directory.',
+      'Return a concise user-facing message in the message field. Put complete written deliverables in documents and refer to their file versions; the next role receives file references and can read them on demand with read_team_document (or through the materialized reference files as Developer).',
+    ].filter(Boolean).join('\n');
+  }
   if (orchestrationVersion === 3 || orchestrationVersion === 4 || orchestrationVersion === 5) {
     if (orchestrationVersion === 5 && role === 'planner') {
       return [
@@ -2546,13 +3132,49 @@ When more user input is required, return:
 {"status":"waiting_for_input","pendingInput":{"question":"One specific question"}}
 
 Otherwise return:
-{"status":"completed","documents":[{"key":"stable-document-key","title":"Document title","content":"Document content","upstreamDocumentKeys":["optional-upstream-key"]}],"unresolvedIssues":["specific unresolved issue"],"changedFiles":["path/to/changed/file"],"completedAssignedWork":true,"criterionAssessments":[{"criterion":"criterion","assessment":"met|unmet|not_verified","evidence":["evidence reference"]}]}
+{"status":"completed","message":"Concise user-facing update","documents":[{"key":"stable-document-key","title":"Document title","content":"Document content","upstreamDocumentKeys":["optional-upstream-key"]}],"unresolvedIssues":["specific unresolved issue"],"changedFiles":["path/to/changed/file"],"completedAssignedWork":true,"criterionAssessments":[{"criterion":"criterion","assessment":"met|unmet|not_verified","evidence":["evidence reference"]}],"developmentAssignments":[{"title":"...","scopeSummary":"...","ownedPaths":["..."],"repositoryIds":["repo-id"]}],"handoff":{"role":"reviewer","goal":"Review the completed implementation","repositoryIds":["repo-id"]}}
 
 Use an empty changedFiles array when the task changed no project files. Set completedAssignedWork to false only when the assigned work remains incomplete, and record the reason in unresolvedIssues. The reviewer may add "repairRequest":{"taskKey":"development","instruction":"specific repair instruction"}. Do not invent command ids; WorkLite records actual command evidence.`;
   return addition ? `${prompt}\n\n${addition}` : prompt;
 }
 
+function teamManagerSystemPrompt(addition?: string): string {
+  const prompt = [
+    'You are Team Manager, a narrowed Chat Agent inside one Agent Team group.',
+    'Use only the supplied Team management tools to inspect or change that Team’s configuration, roles, and Team memories.',
+    'You cannot see project paths, read or modify project files, run Commands, use Skills, call MCP servers, use Chat memory, or manage unrelated WorkLite resources.',
+    'The Team Manager role cannot be deleted. Configuration changes apply to future Runs; this Run keeps its captured Team version.',
+    'Return exactly one JSON object whose status is "completed" or "waiting_for_input". For a completed result include message, documents:[], unresolvedIssues:[], changedFiles:[], completedAssignedWork:true, and criterionAssessments:[]. Keep the user-facing message concise and report tool outcomes accurately.',
+  ].join('\n');
+  return addition ? `${prompt}\n\n${addition}` : prompt;
+}
+
+function isGroupOrchestrationVersion(version: number | undefined): version is 6 | 7 {
+  return version === 6 || version === 7;
+}
+
 function taskContext(request: AgentTeamTaskRequest, executor: boolean, correction?: string): unknown {
+  if (request.taskDefinition.role === 'team-manager') {
+    return {
+      ...(correction ? { correction } : {}),
+      task: request.taskDefinition,
+      intent: request.intent,
+      taskGroup: {
+        groupId: request.groupContext?.groupId,
+        addressedMessage: request.groupMessage ?? request.groupContext?.initialMessage,
+        transcriptPolicy: 'Only this addressed request is model context. Use the Team tools to read Team configuration or memory.',
+      },
+    };
+  }
+  const selectedRepositoryIds = request.assignment?.repositoryIds?.length
+    ? request.assignment.repositoryIds
+    : request.groupContext?.repositories.map((repository) => repository.id) ?? [];
+  const selectedRepositorySet = new Set(selectedRepositoryIds);
+  const selectedRepositories = request.groupContext?.repositories.filter((repository) => selectedRepositorySet.has(repository.id)) ?? [];
+  const selectedMemoryRepositorySet = new Set(selectedRepositories.map((repository) => repository.memoryRepositoryId));
+  const selectedMemories = request.groupContext?.memories.filter((memory) =>
+    (!memory.role || memory.role === request.taskDefinition.role)
+    && (!memory.repositoryId || selectedMemoryRepositorySet.has(memory.repositoryId))) ?? [];
   return {
     ...(correction ? { correction } : {}),
     task: {
@@ -2584,7 +3206,48 @@ function taskContext(request: AgentTeamTaskRequest, executor: boolean, correctio
         ])),
       }
       : {}),
+    ...(request.groupContext ? {
+      taskGroup: {
+        groupId: request.groupContext.groupId,
+        originalRequest: request.groupContext.initialMessage,
+        addressedMessage: request.groupMessage ?? request.groupContext.initialMessage,
+        explicitHandoffSummary: request.handoffSummary || undefined,
+        fileReferences: request.fileReferences ?? [],
+        repositories: selectedRepositories.map(({ id, name, directory }) => ({ id, name, directory })),
+        ...(request.groupContext.knownRepositories?.length
+          ? { knownRepositories: request.groupContext.knownRepositories }
+          : {}),
+        memories: selectedMemories.map(({ id, content }) => ({ id, content })),
+        transcriptPolicy: 'The group transcript is visible to the user but omitted here. Only this request and explicitly handed-off context belong to your input.',
+      },
+    } : {}),
   };
+}
+
+function groupRolePromptAddition(
+  snapshot: StoredAgentTeamVersionSnapshot,
+  request: AgentTeamTaskRequest,
+): string | undefined {
+  if (!request.groupContext || !isGroupOrchestrationVersion(snapshot.orchestrationVersion)) return undefined;
+  if (snapshot.orchestrationVersion === 7 && request.taskDefinition.role === 'team-manager') {
+    const roles = snapshot.roles.map((role) => `${role.role}${role.displayName ? ` (${role.displayName})` : ''}`).join(', ');
+    return [
+      'This is the narrowed Chat inside Agent Team. Manage only this Team’s roles, working practice, concurrency setting and Team memories through the provided Team management tools.',
+      'Do not request or reveal project paths, read or change project files, run Commands, use Skills, call MCP servers, manage Chat memory, or change unrelated workspace resources.',
+      'The Team Manager role is protected. Changes to Team configuration apply to future Runs; the current Run keeps its captured version. A newly created role can receive work in a later message after it appears in the active role list.',
+      `Roles captured by this Run: ${roles}.`,
+      'Return a concise user-facing update in the message field. Do not claim a configuration or memory change succeeded unless its tool returned success.',
+    ].join('\n');
+  }
+  return [
+    snapshot.workingPractice?.trim() ? `Team working practice:\n${snapshot.workingPractice.trim()}` : '',
+    'Group messages are scoped by recipient and repository. Do not assume another role can see your message or that a visible transcript entry is model input.',
+    'Pause, resume, cancel and retry requests are handled by the control service and are never normal task instructions.',
+    'Team long-term memory is separate from Chat memory. Only the Team Manager may add, update, or delete Team memory; other roles must not claim to save memory.',
+    request.taskDefinition.role === 'worktree-manager'
+      ? 'In orchestration v6 and v7, provide advisory per-project Git strategy guidance only. Do not create, merge, or clean branches or worktrees; the project executor chooses and performs Git operations after inspecting each project.'
+      : '',
+  ].filter(Boolean).join('\n\n');
 }
 
 function modeAuthorization(mode: AgentTeamMode): string {
@@ -2646,9 +3309,9 @@ function expectedRunWorktreeLayout(
   };
 }
 
-function parseTaskOutput(output: string, taskKey: string): ParsedTaskResult {
+function parseTaskOutput(output: string, taskKey: string, supportedRoleIds: readonly string[] = []): ParsedTaskResult {
   try {
-    return parseTaskOutputUnsafe(output, taskKey);
+    return parseTaskOutputUnsafe(output, taskKey, supportedRoleIds);
   } catch (error) {
     if (error instanceof TaskOutputValidationError) throw error;
     throw new TaskOutputValidationError(
@@ -2658,7 +3321,7 @@ function parseTaskOutput(output: string, taskKey: string): ParsedTaskResult {
   }
 }
 
-function parseTaskOutputUnsafe(output: string, taskKey: string): ParsedTaskResult {
+function parseTaskOutputUnsafe(output: string, taskKey: string, supportedRoleIds: readonly string[]): ParsedTaskResult {
   let value: RawTaskOutput;
   try {
     value = JSON.parse(output) as RawTaskOutput;
@@ -2686,6 +3349,12 @@ function parseTaskOutputUnsafe(output: string, taskKey: string): ParsedTaskResul
   const repairRequests = parseRepairRequests(value.repairRequests);
   const worktreeSetup = parseWorktreeSetupPlan(value.worktreeSetup);
   const worktreeTeardown = parseWorktreeTeardownDecision(value.worktreeTeardown);
+  const message = typeof value.message === 'string' ? value.message.trim() : undefined;
+  if (value.message !== undefined && typeof value.message !== 'string') {
+    throw new Error('The Agent Team role message must be text.');
+  }
+  const handoff = parseRoleHandoff(value.handoff, supportedRoleIds);
+  const repositoryDirectories = parseRepositoryDirectories(value.repositoryDirectories);
   return {
     status: 'completed',
     documents: parseDocuments(value.documents, taskKey),
@@ -2700,6 +3369,44 @@ function parseTaskOutputUnsafe(output: string, taskKey: string): ParsedTaskResul
     ...(repairRequests ? { repairRequests } : {}),
     ...(worktreeSetup ? { worktreeSetup } : {}),
     ...(worktreeTeardown ? { worktreeTeardown } : {}),
+    ...(message ? { message } : {}),
+    ...(handoff ? { handoff } : {}),
+    ...(repositoryDirectories ? { repositoryDirectories } : {}),
+  };
+}
+
+function parseRepositoryDirectories(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new Error('repositoryDirectories must be an array of absolute paths.');
+  const directories = value.map((item) => {
+    if (typeof item !== 'string' || !isAbsolute(item.trim())) {
+      throw new Error('Each repositoryDirectories entry must be an absolute path.');
+    }
+    return resolve(item.trim());
+  });
+  const unique = [...new Set(directories)];
+  return unique.length ? unique : undefined;
+}
+
+function parseRoleHandoff(value: unknown, supportedRoleIds: readonly string[]): Extract<AgentTeamTaskResult, { status: 'completed' }>['handoff'] {
+  if (value === undefined || value === null) return undefined;
+  const handoff = value as { role?: unknown; goal?: unknown; repositoryIds?: unknown };
+  if (typeof handoff.role !== 'string' || !supportedRoleIds.includes(handoff.role)) {
+    throw new Error('A role handoff needs a role captured by this Team version.');
+  }
+  if (typeof handoff.goal !== 'string' || !handoff.goal.trim()) {
+    throw new Error('A role handoff needs a specific goal.');
+  }
+  if (handoff.repositoryIds !== undefined
+    && (!Array.isArray(handoff.repositoryIds) || handoff.repositoryIds.some((id) => typeof id !== 'string' || !id.trim()))) {
+    throw new Error('A role handoff repository scope must contain repository ids.');
+  }
+  return {
+    role: handoff.role as AgentTeamRuntimeRole,
+    goal: handoff.goal.trim(),
+    ...(Array.isArray(handoff.repositoryIds) && handoff.repositoryIds.length > 0
+      ? { repositoryIds: [...new Set(handoff.repositoryIds.map((id) => (id as string).trim()))] }
+      : {}),
   };
 }
 
@@ -2846,6 +3553,10 @@ function parseDevelopmentAssignments(value: unknown): AgentTeamDevelopmentAssign
     if (!Array.isArray(assignment.ownedPaths) || assignment.ownedPaths.some((path) => typeof path !== 'string')) {
       throw new Error('A development assignment owned path list must be strings.');
     }
+      if (assignment.repositoryIds !== undefined
+        && (!Array.isArray(assignment.repositoryIds) || assignment.repositoryIds.some((id) => typeof id !== 'string' || !id.trim()))) {
+        throw new Error('A development assignment repository list must contain repository ids.');
+      }
     return {
       ...(typeof assignment.developerId === 'string' && assignment.developerId.trim()
         ? { developerId: assignment.developerId.trim() }
@@ -2853,6 +3564,7 @@ function parseDevelopmentAssignments(value: unknown): AgentTeamDevelopmentAssign
       title: assignment.title.trim(),
       scopeSummary: assignment.scopeSummary,
       ownedPaths: assignment.ownedPaths as string[],
+      ...(assignment.repositoryIds?.length ? { repositoryIds: [...new Set(assignment.repositoryIds.map((id) => id.trim()))] } : {}),
     };
   });
 }
@@ -3095,6 +3807,23 @@ function isUsableGraphState(value: unknown, run: AgentTeamRun): value is AgentTe
     state.taskResults !== null;
 }
 
+function isUsableGroupGraphState(value: unknown, run: AgentTeamRun): value is AgentTeamGroupGraphState {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !run.groupContext) return false;
+  const state = value as Partial<AgentTeamGroupGraphState>;
+  const groupContext = state.groupContext;
+  return state.runId === run.id
+    && state.intent === run.intent
+    && state.mode === run.mode
+    && state.projectDirectory === run.projectDirectory
+    && state.scopeRevision === run.scopeRevision
+    && groupContext?.groupId === run.groupContext.groupId
+    && Array.isArray(groupContext?.repositories)
+    && Array.isArray(groupContext?.memories)
+    && Array.isArray(state.selectedRepositoryIds)
+    && Number.isInteger(state.step)
+    && state.step! >= 0;
+}
+
 function recordCompletedCommand(
   record: { status: string; commandId?: string } | undefined,
   commandIds: Set<string>,
@@ -3121,8 +3850,8 @@ function mergeAuthorizedCommands(left: readonly string[], right: readonly string
   return [...new Set([...left, ...right])];
 }
 
-function pendingInputAnswer(answer: string, authorizedCommands: readonly string[]): AgentTeamPendingInputAnswer {
-  return { answer, authorizedCommands };
+function pendingInputAnswer(answer: string, authorizedCommands: readonly string[], directories: readonly string[] = []): AgentTeamPendingInputAnswer {
+  return directories.length ? { answer, authorizedCommands, directories } : { answer, authorizedCommands };
 }
 
 function isAbortError(error: unknown): boolean {
@@ -3157,7 +3886,7 @@ function taskKeyForDocument(
 }
 
 function roleForTaskKey(taskKey: string): AgentTeamRole {
-  return agentTeamContractRole(TASK_ROLES.find(([pattern]) => pattern.test(taskKey))?.[1] ?? 'reviewer');
+  return TASK_ROLES.find(([pattern]) => pattern.test(taskKey))?.[1] ?? 'reviewer';
 }
 
 function fingerprint(value: unknown): string {

@@ -15,6 +15,7 @@ export function ChannelConfiguration() {
     {query.isLoading ? <Skeleton className="h-32 w-full" /> : query.isError ? <div className="space-y-2"><p className="text-sm text-danger" role="alert">{t('channels.loadFailed')}</p><Button variant="secondary" onClick={() => void query.refetch()}>{t('history.retry')}</Button></div> : <>
       <div className="flex flex-wrap gap-2" aria-label={t('settings.channels')}>{query.data?.filter((channel) => channel.id !== 'web').map((channel) => <button key={channel.id} type="button" aria-pressed={selected === channel.id} onClick={() => setSelected(channel.id)} className={cn('rounded-md px-3 py-2 text-sm hover:bg-surface-subtle', focusRingInset, selected === channel.id && 'bg-brand-subtle font-medium')}>{channel.name}</button>)}</div>
       {selected === 'feishu' ? <PluginConfiguration pluginId="feishu-bot" embedded /> : null}
+      {selected === 'wechat' ? <PluginConfiguration pluginId="wechat-bot" embedded /> : null}
     </>}
   </div>;
 }

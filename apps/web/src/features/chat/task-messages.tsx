@@ -35,7 +35,7 @@ function WorkflowTask({ submission }: { submission: ChatSubmissionView }) {
   </div>;
 }
 
-function TeamRunLink({ runId }: { runId: string }) {
+function TeamRunLink({ runId, groupId }: { runId: string; groupId?: string }) {
   const { t } = useTranslation('assistant');
   const { t: tTeams } = useTranslation('agentTeams');
   const query = useAgentTeamRunQuery('personal', runId);
@@ -43,7 +43,9 @@ function TeamRunLink({ runId }: { runId: string }) {
   const failure = run?.status === 'failed' ? [...run.tasks].reverse().find((task) => task.status === 'failed')?.error : null;
   const questions = run?.pendingInputs.filter((input) => input.status === 'pending') ?? [];
   return <div className="space-y-2">
-    <Link to="/agent-team-runs/$runId" params={{ runId }} className="text-[13px] text-brand-text underline underline-offset-4">{t('records.openTask')}</Link>
+    {groupId
+      ? <Link to="/agent-team-groups/$groupId" params={{ groupId }} className="text-[13px] text-brand-text underline underline-offset-4">{t('records.openTask')}</Link>
+      : <Link to="/agent-team-runs/$runId" params={{ runId }} className="text-[13px] text-brand-text underline underline-offset-4">{t('records.openTask')}</Link>}
     {run ? <div className="flex flex-wrap items-center gap-2">
       <StatusBadge key={run.status} status={toStatusKey(run.status)} label={t(`status.${run.status}`)} />
       {run.progress ? <span className="text-[13px] text-muted-foreground tabular-nums">{tTeams(`progress.phaseValue.${run.progress.phase}`)} · {tTeams('progress.percent', { percent: run.progress.percent })}</span> : null}
@@ -57,7 +59,7 @@ function TeamRunLink({ runId }: { runId: string }) {
 function TeamTask({ submission }: { submission: ChatSubmissionView }) {
   const reference = submission.reference;
   return <div className="space-y-2">
-    {reference?.kind === 'team' ? <TeamRunLink runId={reference.runId} /> : null}
+    {reference?.kind === 'team' ? <TeamRunLink runId={reference.runId} groupId={reference.groupId} /> : null}
     {typeof submission.renderedCard?.content === 'string' ? <MessageResponse content={submission.renderedCard.content} enabled /> : null}
   </div>;
 }

@@ -56,7 +56,7 @@ type TeamStatus =
 
 const TERMINAL_RUN_STATUSES = new Set<AgentTeamRunView['status']>(['succeeded', 'failed', 'cancelled']);
 const RECOVERY_DECISIONS = ['adopt_command', 'mark_failed', 'replay'] as const;
-const ROLE_LABELS = {
+const ROLE_LABELS: Partial<Record<string, string>> = {
   planner: 'role.planner',
   test_designer: 'role.test_designer',
   developer: 'role.developer',
@@ -64,7 +64,13 @@ const ROLE_LABELS = {
   test_runner: 'role.test_runner',
   reviewer: 'role.reviewer',
   'worktree-manager': 'role.worktree_manager',
+  'team-manager': 'role.team_manager',
 } as const;
+
+function roleLabel(role: string, translate: (key: string) => string): string {
+  const key = ROLE_LABELS[role];
+  return key ? translate(key) : role;
+}
 
 const DESIRED_CONTROL_LABELS = {
   none: 'run.desiredControl.none',
@@ -180,7 +186,7 @@ function MemberOutputGroupView({ group, owner, active }: { group: MemberOutputGr
         <Button type="button" variant="secondary" size="compact" className="w-full max-w-full justify-start text-left">
           <span className="min-w-0 truncate">
             <span className="font-mono">{group.taskKey}</span>
-            {owner ? ` · ${t(ROLE_LABELS[owner.role])}` : ''}
+            {owner ? ` · ${roleLabel(owner.role, t)}` : ''}
             {owner?.assignmentTitle ? ` · ${owner.assignmentTitle}` : ''}
           </span>
           {active ? <LoaderCircle className="ml-1 size-3 shrink-0 motion-safe:animate-spin" aria-hidden="true" /> : null}
@@ -263,7 +269,7 @@ function PendingInputPanel({
       <h2 id={`agent-team-question-title-${pendingInput.id}`} className="text-sm font-semibold">{t('input.title')}</h2>
       <StreamingMarkdown content={pendingInput.question} className="mt-2 text-[13px]" />
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
-        {owner ? <span>{t(ROLE_LABELS[owner.role])}</span> : null}
+        {owner ? <span>{roleLabel(owner.role, t)}</span> : null}
         {owner ? <span className="font-mono text-xs break-all">{owner.taskKey}</span> : null}
         {owner?.assignmentTitle ? <span className="min-w-0 break-all">{owner.assignmentTitle}</span> : null}
         <CopyableId value={pendingInput.id} />
@@ -422,7 +428,7 @@ function TaskPanel({
       <div className="flex flex-wrap items-center gap-2">
         <TeamStatusBadge status={task.status} />
         <span className="min-w-0 font-mono text-xs break-all">{task.taskKey}</span>
-        <span className="text-[13px] text-muted-foreground">{t(ROLE_LABELS[task.role])}</span>
+        <span className="text-[13px] text-muted-foreground">{roleLabel(task.role, t)}</span>
         {task.developerId ? <span className="font-mono text-xs text-muted-foreground break-all">{task.developerId}</span> : null}
         {task.assignmentTitle ? <span className="min-w-0 text-[13px] break-all">{task.assignmentTitle}</span> : null}
         <span className="text-[13px] text-muted-foreground">{t('tasks.attempt', { count: task.attemptIndex })}</span>
@@ -823,7 +829,6 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
               <Link
                 to="/agent-teams/$teamId"
                 params={{ teamId: run.teamId }}
-                search={{ tab: 'records' }}
                 className="font-medium text-brand-text hover:underline"
               >
                 {t('openTeam')}

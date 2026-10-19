@@ -19,6 +19,14 @@
     "scrollToEnd": "回到最新消息",
     "showEarlier": "显示更早的 {{count}} 条"
   },
+  "progress": {
+    "title": "工作进展",
+    "kind": {
+      "task": "项目任务",
+      "team": "团队任务",
+      "workflow": "工作流"
+    }
+  },
   "commands": {
     "menuLabel": "对话命令",
     "empty": "没有匹配的命令。",
@@ -201,6 +209,9 @@
     "loadFailed": "无法加载渠道配置。",
     "feishuUnbound": "飞书历史 · 当前渠道未绑定，回复仅在网页显示",
     "feishuDisconnected": "飞书会话 · 渠道未连接，投递等待连接恢复",
+    "wechatBound": "微信会话 · 网页回复也会同步到微信",
+    "wechatUnbound": "微信历史 · 当前渠道未绑定，回复仅在网页显示",
+    "wechatDisconnected": "微信会话 · 渠道未连接，投递等待连接恢复",
     "loading": "正在加载渠道配置"
   },
   "records": {

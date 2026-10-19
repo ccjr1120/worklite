@@ -386,9 +386,10 @@ function ChatWorkspace() {
           setExecution((current) => {
             if (!current) return current;
             const existing = current.messages.find((item) => item.id === data.messageId);
+            const messagePresentation = data.progressReport ? { progressReport: data.progressReport } : {};
             const messages = existing
-              ? current.messages.map((item) => item.id === data.messageId ? { ...item, content: item.content + data.delta } : item)
-              : [...current.messages, { id: data.messageId, role: 'assistant' as const, content: data.delta, createdAt: event.createdAt }];
+              ? current.messages.map((item) => item.id === data.messageId ? { ...item, content: item.content + data.delta, ...messagePresentation } : item)
+              : [...current.messages, { id: data.messageId, role: 'assistant' as const, content: data.delta, createdAt: event.createdAt, ...messagePresentation }];
             return { ...current, messages };
           });
         }
@@ -825,7 +826,7 @@ function ChatWorkspace() {
         <section ref={chatSurfaceRef} className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={t('assistant:title')}>
             <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3 md:px-5">
               <Button variant="ghost" size="icon-compact" className="md:hidden" aria-label={t('assistant:history.title')} onClick={() => setSwitcherOpen(true)}><List className="size-4" /></Button>
-              <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{selected?.title || t(selectedConversationId ? 'assistant:history.loading' : 'assistant:history.new')}</p><p className="truncate text-xs text-muted-foreground">{selected?.channel === 'feishu' ? t(currentView?.channelDelivery === 'unbound' ? 'assistant:channels.feishuUnbound' : currentView?.channelDelivery === 'disconnected' ? 'assistant:channels.feishuDisconnected' : 'assistant:channels.feishuBound') : 'Web'}</p></div>
+              <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{selected?.title || t(selectedConversationId ? 'assistant:history.loading' : 'assistant:history.new')}</p><p className="truncate text-xs text-muted-foreground">{selected?.channel === 'feishu' || selected?.channel === 'wechat' ? t(currentView?.channelDelivery === 'unbound' ? `assistant:channels.${selected.channel}Unbound` : currentView?.channelDelivery === 'disconnected' ? `assistant:channels.${selected.channel}Disconnected` : `assistant:channels.${selected.channel}Bound`) : 'Web'}</p></div>
               <Button type="button" variant="ghost" size="icon-compact" aria-label={t('assistant:history.new')} onClick={() => selectConversation(null)} className="md:hidden"><Plus className="size-4" /></Button>
               {selectedConversationId ? <Button type="button" variant="ghost" size="compact" aria-expanded={recordsOpen} onClick={() => setRecordsOpen((value) => !value)}><ScrollText className="size-4" />{t('assistant:records.title')}</Button> : null}
             </header>
@@ -861,7 +862,7 @@ function ChatWorkspace() {
               </PinTrackingContext.Provider>
               {recordsOpen && selectedConversationId ? <div className="absolute inset-0 z-10 flex flex-col bg-background"><ConversationRecords conversationId={selectedConversationId} /></div> : null}
             </div>
-            {recordsOpen ? null : loadingConversation || composerLoading ? <p className="px-4 py-3 text-[13px] text-muted-foreground" role="status">{t('assistant:composer.loading')}</p> : selectedWithoutExecution ? <p className="border-t border-border px-4 py-3 text-[13px] text-muted-foreground">{t(selected?.channel === 'feishu' ? 'assistant:channels.waiting' : 'assistant:history.taskRecord')}</p> : composerAvailable ? (
+            {recordsOpen ? null : loadingConversation || composerLoading ? <p className="px-4 py-3 text-[13px] text-muted-foreground" role="status">{t('assistant:composer.loading')}</p> : selectedWithoutExecution ? <p className="border-t border-border px-4 py-3 text-[13px] text-muted-foreground">{t(selected?.channel === 'feishu' || selected?.channel === 'wechat' ? 'assistant:channels.waiting' : 'assistant:history.taskRecord')}</p> : composerAvailable ? (
               <Composer draft={draft} onDraftChange={(value) => { setDraft(value); setSlashDismissed(false); setMentionDismissed(false); setActiveValue(''); }} onSubmit={submit} onKeyDown={handleComposerKeyDown} onFocus={() => {}}
                 onCompositionStart={handleCompositionStart} onCompositionEnd={handleCompositionEnd}
                 selectedWorkflow={selectedWorkflow} onRemoveWorkflow={() => setSelectedWorkflow(null)} commandMatches={commandMatches} commandMenuOpen={commandMenuOpen} onRunCommand={runCommand}

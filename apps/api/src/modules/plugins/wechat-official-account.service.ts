@@ -348,12 +348,36 @@ async function captureLoginQrCode(page: Page): Promise<string> {
 
 async function showScanLogin(page: Page): Promise<void> {
   const qr = loginQrCode(page);
-  const toggle = page.locator('a.login__type__container__link_text').first();
-  await qr.or(toggle).first().waitFor({ state: 'attached', timeout: 20_000 });
-  if (await qr.waitFor({ state: 'visible', timeout: 3_000 }).then(() => true).catch(() => false)) return;
-  // WeChat sometimes renders the scan-login toggle as hidden even while it is
-  // the only control exposed. Dispatch its DOM click so the QR can appear.
-  await toggle.evaluate(`element => { if (element instanceof HTMLElement) element.click(); }`);
+  const accountPanel = page.locator('.login__type__container__account').first();
+  const scanPanel = page.locator('.login__type__container__scan').first();
+  await accountPanel.or(scanPanel).first().waitFor({ state: 'attached', timeout: 20_000 });
+  // The login page opens on the account-password panel or on the scan panel's
+  // fast-login iframe, and only the scan panel's direct QR image is capturable.
+  // Walk towards it — switching the account panel to scan login, or revealing
+  // the direct QR behind the fast-login iframe — and keep retrying until the
+  // overall deadline in case a late re-render resets the panel state.
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    if (await qr.waitFor({ state: 'visible', timeout: 5_000 }).then(() => true).catch(() => false)) return;
+    if (Date.now() >= deadline) break;
+    if (await accountPanel.isVisible().catch(() => false)) {
+      // The account-password panel is active: switch it to scan login. WeChat's
+      // panel handlers can ignore untrusted DOM clicks, so click for real and
+      // fall back to a DOM click only when the link renders without layout.
+      const switchToScan = page.locator('a.login__type__container__select-type__scan').first();
+      await switchToScan.click({ timeout: 3_000 }).catch(() =>
+        switchToScan.evaluate(`element => { if (element instanceof HTMLElement) element.click(); }`).catch(() => undefined));
+    } else if (await scanPanel.isVisible().catch(() => false)) {
+      // The scan panel shows the fast-login iframe first: reveal the direct QR.
+      // Click only while the 扫码登录 entry is visible — once the direct QR
+      // panel is showing, its click target is the 微信快捷登录 switch-back.
+      const toggle = page.locator('a.login__type__container__link_text').filter({ hasText: '扫码登录' }).first();
+      if (await toggle.isVisible().catch(() => false)) {
+        await toggle.click({ timeout: 3_000 }).catch(() =>
+          toggle.evaluate(`element => { if (element instanceof HTMLElement) element.click(); }`).catch(() => undefined));
+      }
+    }
+  }
   await qr.waitFor({ state: 'visible', timeout: 20_000 });
 }
 

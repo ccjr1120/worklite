@@ -57,7 +57,7 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
   function primaryActive(id: NavItem['id'], to: string) {
     if (id === 'settings') return pathname.startsWith('/settings');
     if (id === 'workflows') return ['/workflows', '/artifacts', '/runs'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
-    if (id === 'agentTeam') return ['/agent-teams', '/agent-team-runs'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+    if (id === 'agentTeam') return ['/agent-teams', '/agent-team-runs', '/agent-team-groups'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
     if (id === 'plugins') return ['/plugins', '/skills', '/mcp-servers'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
     return pathname === to || pathname.startsWith(`${to}/`);
   }
@@ -83,7 +83,6 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
       <Link
         to={item.to}
         params={item.id === 'agentTeam' ? { teamId: 'agent_team_bmad_tea' } : undefined}
-        search={item.id === 'agentTeam' ? { tab: 'records' } : undefined}
         onClick={onNavigate}
         className={cn(
           'wl-press relative z-[1] flex h-9 items-center gap-2.5 rounded-md px-2.5 text-[13px]',

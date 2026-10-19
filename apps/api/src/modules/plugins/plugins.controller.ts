@@ -4,10 +4,11 @@ import { PluginsService } from './plugins.service';
 import { FeishuService } from './feishu/feishu.service';
 import { FeishuRegistrationService } from './feishu/feishu-registration.service';
 import { WechatOfficialAccountService } from './wechat-official-account.service';
+import { WechatService } from './wechat/wechat.service';
 
 @Controller('plugins')
 export class PluginsController {
-  constructor(private readonly plugins: PluginsService, private readonly feishu: FeishuService, private readonly registration: FeishuRegistrationService, private readonly officialAccount: WechatOfficialAccountService) {}
+  constructor(private readonly plugins: PluginsService, private readonly feishu: FeishuService, private readonly registration: FeishuRegistrationService, private readonly officialAccount: WechatOfficialAccountService, private readonly wechat: WechatService) {}
 
   @Get()
   list() {
@@ -26,6 +27,10 @@ export class PluginsController {
     if (pluginId === 'feishu-bot') {
       await this.registration.completeManualBinding();
       await this.feishu.connect();
+      return this.plugins.get(pluginId);
+    }
+    if (pluginId === 'wechat-bot') {
+      await this.wechat.connect();
       return this.plugins.get(pluginId);
     }
     return saved;
@@ -66,5 +71,24 @@ export class PluginsController {
   disconnectOfficialAccount(@Param('pluginId') pluginId: string) {
     if (pluginId !== 'wechat-official-account') throw new BadRequestException('Official Account login is only available for the WeChat Official Account plugin.');
     return this.officialAccount.disconnect();
+  }
+
+  @Post(':pluginId/wechat/login')
+  startWechatLogin(@Param('pluginId') pluginId: string) {
+    if (pluginId !== 'wechat-bot') throw new BadRequestException('QR login is only available for the WeChat channel plugin.');
+    return this.wechat.startLogin();
+  }
+
+  @Delete(':pluginId/wechat/login')
+  async cancelWechatLogin(@Param('pluginId') pluginId: string) {
+    if (pluginId !== 'wechat-bot') throw new BadRequestException('QR login is only available for the WeChat channel plugin.');
+    await this.wechat.cancelLogin();
+    return this.plugins.get(pluginId);
+  }
+
+  @Post(':pluginId/wechat/disconnect')
+  disconnectWechat(@Param('pluginId') pluginId: string) {
+    if (pluginId !== 'wechat-bot') throw new BadRequestException('This plugin has no WeChat connection.');
+    return this.wechat.disconnect();
   }
 }

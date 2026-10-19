@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { Ban, ChevronDown, ChevronRight, CircleX, FileCode2, Hourglass, LoaderCircle, MessageCircleQuestion, MessageSquareText, Play, RefreshCw, ShieldAlert, X } from 'lucide-react';
+import { Activity, Ban, ChevronDown, ChevronRight, CircleX, FileCode2, Hourglass, LoaderCircle, MessageCircleQuestion, MessageSquareText, Play, RefreshCw, ShieldAlert, X } from 'lucide-react';
 import { memo, useContext, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentToolCallView, ChatConversationView, ChatProjectTaskView, ChatSubmissionView, RunView, WorkflowView } from '@worklite/contracts';
@@ -173,7 +173,9 @@ const AssistantTurn = memo(function AssistantTurn({ segments, working, markdownE
         </span>
         <MessageContent className="min-w-0 flex-1 pt-1">
           {segments.map((segment, index) => segment.kind === 'message'
-            ? <MessageResponse key={segment.item.id} content={segment.item.content} enabled={markdownEnabled} className={working && index === segments.length - 1 ? 'wl-caret' : undefined} />
+            ? segment.item.progressReport
+              ? <ProgressReportCard key={segment.item.id} message={segment.item} report={segment.item.progressReport} streaming={working && index === segments.length - 1} markdownEnabled={markdownEnabled} />
+              : <MessageResponse key={segment.item.id} content={segment.item.content} enabled={markdownEnabled} className={working && index === segments.length - 1 ? 'wl-caret' : undefined} />
             : segment.kind === 'question'
               ? <AskedQuestion key={segment.item.id} text={segment.text} />
               : <ToolCallPanel key={segment.item.id} call={segment.item} />)}
@@ -183,6 +185,42 @@ const AssistantTurn = memo(function AssistantTurn({ segments, working, markdownE
     </Message>
   );
 }, (left, right) => left.working === right.working && left.markdownEnabled === right.markdownEnabled && sameSegments(left.segments, right.segments));
+
+function ProgressReportCard({ message, report, streaming, markdownEnabled }: {
+  message: TranscriptMessage;
+  report: NonNullable<TranscriptMessage['progressReport']>;
+  streaming: boolean;
+  markdownEnabled: boolean;
+}) {
+  const { t } = useTranslation('assistant');
+  const { locale } = useLocale();
+  const titleId = useId();
+  return (
+    <article className="my-2 rounded-xl border border-border bg-surface p-3.5 shadow-xs" aria-labelledby={titleId} aria-busy={streaming || undefined}>
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <h3 id={titleId} className="flex items-center gap-2 text-sm font-semibold">
+          <Activity className="size-4 text-muted-foreground" aria-hidden="true" />
+          {t('progress.title')}
+        </h3>
+        <time dateTime={message.createdAt} className="ml-auto text-xs text-muted-foreground">{formatDateTime(message.createdAt, locale)}</time>
+      </header>
+      <ul className="mt-3 space-y-2.5">
+        {report.items.map((item) => (
+          <li key={`${item.kind}:${item.id}`} className="flex items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-muted-foreground">{t(`progress.kind.${item.kind}`)}</p>
+              <p className="break-words text-sm font-medium leading-5">{item.title}</p>
+            </div>
+            <StatusBadge status={toStatusKey(item.status)} className="shrink-0" />
+          </li>
+        ))}
+      </ul>
+      <div className="mt-3 border-t border-border pt-3">
+        <MessageResponse content={message.content} enabled={markdownEnabled} className={streaming ? 'wl-caret' : undefined} />
+      </div>
+    </article>
+  );
+}
 
 // A settled question is part of the reply that asked it, so it reads as quiet assistant text
 // rather than the amber waiting note it replaced.

@@ -1,8 +1,9 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import type { AgentTeamOperationRecoveryDecision, AgentTeamRole } from '@worklite/contracts';
+import type { AgentTeamOperationRecoveryDecision, AgentTeamRoleId } from '@worklite/contracts';
 import {
   createModelGateway,
+  type GatewayToolDefinition,
   type GatewayCorrelation,
   type GatewayToolResultOutput,
   type WorkflowAgentRound,
@@ -91,11 +92,14 @@ type IsolatedAgentInvocationRequest = {
   skills: readonly AgentInvocationSkill[];
   mcpRuntimes: readonly AgentMcpRuntime[];
   builtinToolNames?: readonly string[];
-  role?: AgentTeamRole;
+  role?: AgentTeamRoleId;
   projectDirectory?: string;
   authorizedCommands?: readonly string[];
   processReferencePaths?: readonly string[];
   readProcessReference?: (path: string) => Promise<string>;
+  readTeamDocument?: (documentId: string, revision: number) => Promise<{ title: string; content: string }>;
+  managedTools?: readonly GatewayToolDefinition[];
+  executeManagedTool?: (call: WorkflowAgentToolCall) => Promise<string>;
   signal: AbortSignal;
   onTextDelta?: (delta: string) => void | Promise<void>;
   onModelRound?: (round: WorkflowAgentRound) => void | Promise<void>;
@@ -198,7 +202,7 @@ export class IsolatedAgentInvocationService {
       jsonOutput: request.jsonOutput,
       correlation: request.correlation,
       skillScripts: availableSkillScripts,
-      builtinTools: builtinDefinitions,
+      builtinTools: [...builtinDefinitions, ...(request.managedTools ?? [])],
       mcpTools,
       maxToolRounds: maxRounds,
       maxToolCalls: request.limits?.maxToolCalls,
@@ -222,6 +226,9 @@ export class IsolatedAgentInvocationService {
   ): Promise<WorkflowAgentToolResult> {
     request.signal.throwIfAborted();
     this.validateProcessReference(request, call);
+    if (call.toolName === 'read_team_document') {
+      return (await this.runToolEffect(request, assignedSkills, mcpTools, selectedBuiltinToolNames, call)).output;
+    }
     // An unauthorized bash command never executed, so the rejection carries no uncertain
     // effect: hand it back as tool feedback instead of failing the attempt. The role can
     // then pick an authorized command or ask for the grant through waiting_for_input.
@@ -355,12 +362,30 @@ export class IsolatedAgentInvocationService {
     call: WorkflowAgentToolCall,
     reserveCommand?: CommandReservation,
   ): Promise<ToolEffectResult> {
+    const managedTool = request.managedTools?.find((definition) => definition.name === call.toolName);
+    if (managedTool) {
+      if (!request.executeManagedTool) throw new BadRequestException('The isolated Agent requested an unavailable managed tool.');
+      const value = await request.executeManagedTool(call);
+      return { output: { type: 'text', value: boundedToolResult(value, request.limits?.maxToolResultChars) } };
+    }
+
     if (call.toolName === 'process_reference') {
       const value = await request.readProcessReference!(requiredString(
         (call.input as { path?: unknown } | null)?.path,
         'path',
       ));
       return { output: { type: 'text', value: boundedToolResult(value, request.limits?.maxToolResultChars) } };
+    }
+
+    if (call.toolName === 'read_team_document') {
+      if (!request.readTeamDocument) throw new BadRequestException('No Team document was handed to this Agent task.');
+      const input = call.input as { documentId?: unknown; revision?: unknown } | null;
+      const documentId = requiredString(input?.documentId, 'documentId');
+      if (!Number.isInteger(input?.revision) || (input!.revision as number) < 1) {
+        throw new BadRequestException('A positive document revision is required.');
+      }
+      const document = await request.readTeamDocument(documentId, input!.revision as number);
+      return { output: { type: 'text', value: boundedToolResult(`# ${document.title}\n\n${document.content}`, request.limits?.maxToolResultChars) } };
     }
 
     if (call.toolName === 'skill_script') {

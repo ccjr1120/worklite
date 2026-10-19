@@ -7,7 +7,7 @@ import { agentExecutionEvents, agentExecutions, chatSubmissions, workflowVersion
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from './agent-executions.service';
-import { AgentTeamsService } from '../agent-teams/agent-teams.service';
+import { AgentTeamGroupsService } from '../agent-teams/agent-team-groups.service';
 import { RunsService } from '../runs/runs.service';
 
 export const CHAT_AGENT_ID = 'agt_system_helper_chat';
@@ -21,7 +21,7 @@ export class ChatDispatchService {
     @Inject(DATABASE) private readonly db: Database,
     private readonly workspaces: WorkspaceService,
     private readonly executions: AgentExecutionsService,
-    private readonly teams: AgentTeamsService,
+    private readonly teamGroups: AgentTeamGroupsService,
     private readonly runs: RunsService,
   ) {}
 
@@ -85,10 +85,18 @@ export class ChatDispatchService {
         await this.runs.createForVersion(request, version.id, { input: input.message }, { runId, accept: (transaction) => bind(transaction, { kind: 'workflow', runId, workflowVersionId: version.id }) });
       } else {
         const target = input.target;
-        const runId = `atrun_chat_${createHash('sha256').update(workspace.id + ':' + submission.id).digest('hex')}`;
-        await this.teams.createRun(request, 'personal', target.teamId,
-          { intent: input.message, projectDirectory: target.projectDirectory, mode: target.mode },
-          { runId, accept: (transaction, id) => bind(transaction, { kind: 'team', teamId: target.teamId, runId: id }) });
+        const digest = createHash('sha256').update(workspace.id + ':' + submission.id).digest('hex');
+        const runId = `atrun_chat_${digest}`;
+        const groupId = `atgroup_chat_${digest}`;
+        const dispatched = await this.teamGroups.dispatchFromChat(request, 'personal', target.teamId, {
+          message: input.message,
+          projectDirectory: target.projectDirectory,
+          mode: target.mode,
+          role: target.role,
+          submissionId: submission.id,
+          runId,
+        }, { runId, accept: (transaction, id) => bind(transaction, { kind: 'team', teamId: target.teamId, runId: id, groupId }) });
+        if (dispatched.id !== groupId) throw new Error('Chat Team group id did not match its idempotent submission.');
       }
       const [accepted] = await this.db.select().from(chatSubmissions).where(eq(chatSubmissions.id, submission.id)).limit(1);
       if (!accepted.reference) throw new Error('Conversation dispatch did not commit a task reference.');

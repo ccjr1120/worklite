@@ -7,7 +7,8 @@ import { ChatDispatchModule } from '../agents/chat-dispatch.module';
 import { AgentTeamsModule } from '../agent-teams/agent-teams.module';
 import { RunsModule } from '../runs/runs.module';
 import { WechatOfficialAccountService } from './wechat-official-account.service';
+import { WechatService } from './wechat/wechat.service';
 import { AgentsModule } from '../agents/agents.module';
 
-@Module({ imports: [forwardRef(() => AgentsModule), forwardRef(() => ChatDispatchModule), forwardRef(() => AgentTeamsModule), forwardRef(() => RunsModule)], controllers: [PluginsController], providers: [PluginsService, FeishuService, FeishuRegistrationService, { provide: 'FEISHU_UPGRADE_TRANSPORT', useExisting: FeishuService }, { provide: 'FEISHU_REGISTRATION_RUNTIME', useExisting: FeishuRegistrationService }, WechatOfficialAccountService], exports: [PluginsService, FeishuService, WechatOfficialAccountService] })
+@Module({ imports: [forwardRef(() => AgentsModule), forwardRef(() => ChatDispatchModule), forwardRef(() => AgentTeamsModule), forwardRef(() => RunsModule)], controllers: [PluginsController], providers: [PluginsService, FeishuService, FeishuRegistrationService, { provide: 'FEISHU_UPGRADE_TRANSPORT', useExisting: FeishuService }, { provide: 'FEISHU_REGISTRATION_RUNTIME', useExisting: FeishuRegistrationService }, WechatOfficialAccountService, WechatService, { provide: 'WECHAT_UPGRADE_TRANSPORT', useExisting: WechatService }], exports: [PluginsService, FeishuService, WechatOfficialAccountService, WechatService] })
 export class PluginsModule {}

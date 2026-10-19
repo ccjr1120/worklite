@@ -30,16 +30,16 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 ## Page and Surface Specifications
 
 - [Home](pages/home/DESIGN.md), including the server-derived first-use sequence
-- [Chat](pages/chat/workspace/DESIGN.md), including direct Web conversation, Channels, workspace long-term memory management and full persisted evidence
+- [Chat](pages/chat/workspace/DESIGN.md), including direct Web conversation, active-work progress cards, Channels, workspace long-term memory management and full persisted evidence
 - Providers: [Model providers and Portkey Gateway](pages/model-providers/DESIGN.md), including the dedicated Codex Account Pool
 - Logs: [Gateway statistics and request logs](pages/logs/DESIGN.md), including the shared time range
 - Workflows: [List](pages/workflows/list/DESIGN.md), [Editor](pages/workflows/editor/DESIGN.md), [Versions](pages/workflows/versions/DESIGN.md)
-- Agent Teams: work records and configuration [Detail](pages/agent-teams/detail/DESIGN.md), [Run detail](pages/agent-team-runs/detail/DESIGN.md)
+- Agent Teams: work records [Detail](pages/agent-teams/detail/DESIGN.md), separate [Configuration](pages/agent-teams/configuration/DESIGN.md), group conversation [Group](pages/agent-teams/group/DESIGN.md), and immutable execution evidence [Run detail](pages/agent-team-runs/detail/DESIGN.md)
 - Runs: [Detail](pages/runs/detail/DESIGN.md), [Node logs](surfaces/workflow-run/node-logs/DESIGN.md)
 - Skills: [List](pages/skills/list/DESIGN.md), [Editor](pages/skills/editor/DESIGN.md)
 - MCP servers: [List](pages/mcp-servers/list/DESIGN.md), [Configuration](pages/mcp-servers/configuration/DESIGN.md)
 - Plugins: [List](pages/plugins/list/DESIGN.md), [Configuration](pages/plugins/configuration/DESIGN.md), excluding communication-channel setup, which lives in Chat
-- External chat: [Feishu](surfaces/external-chat/feishu/DESIGN.md), including native streamed reply cards, collapsed task details, capability updates and user-requested managed redeployment
+- External chat: [Feishu](surfaces/external-chat/feishu/DESIGN.md), including native streamed reply cards, collapsed task details, capability updates and user-requested managed redeployment; [WeChat](surfaces/external-chat/wechat/DESIGN.md), private text conversation over iLink QR login with whole text replies
 - Artifacts: [Run artifacts](surfaces/workflow-run/artifacts/DESIGN.md), [Details](pages/artifacts/details/DESIGN.md)
 - Settings: [Usage](pages/settings/usage/DESIGN.md), [Audit log](pages/settings/audit-log/DESIGN.md), [Appearance](pages/settings/appearance/DESIGN.md)
 
@@ -51,6 +51,8 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 /model-providers
 /logs
 /agent-teams/:teamId
+/agent-teams/:teamId/configuration
+/agent-team-groups/:groupId
 /agent-team-runs/:runId
 /workflows/{new,:workflowId,:workflowId/versions}
 /skills/{new,:skillId}
@@ -70,7 +72,7 @@ The `/model-providers` page is the top-level Providers destination. It uses page
 
 `/logs` is the top-level Logs destination for Gateway transport observability. It uses page-level tabs for Statistics and Requests over one shared time range. Provider and model filters scope both views, model breakdowns open their matching requests, and failed Provider tests can focus the exact captured request. Providers configures what the Gateway dispatches to; Logs reads what it did.
 
-`/agent-teams/:teamId` is the direct destination for the one built-in Agent Team and defaults to summary work records, with Configuration in a validated top tab; there is no Team collection or manual Run creation route. Chat Agent dispatch is the only task entry and binds submissions directly to Run ids. A failed managed Team document can be redelivered through its detail or download route without rerunning its producing role. `/agent-team-runs/:runId` is the immutable-version evidence destination reached from a summary record or retained Run link, not a full Run collection. `/runs/:runId` is a Workflow Run log-reading destination reached from a Workflow's Run records dialog, not a top-level collection. There is no Run list route: Runs are reached through their Workflow. Provider request observability is not a Settings page: `/settings` keeps the WorkLite-owned Usage and Audit Log read models, which are business records over Runs and resource mutations rather than Gateway transport records.
+`/agent-teams/:teamId` is the direct destination for the one built-in Agent Team and contains group work records without page tabs. Its upper-right Configuration action opens `/agent-teams/:teamId/configuration`, which owns the Team form and memory management without tabs. Creating a record opens an empty task group at `/agent-team-groups/:groupId`; the user starts work by mentioning an active role or the protected Team Manager in that group. The Team Manager is a narrower Chat capability for Team configuration, role CRUD and Team memories. Chat can also dispatch a message to a task group, defaulting to Team Manager when no role is specified. `/agent-team-groups/:groupId` owns the persisted group transcript and role-addressed messages, while task attempts, repository scopes, documents and controls remain server evidence. `/agent-team-runs/:runId` remains the immutable execution evidence destination for a captured Run, not a full Run collection. A failed managed Team document can be redelivered through its detail or download route without rerunning its producing role. `/runs/:runId` is a Workflow Run log-reading destination reached from a Workflow's Run records dialog, not a top-level collection. There is no Run list route: Runs are reached through their Workflow. Provider request observability is not a Settings page: `/settings` keeps the WorkLite-owned Usage and Audit Log read models, which are business records over Runs and resource mutations rather than Gateway transport records.
 
 ## Shared Component Inventory
 
@@ -89,6 +91,33 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-10-19 - Chat active-work progress interval
+
+- Set the [Chat](pages/chat/workspace/DESIGN.md) active-work check and model-only reminder to roughly 90 seconds, retaining visible-change deduplication, automatic stop when work settles and zero-action progress feedback.
+
+### 2026-10-19 - Chat active-work progress cards
+
+- Render the periodic active-work reply as a neutral Web card with captured work titles, shared status badges, report time and model summary. Streaming and history share explicit report metadata; reminder cadence and external-channel text remain unchanged.
+
+### 2026-10-19 - Team-scoped management Agent and dynamic roles
+
+- Added the protected Team Manager as a role-addressable, in-group narrowed Chat capability for Team configuration, role creation/edit/deletion and Team memory management.
+- Made the role picker reflect the captured active role directory and kept historical Runs tied to their immutable role snapshots.
+- Set the Team Manager as Chat dispatch's default recipient when the user does not specify a work role.
+
+### 2026-10-19 - Team configuration destination
+
+- Made Agent Team work records the sole view on `/agent-teams/:teamId` and moved configuration to a dedicated no-tab route opened from the upper-right context bar action.
+
+### 2026-10-19 - Group chat conversation grammar
+
+- The [Group](pages/agent-teams/group/DESIGN.md) page adopts the Chat conversation grammar: a full-height transcript with a floating composer, an `@` role mention menu with a removable recipient token, in-transcript question cards, a return-to-end control, and a compressed Run task band replacing the side panel.
+- Sending no longer requires a repository selection: unscoped messages create empty-scope Runs whose directories bind through role-identified `repositoryDirectories` or answer-carried `directories`, and the per-message repository checkboxes are removed.
+
+### 2026-10-19 - Agent Team group chat
+
+- Added the group conversation specification and updated Team records to create empty groups, open group chat, show working practice, and manage Team/repository/role-scoped memories in Configuration.
 
 ### 2026-10-16 - Chat history filters and settings section rail
 

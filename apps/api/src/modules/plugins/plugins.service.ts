@@ -1,12 +1,15 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { spawnSync } from 'node:child_process';
 import { eq } from 'drizzle-orm';
 import type { PluginTestResult, PluginView, UpdatePluginRequest } from '@worklite/contracts';
 import { feishuRegistrations, plugins, wechatOfficialAccounts, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import type { WechatService } from './wechat/wechat.service';
 
 export const FEISHU_PLUGIN_ID = 'feishu-bot' as const;
+export const WECHAT_PLUGIN_ID = 'wechat-bot' as const;
 export const CODEX_CLI_PLUGIN_ID = 'codex-cli-chat' as const;
 export const CLAUDE_CODE_PLUGIN_ID = 'claude-code' as const;
 const EXECUTABLE_PLUGIN_IDS: readonly string[] = [CODEX_CLI_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID];
@@ -14,7 +17,7 @@ export const CODEX_CLI_AGENT_ID = 'agt_codex_cli_chat' as const;
 
 @Injectable()
 export class PluginsService {
-  constructor(@Inject(DATABASE) private readonly db: Database) {}
+  constructor(@Inject(DATABASE) private readonly db: Database, private readonly modules: ModuleRef) {}
 
   async list(): Promise<PluginView[]> {
     const rows = await this.db.select().from(plugins).orderBy(plugins.name);
@@ -51,6 +54,14 @@ export class PluginsService {
       }).where(eq(plugins.id, pluginId));
       return this.get(pluginId);
     }
+    if (pluginId === WECHAT_PLUGIN_ID) {
+      const config = input?.wechat;
+      if (!config?.allowedUserId?.trim()) throw new BadRequestException('The WeChat allowed user id is required.');
+      const [row] = await this.db.select().from(plugins).where(eq(plugins.id, pluginId)).limit(1);
+      if (!row) throw new NotFoundException('Plugin not found.');
+      await this.db.update(plugins).set({ wechatAllowedUserId: config.allowedUserId.trim(), updatedAt: new Date() }).where(eq(plugins.id, pluginId));
+      return this.get(pluginId);
+    }
     if (!EXECUTABLE_PLUGIN_IDS.includes(pluginId)) throw new BadRequestException('This plugin has no executable command configuration.');
     const command = this.normalizeCommand(input?.command);
     const [updated] = await this.db.update(plugins).set({ command, updatedAt: new Date() }).where(eq(plugins.id, pluginId)).returning();
@@ -72,6 +83,17 @@ export class PluginsService {
   async updateFeishu(patch: Partial<typeof plugins.$inferInsert>): Promise<PluginView> {
     await this.db.update(plugins).set({ ...patch, updatedAt: new Date() }).where(eq(plugins.id, FEISHU_PLUGIN_ID));
     return this.get(FEISHU_PLUGIN_ID);
+  }
+
+  async wechatSecret() {
+    const [row] = await this.db.select().from(plugins).where(eq(plugins.id, WECHAT_PLUGIN_ID)).limit(1);
+    if (!row) throw new NotFoundException('WeChat plugin not found.');
+    return { ...row, botToken: row.wechatBotToken ? decryptSecret(row.wechatBotToken) : null };
+  }
+
+  async updateWechat(patch: Partial<typeof plugins.$inferInsert>): Promise<PluginView> {
+    await this.db.update(plugins).set({ ...patch, updatedAt: new Date() }).where(eq(plugins.id, WECHAT_PLUGIN_ID));
+    return this.get(WECHAT_PLUGIN_ID);
   }
 
   private async toView(row: typeof plugins.$inferSelect): Promise<PluginView> {
@@ -100,6 +122,11 @@ export class PluginsService {
           verificationUrl: registration.verificationUrl,
           expiresAt: registration.expiresAt?.toISOString() ?? null, error: registration.error,
         } : null,
+      } : undefined,
+      wechat: row.id === WECHAT_PLUGIN_ID ? {
+        botId: row.wechatBotId, hasToken: Boolean(row.wechatBotToken),
+        allowedUserId: row.wechatAllowedUserId, status: row.wechatStatus, lastError: row.wechatLastError,
+        login: this.modules.get<WechatService | undefined>('WECHAT_UPGRADE_TRANSPORT', { strict: false })?.loginView() ?? null,
       } : undefined,
       officialAccount: officialAccount ? {
         id: officialAccount.id,

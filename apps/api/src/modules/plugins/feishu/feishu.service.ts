@@ -3,7 +3,7 @@ import { Client, EventDispatcher, LoggerLevel, WSClient } from '@larksuiteoapi/n
 import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { Request } from 'express';
-import { chatSubmissions, feishuChats, feishuDeliveries, feishuEvents, type Database } from '@worklite/db';
+import { chatSubmissions, externalChats, feishuDeliveries, feishuEvents, type Database } from '@worklite/db';
 import { DATABASE } from '../../../infrastructure/database.module';
 import { AgentExecutionsService } from '../../agents/agent-executions.service';
 import { CHAT_AGENT_ID, ChatDispatchService } from '../../agents/chat-dispatch.service';
@@ -142,8 +142,8 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
     if (message.message_type === 'text') {
       try { text = string(record(JSON.parse(string(message.content))).text).trim(); } catch { /* Unsupported payload receives explicit feedback below. */ }
     }
-    await this.db.insert(feishuChats).values({ id: chatId, workspaceId: 'workspace_personal', userId }).onConflictDoNothing();
-    const [chat] = await this.db.select().from(feishuChats).where(eq(feishuChats.id, chatId)).limit(1);
+    await this.db.insert(externalChats).values({ id: chatId, workspaceId: 'workspace_personal', channel: 'feishu', externalId: chatId, userId }).onConflictDoNothing();
+    const [chat] = await this.db.select().from(externalChats).where(and(eq(externalChats.id, chatId), eq(externalChats.channel, 'feishu'))).limit(1);
     const replyTo = string(message.parent_id) || string(message.root_id);
     let boundAction: FeishuAction | undefined;
     let parentSubmissionId: string | undefined;
@@ -170,7 +170,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       const receipt = transaction.insert(feishuEvents).values({ id: eventId, chatId, payload: { text, context: { content: message.content, messageId, messageType: message.message_type, createTime: message.create_time, parentId: message.parent_id, rootId: message.root_id }, ...(boundAction ? { action: boundAction, form: { answer: text }, ...(parentSubmissionId ? { submissionId: parentSubmissionId } : {}) } : {}) } }).onConflictDoNothing().run();
       let submissionExecutionId = chat.executionId;
       if (receipt.changes > 0 && escapeFailedConversation && chat.executionId) {
-        const unbound = transaction.update(feishuChats).set({ executionId: null, updatedAt: new Date() }).where(and(eq(feishuChats.id, chatId), eq(feishuChats.executionId, chat.executionId))).run();
+        const unbound = transaction.update(externalChats).set({ executionId: null, updatedAt: new Date() }).where(and(eq(externalChats.id, chatId), eq(externalChats.channel, 'feishu'), eq(externalChats.executionId, chat.executionId))).run();
         if (unbound.changes === 0) throw new ConflictException('This Feishu conversation is no longer bound to the failed Agent execution.');
         submissionExecutionId = null;
       }
@@ -199,6 +199,8 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Feishu card action rejected: submission chat missing, eventId=${eventId}, submissionId=${submission.id}.`);
       return { accepted: false, reason: '任务卡片未关联对话' };
     }
+    const [chat] = await this.db.select({ channel: externalChats.channel }).from(externalChats).where(eq(externalChats.id, submission.chatId)).limit(1);
+    if (chat?.channel !== 'feishu') return { accepted: false, reason: '任务卡片未关联对话' };
     const saved = submission.renderedCard as SavedCard | null;
     const taskCards = (submission.renderedTaskCards as TaskCardMap | null) ?? {};
     let selected = saved?.actions[actionKey];
@@ -232,8 +234,8 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       for (const event of events) {
         if (runtimeAdmissionClosed()) break;
         if (blocked.has(event.chatId) && !event.payload.action) continue;
-        const [owner] = await this.db.select({ userId: feishuChats.userId }).from(feishuChats).where(eq(feishuChats.id, event.chatId)).limit(1);
-        if (owner?.userId !== this.allowedUserId) continue;
+        const [owner] = await this.db.select({ userId: externalChats.userId, channel: externalChats.channel }).from(externalChats).where(eq(externalChats.id, event.chatId)).limit(1);
+        if (owner?.channel !== 'feishu' || owner.userId !== this.allowedUserId) continue;
         if (!event.payload.action) {
           const [placeholder] = await this.db.select().from(chatSubmissions).where(eq(chatSubmissions.id, event.id)).limit(1);
           if (placeholder && !placeholder.reference && !placeholder.error) {
@@ -262,8 +264,8 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       const submissions = await this.db.select().from(chatSubmissions).where(and(eq(chatSubmissions.workspaceId, 'workspace_personal'), eq(chatSubmissions.settled, false))).orderBy(asc(chatSubmissions.createdAt));
       for (const submission of submissions) {
         if (!submission.chatId) continue;
-        const [owner] = await this.db.select({ userId: feishuChats.userId }).from(feishuChats).where(eq(feishuChats.id, submission.chatId)).limit(1);
-        if (owner?.userId !== this.allowedUserId) continue;
+        const [owner] = await this.db.select({ userId: externalChats.userId, channel: externalChats.channel }).from(externalChats).where(eq(externalChats.id, submission.chatId)).limit(1);
+        if (owner?.channel !== 'feishu' || owner.userId !== this.allowedUserId) continue;
         try { await this.deliver(submission); }
         catch { await this.plugins.updateFeishu({ feishuLastError: '飞书消息投递失败，请检查机器人消息、文件与卡片权限；恢复后自动继续投递。' }); }
       }
@@ -273,7 +275,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async processEvent(event: typeof feishuEvents.$inferSelect): Promise<void> {
-    const [chat] = await this.db.select().from(feishuChats).where(eq(feishuChats.id, event.chatId)).limit(1);
+    const [chat] = await this.db.select().from(externalChats).where(and(eq(externalChats.id, event.chatId), eq(externalChats.channel, 'feishu'))).limit(1);
     const payload = event.payload;
     if (payload.action) {
       await this.applyAction(event.id, chat.id, payload.action as FeishuAction, record(payload.form), string(payload.submissionId));
@@ -286,13 +288,13 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async dispatchFromChannel(input: import('@worklite/contracts').DispatchChatRequest, chatId: string) {
-    const [chat] = await this.db.select().from(feishuChats).where(eq(feishuChats.id, chatId)).limit(1);
+    const [chat] = await this.db.select().from(externalChats).where(and(eq(externalChats.id, chatId), eq(externalChats.channel, 'feishu'))).limit(1);
     await this.db.insert(chatSubmissions).values({ id: input.submissionId, workspaceId: chat.workspaceId, chatId, executionId: input.executionId, message: input.message, target: input.target }).onConflictDoNothing();
     const result = await this.dispatches.dispatch(request, input);
     if (result.reference.kind === 'conversation') {
       const executionId = result.reference.executionId;
       this.db.transaction((transaction) => {
-        const bound = transaction.update(feishuChats).set({ executionId, updatedAt: new Date() }).where(and(eq(feishuChats.id, chatId), input.executionId ? eq(feishuChats.executionId, input.executionId) : isNull(feishuChats.executionId))).run();
+        const bound = transaction.update(externalChats).set({ executionId, updatedAt: new Date() }).where(and(eq(externalChats.id, chatId), eq(externalChats.channel, 'feishu'), input.executionId ? eq(externalChats.executionId, input.executionId) : isNull(externalChats.executionId))).run();
         if (bound.changes > 0) transaction.update(chatSubmissions).set({ executionId }).where(and(eq(chatSubmissions.chatId, chatId), isNull(chatSubmissions.executionId))).run();
       });
     }
@@ -309,7 +311,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
     } else if (action.kind === 'agent_answer') {
       const [accepted] = await this.db.select({ reference: chatSubmissions.reference }).from(chatSubmissions).where(eq(chatSubmissions.id, eventId)).limit(1);
       if (accepted?.reference) {
-        if (action.newConversation && accepted.reference.kind === 'conversation') await this.db.update(feishuChats).set({ executionId: accepted.reference.executionId, updatedAt: new Date() }).where(and(eq(feishuChats.id, chatId), eq(feishuChats.executionId, action.executionId)));
+        if (action.newConversation && accepted.reference.kind === 'conversation') await this.db.update(externalChats).set({ executionId: accepted.reference.executionId, updatedAt: new Date() }).where(and(eq(externalChats.id, chatId), eq(externalChats.channel, 'feishu'), eq(externalChats.executionId, action.executionId)));
         return;
       }
       const current = await this.executions.get(request, 'personal', CHAT_AGENT_ID, action.executionId);

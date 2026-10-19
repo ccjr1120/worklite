@@ -1,24 +1,24 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import type { GatewayToolDefinition } from '@worklite/model-gateway';
-import type { AgentTeamRole, CommandExecutionView } from '@worklite/contracts';
+import type { AgentTeamRoleId, CommandExecutionView } from '@worklite/contracts';
 import { CommandsService, type CommandReservation } from '../commands/commands.service';
 
 type BuiltinExecution = { execution: CommandExecutionView; output: string };
 type StartOptions = { cwd?: string; reserveCommand?: CommandReservation };
 
 const READ_ONLY_TOOL_NAMES = ['read', 'glob', 'grep', 'process_reference'];
-const ROLE_ALLOWED_TOOL_NAMES: Record<AgentTeamRole, readonly string[]> = {
-  planner: READ_ONLY_TOOL_NAMES,
-  'worktree-manager': READ_ONLY_TOOL_NAMES,
-  test_designer: READ_ONLY_TOOL_NAMES,
-  developer: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference'],
-  test_author: ['read', 'write', 'glob', 'grep', 'process_reference'],
-  test_runner: ['bash', 'read', 'write', 'glob', 'grep'],
-  reviewer: READ_ONLY_TOOL_NAMES,
+const ROLE_ALLOWED_TOOL_NAMES: Partial<Record<string, readonly string[]>> = {
+  planner: [...READ_ONLY_TOOL_NAMES, 'read_team_document'],
+  'worktree-manager': [...READ_ONLY_TOOL_NAMES, 'read_team_document'],
+  test_designer: [...READ_ONLY_TOOL_NAMES, 'read_team_document'],
+  developer: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference', 'read_team_document'],
+  test_author: ['read', 'write', 'glob', 'grep', 'process_reference', 'read_team_document'],
+  test_runner: ['bash', 'read', 'write', 'glob', 'grep', 'read_team_document'],
+  reviewer: [...READ_ONLY_TOOL_NAMES, 'read_team_document'],
 };
 
-export function selectBuiltinToolNames(role: AgentTeamRole, requestedToolNames: readonly string[]): string[] {
-  const allowed = new Set(ROLE_ALLOWED_TOOL_NAMES[role]);
+export function selectBuiltinToolNames(role: AgentTeamRoleId, requestedToolNames: readonly string[]): string[] {
+  const allowed = new Set(ROLE_ALLOWED_TOOL_NAMES[role] ?? []);
   return [...new Set(requestedToolNames)].filter((name) => allowed.has(name));
 }
 
@@ -29,6 +29,7 @@ const definitions: GatewayToolDefinition[] = [
   { name: 'glob', description: 'Find files matching a glob pattern.', inputSchema: { type: 'object', additionalProperties: false, required: ['pattern'], properties: { pattern: { type: 'string' } } } },
   { name: 'grep', description: 'Search files with a regular expression.', inputSchema: { type: 'object', additionalProperties: false, required: ['pattern'], properties: { pattern: { type: 'string' }, path: { type: 'string' } } } },
   { name: 'process_reference', description: 'Read a file from the pinned Agent Team process package.', inputSchema: { type: 'object', additionalProperties: false, required: ['path'], properties: { path: { type: 'string' } } } },
+  { name: 'read_team_document', description: 'Read an exact immutable Team document version that was explicitly handed to this task.', inputSchema: { type: 'object', additionalProperties: false, required: ['documentId', 'revision'], properties: { documentId: { type: 'string' }, revision: { type: 'integer', minimum: 1 } } } },
 ];
 
 @Injectable()

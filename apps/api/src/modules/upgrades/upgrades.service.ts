@@ -5,7 +5,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, openSync, closeSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { and, eq, inArray } from 'drizzle-orm';
-import { agentExecutions, agentTeamRuns, agentToolCalls, chatSubmissions, commandExecutions, feishuChats, workflowRuns, type Database } from '@worklite/db';
+import { agentExecutions, agentTeamRuns, agentToolCalls, chatSubmissions, commandExecutions, externalChats, workflowRuns, type Database } from '@worklite/db';
 import type { WorkliteUpgradeView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { upgradeStateDirectory } from '../../infrastructure/runtime-upgrade-state';
@@ -15,6 +15,7 @@ import { CommandsService } from '../commands/commands.service';
 import { RunsService } from '../runs/runs.service';
 import type { FeishuService } from '../plugins/feishu/feishu.service';
 import type { FeishuRegistrationService } from '../plugins/feishu/feishu-registration.service';
+import type { WechatService } from '../plugins/wechat/wechat.service';
 import type { Request } from 'express';
 
 type UpgradeJob = {
@@ -59,7 +60,7 @@ export class UpgradesService implements OnModuleInit {
     const runtime = this.readFile<{ projectRoot: string }>(join(directory, 'current.json'));
     const [execution] = await this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, input.executionId), eq(agentExecutions.agentId, 'agt_system_helper_chat'))).limit(1);
     if (!execution || !input.summary?.trim()) throw new BadRequestException('A Chat execution and upgrade summary are required.');
-    const [chat] = await this.db.select({ id: feishuChats.id }).from(feishuChats).where(eq(feishuChats.executionId, execution.id)).limit(1);
+    const [chat] = await this.db.select({ id: externalChats.id }).from(externalChats).where(eq(externalChats.executionId, execution.id)).limit(1);
     const [existing] = await this.db.select().from(chatSubmissions).where(eq(chatSubmissions.id, input.submissionId)).limit(1);
     if (existing?.reference?.kind === 'upgrade') return this.view(existing.reference.jobId);
     const id = `upgrade_${randomUUID()}`;
@@ -81,7 +82,7 @@ export class UpgradesService implements OnModuleInit {
       || call?.status !== 'running' || call.skillId !== 'sk_worklite_platform' || call.scriptPath !== 'scripts/redeploy.mjs' || !currentCall) {
       throw new BadRequestException('Redeployment requires the current server-bound Chat user request.');
     }
-    const [chat] = await this.db.select({ id: feishuChats.id }).from(feishuChats).where(eq(feishuChats.executionId, execution.id)).limit(1);
+    const [chat] = await this.db.select({ id: externalChats.id }).from(externalChats).where(eq(externalChats.executionId, execution.id)).limit(1);
     const id = `upgrade_${createHash('sha256').update(`${execution.id}:${userMessage.id}`).digest('hex').slice(0, 32)}`;
     if (existsSync(join(directory, 'upgrades', `${id}.json`))) return this.view(id);
     this.requireIdle();
@@ -194,6 +195,7 @@ export class UpgradesService implements OnModuleInit {
     await this.handoff(id);
     const current = this.load(id); current.phase = 'frozen'; this.save(current);
     await this.modules.get<FeishuService>('FEISHU_UPGRADE_TRANSPORT', { strict: false }).freezeForUpgrade();
+    await this.modules.get<WechatService>('WECHAT_UPGRADE_TRANSPORT', { strict: false })?.freezeForUpgrade();
     return { frozen: true };
   }
 

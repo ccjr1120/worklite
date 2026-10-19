@@ -48,7 +48,7 @@ export type WorkspaceView = {
 };
 
 export type PluginView = {
-  id: 'codex-cli-chat' | 'claude-code' | 'feishu-bot' | 'wechat-official-account';
+  id: 'codex-cli-chat' | 'claude-code' | 'feishu-bot' | 'wechat-bot' | 'wechat-official-account';
   name: string;
   description: string;
   command: string;
@@ -56,6 +56,7 @@ export type PluginView = {
   status: 'available' | 'missing' | 'failed';
   updatedAt: string;
   feishu?: FeishuConnectionView;
+  wechat?: WechatConnectionView;
   officialAccount?: WechatOfficialAccountView;
 };
 
@@ -89,19 +90,36 @@ export type FeishuConnectionView = {
   registration: FeishuRegistrationView | null;
 };
 
+export type WechatLoginView = {
+  id: string;
+  status: 'pending' | 'scanned' | 'confirmed' | 'expired' | 'error';
+  qrCodeUrl: string | null;
+  error: string | null;
+};
+
+export type WechatConnectionView = {
+  botId: string;
+  hasToken: boolean;
+  allowedUserId: string;
+  status: 'disconnected' | 'connecting' | 'connected' | 'error';
+  lastError: string | null;
+  login: WechatLoginView | null;
+};
+
 export type UpdatePluginRequest = {
   command?: string;
   feishu?: { appId: string; appSecret?: string; allowedUserId: string };
+  wechat?: { allowedUserId: string };
 };
 
 export type ChatTarget =
   | { kind: 'conversation' }
-  | { kind: 'team'; teamId: string; projectDirectory: string; mode: 'plan_only' | 'validate_existing' | 'implement_and_validate' }
+  | { kind: 'team'; teamId: string; projectDirectory: string; mode: 'plan_only' | 'validate_existing' | 'implement_and_validate'; role?: AgentTeamRoleId }
   | { kind: 'workflow'; workflowId: string };
 
 export type ChatTaskReference =
   | { kind: 'conversation'; executionId: string; afterMessageId: string | null; afterSequence: number; untilMessageId?: string | null; completionStatus?: string; completionError?: string | null }
-  | { kind: 'team'; teamId: string; runId: string }
+  | { kind: 'team'; teamId: string; runId: string; groupId?: string }
   | { kind: 'workflow'; runId: string; workflowVersionId: string }
   | { kind: 'upgrade'; jobId: string };
 
@@ -277,11 +295,16 @@ export type AgentExecutionErrorCode =
   | 'restarted'
   | 'internal';
 
+export type ChatProgressReport = {
+  items: Array<{ kind: 'task' | 'team' | 'workflow'; id: string; title: string; status: string }>;
+};
+
 export type AgentExecutionMessage = {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   createdAt: string;
+  progressReport?: ChatProgressReport;
   // A summary divider marks where a /summarize compressed the model context; it is a
   // transcript marker persisted among the display messages, not a spoken message.
   kind?: 'summary_divider';
@@ -392,7 +415,7 @@ export type AgentExecutionView = {
 
 export type AgentExecutionEventData =
   | { kind: 'snapshot'; execution: AgentExecutionView }
-  | { kind: 'message_delta'; messageId: string; delta: string }
+  | { kind: 'message_delta'; messageId: string; delta: string; progressReport?: ChatProgressReport }
   | { kind: 'status'; status: AgentExecutionStatus; phase: AgentExecutionPhase; errorCode: AgentExecutionErrorCode | null; error: string | null }
   | { kind: 'tool_call'; call: AgentToolCallView };
 
@@ -1244,17 +1267,20 @@ export type AgentTeamRole =
   | 'reviewer'
   | 'worktree-manager';
 
+export type AgentTeamRoleId = string;
+
 export type AgentTeamMode = 'plan_only' | 'validate_existing' | 'implement_and_validate';
 
 export type AgentTeamRoleConfiguration = {
-  role: AgentTeamRole;
+  role: AgentTeamRoleId;
+  displayName?: string;
   publicModelId: string;
   instructions: string;
   entryPoints: string[];
   skillIds: string[];
   mcpServerIds: string[];
   toolNames: string[];
-  executor?: ProjectExecutor;
+  executor?: ProjectExecutor | null;
 };
 
 export type AgentTeamDevelopmentAssignmentInput = {
@@ -1262,6 +1288,13 @@ export type AgentTeamDevelopmentAssignmentInput = {
   title: string;
   scopeSummary: string;
   ownedPaths: string[];
+  repositoryIds?: string[];
+};
+
+export type AgentTeamRoleHandoff = {
+  role: AgentTeamRoleId;
+  goal: string;
+  repositoryIds?: string[];
 };
 
 // Worktree Manager setup phase output, validated by the runtime before any
@@ -1288,6 +1321,7 @@ export type AgentTeamDevelopmentAssignment = {
   title: string;
   scopeSummary: string;
   ownedPaths: string[];
+  repositoryIds?: string[];
 };
 
 export type AgentTeamRunProgress = {
@@ -1307,6 +1341,7 @@ export type AgentTeamView = {
   processId: string;
   processVersion: string;
   roles: AgentTeamRoleConfiguration[];
+  workingPractice: string;
   // Maximum number of simultaneously active Runs; dispatches beyond it queue FIFO.
   maxConcurrentRuns: number;
   createdAt: string;
@@ -1319,7 +1354,8 @@ export type AgentTeamVersionMetadata = {
   createdAt: string;
   developerExecution?: ProjectExecutorLaunchView | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3 | 4 | 5;
+  projectExecutorLaunches?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
+  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7;
 };
 
 export type AgentTeamTaskAttemptStatus =
@@ -1334,7 +1370,7 @@ export type AgentTeamTaskAttemptView = {
   id: string;
   taskKey: string;
   attemptIndex: number;
-  role: AgentTeamRole;
+  role: AgentTeamRoleId;
   status: AgentTeamTaskAttemptStatus;
   inputFingerprint: string;
   result: AgentTeamTaskResult | null;
@@ -1445,6 +1481,8 @@ export type AgentTeamTaskResult =
         taskKey: string;
         instruction: string;
       };
+      message?: string;
+      handoff?: AgentTeamRoleHandoff;
     }
   | {
       status: 'waiting_for_input';
@@ -1471,9 +1509,119 @@ export type AgentTeamRunSummary = {
   finishedAt: string | null;
 };
 
+export type AgentTeamGroupRepository = {
+  id: string;
+  teamRepositoryId: string;
+  name: string;
+  directory: string;
+  createdAt: string;
+};
+
+export type AgentTeamRepositoryView = {
+  id: string;
+  name: string;
+  directory: string;
+};
+
+export type AgentTeamGroupMessage = {
+  id: string;
+  sequence: number;
+  sender: 'user' | 'role' | 'system';
+  senderRole: AgentTeamRoleId | null;
+  recipientRole: AgentTeamRoleId | null;
+  kind: 'text' | 'question' | 'handoff' | 'control' | 'status' | 'file';
+  body: string;
+  runId: string | null;
+  taskAttemptId: string | null;
+  repositoryIds: string[];
+  fileReferences: Array<{ documentId: string; revision: number; title: string }>;
+  deliveryStatus: 'pending' | 'delivered' | 'failed';
+  createdAt: string;
+};
+
+export type AgentTeamGroupSummary = {
+  id: string;
+  title: string;
+  mode: AgentTeamMode;
+  status: AgentTeamRunStatus | 'empty';
+  runCount: number;
+  repositories: AgentTeamGroupRepository[];
+  lastMessage: AgentTeamGroupMessage | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AgentTeamGroupView = AgentTeamGroupSummary & {
+  teamId: string;
+  workingPractice: string;
+  messages: AgentTeamGroupMessage[];
+  runs: Array<{ id: string; targetRole: AgentTeamRoleId | null; currentRole: AgentTeamRoleId | null; status: AgentTeamRunStatus; intent: string; repositoryIds: string[]; createdAt: string; finishedAt: string | null; pendingInputs: Array<{ id: string; question: string; scopeRevision: number }> }>;
+};
+
+export type CreateAgentTeamGroupRequest = { title?: string; mode?: AgentTeamMode };
+
+export type AddAgentTeamGroupRepositoriesRequest = {
+  repositories: Array<{ name?: string; directory: string }>;
+};
+
+export type SendAgentTeamGroupMessageRequest = {
+  body: string;
+  recipientRole: AgentTeamRoleId;
+  repositoryIds?: string[];
+  submissionId: string;
+  runId?: string;
+};
+
+export type AgentTeamGroupControlRequest = {
+  operation: 'pause' | 'resume' | 'cancel' | 'retry' | 'reexecute';
+  runIds: string[];
+  targetRole?: AgentTeamRoleId;
+  taskKey?: string;
+};
+
+export type AgentTeamGroupAnswerRequest = {
+  pendingInputId: string;
+  scopeRevision: number;
+  answer: string;
+  authorizedCommands?: string[];
+  directories?: string[];
+};
+
+export type AgentTeamMemoryView = {
+  id: string;
+  repositoryId: string | null;
+  repositoryName: string | null;
+  repositoryDirectory: string | null;
+  role: AgentTeamRoleId | null;
+  content: string;
+  sourceMessageId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateAgentTeamMemoryRequest = {
+  repositoryId?: string | null;
+  role?: AgentTeamRoleId | null;
+  content: string;
+  sourceMessageId?: string | null;
+};
+
+export type UpdateAgentTeamMemoryRequest = Partial<CreateAgentTeamMemoryRequest>;
+
+export type AgentTeamGroupEvent = {
+  groupId: string;
+  sequence: number;
+  type: 'message' | 'repository.updated' | 'run.updated' | 'memory.updated';
+  payload: Record<string, unknown>;
+  createdAt: string;
+};
+
 export type AgentTeamRunView = {
   id: string;
   teamId: string;
+  groupId: string | null;
+  targetRole: AgentTeamRoleId | null;
+  repositoryIds: string[];
   teamVersion: AgentTeamVersionMetadata;
   status: AgentTeamRunStatus;
   intent: string;
@@ -1531,6 +1679,7 @@ export type AgentTeamDocumentDownloadView = {
 export type UpdateAgentTeamRequest = {
   roles?: AgentTeamRoleConfiguration[];
   maxConcurrentRuns?: number;
+  workingPractice?: string;
 };
 
 export type CreateAgentTeamRunRequest = {
@@ -1549,6 +1698,7 @@ export type AnswerAgentTeamRunRequest = {
   scopeRevision: number;
   answer: string;
   authorizedCommands?: string[];
+  directories?: string[];
 };
 
 export type RecoverAgentTeamOperationRequest = {

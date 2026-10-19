@@ -240,6 +240,7 @@ describe('buildActiveWorkNote / activeWorkSignature', () => {
   it('summarizes every active item briefly without internal detail', () => {
     const note = buildActiveWorkNote(items);
     expect(note).toContain('[活跃工作进展提醒]');
+    expect(note).toContain('约每 90 秒提醒一次');
     expect(note).toContain('acall_1');
     expect(note).toContain('trun_1');
     expect(note).toContain('wrun_1');

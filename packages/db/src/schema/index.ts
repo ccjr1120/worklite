@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index, integer, primaryKey, sqliteTable, text, unique, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text, unique, uniqueIndex, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 
 const timestamp = (name: string) => integer(name, { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`);
 
@@ -25,6 +25,14 @@ export const plugins = sqliteTable('plugins', {
   feishuEnabled: integer('feishu_enabled', { mode: 'boolean' }).notNull().default(false),
   feishuStatus: text('feishu_status').$type<'disconnected' | 'connecting' | 'connected' | 'error'>().notNull().default('disconnected'),
   feishuLastError: text('feishu_last_error'),
+  wechatBotId: text('wechat_bot_id').notNull().default(''),
+  wechatBotToken: text('wechat_bot_token'),
+  wechatBaseUrl: text('wechat_base_url').notNull().default(''),
+  wechatAllowedUserId: text('wechat_allowed_user_id').notNull().default(''),
+  wechatEnabled: integer('wechat_enabled', { mode: 'boolean' }).notNull().default(false),
+  wechatStatus: text('wechat_status').$type<'disconnected' | 'connecting' | 'connected' | 'error'>().notNull().default('disconnected'),
+  wechatLastError: text('wechat_last_error'),
+  wechatSyncBuf: text('wechat_sync_buf').notNull().default(''),
   updatedAt: timestamp('updated_at'),
 });
 
@@ -52,11 +60,19 @@ export type StoredChatTaskReference =
   | { kind: 'workflow'; runId: string; workflowVersionId: string }
   | { kind: 'upgrade'; jobId: string };
 
-export const feishuChats = sqliteTable('feishu_chats', {
+// Channel-neutral external chat binding shared by every external conversation
+// channel. `channel + externalId` identifies the platform chat; Feishu rows
+// migrated from `feishu_chats` keep their bare chat id as `id`, WeChat rows
+// use `wechat:<ilink_user_id>`. `contextToken` carries the iLink reply context
+// WeChat must echo on outbound sends; it stays null for Feishu.
+export const externalChats = sqliteTable('external_chats', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  channel: text('channel').$type<'feishu' | 'wechat'>().notNull(),
+  externalId: text('external_id').notNull(),
   userId: text('user_id').notNull(),
   executionId: text('execution_id'),
+  contextToken: text('context_token'),
   target: text('target', { mode: 'json' }).$type<StoredChatTarget>().notNull().default({ kind: 'conversation' }),
   updatedAt: timestamp('updated_at'),
 });
@@ -64,7 +80,7 @@ export const feishuChats = sqliteTable('feishu_chats', {
 export const chatSubmissions = sqliteTable('chat_submissions', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
-  chatId: text('chat_id').references(() => feishuChats.id, { onDelete: 'cascade' }),
+  chatId: text('chat_id').references(() => externalChats.id, { onDelete: 'cascade' }),
   executionId: text('execution_id'),
   message: text('message').notNull(),
   target: text('target', { mode: 'json' }).$type<StoredChatTarget>().notNull(),
@@ -83,7 +99,7 @@ export const chatSubmissions = sqliteTable('chat_submissions', {
 
 export const feishuEvents = sqliteTable('feishu_events', {
   id: text('id').primaryKey(),
-  chatId: text('chat_id').notNull().references(() => feishuChats.id, { onDelete: 'cascade' }),
+  chatId: text('chat_id').notNull().references(() => externalChats.id, { onDelete: 'cascade' }),
   payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
   status: text('status').$type<'queued' | 'done' | 'failed'>().notNull().default('queued'),
   error: text('error'),
@@ -92,9 +108,18 @@ export const feishuEvents = sqliteTable('feishu_events', {
 
 export const feishuDeliveries = sqliteTable('feishu_deliveries', {
   id: text('id').primaryKey(),
-  chatId: text('chat_id').notNull().references(() => feishuChats.id, { onDelete: 'cascade' }),
+  chatId: text('chat_id').notNull().references(() => externalChats.id, { onDelete: 'cascade' }),
   messageId: text('message_id'),
 });
+
+export const wechatEvents = sqliteTable('wechat_events', {
+  id: text('id').primaryKey(),
+  chatId: text('chat_id').notNull().references(() => externalChats.id, { onDelete: 'cascade' }),
+  payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+  status: text('status').$type<'queued' | 'done' | 'failed'>().notNull().default('queued'),
+  error: text('error'),
+  createdAt: timestamp('created_at'),
+}, (table) => [index('wechat_events_chat_idx').on(table.chatId)]);
 
 export const agents = sqliteTable('agents', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), kind: text('kind').$type<'system' | 'custom'>().notNull().default('custom'), name: text('name').notNull(), responsibility: text('responsibility').notNull(), model: text('model').notNull(), providerId: text('provider_id'),
@@ -346,6 +371,9 @@ export type StoredAgentDisplayMessage = {
   role: 'user' | 'assistant';
   content: string;
   createdAt: string;
+  progressReport?: {
+    items: Array<{ kind: 'task' | 'team' | 'workflow'; id: string; title: string; status: string }>;
+  };
   // A summary divider marks where a /summarize compressed the model context; its content
   // retains the generated summary so a later summarize can build on it.
   kind?: 'summary_divider';
@@ -552,7 +580,9 @@ export type StoredAgentTeamRole =
   | 'test_author'
   | 'test_runner'
   | 'reviewer'
-  | 'worktree-manager';
+  | 'worktree-manager'
+  | 'team-manager'
+  | (string & {});
 
 export type StoredAgentTeamMode = 'plan_only' | 'validate_existing' | 'implement_and_validate';
 
@@ -593,6 +623,7 @@ export type StoredAgentTeamDeveloperInstanceConfiguration = {
 
 export type StoredAgentTeamRoleConfiguration = {
   role: StoredAgentTeamRole;
+  displayName?: string;
   publicModelId: string;
   instructions: string;
   entryPoints: string[];
@@ -615,7 +646,9 @@ export type StoredAgentTeamVersionSnapshot = {
   processVersion: string;
   developerExecution: StoredProjectExecutorLaunch | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3 | 4 | 5;
+  projectExecutorLaunches?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
+  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  workingPractice?: string;
   roles: StoredAgentTeamRoleConfiguration[];
   processFiles: Array<{ path: string; content: string }>;
   recipeDefaults: StoredAgentTeamRecipeDefaults;
@@ -629,12 +662,89 @@ export const agentTeams = sqliteTable('agent_teams', {
   processId: text('process_id').notNull(),
   processVersion: text('process_version').notNull(),
   roles: text('roles', { mode: 'json' }).$type<StoredAgentTeamRoleConfiguration[]>().notNull().default([]),
+  workingPractice: text('working_practice').notNull().default(''),
   // Maximum number of simultaneously active Runs for this Team; dispatches
   // beyond it persist as queued Runs and start FIFO when a slot frees.
   maxConcurrentRuns: integer('max_concurrent_runs').notNull().default(3),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 }, (table) => [unique().on(table.workspaceId, table.name)]);
+
+export const agentTeamRepositories = sqliteTable('agent_team_repositories', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  teamId: text('team_id').notNull().references(() => agentTeams.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  directory: text('directory').notNull(),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (table) => [unique().on(table.teamId, table.directory)]);
+
+export const agentTeamGroups = sqliteTable('agent_team_groups', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  teamId: text('team_id').notNull().references(() => agentTeams.id, { onDelete: 'cascade' }),
+  title: text('title').notNull().default(''),
+  mode: text('mode').$type<StoredAgentTeamMode>().notNull().default('implement_and_validate'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (table) => [index('agent_team_groups_workspace_updated_idx').on(table.workspaceId, table.updatedAt)]);
+
+export const agentTeamGroupRepositories = sqliteTable('agent_team_group_repositories', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  groupId: text('group_id').notNull().references(() => agentTeamGroups.id, { onDelete: 'cascade' }),
+  teamRepositoryId: text('team_repository_id').notNull().references(() => agentTeamRepositories.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  directory: text('directory').notNull(),
+  createdAt: timestamp('created_at'),
+}, (table) => [unique().on(table.groupId, table.directory), index('agent_team_group_repositories_group_idx').on(table.groupId)]);
+
+export type StoredAgentTeamGroupMessageKind = 'text' | 'question' | 'handoff' | 'control' | 'status' | 'file';
+
+export const agentTeamGroupMessages = sqliteTable('agent_team_group_messages', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  groupId: text('group_id').notNull().references(() => agentTeamGroups.id, { onDelete: 'cascade' }),
+  sequence: integer('sequence').notNull(),
+  sender: text('sender').$type<'user' | 'role' | 'system'>().notNull(),
+  senderRole: text('sender_role').$type<StoredAgentTeamRole>(),
+  recipientRole: text('recipient_role').$type<StoredAgentTeamRole>(),
+  kind: text('kind').$type<StoredAgentTeamGroupMessageKind>().notNull().default('text'),
+  body: text('body').notNull(),
+  runId: text('run_id').references((): AnySQLiteColumn => agentTeamRuns.id, { onDelete: 'set null' }),
+  taskAttemptId: text('task_attempt_id').references((): AnySQLiteColumn => agentTeamTaskAttempts.id, { onDelete: 'set null' }),
+  repositoryIds: text('repository_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
+  fileReferences: text('file_references', { mode: 'json' }).$type<Array<{ documentId: string; revision: number; title: string }>>().notNull().default([]),
+  submissionId: text('submission_id'),
+  deliveryStatus: text('delivery_status').$type<'pending' | 'delivered' | 'failed'>().notNull().default('delivered'),
+  createdAt: timestamp('created_at'),
+}, (table) => [
+  unique().on(table.groupId, table.sequence),
+  unique().on(table.groupId, table.submissionId),
+  unique().on(table.taskAttemptId),
+  index('agent_team_group_messages_run_idx').on(table.runId),
+]);
+
+export const agentTeamGroupEvents = sqliteTable('agent_team_group_events', {
+  groupId: text('group_id').notNull().references(() => agentTeamGroups.id, { onDelete: 'cascade' }),
+  sequence: integer('sequence').notNull(),
+  type: text('type').$type<'message' | 'repository.updated' | 'run.updated' | 'memory.updated'>().notNull(),
+  payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp('created_at'),
+}, (table) => [primaryKey({ columns: [table.groupId, table.sequence] })]);
+
+export const agentTeamMemories = sqliteTable('agent_team_memories', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  teamId: text('team_id').notNull().references(() => agentTeams.id, { onDelete: 'cascade' }),
+  repositoryId: text('repository_id').references(() => agentTeamRepositories.id, { onDelete: 'cascade' }),
+  role: text('role').$type<StoredAgentTeamRole>(),
+  content: text('content').notNull(),
+  sourceMessageId: text('source_message_id').references(() => agentTeamGroupMessages.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (table) => [index('agent_team_memories_scope_idx').on(table.teamId, table.repositoryId, table.role, table.updatedAt)]);
 
 
 export type StoredAgentTeamIntakeStatus = 'queued' | 'collecting' | 'starting' | 'started' | 'failed';
@@ -706,6 +816,20 @@ export const agentTeamRuns = sqliteTable('agent_team_runs', {
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   teamId: text('team_id').notNull().references(() => agentTeams.id, { onDelete: 'restrict' }),
   teamVersionId: text('team_version_id').notNull().references(() => agentTeamVersions.id, { onDelete: 'restrict' }),
+  groupId: text('group_id').references(() => agentTeamGroups.id, { onDelete: 'set null' }),
+  groupMessageId: text('group_message_id').references((): AnySQLiteColumn => agentTeamGroupMessages.id, { onDelete: 'set null' }),
+  targetRole: text('target_role').$type<StoredAgentTeamRole>(),
+  repositoryIds: text('repository_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
+  groupContext: text('group_context', { mode: 'json' }).$type<{
+    groupId: string;
+    initialMessageId: string;
+    initialMessage: string;
+    targetRole: StoredAgentTeamRole;
+    mode: StoredAgentTeamMode;
+    repositories: Array<{ id: string; memoryRepositoryId: string; name: string; directory: string; projectInstructions: StoredAgentTeamProjectInstructionFile[] }>;
+    knownRepositories?: Array<{ name: string; directory: string }>;
+    memories: Array<{ id: string; repositoryId: string | null; role: StoredAgentTeamRole | null; content: string }>;
+  }>(),
   status: text('status').$type<'queued' | 'running' | 'waiting_for_input' | 'paused' | 'succeeded' | 'failed' | 'cancelled'>().notNull().default('queued'),
   intent: text('intent').notNull(),
   projectDirectory: text('project_directory').notNull(),
@@ -848,6 +972,12 @@ export type ScheduledAgentTask = typeof scheduledAgentTasks.$inferSelect;
 export type McpServer = typeof mcpServers.$inferSelect;
 export type ModelProvider = typeof modelProviders.$inferSelect;
 export type AgentTeam = typeof agentTeams.$inferSelect;
+export type AgentTeamGroup = typeof agentTeamGroups.$inferSelect;
+export type AgentTeamRepository = typeof agentTeamRepositories.$inferSelect;
+export type AgentTeamGroupRepository = typeof agentTeamGroupRepositories.$inferSelect;
+export type AgentTeamGroupMessage = typeof agentTeamGroupMessages.$inferSelect;
+export type AgentTeamGroupEvent = typeof agentTeamGroupEvents.$inferSelect;
+export type AgentTeamMemory = typeof agentTeamMemories.$inferSelect;
 export type AgentTeamVersion = typeof agentTeamVersions.$inferSelect;
 export type AgentTeamConversation = typeof agentTeamConversations.$inferSelect;
 export type AgentTeamIntake = typeof agentTeamIntakes.$inferSelect;

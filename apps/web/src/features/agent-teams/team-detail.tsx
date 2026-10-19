@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import * as SelectPrimitive from '@radix-ui/react-select';
-import { useNavigate } from '@tanstack/react-router';
-import { LoaderCircle } from 'lucide-react';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { ArrowLeft, LoaderCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type {
   AgentTeamView,
-  AgentTeamRole,
+  AgentTeamRoleId,
   AgentTeamRoleConfiguration,
   ProjectExecutor,
 } from '@worklite/contracts';
@@ -28,68 +28,54 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { TeamRecords } from './team-records';
+import { TeamMemoriesSettings } from './team-memories';
 import { queryClient } from '@/lib/query-client';
 
 const TEAM_MODEL_SENTINEL = '__team_default__';
 const DEFAULT_MAX_CONCURRENT_RUNS = 3;
-const ROLE_ORDER: AgentTeamRole[] = ['planner', 'test_designer', 'developer', 'test_author', 'test_runner', 'reviewer'];
-const ROLE_TOOLS: Record<AgentTeamRole, string[]> = {
+const BUILT_IN_ROLES: AgentTeamRoleId[] = ['planner', 'test_designer', 'developer', 'test_author', 'test_runner', 'reviewer', 'worktree-manager', 'team-manager'];
+const ROLE_TOOLS: Partial<Record<string, string[]>> = {
   planner: ['read', 'glob', 'grep', 'process_reference'],
   test_designer: ['read', 'glob', 'grep', 'process_reference'],
   developer: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference'],
   test_author: ['read', 'write', 'glob', 'grep', 'process_reference'],
   test_runner: ['bash', 'read', 'write', 'glob', 'grep'],
   reviewer: ['read', 'glob', 'grep', 'process_reference'],
+  'worktree-manager': ['read', 'glob', 'grep', 'process_reference'],
+  'team-manager': [],
 };
+const CUSTOM_ROLE_TOOLS = ['bash', 'read', 'write', 'glob', 'grep', 'process_reference'];
 const EXECUTORS: ProjectExecutor[] = ['claude', 'codex'];
 
 type EditableRoleFields = Pick<AgentTeamRoleConfiguration, 'instructions' | 'entryPoints' | 'skillIds' | 'mcpServerIds' | 'toolNames'>;
 
 function toDraftRoles(roles: readonly AgentTeamRoleConfiguration[]): AgentTeamRoleConfiguration[] {
-  const byRole = new Map(roles.map((role) => [role.role, role]));
-  return ROLE_ORDER.map((role) => {
-    const source = byRole.get(role);
-    return {
-      role,
-      publicModelId: source?.publicModelId || TEAM_MODEL_SENTINEL,
-      instructions: source?.instructions ?? '',
-      entryPoints: source?.entryPoints ?? [],
-      skillIds: source?.skillIds ?? [],
-      mcpServerIds: source?.mcpServerIds ?? [],
-      toolNames: source?.toolNames ?? [],
-      ...(source?.executor ? { executor: source.executor } : {}),
-    };
-  });
+  return roles.map((source) => ({
+    ...source,
+    publicModelId: source.publicModelId || TEAM_MODEL_SENTINEL,
+    instructions: source.instructions ?? '',
+    entryPoints: source.entryPoints ?? [],
+    skillIds: source.skillIds ?? [],
+    mcpServerIds: source.mcpServerIds ?? [],
+    toolNames: source.toolNames ?? [],
+  }));
 }
 
 function toPersistedRoles(roles: readonly AgentTeamRoleConfiguration[]): AgentTeamRoleConfiguration[] {
-  return ROLE_ORDER.map((role) => {
-    const source = roles.find((item) => item.role === role);
-    if (!source) throw new Error(`The ${role} role configuration is missing.`);
-    return {
-      role,
-      publicModelId: source.publicModelId === TEAM_MODEL_SENTINEL ? '' : source.publicModelId,
-      instructions: source.instructions,
-      entryPoints: source.entryPoints.filter(Boolean),
-      skillIds: source.skillIds,
-      mcpServerIds: source.mcpServerIds,
-      toolNames: source.toolNames,
-      ...(source.executor ? { executor: source.executor } : {}),
-    };
-  });
+  return roles.map((source) => ({ ...source, publicModelId: source.publicModelId === TEAM_MODEL_SENTINEL ? '' : source.publicModelId, entryPoints: source.entryPoints.filter(Boolean) }));
 }
 
-function ExecutorSelect({ id, value, onChange }: { id: string; value: ProjectExecutor; onChange: (value: ProjectExecutor) => void }) {
+function ExecutorSelect({ id, value, onChange }: { id: string; value: ProjectExecutor | 'model'; onChange: (value: ProjectExecutor | 'model') => void }) {
   const { t } = useTranslation('agentTeams');
   return (
-    <Select value={value} onValueChange={(next) => onChange(next as ProjectExecutor)}>
+    <Select value={value} onValueChange={(next) => onChange(next as ProjectExecutor | 'model')}>
       <SelectTrigger id={id}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
+        <SelectItem value="model">{t('team.executor.model')}</SelectItem>
         {EXECUTORS.map((executor) => (
           <SelectItem key={executor} value={executor}>{t(`team.executor.${executor}`)}</SelectItem>
         ))}
@@ -98,16 +84,17 @@ function ExecutorSelect({ id, value, onChange }: { id: string; value: ProjectExe
   );
 }
 
-function ModelSelect({ id, value, modelGroups, onChange }: {
+function ModelSelect({ id, value, modelGroups, onChange, disabled }: {
   id: string;
   value: string;
   modelGroups: Array<{ name: string; models: string[] }>;
   onChange: (value: string) => void;
+  disabled?: boolean;
 }) {
   const { t } = useTranslation('agentTeams');
   return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger id={id}>
+    <Select value={value} onValueChange={onChange} disabled={disabled}>
+      <SelectTrigger id={id} disabled={disabled}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -224,7 +211,7 @@ function AdvancedRoleFields({ idPrefix, tools, value, onChange }: {
   );
 }
 
-export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'records' | 'configuration' }) {
+export function TeamDetailPage({ teamId, view }: { teamId: string; view: 'records' | 'configuration' }) {
   const { t } = useTranslation('agentTeams');
   const navigate = useNavigate();
   const workspaceSlug = 'personal';
@@ -234,8 +221,8 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'records'
   const mcpServersQuery = useMcpServersQuery(workspaceSlug);
   const [draftTeamId, setDraftTeamId] = useState('');
   const [roleDrafts, setRoleDrafts] = useState<AgentTeamRoleConfiguration[]>([]);
-  const [preservedRoles, setPreservedRoles] = useState<AgentTeamRoleConfiguration[]>([]);
   const [maxConcurrentRunsDraft, setMaxConcurrentRunsDraft] = useState(String(DEFAULT_MAX_CONCURRENT_RUNS));
+  const [workingPracticeDraft, setWorkingPracticeDraft] = useState('');
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'unsaved'>('saved');
   const [saveNotice, setSaveNotice] = useState('');
   const [saving, setSaving] = useState(false);
@@ -246,8 +233,8 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'records'
     if (!teamQuery.data || draftTeamId === teamQuery.data.id) return;
     setDraftTeamId(teamQuery.data.id);
     setRoleDrafts(toDraftRoles(teamQuery.data.roles));
-    setPreservedRoles(teamQuery.data.roles.filter((role) => !ROLE_ORDER.includes(role.role)));
     setMaxConcurrentRunsDraft(String(teamQuery.data.maxConcurrentRuns ?? DEFAULT_MAX_CONCURRENT_RUNS));
+    setWorkingPracticeDraft(teamQuery.data.workingPractice ?? '');
     setSaveState('saved');
     setSaveNotice('');
     setSaveError('');
@@ -269,7 +256,7 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'records'
     setSaveError('');
   }
 
-  function updateRole(role: AgentTeamRole, changes: Partial<AgentTeamRoleConfiguration>) {
+  function updateRole(role: AgentTeamRoleId, changes: Partial<AgentTeamRoleConfiguration>) {
     draftRevisionRef.current += 1;
     setRoleDrafts((current) => current.map((item) => (item.role === role ? { ...item, ...changes } : item)));
     markUnsaved();
@@ -287,14 +274,15 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'records'
       const parsedLimit = Number.parseInt(maxConcurrentRunsDraft, 10);
       const maxConcurrentRuns = Number.isFinite(parsedLimit) && parsedLimit >= 1 ? parsedLimit : DEFAULT_MAX_CONCURRENT_RUNS;
       const saved: AgentTeamView = await api.updateAgentTeam(teamId, {
-        roles: [...toPersistedRoles(roleDrafts), ...preservedRoles],
+        roles: toPersistedRoles(roleDrafts),
         maxConcurrentRuns,
+        workingPractice: workingPracticeDraft,
       });
       const draftsChangedDuringSave = draftRevisionRef.current !== draftRevision;
       setRoleDrafts((current) => (draftsChangedDuringSave ? current : toDraftRoles(saved.roles)));
       if (!draftsChangedDuringSave) {
-        setPreservedRoles(saved.roles.filter((role) => !ROLE_ORDER.includes(role.role)));
         setMaxConcurrentRunsDraft(String(saved.maxConcurrentRuns ?? DEFAULT_MAX_CONCURRENT_RUNS));
+        setWorkingPracticeDraft(saved.workingPractice ?? '');
       }
       setSaveState(draftsChangedDuringSave ? 'unsaved' : 'saved');
       setSaveNotice(draftsChangedDuringSave ? '' : t('team.updated'));
@@ -310,16 +298,27 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'records'
   if (teamQuery.isLoading) {
     return (
       <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
-        <WorkspaceChrome crumbs={[{ label: t('title') }]} />
-        <div className="space-y-4" role="status" aria-busy="true" aria-live="polite">
-          <span className="sr-only">{t('loading')}</span>
-          <Skeleton className="h-8 w-72" />
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-            <Skeleton className="h-80 w-full" />
-            <Skeleton className="h-80 w-full" />
+        <WorkspaceChrome crumbs={view === 'configuration'
+          ? [{ label: t('title'), to: `/agent-teams/${teamId}` }, { label: t('configuration.title') }]
+          : [{ label: t('title') }]} />
+        {view === 'configuration' ? (
+          <div className="space-y-4" role="status" aria-busy="true" aria-live="polite">
+            <span className="sr-only">{t('loading')}</span>
+            <Skeleton className="h-8 w-72" />
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+              <Skeleton className="h-80 w-full" />
+              <Skeleton className="h-80 w-full" />
+            </div>
+            {BUILT_IN_ROLES.map((role) => <Skeleton key={role} className="h-72 w-full" />)}
           </div>
-          {ROLE_ORDER.map((role) => <Skeleton key={role} className="h-72 w-full" />)}
-        </div>
+        ) : (
+          <div className="space-y-3" role="status" aria-busy="true" aria-live="polite">
+            <span className="sr-only">{t('loading')}</span>
+            <Skeleton className="h-8 w-72" />
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-20 w-full" />
+          </div>
+        )}
       </div>
     );
   }
@@ -328,7 +327,9 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'records'
   if (notFound || (!teamQuery.isError && !teamQuery.data)) {
     return (
       <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
-        <WorkspaceChrome crumbs={[{ label: t('title') }]} />
+        <WorkspaceChrome crumbs={view === 'configuration'
+          ? [{ label: t('title'), to: `/agent-teams/${teamId}` }, { label: t('configuration.title') }]
+          : [{ label: t('title') }]} />
         <EmptyState title={t('unavailable.title')} description={t('unavailable.description')} />
       </div>
     );
@@ -337,7 +338,9 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'records'
   if (teamQuery.isError || !teamQuery.data) {
     return (
       <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
-        <WorkspaceChrome crumbs={[{ label: t('title') }]} />
+        <WorkspaceChrome crumbs={view === 'configuration'
+          ? [{ label: t('title'), to: `/agent-teams/${teamId}` }, { label: t('configuration.title') }]
+          : [{ label: t('title') }]} />
         <ErrorState title={t('title')} description={t('loadFailed')} onAction={() => void teamQuery.refetch()} />
       </div>
     );
@@ -349,13 +352,24 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'records'
     skillsQuery.isError ? { label: t('resources.skills'), refetch: skillsQuery.refetch } : null,
     mcpServersQuery.isError ? { label: t('resources.mcpServers'), refetch: mcpServersQuery.refetch } : null,
   ].filter(Boolean) as Array<{ label: string; refetch: () => Promise<unknown> }>;
+  const crumbs = view === 'configuration'
+    ? [{ label: t('title'), to: `/agent-teams/${teamId}` }, { label: team.name }, { label: t('configuration.title') }]
+    : [{ label: t('title') }, { label: team.name }];
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome
-        crumbs={[{ label: t('title') }, { label: team.name }]}
-        status={tab === 'configuration' ? <SaveIndicator state={saveState} /> : undefined}
-        actions={tab === 'configuration' ? (
+        crumbs={crumbs}
+        back={view === 'configuration' ? (
+          <Button asChild variant="ghost" size="compact">
+            <Link to="/agent-teams/$teamId" params={{ teamId }}>
+              <ArrowLeft aria-hidden="true" />
+              {t('configuration.backToRecords')}
+            </Link>
+          </Button>
+        ) : undefined}
+        status={view === 'configuration' ? <SaveIndicator state={saveState} /> : undefined}
+        actions={view === 'configuration' ? (
           <div className="flex flex-col items-end gap-1">
             <Button type="submit" form="agent-team-configuration" size="compact" disabled={saving}>
               {saving ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}
@@ -363,29 +377,23 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'records'
             </Button>
             {saveError ? <p className="text-[13px] text-danger" role="alert">{saveError}</p> : null}
           </div>
-        ) : undefined}
+        ) : (
+          <Button
+            type="button"
+            variant="secondary"
+            size="compact"
+            onClick={() => void navigate({ to: '/agent-teams/$teamId/configuration', params: { teamId } })}
+          >
+            {t('configuration.open')}
+          </Button>
+        )}
       />
-      <PageHeading title={team.name} description={team.description} />
-      <Tabs
-        className="mt-6"
-        value={tab}
-        onValueChange={(value) => {
-          if (value !== 'records' && value !== 'configuration') return;
-          void navigate({
-            to: '/agent-teams/$teamId',
-            params: { teamId },
-            search: { tab: value },
-          });
-        }}
-      >
-        <TabsList aria-label={t('title')}>
-          <TabsTrigger value="records">{t('records.tab')}</TabsTrigger>
-          <TabsTrigger value="configuration">{t('configuration.tab')}</TabsTrigger>
-        </TabsList>
-        <TabsContent value="records">
-          <TeamRecords teamId={teamId} />
-        </TabsContent>
-        <TabsContent value="configuration">
+      <PageHeading
+        title={view === 'configuration' ? t('configuration.title') : team.name}
+        description={view === 'records' ? team.description : undefined}
+      />
+      {view === 'records' ? <TeamRecords teamId={teamId} /> : (
+        <div className="mt-6">
           {resourceErrors.length > 0 ? (
             <div className="space-y-3">
               {resourceErrors.map((resource) => (
@@ -410,79 +418,95 @@ export function TeamDetailPage({ teamId, tab }: { teamId: string; tab: 'records'
                 <dd className="mt-1 font-mono break-all">{team.processVersion}</dd>
               </div>
             </dl>
-        </section>
-        <form id="agent-team-configuration" className="mt-4 space-y-4" onSubmit={saveTeam}>
-        <section className="min-w-0 rounded-xl border border-border bg-surface p-4 shadow-xs">
-          <Field
-            label={t('team.maxConcurrentRuns.label')}
-            htmlFor="agent-team-max-concurrent-runs"
-            hint={t('team.maxConcurrentRuns.hint')}
-          >
-            <Input
-              id="agent-team-max-concurrent-runs"
-              type="number"
-              min={1}
-              step={1}
-              className="w-32"
-              value={maxConcurrentRunsDraft}
-              onChange={(event) => {
-                setMaxConcurrentRunsDraft(event.target.value);
-                markUnsaved();
-              }}
-            />
-          </Field>
-        </section>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold">{t('team.roles')}</h2>
-          {saveNotice ? <p role="status">{saveNotice}</p> : null}
-        </div>
-        <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
-          {roleDrafts.map((role) => (
-            <section key={role.role} className="min-w-0 p-4" aria-labelledby={`agent-team-role-${role.role}`}>
-              <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(10rem,0.7fr)_minmax(0,1fr)] sm:items-center">
-                <h3 id={`agent-team-role-${role.role}`} className="text-sm font-semibold">{t(`role.${role.role}`)}</h3>
-                <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-                  <Field label={t('model.label')} htmlFor={`agent-team-model-${role.role}`}>
-                    <ModelSelect
-                      id={`agent-team-model-${role.role}`}
-                      value={role.publicModelId}
-                      modelGroups={modelGroups}
-                      onChange={(value) => updateRole(role.role, { publicModelId: value })}
-                    />
-                  </Field>
-                  {role.role === 'developer' ? (
-                    <Field label={t('team.executor.label')} htmlFor={`agent-team-executor-${role.role}`}>
-                      <ExecutorSelect
-                        id={`agent-team-executor-${role.role}`}
-                        value={role.executor ?? 'claude'}
-                        onChange={(value) => updateRole(role.role, { executor: value })}
-                      />
-                    </Field>
-                  ) : null}
-                </div>
-              </div>
-              {role.role === 'developer' ? (
-                <p className="mt-3 border-t border-border pt-3 text-[13px] text-muted-foreground">
-                  {t('team.parallelism')}
-                </p>
-              ) : null}
-              <details className="mt-3 border-t border-border pt-3">
-                <summary className="w-fit cursor-pointer rounded-sm text-[13px] font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45">
-                  {t('team.advanced')}
-                </summary>
-                <AdvancedRoleFields
-                  idPrefix={`agent-team-${role.role}`}
-                  tools={ROLE_TOOLS[role.role]}
-                  value={role}
-                  onChange={(changes) => updateRole(role.role, changes)}
+          </section>
+          <form id="agent-team-configuration" className="mt-4 space-y-4" onSubmit={saveTeam}>
+            <section className="min-w-0 rounded-xl border border-border bg-surface p-4 shadow-xs">
+              <Field
+                label={t('team.maxConcurrentRuns.label')}
+                htmlFor="agent-team-max-concurrent-runs"
+                hint={t('team.maxConcurrentRuns.hint')}
+              >
+                <Input
+                  id="agent-team-max-concurrent-runs"
+                  type="number"
+                  min={1}
+                  step={1}
+                  className="w-32"
+                  value={maxConcurrentRunsDraft}
+                  onChange={(event) => {
+                    setMaxConcurrentRunsDraft(event.target.value);
+                    markUnsaved();
+                  }}
                 />
-              </details>
+              </Field>
             </section>
-          ))}
+            <section className="min-w-0 rounded-xl border border-border bg-surface p-4 shadow-xs">
+              <Field label={t('team.workingPractice.label')} htmlFor="agent-team-working-practice" hint={t('team.workingPractice.hint')}>
+                <Textarea
+                  id="agent-team-working-practice"
+                  className="min-h-28"
+                  value={workingPracticeDraft}
+                  onChange={(event) => {
+                    setWorkingPracticeDraft(event.target.value);
+                    markUnsaved();
+                  }}
+                />
+              </Field>
+            </section>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold">{t('team.roles')}</h2>
+              {saveNotice ? <p role="status">{saveNotice}</p> : null}
+            </div>
+            <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
+              {roleDrafts.map((role) => (
+                <section key={role.role} className="min-w-0 p-4" aria-labelledby={`agent-team-role-${role.role}`}>
+                  <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(10rem,0.7fr)_minmax(0,1fr)] sm:items-center">
+                    <h3 id={`agent-team-role-${role.role}`} className="text-sm font-semibold">{role.displayName ?? (BUILT_IN_ROLES.includes(role.role) ? t(`role.${role.role.replaceAll('-', '_')}`) : role.role)}</h3>
+                    <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+                      <Field label={t('model.label')} htmlFor={`agent-team-model-${role.role}`}>
+                        <ModelSelect
+                          id={`agent-team-model-${role.role}`}
+                          value={role.publicModelId}
+                          modelGroups={modelGroups}
+                          onChange={(value) => updateRole(role.role, { publicModelId: value })}
+                        />
+                      </Field>
+                      {role.role !== 'team-manager' ? (
+                        <Field label={t('team.executor.label')} htmlFor={`agent-team-executor-${role.role}`}>
+                          <ExecutorSelect
+                            id={`agent-team-executor-${role.role}`}
+                            value={role.role === 'developer' ? role.executor ?? 'claude' : role.executor ?? 'model'}
+                            onChange={(value) => updateRole(role.role, { executor: value === 'model' ? null : value })}
+                          />
+                        </Field>
+                      ) : null}
+                    </div>
+                  </div>
+                  {role.role === 'team-manager' ? (
+                    <p className="mt-3 border-t border-border pt-3 text-[13px] text-muted-foreground">{t('team.managerProtected')}</p>
+                  ) : role.role === 'developer' ? (
+                    <p className="mt-3 border-t border-border pt-3 text-[13px] text-muted-foreground">
+                      {t('team.parallelism')}
+                    </p>
+                  ) : null}
+                  {role.role === 'team-manager' ? null : <details className="mt-3 border-t border-border pt-3">
+                    <summary className="w-fit cursor-pointer rounded-sm text-[13px] font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45">
+                      {t('team.advanced')}
+                    </summary>
+                    <AdvancedRoleFields
+                      idPrefix={`agent-team-${role.role}`}
+                      tools={ROLE_TOOLS[role.role] ?? CUSTOM_ROLE_TOOLS}
+                      value={role}
+                      onChange={(changes) => updateRole(role.role, changes)}
+                    />
+                  </details>}
+                </section>
+              ))}
+            </div>
+          </form>
+          <TeamMemoriesSettings teamId={team.id} />
         </div>
-        </form>
-      </TabsContent>
-      </Tabs>
+      )}
     </div>
   );
 }

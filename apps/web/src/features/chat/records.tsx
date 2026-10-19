@@ -12,7 +12,9 @@ import type { ChatTaskReference } from '@worklite/contracts';
 export function TaskLink({ reference }: { reference: ChatTaskReference | null }) {
   const { t } = useTranslation('assistant');
   if (reference?.kind === 'workflow') return <Link className="text-[13px] text-brand-text underline underline-offset-4" to="/runs/$runId" params={{ runId: reference.runId }}>{t('records.openTask')}</Link>;
-  if (reference?.kind === 'team') return <Link className="text-[13px] text-brand-text underline underline-offset-4" to="/agent-team-runs/$runId" params={{ runId: reference.runId }}>{t('records.openTask')}</Link>;
+  if (reference?.kind === 'team') return reference.groupId
+    ? <Link className="text-[13px] text-brand-text underline underline-offset-4" to="/agent-team-groups/$groupId" params={{ groupId: reference.groupId }}>{t('records.openTask')}</Link>
+    : <Link className="text-[13px] text-brand-text underline underline-offset-4" to="/agent-team-runs/$runId" params={{ runId: reference.runId }}>{t('records.openTask')}</Link>;
   return null;
 }
 

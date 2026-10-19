@@ -24,8 +24,8 @@ function PluginListPage() {
   const { locale } = useLocale();
   const [search, setSearch] = useState('');
   const { data: plugins = [], isLoading, isError, refetch } = usePluginsQuery();
-  const visiblePlugins = plugins.filter((plugin) => plugin.id !== 'feishu-bot');
-  const items = useMemo(() => plugins.filter((plugin) => plugin.id !== 'feishu-bot').filter((plugin) => `${plugin.name} ${plugin.description} ${plugin.command}`.toLowerCase().includes(search.toLowerCase())), [plugins, search]);
+  const visiblePlugins = plugins.filter((plugin) => plugin.id !== 'feishu-bot' && plugin.id !== 'wechat-bot');
+  const items = useMemo(() => plugins.filter((plugin) => plugin.id !== 'feishu-bot' && plugin.id !== 'wechat-bot').filter((plugin) => `${plugin.name} ${plugin.description} ${plugin.command}`.toLowerCase().includes(search.toLowerCase())), [plugins, search]);
 
   return (
     <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
