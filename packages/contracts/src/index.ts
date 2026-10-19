@@ -296,7 +296,9 @@ export type AgentExecutionErrorCode =
   | 'internal';
 
 export type ChatProgressReport = {
-  items: Array<{ kind: 'task' | 'team' | 'workflow'; id: string; title: string; status: string }>;
+  // stage/progress/updatedAt are presentation fields for the collapsible Web card; the reminder
+  // text and its dedupe signature do not depend on them.
+  items: Array<{ kind: 'task' | 'team' | 'workflow'; id: string; title: string; status: string; stage?: string; progress?: string; updatedAt?: string }>;
 };
 
 export type AgentExecutionMessage = {

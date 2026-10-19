@@ -21,6 +21,11 @@
   },
   "progress": {
     "title": "工作进展",
+    "compactCount": "{{count}} 项进行中",
+    "compactLatest": "最新：{{title}}",
+    "expand": "展开工作进展",
+    "collapse": "收起工作进展",
+    "stage": "阶段：{{stage}}",
     "kind": {
       "task": "项目任务",
       "team": "团队任务",

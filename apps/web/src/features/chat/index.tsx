@@ -26,7 +26,7 @@ import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CHAT_AGENT_ID } from '@worklite/contracts';
-import { AssistantTurn, buildTimeline, CancelledNote, FailureNote, QuestionNote, QueueRows, SummaryDivider, TranscriptSkeleton, UserMessage, WorkflowRunRow } from './transcript';
+import { AssistantTurn, buildTimeline, CancelledNote, FailureNote, ProgressReportExpansionContext, QuestionNote, QueueRows, SummaryDivider, TranscriptSkeleton, UserMessage, WorkflowRunRow } from './transcript';
 
 const INCOMPLETE_SKILL_REQUEST = 'The model returned an incomplete Skill request. Its JSON ended before the request was complete.';
 const INVALID_SKILL_REQUEST = 'The model returned an invalid Skill request. Its arguments could not be parsed or did not match the required structure.';
@@ -121,6 +121,9 @@ function ChatWorkspace() {
   const [configError, setConfigError] = useState('');
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [showAllTimeline, setShowAllTimeline] = useState(false);
+  // Progress report cards default to their compact line; the reader's expand choice is one
+  // conversation-level state shared by every card and resets when the conversation changes.
+  const [progressReportsExpanded, setProgressReportsExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [loadingExecution, setLoadingExecution] = useState(false);
@@ -223,6 +226,8 @@ function ChatWorkspace() {
   }, [selectedConversationId, draft, queued, queuePaused]);
 
   useEffect(() => () => { ++mainRequestGenerationRef.current; }, []);
+
+  useEffect(() => { setProgressReportsExpanded(false); }, [selectedConversationId]);
 
   useEffect(() => {
     try {
@@ -762,6 +767,7 @@ function ChatWorkspace() {
 
   const transcriptHostRef = useRef<HTMLDivElement>(null);
   const pinTracking = usePinTracking(transcriptHostRef);
+  const progressReportExpansion = useMemo(() => ({ expanded: progressReportsExpanded, toggle: () => setProgressReportsExpanded((value) => !value) }), [progressReportsExpanded]);
   const submissions = currentView?.submissions ?? NO_SUBMISSIONS;
   const receipts = currentView?.pendingReceipts ?? NO_RECEIPTS;
   const timeline = useMemo(() => buildTimeline({
@@ -832,6 +838,7 @@ function ChatWorkspace() {
             </header>
             <div ref={transcriptHostRef} className="relative min-h-0 flex-1">
               <PinTrackingContext.Provider value={pinTracking.context}>
+              <ProgressReportExpansionContext.Provider value={progressReportExpansion}>
               {recordsOpen ? null : <PinnedExecutionBar candidates={pinCandidates} above={pinTracking.above} onReveal={pinTracking.reveal} />}
               <div className="flex h-full min-h-0 flex-col" inert={recordsOpen} aria-hidden={recordsOpen}>
               <Conversation className="min-h-0 flex-1 px-4 md:px-8" scrollToEndLabel={t('assistant:transcript.scrollToEnd')}>
@@ -859,6 +866,7 @@ function ChatWorkspace() {
                 </ConversationContent>
               </Conversation>
               </div>
+              </ProgressReportExpansionContext.Provider>
               </PinTrackingContext.Provider>
               {recordsOpen && selectedConversationId ? <div className="absolute inset-0 z-10 flex flex-col bg-background"><ConversationRecords conversationId={selectedConversationId} /></div> : null}
             </div>

@@ -99,6 +99,7 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 ### 2026-10-19 - Chat active-work progress cards
 
 - Render the periodic active-work reply as a neutral Web card with captured work titles, shared status badges, report time and model summary. Streaming and history share explicit report metadata; reminder cadence and external-channel text remain unchanged.
+- Collapse the card to one compact line by default (in-progress count, latest-changed item, report time) with an in-place toggle to the full work list; the expansion choice is one conversation-level state shared by every card and resets on conversation change or reload.
 
 ### 2026-10-19 - Team-scoped management Agent and dynamic roles
 
