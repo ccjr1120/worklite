@@ -1,5 +1,5 @@
 import { assertRuntimeAdmission } from '../../infrastructure/runtime-upgrade-state';
-import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, type OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException, type OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -763,7 +763,7 @@ export class AgentExecutionsService implements OnModuleInit {
     let task: Awaited<ReturnType<ChatProjectTasksService['capture']>>;
     try { task = await this.projectTasks.capture(workspaceId, executionId, call.id, call.input); }
     catch (error) {
-      const output = error instanceof BadRequestException || error instanceof ConflictException || error instanceof ClaudeCodeError || error instanceof CodexAppServerError ? error.message : '无法启动项目任务，请检查项目目录、执行器插件可用性和 Gateway 模型。';
+      const output = projectTaskCaptureFailureMessage(error);
       await this.db.update(agentToolCalls).set({ status: 'failed', output, finishedAt: new Date() }).where(and(eq(agentToolCalls.id, call.id), eq(agentToolCalls.status, 'running')));
       await this.publishSnapshotForExecution(workspaceId, executionId);
       await this.resumeAfterToolCalls(request, workspaceSlug, workspaceId, CHAT_AGENT_ID, executionId);
@@ -1175,6 +1175,17 @@ export class AgentExecutionsService implements OnModuleInit {
 function normalizeUserMessage(input: unknown): string {
   if (typeof input !== 'string' || !input.trim()) throw new BadRequestException('An Agent message is required.');
   return input.trim();
+}
+
+// capture() can reject with any exception the executor launch or Gateway model resolution raises,
+// including NotFoundException/ServiceUnavailableException from resolving the executor's declared
+// model against the Gateway's registered Providers; only an unrecognized error type falls back to
+// the generic message, so a real, actionable cause (missing Gateway Provider, unreachable Gateway,
+// invalid executor plugin command, etc.) is never silently replaced.
+export function projectTaskCaptureFailureMessage(error: unknown): string {
+  return error instanceof BadRequestException || error instanceof ConflictException || error instanceof NotFoundException || error instanceof ServiceUnavailableException || error instanceof ClaudeCodeError || error instanceof CodexAppServerError
+    ? error.message
+    : '无法启动项目任务，请检查项目目录、执行器插件可用性和 Gateway 模型。';
 }
 
 function normalizeAssistantMessage(input: string): string {
