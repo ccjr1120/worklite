@@ -109,6 +109,9 @@
     "loadFailed": "无法加载命令证据。",
     "noCommand": "未关联命令"
   },
+  "output": {
+    "empty": "暂无输出。"
+  },
   "outcome": {
     "title": "执行结果",
     "summary": "总结",
@@ -155,6 +158,43 @@
     "openChat": "在 Chat 中发起任务",
     "finishedAt": "结束时间",
     "loadFailed": "无法加载工作记录"
+  },
+  "config": {
+    "title": "Team 配置",
+    "description": "只读查看 Team 的基本信息、角色与记忆；配置修改在 Chat 中进行。",
+    "viewConfig": "查看配置",
+    "backToRecords": "返回记录",
+    "loadFailed": "无法加载 Team 配置。",
+    "notSet": "未设置",
+    "overview": {
+      "title": "基本信息",
+      "name": "名称",
+      "description": "描述",
+      "processId": "流程 ID",
+      "processVersion": "流程版本",
+      "maxConcurrentRuns": "最大并发执行数",
+      "workingPractice": "工作惯例",
+      "createdAt": "创建时间",
+      "updatedAt": "更新时间"
+    },
+    "roles": {
+      "title": "角色",
+      "empty": "未配置角色。",
+      "model": "模型",
+      "executor": "执行器",
+      "entryPoints": "入口点",
+      "skills": "技能",
+      "mcpServers": "MCP 服务器",
+      "tools": "工具",
+      "showInstructions": "展开指令",
+      "hideInstructions": "收起指令"
+    },
+    "memories": {
+      "title": "Team 记忆",
+      "empty": "暂无 Team 记忆。",
+      "loadFailed": "无法加载 Team 记忆。",
+      "allRoles": "全部角色"
+    }
   },
   "group": {
     "untitled": "未命名工作记录",

@@ -12,6 +12,7 @@
 ## Implementation
 
 - `apps/web/src/routes/mcp-servers/index.tsx`
+- `apps/web/src/features/mcp-servers/delete-dialog.tsx` (shared with the configuration surface)
 
 ## Purpose
 
@@ -33,7 +34,7 @@ Activating a row navigates to `/mcp-servers/:serverId`. Activating `Connect MCP 
 
 Typing in the filter narrows the list on each keystroke against the server name. The no-results state offers `Clear filters`.
 
-Deleting a server is the one action that costs a second deliberate step, because it is permanent. The row's destructive icon control opens a named confirmation. Confirming reports progress on the confirm control, closes the dialog on success, shows a toast, and refetches the list. Deletion is blocked with visible dependency feedback when a Workflow draft or version references the server; that feedback stays in the dialog rather than replacing the list.
+Deleting a server is the one action that costs a second deliberate step, because it is permanent. The row's destructive icon control opens a named confirmation. Confirming reports progress on the confirm control, closes the dialog on success, shows a toast, and refetches the list. When the server is still referenced, the rejection stays inside the dialog as a concrete list of every referencing location: Agent assignments, the current Chat configuration, active Chat turns, Workflow drafts and published versions with their node ids, and Team roles and captured Team versions. References that force deletion can clean — Workflow drafts and active Team roles — appear with an unchecked-by-default force checkbox that the reader must actively check before confirming again; checking it removes those references in place in the same transaction as the deletion. Chat configuration, active-turn, and Agent assignment references can never be force-cleaned and instead state that they must be removed at their source. Published Workflow versions and captured Team versions are immutable history: they keep their references, and the dialog states that re-running them reports the server as unavailable.
 
 A failed load offers `Try again`, which refetches in place.
 
@@ -78,6 +79,13 @@ Unreachable and authentication-failure conditions are per-row connection states 
 | `mcpServers:delete.deleting` | State |
 | `mcpServers:delete.success` | State |
 | `mcpServers:delete.failed` | Recovery |
+| `mcpServers:delete.references.title` | Constraint |
+| `mcpServers:delete.references.agent` / `chatConfiguration` / `activeChatTurns` | Constraint |
+| `mcpServers:delete.references.workflowDraft` / `workflowVersion` | Constraint |
+| `mcpServers:delete.references.agentTeamRole` / `agentTeamVersion` | Constraint |
+| `mcpServers:delete.force.label` / `immutableLabel` | Action |
+| `mcpServers:delete.force.immutableNote` | Constraint |
+| `mcpServers:delete.force.blockedNote` | Recovery |
 | `common:status.connected` | State |
 | `common:status.disconnected` | State |
 | `common:status.unreachable` | State |
@@ -98,6 +106,8 @@ Connection status uses the shared status badge, which pairs an icon and a text l
 
 ## Coverage Status
 
+2026-10-20 source comparison: deletion now runs through the shared `McpServerDeleteDialog`; a reference rejection renders the concrete location list inside the dialog, the force checkbox appears unchecked only when force can clean the remaining references, and the deletion copy names the discovered tool declarations. Earlier findings below remain as recorded.
+
 Verified 2026-09-19. Differences found against `apps/web/src/routes/mcp-servers/index.tsx`:
 
 - The empty state offers no action. `EmptyState` is rendered without `actionLabel`/`onAction`, so the first-use state names the task without providing the entry point the shared rule requires.
@@ -110,6 +120,10 @@ Verified 2026-09-19. Differences found against `apps/web/src/routes/mcp-servers/
 - `mcpServers:description` needs removal under `shared/copy-standards.md`.
 
 ## Changelog
+
+### 2026-10-20 - Reference-protected deletion
+
+- Deletion moves to the shared `McpServerDeleteDialog`: reference rejections list every concrete location in the dialog, an unchecked-by-default force checkbox cleans Workflow draft and Team role references in place, and the deletion copy states that discovered tool declarations are removed with the server.
 
 ### 2026-09-19 - Copy cleanup
 

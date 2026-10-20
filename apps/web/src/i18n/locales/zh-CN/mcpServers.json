@@ -45,11 +45,27 @@
   },
   "delete": {
     "title": "删除 {{name}}？",
-    "description": "这会永久删除该 MCP 服务器连接。此操作无法撤销。",
+    "description": "这会永久删除该 MCP 服务器连接及其已发现的工具声明。此操作无法撤销。",
     "action": "删除 {{name}}",
     "deleting": "正在删除...",
     "success": "MCP 服务器已删除",
-    "failed": "无法删除MCP 服务器。"
+    "failed": "无法删除MCP 服务器。",
+    "references": {
+      "title": "该服务器仍被以下位置引用：",
+      "agent": "Agent「{{name}}」",
+      "chatConfiguration": "当前 Chat 配置",
+      "activeChatTurns": "进行中的 Chat 会话",
+      "workflowDraft": "Workflow「{{name}}」草稿（节点：{{nodes}}）",
+      "workflowVersion": "已发布的 Workflow「{{name}}」v{{version}}（节点：{{nodes}}）",
+      "agentTeamRole": "Team「{{team}}」的角色 {{role}}",
+      "agentTeamVersion": "已捕获的 Team 版本 v{{version}}（角色：{{roles}}）"
+    },
+    "force": {
+      "label": "同时移除 Workflow 草稿和 Team 角色中的引用，并强制删除",
+      "immutableLabel": "确认强制删除",
+      "immutableNote": "已发布的 Workflow 版本与已捕获的 Team 版本保留历史引用，重跑时将报告该服务器不可用。",
+      "blockedNote": "以上引用无法通过强制删除清理，请先在对应位置移除引用。"
+    }
   },
   "loading": "正在加载 MCP 服务器...",
   "loadFailed": "无法加载 MCP 服务器。",

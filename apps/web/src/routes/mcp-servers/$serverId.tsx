@@ -3,7 +3,6 @@ import { LoaderCircle, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { ConfirmDialog } from '@/components/confirm-dialog';
 import { ErrorState } from '@/components/error-state';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -14,8 +13,9 @@ import { PasswordInput } from '@/components/password-input';
 import { SaveIndicator } from '@/components/save-indicator';
 import { StatusBadge } from '@/components/status-badge';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
+import { McpServerDeleteDialog } from '@/features/mcp-servers/delete-dialog';
 import { api } from '@/api/client';
-import { mcpServersQueryKey, useMcpServerQuery } from '@/api/queries';
+import { useMcpServerQuery } from '@/api/queries';
 import { queryClient } from '@/lib/query-client';
 import type { McpServerView } from '@worklite/contracts';
 
@@ -45,8 +45,6 @@ function McpConfigPage() {
   const [saveError, setSaveError] = useState('');
   const [saving, setSaving] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleteBusy, setDeleteBusy] = useState(false);
-  const [deleteError, setDeleteError] = useState('');
 
   useEffect(() => {
     if (!server) return;
@@ -110,23 +108,6 @@ function McpConfigPage() {
     return saved;
   }
 
-  async function deleteMcpServer() {
-    if (isNew || deleteBusy) return;
-    setDeleteBusy(true);
-    setDeleteError('');
-    try {
-      await api.deleteMcpServer(workspaceSlug, serverId);
-      setDeleteOpen(false);
-      toast.success(t('delete.success'));
-      await queryClient.invalidateQueries({ queryKey: mcpServersQueryKey() });
-      void navigate({ to: '/mcp-servers' });
-    } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : t('delete.failed'));
-    } finally {
-      setDeleteBusy(false);
-    }
-  }
-
   if (editorLoading) {
     return (
       <div className="mx-auto w-full max-w-[840px] px-4 py-6 md:px-6 md:py-8">
@@ -166,7 +147,7 @@ function McpConfigPage() {
         status={<SaveIndicator state={saveState} />}
         actions={
           <div className="flex items-center gap-2">
-            {!isNew ? <Button type="button" variant="ghost" size="icon-compact" aria-label={t('delete.action', { name: server?.name ?? name })} title={t('delete.action', { name: server?.name ?? name })} onClick={() => { setDeleteError(''); setDeleteOpen(true); }}><Trash2 className="size-4" /></Button> : null}
+            {!isNew ? <Button type="button" variant="ghost" size="icon-compact" aria-label={t('delete.action', { name: server?.name ?? name })} title={t('delete.action', { name: server?.name ?? name })} onClick={() => setDeleteOpen(true)}><Trash2 className="size-4" /></Button> : null}
             <Button size="compact" onClick={() => void save()} disabled={saving || !name.trim() || !endpoint.trim()}>{saving ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}{t('common:actions.save')}</Button>
           </div>
         }
@@ -215,17 +196,12 @@ function McpConfigPage() {
           ))}
         </fieldset>
       </div>
-      <ConfirmDialog
+      <McpServerDeleteDialog
         open={deleteOpen}
-        onOpenChange={(nextOpen) => { setDeleteOpen(nextOpen); if (!nextOpen) setDeleteError(''); }}
-        title={t('delete.title', { name: server?.name ?? name })}
-        description={t('delete.description')}
-        confirmLabel={t('delete.action', { name: server?.name ?? name })}
-        cancelLabel={t('common:actions.cancel')}
-        busyLabel={t('delete.deleting')}
-        error={deleteError}
-        busy={deleteBusy}
-        onConfirm={() => void deleteMcpServer()}
+        onOpenChange={setDeleteOpen}
+        serverId={serverId}
+        name={server?.name ?? name}
+        onDeleted={() => void navigate({ to: '/mcp-servers' })}
       />
     </div>
   );

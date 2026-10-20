@@ -20,6 +20,7 @@ type ConfirmDialogProps = {
   busyLabel?: string;
   error?: string;
   busy?: boolean;
+  children?: ReactNode;
   onConfirm: () => void;
 };
 
@@ -33,6 +34,7 @@ function ConfirmDialog({
   busyLabel,
   error,
   busy = false,
+  children,
   onConfirm,
 }: ConfirmDialogProps) {
   return (
@@ -47,6 +49,7 @@ function ConfirmDialog({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
+        {children}
         {error ? (
           <p className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[13px] text-danger" role="alert">
             {error}

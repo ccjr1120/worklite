@@ -10,8 +10,10 @@ import type {
   CreateModelProviderRequest,
   CreateSkillRequest,
   CommandExecutionView,
+  DeleteMcpServerResult,
   ExecuteSkillScriptRequest,
   ImportSkillRequest,
+  McpServerReferenceReport,
   McpServerTestResult,
   McpServerView,
   ModelProviderView,
@@ -38,6 +40,7 @@ import {
   skillFiles,
   skills,
   workflowDrafts,
+  workflowEditRevisions,
   workflowRuns,
   workflowSchedules,
   workflowVersions,
@@ -45,6 +48,7 @@ import {
   workflows,
   workspaceSettings,
   type Database,
+  type StoredWorkflowDefinition,
 } from '@worklite/db';
 import type { ModelProviderConfig } from '@worklite/model-gateway';
 import { listWorkflowNodeCapabilities } from '@worklite/workflow-engine';
@@ -417,21 +421,88 @@ export class WorkspaceResourcesService {
     });
   }
 
-  async deleteMcpServer(request: Request, workspaceSlug: string, serverId: string): Promise<void> {
+  async deleteMcpServer(request: Request, workspaceSlug: string, serverId: string, options: { force?: boolean } = {}): Promise<DeleteMcpServerResult> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [existing] = await this.db.select().from(mcpServers).where(and(eq(mcpServers.id, serverId), eq(mcpServers.workspaceId, team.id))).limit(1);
     if (!existing) throw new NotFoundException('MCP server not found');
-    // Legacy Chat MCP assignments are ignored and removed by the cascading foreign key.
-    const [assignment] = await this.db.select({ agentId: agentMcpServers.agentId }).from(agentMcpServers).where(and(eq(agentMcpServers.mcpServerId, serverId), ne(agentMcpServers.agentId, CHAT_AGENT_ID))).limit(1);
-    if (assignment) throw new BadRequestException('Remove this MCP server from every Agent before deleting it.');
-    if (await this.activeChatCapabilityIsReferenced(team.id, 'mcpServers', serverId)) throw new BadRequestException('This MCP server is captured by an active Chat turn.');
-    if (await this.workflowResourceIsReferenced(team.id, 'mcpServerIds', serverId)) throw new BadRequestException('Remove this MCP server from every Workflow draft and published version before deleting it.');
-    if (await this.agentTeamResourceIsReferenced(team.id, 'mcpServers', serverId)) throw new BadRequestException('Remove this MCP server from every Agent Team configuration and captured Team version before deleting it.');
-    // Only the latest Chat configuration revision holds a live declaration; older revisions keep their captured ids.
-    const [chatConfiguration] = await this.db.select({ projectTaskMcpServerIds: chatConfigurations.projectTaskMcpServerIds }).from(chatConfigurations)
-      .where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
-    if (chatConfiguration?.projectTaskMcpServerIds.includes(serverId)) throw new BadRequestException('Remove this MCP server from the Chat configuration before deleting it.');
-    await this.db.delete(mcpServers).where(and(eq(mcpServers.id, serverId), eq(mcpServers.workspaceId, team.id)));
+    const references = await this.collectMcpServerReferences(team.id, serverId);
+    const blocked = references.agents.length > 0 || references.activeChatTurns || references.chatConfiguration;
+    const referenced = blocked || references.workflowDrafts.length > 0 || references.workflowVersions.length > 0 || references.agentTeamRoles.length > 0 || references.agentTeamVersions.length > 0;
+    if (blocked || (referenced && !options.force)) {
+      throw new BadRequestException({ message: mcpServerReferenceMessage(references, options.force === true), references });
+    }
+    // Force deletion and its in-place reference cleanup share one transaction so a
+    // half-cleaned state is impossible. Published WorkflowVersions and captured
+    // TeamVersions are immutable history and are never rewritten.
+    const cleaned = await this.db.transaction((transaction) => {
+      let workflowDraftCount = 0;
+      let agentTeamRoleCount = 0;
+      if (options.force) {
+        const draftRows = transaction.select({ draft: workflowDrafts }).from(workflowDrafts).where(eq(workflowDrafts.workspaceId, team.id)).all();
+        for (const { draft } of draftRows) {
+          const next = removeMcpServerFromWorkflowDefinition(draft.definition, serverId);
+          if (!next) continue;
+          const revisionId = `wfr_${randomUUID()}`;
+          transaction.insert(workflowEditRevisions).values({ id: revisionId, workspaceId: team.id, workflowId: draft.workflowId, draftId: draft.id, parentRevisionId: draft.currentRevisionId, source: 'migration', sourceInstruction: `Removed the deleted MCP server ${serverId} from Agent node references.`, operations: [], snapshot: next }).run();
+          transaction.update(workflowDrafts).set({ currentRevisionId: revisionId, definition: next, updatedAt: new Date() }).where(eq(workflowDrafts.id, draft.id)).run();
+          workflowDraftCount += 1;
+        }
+        const teamRows = transaction.select({ team: agentTeams }).from(agentTeams).where(eq(agentTeams.workspaceId, team.id)).all();
+        for (const { team: agentTeam } of teamRows) {
+          if (!agentTeam.roles.some((role) => role.mcpServers.some((server) => server.id === serverId))) continue;
+          agentTeamRoleCount += agentTeam.roles.filter((role) => role.mcpServers.some((server) => server.id === serverId)).length;
+          transaction.update(agentTeams).set({
+            roles: agentTeam.roles.map((role) => ({ ...role, mcpServers: role.mcpServers.filter((server) => server.id !== serverId) })),
+            updatedAt: new Date(),
+          }).where(eq(agentTeams.id, agentTeam.id)).run();
+        }
+      }
+      transaction.delete(mcpServers).where(and(eq(mcpServers.id, serverId), eq(mcpServers.workspaceId, team.id))).run();
+      return { workflowDrafts: workflowDraftCount, agentTeamRoles: agentTeamRoleCount };
+    });
+    return { deleted: serverId, force: options.force === true, cleaned };
+  }
+
+  // Every reference a deletion decision reports, with concrete locations. Legacy
+  // Chat MCP assignments are ignored and removed by the cascading foreign key, so
+  // only non-Chat Agent assignments appear here.
+  private async collectMcpServerReferences(workspaceId: string, serverId: string): Promise<McpServerReferenceReport> {
+    const [agentRows, draftRows, versionRows, teamRows, teamVersionRows, chatConfigurationRows] = await Promise.all([
+      this.db.select({ agentId: agentMcpServers.agentId, agentName: agents.name }).from(agentMcpServers)
+        .innerJoin(agents, eq(agentMcpServers.agentId, agents.id))
+        .where(and(eq(agentMcpServers.mcpServerId, serverId), ne(agentMcpServers.agentId, CHAT_AGENT_ID))),
+      this.db.select({ draft: workflowDrafts, workflowName: workflows.name }).from(workflowDrafts)
+        .innerJoin(workflows, eq(workflowDrafts.workflowId, workflows.id))
+        .where(eq(workflowDrafts.workspaceId, workspaceId)),
+      this.db.select({ version: workflowVersions, workflowName: workflows.name }).from(workflowVersions)
+        .innerJoin(workflows, eq(workflowVersions.workflowId, workflows.id))
+        .where(eq(workflowVersions.workspaceId, workspaceId)),
+      this.db.select().from(agentTeams).where(eq(agentTeams.workspaceId, workspaceId)),
+      this.db.select().from(agentTeamVersions).where(eq(agentTeamVersions.workspaceId, workspaceId)),
+      // Only the latest Chat configuration revision holds a live declaration; older revisions keep their captured ids.
+      this.db.select({ projectTaskMcpServerIds: chatConfigurations.projectTaskMcpServerIds }).from(chatConfigurations)
+        .where(eq(chatConfigurations.workspaceId, workspaceId)).orderBy(desc(chatConfigurations.revision)).limit(1),
+    ]);
+    return {
+      agents: agentRows.map((row) => ({ agentId: row.agentId, agentName: row.agentName })),
+      activeChatTurns: await this.activeChatCapabilityIsReferenced(workspaceId, 'mcpServers', serverId),
+      chatConfiguration: chatConfigurationRows[0]?.projectTaskMcpServerIds.includes(serverId) ?? false,
+      workflowDrafts: draftRows.flatMap(({ draft, workflowName }) => {
+        const nodeIds = workflowNodesReferencingMcpServer(draft.definition, serverId);
+        return nodeIds.length ? [{ workflowId: draft.workflowId, workflowName, nodeIds }] : [];
+      }),
+      workflowVersions: versionRows.flatMap(({ version, workflowName }) => {
+        const nodeIds = version.definition ? workflowNodesReferencingMcpServer(version.definition, serverId) : [];
+        return nodeIds.length ? [{ workflowId: version.workflowId, workflowName, version: version.version, nodeIds }] : [];
+      }),
+      agentTeamRoles: teamRows.flatMap((row) => row.roles.flatMap((role) => role.mcpServers.some((server) => server.id === serverId)
+        ? [{ teamId: row.id, teamName: row.name, role: role.role, displayName: role.displayName ?? null }]
+        : [])),
+      agentTeamVersions: teamVersionRows.flatMap((row) => {
+        const roles = row.snapshot.roles.filter((role) => role.mcpServers.some((server) => server.id === serverId)).map((role) => role.role);
+        return roles.length ? [{ teamId: row.teamId, versionId: row.id, version: row.version, roles }] : [];
+      }),
+    };
   }
 
   async createMcpServer(request: Request, workspaceSlug: string, input: CreateMcpServerRequest): Promise<McpServerView> {
@@ -582,7 +653,7 @@ export class WorkspaceResourcesService {
         chatCapabilities: { cancellation: { route: 'POST /agents/agt_system_helper_chat/executions/:executionId/cancel', states: ['running', 'waiting_for_input'], retained: ['messages', 'draft', 'execution evidence'], uncertainEffects: 'structured recovery; no automatic replay' }, orchestration: { directHostTools: false, customSkillExecution: false, directMcpCalls: false, platformTools: 'typed protected worklite-platform tools only', executorCapabilities: 'none; Chat has no Skill/MCP selection and project executors use their native tools; Claude Code project tasks receive the Chat configuration\'s declared projectTaskMcpServerIds', codingTarget: 'project_task', localCommandTarget: 'project_task', collaborationTarget: 'Chat-dispatched Agent Team Run operated from its Chat task card', automationTarget: 'published Workflow' }, newConversation: { intentOwner: 'Chat', presentation: 'request-bound button only', action: 'ask_user action new_conversation', submitRoute: 'POST /chat/dispatch', retainsHistory: true, cancelsDomainTasks: false }, configuration: 'revisioned user extensions', turnSnapshot: true, updatesApply: 'next user turn', configureRoute: 'PATCH /agents/agt_system_helper_chat', memory: { store: 'workspace-level chat_memories rows with content, category, source conversation and timestamps', categories: ['rule', 'preference', 'project', 'project_state', 'workflow', 'other'], categoryMetadata: '@worklite/contracts CHAT_MEMORY_CATEGORY_META is the single source for which categories are always injected (rule, preference) versus on-demand', tools: ['list_memories', 'save_memory', 'update_memory', 'delete_memory'], routes: ['GET /chat/memories', 'GET /chat/memories/:id', 'POST /chat/memories', 'PATCH /chat/memories/:id', 'DELETE /chat/memories/:id'], injection: 'bounded projection captured per accepted turn into the capability snapshot system prompt: rule and preference categories inject full content, other categories inject only an id/category/summary catalog for on-demand reads through list_memories', bounds: { contentChars: 2000, entries: 100, promptEntries: 50, promptChars: 6000, catalogEntries: 50, catalogChars: 2000 }, management: 'Web Chat settings dialog, grouped and filterable by category' } },
         upgrades: { operatorDeploymentVersion: { command: 'pnpm deploy:local', source: 'apps/web/package.json', bump: 'patch before compilation on every invocation', initialBaseline: 'established when current.json is absent after isolated preflight', laterDeployment: 'confirmed operator job through full managed upgrade flow', legacyTakeover: 'verified PID file, project start-local.mjs command, repository cwd, process group and target listeners only', unknownListeners: 'left untouched; deployment fails', failedAttempt: 'consumes source version; active build retains previous version', gitMutations: false, managedRelease: 'immutable manifest-bound version' }, proposeRoute: 'POST /upgrades', redeployRoute: 'POST /upgrades/redeploy', redeployTool: 'redeploy', inspectRoute: 'GET /upgrades/:id', authorization: 'explicit current Web or Feishu Chat user redeploy request; no second confirmation', authorizationBinding: 'persisted current user message and immutable release', deduplication: 'one job per execution and user message', profile: 'current managed runtime only; no model override', progress: 'original conversation; automatic observation after reconnect', requiresManagedBaseline: true, projectRoot: process.env.WORKLITE_PROJECT_ROOT ?? null, phases: ['proposed', 'authorized', 'preflighting', 'draining', 'frozen', 'switching', 'recovering', 'succeeded', 'rolled_back', 'failed'], uninterruptedIngress: false, interruptionPolicy: 'cancel active Agent, Team, Workflow and Command work after isolated preflight; never automatically resume after success or rollback' },
         chat: { workspaceRoute: '/chat', channelsRoute: 'GET /chat/channels', conversationsRoute: 'GET /chat/conversations', conversationRoute: 'GET /chat/conversations/:id', recordsRoute: 'GET /chat/conversations/:id/records', recordsSnapshots: 'latest snapshot plus all non-snapshot events', maxSkillScriptOutputChars: 60000, diagnosticTool: { name: 'inspect_chat_conversation', records: 'current evidence and status/receipt metadata; repeated snapshots and cards referenced', fullToolOutputInput: 'toolCallId', completeEvidence: 'fullRecordsRoute', inferenceHistory: 'raw replay snapshots replaced with explicit retained-evidence references; original history unchanged' }, channels: [{ id: 'web', builtIn: true, presentation: ['streaming', 'markdown', 'questions'] }, { id: 'feishu', builtIn: false, presentation: ['native streamed cards', 'collapsed task details', 'forms', 'QR images', 'files'] }, { id: 'wechat', builtIn: false, presentation: ['text messages'] }], histories: 'server-persisted; unrelated conversations remain separate', backgroundConversations: { start: 'start_chat_conversation', monitor: ['wait_chat_conversation', 'inspect_chat_conversation'], reply: 'message_chat_conversation', userActivation: false, origin: 'first user message names the starting conversation', messaging: 'only conversations started from the current conversation', nesting: false, recoveryQuestions: 'user only' }, masterAgentId: 'agt_system_helper_chat', dispatchRoute: 'POST /chat/dispatch', taskFeedback: 'task state is independent of Chat turn; Team questions, failures and failed dispatches remain visible', teamDispatch: { owner: 'Chat Agent', recordsRoute: 'GET /agent-teams/:teamId/runs', groupRoute: 'read-only archive at /agent-team-groups/:groupId', runRoute: 'read-only evidence at /agent-team-runs/:runId', requires: ['goal', 'absolute existing projectDirectory', 'mode'], initialRole: 'Planner unless the user names an active work role', submissionReference: ['groupId', 'runId'], entry: 'dispatch_task creates a hidden persistent group and bound Run; Chat owns the task card and all follow-up actions', controls: ['answer', 'exact command grant through structured task-card field', 'pause', 'resume', 'cancel', 'retry', 'reexecute', 'recover'], roleControl: 'Chat task card controls the bound Run; reexecution creates a new group message and Run', commandAuthorization: 'non-project-executor commands require exact strings entered by the user in a structured Web Chat task card or Feishu form; prose and text-only WeChat never grant them', contextIsolation: ['initially addressed role', 'selected repositories', 'v8 working practice and matching Team memories go only to the initially addressed role'], handoffs: 'summary and immutable file references; recipients read document content on demand', busyTeam: 'queue the bound Run when maxConcurrentRuns is reached; start queued Runs FIFO when an active slot opens' }, targets: ['conversation', 'team', 'workflow'], workflowVersions: 'published only', externalPluginId: 'feishu-bot', mergeHistories: false, webAccess: 'inspect and continue selected persisted conversation', feishu: { privateChat: true, defaultTarget: 'conversation', persistentTargetSelection: false, choices: 'current pending Agent question; plan not required', replyProgress: 'separate queued, thinking, responding and processing component in the same CardKit entity', cardPresentation: { transport: 'CardKit JSON 2.0 entity', requiredPermission: 'cardkit:card:write', replyAnimation: 'native fast typewriter', updates: 'component-local; full card for structural transitions', progressIcon: 'neutral native loading icon; no custom animation', taskDetails: 'default-collapsed Team task attempts and Workflow node execution statuses', visibleContext: ['current task or step', 'outcome', 'questions', 'failures', 'QR images', 'authorization forms', 'controls'], streamingLifecycle: 'model output only; close for tools, questions and terminal states; renew platform window', persistedDelivery: ['cardId', 'sequence', 'last delivered card', 'streaming start', 'pending idempotent UUID and exact payload'], legacyCardConversion: false }, completedDialogue: 'content without task header or completion label', taskAnswers: 'reply to the task card or submit its form', groupChat: false, inbound: ['text', 'card actions'], outbound: ['updated response cards', 'task questions and controls', 'QR images', 'Team documents', 'Workflow Artifacts'], configurationRoute: '/chat?view=channels', applicationRegistration: { available: true, archetype: 'PersonalAgent', startRoute: 'POST /plugins/feishu-bot/feishu/registration', cancelRoute: 'DELETE /plugins/feishu-bot/feishu/registration', operator: 'user through Web configuration', automaticCredentialPersistence: true, userBinding: 'automatic when returned, otherwise manual', resumable: true, manualExistingApplication: true, platformSetup: ['bot capability', 'IM permissions', 'long-connection message and card subscriptions', 'publication'], userOAuth: false, runtimeCompatibility: 'requires authorized real integration' }, wechat: { pluginId: 'wechat-bot', protocol: 'Tencent iLink bot long-poll', login: { startRoute: 'POST /plugins/wechat-bot/wechat/login', cancelRoute: 'DELETE /plugins/wechat-bot/wechat/login', mechanism: 'QR scan; scanning user becomes the allowed user', credentialStorage: 'encrypted bot token in the plugin row' }, privateChat: true, groupChat: false, inbound: ['text'], outbound: ['whole text replies', 'conversation question prompts', 'task status notifications'], streaming: false, cards: false, media: false, defaultTarget: 'conversation', questionAnswers: 'plain text answers to Chat pending questions; Chat Agent handles Team actions, while exact-command grants require a structured Web Chat or Feishu field', disconnectRoute: 'POST /plugins/wechat-bot/wechat/disconnect', configurationRoute: '/chat?view=channels', staleToken: 'status error; user re-logins by QR' } } },
-        supportedResourceOperations: ['inspect Gateway statistics and request logs', 'delegate independent project work to a Codex or Claude Code project executor', 'inspect Chat project task activity', 'dispatch collaborative repair to Agent Team', 'inspect Chat conversations and full saved records', 'start, monitor and answer a background Chat conversation', 'inspect and update Chat capabilities', 'save, update, list and delete workspace long-term memories', 'propose and inspect managed upgrades', 'redeploy WorkLite on explicit user request', 'inspect workspace resources', 'inspect Workflow capabilities', 'inspect and configure Agent Teams', 'inspect Agent Team Run records, archived group transcripts, Runs and documents', 'manage Team/repository-scoped memories and working practice through Chat', 'answer, control, recover and retry Agent Team Runs from Chat', 'dispatch Chat-owned Agent Team Runs and published Workflow tasks', 'navigate to known WorkLite pages and a Workflow editor by name or id', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server (connects and discovers its tools automatically)', 'create Workflow draft', 'edit Workflow draft from a logical plan', 'replace Workflow draft Agent models', 'publish Workflow draft', 'delete Workflow with explicit confirmation and guarded force', 'change appearance', 'change language'],
+        supportedResourceOperations: ['inspect Gateway statistics and request logs', 'delegate independent project work to a Codex or Claude Code project executor', 'inspect Chat project task activity', 'dispatch collaborative repair to Agent Team', 'inspect Chat conversations and full saved records', 'start, monitor and answer a background Chat conversation', 'inspect and update Chat capabilities', 'save, update, list and delete workspace long-term memories', 'propose and inspect managed upgrades', 'redeploy WorkLite on explicit user request', 'inspect workspace resources', 'inspect Workflow capabilities', 'inspect and configure Agent Teams', 'inspect Agent Team Run records, archived group transcripts, Runs and documents', 'manage Team/repository-scoped memories and working practice through Chat', 'answer, control, recover and retry Agent Team Runs from Chat', 'dispatch Chat-owned Agent Team Runs and published Workflow tasks', 'navigate to known WorkLite pages and a Workflow editor by name or id', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server (connects and discovers its tools automatically)', 'delete MCP server with explicit confirmation and reference-protected force', 'create Workflow draft', 'edit Workflow draft from a logical plan', 'replace Workflow draft Agent models', 'publish Workflow draft', 'delete Workflow with explicit confirmation and guarded force', 'change appearance', 'change language'],
         modelProviderProxy: {
           protocols: ['openai/chat', 'openai/responses', 'anthropic/messages', 'codex/responses', 'typesafe/systemone'],
           requiresExplicitProtocol: true,
@@ -989,4 +1060,46 @@ export class WorkspaceResourcesService {
   private toArtifact(row: typeof artifacts.$inferSelect, workspaceSlug: string, workflowName: string): ArtifactView {
     return { id: row.id, workspaceSlug, name: row.name, type: row.type, workflowName, runId: row.runId ?? '', size: row.size, createdAt: row.createdAt.toISOString(), content: row.content };
   }
+}
+
+function workflowNodesReferencingMcpServer(definition: StoredWorkflowDefinition, serverId: string): string[] {
+  return definition.nodes.flatMap((node) => {
+    if (node.type !== 'worklite/agent' || !node.config || typeof node.config !== 'object' || Array.isArray(node.config)) return [];
+    const ids = (node.config as Record<string, unknown>).mcpServerIds;
+    return Array.isArray(ids) && ids.includes(serverId) ? [node.id] : [];
+  });
+}
+
+// Returns the cleaned definition, or null when no Agent node referenced the server.
+function removeMcpServerFromWorkflowDefinition(definition: StoredWorkflowDefinition, serverId: string): StoredWorkflowDefinition | null {
+  if (workflowNodesReferencingMcpServer(definition, serverId).length === 0) return null;
+  return {
+    ...definition,
+    nodes: definition.nodes.map((node) => {
+      if (node.type !== 'worklite/agent' || !node.config || typeof node.config !== 'object' || Array.isArray(node.config)) return node;
+      const config = node.config as Record<string, unknown>;
+      const ids = config.mcpServerIds;
+      if (!Array.isArray(ids) || !ids.includes(serverId)) return node;
+      return { ...node, config: { ...config, mcpServerIds: ids.filter((id) => id !== serverId) } };
+    }),
+  };
+}
+
+function mcpServerReferenceMessage(references: McpServerReferenceReport, force: boolean): string {
+  const locations: string[] = [];
+  if (references.workflowDrafts.length) locations.push(`Workflow draft ${references.workflowDrafts.map((draft) => `"${draft.workflowName}" (nodes: ${draft.nodeIds.join(', ')})`).join(', ')}`);
+  if (references.workflowVersions.length) locations.push(`published Workflow ${references.workflowVersions.map((version) => `"${version.workflowName}" v${version.version} (nodes: ${version.nodeIds.join(', ')})`).join(', ')}`);
+  if (references.agentTeamRoles.length) locations.push(`Agent Team ${references.agentTeamRoles.map((ref) => `"${ref.teamName}" role ${ref.displayName ?? ref.role}`).join(', ')}`);
+  if (references.agentTeamVersions.length) locations.push(`captured Team version ${references.agentTeamVersions.map((version) => `v${version.version} (roles: ${version.roles.join(', ')})`).join(', ')}`);
+  if (references.chatConfiguration) locations.push('the current Chat configuration');
+  if (references.activeChatTurns) locations.push('an active Chat turn');
+  if (references.agents.length) locations.push(`Agent ${references.agents.map((agent) => `"${agent.agentName}"`).join(', ')}`);
+  const prefix = `This MCP server is referenced by ${locations.join('; ')}.`;
+  if (references.agents.length > 0 || references.activeChatTurns || references.chatConfiguration) {
+    return `${prefix} Remove those references first (update_chat clears the Chat configuration declaration); force deletion cannot remove them.`;
+  }
+  if (force) return prefix;
+  const cleanable = references.workflowDrafts.length > 0 || references.agentTeamRoles.length > 0;
+  if (!cleanable) return `${prefix} Published Workflow versions and captured Team versions are immutable history; retry with force=true to delete the server while they keep their historical references.`;
+  return `${prefix} Retry with force=true to remove the Workflow draft and Agent Team role references in place; published versions and captured Team versions keep their historical references.`;
 }
