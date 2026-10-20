@@ -1124,11 +1124,20 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async resumeInput(run: AgentTeamRun): Promise<AgentTeamGraphState | null> {
+  private async resumeInput(run: AgentTeamRun): Promise<AgentTeamGraphState | AgentTeamGroupGraphState | null> {
     const version = await this.getVersion(run);
     const graph = this.createGraph(run, version);
     const snapshot = await graph.getState({ configurable: { thread_id: run.langGraphThreadId } });
-    if (isGroupOrchestrationVersion(version.snapshot.orchestrationVersion)) return null;
+    if (isGroupOrchestrationVersion(version.snapshot.orchestrationVersion)) {
+      // A group Run with an existing usable checkpoint is resuming an in-progress graph:
+      // the checkpointer already holds its state, so passing null lets LangGraph replay it.
+      // A brand-new Run has no checkpoint at all (empty channel_versions), so LangGraph's
+      // isResuming check is false and a null/undefined input never reaches the "__start__"
+      // channel: the graph's own 'start' node seeds the real state from its closure and
+      // ignores this value, but Pregel still requires a non-null write to schedule it.
+      const groupState = snapshot.values as AgentTeamGroupGraphState | undefined;
+      return isUsableGroupGraphState(groupState, run) ? null : ({} as AgentTeamGroupGraphState);
+    }
     const state = snapshot.values as AgentTeamGraphState | undefined;
     return isUsableGraphState(state, run) ? null : this.initialGraphInput(run);
   }
@@ -3887,7 +3896,12 @@ function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
 }
 
-function formatError(error: unknown): string {
+export function formatError(error: unknown): string {
+  // LangGraph's EmptyInputError surfaces its internal channel key (e.g. "__start__") rather
+  // than a reason a user can act on; translate it into a readable orchestration-start failure.
+  if (error instanceof Error && error.name === 'EmptyInputError') {
+    return `The Agent Team run could not start: the orchestration engine received no input for its entry node (${error.message}). Retry the dispatch; if this recurs, it indicates an orchestration bug rather than a model or task failure.`;
+  }
   return error instanceof Error ? error.message : 'The Agent Team task failed.';
 }
 
