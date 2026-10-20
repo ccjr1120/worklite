@@ -5,18 +5,13 @@ import { stat } from 'node:fs/promises';
 import { basename, isAbsolute, resolve } from 'node:path';
 import type { Request } from 'express';
 import type {
-  AddAgentTeamGroupRepositoriesRequest,
   AgentTeamGroupEvent,
   AgentTeamGroupControlRequest,
-  AgentTeamGroupAnswerRequest,
   AgentTeamGroupMessage,
-  AgentTeamGroupSummary,
   AgentTeamGroupView,
   AgentTeamMemoryView,
   AgentTeamRoleId,
-  CreateAgentTeamGroupRequest,
   CreateAgentTeamMemoryRequest,
-  SendAgentTeamGroupMessageRequest,
   UpdateAgentTeamMemoryRequest,
 } from '@worklite/contracts';
 import {
@@ -75,39 +70,10 @@ export class AgentTeamGroupsService {
     if (!repository) throw new BadRequestException('The Chat project directory was not attached to its task group.');
     return this.sendMessage(request, workspaceSlug, groupId, {
       body: input.message,
-      recipientRole: input.role ?? 'team-manager',
+      recipientRole: input.role ?? 'planner',
       repositoryIds: [repository.id],
       submissionId: `chat_${input.submissionId}`,
     }, acceptance);
-  }
-
-  async create(request: Request, workspaceSlug: string, teamId: string, input: CreateAgentTeamGroupRequest = {}): Promise<AgentTeamGroupView> {
-    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    await this.getTeam(teamId, workspace.id);
-    const mode = input.mode ?? 'implement_and_validate';
-    if (!['plan_only', 'validate_existing', 'implement_and_validate'].includes(mode)) {
-      throw new BadRequestException('A supported Agent Team mode is required.');
-    }
-    const now = new Date();
-    const [group] = await this.db.insert(agentTeamGroups).values({
-      id: `atgroup_${randomUUID()}`,
-      workspaceId: workspace.id,
-      teamId,
-      title: input.title?.trim() ?? '',
-      mode,
-      createdAt: now,
-      updatedAt: now,
-    }).returning();
-    return this.get(request, workspaceSlug, group!.id);
-  }
-
-  async list(request: Request, workspaceSlug: string, teamId: string): Promise<AgentTeamGroupSummary[]> {
-    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    await this.getTeam(teamId, workspace.id);
-    const rows = await this.db.select().from(agentTeamGroups)
-      .where(and(eq(agentTeamGroups.workspaceId, workspace.id), eq(agentTeamGroups.teamId, teamId)))
-      .orderBy(desc(agentTeamGroups.updatedAt));
-    return Promise.all(rows.map(async (group) => this.toSummary(group)));
   }
 
   async get(request: Request, workspaceSlug: string, groupId: string): Promise<AgentTeamGroupView> {
@@ -155,7 +121,7 @@ export class AgentTeamGroupsService {
     };
   }
 
-  async addRepositories(request: Request, workspaceSlug: string, groupId: string, input: AddAgentTeamGroupRepositoriesRequest) {
+  private async addRepositories(request: Request, workspaceSlug: string, groupId: string, input: { repositories: Array<{ name?: string; directory: string }> }) {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const group = await this.getGroup(groupId, workspace.id);
     if (!Array.isArray(input?.repositories) || input.repositories.length === 0) {
@@ -210,20 +176,11 @@ export class AgentTeamGroupsService {
     return this.get(request, workspaceSlug, groupId);
   }
 
-  async repositories(request: Request, workspaceSlug: string, teamId: string) {
-    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    await this.getTeam(teamId, workspace.id);
-    const rows = await this.db.select().from(agentTeamRepositories)
-      .where(and(eq(agentTeamRepositories.workspaceId, workspace.id), eq(agentTeamRepositories.teamId, teamId)))
-      .orderBy(asc(agentTeamRepositories.name));
-    return rows.map((row) => ({ id: row.id, name: row.name, directory: row.directory }));
-  }
-
-  async sendMessage(
+  private async sendMessage(
     request: Request,
     workspaceSlug: string,
     groupId: string,
-    input: SendAgentTeamGroupMessageRequest,
+    input: { body: string; recipientRole: AgentTeamRoleId; repositoryIds?: string[]; submissionId: string },
     acceptance?: Parameters<AgentTeamRuntimeService['createGroupRun']>[2],
   ): Promise<AgentTeamGroupView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
@@ -353,97 +310,39 @@ export class AgentTeamGroupsService {
   async control(request: Request, workspaceSlug: string, groupId: string, input: AgentTeamGroupControlRequest) {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const group = await this.getGroup(groupId, workspace.id);
-    if (!['pause', 'resume', 'cancel', 'retry', 'reexecute'].includes(input?.operation)) {
-      throw new BadRequestException('Select a supported Agent Team group control.');
-    }
-    const targetRole = input.targetRole === undefined ? undefined : this.requireRole(input.targetRole);
+    if (input?.operation !== 'reexecute') throw new BadRequestException('Only Chat re-execution is available for Agent Team groups.');
     const runIds = [...new Set(input?.runIds ?? [])];
-    if (!runIds.length) throw new BadRequestException('Select at least one role task.');
+    if (!runIds.length) throw new BadRequestException('Select at least one Run to re-execute.');
     const runs = await this.db.select().from(agentTeamRuns)
       .where(and(eq(agentTeamRuns.groupId, group.id), eq(agentTeamRuns.workspaceId, workspace.id), inArray(agentTeamRuns.id, runIds)));
-    if (runs.length !== runIds.length) throw new BadRequestException('A selected role task does not belong to this group.');
-    const targetRuns = targetRole ? await Promise.all(runs.map(async (run) => {
-      const [lastMessage] = await this.db.select({ senderRole: agentTeamGroupMessages.senderRole, recipientRole: agentTeamGroupMessages.recipientRole })
-        .from(agentTeamGroupMessages).where(eq(agentTeamGroupMessages.runId, run.id))
-        .orderBy(desc(agentTeamGroupMessages.sequence)).limit(1);
-      const activeRole = lastMessage?.recipientRole ?? lastMessage?.senderRole ?? run.targetRole;
-      return activeRole === targetRole ? run : null;
-    })).then((items) => items.filter((run): run is typeof runs[number] => run !== null)) : runs;
-    if (!targetRuns.length) throw new BadRequestException('No role task in this group matches the requested @role control.');
-    if (input.operation === 'reexecute') {
-      for (const run of targetRuns) {
-        if (!run.targetRole || !run.groupMessageId) throw new BadRequestException('The selected Run has no re-executable group message.');
-        const [message] = await this.db.select().from(agentTeamGroupMessages).where(eq(agentTeamGroupMessages.id, run.groupMessageId)).limit(1);
-        if (!message) throw new NotFoundException('The original group message was not found.');
-        await this.sendMessage(request, workspaceSlug, groupId, {
-          body: message.body,
-          recipientRole: targetRole ?? run.targetRole,
-          repositoryIds: run.repositoryIds,
-          submissionId: `reexecute_${run.id}_${randomUUID()}`,
-        });
-      }
-    } else {
-      for (const run of targetRuns) {
-        if (input.operation === 'pause') await this.runtime.pause(run.id);
-        else if (input.operation === 'resume') await this.runtime.resume(run.id);
-        else if (input.operation === 'cancel') await this.runtime.cancel(run.id);
-        else if (input.operation === 'retry') {
-          const view = await this.runtime.getRunView(run.id, workspace.id);
-          const taskKey = input.taskKey ?? view.tasks.find((task) => task.retryable)?.taskKey;
-          if (!taskKey) throw new BadRequestException('The selected Run has no retryable task.');
-          await this.runtime.retry(run.id, taskKey);
-        }
-      }
+    if (runs.length !== runIds.length) throw new BadRequestException('A selected Run does not belong to this group.');
+    for (const run of runs) {
+      if (!run.targetRole || !run.groupMessageId) throw new BadRequestException('The selected Run has no re-executable group message.');
+      const [message] = await this.db.select().from(agentTeamGroupMessages).where(eq(agentTeamGroupMessages.id, run.groupMessageId)).limit(1);
+      if (!message) throw new NotFoundException('The original group message was not found.');
+      const initialRole = run.targetRole === 'team-manager' ? 'planner' : run.targetRole;
+      await this.sendMessage(request, workspaceSlug, groupId, {
+        body: message.body,
+        recipientRole: initialRole,
+        repositoryIds: run.repositoryIds,
+        submissionId: `reexecute_${run.id}_${randomUUID()}`,
+      });
     }
-    const operationNames = { pause: '暂停', resume: '继续', cancel: '停止', retry: '重试', reexecute: '重新执行' };
     await this.db.transaction((transaction) => {
-      for (const run of targetRuns) {
+      for (const run of runs) {
         this.insertMessage(transaction, {
           workspaceId: workspace.id,
           groupId: group.id,
           sender: 'user',
-          recipientRole: targetRole ?? run.targetRole ?? undefined,
+          recipientRole: run.targetRole ?? undefined,
           kind: 'control',
-          body: `@${targetRole ?? run.targetRole ?? 'role'} ${operationNames[input.operation]}${run.id}`,
+          body: `Chat 重新执行 ${run.id}`,
           runId: run.id,
           repositoryIds: run.repositoryIds,
           deliveryStatus: 'delivered',
         });
       }
     });
-    return this.get(request, workspaceSlug, groupId);
-  }
-
-  async answer(request: Request, workspaceSlug: string, groupId: string, runId: string, input: AgentTeamGroupAnswerRequest) {
-    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const group = await this.getGroup(groupId, workspace.id);
-    const [run] = await this.db.select().from(agentTeamRuns)
-      .where(and(eq(agentTeamRuns.id, runId), eq(agentTeamRuns.groupId, group.id), eq(agentTeamRuns.workspaceId, workspace.id))).limit(1);
-    if (!run) throw new NotFoundException('Agent Team role task not found.');
-    const answer = input?.answer?.trim();
-    if (!answer) throw new BadRequestException('An answer is required.');
-    await this.runtime.answer(runId, {
-      pendingInputId: input.pendingInputId,
-      scopeRevision: input.scopeRevision,
-      answer,
-      authorizedCommands: input.authorizedCommands ?? [],
-      directories: input.directories,
-    });
-    // Directory binding during the answer extends the Run scope, so the recorded answer
-    // message reads the freshest repository ids rather than the pre-answer row.
-    const [updatedRun] = await this.db.select({ repositoryIds: agentTeamRuns.repositoryIds })
-      .from(agentTeamRuns).where(eq(agentTeamRuns.id, runId)).limit(1);
-    await this.db.transaction((transaction) => this.insertMessage(transaction, {
-      workspaceId: workspace.id,
-      groupId: group.id,
-      sender: 'user',
-      recipientRole: run.targetRole ?? undefined,
-      kind: 'text',
-      body: answer,
-      runId,
-      repositoryIds: updatedRun?.repositoryIds ?? run.repositoryIds,
-      deliveryStatus: 'delivered',
-    }));
     return this.get(request, workspaceSlug, groupId);
   }
 
@@ -547,25 +446,6 @@ export class AgentTeamGroupsService {
       .where(and(eq(agentTeams.id, teamId), eq(agentTeams.workspaceId, workspaceId))).limit(1);
     if (!team) throw new NotFoundException('Agent Team not found.');
     return team;
-  }
-
-  private async toSummary(group: typeof agentTeamGroups.$inferSelect): Promise<AgentTeamGroupSummary> {
-    const [repositories, messages, runs] = await Promise.all([
-      this.db.select().from(agentTeamGroupRepositories).where(eq(agentTeamGroupRepositories.groupId, group.id)).orderBy(asc(agentTeamGroupRepositories.createdAt)),
-      this.db.select().from(agentTeamGroupMessages).where(eq(agentTeamGroupMessages.groupId, group.id)).orderBy(desc(agentTeamGroupMessages.sequence)).limit(1),
-      this.db.select().from(agentTeamRuns).where(eq(agentTeamRuns.groupId, group.id)).orderBy(desc(agentTeamRuns.createdAt)),
-    ]);
-    return {
-      id: group.id,
-      title: group.title,
-      mode: group.mode,
-      status: runs[0]?.status ?? 'empty',
-      runCount: runs.length,
-      repositories: repositories.map(toRepositoryView),
-      lastMessage: messages[0] ? toMessageView(messages[0]) : null,
-      createdAt: group.createdAt.toISOString(),
-      updatedAt: group.updatedAt.toISOString(),
-    };
   }
 
   private insertMessage(transaction: Parameters<Parameters<Database['transaction']>[0]>[0], input: {

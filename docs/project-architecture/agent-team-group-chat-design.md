@@ -1,8 +1,19 @@
 # Agent Team 任务群聊技术设计
 
-日期：2026-10-19  
-状态：Team 群聊与 v7 Team Manager 已按 2026-10-19 授权实现，未执行运行验证。Team Manager 是 Team 群内仅管理当前 Team 的缩小版 Chat；主 Chat 也可通过受保护的 WorkLite 平台工具直接管理 Team 配置、角色和记忆。2026-10-19 更新：工作方式与 Team 记忆改为 Team Manager 私有，仅注入 Manager 自己的回合，工作角色不再接收；Team Manager 的模型可配置，保护含义仅为不可删除与固定 typed 工具集。  
+日期：2026-10-19（被 2026-10-20 决策取代）  
+状态：本文记录 v7 群聊设计及其历史实现边界。2026-10-20 确认 Chat 成为 Team 的唯一操作入口，Team 群路由降为只读历史归档；下方涉及直接群聊、Team Manager 用户交互和群内控制的条款不再是当前产品方向。当前方向以 [Project Architecture](README.md#agent-team-implementation-direction) 的“Chat-only Team operations”为准。  
 架构入口：[Project Architecture](README.md#agent-team-implementation-direction)
+
+## 2026-10-20 superseding decision
+
+- Chat is the sole user-facing entry for new Team tasks, pending-input answers, exact Command grants, Run controls/recovery, and Team configuration, role, working-practice, and memory management through protected `worklite-platform` tools.
+- `/agent-teams/:teamId` lists Runs as read-only evidence. `/agent-team-runs/:runId` is read-only. `/agent-team-groups/:groupId` is a read-only archive for existing transcript history and cannot continue or mutate a group. The Team configuration route is retired.
+- Chat dispatch still atomically creates a group-bound Run. Group persistence remains for idempotency, archived history, and captured runtime context. Existing data is retained without migration or deletion.
+- New TeamVersions are v8 and have no user-addressable Team Manager role; unspecified initial work targets Planner. Chat directly owns Team administration. Historical v1–v7 snapshots and Runs preserve their captured roles, graphs, and lifecycle.
+- Non-project-executor Command grants require exact strings from a structured user-entered field in a Chat channel. A model response or prose answer never grants a Command. Feishu's structured Chat action follows this rule; text-only channel messages cannot grant Commands.
+- The direct group composer, `@` addressing, question forms, repository mutation, Run controls, and Team Manager operations described in the historical sections below are removed from Web group routes.
+
+The rest of this document is retained as the detailed v7 design record, not as the current interaction contract.
 
 本文记录已确认的产品方向和当前实现边界；既有角色图、授权和 Run 生命周期仍见 [Agent Team Implementation Plan](agent-team-implementation.md)。当前新群聊 Run 使用 v7，历史 v1–v6 Run 保持原快照与生命周期。
 

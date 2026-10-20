@@ -155,7 +155,7 @@ export type AgentTeamGraphDelegate = {
 
 export type AgentTeamGraphOptions = {
   maxRepairRounds?: number;
-  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
   developerIds?: readonly string[];
   developerConcurrency?: number;
 };

@@ -58,15 +58,32 @@ function assertRelease(release) {
   }
 }
 
+async function withRouteTreeRestored(root, operation) {
+  const routeTreePath = join(root, 'apps/web/src/routeTree.gen.ts');
+  const routeTree = existsSync(routeTreePath)
+    ? { content: readFileSync(routeTreePath), mode: lstatSync(routeTreePath).mode }
+    : null;
+  try {
+    return await operation();
+  } finally {
+    if (routeTree) {
+      writeFileSync(routeTreePath, routeTree.content);
+      chmodSync(routeTreePath, routeTree.mode & 0o7777);
+    }
+  }
+}
+
 async function build(root, log) {
-  for (const argv of [
-    ['install', '--frozen-lockfile'],
-    ['--filter', '@portkey-ai/gateway', 'build'],
-    ['--filter', '@worklite/api', 'exec', 'nest', 'build', '--builder', 'webpack', '--webpackPath', 'webpack.config.js'],
-    ['--filter', '@worklite/web', 'exec', 'vite', 'build'],
-  ]) await new Promise((done, fail) => {
-    const child = spawn('pnpm', argv, { cwd: root, env: process.env, stdio: ['ignore', log, log] });
-    child.once('error', fail); child.once('exit', (code) => code === 0 ? done() : fail(new Error('Candidate compilation failed; see the upgrade log.')));
+  await withRouteTreeRestored(root, async () => {
+    for (const argv of [
+      ['install', '--frozen-lockfile'],
+      ['--filter', '@portkey-ai/gateway', 'build'],
+      ['--filter', '@worklite/api', 'exec', 'nest', 'build', '--builder', 'webpack', '--webpackPath', 'webpack.config.js'],
+      ['--filter', '@worklite/web', 'exec', 'vite', 'build'],
+    ]) await new Promise((done, fail) => {
+      const child = spawn('pnpm', argv, { cwd: root, env: process.env, stdio: ['ignore', log, log] });
+      child.once('error', fail); child.once('exit', (code) => code === 0 ? done() : fail(new Error('Candidate compilation failed; see the upgrade log.')));
+    });
   });
 }
 
@@ -227,8 +244,12 @@ async function preflight(runtime, release, log, id) {
   await copyData(runtime.dataDirectory, data, runtime.releaseDirectory);
   const candidate = { ...runtime, ...release };
   let pid;
-  try { pid = launch(candidate, data, runtime.preflightPorts, true, log); await ready(pid, runtime.preflightPorts, candidate.releaseHash); }
-  finally { if (pid) await stop(pid, candidate.releaseDirectory); rmSync(data, { recursive: true, force: true }); }
+  try {
+    await withRouteTreeRestored(candidate.releaseDirectory, async () => {
+      try { pid = launch(candidate, data, runtime.preflightPorts, true, log); await ready(pid, runtime.preflightPorts, candidate.releaseHash); }
+      finally { if (pid) await stop(pid, candidate.releaseDirectory); }
+    });
+  } finally { rmSync(data, { recursive: true, force: true }); }
 }
 
 async function install(profile) {

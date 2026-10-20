@@ -1375,7 +1375,7 @@ export type AgentTeamVersionMetadata = {
   developerExecution?: ProjectExecutorLaunchView | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
   projectExecutorLaunches?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 };
 
 export type AgentTeamTaskAttemptStatus =
@@ -1578,33 +1578,9 @@ export type AgentTeamGroupView = AgentTeamGroupSummary & {
   runs: Array<{ id: string; targetRole: AgentTeamRoleId | null; currentRole: AgentTeamRoleId | null; status: AgentTeamRunStatus; intent: string; repositoryIds: string[]; createdAt: string; finishedAt: string | null; pendingInputs: Array<{ id: string; question: string; scopeRevision: number }> }>;
 };
 
-export type CreateAgentTeamGroupRequest = { title?: string; mode?: AgentTeamMode };
-
-export type AddAgentTeamGroupRepositoriesRequest = {
-  repositories: Array<{ name?: string; directory: string }>;
-};
-
-export type SendAgentTeamGroupMessageRequest = {
-  body: string;
-  recipientRole: AgentTeamRoleId;
-  repositoryIds?: string[];
-  submissionId: string;
-  runId?: string;
-};
-
 export type AgentTeamGroupControlRequest = {
-  operation: 'pause' | 'resume' | 'cancel' | 'retry' | 'reexecute';
+  operation: 'reexecute';
   runIds: string[];
-  targetRole?: AgentTeamRoleId;
-  taskKey?: string;
-};
-
-export type AgentTeamGroupAnswerRequest = {
-  pendingInputId: string;
-  scopeRevision: number;
-  answer: string;
-  authorizedCommands?: string[];
-  directories?: string[];
 };
 
 export type AgentTeamMemoryView = {

@@ -315,16 +315,11 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       .limit(1);
     if (!team) throw new NotFoundException('The built-in Agent Team was not found.');
     if (request.targetRole === 'team-manager') {
-      const managerRole = team.roles.find((role) => role.role === 'team-manager');
-      const hasConfiguredModel = Boolean(managerRole?.publicModelId.trim())
-        || Boolean(this.config.get<string>('AGENT_TEAM_DEFAULT_PUBLIC_MODEL_ID')?.trim());
-      if (!hasConfiguredModel) {
-        throw new BadRequestException('Team Manager 还没有配置模型，请先在团队配置中为 Team Manager 选择一个模型。');
-      }
+      throw new BadRequestException('Team Manager is not an active work role in new Runs.');
     }
     const runId = acceptance.runId;
     const versionId = `atver_${randomUUID()}`;
-    const snapshot = await this.createVersionSnapshot(team.roles, team.workingPractice, 7);
+    const snapshot = await this.createVersionSnapshot(team.roles, team.workingPractice, 8);
     const primary = repositories[0];
     const now = new Date();
     await this.transaction((transaction) => {
@@ -702,7 +697,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     let resumeInterruptId: string | undefined;
     // Lane-based graphs (v2, v4) resume the exact interrupted input node by interrupt id so
     // one lane's answer never lands in another lane's pending question.
-    if (orchestrationVersion === 2 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7) {
+    if (orchestrationVersion === 2 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7 || orchestrationVersion === 8) {
       const graph = this.createGraph(run, version);
       const snapshot = await graph.getState({ configurable: { thread_id: run.langGraphThreadId } });
       resumeInterruptId = snapshot.tasks
@@ -760,7 +755,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
     const resume = pendingInputAnswer(request.answer, answered, directories);
     this.scheduleExecution(runId, new Command({
-      resume: orchestrationVersion === 2 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7 ? { [resumeInterruptId as string]: resume } : resume,
+      resume: orchestrationVersion === 2 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7 || orchestrationVersion === 8 ? { [resumeInterruptId as string]: resume } : resume,
     }));
     return this.getRunView(runId);
   }
@@ -1040,10 +1035,10 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       .limit(1);
     if (existing) {
       const roles: StoredAgentTeamRoleConfiguration[] = [...existing.roles];
-      if (!roles.some((role) => role.role === 'worktree-manager')) roles.push(defaultRoleConfiguration('worktree-manager'));
-      if (!roles.some((role) => role.role === 'team-manager')) roles.push(defaultRoleConfiguration('team-manager'));
-      if (roles.length === existing.roles.length) return;
-      await this.db.update(agentTeams).set({ roles, updatedAt: new Date() })
+      const activeRoles = roles.filter((role) => role.role !== 'team-manager');
+      if (!activeRoles.some((role) => role.role === 'worktree-manager')) activeRoles.push(defaultRoleConfiguration('worktree-manager'));
+      if (!roles.some((role) => role.role === 'team-manager') && roles.some((role) => role.role === 'worktree-manager')) return;
+      await this.db.update(agentTeams).set({ roles: activeRoles, updatedAt: new Date() })
         .where(eq(agentTeams.id, existing.id)).run();
       return;
     }
@@ -1064,7 +1059,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   private async createVersionSnapshot(
     configuredRoles: StoredAgentTeamRoleConfiguration[],
     workingPractice = '',
-    orchestrationVersion: 5 | 6 | 7 = 5,
+    orchestrationVersion: 5 | 6 | 7 | 8 = 5,
   ): Promise<StoredAgentTeamVersionSnapshot> {
     const manifest = getBmadTeaProcessManifest();
     const processFiles = await Promise.all(manifest.files.map(async (file) => ({
@@ -1073,8 +1068,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     })));
     const developerRole = configuredRoles.find((role) => role.role === 'developer');
     const developerExecution = await this.executors.captureLaunch(developerRole?.executor ?? 'claude', null);
-    const projectExecutorLaunches = orchestrationVersion === 7
-      ? Object.fromEntries(await Promise.all(configuredRoles.filter((role) => role.executor).map(async (role) => [
+    const projectExecutorLaunches = orchestrationVersion === 7 || orchestrationVersion === 8
+      ? Object.fromEntries(await Promise.all(configuredRoles.filter((role) => role.executor && role.role !== 'team-manager').map(async (role) => [
         role.role,
         await this.executors.captureLaunch(role.executor!, null),
       ])))
@@ -1088,10 +1083,10 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       // assignments execute; each lane shares the role's captured launch.
       developerExecutions: { [RESERVED_DEVELOPER_ID]: developerExecution },
       ...(projectExecutorLaunches ? { projectExecutorLaunches } : {}),
-      // v5 remains the ordinary fixed workflow; v6/v7 start from a persisted group message.
+      // v5 remains the ordinary fixed workflow; v6-v8 start from a persisted group message.
       orchestrationVersion,
       workingPractice,
-      roles: await Promise.all(configuredRoles.map(async (role) => {
+      roles: await Promise.all(configuredRoles.filter((role) => orchestrationVersion !== 8 || role.role !== 'team-manager').map(async (role) => {
         const entryPointContent = await Promise.all(role.entryPoints.map((path) => readBmadTeaProcessFile(path)));
         const processReferences = processReferencePaths(role.role, manifest);
         return {
@@ -1258,7 +1253,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     }
     if (interrupted) {
       const orchestrationVersion: number = version.snapshot.orchestrationVersion ?? 1;
-      if (orchestrationVersion === 2 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7) {
+      if (orchestrationVersion === 2 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7 || orchestrationVersion === 8) {
         const resume: Record<string, AgentTeamPendingInputAnswer> = {};
         let unanswered = false;
         for (const interrupt of snapshot.tasks.flatMap((task) => task.interrupts)) {
@@ -1475,17 +1470,17 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const role = version.snapshot.roles.find((item) => item.role === taskRole);
     if (!role) throw new Error(`Agent Team role ${taskRole} was not captured by this version.`);
     if (taskRole === 'team-manager' && (!request.groupContext || version.snapshot.orchestrationVersion !== 7)) {
-      throw new Error('Team Manager is available only in new Agent Team group Runs.');
+      throw new Error('Team Manager is available only in captured historical v7 group Runs.');
     }
     if (taskRole === 'team-manager' && !role.publicModelId.trim()) {
-      throw new Error('Team Manager 还没有配置模型，请先在团队配置中为 Team Manager 选择一个模型。');
+      throw new Error('The captured historical Team Manager role has no configured model.');
     }
     const attempt = await this.prepareTaskAttempt(run, request);
     if (attempt.status === 'completed' || attempt.status === 'waiting_for_input') {
       return attempt.result as AgentTeamTaskResult;
     }
     const orchestrationVersion: number = version.snapshot.orchestrationVersion ?? 1;
-    // A v6/v7 project-executor task cannot launch without a real directory. On an
+    // A v6-v8 project-executor task cannot launch without a real directory. On an
     // empty-scope Run the runtime raises the directory question itself; an answer that
     // carries directories binds them and the task re-runs with a real project directory.
     if (isGroupOrchestrationVersion(orchestrationVersion) && role.executor && !request.projectDirectory.trim()) {
@@ -1515,16 +1510,16 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const requestLane: AgentTeamLaneWorktree | undefined = (request as AgentTeamTaskRequestV4).laneWorktree;
 
     const produceOutput = async (correction?: string): Promise<string> => {
-      if (taskRole === 'developer' || (orchestrationVersion === 7 && role.executor)) {
+      if (taskRole === 'developer' || ((orchestrationVersion === 7 || orchestrationVersion === 8) && role.executor)) {
         const developerId = request.developerId ?? RESERVED_DEVELOPER_ID;
         // v3/v4/v5 lanes share the role's single captured launch; only v2 snapshots
         // carry per-instance launches and configurations.
-        const roleExecution = orchestrationVersion === 7 ? version.snapshot.projectExecutorLaunches?.[taskRole] : undefined;
+        const roleExecution = orchestrationVersion === 7 || orchestrationVersion === 8 ? version.snapshot.projectExecutorLaunches?.[taskRole] : undefined;
         const execution = roleExecution ?? version.snapshot.developerExecutions?.[developerId]
-          ?? (orchestrationVersion === 3 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7 ? version.snapshot.developerExecutions?.[RESERVED_DEVELOPER_ID] : undefined)
+          ?? (orchestrationVersion === 3 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7 || orchestrationVersion === 8 ? version.snapshot.developerExecutions?.[RESERVED_DEVELOPER_ID] : undefined)
           ?? (developerId === RESERVED_DEVELOPER_ID ? version.snapshot.developerExecution : undefined);
         if (!execution || !('executor' in execution)) throw new Error('This Team version has no captured developer executor. Start a new Team Run.');
-        const sharedLaunch = orchestrationVersion === 3 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7;
+        const sharedLaunch = orchestrationVersion === 3 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7 || orchestrationVersion === 8;
         const instance = !sharedLaunch && developerId !== RESERVED_DEVELOPER_ID
           ? role.developerInstances?.find((candidate) => candidate.developerId === developerId)
           : undefined;
@@ -1534,7 +1529,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         const developerRole = instance ?? role;
         const model = developerRole.publicModelId.trim() || (execution.executor === 'codex' ? execution.model : null);
         if (model) await this.executors.requireModel(workspaceId, execution.executor, model);
-        if (!laneWorktree && orchestrationVersion !== 5 && orchestrationVersion !== 6 && orchestrationVersion !== 7) {
+        if (!laneWorktree && orchestrationVersion !== 5 && orchestrationVersion !== 6 && orchestrationVersion !== 7 && orchestrationVersion !== 8) {
           if (requestLane) {
             laneWorktree = {
               worktreePath: requestLane.worktreePath,
@@ -1725,7 +1720,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     // The Worktree Manager's validated output is executed by the runtime before the result
     // commits: shape and convention errors throw TaskOutputValidationError (earning the
     // single corrective re-invocation), git failures fail the attempt outright.
-    const executed = orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7
+    const executed = orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7 || orchestrationVersion === 8
       ? { ...result, worktreeSetup: undefined, worktreeTeardown: undefined }
       : await this.applyWorktreeManagerOutput(request, attemptId, output, result);
     return this.finishCompletedAttempt(request, workspaceId, attemptId, executed);
@@ -3022,7 +3017,7 @@ function rolePromptAddition(
   request?: AgentTeamTaskRequest,
 ): string | undefined {
   const orchestrationVersion: number = snapshot.orchestrationVersion ?? 1;
-  if (orchestrationVersion === 6 || orchestrationVersion === 7) {
+  if (orchestrationVersion === 6 || orchestrationVersion === 7 || orchestrationVersion === 8) {
     return [
       'This is a message addressed to your one configured Agent Team role. Complete the stated goal or ask one specific question when blocked.',
       `To pass work onward, include a handoff object with a role id captured by this Team version and a specific goal. Omit handoff when your work is complete or you are waiting for the user.`,
@@ -3153,8 +3148,8 @@ function teamManagerSystemPrompt(addition?: string): string {
   return addition ? `${prompt}\n\n${addition}` : prompt;
 }
 
-function isGroupOrchestrationVersion(version: number | undefined): version is 6 | 7 {
-  return version === 6 || version === 7;
+function isGroupOrchestrationVersion(version: number | undefined): version is 6 | 7 | 8 {
+  return version === 6 || version === 7 || version === 8;
 }
 
 function taskContext(request: AgentTeamTaskRequest, executor: boolean, correction?: string): unknown {
@@ -3231,7 +3226,7 @@ function groupRolePromptAddition(
   if (snapshot.orchestrationVersion === 7 && request.taskDefinition.role === 'team-manager') {
     const roles = snapshot.roles.map((role) => `${role.role}${role.displayName ? ` (${role.displayName})` : ''}`).join(', ');
     const workingPractice = snapshot.workingPractice?.trim();
-    const memories = teamManagerMemoryProjection(request.groupContext?.memories ?? []);
+    const memories = teamMemoryProjection(request.groupContext?.memories ?? []);
     return [
       'This is the narrowed Chat inside Agent Team. Manage only this Team’s roles, working practice, concurrency setting and Team memories through the provided Team management tools.',
       ...(workingPractice ? [`Team working practice:\n${workingPractice}`] : []),
@@ -3242,23 +3237,36 @@ function groupRolePromptAddition(
       'Return a concise user-facing update in the message field. Do not claim a configuration or memory change succeeded unless its tool returned success.',
     ].join('\n');
   }
+  if (snapshot.orchestrationVersion === 8 && request.taskDefinition.taskKey === `group_0_${request.groupContext.targetRole}`) {
+    const workingPractice = snapshot.workingPractice?.trim();
+    const memories = teamMemoryProjection(request.groupContext.memories ?? []);
+    return [
+      'This is the initially addressed role for a Chat-dispatched Agent Team Run. Use the captured Team context to guide this request.',
+      ...(workingPractice ? [`Team working practice:\n${workingPractice}`] : []),
+      ...(memories ? [`Team memories:\n${memories}`] : []),
+      'Team settings, roles and memories are managed by Chat through protected platform operations. Do not claim to read or change Team memories or settings yourself.',
+    ].join('\n');
+  }
+  const memoryRule = snapshot.orchestrationVersion === 8
+    ? 'Team long-term memory is separate from Chat memory and is managed by Chat. Only the initially addressed role in a new v8 Run receives its bounded captured memory projection; handoff roles receive none and no Team role may add, update, or delete memories.'
+    : 'Team long-term memory is separate from Chat memory and belongs to the Team Manager. Only the Team Manager receives Team memories and may add, update, or delete them; other roles must not claim to read or save memory.';
   return [
     'Group messages are scoped by recipient and repository. Do not assume another role can see your message or that a visible transcript entry is model input.',
     'Pause, resume, cancel and retry requests are handled by the control service and are never normal task instructions.',
-    'Team long-term memory is separate from Chat memory and belongs to the Team Manager. Only the Team Manager receives Team memories and may add, update, or delete them; other roles must not claim to read or save memory.',
+    memoryRule,
     request.taskDefinition.role === 'worktree-manager'
-      ? 'In orchestration v6 and v7, provide advisory per-project Git strategy guidance only. Do not create, merge, or clean branches or worktrees; the project executor chooses and performs Git operations after inspecting each project.'
+      ? 'In orchestration v6, v7 and v8, provide advisory per-project Git strategy guidance only. Do not create, merge, or clean branches or worktrees; the project executor chooses and performs Git operations after inspecting each project.'
       : '',
   ].filter(Boolean).join('\n\n');
 }
 
-// Team memories belong to the Team Manager: its turns receive a bounded
-// projection of the captured Team/repository-scoped memories, mirroring Chat's
-// memory projection. Legacy role-scoped entries are never injected.
+// v8 initially addressed roles and historical v7 Team Manager turns receive a bounded
+// projection of captured Team/repository-scoped memories. Legacy role-scoped entries
+// are never injected.
 const TEAM_MEMORY_PROMPT_ENTRIES = 50;
 const TEAM_MEMORY_PROMPT_CHARS = 6000;
 
-function teamManagerMemoryProjection(memories: Array<{ role: string | null; content: string }>): string {
+function teamMemoryProjection(memories: Array<{ role: string | null; content: string }>): string {
   const lines: string[] = [];
   let total = 0;
   for (const memory of memories) {

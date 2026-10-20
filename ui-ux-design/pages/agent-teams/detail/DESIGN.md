@@ -18,77 +18,66 @@
 
 - `apps/web/src/routes/agent-teams/$teamId.tsx`
 - `apps/web/src/routes/agent-teams/$teamId.index.tsx`
-- `apps/web/src/features/agent-teams/team-detail.tsx`
 - `apps/web/src/features/agent-teams/team-records.tsx`
 
 ## Purpose
 
-Find Team task groups and open their live conversation.
+Find Team Runs and open their read-only execution evidence. Chat owns all Team operations.
 
 ## Primary Task
 
-Open a work record to inspect its conversation. Action budget: one group activation. The single `New work record` action creates an empty group and opens it; work begins when the user addresses a role in the group. Chat may also start group work. The context bar's upper-right `Configuration` action opens the separate Team configuration page.
+Open a Run to inspect its evidence. Action budget: one Run activation. Start or change Team work, answer questions, control Runs, and manage Team configuration in Chat.
 
 ## Layout
 
-Use the shared detail width up to 1200px. Work records are the sole body of this route, with no page tabs. The context bar places one secondary `Configuration` action at the upper right. Records are a compact list of task groups showing the title, latest message, status, repositories, Run count and update time. The toolbar has one `New work record` action. Narrow screens stack metadata without removing status or the group link. Shared semantic tokens govern both light and dark modes.
+Use the shared detail width up to 1200px. Run records are the sole body of this route, with no page tabs or mutation controls. Each compact row shows intent, status, project directory, mode, creation time and finish time when present; it opens immutable Run evidence. The page heading and empty state both link to Chat to start work. Narrow screens wrap the path and stack metadata without removing status or the Run link. Shared semantic tokens govern both light and dark modes.
 
 ## Interaction Contract
 
 | Action | Behavior |
 | --- | --- |
-| Open configuration | Navigate to `/agent-teams/:teamId/configuration` from the context-bar action in one activation. |
-| Open record | Navigate to `/agent-team-groups/:groupId` in one activation. |
-| New work record | Create an empty task group and navigate to `/agent-team-groups/:groupId`; no goal/directory form precedes the group. |
-| Open Chat | Navigate to Chat from the empty-state link to start work there. |
+| Open Run | Navigate to `/agent-team-runs/:runId` in one activation. |
+| Start Team work | Navigate to Chat from the empty-state link; Chat collects any missing dispatch information. |
 
-The group-summary query keeps records fresh. It does not load message history, task activity or Run snapshots. The selected group route owns its messages and event stream.
+The Run-summary query refreshes every five seconds. It does not load task activity or Run snapshots. Run detail owns its read-only evidence stream. Chat owns Team mutations and live pending-input handling.
 
 ## States
 
 | State | Behavior |
 | --- | --- |
 | Loading | Shared content-shaped placeholders retain page geometry. |
-| Empty | Keep `New work record` available and show the separate Chat entry. |
-| Error | Show the shared recoverable error; the separate configuration route remains available. |
-| Busy | Work-record creation shows control-local progress. Existing record links remain independent. |
+| Empty | Show the Chat entry to start Team work. |
+| Error | Show the shared recoverable error. |
+| Busy | List loading stays local; there are no mutation controls on this page. |
 | Offline | Inherits shared-states.md. |
 | Long content | Wrap goal and paths; stack row metadata on narrow screens. |
-| Active group | Show server-derived group status and retain the group link. |
+| Active Run | Show server-derived status and retain the Run link. |
 
 ## Copy Inventory
 
 | Key | Category |
 | --- | --- |
 | `agentTeams:title` | State |
-| `agentTeams:loading` | State |
-| `agentTeams:loadFailed` | Recovery |
-| `agentTeams:unavailable.title` | State |
-| `agentTeams:unavailable.description` | Recovery |
-| `agentTeams:configuration.open` | Action |
-| `agentTeams:records.empty` | State |
-| `agentTeams:records.startInChat` | Action |
-| `agentTeams:records.title` / `description` / `create` / `creating` | State / Action |
-| `agentTeams:records.createFailed` / `empty` / `loadFailed` | Recovery / State |
-| `agentTeams:group.untitled` / `noMessages` / `noRepositories` / `runCount` | State |
-| `agentTeams:records.loadFailed` | Recovery |
+| `agentTeams:records.title` / `description` / `empty` / `loadFailed` | State / Recovery |
+| `agentTeams:records.openChat` | Action |
+| `agentTeams:records.finishedAt` | State |
 | `agentTeams:run.status.*` | State |
 | `agentTeams:run.modeValue.*` | State |
-| `agentTeams:resources.providers` | State |
-| `agentTeams:resources.skills` | State |
-| `agentTeams:resources.mcpServers` | State |
-| `agentTeams:resources.loadFailed` | Recovery |
 | `agentTeams:role.*` | State |
 
 ## Accessibility
 
-Record links and the upper-right configuration action are keyboard reachable with visible focus. Status uses icon/text alongside color. Both themes and reduced-motion behavior inherit shared components.
+Run links are keyboard reachable with visible focus. Status uses icon/text alongside color. Both themes and reduced-motion behavior inherit shared components.
 
 ## Coverage Status
 
-2026-10-19 source comparison: Records are the only view on the Team route; the upper-right context-bar action opens the separate configuration route, and task groups open their conversation route. The list shows title, latest message, status, repositories, Run count and update time; the empty state keeps both the new-record action and its separate Chat link. No differences found against the documented layout and interactions. No browser, runtime, build, test or type-check verification was performed.
+2026-10-20 source comparison: the route renders only compact Run summaries and a Chat link; each summary opens read-only Run evidence. No create, configuration, answer or Run-control action remains on the Team page. The summary response exposes no progress percentage, so the list shows status and timestamps only. This was a source review; no runtime or browser verification was run.
 
 ## Changelog
+
+### 2026-10-20
+
+- Changed the Team route from group records and creation/configuration actions to a read-only Run list with a Chat entry for Team operations.
 
 ### 2026-10-19
 

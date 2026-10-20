@@ -7,7 +7,7 @@ export const AGENT_TEAM_PROCESS_VERSION = '1';
 
 export const DEFAULT_MAX_CONCURRENT_RUNS = 3;
 
-// Existing role ids stay stable; server-created v7 work roles receive dynamic ids captured by each TeamVersion.
+// Existing role ids stay stable; server-created v8 work roles receive dynamic ids captured by each TeamVersion.
 export type AgentTeamRuntimeRole = AgentTeamRoleId;
 
 export function agentTeamContractRole(role: AgentTeamRuntimeRole): AgentTeamRoleId {
@@ -22,7 +22,6 @@ export const AGENT_TEAM_ROLES: readonly AgentTeamRuntimeRole[] = [
   'test_runner',
   'reviewer',
   'worktree-manager',
-  'team-manager',
 ];
 
 export const AGENT_TEAM_ROLE_TOOL_NAMES: Partial<Record<string, readonly string[]>> = {
@@ -32,9 +31,8 @@ export const AGENT_TEAM_ROLE_TOOL_NAMES: Partial<Record<string, readonly string[
   test_author: ['read', 'write', 'glob', 'grep', 'process_reference'],
   test_runner: ['bash', 'read', 'write', 'glob', 'grep'],
   reviewer: ['read', 'glob', 'grep', 'process_reference'],
-  // The v5-v7 Worktree Manager plans and reports; project executors choose Git operations.
+  // The v5-v8 Worktree Manager plans and reports; project executors choose Git operations.
   'worktree-manager': ['read', 'glob', 'grep', 'process_reference'],
-  'team-manager': [],
 };
 
 export const AGENT_TEAM_ROLE_INSTRUCTIONS: Partial<Record<string, string>> = {
@@ -44,8 +42,7 @@ export const AGENT_TEAM_ROLE_INSTRUCTIONS: Partial<Record<string, string>> = {
   test_author: 'Author only the tests required by the confirmed test design and authorized execution scope.',
   test_runner: 'Execute the declared checks through the available command tool, preserve their exact evidence, and distinguish command success from criterion completion.',
   reviewer: 'Independently assess the implementation and test evidence against the original intent. Request scoped repair only when concrete evidence shows a defect.',
-  'worktree-manager': 'For v4 Runs, follow the captured worktree setup and teardown instructions. For v5–v7 work, provide advisory per-project Git strategy recommendations only; project executors inspect the actual repository state and choose their own Git operations.',
-  'team-manager': 'Manage the single built-in Agent Team through Team management tools. You have no project path or file access, shell, Skill, MCP, or general workspace tools.',
+  'worktree-manager': 'For v4 Runs, follow the captured worktree setup and teardown instructions. For v5–v8 work, provide advisory per-project Git strategy recommendations only; project executors inspect the actual repository state and choose their own Git operations.',
 };
 
 export function agentTeamEntryPoints(role: AgentTeamRuntimeRole): readonly string[] {
@@ -56,12 +53,6 @@ export function agentTeamEntryPoints(role: AgentTeamRuntimeRole): readonly strin
   return [...new Set(Object.values(manifest.entryPoints).flat())];
 }
 
-export const AGENT_TEAM_MANAGER_ROLE = 'team-manager';
-
 export function isValidAgentTeamRoleId(value: unknown): value is AgentTeamRuntimeRole {
   return typeof value === 'string' && /^[a-z][a-z0-9_-]{0,63}$/.test(value);
-}
-
-export function isProtectedAgentTeamRole(role: string): boolean {
-  return role === AGENT_TEAM_MANAGER_ROLE;
 }

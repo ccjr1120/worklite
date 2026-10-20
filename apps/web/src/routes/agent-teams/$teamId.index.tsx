@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { TeamDetailPage } from '@/features/agent-teams/team-detail';
+import { TeamRecords } from '@/features/agent-teams/team-records';
 
 export const Route = createFileRoute('/agent-teams/$teamId/')({
   component: AgentTeamRecordsRoute,
@@ -7,5 +7,5 @@ export const Route = createFileRoute('/agent-teams/$teamId/')({
 
 function AgentTeamRecordsRoute() {
   const { teamId } = Route.useParams();
-  return <TeamDetailPage teamId={teamId} view="records" />;
+  return <TeamRecords teamId={teamId} />;
 }

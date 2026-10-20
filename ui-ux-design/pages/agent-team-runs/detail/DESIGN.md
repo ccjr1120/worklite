@@ -4,7 +4,7 @@
 
 `/agent-team-runs/:runId`
 
-The route is a direct immutable-evidence destination reached from the Team summary records endpoint or a retained Run link. It is not a full Run collection; the Team page reads only compact summary rows.
+The route is a direct immutable-evidence destination reached from a Team summary row, Chat task card or archived group link. It is not a full Run collection; the Team page reads only compact summary rows.
 
 ## Design Source
 
@@ -23,30 +23,24 @@ The route is a direct immutable-evidence destination reached from the Team summa
 
 ## Purpose
 
-Observe one Team run, answer its current input, recover uncertain effects, and continue or stop it without moving role outputs manually.
+Read one Team Run's immutable execution evidence. Chat owns answers, exact Command grants, controls, and recovery.
 
 ## Primary Task
 
-Understand and continue the current run. Reading costs no action: the persisted Run query and replayable SSE stream keep state fresh. Codex developer tasks execute directly with no WorkLite proposal or command-grant step. Their clarification panel has only the answer input; non-Codex roles retain exact-command fields. Each independent continuation goal costs one activation: answer, operation recovery, resume, retry, pause, or cancel.
+Understand the current Run. Reading costs no action: the persisted Run query and replayable SSE stream keep state fresh. Open Chat and return to the task card to answer pending input, enter structured exact Command grants, control the Run, or recover an uncertain operation.
 
 ## Layout
 
-The page uses the full Workspace page width with a `1200px` maximum. The heading and execution controls are followed by a progress header naming the current phase, a thin progress bar with the server-derived completion percentage (terminal-only 100), next step, completed and total development assignments, active Developers, and the waiting reason, then immutable TeamVersion metadata, mode, intent, project directory, command grants, and scope revision. Orchestration v4 Runs additionally carry immutable worktree evidence in the metadata: the Run-level base worktree path and run branch recorded by the Worktree Manager. Worktree Manager setup and teardown appear as task attempts with their own role label, and their structured path and branch output remains readable as immutable task result evidence. The main desktop grid places active work — pending input or recovery, then task attempts — in a wider primary column and documents, operations, and criterion assessments in a supporting column. Development task attempts carry their Developer and assignment title beside the task key and show the attempt's latest public progress text while it runs; test authoring, test execution, and review attempts remain single tasks after the fan-in. Pending input panels name their owning task attempt. The live member output occupies a fixed reading column with its own bounded scroll region and a lane filter that scopes it to one Developer lane; deltas are grouped per task attempt into foldable sections — the active attempt stays expanded, settled attempts fold — with text rendered as Markdown and tool or command activity collapsed to compact rows, instead of one raw preformatted stream. Columns stack below `1024px`. Documents and command evidence use disclosures with bounded preformatted regions rather than expanding the page. Agent-authored text — task progress text, pending input and recovery questions, the outcome summary and Team document bodies — renders through the shared safe Markdown renderer; result JSON and command output stay preformatted.
+The page uses the shared detail width up to `1200px`. The heading links back to Chat. Its read-only progress section shows phase, server-derived percentage, next step, assignment completion, active Developer ids and waiting reason. Run metadata includes TeamVersion and orchestration version, mode, intent, project directory, scope revision, worktree paths, captured command grants and project-executor launches when present. Task attempts show status, role, assignment title, progress text, errors, results and timestamps. Pending questions state that Chat owns the answer. Documents show full content and delivery status. Operations show linked Command status, exit code, working directory, exact command and persisted output events. A separate bounded list renders persisted Run activity payloads. The outcome section shows summary, unresolved issues and criterion assessments with evidence. All sections are read-only; Chat task cards own answers, exact Command grants, controls and recovery. Agent-authored text uses the shared safe Markdown renderer; result JSON, activity payloads and command output stay preformatted.
 
 ## Interaction Contract
 
 | Action | Trigger and behavior |
 | --- | --- |
 | Observe run | The Run query is refreshed by SSE events while work is active. Persisted event replay and browser-managed `Last-Event-ID` reconnection preserve member output without a manual refresh. |
-| Filter member output by lane | One selection scopes the live output column to all lanes or one Developer lane; the persisted stream is unchanged and the filter resets when the run changes. |
-| Answer input | The Answer control shows local progress, submits the exact pending input id and scope revision, and replaces the Run cache with the server response. Failure preserves the answer and any non-Codex command-grant input. Codex developer questions omit the command-grant field. |
-| Recover uncertain operation | Selecting one structured decision and submitting it shows local progress and uses the operation key in both path and body. Failure leaves the decision selected. |
-| Pause | Pause shows local progress and preserves the request as visible pending state until the server settles at a stable boundary. |
-| Resume | Resume shows local progress and is available only for a paused run. If recovery remains pending, the server returns it to the recovery input. |
-| Cancel | Cancel opens the shared destructive confirmation pattern, then shows local progress. Cancellation remains visible until active work settles. |
-| Retry failed task | Only a server-declared retryable active task renders Retry. Its control shows local progress and sends that task key. Successful predecessors are never rerun by the UI. |
-| Read command evidence | An operation with a linked Command loads its command, status, exit code, and bounded replayed output through the existing Command query and event stream. |
-| Open Team | The TeamVersion link returns to the Team work records when that link is available, otherwise the direct Team route, without changing run state. |
+| Return to Chat | Open Chat and locate the task card to answer pending input, grant exact commands through its structured field, or operate the Run through Chat. |
+| Read command evidence | An operation with a linked Command loads its command, status, exit code, and persisted output events through the Command query and event stream. |
+| Read Run activity | Expand the persisted activity list; each row shows the event sequence, type, timestamp and payload. |
 
 SSE transport failure is shown as a reconnecting state, not a run failure. The persisted Run query remains the recovery path if the stream cannot reconnect.
 
@@ -57,11 +51,11 @@ SSE transport failure is shown as a reconnecting state, not a run failure. The p
 | Loading | The page renders a content-shaped skeleton under the Team Run breadcrumb. |
 | Empty | A missing Run renders the unavailable state; it has no creation fallback. |
 | No results | Inapplicable: the route addresses one Run. |
-| Error | Load failures use the shared recoverable error state. Mutation failures are control-local alerts and never replace durable Run data. |
-| Busy | Every action control owns its spinner and disabled state; no full-page blocking overlay is used. |
-| Offline | SSE shows a reconnecting cue, React Query retries the persisted snapshot, and completed durable sections remain readable. |
-| Long content | Member output, documents, changed-file lists, task result JSON, and command output use bounded scroll or disclosure regions. Output is never silently truncated. |
-| Parallel development | The progress header reports phase, a progress bar with the completion percentage, assignment completion, active Developers, and next step; development attempts show their lane attribution and latest public progress text, and live output groups deltas per task attempt with the active attempt expanded. |
+| Error | Load failures use the shared recoverable error state. |
+| Busy | SSE and evidence reads remain local; this page has no mutation controls. |
+| Offline | The persisted Run and Command queries show their shared load recovery state when a fresh read fails. |
+| Long content | Activity payloads, task result JSON and command output use bounded scroll regions. Document Markdown remains readable in the page. |
+| Parallel development | The progress section reports assignment completion and active Developer ids; task attempts preserve role and assignment titles. |
 
 The page distinguishes execution status from criterion assessment. `succeeded` is only the Run completion state; criterion values remain `met`, `unmet`, or `not_verified` with their evidence.
 
@@ -69,119 +63,30 @@ The page distinguishes execution status from criterion assessment. `succeeded` i
 
 | Key | Category |
 | --- | --- |
-| `agentTeams:title` | State |
-| `agentTeams:run.detail.title` | State |
-| `agentTeams:run.loading` | State |
+| `agentTeams:title` / `run.detail.title` | State |
 | `agentTeams:run.loadFailed` | Recovery |
-| `agentTeams:run.unavailable.title` | State |
-| `agentTeams:run.unavailable.description` | Recovery |
+| `agentTeams:run.continueInChat` / `run.openArchive` | Action |
 | `agentTeams:run.status.*` | State |
-| `agentTeams:run.desiredControl.*` | State |
-| `agentTeams:metadata.title` | State |
-| `agentTeams:metadata.status` | State |
-| `agentTeams:metadata.taskKey` | State |
-| `agentTeams:run.version` | State |
-| `agentTeams:run.mode` | Constraint |
-| `agentTeams:run.modeValue.*` | State |
-| `agentTeams:run.intent` | Constraint |
-| `agentTeams:run.project` | State |
-| `agentTeams:run.worktreeBasePath` | State |
-| `agentTeams:run.runBranch` | State |
-| `agentTeams:run.commands` | Constraint |
-| `agentTeams:run.noCommands` | State |
-| `agentTeams:run.scopeRevision` | State |
-| `agentTeams:tasks.title` | State |
-| `agentTeams:tasks.empty` | State |
-| `agentTeams:tasks.attempt` | State |
-| `agentTeams:tasks.changedFiles` | State |
-| `agentTeams:tasks.noChangedFiles` | State |
-| `agentTeams:tasks.assignedWork` | State |
-| `agentTeams:tasks.assignedWorkCompleted` | State |
-| `agentTeams:tasks.assignedWorkNotCompleted` | State |
-| `agentTeams:tasks.result` | State |
-| `agentTeams:tasks.retry` | Action |
-| `agentTeams:tasks.retrying` | State |
-| `agentTeams:tasks.retryFailed` | Recovery |
-| `agentTeams:input.title` | State |
-| `agentTeams:input.answer` | Action |
-| `agentTeams:input.answering` | State |
-| `agentTeams:input.answerFailed` | Recovery |
-| `agentTeams:input.answerPlaceholder` | Constraint |
-| `agentTeams:input.commands` | Constraint |
-| `agentTeams:recovery.title` | State |
-| `agentTeams:recovery.operation` | State |
-| `agentTeams:recovery.decision` | Constraint |
-| `agentTeams:recovery.adopt_command` | Action |
-| `agentTeams:recovery.mark_failed` | Action |
-| `agentTeams:recovery.replay` | Action |
-| `agentTeams:recovery.submit` | Action |
-| `agentTeams:recovery.submitting` | State |
-| `agentTeams:recovery.failed` | Recovery |
-| `agentTeams:output.title` | State |
-| `agentTeams:output.empty` | State |
-| `agentTeams:output.reconnecting` | State |
-| `agentTeams:output.lane.label` | Constraint |
-| `agentTeams:output.lane.all` | State |
-| `agentTeams:progress.title` | State |
-| `agentTeams:progress.percent` | State |
-| `agentTeams:progress.phase` | State |
-| `agentTeams:progress.phase.*` | State |
-| `agentTeams:progress.nextStep` | State |
-| `agentTeams:progress.nextStep.*` | State |
-| `agentTeams:progress.assignments` | State |
-| `agentTeams:progress.activeDevelopers` | State |
-| `agentTeams:progress.waitingReason.*` | State |
-| `agentTeams:documents.title` | State |
-| `agentTeams:documents.empty` | State |
-| `agentTeams:documents.revision` | State |
-| `agentTeams:documents.key` | State |
-| `agentTeams:documents.upstreamKeys` | State |
-| `agentTeams:documents.noUpstreamKeys` | State |
-| `agentTeams:documents.content` | State |
-| `agentTeams:operations.title` | State |
-| `agentTeams:operations.empty` | State |
-| `agentTeams:operations.command` | State |
-| `agentTeams:operations.noCommand` | State |
-| `agentTeams:operations.exitCode` | State |
-| `agentTeams:operations.output` | State |
-| `agentTeams:operations.loadFailed` | Recovery |
-| `agentTeams:outcome.title` | State |
-| `agentTeams:outcome.empty` | State |
-| `agentTeams:outcome.summary` | State |
-| `agentTeams:outcome.unresolved` | State |
-| `agentTeams:outcome.noUnresolved` | State |
-| `agentTeams:outcome.criteria` | State |
-| `agentTeams:outcome.evidence` | State |
-| `agentTeams:outcome.noEvidence` | State |
-| `agentTeams:outcome.assessment.met` | State |
-| `agentTeams:outcome.assessment.unmet` | State |
-| `agentTeams:outcome.assessment.not_verified` | State |
-| `agentTeams:role.planner` | State |
-| `agentTeams:role.test_designer` | State |
-| `agentTeams:role.developer` | State |
-| `agentTeams:role.test_author` | State |
-| `agentTeams:role.test_runner` | State |
-| `agentTeams:role.reviewer` | State |
-| `agentTeams:role.worktree_manager` | State |
-| `agentTeams:controls.pause` | Action |
-| `agentTeams:controls.pausing` | State |
-| `agentTeams:controls.resume` | Action |
-| `agentTeams:controls.resuming` | State |
-| `agentTeams:controls.cancel` | Action |
-| `agentTeams:controls.cancelling` | State |
-| `agentTeams:controls.cancelTitle` | Constraint |
-| `agentTeams:controls.cancelDescription` | Constraint |
-| `agentTeams:controls.cancelConfirm` | Action |
-| `agentTeams:controls.failed` | Recovery |
-| `agentTeams:openTeam` | Action |
-| `agentTeams:openConversation` | Action |
-| `common:actions.cancel` | Action |
+| `agentTeams:run.version` / `versionUnknown` / `executors` | State |
+| `agentTeams:run.mode` / `modeValue.*` / `intent` / `project` / `scopeRevision` | State |
+| `agentTeams:run.worktreeBasePath` / `runBranch` / `commands` / `noCommands` | State |
+| `agentTeams:input.title` / `run.inputInChat` | State |
+| `agentTeams:metadata.title` / `taskKey` | State |
+| `agentTeams:tasks.title` / `empty` | State |
+| `agentTeams:progress.title` / `phase` / `phaseValue.*` / `nextStep` / `nextStepValue.*` / `assignments` / `percent` / `activeDevelopers` / `waitingReason.*` | State |
+| `agentTeams:documents.title` / `empty` | State |
+| `agentTeams:operations.title` / `empty` / `command` / `exitCode` / `output` / `loadFailed` / `noCommand` | State / Recovery |
+| `agentTeams:outcome.title` / `summary` / `unresolved` / `noUnresolved` / `criteria` / `assessment.*` / `empty` / `noEvidence` | State |
+| `agentTeams:events.title` / `empty` | State |
+| `agentTeams:role.*` | State |
 
 ## Accessibility
 
-The heading hierarchy moves from Run title to section titles. Controls are native buttons with visible text and shared focus rings; only the copy-id control is icon-independent and remains labelled by its value. Live output, reconnecting, queued, working, waiting, and paused states use polite status regions; failures use alerts. Every status includes a text label in addition to color. Recovery is a labelled radio group, so arrow keys move between the three decisions and the decision remains visible if submission fails. Changed-file lists use list semantics and the assigned-work summary uses a description list, so assistive technology announces the evidence relationships. Disclosure summaries and preformatted regions are keyboard reachable, and focus is not moved after SSE updates. Cancel uses a labelled dialog and returns focus to its invoking pattern on close.
+The heading hierarchy moves from Run title to section titles. Read-only preformatted regions are keyboard reachable. Queued, working, waiting, and paused states use polite status regions; failures use alerts. Every status includes a text label in addition to color. The Chat link and archived group link are keyboard reachable. Focus is not moved after SSE updates.
 
 ## Coverage Status
+
+2026-10-20 source comparison: all Run detail actions have moved to the Chat task card. The route displays read-only metadata, progress, task results, questions, documents, operations and activity; linked Command output still streams from persisted Command events. Compared with the previous UI, the lane filter and delta-grouped member output are no longer present; progress text and stored activity remain available. Chat renders question answers, exact command fields, controls, retry and operation recovery. This was a source review only; no runtime or browser verification was run.
 
 2026-10-13 source comparison for orchestration v4 worktree evidence: the metadata section renders the Run-level base worktree path and run branch when the server records them, and Worktree Manager setup/teardown attempts render through the shared role label and task result disclosure. The `worktreeBasePath`/`runBranch` fields and the `worktree-manager` role are declared against the pinned cross-package contract and take effect when the packages and API lanes merge. Web type check (tsc --noEmit and locale key check) passed; no browser, runtime, accessibility-tool or real-Run verification was authorized or performed.
 

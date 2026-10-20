@@ -652,7 +652,7 @@ export type StoredAgentTeamVersionSnapshot = {
   developerExecution: StoredProjectExecutorLaunch | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
   projectExecutorLaunches?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
   workingPractice?: string;
   roles: StoredAgentTeamRoleConfiguration[];
   processFiles: Array<{ path: string; content: string }>;

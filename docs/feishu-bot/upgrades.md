@@ -20,7 +20,7 @@ Chat 的产品提示词由启动时的内置知识维护。用户扩展提示词
 pnpm deploy:local
 ```
 
-该命令先递增 Web 补丁版本，再调用托管 runner 的 `deploy deployment`。没有 `.data/deployment/runtime/current.json` 时，runner 快照当前项目，安装依赖并编译候选版本，在 `23490`–`23492` 做隔离预检，检查就绪后备份数据并启动部署 profile 的托管基线。若旧 `install-local.sh` 启动的服务占用目标端口，runner 只会在 PID 文件、进程组和监听端口均证明它属于当前项目 `start-local.mjs` 时停止该组；其他占用者会让部署失败，保持原样。首次切换后若托管服务启动失败，会恢复匹配的数据备份并报错，不会重启已经停止的旧进程；再次运行 `pnpm deploy:local` 可重试部署。已有基线时，候选版本先在隔离端口完成编译和就绪检查，随后取消活动 Agent、Team、Workflow、Command 和待处理的飞书应用注册，立即替换托管进程组，不等待任务自然结束。升级成功或回滚后都不会自动恢复这些任务；不确定的外部副作用仍需显式恢复。候选启动失败时恢复匹配的旧程序和数据。每次调用都会消耗一个补丁版本，即使预检失败；当前部署只有在候选版本通过预检后才会切换。
+该命令先递增 Web 补丁版本，再调用托管 runner 的 `deploy deployment`。没有 `.data/deployment/runtime/current.json` 时，runner 快照当前项目，安装依赖并编译候选版本，在 `23490`–`23492` 做隔离预检，检查就绪后备份数据并启动部署 profile 的托管基线。Vite 会生成 Web bundle 使用的路由树；runner 在构建和隔离预检期间保存并恢复发行快照内的 `apps/web/src/routeTree.gen.ts`，使发行清单继续对应原始快照。若旧 `install-local.sh` 启动的服务占用目标端口，runner 只会在 PID 文件、进程组和监听端口均证明它属于当前项目 `start-local.mjs` 时停止该组；其他占用者会让部署失败，保持原样。首次切换后若托管服务启动失败，会恢复匹配的数据备份并报错，不会重启已经停止的旧进程；再次运行 `pnpm deploy:local` 可重试部署。已有基线时，候选版本先在隔离端口完成编译和就绪检查，随后取消活动 Agent、Team、Workflow、Command 和待处理的飞书应用注册，立即替换托管进程组，不等待任务自然结束。升级成功或回滚后都不会自动恢复这些任务；不确定的外部副作用仍需显式恢复。候选启动失败时恢复匹配的旧程序和数据。每次调用都会消耗一个补丁版本，即使预检失败；当前部署只有在候选版本通过预检后才会切换。
 
 部署状态在 `.data/deployment/runtime/`；开发 Web 仅代理到部署 API，不再拥有 `.data/runtime/` 或独立凭证数据。部署目标端口为 `23390`–`23392`，隔离预检端口为 `23490`–`23492`。旧的 `install-local.sh`、`start-background.mjs` 和 `start-local.mjs` 入口已移除；不要绕过 runner 建立或替换部署服务。
 

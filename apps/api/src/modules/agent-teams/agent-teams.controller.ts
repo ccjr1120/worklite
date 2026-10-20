@@ -3,14 +3,10 @@ import type { Request, Response } from 'express';
 import type {
   AgentTeamRunEvent,
   AnswerAgentTeamRunRequest,
-  AddAgentTeamGroupRepositoriesRequest,
   AgentTeamGroupControlRequest,
-  AgentTeamGroupAnswerRequest,
   AgentTeamGroupEvent,
-  CreateAgentTeamGroupRequest,
   CreateAgentTeamMemoryRequest,
   RecoverAgentTeamOperationRequest,
-  SendAgentTeamGroupMessageRequest,
   UpdateAgentTeamRequest,
   AgentTeamRoleConfiguration,
   UpdateAgentTeamMemoryRequest,
@@ -56,21 +52,6 @@ export class AgentTeamsController {
     return this.teams.records(request, 'personal', teamId);
   }
 
-  @Get(':teamId/groups')
-  groupsList(@Req() request: Request, @Param('teamId') teamId: string) {
-    return this.groups.list(request, 'personal', teamId);
-  }
-
-  @Post(':teamId/groups')
-  createGroup(@Req() request: Request, @Param('teamId') teamId: string, @Body() body: CreateAgentTeamGroupRequest) {
-    return this.groups.create(request, 'personal', teamId, body);
-  }
-
-  @Get(':teamId/repositories')
-  repositories(@Req() request: Request, @Param('teamId') teamId: string) {
-    return this.groups.repositories(request, 'personal', teamId);
-  }
-
   @Get(':teamId/memories')
   memories(@Req() request: Request, @Param('teamId') teamId: string) {
     return this.groups.memories(request, 'personal', teamId);
@@ -101,29 +82,9 @@ export class AgentTeamGroupsController {
     return this.groups.get(request, 'personal', groupId);
   }
 
-  @Post(':groupId/repositories')
-  repositories(@Req() request: Request, @Param('groupId') groupId: string, @Body() body: AddAgentTeamGroupRepositoriesRequest) {
-    return this.groups.addRepositories(request, 'personal', groupId, body);
-  }
-
-  @Get(':groupId/messages')
-  messages(@Req() request: Request, @Param('groupId') groupId: string) {
-    return this.groups.get(request, 'personal', groupId).then((group) => group.messages);
-  }
-
-  @Post(':groupId/messages')
-  sendMessage(@Req() request: Request, @Param('groupId') groupId: string, @Body() body: SendAgentTeamGroupMessageRequest) {
-    return this.groups.sendMessage(request, 'personal', groupId, body);
-  }
-
   @Post(':groupId/controls')
   control(@Req() request: Request, @Param('groupId') groupId: string, @Body() body: AgentTeamGroupControlRequest) {
     return this.groups.control(request, 'personal', groupId, body);
-  }
-
-  @Post(':groupId/runs/:runId/answer')
-  answer(@Req() request: Request, @Param('groupId') groupId: string, @Param('runId') runId: string, @Body() body: AgentTeamGroupAnswerRequest) {
-    return this.groups.answer(request, 'personal', groupId, runId, body);
   }
 
   @Get(':groupId/events')

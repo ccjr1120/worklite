@@ -49,16 +49,6 @@ export class AgentTeamConfigurationService {
       throw new BadRequestException('At least one Agent Team setting is required.');
     }
     const roles = input.roles === undefined ? team.roles : await this.resolveRoles(workspaceId, input.roles);
-    if (input.roles !== undefined) {
-      // Protection means non-deletable with a fixed typed tool set, not a locked model:
-      // the Team Manager publicModelId stays configurable through the Team save path.
-      const comparable = (role: StoredAgentTeamRoleConfiguration) => JSON.stringify({ ...toPublicRole(role), publicModelId: '' });
-      const protectedRole = team.roles.find((role) => role.role === 'team-manager');
-      const requestedProtectedRole = roles.find((role) => role.role === 'team-manager');
-      if (!protectedRole || !requestedProtectedRole || comparable(protectedRole) !== comparable(requestedProtectedRole)) {
-        throw new BadRequestException('The Team Manager role is protected.');
-      }
-    }
     if (input.maxConcurrentRuns !== undefined && (!Number.isInteger(input.maxConcurrentRuns) || input.maxConcurrentRuns < 1)) {
       throw new BadRequestException('Maximum concurrent Team Runs must be an integer of at least 1.');
     }
@@ -88,7 +78,6 @@ export class AgentTeamConfigurationService {
     roleId: string,
     changes: Partial<Omit<AgentTeamRoleConfiguration, 'role'>>,
   ): Promise<AgentTeam> {
-    if (roleId === 'team-manager') throw new BadRequestException('The Team Manager role is protected.');
     const team = await this.getTeam(workspaceId, teamId);
     const target = team.roles.find((role) => role.role === roleId);
     if (!target) throw new NotFoundException('Agent Team role not found.');
@@ -99,7 +88,6 @@ export class AgentTeamConfigurationService {
   }
 
   async deleteRole(workspaceId: string, teamId: string, roleId: string): Promise<AgentTeam> {
-    if (roleId === 'team-manager') throw new BadRequestException('The Team Manager role is protected.');
     const team = await this.getTeam(workspaceId, teamId);
     if (!team.roles.some((role) => role.role === roleId)) throw new NotFoundException('Agent Team role not found.');
     return this.update(workspaceId, teamId, { roles: team.roles.filter((role) => role.role !== roleId).map(toPublicRole) });
@@ -114,15 +102,12 @@ export class AgentTeamConfigurationService {
       if (!isValidAgentTeamRoleId(value.role) || byRole.has(value.role)) throw new BadRequestException('Agent Team role ids must be unique lowercase identifiers.');
       byRole.set(value.role, value);
     }
-    if (!byRole.has('team-manager')) throw new BadRequestException('The protected Team Manager role must remain in the Agent Team.');
+    if (byRole.has('team-manager')) throw new BadRequestException('Team Manager is not an active work role.');
 
     const normalized: Array<Omit<StoredAgentTeamRoleConfiguration, 'skills' | 'mcpServers'>> = [];
     for (const [role, value] of byRole) {
       if (typeof value.publicModelId !== 'string') throw new BadRequestException(`A public model id for Agent Team role ${role} must be a string.`);
       const publicModelId = value.publicModelId.trim();
-      if (role === 'team-manager' && (value.executor !== undefined || value.toolNames?.length || value.skillIds?.length || value.mcpServerIds?.length)) {
-        throw new BadRequestException('Team Manager cannot receive project tools, Skills, MCP servers or an executor.');
-      }
       if (value.executor !== undefined && value.executor !== null && value.executor !== 'claude' && value.executor !== 'codex') throw new BadRequestException(`The executor for Agent Team role ${role} must be claude or codex.`);
       const executor = role === 'developer' ? value.executor ?? 'claude' : value.executor ?? undefined;
       const runtime = publicModelId ? await this.resources.publicModelRuntime(workspaceId, publicModelId) : undefined;

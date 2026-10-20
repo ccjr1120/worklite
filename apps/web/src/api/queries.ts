@@ -68,12 +68,8 @@ export const workflowsQueryKey = () => ['workflows'] as const;
 export const runsQueryKey = () => ['runs'] as const;
 export const mcpServersQueryKey = () => ['mcp-servers'] as const;
 export const artifactsQueryKey = () => ['artifacts'] as const;
-export const agentTeamQueryKey = (teamId: string) => ['agent-team', teamId] as const;
 export const agentTeamRecordsQueryKey = (teamId: string) => ['agent-team-records', teamId] as const;
-export const agentTeamGroupsQueryKey = (teamId: string) => ['agent-team-groups', teamId] as const;
 export const agentTeamGroupQueryKey = (groupId: string) => ['agent-team-group', groupId] as const;
-export const agentTeamMemoriesQueryKey = (teamId: string) => ['agent-team-memories', teamId] as const;
-export const agentTeamRepositoriesQueryKey = (teamId: string) => ['agent-team-repositories', teamId] as const;
 export const agentTeamRunQueryKey = (runId: string) => ['agent-team-run', runId] as const;
 const agentTeamDocumentQueryKey = (documentId: string) => ['agent-team-document', documentId] as const;
 
@@ -166,28 +162,12 @@ export function useSkillQuery(workspace: string | undefined, skillId: string) {
   return useQuery({ queryKey: ['skill', skillId] as const, queryFn: () => api.skill(workspace, skillId), enabled: Boolean(skillId && skillId !== 'new') });
 }
 
-export function useAgentTeamQuery(workspace: string | undefined, teamId: string) {
-  return useQuery({ queryKey: agentTeamQueryKey(teamId), queryFn: () => api.agentTeam(teamId), enabled: Boolean(workspace && teamId) });
-}
-
 export function useAgentTeamRecordsQuery(teamId: string) {
   return useQuery({ queryKey: agentTeamRecordsQueryKey(teamId), queryFn: () => api.agentTeamRecords(teamId), enabled: Boolean(teamId), refetchInterval: 5_000 });
 }
 
-export function useAgentTeamGroupsQuery(teamId: string) {
-  return useQuery({ queryKey: agentTeamGroupsQueryKey(teamId), queryFn: () => api.agentTeamGroups(teamId), enabled: Boolean(teamId), refetchInterval: 5_000 });
-}
-
 export function useAgentTeamGroupQuery(groupId: string) {
   return useQuery({ queryKey: agentTeamGroupQueryKey(groupId), queryFn: () => api.agentTeamGroup(groupId), enabled: Boolean(groupId), refetchInterval: 5_000 });
-}
-
-export function useAgentTeamMemoriesQuery(teamId: string) {
-  return useQuery({ queryKey: agentTeamMemoriesQueryKey(teamId), queryFn: () => api.agentTeamMemories(teamId), enabled: Boolean(teamId) });
-}
-
-export function useAgentTeamRepositoriesQuery(teamId: string) {
-  return useQuery({ queryKey: agentTeamRepositoriesQueryKey(teamId), queryFn: () => api.agentTeamRepositories(teamId), enabled: Boolean(teamId) });
 }
 
 export function useAgentTeamDocumentQuery(workspace: string | undefined, documentId: string | null) {

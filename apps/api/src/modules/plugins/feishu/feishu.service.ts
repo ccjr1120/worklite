@@ -441,7 +441,11 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       state.content = `${run.intent}\n\n${active ? `当前任务：${active.taskKey}` : ''}`;
       if (run.status === 'failed' && active?.error) state.content += `\n\n${active.error}`;
       const pending = run.pendingInputs.find((item) => item.status === 'pending');
-      if (pending?.kind === 'question') state.question = { text: pending.question, action: { kind: 'answer', runId: run.id, pendingInputId: pending.id, scopeRevision: pending.scopeRevision }, commands: run.mode !== 'plan_only' && run.tasks.find((task) => task.id === pending.taskAttemptId)?.role !== 'developer' };
+      if (pending?.kind === 'question') {
+        const owner = run.tasks.find((task) => task.id === pending.taskAttemptId);
+        const executorBacked = Boolean(owner && run.teamVersion.projectExecutorLaunches?.[owner.role]);
+        state.question = { text: pending.question, action: { kind: 'answer', runId: run.id, pendingInputId: pending.id, scopeRevision: pending.scopeRevision }, commands: Boolean(owner && run.mode !== 'plan_only' && owner.role !== 'developer' && owner.role !== 'team-manager' && !executorBacked) };
+      }
       if (pending?.kind === 'operation_recovery' && pending.operationKey) {
         state.content += `\n\n${pending.question}`;
         state.buttons.push(...(['adopt_command', 'mark_failed', 'replay'] as const).map((decision) => ({ label: ({ adopt_command: '采用已执行结果', mark_failed: '标记操作失败', replay: '重新执行此操作' })[decision], action: { kind: 'recovery', runId: run.id, operationKey: pending.operationKey!, decision } as FeishuAction })));

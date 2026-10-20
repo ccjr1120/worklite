@@ -34,7 +34,7 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 - Providers: [Model providers and Portkey Gateway](pages/model-providers/DESIGN.md), including the dedicated Codex Account Pool
 - Logs: [Gateway statistics and request logs](pages/logs/DESIGN.md), including the shared time range
 - Workflows: [List](pages/workflows/list/DESIGN.md), [Editor](pages/workflows/editor/DESIGN.md), [Versions](pages/workflows/versions/DESIGN.md)
-- Agent Teams: work records [Detail](pages/agent-teams/detail/DESIGN.md), separate [Configuration](pages/agent-teams/configuration/DESIGN.md), group conversation [Group](pages/agent-teams/group/DESIGN.md), and immutable execution evidence [Run detail](pages/agent-team-runs/detail/DESIGN.md)
+- Agent Teams: read-only Run records [Detail](pages/agent-teams/detail/DESIGN.md), read-only transcript archive [Group](pages/agent-teams/group/DESIGN.md), and immutable execution evidence [Run detail](pages/agent-team-runs/detail/DESIGN.md). Team operations and configuration live in Chat.
 - Runs: [Detail](pages/runs/detail/DESIGN.md), [Node logs](surfaces/workflow-run/node-logs/DESIGN.md)
 - Skills: [List](pages/skills/list/DESIGN.md), [Editor](pages/skills/editor/DESIGN.md)
 - MCP servers: [List](pages/mcp-servers/list/DESIGN.md), [Configuration](pages/mcp-servers/configuration/DESIGN.md)
@@ -51,7 +51,6 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 /model-providers
 /logs
 /agent-teams/:teamId
-/agent-teams/:teamId/configuration
 /agent-team-groups/:groupId
 /agent-team-runs/:runId
 /workflows/{new,:workflowId,:workflowId/versions}
@@ -72,7 +71,7 @@ The `/model-providers` page is the top-level Providers destination. It uses page
 
 `/logs` is the top-level Logs destination for Gateway transport observability. It uses page-level tabs for Statistics and Requests over one shared time range. Provider and model filters scope both views, model breakdowns open their matching requests, and failed Provider tests can focus the exact captured request. Providers configures what the Gateway dispatches to; Logs reads what it did.
 
-`/agent-teams/:teamId` is the direct destination for the one built-in Agent Team and contains group work records without page tabs. Its upper-right Configuration action opens `/agent-teams/:teamId/configuration`, which owns the Team form and memory management without tabs. Creating a record opens an empty task group at `/agent-team-groups/:groupId`; the user starts work by mentioning an active role or the protected Team Manager in that group. The Team Manager is a narrower Chat capability for Team configuration, role CRUD and Team memories. Chat can also dispatch a message to a task group, defaulting to Team Manager when no role is specified. `/agent-team-groups/:groupId` owns the persisted group transcript and role-addressed messages, while task attempts, repository scopes, documents and controls remain server evidence. `/agent-team-runs/:runId` remains the immutable execution evidence destination for a captured Run, not a full Run collection. A failed managed Team document can be redelivered through its detail or download route without rerunning its producing role. `/runs/:runId` is a Workflow Run log-reading destination reached from a Workflow's Run records dialog, not a top-level collection. There is no Run list route: Runs are reached through their Workflow. Provider request observability is not a Settings page: `/settings` keeps the WorkLite-owned Usage and Audit Log read models, which are business records over Runs and resource mutations rather than Gateway transport records.
+`/agent-teams/:teamId` is the direct destination for the one built-in Agent Team and lists read-only Run summaries without tabs. Chat is the sole user-facing surface for dispatch, pending-input answers, exact Command grants, Run controls and recovery, and Team configuration, role, working-practice, and memory management through protected platform operations. Chat dispatch creates a group-bound Run internally. `/agent-team-groups/:groupId` is a read-only archive for existing persisted group transcripts; direct group creation, message, answer and repository-mutation routes are retired; only Chat-bound reexecution remains. `/agent-team-runs/:runId` displays read-only immutable execution evidence for one captured Run, not a full Run collection. The former Team configuration route is retired. Group and Run evidence remain available from existing records and Chat task cards. A failed managed Team document can be redelivered through its detail or download route without rerunning its producing role. `/runs/:runId` is a Workflow Run log-reading destination reached from a Workflow's Run records dialog, not a top-level collection. There is no Run list route: Runs are reached through their Workflow. Provider request observability is not a Settings page: `/settings` keeps the WorkLite-owned Usage and Audit Log read models, which are business records over Runs and resource mutations rather than Gateway transport records.
 
 ## Shared Component Inventory
 
@@ -91,6 +90,12 @@ Domain-neutral reusable components belong in the shared UI package. Feature comp
 Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
+
+### 2026-10-20 - Chat-only Agent Team operations
+
+- Made Chat the only Team operation surface. The Team route lists read-only Runs, Run detail is read-only evidence, existing group routes are read-only transcript archives, and the configuration route is retired.
+- Removed direct group creation, message, answer and repository-mutation API routes; group mutation remains only for Chat-bound reexecution.
+- Team task cards link to Run evidence and keep questions, structured exact Command grants, controls, and recovery in the Chat conversation.
 
 ### 2026-10-19 - Team Manager owns working practice and memories
 

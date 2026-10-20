@@ -18,7 +18,6 @@ import { Route as SettingsRouteRouteImport } from './routes/settings/route'
 import { Route as AgentTeamGroupsGroupIdRouteImport } from './routes/agent-team-groups/$groupId'
 import { Route as AgentTeamRunsRunIdRouteImport } from './routes/agent-team-runs/$runId'
 import { Route as AgentTeamsTeamIdRouteImport } from './routes/agent-teams/$teamId'
-import { Route as AgentTeamsTeamIdConfigurationRouteImport } from './routes/agent-teams/$teamId.configuration'
 import { Route as AgentTeamsTeamIdIndexRouteImport } from './routes/agent-teams/$teamId.index'
 import { Route as ArtifactsArtifactIdRouteImport } from './routes/artifacts/$artifactId'
 import { Route as McpServersIndexRouteImport } from './routes/mcp-servers/index'
@@ -80,11 +79,6 @@ const AgentTeamsTeamIdRoute = AgentTeamsTeamIdRouteImport.update({
   id: '/agent-teams/$teamId',
   path: '/agent-teams/$teamId',
   getParentRoute: () => rootRouteImport,
-} as any)
-const AgentTeamsTeamIdConfigurationRoute = AgentTeamsTeamIdConfigurationRouteImport.update({
-  id: '/configuration',
-  path: '/configuration',
-  getParentRoute: () => AgentTeamsTeamIdRoute,
 } as any)
 const AgentTeamsTeamIdIndexRoute = AgentTeamsTeamIdIndexRouteImport.update({
   id: '/',
@@ -178,7 +172,6 @@ export interface FileRoutesByFullPath {
   '/agent-team-groups/$groupId': typeof AgentTeamGroupsGroupIdRoute
   '/agent-team-runs/$runId': typeof AgentTeamRunsRunIdRoute
   '/agent-teams/$teamId': typeof AgentTeamsTeamIdRouteWithChildren
-  '/agent-teams/$teamId/configuration': typeof AgentTeamsTeamIdConfigurationRoute
   '/agent-teams/$teamId/': typeof AgentTeamsTeamIdIndexRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
@@ -205,7 +198,6 @@ export interface FileRoutesByTo {
   '/agent-team-groups/$groupId': typeof AgentTeamGroupsGroupIdRoute
   '/agent-team-runs/$runId': typeof AgentTeamRunsRunIdRoute
   '/agent-teams/$teamId': typeof AgentTeamsTeamIdRouteWithChildren
-  '/agent-teams/$teamId/configuration': typeof AgentTeamsTeamIdConfigurationRoute
   '/agent-teams/$teamId/': typeof AgentTeamsTeamIdIndexRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
@@ -234,7 +226,6 @@ export interface FileRoutesById {
   '/agent-team-groups/$groupId': typeof AgentTeamGroupsGroupIdRoute
   '/agent-team-runs/$runId': typeof AgentTeamRunsRunIdRoute
   '/agent-teams/$teamId': typeof AgentTeamsTeamIdRouteWithChildren
-  '/agent-teams/$teamId/configuration': typeof AgentTeamsTeamIdConfigurationRoute
   '/agent-teams/$teamId/': typeof AgentTeamsTeamIdIndexRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
@@ -264,7 +255,6 @@ export interface FileRouteTypes {
     | '/agent-team-groups/$groupId'
     | '/agent-team-runs/$runId'
     | '/agent-teams/$teamId'
-    | '/agent-teams/$teamId/configuration'
     | '/agent-teams/$teamId/'
     | '/artifacts/$artifactId'
     | '/mcp-servers/$serverId'
@@ -291,7 +281,6 @@ export interface FileRouteTypes {
     | '/agent-team-groups/$groupId'
     | '/agent-team-runs/$runId'
     | '/agent-teams/$teamId'
-    | '/agent-teams/$teamId/configuration'
     | '/agent-teams/$teamId/'
     | '/artifacts/$artifactId'
     | '/mcp-servers/$serverId'
@@ -319,7 +308,6 @@ export interface FileRouteTypes {
     | '/agent-team-groups/$groupId'
     | '/agent-team-runs/$runId'
     | '/agent-teams/$teamId'
-    | '/agent-teams/$teamId/configuration'
     | '/agent-teams/$teamId/'
     | '/artifacts/$artifactId'
     | '/mcp-servers/$serverId'
@@ -424,13 +412,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/agent-teams/$teamId'
       preLoaderRoute: typeof AgentTeamsTeamIdRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/agent-teams/$teamId/configuration': {
-      id: '/configuration'
-      path: '/configuration'
-      fullPath: '/agent-teams/$teamId/configuration'
-      preLoaderRoute: typeof AgentTeamsTeamIdConfigurationRouteImport
-      parentRoute: typeof AgentTeamsTeamIdRoute
     }
     '/agent-teams/$teamId/': {
       id: '/'
@@ -577,12 +558,10 @@ const WorkflowsWorkflowIdRouteWithChildren =
   WorkflowsWorkflowIdRoute._addFileChildren(WorkflowsWorkflowIdRouteChildren)
 
 interface AgentTeamsTeamIdRouteChildren {
-  AgentTeamsTeamIdConfigurationRoute: typeof AgentTeamsTeamIdConfigurationRoute
   AgentTeamsTeamIdIndexRoute: typeof AgentTeamsTeamIdIndexRoute
 }
 
 const AgentTeamsTeamIdRouteChildren: AgentTeamsTeamIdRouteChildren = {
-  AgentTeamsTeamIdConfigurationRoute: AgentTeamsTeamIdConfigurationRoute,
   AgentTeamsTeamIdIndexRoute: AgentTeamsTeamIdIndexRoute,
 }
 
