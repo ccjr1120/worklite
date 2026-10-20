@@ -5,8 +5,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { and, asc, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
-import type { AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ChatProgressReport, ChatProjectTaskView, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, WorkflowNodeActivityDetail, WorkliteScriptResult } from '@worklite/contracts';
-import { agentExecutionEvents, agentExecutions, chatConfigurations, chatMemories, agents, agentSkills, agentSubSessions, agentToolCalls, auditLogs, chatProjectTasks, chatSubmissions, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage, insertAgentToolResults, normalizeAgentModelMessages } from '@worklite/db';
+import type { AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ChatProgressReport, ChatProjectTaskView, ChatTaskReference, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, WorkflowNodeActivityDetail, WorkliteScriptResult } from '@worklite/contracts';
+import { agentExecutionEvents, agentExecutions, chatConfigurations, chatMemories, agents, agentSkills, agentSubSessions, agentToolCalls, auditLogs, chatProjectTasks, chatSubmissions, externalChats, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage, insertAgentToolResults, normalizeAgentModelMessages } from '@worklite/db';
 import { createModelGateway, type GatewayAgentMessage, type GatewayToolDefinition, type GatewayToolResultOutput } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
@@ -832,6 +832,7 @@ export class AgentExecutionsService implements OnModuleInit {
       accepted = true;
       transaction.update(chatProjectTasks).set({ reportedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).run();
       transaction.insert(auditLogs).values({ id: `audit_${randomUUID()}`, workspaceId, action: `chat_project_task.${task.status}`, resource: taskId, metadata: { executionId, taskId, report: true } }).run();
+      this.openConversationReportWindow(transaction, workspaceId, executionId, execution.displayMessages);
     });
     if (!accepted) {
       if (deferredAttempts < 240) this.scheduleProjectTaskReport(workspaceId, executionId, taskId, 15000, deferredAttempts + 1);
@@ -893,6 +894,7 @@ export class AgentExecutionsService implements OnModuleInit {
       if (updated.changes === 0) return;
       accepted = true;
       transaction.insert(auditLogs).values({ id: `audit_${randomUUID()}`, workspaceId, action: `chat_project_task.${task.status}`, resource: taskId, metadata: { executionId, taskId, report: true, subscriptionId } }).run();
+      this.openConversationReportWindow(transaction, workspaceId, executionId, execution.displayMessages);
     });
     if (!accepted) {
       if (deferredAttempts < 240) this.scheduleSubscriptionReport(workspaceId, executionId, taskId, subscriptionId, 15000, deferredAttempts + 1);
@@ -947,12 +949,30 @@ export class AgentExecutionsService implements OnModuleInit {
       if (updated.changes === 0) return;
       accepted = true;
       transaction.insert(auditLogs).values({ id: `audit_${randomUUID()}`, workspaceId, action: 'chat_progress.reported', resource: executionId, metadata: { executionId, report: 'progress' } }).run();
+      this.openConversationReportWindow(transaction, workspaceId, executionId, execution.displayMessages);
     });
     if (!accepted) return 'busy';
     await this.publishSnapshotForExecution(workspaceId, executionId);
     // The report turn runs outside an HTTP request; the workspace and model runtime resolve without one.
     this.schedule({} as Request, 'personal', executionId, progressReport);
     return 'reported';
+  }
+
+  // A background report (project task settlement or periodic active-work progress) appends its
+  // reply to the execution's own message history, which Web already streams live. But the
+  // conversation's most recent 'conversation'-kind chatSubmissions row was frozen (completionStatus
+  // set, settled=true) when its own turn ended, and nothing else reopens that window — so a
+  // channel adapter whose delivery sweep only redelivers settled=false rows (WeChat, Feishu) never
+  // sees the new reply. Opening a fresh, narrowly-scoped row per report mirrors how upgrades.service
+  // already injects a mid-execution notification, and keeps the window just the new reply instead
+  // of replaying everything already delivered.
+  private openConversationReportWindow(transaction: AcceptanceTransaction, workspaceId: string, executionId: string, beforeMessages: StoredAgentDisplayMessage[]): void {
+    const chat = transaction.select({ id: externalChats.id }).from(externalChats).where(eq(externalChats.executionId, executionId)).limit(1).get();
+    if (!chat) return;
+    const reference: ChatTaskReference = { kind: 'conversation', executionId, afterMessageId: beforeMessages.at(-1)?.id ?? null, afterSequence: 0 };
+    transaction.insert(chatSubmissions).values({
+      id: `report_${randomUUID()}`, workspaceId, chatId: chat.id, executionId, message: '', target: { kind: 'conversation' }, reference,
+    }).run();
   }
 
   private async executeProjectTaskControlTool(request: Request, workspaceSlug: string, workspaceId: string, executionId: string, call: typeof agentToolCalls.$inferSelect): Promise<void> {
