@@ -184,6 +184,36 @@
     "imageSize": "尺寸",
     "imageSummary": "{{count}} 张图片 · {{background}} · {{quality}} · {{size}}",
     "imageConnectionHint": "生成图片只能连接到微信 v2 封面输入。",
+    "stickerNode": "Canvas 贴图",
+    "stickerNodeDescription": "用 Canvas 2D 确定性绘制形状和文字贴图",
+    "stickerTextPort": "贴图文字",
+    "stickerWidth": "宽度",
+    "stickerHeight": "高度",
+    "stickerShape": "形状",
+    "stickerShapes": {
+      "none": "无（矩形）",
+      "roundedRect": "圆角矩形",
+      "circle": "圆形",
+      "ribbon": "丝带形"
+    },
+    "stickerBackgroundColor": "背景颜色",
+    "stickerCornerRadius": "圆角半径",
+    "stickerTextContent": "文字内容",
+    "stickerTextContentHint": "留空则使用上游连接的文字输入。",
+    "stickerTextColor": "文字颜色",
+    "stickerTextFontSize": "字号",
+    "stickerTextFontFamily": "字体",
+    "stickerFontFamilies": {
+      "sansSerif": "无衬线",
+      "serif": "衬线",
+      "monospace": "等宽"
+    },
+    "stickerTextAlign": "文字对齐",
+    "stickerAligns": {
+      "left": "左对齐",
+      "center": "居中",
+      "right": "右对齐"
+    },
     "wechatNode": "微信公众号",
     "wechatNodeDescription": "通过扫码确认保存或发布带生成封面的 Markdown 文章",
     "wechatAccount": "公众号账号",

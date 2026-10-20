@@ -213,6 +213,37 @@ const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     },
   },
   {
+    id: 'worklite/canvas-sticker',
+    version: '1',
+    name: 'Canvas Sticker',
+    purpose: 'Draw a deterministic PNG sticker from a configured shape and optional text using the Canvas 2D API.',
+    inputs: [{ name: 'text', required: false, dataType: 'string', multiple: false }],
+    outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
+    inputSchema: { type: 'object', properties: { text: { type: 'string' } } },
+    outputSchema: { type: 'object' },
+    configSchema: {
+      type: 'object',
+      required: ['width', 'height', 'shape', 'backgroundColor'],
+      properties: {
+        width: { type: 'integer', minimum: 64, maximum: 2048 },
+        height: { type: 'integer', minimum: 64, maximum: 2048 },
+        shape: { type: 'string', enum: ['none', 'roundedRect', 'circle', 'ribbon'] },
+        backgroundColor: { type: 'string' },
+        cornerRadius: { type: 'integer', minimum: 0 },
+        text: {
+          type: 'object',
+          properties: {
+            content: { type: 'string' },
+            color: { type: 'string' },
+            fontSize: { type: 'integer', minimum: 8, maximum: 400 },
+            fontFamily: { type: 'string', enum: ['sans-serif', 'serif', 'monospace'] },
+            align: { type: 'string', enum: ['left', 'center', 'right'] },
+          },
+        },
+      },
+    },
+  },
+  {
     id: 'wechat-official-account/publish',
     version: '1',
     name: 'WeChat Official Account',

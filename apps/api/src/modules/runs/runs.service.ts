@@ -25,6 +25,7 @@ import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from '../agents/agent-executions.service';
 import { WechatOfficialAccountService } from '../plugins/wechat-official-account.service';
 import { PortkeyGatewayService } from '../model-providers/portkey-gateway.service';
+import { renderCanvasSticker, validateCanvasStickerConfig } from './canvas-sticker';
 
 type RunListener = (event: RunProgressEvent) => void;
 type PreparedArtifactNode = {
@@ -291,6 +292,23 @@ export class RunsService {
           signal: request.signal,
         });
         return { output };
+      },
+    });
+    this.registry.register({
+      ...capability('worklite/canvas-sticker'),
+      execute: async (request) => {
+        const config = validateCanvasStickerConfig(request.config);
+        const input = asRecord(request.input);
+        const text = typeof input?.text === 'string' ? input.text : undefined;
+        const png = renderCanvasSticker(config, text);
+        return {
+          output: {
+            type: 'workflow_image',
+            model: 'worklite/canvas-sticker',
+            mediaType: 'image/png',
+            data: [{ b64Json: png.toString('base64') }],
+          },
+        };
       },
     });
     this.registry.register({

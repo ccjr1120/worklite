@@ -1,11 +1,11 @@
-import { Bot, Braces, FileSearch, FileText, GitBranch, Image as ImageIcon, LayoutDashboard, ListChecks, Send, Timer } from 'lucide-react';
+import { Bot, Braces, FileSearch, FileText, GitBranch, Image as ImageIcon, LayoutDashboard, ListChecks, Send, Sticker, Timer } from 'lucide-react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import type { WorkflowDashboardLayout, WorkflowEdgeCondition } from '@worklite/contracts';
 import { cn } from '@/lib/utils';
 
-export type WorkflowCanvasNodeType = 'input' | 'timer' | 'agent' | 'branch' | 'systemOne' | 'systemOneMap' | 'dashboard' | 'artifact' | 'artifactQuery' | 'wechatPublish' | 'image';
+export type WorkflowCanvasNodeType = 'input' | 'timer' | 'agent' | 'branch' | 'systemOne' | 'systemOneMap' | 'dashboard' | 'artifact' | 'artifactQuery' | 'wechatPublish' | 'image' | 'canvasSticker';
 
 export type WorkflowSystemOneRank = {
   path: string;
@@ -44,6 +44,16 @@ export type WorkflowCanvasNodeData = {
   imageBackground?: 'opaque' | 'transparent';
   imageQuality?: 'low' | 'medium' | 'high';
   imageSize?: '1024x1024' | '1536x1024' | '1024x1536';
+  stickerWidth?: number;
+  stickerHeight?: number;
+  stickerShape?: 'none' | 'roundedRect' | 'circle' | 'ribbon';
+  stickerBackgroundColor?: string;
+  stickerCornerRadius?: number;
+  stickerTextContent?: string;
+  stickerTextColor?: string;
+  stickerTextFontSize?: number;
+  stickerTextFontFamily?: 'sans-serif' | 'serif' | 'monospace';
+  stickerTextAlign?: 'left' | 'center' | 'right';
   errorPolicy: 'stop' | 'retry';
 };
 
@@ -99,6 +109,7 @@ export function workflowNodeInputs(node: WorkflowCanvasNode, t: TFunction<'workf
       ...(node.data.wechatNodeVersion === '1' ? [] : [{ id: 'coverImage', label: t('editor.wechatCoverPort') }]),
     ],
     image: [{ id: 'prompt', label: t('editor.imagePromptPort') }],
+    canvasSticker: [{ id: 'text', label: t('editor.stickerTextPort') }],
   };
   return inputs[node.data.nodeType];
 }
@@ -116,6 +127,7 @@ function workflowNodeKind(nodeType: WorkflowCanvasNodeType, t: TFunction<'workfl
     artifactQuery: t('editor.artifactQueryNode'),
     wechatPublish: t('editor.wechatNode'),
     image: t('editor.imageNode'),
+    canvasSticker: t('editor.stickerNode'),
   };
   return kinds[nodeType];
 }
@@ -170,6 +182,7 @@ export function WorkflowStageNode({
     artifactQuery: <FileSearch className={iconClass} aria-hidden="true" />,
     wechatPublish: <Send className={iconClass} aria-hidden="true" />,
     image: <ImageIcon className={iconClass} aria-hidden="true" />,
+    canvasSticker: <Sticker className={iconClass} aria-hidden="true" />,
   }[node.data.nodeType];
   const kind = workflowNodeKind(node.data.nodeType, t);
   const inputs = workflowNodeInputs(node, t);

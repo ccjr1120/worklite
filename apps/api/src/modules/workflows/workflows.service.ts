@@ -535,6 +535,8 @@ function validateDefinition(definition: StoredWorkflowDefinition, requireComplet
 }
 
 
+const CANVAS_STICKER_COLOR_PATTERN = /^(#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|rgba?\([0-9.,%\s]+\)|transparent)$/;
+
 const WORKFLOW_EDGE_OPERATORS = new Set([
   'equals',
   'notEquals',
@@ -665,6 +667,21 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
     if (value.quality !== 'low' && value.quality !== 'medium' && value.quality !== 'high') throw new BadRequestException('Image node quality must be low, medium, or high.');
     if (value.size !== '1024x1024' && value.size !== '1536x1024' && value.size !== '1024x1536') throw new BadRequestException('Image node size is not supported.');
   }
+  if (type === 'worklite/canvas-sticker') {
+    if (typeof value.width !== 'number' || !Number.isInteger(value.width) || value.width < 64 || value.width > 2048) throw new BadRequestException('Canvas Sticker node width must be an integer between 64 and 2048.');
+    if (typeof value.height !== 'number' || !Number.isInteger(value.height) || value.height < 64 || value.height > 2048) throw new BadRequestException('Canvas Sticker node height must be an integer between 64 and 2048.');
+    if (value.shape !== 'none' && value.shape !== 'roundedRect' && value.shape !== 'circle' && value.shape !== 'ribbon') throw new BadRequestException('Canvas Sticker node shape must be none, roundedRect, circle, or ribbon.');
+    if (typeof value.backgroundColor !== 'string' || !CANVAS_STICKER_COLOR_PATTERN.test(value.backgroundColor.trim())) throw new BadRequestException('Canvas Sticker node backgroundColor must be a #hex, rgb(a)(), or transparent color.');
+    if (value.cornerRadius !== undefined && (typeof value.cornerRadius !== 'number' || !Number.isInteger(value.cornerRadius) || value.cornerRadius < 0)) throw new BadRequestException('Canvas Sticker node cornerRadius must be a non-negative integer.');
+    if (value.text !== undefined) {
+      if (!isRecord(value.text)) throw new BadRequestException('Canvas Sticker node text must be an object.');
+      if (value.text.content !== undefined && typeof value.text.content !== 'string') throw new BadRequestException('Canvas Sticker node text.content must be a string.');
+      if (value.text.color !== undefined && (typeof value.text.color !== 'string' || !CANVAS_STICKER_COLOR_PATTERN.test(value.text.color.trim()))) throw new BadRequestException('Canvas Sticker node text.color must be a #hex, rgb(a)(), or transparent color.');
+      if (value.text.fontSize !== undefined && (typeof value.text.fontSize !== 'number' || !Number.isInteger(value.text.fontSize) || value.text.fontSize < 8 || value.text.fontSize > 400)) throw new BadRequestException('Canvas Sticker node text.fontSize must be an integer between 8 and 400.');
+      if (value.text.fontFamily !== undefined && value.text.fontFamily !== 'sans-serif' && value.text.fontFamily !== 'serif' && value.text.fontFamily !== 'monospace') throw new BadRequestException('Canvas Sticker node text.fontFamily must be sans-serif, serif, or monospace.');
+      if (value.text.align !== undefined && value.text.align !== 'left' && value.text.align !== 'center' && value.text.align !== 'right') throw new BadRequestException('Canvas Sticker node text.align must be left, center, or right.');
+    }
+  }
   if (type === 'worklite/timer') {
     if (typeof value.enabled !== 'boolean') throw new BadRequestException('Timer node enabled must be a boolean.');
     if (typeof value.intervalSeconds !== 'number' || !Number.isFinite(value.intervalSeconds) || value.intervalSeconds < 300) throw new BadRequestException('Timer node intervalSeconds must be a finite number of at least 300.');
@@ -733,7 +750,7 @@ function isGeneratedImageConnectionAllowed(
   sourcePort: string,
   targetPort: string,
 ): boolean {
-  const isImageOutput = source.type === 'worklite/image' && source.typeVersion === '1' && sourcePort === 'output';
+  const isImageOutput = (source.type === 'worklite/image' || source.type === 'worklite/canvas-sticker') && source.typeVersion === '1' && sourcePort === 'output';
   const isWeChatCoverInput = target.type === 'wechat-official-account/publish' && target.typeVersion === '2' && targetPort === 'coverImage';
   return isImageOutput === isWeChatCoverInput;
 }
