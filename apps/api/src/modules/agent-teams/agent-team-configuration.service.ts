@@ -166,7 +166,10 @@ export class AgentTeamConfigurationService {
   private async resolveMcpServers(workspaceId: string, serverIds: ReadonlySet<string>) {
     const rows = serverIds.size === 0 ? [] : await this.db.select().from(mcpServers).where(and(eq(mcpServers.workspaceId, workspaceId), inArray(mcpServers.id, [...serverIds])));
     if (rows.length !== serverIds.size) throw new NotFoundException('A selected MCP server was not found in this workspace.');
-    return new Map(rows.map((row) => [row.id, { id: row.id, name: row.name, allowedToolNames: row.allowedToolNames ?? [] }]));
+    // A role captures the server's discovered tool set, so a never-configured
+    // server connects and discovers its tools here before the capture.
+    const resolved = await Promise.all(rows.map((row) => row.connection === 'unconfigured' ? this.resources.autoConnectMcpServer(row, true) : row));
+    return new Map(resolved.map((row) => [row.id, { id: row.id, name: row.name, allowedToolNames: row.allowedToolNames ?? [] }]));
   }
 }
 

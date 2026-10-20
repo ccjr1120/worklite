@@ -301,7 +301,7 @@ const WORKLITE_PLATFORM_TOOL_SPECS: Array<[path: string, description: string, in
     source: { type: 'string', enum: ['online'] },
     files: { type: 'array', minItems: 1, maxItems: 100, items: toolInput({ path: toolString('Relative path, such as SKILL.md or scripts/run.sh.'), content: toolString() }, ['path', 'content']) },
   }, ['name', 'source', 'files'])],
-  ['scripts/create-mcp-server.mjs', 'Create a remote MCP server draft.', toolInput({
+  ['scripts/create-mcp-server.mjs', 'Create a remote MCP server. The server connects and discovers its tools automatically on creation and when first referenced; without an explicit tool selection every discovered tool is allowed. The returned resource carries the connection state, a persisted failure reason when connection fails, and the discovered tool names.', toolInput({
     name: toolString(),
     endpoint: toolString('Remote MCP endpoint URL.'),
   }, ['name', 'endpoint'])],
