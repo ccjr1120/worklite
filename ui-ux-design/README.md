@@ -97,6 +97,10 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 - Pinned the Team Manager at the top of [Team Configuration](pages/agent-teams/configuration/DESIGN.md) as a Chat-style section combining its model, working practice and Team/repository-scoped memories; work roles keep model and executor choices while advanced capability fields move to Team Manager conversation management.
 - The group `@` role menu lists Team Manager first and returns focus to the composer after a selection.
 
+### 2026-10-20 - Chat active-work progress interval configuration
+
+- The [Chat](pages/chat/workspace/DESIGN.md) active-work check and model-only reminder interval is now `CHAT_PROGRESS_NOTE_INTERVAL_SECONDS` (default 300 seconds, five minutes), retaining visible-change deduplication, automatic stop when work settles and zero-action progress feedback.
+
 ### 2026-10-19 - Chat active-work progress interval
 
 - Set the [Chat](pages/chat/workspace/DESIGN.md) active-work check and model-only reminder to roughly 90 seconds, retaining visible-change deduplication, automatic stop when work settles and zero-action progress feedback.

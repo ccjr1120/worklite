@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ConfigService } from '@nestjs/config';
 import { createDb, type Database } from '@worklite/db';
-import { activeWorkSignature, buildActiveWorkNote, ChatProgressReportsService, type ActiveWorkItem } from './chat-progress-reports.service';
+import { activeWorkSignature, buildActiveWorkNote, ChatProgressReportsService, DEFAULT_PROGRESS_NOTE_INTERVAL_SECONDS, type ActiveWorkItem } from './chat-progress-reports.service';
 import type { AgentExecutionsService } from './agent-executions.service';
 import type { AgentTeamRuntimeService } from '../agent-teams/agent-team-runtime.service';
 
@@ -69,7 +70,7 @@ const DDL = [
 
 const dbs: Database[] = [];
 
-function setup(options?: { report?: 'reported' | 'busy' | 'unavailable' }) {
+function setup(options?: { report?: 'reported' | 'busy' | 'unavailable'; env?: Record<string, string> }) {
   const db = createDb(':memory:');
   dbs.push(db);
   for (const statement of DDL) db.$client.exec(statement);
@@ -86,6 +87,7 @@ function setup(options?: { report?: 'reported' | 'busy' | 'unavailable' }) {
     db,
     { getRunProgress } as unknown as AgentTeamRuntimeService,
     { reportActiveWorkProgress } as unknown as AgentExecutionsService,
+    { get: (key: string) => options?.env?.[key] } as unknown as ConfigService,
   );
   const tick = () => (service as unknown as { tick(): Promise<void> }).tick();
   return { db, service, tick, reportActiveWorkProgress, getRunProgress };
@@ -228,6 +230,21 @@ describe('ChatProgressReportsService', () => {
     await tick();
     expect(reportActiveWorkProgress).toHaveBeenCalledTimes(2);
   });
+
+  it('defaults the report interval to five minutes', () => {
+    const { service } = setup();
+    expect(service.intervalSeconds).toBe(DEFAULT_PROGRESS_NOTE_INTERVAL_SECONDS);
+    expect(DEFAULT_PROGRESS_NOTE_INTERVAL_SECONDS).toBe(300);
+  });
+
+  it('reads the report interval from CHAT_PROGRESS_NOTE_INTERVAL_SECONDS', () => {
+    expect(setup({ env: { CHAT_PROGRESS_NOTE_INTERVAL_SECONDS: '600' } }).service.intervalSeconds).toBe(600);
+  });
+
+  it('falls back to the default interval for an invalid value', () => {
+    expect(setup({ env: { CHAT_PROGRESS_NOTE_INTERVAL_SECONDS: 'soon' } }).service.intervalSeconds).toBe(DEFAULT_PROGRESS_NOTE_INTERVAL_SECONDS);
+    expect(setup({ env: { CHAT_PROGRESS_NOTE_INTERVAL_SECONDS: '-30' } }).service.intervalSeconds).toBe(DEFAULT_PROGRESS_NOTE_INTERVAL_SECONDS);
+  });
 });
 
 describe('buildActiveWorkNote / activeWorkSignature', () => {
@@ -240,11 +257,15 @@ describe('buildActiveWorkNote / activeWorkSignature', () => {
   it('summarizes every active item briefly without internal detail', () => {
     const note = buildActiveWorkNote(items);
     expect(note).toContain('[活跃工作进展提醒]');
-    expect(note).toContain('约每 90 秒提醒一次');
+    expect(note).toContain('约每 5 分钟提醒一次');
     expect(note).toContain('acall_1');
     expect(note).toContain('trun_1');
     expect(note).toContain('wrun_1');
     expect(note).toContain('不要向用户复述本提醒本身');
+  });
+
+  it('labels a non-minute interval in seconds', () => {
+    expect(buildActiveWorkNote(items, 90)).toContain('约每 90 秒提醒一次');
   });
 
   it('changes only when a visible field changes', () => {

@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { agentTeamRuns, chatProjectTasks, chatSubmissions, workflowRuns, workflows, type Database } from '@worklite/db';
 import type { AgentTeamRunProgress } from '@worklite/contracts';
@@ -7,7 +8,7 @@ import { AgentTeamRuntimeService } from '../agent-teams/agent-team-runtime.servi
 import { AgentExecutionsService } from './agent-executions.service';
 import { deriveTaskStage } from './chat-project-tasks.service';
 
-const TICK_MS = 90_000;
+export const DEFAULT_PROGRESS_NOTE_INTERVAL_SECONDS = 300;
 const ACTIVE_RUN_STATUSES = ['queued', 'running', 'paused'] as const;
 const TITLE_LIMIT = 80;
 const PROGRESS_TEXT_LIMIT = 160;
@@ -31,7 +32,9 @@ export function activeWorkSignature(items: ActiveWorkItem[]): string {
       : [item.kind, item.id, item.status, item.currentNodeId]));
 }
 
-export function buildActiveWorkNote(items: ActiveWorkItem[]): string {
+const formatInterval = (seconds: number) => seconds % 60 === 0 ? `${seconds / 60} 分钟` : `${seconds} 秒`;
+
+export function buildActiveWorkNote(items: ActiveWorkItem[], intervalSeconds = DEFAULT_PROGRESS_NOTE_INTERVAL_SECONDS): string {
   const lines = items.map((item, index) => {
     if (item.kind === 'task') {
       const progress = item.progressText ? `，最新进展：${truncate(item.progressText, PROGRESS_TEXT_LIMIT)}` : '';
@@ -43,7 +46,7 @@ export function buildActiveWorkNote(items: ActiveWorkItem[]): string {
     }
     return `${index + 1}. 工作流运行 ${item.id}（${item.workflowName}）：${item.status}${item.currentNodeId ? `，当前节点 ${item.currentNodeId}` : ''}`;
   });
-  return `[活跃工作进展提醒] 当前对话仍有进行中的工作（约每 90 秒提醒一次，工作全部结束或无新进展时自动停止）：\n${lines.join('\n')}\n请基于以上信息用一两句话向用户汇报最新进展摘要；不要向用户复述本提醒本身；直接回复，不要调用工具。`;
+  return `[活跃工作进展提醒] 当前对话仍有进行中的工作（约每 ${formatInterval(intervalSeconds)}提醒一次，工作全部结束或无新进展时自动停止）：\n${lines.join('\n')}\n请基于以上信息用一两句话向用户汇报最新进展摘要；不要向用户复述本提醒本身；直接回复，不要调用工具。`;
 }
 
 // Periodic progress reports for conversations with active background work: a running project
@@ -57,18 +60,25 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
   private readonly logger = new Logger(ChatProgressReportsService.name);
   private readonly lastSignatures = new Map<string, string>();
   private timer: NodeJS.Timeout | null = null;
+  readonly intervalSeconds: number;
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     private readonly runtime: AgentTeamRuntimeService,
     private readonly executions: AgentExecutionsService,
-  ) {}
+    private readonly config: ConfigService,
+  ) {
+    const configured = this.config.get<string>('CHAT_PROGRESS_NOTE_INTERVAL_SECONDS');
+    const seconds = configured === undefined || configured === '' ? DEFAULT_PROGRESS_NOTE_INTERVAL_SECONDS : Number(configured);
+    if (!Number.isFinite(seconds) || seconds <= 0) this.logger.warn(`CHAT_PROGRESS_NOTE_INTERVAL_SECONDS=${configured} is not a positive number; using ${DEFAULT_PROGRESS_NOTE_INTERVAL_SECONDS} seconds.`);
+    this.intervalSeconds = Number.isFinite(seconds) && seconds > 0 ? seconds : DEFAULT_PROGRESS_NOTE_INTERVAL_SECONDS;
+  }
 
   onModuleInit(): void {
     this.timer = setInterval(() => {
       void this.tick()
         .catch((error) => this.logger.warn(`Chat progress report tick failed: ${error instanceof Error ? error.message : String(error)}`));
-    }, TICK_MS);
+    }, this.intervalSeconds * 1000);
     this.timer.unref();
   }
 
@@ -119,7 +129,7 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
     }
     const signature = activeWorkSignature(items);
     if (this.lastSignatures.get(target.executionId) === signature) return;
-    const result = await this.executions.reportActiveWorkProgress(target.workspaceId, target.executionId, buildActiveWorkNote(items), {
+    const result = await this.executions.reportActiveWorkProgress(target.workspaceId, target.executionId, buildActiveWorkNote(items, this.intervalSeconds), {
       items: items.map((item) => ({
         kind: item.kind,
         id: item.id,
