@@ -1016,6 +1016,7 @@ export type McpServerView = {
   name: string;
   endpoint: string;
   connection: 'connected' | 'unreachable' | 'auth_failed' | 'unconfigured';
+  connectionError: 'authentication' | 'unreachable' | 'unsupported_protocol' | 'malformed_response' | null;
   transport: 'Streamable HTTP';
   allowedTools: number;
   allowedToolNames: string[];

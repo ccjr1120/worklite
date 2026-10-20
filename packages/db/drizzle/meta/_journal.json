@@ -295,6 +295,13 @@
       "when": 1792405073802,
       "tag": "0042_chat_memory_categories",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1792468151786,
+      "tag": "0043_mcp_server_connection_error",
+      "breakpoints": true
     }
   ]
 }

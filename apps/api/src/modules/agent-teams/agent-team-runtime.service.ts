@@ -1568,7 +1568,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           mcpServers: (await this.resources.workflowMcpRuntimes(workspaceId, developerRole.mcpServers.map((server) => server.id)))
             .map((runtime) => {
               const snapshot = developerRole.mcpServers.find((server) => server.id === runtime.id);
-              return snapshot ? { ...runtime, name: snapshot.name, allowedTools: snapshot.allowedToolNames } : runtime;
+              // An empty captured selection means the server was never configured; the
+              // live runtime then carries its auto-discovered tools.
+              return snapshot?.allowedToolNames.length ? { ...runtime, name: snapshot.name, allowedTools: snapshot.allowedToolNames } : runtime;
             }),
           references,
           signal,
@@ -1624,7 +1626,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         mcpRuntimes: taskRole === 'team-manager' ? [] : (await this.resources.workflowMcpRuntimes(workspaceId, role.mcpServers.map((server) => server.id)))
           .map((runtime) => {
             const snapshot = role.mcpServers.find((server) => server.id === runtime.id);
-            return snapshot
+            // An empty captured selection means the server was never configured; the
+            // live runtime then carries its auto-discovered tools.
+            return snapshot?.allowedToolNames.length
               ? { ...runtime, name: snapshot.name, allowedTools: snapshot.allowedToolNames }
               : runtime;
           }),
