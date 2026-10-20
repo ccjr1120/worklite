@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import type { CreateMcpServerRequest, CreateSkillRequest, ExecuteSkillScriptRequest, ImportSkillRequest, UpdateMcpServerRequest, UpdateSkillRequest, UpdateWorkspaceSettingsRequest } from '@worklite/contracts';
 import { WorkspaceResourcesService } from './team-resources.service';
@@ -41,7 +41,7 @@ export class WorkspaceResourcesController {
   updateMcpServer(@Req() request: Request, @Param('serverId') serverId: string, @Body() body: UpdateMcpServerRequest) { return this.resources.updateMcpServer(request, 'personal', serverId, body); }
 
   @Delete('mcp-servers/:serverId')
-  deleteMcpServer(@Req() request: Request, @Param('serverId') serverId: string) { return this.resources.deleteMcpServer(request, 'personal', serverId); }
+  deleteMcpServer(@Req() request: Request, @Param('serverId') serverId: string, @Query('force') force?: string) { return this.resources.deleteMcpServer(request, 'personal', serverId, { force: force === 'true' }); }
 
   @Post('mcp-servers/:serverId/test')
   testMcpServer(@Req() request: Request, @Param('serverId') serverId: string) { return this.resources.testMcpServer(request, 'personal', serverId); }

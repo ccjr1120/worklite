@@ -1024,6 +1024,27 @@ export type McpServerView = {
   updatedAt: string;
 };
 
+// Every place a workspace MCP server is referenced, reported when its deletion
+// is rejected. Drafts and active Team role configuration are mutable and can be
+// cleaned by a force deletion; published WorkflowVersions and captured
+// TeamVersions are immutable history and are never rewritten; Chat and legacy
+// Agent references always block deletion until cleared by their owner.
+export type McpServerReferenceReport = {
+  agents: Array<{ agentId: string; agentName: string }>;
+  activeChatTurns: boolean;
+  chatConfiguration: boolean;
+  workflowDrafts: Array<{ workflowId: string; workflowName: string; nodeIds: string[] }>;
+  workflowVersions: Array<{ workflowId: string; workflowName: string; version: number; nodeIds: string[] }>;
+  agentTeamRoles: Array<{ teamId: string; teamName: string; role: string; displayName: string | null }>;
+  agentTeamVersions: Array<{ teamId: string; versionId: string; version: number; roles: string[] }>;
+};
+
+export type DeleteMcpServerResult = {
+  deleted: string;
+  force: boolean;
+  cleaned: { workflowDrafts: number; agentTeamRoles: number };
+};
+
 export type ModelProviderProtocol = 'openai/chat' | 'openai/responses' | 'anthropic/messages' | 'codex/responses' | 'typesafe/systemone';
 
 export type ModelProviderView = {

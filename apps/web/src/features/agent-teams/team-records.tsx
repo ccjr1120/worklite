@@ -20,7 +20,7 @@ export function TeamRecords({ teamId }: { teamId: string }) {
   return (
     <PageContainer width="detail">
       <WorkspaceChrome crumbs={[{ label: t('title') }]} />
-      <PageHeading title={t('title')} description={t('records.description')} actions={<Link to="/chat" className="rounded-md bg-brand px-3 py-2 text-sm font-medium text-brand-foreground hover:opacity-90">{t('records.openChat')}</Link>} />
+      <PageHeading title={t('title')} description={t('records.description')} actions={<div className="flex items-center gap-2"><Link to="/agent-team-config" className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">{t('config.viewConfig')}</Link><Link to="/chat" className="rounded-md bg-brand px-3 py-2 text-sm font-medium text-brand-foreground hover:opacity-90">{t('records.openChat')}</Link></div>} />
       {!query.data.length ? (
         <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground"><p>{t('records.empty')}</p><Link to="/chat" className="mt-2 inline-block text-brand-text underline underline-offset-4">{t('records.openChat')}</Link></div>
       ) : (

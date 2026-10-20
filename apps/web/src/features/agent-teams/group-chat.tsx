@@ -53,10 +53,10 @@ export function AgentTeamGroupChatPage({ groupId }: { groupId: string }) {
               <li key={message.id} className="min-w-0 border-t border-border pt-3 first:border-0 first:pt-0">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   <span className="font-medium text-foreground">
-                    {message.sender === 'user' ? t('group.you') : message.sender === 'system' ? t('group.system') : message.senderRole ? t(`role.${message.senderRole.replaceAll('-', '_')}`) : t('group.system')}
+                    {message.sender === 'user' ? t('group.you') : message.sender === 'system' ? t('group.system') : message.senderRole ? t(`role.${message.senderRole.replaceAll('-', '_')}` as never) : t('group.system')}
                   </span>
                   <time dateTime={message.createdAt}>{formatDateTime(message.createdAt, locale)}</time>
-                  {message.recipientRole ? <span>{t('group.recipientLabel', { role: t(`role.${message.recipientRole.replaceAll('-', '_')}`) })}</span> : null}
+                  {message.recipientRole ? <span>{t('group.recipientLabel', { role: t(`role.${message.recipientRole.replaceAll('-', '_')}` as never) })}</span> : null}
                 </div>
                 <div className="mt-2"><MessageResponse content={message.body} enabled /></div>
                 {message.runId ? <Link to="/agent-team-runs/$runId" params={{ runId: message.runId }} className="mt-2 inline-block text-[13px] text-brand-text underline underline-offset-4">{t('group.openRun')}</Link> : null}
@@ -72,7 +72,7 @@ export function AgentTeamGroupChatPage({ groupId }: { groupId: string }) {
           <ul className="mt-3 divide-y divide-border">
             {group.runs.map((run) => (
               <li key={run.id} className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
-                <div className="min-w-0"><p className="whitespace-pre-wrap break-words text-sm font-medium">{run.intent}</p><p className="mt-1 text-xs text-muted-foreground">{run.targetRole ? t(`role.${run.targetRole.replaceAll('-', '_')}`) : t('group.unspecifiedRole')}</p></div>
+                <div className="min-w-0"><p className="whitespace-pre-wrap break-words text-sm font-medium">{run.intent}</p><p className="mt-1 text-xs text-muted-foreground">{run.targetRole ? t(`role.${run.targetRole.replaceAll('-', '_')}` as never) : t('group.unspecifiedRole')}</p></div>
                 <div className="flex items-center gap-3"><StatusBadge status={toStatusKey(run.status)} label={t(`run.status.${run.status}`)} /><Link to="/agent-team-runs/$runId" params={{ runId: run.id }} className="text-[13px] text-brand-text underline underline-offset-4">{t('group.openRun')}</Link></div>
               </li>
             ))}

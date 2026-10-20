@@ -166,6 +166,14 @@ export function useAgentTeamRecordsQuery(teamId: string) {
   return useQuery({ queryKey: agentTeamRecordsQueryKey(teamId), queryFn: () => api.agentTeamRecords(teamId), enabled: Boolean(teamId), refetchInterval: 5_000 });
 }
 
+export function useAgentTeamQuery(teamId: string) {
+  return useQuery({ queryKey: ['agent-team', teamId] as const, queryFn: () => api.agentTeam(teamId), enabled: Boolean(teamId) });
+}
+
+export function useAgentTeamMemoriesQuery(teamId: string) {
+  return useQuery({ queryKey: ['agent-team-memories', teamId] as const, queryFn: () => api.agentTeamMemories(teamId), enabled: Boolean(teamId) });
+}
+
 export function useAgentTeamGroupQuery(groupId: string) {
   return useQuery({ queryKey: agentTeamGroupQueryKey(groupId), queryFn: () => api.agentTeamGroup(groupId), enabled: Boolean(groupId), refetchInterval: 5_000 });
 }

@@ -12,6 +12,7 @@
 ## Implementation
 
 - `apps/web/src/routes/mcp-servers/$serverId.tsx`
+- `apps/web/src/features/mcp-servers/delete-dialog.tsx` (shared with the list surface)
 
 ## Purpose
 
@@ -39,7 +40,7 @@ Existing drafts restore their endpoint and persisted allowed-tool selection on l
 
 Publication language appears only when an immutable MCP version is actually created. Save language is used for draft persistence.
 
-Delete is a separate intent and keeps its own confirmation, per the permanent-removal exception in `shared/interaction-contract.md`. Dependency conflicts remain visible in the named confirmation dialog; successful deletion returns to the MCP server list.
+Delete is a separate intent and keeps its own confirmation, per the permanent-removal exception in `shared/interaction-contract.md`. The shared delete dialog lists every concrete reference location when deletion is rejected, offers an unchecked-by-default force checkbox only for references force can clean (Workflow drafts and active Team roles, removed in place in the same transaction), and states when references must be removed at their source instead; successful deletion returns to the MCP server list.
 
 No value on this surface is self-healing. Connection state changes only as a result of a handshake the user commits, so there is no poll and no manual refresh.
 
@@ -93,6 +94,8 @@ Never reveal full credentials or log secrets. Render discovered descriptions and
 
 ## Coverage Status
 
+2026-10-20 source comparison: deletion runs through the shared `McpServerDeleteDialog` with the concrete reference list and the unchecked-by-default force checkbox described above. Earlier findings below remain as recorded.
+
 Verified 2026-09-19. Differences found against `apps/web/src/routes/mcp-servers/$serverId.tsx`. Struck entries were resolved in the 2026-09-19 state-completeness pass; the rest await the single-action pass.
 
 - ~~The standalone `Test connection` control still exists and must be removed.~~ Resolved 2026-09-19: `Save` persists and then handshakes in one action, and the standalone control and its `config.test`/`config.testing` keys are gone. The connection outcome renders as a status badge, with a `config.connecting` cue while the handshake runs.
@@ -103,6 +106,10 @@ Verified 2026-09-19. Differences found against `apps/web/src/routes/mcp-servers/
 - ~~`mcpServers:config.saveHint` is still rendered and must be removed under `shared/copy-standards.md`.~~ Resolved 2026-09-19: removed from both locales.
 
 ## Changelog
+
+### 2026-10-20 - Reference-protected deletion
+
+- Deletion moves to the shared `McpServerDeleteDialog`: reference rejections list every concrete location in the dialog, and an unchecked-by-default force checkbox cleans Workflow draft and Team role references in place.
 
 ### 2026-09-19 - Single action
 

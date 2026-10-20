@@ -2,7 +2,7 @@
 
 ## Route
 
-`/agent-teams/:teamId`. Work records are the only page view. One built-in Team has no Team collection or creation/deletion surface.
+`/agent-teams/:teamId`. Work records are the only page view. One built-in Team has no Team collection or creation/deletion surface. The read-only configuration companion lives at the fixed route `/agent-team-config` ([Configuration](../config/DESIGN.md)).
 
 ## Design Source
 
@@ -37,6 +37,7 @@ Use the shared detail width up to 1200px. Run records are the sole body of this 
 | Action | Behavior |
 | --- | --- |
 | Open Run | Navigate to `/agent-team-runs/:runId` in one activation. |
+| View configuration | Navigate to `/agent-team-config` from the page heading; the configuration page is read-only and links back here. |
 | Start Team work | Navigate to Chat from the empty-state link; Chat collects any missing dispatch information. |
 
 The Run-summary query refreshes every five seconds. It does not load task activity or Run snapshots. Run detail owns its read-only evidence stream. Chat owns Team mutations and live pending-input handling.
@@ -60,6 +61,7 @@ The Run-summary query refreshes every five seconds. It does not load task activi
 | `agentTeams:title` | State |
 | `agentTeams:records.title` / `description` / `empty` / `loadFailed` | State / Recovery |
 | `agentTeams:records.openChat` | Action |
+| `agentTeams:config.viewConfig` | Action |
 | `agentTeams:records.finishedAt` | State |
 | `agentTeams:run.status.*` | State |
 | `agentTeams:run.modeValue.*` | State |
@@ -71,9 +73,15 @@ Run links are keyboard reachable with visible focus. Status uses icon/text along
 
 ## Coverage Status
 
-2026-10-20 source comparison: the route renders only compact Run summaries and a Chat link; each summary opens read-only Run evidence. No create, configuration, answer or Run-control action remains on the Team page. The summary response exposes no progress percentage, so the list shows status and timestamps only. This was a source review; no runtime or browser verification was run.
+2026-10-20 source comparison: the route renders compact Run summaries, a Chat link, and a bordered `查看配置` link to the read-only configuration page. No create, configuration-edit, answer or Run-control action remains on the Team page. This was a source review; no runtime or browser verification was run.
+
+2026-10-20 earlier comparison: the route renders only compact Run summaries and a Chat link; each summary opens read-only Run evidence. No create, configuration, answer or Run-control action remains on the Team page. The summary response exposes no progress percentage, so the list shows status and timestamps only. This was a source review; no runtime or browser verification was run.
 
 ## Changelog
+
+### 2026-10-20 - Read-only configuration entry
+
+- Added the `查看配置` page-heading link to the new read-only configuration page at `/agent-team-config`.
 
 ### 2026-10-20
 

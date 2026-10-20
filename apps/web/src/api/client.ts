@@ -1,9 +1,11 @@
 import type {
   AgentView,
   AgentTeamDocumentView,
+  AgentTeamMemoryView,
   AgentTeamRunView,
   AgentTeamRunSummary,
   AgentTeamRunEvent,
+  AgentTeamView,
   AnswerAgentTeamRunRequest,
   RecoverAgentTeamOperationRequest,
   AgentTeamRunActionResponse,
@@ -32,6 +34,8 @@ import type {
   GatewayRequestLogQuery,
   GatewayTimeRange,
   CreateMcpServerRequest,
+  DeleteMcpServerResult,
+  McpServerReferenceReport,
   UpdateMcpServerRequest,
   CreateModelProviderRequest,
   UpdateModelProviderRequest,
@@ -77,7 +81,7 @@ import type {
 } from '@worklite/contracts';
 
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string, public readonly requestLogId?: string, public readonly testInput?: SystemOneTestInput) {
+  constructor(public readonly status: number, message: string, public readonly requestLogId?: string, public readonly testInput?: SystemOneTestInput, public readonly references?: McpServerReferenceReport) {
     super(message);
     this.name = 'ApiError';
   }
@@ -96,15 +100,17 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
     let message = `Request failed: ${response.status}`;
     let requestLogId: string | undefined;
     let testInput: SystemOneTestInput | undefined;
+    let references: McpServerReferenceReport | undefined;
     try {
-      const body = (await response.json()) as { message?: string | string[]; requestLogId?: string; testInput?: SystemOneTestInput };
+      const body = (await response.json()) as { message?: string | string[]; requestLogId?: string; testInput?: SystemOneTestInput; references?: McpServerReferenceReport };
       if (body.message) message = Array.isArray(body.message) ? body.message.join(', ') : body.message;
       requestLogId = body.requestLogId;
       testInput = body.testInput;
+      references = body.references;
     } catch {
       // Keep the status-based error when the server does not return JSON.
     }
-    throw new ApiError(response.status, message, requestLogId, testInput);
+    throw new ApiError(response.status, message, requestLogId, testInput, references);
   }
   if (response.status === 204 || response.headers.get('content-length') === '0') return undefined as T;
   const text = await response.text();
@@ -222,7 +228,7 @@ export const api = {
   mcpServer: (_workspace: string | undefined, serverId: string) => apiGet<McpServerView>(`/api/mcp-servers/${encodeURIComponent(serverId)}`),
   createMcpServer: (_workspace: string | undefined, input: CreateMcpServerRequest) => apiPost<McpServerView>('/api/mcp-servers', input),
   updateMcpServer: (_workspace: string | undefined, serverId: string, input: UpdateMcpServerRequest) => apiPatch<McpServerView>(`/api/mcp-servers/${encodeURIComponent(serverId)}`, input),
-  deleteMcpServer: (_workspace: string | undefined, serverId: string) => apiDelete(`/api/mcp-servers/${encodeURIComponent(serverId)}`),
+  deleteMcpServer: (_workspace: string | undefined, serverId: string, options: { force?: boolean } = {}) => apiDelete<DeleteMcpServerResult>(`/api/mcp-servers/${encodeURIComponent(serverId)}${options.force ? '?force=true' : ''}`),
   testMcpServer: (_workspace: string | undefined, serverId: string) => apiPost<McpServerTestResult>(`/api/mcp-servers/${encodeURIComponent(serverId)}/test`),
   modelProviders: (_workspace?: string) => apiGet<ModelProviderView[]>('/api/portkey-gateway/providers'),
   saveModelProvider: (_workspace: string | undefined, input: CreateModelProviderRequest) => apiPost<ModelProviderView>('/api/portkey-gateway/providers', input),
@@ -251,6 +257,8 @@ export const api = {
   },
   gatewayRequestLog: (requestLogId: string) => apiGet<GatewayRequestLogDetail>(`/api/portkey-gateway/request-logs/${encodeURIComponent(requestLogId)}`),
   agentTeamRecords: (teamId: string) => apiGet<AgentTeamRunSummary[]>(`/api/agent-teams/${encodeURIComponent(teamId)}/runs`),
+  agentTeam: (teamId: string) => apiGet<AgentTeamView>(`/api/agent-teams/${encodeURIComponent(teamId)}`),
+  agentTeamMemories: (teamId: string) => apiGet<AgentTeamMemoryView[]>(`/api/agent-teams/${encodeURIComponent(teamId)}/memories`),
   agentTeamGroup: (groupId: string) => apiGet<AgentTeamGroupView>(`/api/agent-team-groups/${encodeURIComponent(groupId)}`),
   controlAgentTeamGroup: (groupId: string, input: { operation: 'reexecute'; runIds: string[] }) => apiPost<AgentTeamGroupView>(`/api/agent-team-groups/${encodeURIComponent(groupId)}/controls`, input),
   agentTeamGroupEventsUrl: (groupId: string) => `/api/agent-team-groups/${encodeURIComponent(groupId)}/events`,
