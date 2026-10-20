@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import { ArrowLeft, Bot, Braces, Check, Copy, Download, FilePlus2, FileSearch, FileText, GitBranch, Image as ImageIcon, LayoutDashboard, ListChecks, Plus, Redo2, Search, Send, SlidersHorizontal, Timer, Trash2, Undo2, Workflow, X } from 'lucide-react';
+import { ArrowLeft, Bot, Braces, Check, Copy, Download, FilePlus2, FileSearch, FileText, GitBranch, Image as ImageIcon, LayoutDashboard, ListChecks, Plus, Redo2, Search, Send, SlidersHorizontal, Sticker, Timer, Trash2, Undo2, Workflow, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
@@ -170,6 +170,7 @@ function WorkflowEditorPage() {
   const filteredArtifactVisible = !paletteQuery.trim() || `${t('editor.artifactNode')} ${t('editor.artifactNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredArtifactQueryVisible = !paletteQuery.trim() || `${t('editor.artifactQueryNode')} ${t('editor.artifactQueryNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredImageVisible = !paletteQuery.trim() || `${t('editor.imageNode')} ${t('editor.imageNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
+  const filteredStickerVisible = !paletteQuery.trim() || `${t('editor.stickerNode')} ${t('editor.stickerNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredWechatVisible = !paletteQuery.trim() || `${t('editor.wechatNode')} ${t('editor.wechatNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
 
   function currentDefinition(): WorkflowDefinition {
@@ -371,6 +372,18 @@ function WorkflowEditorPage() {
     addNode(node, sourceNodeId);
   }
 
+  function addCanvasStickerNode(sourceNodeId?: string) {
+    const id = createId('sticker');
+    const node: WorkflowCanvasNode = {
+      id,
+      type: 'canvasSticker',
+      position: nextPosition(),
+      selected: true,
+      data: { nodeType: 'canvasSticker', label: t('editor.stickerNode'), stickerWidth: 512, stickerHeight: 512, stickerShape: 'roundedRect', stickerBackgroundColor: '#2563eb', stickerCornerRadius: 32, stickerTextColor: '#ffffff', stickerTextFontFamily: 'sans-serif', stickerTextAlign: 'center', errorPolicy: executionPolicy },
+    };
+    addNode(node, sourceNodeId);
+  }
+
   function addWechatPublishNode(sourceNodeId?: string) {
     const id = createId('wechat');
     const node: WorkflowCanvasNode = {
@@ -393,8 +406,9 @@ function WorkflowEditorPage() {
             : node.data.nodeType === 'dashboard' || node.data.nodeType === 'artifact' ? 'data'
               : node.data.nodeType === 'artifactQuery' ? 'request'
                 : node.data.nodeType === 'image' ? 'prompt'
-                  : node.data.nodeType === 'wechatPublish' ? sourceNode?.data.nodeType === 'image' ? 'coverImage' : 'article'
-                    : null;
+                  : node.data.nodeType === 'canvasSticker' ? 'text'
+                    : node.data.nodeType === 'wechatPublish' ? sourceNode?.data.nodeType === 'image' || sourceNode?.data.nodeType === 'canvasSticker' ? 'coverImage' : 'article'
+                      : null;
       const connection = sourceNode && targetHandle ? { source: sourceNode.id, sourceHandle: 'output', target: node.id, targetHandle } : null;
       if (!connection || !canConnect(connection, [...nodes, node], edges)) {
         toast.error(t('editor.invalidConnection'));
@@ -419,6 +433,7 @@ function WorkflowEditorPage() {
     else if (nodeType === 'artifact') addArtifactNode(sourceNodeId);
     else if (nodeType === 'artifactQuery') addArtifactQueryNode(sourceNodeId);
     else if (nodeType === 'image') addImageNode(sourceNodeId);
+    else if (nodeType === 'canvasSticker') addCanvasStickerNode(sourceNodeId);
     else addWechatPublishNode(sourceNodeId);
   }
 
@@ -663,11 +678,11 @@ function WorkflowEditorPage() {
     const sourceNode = sourceNodeId ? nodes.find((node) => node.id === sourceNodeId) : undefined;
     const compatibleTypes: WorkflowCanvasNodeType[] = sourceNodeId
       ? sourceNode
-        ? sourceNode.data.nodeType === 'image' ? ['wechatPublish']
+        ? sourceNode.data.nodeType === 'image' || sourceNode.data.nodeType === 'canvasSticker' ? ['wechatPublish']
           : sourceNode.data.nodeType === 'input' ? ['agent']
-            : ['agent', 'branch', 'systemOne', 'systemOneMap', 'dashboard', 'artifact', 'artifactQuery', 'image', 'wechatPublish']
+            : ['agent', 'branch', 'systemOne', 'systemOneMap', 'dashboard', 'artifact', 'artifactQuery', 'image', 'canvasSticker', 'wechatPublish']
         : []
-      : ['input', 'timer', 'agent', 'branch', 'systemOne', 'systemOneMap', 'dashboard', 'artifact', 'artifactQuery', 'image', 'wechatPublish'];
+      : ['input', 'timer', 'agent', 'branch', 'systemOne', 'systemOneMap', 'dashboard', 'artifact', 'artifactQuery', 'image', 'canvasSticker', 'wechatPublish'];
     const availableTypes = compatibleTypes.filter((nodeType) => {
       if (nodeType === 'timer' && nodes.some((node) => node.data.nodeType === 'timer')) return false;
       if (nodeType === 'dashboard' && nodes.some((node) => node.data.nodeType === 'dashboard')) return false;
@@ -684,6 +699,7 @@ function WorkflowEditorPage() {
       artifact: filteredArtifactVisible,
       artifactQuery: filteredArtifactQueryVisible,
       image: filteredImageVisible,
+      canvasSticker: filteredStickerVisible,
       wechatPublish: filteredWechatVisible,
     };
     const hasFilteredNodes = availableTypes.some((nodeType) => filteredTypes[nodeType]);
@@ -705,6 +721,7 @@ function WorkflowEditorPage() {
           {canShow('artifact') && filteredArtifactVisible ? <PaletteButton icon={<FileText className="size-5 text-foreground" />} title={t('editor.artifactNode')} description={t('editor.artifactNodeDescription')} onClick={choose('artifact')} /> : null}
           {canShow('artifactQuery') && filteredArtifactQueryVisible ? <PaletteButton icon={<FileSearch className="size-5 text-foreground" />} title={t('editor.artifactQueryNode')} description={t('editor.artifactQueryNodeDescription')} onClick={choose('artifactQuery')} /> : null}
           {canShow('image') && filteredImageVisible ? <PaletteButton icon={<ImageIcon className="size-5 text-foreground" />} title={t('editor.imageNode')} description={t('editor.imageNodeDescription')} onClick={choose('image')} /> : null}
+          {canShow('canvasSticker') && filteredStickerVisible ? <PaletteButton icon={<Sticker className="size-5 text-foreground" />} title={t('editor.stickerNode')} description={t('editor.stickerNodeDescription')} onClick={choose('canvasSticker')} /> : null}
           {canShow('wechatPublish') && filteredWechatVisible ? <PaletteButton icon={<Send className="size-5 text-foreground" />} title={t('editor.wechatNode')} description={t('editor.wechatNodeDescription')} onClick={choose('wechatPublish')} /> : null}
           {!hasFilteredNodes ? <p className="px-2 py-3 text-[12px] text-muted-foreground">{t('editor.noNodeMatches', { search: paletteQuery })}</p> : null}
         </div>
@@ -771,6 +788,19 @@ function WorkflowEditorPage() {
           <Field label={t('editor.imageBackground')} htmlFor="image-background"><Select value={selectedNode.data.imageBackground ?? 'opaque'} onValueChange={(value) => { const imageBackground = value as 'opaque' | 'transparent'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, imageBackground } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="image-background"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="opaque">{t('editor.imageBackgrounds.opaque')}</SelectItem><SelectItem value="transparent">{t('editor.imageBackgrounds.transparent')}</SelectItem></SelectContent></Select></Field>
           <Field label={t('editor.imageQuality')} htmlFor="image-quality"><Select value={selectedNode.data.imageQuality ?? 'medium'} onValueChange={(value) => { const imageQuality = value as 'low' | 'medium' | 'high'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, imageQuality } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="image-quality"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="low">{t('editor.imageQualities.low')}</SelectItem><SelectItem value="medium">{t('editor.imageQualities.medium')}</SelectItem><SelectItem value="high">{t('editor.imageQualities.high')}</SelectItem></SelectContent></Select></Field>
           <Field label={t('editor.imageSize')} htmlFor="image-size"><Select value={selectedNode.data.imageSize ?? '1024x1024'} onValueChange={(value) => { const imageSize = value as '1024x1024' | '1536x1024' | '1024x1536'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, imageSize } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="image-size"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="1024x1024">1024×1024</SelectItem><SelectItem value="1536x1024">1536×1024</SelectItem><SelectItem value="1024x1536">1024×1536</SelectItem></SelectContent></Select></Field>
+          <p className="text-[12px] text-muted-foreground">{t('editor.imageConnectionHint')}</p>
+        </> : null}
+        {selectedNode.data.nodeType === 'canvasSticker' ? <>
+          <Field label={t('editor.stickerWidth')} htmlFor="sticker-width"><Input id="sticker-width" type="number" min={64} max={2048} step={1} value={String(selectedNode.data.stickerWidth ?? 512)} onChange={(event) => { const stickerWidth = Number(event.target.value); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, stickerWidth: Number.isFinite(stickerWidth) ? stickerWidth : 512 } } : node)); setSaveState('unsaved'); }} /></Field>
+          <Field label={t('editor.stickerHeight')} htmlFor="sticker-height"><Input id="sticker-height" type="number" min={64} max={2048} step={1} value={String(selectedNode.data.stickerHeight ?? 512)} onChange={(event) => { const stickerHeight = Number(event.target.value); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, stickerHeight: Number.isFinite(stickerHeight) ? stickerHeight : 512 } } : node)); setSaveState('unsaved'); }} /></Field>
+          <Field label={t('editor.stickerShape')} htmlFor="sticker-shape"><Select value={selectedNode.data.stickerShape ?? 'roundedRect'} onValueChange={(value) => { const stickerShape = value as 'none' | 'roundedRect' | 'circle' | 'ribbon'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, stickerShape } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="sticker-shape"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">{t('editor.stickerShapes.none')}</SelectItem><SelectItem value="roundedRect">{t('editor.stickerShapes.roundedRect')}</SelectItem><SelectItem value="circle">{t('editor.stickerShapes.circle')}</SelectItem><SelectItem value="ribbon">{t('editor.stickerShapes.ribbon')}</SelectItem></SelectContent></Select></Field>
+          <Field label={t('editor.stickerBackgroundColor')} htmlFor="sticker-background-color"><Input id="sticker-background-color" value={selectedNode.data.stickerBackgroundColor ?? '#2563eb'} onChange={(event) => { const stickerBackgroundColor = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, stickerBackgroundColor } } : node)); setSaveState('unsaved'); }} /></Field>
+          {selectedNode.data.stickerShape === 'roundedRect' ? <Field label={t('editor.stickerCornerRadius')} htmlFor="sticker-corner-radius"><Input id="sticker-corner-radius" type="number" min={0} step={1} value={String(selectedNode.data.stickerCornerRadius ?? 0)} onChange={(event) => { const stickerCornerRadius = Number(event.target.value); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, stickerCornerRadius: Number.isFinite(stickerCornerRadius) ? stickerCornerRadius : 0 } } : node)); setSaveState('unsaved'); }} /></Field> : null}
+          <Field label={t('editor.stickerTextContent')} htmlFor="sticker-text-content" hint={t('editor.stickerTextContentHint')}><Input id="sticker-text-content" value={selectedNode.data.stickerTextContent ?? ''} onChange={(event) => { const stickerTextContent = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, stickerTextContent } } : node)); setSaveState('unsaved'); }} /></Field>
+          <Field label={t('editor.stickerTextColor')} htmlFor="sticker-text-color"><Input id="sticker-text-color" value={selectedNode.data.stickerTextColor ?? '#ffffff'} onChange={(event) => { const stickerTextColor = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, stickerTextColor } } : node)); setSaveState('unsaved'); }} /></Field>
+          <Field label={t('editor.stickerTextFontSize')} htmlFor="sticker-text-font-size"><Input id="sticker-text-font-size" type="number" min={8} max={400} step={1} value={selectedNode.data.stickerTextFontSize ? String(selectedNode.data.stickerTextFontSize) : ''} onChange={(event) => { const parsed = Number(event.target.value); const stickerTextFontSize = Number.isInteger(parsed) && parsed > 0 ? parsed : undefined; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, stickerTextFontSize } } : node)); setSaveState('unsaved'); }} /></Field>
+          <Field label={t('editor.stickerTextFontFamily')} htmlFor="sticker-text-font-family"><Select value={selectedNode.data.stickerTextFontFamily ?? 'sans-serif'} onValueChange={(value) => { const stickerTextFontFamily = value as 'sans-serif' | 'serif' | 'monospace'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, stickerTextFontFamily } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="sticker-text-font-family"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="sans-serif">{t('editor.stickerFontFamilies.sansSerif')}</SelectItem><SelectItem value="serif">{t('editor.stickerFontFamilies.serif')}</SelectItem><SelectItem value="monospace">{t('editor.stickerFontFamilies.monospace')}</SelectItem></SelectContent></Select></Field>
+          <Field label={t('editor.stickerTextAlign')} htmlFor="sticker-text-align"><Select value={selectedNode.data.stickerTextAlign ?? 'center'} onValueChange={(value) => { const stickerTextAlign = value as 'left' | 'center' | 'right'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, stickerTextAlign } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="sticker-text-align"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="left">{t('editor.stickerAligns.left')}</SelectItem><SelectItem value="center">{t('editor.stickerAligns.center')}</SelectItem><SelectItem value="right">{t('editor.stickerAligns.right')}</SelectItem></SelectContent></Select></Field>
           <p className="text-[12px] text-muted-foreground">{t('editor.imageConnectionHint')}</p>
         </> : null}
         {selectedNode.data.nodeType === 'wechatPublish' ? <>
@@ -958,8 +988,9 @@ function toSystemOneRank(value: unknown): WorkflowSystemOneRank | undefined {
 function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
   return definition.nodes.map((node) => {
     const config = asRecord(node.config);
-    const nodeType = node.type === 'worklite/input' ? 'input' : node.type === 'worklite/timer' ? 'timer' : node.type === 'worklite/branch' ? 'branch' : node.type === 'typesafe/systemone' ? 'systemOne' : node.type === 'typesafe/systemone-map' ? 'systemOneMap' : node.type === 'worklite/dashboard' ? 'dashboard' : node.type === 'worklite/artifact' ? 'artifact' : node.type === 'worklite/artifact-query' ? 'artifactQuery' : node.type === 'worklite/image' ? 'image' : node.type === 'wechat-official-account/publish' ? 'wechatPublish' : 'agent';
-    const label = typeof config.label === 'string' ? config.label : nodeType === 'input' ? 'Workflow Input' : nodeType === 'timer' ? 'Timer' : nodeType === 'branch' ? 'Choice Branch' : nodeType === 'systemOne' ? 'TypeSafe System One' : nodeType === 'systemOneMap' ? 'TypeSafe System One Map' : nodeType === 'dashboard' ? 'Dashboard' : nodeType === 'artifact' ? 'Artifact' : nodeType === 'artifactQuery' ? 'Artifact Query' : nodeType === 'image' ? 'Image Generation' : nodeType === 'wechatPublish' ? 'WeChat Official Account' : 'Agent';
+    const nodeType = node.type === 'worklite/input' ? 'input' : node.type === 'worklite/timer' ? 'timer' : node.type === 'worklite/branch' ? 'branch' : node.type === 'typesafe/systemone' ? 'systemOne' : node.type === 'typesafe/systemone-map' ? 'systemOneMap' : node.type === 'worklite/dashboard' ? 'dashboard' : node.type === 'worklite/artifact' ? 'artifact' : node.type === 'worklite/artifact-query' ? 'artifactQuery' : node.type === 'worklite/image' ? 'image' : node.type === 'worklite/canvas-sticker' ? 'canvasSticker' : node.type === 'wechat-official-account/publish' ? 'wechatPublish' : 'agent';
+    const label = typeof config.label === 'string' ? config.label : nodeType === 'input' ? 'Workflow Input' : nodeType === 'timer' ? 'Timer' : nodeType === 'branch' ? 'Choice Branch' : nodeType === 'systemOne' ? 'TypeSafe System One' : nodeType === 'systemOneMap' ? 'TypeSafe System One Map' : nodeType === 'dashboard' ? 'Dashboard' : nodeType === 'artifact' ? 'Artifact' : nodeType === 'artifactQuery' ? 'Artifact Query' : nodeType === 'image' ? 'Image Generation' : nodeType === 'canvasSticker' ? 'Canvas Sticker' : nodeType === 'wechatPublish' ? 'WeChat Official Account' : 'Agent';
+    const stickerTextConfig = asRecord(config.text);
     return {
       id: node.id,
       type: nodeType,
@@ -994,6 +1025,16 @@ function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
         imageBackground: config.background === 'transparent' ? 'transparent' : 'opaque',
         imageQuality: config.quality === 'low' || config.quality === 'high' ? config.quality : 'medium',
         imageSize: config.size === '1536x1024' || config.size === '1024x1536' ? config.size : '1024x1024',
+        stickerWidth: typeof config.width === 'number' && Number.isInteger(config.width) ? config.width : 512,
+        stickerHeight: typeof config.height === 'number' && Number.isInteger(config.height) ? config.height : 512,
+        stickerShape: config.shape === 'none' || config.shape === 'circle' || config.shape === 'ribbon' ? config.shape : 'roundedRect',
+        stickerBackgroundColor: typeof config.backgroundColor === 'string' ? config.backgroundColor : '#2563eb',
+        stickerCornerRadius: typeof config.cornerRadius === 'number' && Number.isInteger(config.cornerRadius) ? config.cornerRadius : undefined,
+        stickerTextContent: typeof stickerTextConfig.content === 'string' ? stickerTextConfig.content : undefined,
+        stickerTextColor: typeof stickerTextConfig.color === 'string' ? stickerTextConfig.color : '#ffffff',
+        stickerTextFontSize: typeof stickerTextConfig.fontSize === 'number' && Number.isInteger(stickerTextConfig.fontSize) ? stickerTextConfig.fontSize : undefined,
+        stickerTextFontFamily: stickerTextConfig.fontFamily === 'serif' || stickerTextConfig.fontFamily === 'monospace' ? stickerTextConfig.fontFamily : 'sans-serif',
+        stickerTextAlign: stickerTextConfig.align === 'left' || stickerTextConfig.align === 'right' ? stickerTextConfig.align : 'center',
         errorPolicy: node.errorPolicy,
       },
     };
@@ -1060,7 +1101,7 @@ function canConnect(connection: { source: string | null; sourceHandle?: string |
   if (!sourceNode || !targetNode) return false;
   const sourcePort = sourceHandle ?? 'output';
   if (sourcePort !== 'output') return false;
-  const imageConnectionAllowed = sourceNode.data.nodeType !== 'image'
+  const imageConnectionAllowed = (sourceNode.data.nodeType !== 'image' && sourceNode.data.nodeType !== 'canvasSticker')
     || (targetNode.data.nodeType === 'wechatPublish'
       && targetNode.data.wechatNodeVersion !== '1'
       && targetHandle === 'coverImage');
@@ -1075,6 +1116,8 @@ function canConnect(connection: { source: string | null; sourceHandle?: string |
     if (targetHandle !== 'state') return false;
   } else if (targetNode.data.nodeType === 'image') {
     if (targetHandle !== 'prompt') return false;
+  } else if (targetNode.data.nodeType === 'canvasSticker') {
+    if (targetHandle !== 'text') return false;
   } else if (targetNode.data.nodeType === 'wechatPublish') {
     if (targetNode.data.wechatNodeVersion === '1') {
       if (targetHandle !== 'article' && targetHandle !== 'metadata') return false;
@@ -1152,6 +1195,23 @@ function toDefinitionNode(node: WorkflowCanvasNode): WorkflowNodeDefinition {
       background: node.data.imageBackground ?? 'opaque',
       quality: node.data.imageQuality ?? 'medium',
       size: node.data.imageSize ?? '1024x1024',
+    };
+  } else if (node.data.nodeType === 'canvasSticker') {
+    type = 'worklite/canvas-sticker';
+    config = {
+      ...base,
+      width: node.data.stickerWidth ?? 512,
+      height: node.data.stickerHeight ?? 512,
+      shape: node.data.stickerShape ?? 'roundedRect',
+      backgroundColor: node.data.stickerBackgroundColor ?? '#2563eb',
+      ...(node.data.stickerCornerRadius !== undefined ? { cornerRadius: node.data.stickerCornerRadius } : {}),
+      text: {
+        ...(node.data.stickerTextContent?.trim() ? { content: node.data.stickerTextContent.trim() } : {}),
+        color: node.data.stickerTextColor ?? '#ffffff',
+        ...(node.data.stickerTextFontSize ? { fontSize: node.data.stickerTextFontSize } : {}),
+        fontFamily: node.data.stickerTextFontFamily ?? 'sans-serif',
+        align: node.data.stickerTextAlign ?? 'center',
+      },
     };
   } else if (node.data.nodeType === 'wechatPublish') {
     type = 'wechat-official-account/publish';

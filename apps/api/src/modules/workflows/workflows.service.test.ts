@@ -202,6 +202,87 @@ describe('WorkflowsService draft Agent model replacement', () => {
   });
 });
 
+function canvasStickerDefinition(overrides: Record<string, unknown> = {}): StoredWorkflowDefinition {
+  return {
+    schemaVersion: 4,
+    input: {},
+    defaults: { errorPolicy: 'stop' },
+    nodes: [
+      {
+        id: 'sticker',
+        position: { x: 0, y: 0 },
+        type: 'worklite/canvas-sticker',
+        typeVersion: '1',
+        config: { width: 512, height: 512, shape: 'roundedRect', backgroundColor: '#2563eb', cornerRadius: 32, ...overrides },
+        errorPolicy: 'stop',
+      },
+      {
+        id: 'wechat',
+        position: { x: 300, y: 0 },
+        type: 'wechat-official-account/publish',
+        typeVersion: '2',
+        config: { accountId: 'wechat_official_account_personal', mode: 'draft' },
+        errorPolicy: 'stop',
+      },
+    ],
+    edges: [
+      { id: 'edge-cover', sourceNodeId: 'sticker', sourcePort: 'output', targetNodeId: 'wechat', targetPort: 'coverImage' },
+    ],
+  };
+}
+
+describe('WorkflowsService Canvas Sticker node validation', () => {
+  it('accepts a valid Canvas Sticker node connected to the WeChat v2 cover input', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+    const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) } as unknown as WorkspaceService;
+    const resources = {} as WorkspaceResourcesService;
+    const workflows = new WorkflowsService(db, workspaces, {} as WorkflowSchedulesService, resources);
+    const created = await workflows.create(request, 'personal', { name: 'Sticker cover', definition: canvasStickerDefinition() });
+    expect(node(created, 'sticker').type).toBe('worklite/canvas-sticker');
+  });
+
+  it('rejects a width outside the supported range', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+    const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) } as unknown as WorkspaceService;
+    const resources = {} as WorkspaceResourcesService;
+    const workflows = new WorkflowsService(db, workspaces, {} as WorkflowSchedulesService, resources);
+    await expect(workflows.create(request, 'personal', { name: 'Bad sticker', definition: canvasStickerDefinition({ width: 32 }) })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects an unsupported shape', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+    const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) } as unknown as WorkspaceService;
+    const resources = {} as WorkspaceResourcesService;
+    const workflows = new WorkflowsService(db, workspaces, {} as WorkflowSchedulesService, resources);
+    await expect(workflows.create(request, 'personal', { name: 'Bad shape', definition: canvasStickerDefinition({ shape: 'triangle' }) })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects an invalid backgroundColor', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+    const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) } as unknown as WorkspaceService;
+    const resources = {} as WorkspaceResourcesService;
+    const workflows = new WorkflowsService(db, workspaces, {} as WorkflowSchedulesService, resources);
+    await expect(workflows.create(request, 'personal', { name: 'Bad color', definition: canvasStickerDefinition({ backgroundColor: 'not-a-color' }) })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects connecting Canvas Sticker output to a non-coverImage port', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+    const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) } as unknown as WorkspaceService;
+    const resources = {} as WorkspaceResourcesService;
+    const workflows = new WorkflowsService(db, workspaces, {} as WorkflowSchedulesService, resources);
+    const invalid = canvasStickerDefinition();
+    invalid.nodes[1]!.typeVersion = '1';
+    invalid.nodes[1]!.config = { accountId: 'wechat_official_account_personal', mode: 'draft' };
+    invalid.edges[0]!.targetPort = 'article';
+    await expect(workflows.create(request, 'personal', { name: 'Bad connection', definition: invalid })).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
 describe('WorkflowsService deletion', () => {
   function addVersion(workflowId: string, id = 'wfv_delete_test') {
     db!.insert(workflowVersions).values({
