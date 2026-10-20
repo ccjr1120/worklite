@@ -40,6 +40,80 @@ describe('monitorFailureState', () => {
   });
 });
 
+// The two deliver() paths under test only ever select from externalChats, so a single
+// configured row set is enough; a real empty-result chain covers any other `.from()` call.
+function selectFrom(rows: unknown[]): unknown {
+  return () => ({
+    from: () => {
+      const query = { where: () => query, orderBy: () => query, limit: () => query, then: (onFulfilled?: (value: unknown[]) => unknown) => Promise.resolve(rows).then(onFulfilled) };
+      return query;
+    },
+  });
+}
+
+describe('WechatService#deliver typing indicator', () => {
+  const baseSubmission = {
+    id: 'sub-1', workspaceId: 'workspace_personal', chatId: 'wechat:user-a', executionId: null,
+    message: 'hi', target: { kind: 'conversation' as const }, reference: null, outputMessageId: null,
+    renderedCard: null, renderedTaskCards: null, deliveryFingerprint: null, settled: false,
+    reportedAt: null, error: null, createdAt: new Date(), updatedAt: new Date(),
+  };
+  const chatRow = { id: 'wechat:user-a', externalId: 'user-a', contextToken: 'ctx-1' };
+
+  it('signals typing instead of sending a placeholder text when nothing is ready to report', async () => {
+    const calls: Array<{ endpoint: string; body: Record<string, unknown> }> = [];
+    const fetchImpl: FetchLike = async (input, init) => {
+      const endpoint = String(input).split('/ilink/bot/')[1];
+      const body = init?.body ? JSON.parse(init.body) : {};
+      calls.push({ endpoint, body });
+      if (endpoint === 'getconfig') return { ok: true, status: 200, text: async () => '{"ret":0,"typing_ticket":"ticket-xyz"}' };
+      return { ok: true, status: 200, text: async () => '{}' };
+    };
+    const db = { select: selectFrom([chatRow]), update: () => { throw new Error('deliver must not write when nothing is ready to report'); } };
+    const service = new WechatService(db as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    (service as unknown as { fetchImpl: FetchLike; baseUrl: string; token: string }).fetchImpl = fetchImpl;
+    (service as unknown as { baseUrl: string }).baseUrl = 'https://ilink.example';
+    (service as unknown as { token: string }).token = 'tok';
+
+    await (service as unknown as { deliver: (s: typeof baseSubmission) => Promise<void> }).deliver(baseSubmission);
+
+    expect(calls.map((c) => c.endpoint)).toEqual(['getconfig', 'sendtyping']);
+    expect(calls[1].body.status).toBe(1);
+    expect(calls.some((c) => c.endpoint === 'sendmessage')).toBe(false);
+  });
+
+  it('cancels typing before sending the real reply text', async () => {
+    const calls: Array<{ endpoint: string; body: Record<string, unknown> }> = [];
+    const fetchImpl: FetchLike = async (input, init) => {
+      const endpoint = String(input).split('/ilink/bot/')[1];
+      const body = init?.body ? JSON.parse(init.body) : {};
+      calls.push({ endpoint, body });
+      if (endpoint === 'getconfig') return { ok: true, status: 200, text: async () => '{"ret":0,"typing_ticket":"ticket-xyz"}' };
+      if (endpoint === 'sendmessage') return { ok: true, status: 200, text: async () => '{"ret":0,"message_id":"m1"}' };
+      return { ok: true, status: 200, text: async () => '{}' };
+    };
+    const updates: Array<Record<string, unknown>> = [];
+    const inserts: Array<Record<string, unknown>> = [];
+    const db = {
+      select: selectFrom([chatRow]),
+      update: () => { const query = { set: (patch: Record<string, unknown>) => { updates.push(patch); return query; }, where: () => Promise.resolve(undefined) }; return query; },
+      insert: () => { const query = { values: (v: Record<string, unknown>) => { inserts.push(v); return query; }, onConflictDoUpdate: () => Promise.resolve(undefined), onConflictDoNothing: () => Promise.resolve(undefined) }; return query; },
+    };
+    const service = new WechatService(db as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    (service as unknown as { fetchImpl: FetchLike }).fetchImpl = fetchImpl;
+    (service as unknown as { baseUrl: string }).baseUrl = 'https://ilink.example';
+    (service as unknown as { token: string }).token = 'tok';
+
+    const submission = { ...baseSubmission, error: '任务失败示例' };
+    await (service as unknown as { deliver: (s: typeof submission) => Promise<void> }).deliver(submission);
+
+    const endpoints = calls.map((c) => c.endpoint);
+    expect(endpoints.indexOf('sendtyping')).toBeGreaterThanOrEqual(0);
+    expect(endpoints.indexOf('sendtyping')).toBeLessThan(endpoints.indexOf('sendmessage'));
+    expect(calls[endpoints.indexOf('sendtyping')].body.status).toBe(2);
+  });
+});
+
 describe('WechatService monitor under an upgrade freeze', () => {
   let directory = '';
 

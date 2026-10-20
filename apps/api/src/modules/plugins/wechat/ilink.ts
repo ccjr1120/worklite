@@ -59,6 +59,9 @@ export type ILinkUpdates = {
 export const MESSAGE_TYPE_USER = 1;
 export const MESSAGE_TYPE_BOT = 2;
 export const MESSAGE_STATE_FINISH = 2;
+// sendtyping status: 1 sets the typing indicator, 2 cancels it.
+const TYPING_STATUS_TYPING = 1;
+const TYPING_STATUS_CANCEL = 2;
 
 const asRecord = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const asString = (value: unknown): string => typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '';
@@ -153,6 +156,20 @@ export async function sendTextMessage(fetchImpl: FetchLike, options: { baseUrl: 
   const ret = asNumber(parsed.ret);
   if (ret !== 0) throw new ILinkApiError(asString(parsed.errmsg) || `iLink sendmessage failed (ret=${ret}).`, ret, asNumber(parsed.errcode));
   return { messageId: asString(parsed.message_id) };
+}
+
+// getconfig issues the per-user typing ticket that sendtyping requires; the reference client
+// caches it since it has its own ~24h validity window independent of the bot token.
+export async function fetchTypingTicket(fetchImpl: FetchLike, options: { baseUrl: string; token: string; userId: string; contextToken?: string }): Promise<string> {
+  const parsed = await post(fetchImpl, `${options.baseUrl}/ilink/bot/getconfig`, { ilink_user_id: options.userId, ...(options.contextToken ? { context_token: options.contextToken } : {}), base_info: baseInfo() }, options.token, API_TIMEOUT_MS);
+  if (asNumber(parsed.ret) !== 0) throw new ILinkApiError(asString(parsed.errmsg) || `iLink getconfig failed (ret=${asNumber(parsed.ret)}).`, asNumber(parsed.ret), asNumber(parsed.errcode));
+  return asString(parsed.typing_ticket);
+}
+
+// sendtyping's response carries no business return code to check; the platform accepts the
+// request as fire-and-forget, so callers should not block a reply on this succeeding.
+export async function sendTyping(fetchImpl: FetchLike, options: { baseUrl: string; token: string; userId: string; typingTicket: string; cancel?: boolean }): Promise<void> {
+  await post(fetchImpl, `${options.baseUrl}/ilink/bot/sendtyping`, { ilink_user_id: options.userId, typing_ticket: options.typingTicket, status: options.cancel ? TYPING_STATUS_CANCEL : TYPING_STATUS_TYPING, base_info: baseInfo() }, options.token, API_TIMEOUT_MS);
 }
 
 const MEDIA_LABELS: Record<number, { kind: ILinkInboundMessage['mediaKind']; label: string }> = {

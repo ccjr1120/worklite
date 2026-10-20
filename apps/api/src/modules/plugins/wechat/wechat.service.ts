@@ -14,7 +14,7 @@ import { RunsService } from '../../runs/runs.service';
 import { UpgradesService } from '../../upgrades/upgrades.service';
 import { encryptSecret, PluginsService } from '../plugins.service';
 import { statusText } from '../feishu/feishu-cards';
-import { fetchBotQrCode, getUpdates, ILINK_DEFAULT_BASE_URL, ILINK_STALE_TOKEN_ERRCODE, ILinkApiError, mediaLabel, parseInboundMessage, pollQrCodeStatus, sendTextMessage, MESSAGE_TYPE_USER, type FetchLike, type ILinkRawMessage } from './ilink';
+import { fetchBotQrCode, fetchTypingTicket, getUpdates, ILINK_DEFAULT_BASE_URL, ILINK_STALE_TOKEN_ERRCODE, ILinkApiError, mediaLabel, parseInboundMessage, pollQrCodeStatus, sendTextMessage, sendTyping, MESSAGE_TYPE_USER, type FetchLike, type ILinkRawMessage } from './ilink';
 
 type Json = Record<string, unknown>;
 type Submission = typeof chatSubmissions.$inferSelect;
@@ -62,6 +62,9 @@ export function monitorFailureState(failures: number, failingForMs: number): { s
 // instead of split so one delivery state stays one platform message.
 const MAX_TEXT_BYTES = 3_500;
 const TRUNCATION_NOTE = '\n\n……（内容过长已截断，完整内容请在 WorkLite 查看）';
+// Mirrors the reference iLink client's getconfig cache window; refetching every poll would
+// be wasteful since the ticket outlives any single turn.
+const TYPING_TICKET_TTL_MS = 60 * 60_000;
 
 @Injectable()
 export class WechatService implements OnModuleInit, OnModuleDestroy {
@@ -77,6 +80,9 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
   private token = '';
   private baseUrl = ILINK_DEFAULT_BASE_URL;
   private login: LoginSession | null = null;
+  // getconfig's typing_ticket has its own validity window independent of the bot token;
+  // cache it per user instead of fetching before every typing signal.
+  private readonly typingTickets = new Map<string, { ticket: string; fetchedAt: number }>();
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
@@ -480,7 +486,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
   private async deliver(submission: Submission): Promise<void> {
     const chatId = submission.chatId!;
     const reference = submission.reference;
-    let text = '已收到，正在处理…';
+    let text: string | null = null;
     let terminal = false;
     if (submission.error) {
       text = `请求失败：${submission.error}`;
@@ -536,6 +542,14 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
         text = `【工作流】「${run.workflowName}」已开始执行${run.currentStep ? `\n当前步骤：${run.currentStep}` : ''}`;
       }
     }
+    if (text === null) {
+      // Nothing to report yet (freshly received, dispatch not committed, or still running):
+      // signal typing instead of sending a placeholder text message. Best-effort and silent;
+      // the user sees no feedback only if the platform itself cannot carry typing status.
+      const [chat] = await this.db.select().from(externalChats).where(eq(externalChats.id, chatId)).limit(1);
+      if (chat) await this.signalTyping(chat.externalId, chat.contextToken ?? undefined, false);
+      return;
+    }
     if (Buffer.byteLength(text) > MAX_TEXT_BYTES) {
       let cut = text;
       while (Buffer.byteLength(cut) > MAX_TEXT_BYTES - Buffer.byteLength(TRUNCATION_NOTE)) cut = cut.slice(0, -1);
@@ -548,6 +562,8 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
     }
     const [chat] = await this.db.select().from(externalChats).where(eq(externalChats.id, chatId)).limit(1);
     if (!chat) throw new Error('WeChat conversation is missing.');
+    // A real message is about to land; clear any typing indicator so it does not linger.
+    await this.signalTyping(chat.externalId, chat.contextToken ?? undefined, true);
     // The client id derives from the submission and content, so a retry after an uncertain
     // send replays the same platform idempotency key instead of producing a duplicate.
     const clientId = digest(`wechat:${submission.id}:${fingerprint}`).slice(0, 32);
@@ -563,6 +579,23 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
         await this.plugins.updateWechat({ wechatStatus: 'error', wechatLastError: '微信登录已过期，请重新扫码登录。' });
       }
       throw error;
+    }
+  }
+
+  // Typing is a best-effort presence signal: a failure here must never block or fail the
+  // surrounding reply delivery, so every error is swallowed after a debug log.
+  private async signalTyping(toUserId: string, contextToken: string | undefined, cancel: boolean): Promise<void> {
+    try {
+      let cached = this.typingTickets.get(toUserId);
+      if (!cached || Date.now() - cached.fetchedAt > TYPING_TICKET_TTL_MS) {
+        const ticket = await fetchTypingTicket(this.fetchImpl, { baseUrl: this.baseUrl, token: this.token, userId: toUserId, contextToken });
+        if (!ticket) return;
+        cached = { ticket, fetchedAt: Date.now() };
+        this.typingTickets.set(toUserId, cached);
+      }
+      await sendTyping(this.fetchImpl, { baseUrl: this.baseUrl, token: this.token, userId: toUserId, typingTicket: cached.ticket, cancel });
+    } catch (error) {
+      this.logger.debug(`WeChat typing indicator signal failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

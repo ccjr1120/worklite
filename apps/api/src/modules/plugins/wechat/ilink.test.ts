@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ILinkApiError, MESSAGE_TYPE_BOT, MESSAGE_STATE_FINISH, getUpdates, mediaLabel, parseILinkJson, parseInboundMessage, pollQrCodeStatus, sendTextMessage, type FetchLike } from './ilink';
+import { ILinkApiError, MESSAGE_TYPE_BOT, MESSAGE_STATE_FINISH, fetchTypingTicket, getUpdates, mediaLabel, parseILinkJson, parseInboundMessage, pollQrCodeStatus, sendTextMessage, sendTyping, type FetchLike } from './ilink';
 
 const okFetch = (body: string): FetchLike => async () => ({ ok: true, status: 200, text: async () => body });
 
@@ -107,5 +107,38 @@ describe('sendTextMessage', () => {
     const failure = await sendTextMessage(okFetch('{"ret":-2,"errmsg":"invalid session"}'), { baseUrl: 'https://ilink.example', token: 'tok', toUserId: 'user-a', text: '回复', contextToken: '', clientId: 'c' }).catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(ILinkApiError);
     expect((failure as ILinkApiError).ret).toBe(-2);
+  });
+});
+
+describe('fetchTypingTicket', () => {
+  it('returns the typing ticket from a successful getconfig response', async () => {
+    const ticket = await fetchTypingTicket(okFetch('{"ret":0,"typing_ticket":"ticket-abc"}'), { baseUrl: 'https://ilink.example', token: 'tok', userId: 'user-a' });
+    expect(ticket).toBe('ticket-abc');
+  });
+
+  it('fails on a platform rejection', async () => {
+    const failure = await fetchTypingTicket(okFetch('{"ret":-2,"errmsg":"invalid session"}'), { baseUrl: 'https://ilink.example', token: 'tok', userId: 'user-a' }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ILinkApiError);
+    expect((failure as ILinkApiError).ret).toBe(-2);
+  });
+});
+
+describe('sendTyping', () => {
+  it('posts the typing status with the given ticket', async () => {
+    let captured = '';
+    const fetchImpl: FetchLike = async (_input, init) => { captured = init?.body ?? ''; return { ok: true, status: 200, text: async () => '{}' }; };
+    await sendTyping(fetchImpl, { baseUrl: 'https://ilink.example', token: 'tok', userId: 'user-a', typingTicket: 'ticket-abc' });
+    const body = JSON.parse(captured) as Record<string, unknown>;
+    expect(body.ilink_user_id).toBe('user-a');
+    expect(body.typing_ticket).toBe('ticket-abc');
+    expect(body.status).toBe(1);
+  });
+
+  it('posts the cancel status when cancel is requested', async () => {
+    let captured = '';
+    const fetchImpl: FetchLike = async (_input, init) => { captured = init?.body ?? ''; return { ok: true, status: 200, text: async () => '{}' }; };
+    await sendTyping(fetchImpl, { baseUrl: 'https://ilink.example', token: 'tok', userId: 'user-a', typingTicket: 'ticket-abc', cancel: true });
+    const body = JSON.parse(captured) as Record<string, unknown>;
+    expect(body.status).toBe(2);
   });
 });
