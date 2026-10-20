@@ -2,11 +2,10 @@
 // Runs only after an operator installation command or a server-bound Chat redeploy request.
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, readdirSync, lstatSync, readlinkSync, symlinkSync, chmodSync, rmSync, openSync, closeSync, writeSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, lstatSync, readlinkSync, symlinkSync, chmodSync, rmSync, openSync, closeSync, writeSync } from 'node:fs';
 
 const [command, ...args] = process.argv.slice(2);
 const sleep = (milliseconds) => new Promise((done) => setTimeout(done, milliseconds));
@@ -212,36 +211,11 @@ async function stopImmediately(runtime) {
   await portsFree(runtime.ports);
 }
 
-async function copyData(source, destination, moduleRoot) {
-  mkdirSync(destination, { recursive: true });
-  const SQLite = createRequire(join(moduleRoot, 'apps/api/package.json'))('better-sqlite3');
-  async function copy(directory) {
-    if (!existsSync(directory)) return;
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const from = join(directory, entry.name); const subpath = relative(source, from); const to = join(destination, subpath);
-      if (subpath === 'runtime' || subpath.startsWith('runtime/') || subpath === 'deployment' || /-(wal|shm)$/.test(entry.name)) continue;
-      if (entry.isDirectory()) { mkdirSync(to, { recursive: true }); await copy(from); }
-      else if (entry.isFile()) {
-        mkdirSync(dirname(to), { recursive: true });
-        const header = Buffer.alloc(16); const fd = openSync(from, 'r');
-        const { readSync } = await import('node:fs'); readSync(fd, header, 0, 16, 0); closeSync(fd);
-        if (header.toString() === 'SQLite format 3\0') { const database = new SQLite(from, { readonly: true }); try { await database.backup(to, { progress: () => 0x7fffffff }); } finally { database.close(); } }
-        else cpSync(from, to);
-      }
-    }
-  }
-  await copy(source);
-}
-
-function restoreData(backup, data) {
-  for (const entry of readdirSync(data)) if (entry !== 'runtime' && entry !== 'deployment') rmSync(join(data, entry), { recursive: true, force: true });
-  cpSync(backup, data, { recursive: true });
-}
-
 async function preflight(runtime, release, log, id) {
   const data = join(runtime.stateDirectory, 'preflight', id);
   await portsFree(runtime.preflightPorts);
-  await copyData(runtime.dataDirectory, data, runtime.releaseDirectory);
+  rmSync(data, { recursive: true, force: true });
+  mkdirSync(data, { recursive: true });
   const candidate = { ...runtime, ...release };
   let pid;
   try {
@@ -267,12 +241,10 @@ async function install(profile) {
     await build(release.releaseDirectory, log);
     await preflight(runtime, release, log, id);
     await freeTargetPorts(runtime);
-    const backup = join(stateDirectory, 'backups', id);
-    await copyData(dataDirectory, backup, release.releaseDirectory);
     write(currentPath, runtime);
     runtime.pid = launch(runtime, dataDirectory, runtime.ports, false, log); write(currentPath, runtime);
     try { await ready(runtime.pid, runtime.ports, runtime.releaseHash); }
-    catch (error) { await stop(runtime.pid, runtime.releaseDirectory); restoreData(backup, dataDirectory); rmSync(currentPath); throw error; }
+    catch (error) { await stop(runtime.pid, runtime.releaseDirectory); rmSync(currentPath); throw error; }
     process.stdout.write(`Managed WorkLite baseline started on port ${runtime.ports[0]}.\n`);
   } finally { closeSync(log); }
 }
@@ -393,7 +365,6 @@ async function run(state, id) {
   const currentPath = join(state, 'current.json');
   const current = read(currentPath);
   const previous = job.previous ?? current;
-  const backup = join(state, 'backups', id);
   const phase = (value, extra = {}) => { job = { ...read(jobPath), ...extra, phase: value, runnerPid: process.pid, updatedAt: new Date().toISOString() }; write(jobPath, job); };
   let stage = 'upgrade initialization';
   const targetUrl = `http://127.0.0.1:${previous.ports[1]}/api/upgrades/runtime`;
@@ -439,19 +410,27 @@ async function run(state, id) {
     };
     write(jobPath, currentJob);
   }
-  async function recover() {
-    stage = 'previous release recovery';
-    phase('recovering');
+  async function stopFailedCandidate() {
     const running = read(currentPath);
-    if (running.pid) await stopImmediately(running);
-    if (job.backupComplete) restoreData(backup, previous.dataDirectory);
-    await portsFree(previous.ports);
-    previous.pid = launch(previous, previous.dataDirectory, previous.ports, false, log); write(currentPath, previous);
-    await ready(previous.pid, previous.ports, previous.releaseHash);
-    phase('rolled_back', { error: '新版本未完成切换，已恢复对应的旧版本和数据；被中断的任务不会自动恢复。详情见本机升级日志。' });
+    if (!running?.pid || !running.releaseDirectory || resolve(running.releaseDirectory) !== resolve(job.releaseDirectory)) return null;
+    try { await stopImmediately(running); return null; }
+    catch (error) {
+      const detail = describeError(error);
+      writeSync(log, 'Failed candidate stop error: ' + detail + String.fromCharCode(10));
+      return detail;
+    }
+  }
+  async function failCutover(detail) {
+    const stopError = await stopFailedCandidate();
+    const stopNotice = stopError ? ' 候选服务停止失败：' + stopError + '。' : '';
+    phase('failed', { error: '升级在「' + stage + '」阶段失败：' + detail + '。未自动恢复旧程序或数据库；线上数据库可能已被部分迁移。' + stopNotice + '请检查当前部署和升级日志，并手动修复或重新部署。' });
   }
   try {
-    if (['frozen', 'switching', 'recovering'].includes(job.phase)) { await recover(); return; }
+    if (['frozen', 'switching', 'recovering'].includes(job.phase)) {
+      stage = 'interrupted cutover review';
+      await failCutover('升级执行器中断于「' + job.phase + '」阶段');
+      return;
+    }
     phase('preflighting', { previous });
     stage = 'release integrity check';
     assertRelease(job);
@@ -481,9 +460,7 @@ async function run(state, id) {
     stage = 'stopping previous release';
     await stopImmediately(previous);
     await portsFree(previous.ports);
-    stage = 'deployment data backup';
-    await copyData(previous.dataDirectory, backup, previous.releaseDirectory);
-    phase('switching', { backupComplete: true });
+    phase('switching');
     stage = 'starting candidate release';
     const candidate = { ...previous, releaseHash: job.releaseHash, releaseDirectory: job.releaseDirectory };
     candidate.pid = launch(candidate, candidate.dataDirectory, candidate.ports, false, log); write(currentPath, candidate);
@@ -499,14 +476,9 @@ async function run(state, id) {
     writeSync(log, `${diagnostic}\n`);
     process.stderr.write(`${diagnostic}\n`);
     if (['frozen', 'switching', 'recovering'].includes(job.phase)) {
-      try { await recover(); }
-      catch (recoveryError) {
-        const recoveryDetail = describeError(recoveryError);
-        writeSync(log, `Upgrade ${id} previous release recovery failed: ${recoveryDetail}\n`);
-        phase('recovering', { error: `自动恢复尚未完成：${recoveryDetail}。原始失败：${detail}。详情见本机升级日志。` });
-      }
+      await failCutover(detail);
     } else {
-      phase('failed', { error: `升级在「${stage}」阶段失败：${detail}。现有版本未被替换；已经中断的任务不会自动恢复。详情见本机升级日志。` });
+      phase('failed', { error: '升级在「' + stage + '」阶段失败：' + detail + '。切换尚未开始，现有运行版本未被替换；已经中断的任务不会自动恢复。详情见本机升级日志。' });
     }
   } finally { closeSync(log); rmSync(lockPath, { force: true }); }
 }
