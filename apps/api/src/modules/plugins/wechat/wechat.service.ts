@@ -362,7 +362,17 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
         ...(recoveryDecision ? { recoveryDecision } : {}),
       };
     }
-    const escapeFailedConversation = !boundAction && message.text === '新对话' && execution?.status === 'failed';
+    // "新对话" is the one plain-text command on this text-only channel: it unbinds the chat from
+    // its current execution so the next message starts a fresh one, mirroring the Web "new
+    // conversation" action's lazy create (no execution exists until the first real message).
+    // It never fires while a pendingQuestion is active — that text instead answers whatever
+    // question is pending (including a model's own new_conversation question, handled above via
+    // boundAction) — so it can never silently swallow an answer. Firing regardless of the bound
+    // execution's status (running, waiting_for_input, completed, cancelled or failed) lets the
+    // user step out of a stuck or long-running turn instead of being forced to wait it out; that
+    // execution keeps running to its own terminal reply and stays inspectable on Web, only this
+    // channel's routing moves off it.
+    const startNewConversation = !boundAction && message.text === '新对话' && Boolean(chat.executionId);
     const eventId = `message:${message.messageId}`;
     this.db.transaction((transaction) => {
       const receipt = transaction.insert(wechatEvents).values({
@@ -378,9 +388,9 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
         },
       }).onConflictDoNothing().run();
       let submissionExecutionId = chat.executionId;
-      if (receipt.changes > 0 && escapeFailedConversation && chat.executionId) {
+      if (receipt.changes > 0 && startNewConversation && chat.executionId) {
         const unbound = transaction.update(externalChats).set({ executionId: null, updatedAt: new Date() }).where(and(eq(externalChats.id, chatId), eq(externalChats.executionId, chat.executionId))).run();
-        if (unbound.changes === 0) throw new ConflictException('This WeChat conversation is no longer bound to the failed Agent execution.');
+        if (unbound.changes === 0) throw new ConflictException('This WeChat conversation is no longer bound to that Agent execution.');
         submissionExecutionId = null;
       }
       if (receipt.changes > 0 && message.text && !boundAction) transaction.insert(chatSubmissions).values({ id: eventId, workspaceId: chat.workspaceId, chatId, executionId: submissionExecutionId, message: message.text, target: { kind: 'conversation' } }).run();
