@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createDb, initializeDatabase, externalChats, chatSubmissions, wechatEvents, type Database } from '@worklite/db';
+import type { AgentExecutionView } from '@worklite/contracts';
 import { monitorFailureState, WECHAT_CONNECT_FAILURE_ESCALATION_MS, WechatService } from './wechat.service';
 import type { FetchLike } from './ilink';
 
@@ -111,6 +113,128 @@ describe('WechatService#deliver typing indicator', () => {
     expect(endpoints.indexOf('sendtyping')).toBeGreaterThanOrEqual(0);
     expect(endpoints.indexOf('sendtyping')).toBeLessThan(endpoints.indexOf('sendmessage'));
     expect(calls[endpoints.indexOf('sendtyping')].body.status).toBe(2);
+  });
+});
+
+describe('WechatService "新对话" command', () => {
+  const WORKSPACE_ID = 'workspace_personal';
+  const ALLOWED_USER = 'user-a';
+  const CHAT_ID = `wechat:${ALLOWED_USER}`;
+  let db: Database;
+
+  const rawMessage = (messageId: string, text: string) => ({
+    message_type: 1,
+    message_id: messageId,
+    from_user_id: ALLOWED_USER,
+    item_list: [{ type: 1, text_item: { text } }],
+  });
+
+  function service(options: { execution?: Partial<AgentExecutionView> | null; dispatch?: () => Promise<unknown> } = {}) {
+    const executions = {
+      get: async () => (options.execution === null || options.execution === undefined
+        ? undefined
+        : { id: 'aex_1', status: 'completed', pendingQuestion: null, ...options.execution }) as AgentExecutionView,
+    };
+    const dispatched: unknown[] = [];
+    const dispatches = {
+      dispatch: async (_request: unknown, input: unknown) => {
+        dispatched.push(input);
+        return options.dispatch ? await options.dispatch() : { submissionId: (input as { submissionId: string }).submissionId, reference: { kind: 'conversation', executionId: 'aex_new', afterMessageId: null, afterSequence: 0 } };
+      },
+    };
+    const instance = new WechatService(db as never, {} as never, dispatches as never, executions as never, {} as never, {} as never, {} as never);
+    (instance as unknown as { allowedUserId: string }).allowedUserId = ALLOWED_USER;
+    return { instance, dispatched };
+  }
+
+  beforeEach(async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db); // Already seeds workspace_personal; inserting it again violates the slug unique index.
+  });
+
+  afterEach(() => {
+    db.$client.close();
+  });
+
+  it('unbinds a completed conversation so the next message starts fresh', async () => {
+    db.insert(externalChats).values({ id: CHAT_ID, workspaceId: WORKSPACE_ID, channel: 'wechat', externalId: ALLOWED_USER, userId: ALLOWED_USER, executionId: 'aex_1' }).run();
+    const { instance } = service({ execution: { status: 'completed', pendingQuestion: null } });
+
+    await (instance as unknown as { receiveMessage: (raw: unknown) => Promise<void> }).receiveMessage(rawMessage('msg-1', '新对话'));
+
+    const rows = db.select().from(externalChats).all() as Array<{ executionId: string | null }>;
+    expect(rows[0].executionId).toBeNull();
+    // The command's own text still becomes the queued opening message of the new conversation,
+    // which the (mocked) dispatch will turn into a brand-new executionId once `work()` runs.
+    const submissions = db.select().from(chatSubmissions).all() as Array<{ message: string; executionId: string | null }>;
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0].message).toBe('新对话');
+    expect(submissions[0].executionId).toBeNull();
+  });
+
+  it('unbinds a failed conversation (the original escape case still works)', async () => {
+    db.insert(externalChats).values({ id: CHAT_ID, workspaceId: WORKSPACE_ID, channel: 'wechat', externalId: ALLOWED_USER, userId: ALLOWED_USER, executionId: 'aex_1' }).run();
+    const { instance } = service({ execution: { status: 'failed', pendingQuestion: null } });
+
+    await (instance as unknown as { receiveMessage: (raw: unknown) => Promise<void> }).receiveMessage(rawMessage('msg-2', '新对话'));
+
+    const rows = db.select().from(externalChats).all() as Array<{ executionId: string | null }>;
+    expect(rows[0].executionId).toBeNull();
+  });
+
+  it('unbinds a running conversation without disturbing its own in-flight turn', async () => {
+    db.insert(externalChats).values({ id: CHAT_ID, workspaceId: WORKSPACE_ID, channel: 'wechat', externalId: ALLOWED_USER, userId: ALLOWED_USER, executionId: 'aex_1' }).run();
+    const { instance } = service({ execution: { status: 'running', pendingQuestion: null } });
+
+    await (instance as unknown as { receiveMessage: (raw: unknown) => Promise<void> }).receiveMessage(rawMessage('msg-3', '新对话'));
+
+    const rows = db.select().from(externalChats).all() as Array<{ executionId: string | null }>;
+    expect(rows[0].executionId).toBeNull();
+  });
+
+  it('treats a plain message as an ordinary submission and keeps the binding intact', async () => {
+    db.insert(externalChats).values({ id: CHAT_ID, workspaceId: WORKSPACE_ID, channel: 'wechat', externalId: ALLOWED_USER, userId: ALLOWED_USER, executionId: 'aex_1' }).run();
+    const { instance, dispatched } = service({ execution: { status: 'completed', pendingQuestion: null } });
+
+    await (instance as unknown as { receiveMessage: (raw: unknown) => Promise<void> }).receiveMessage(rawMessage('msg-4', '继续聊聊天气'));
+
+    const rows = db.select().from(externalChats).all() as Array<{ executionId: string | null }>;
+    expect(rows[0].executionId).toBe('aex_1');
+    const submissions = db.select().from(chatSubmissions).all() as Array<{ message: string; executionId: string | null }>;
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0].message).toBe('继续聊聊天气');
+    expect(submissions[0].executionId).toBe('aex_1');
+    expect(dispatched).toHaveLength(0); // receiveMessage only persists; work() dispatches separately.
+  });
+
+  it('takes "新对话" as the literal answer to a pending ordinary question instead of unbinding', async () => {
+    db.insert(externalChats).values({ id: CHAT_ID, workspaceId: WORKSPACE_ID, channel: 'wechat', externalId: ALLOWED_USER, userId: ALLOWED_USER, executionId: 'aex_1' }).run();
+    const { instance } = service({ execution: { status: 'waiting_for_input', pendingQuestion: { id: 'q_1', question: '继续吗？', options: [], createdAt: new Date().toISOString() } } });
+
+    await (instance as unknown as { receiveMessage: (raw: unknown) => Promise<void> }).receiveMessage(rawMessage('msg-5', '新对话'));
+
+    const rows = db.select().from(externalChats).all() as Array<{ executionId: string | null }>;
+    expect(rows[0].executionId).toBe('aex_1'); // Still bound: the text became the question's answer, not an unbind.
+    const events = db.select().from(wechatEvents).all() as Array<{ payload: { action?: { kind: string; questionId: string } } }>;
+    expect(events[0].payload.action).toEqual(expect.objectContaining({ kind: 'agent_answer', questionId: 'q_1' }));
+  });
+
+  it('is idempotent on a redelivered message id (no double-unbind, no duplicate submission)', async () => {
+    db.insert(externalChats).values({ id: CHAT_ID, workspaceId: WORKSPACE_ID, channel: 'wechat', externalId: ALLOWED_USER, userId: ALLOWED_USER, executionId: 'aex_1' }).run();
+    const { instance } = service({ execution: { status: 'completed', pendingQuestion: null } });
+    const receiveMessage = (instance as unknown as { receiveMessage: (raw: unknown) => Promise<void> }).receiveMessage.bind(instance);
+
+    await receiveMessage(rawMessage('msg-6', '新对话'));
+    await receiveMessage(rawMessage('msg-6', '新对话')); // Same platform message id redelivered.
+
+    const rows = db.select().from(externalChats).all() as Array<{ executionId: string | null }>;
+    expect(rows[0].executionId).toBeNull();
+    // onConflictDoNothing on the receipt means the redelivery never re-enters the unbind or
+    // submission branch a second time: still exactly one wechatEvent and one submission.
+    const events = db.select().from(wechatEvents).all();
+    expect(events).toHaveLength(1);
+    const submissions = db.select().from(chatSubmissions).all();
+    expect(submissions).toHaveLength(1);
   });
 });
 
