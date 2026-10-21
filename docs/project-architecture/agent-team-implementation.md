@@ -4,7 +4,7 @@ Date: 2026-10-03
 
 Status: The BMAD + TEA and LangGraph.js technology direction is confirmed and implemented through the authorized P2 runtime acceptance and P4 release assessment. The public REST/SSE boundary is implemented for one built-in Team, including summary work records, Run progress and managed-file delivery. The Web Team page lists records and configuration; Chat Agent alone starts Runs. Team collection, direct Run-creation and conversation routes are absent; Team creation/deletion remains unavailable. The acceptance report below covers the authorized scenarios only; scenarios not listed as executed remain implementation requirements, and normal repository verification and service-lifecycle rules still apply.
 
-Architecture authority: [Project Architecture](README.md#agent-team-implementation-direction). Applicable working rules: [AGENTS.md](../../AGENTS.md) and [AGENTS_WORKFLOW.md](../../AGENTS_WORKFLOW.md).
+Architecture authority: [Project Architecture](README.md#agent-team-implementation-direction). Applicable working rules: [AGENTS_WORKFLOW.md](../../AGENTS_WORKFLOW.md).
 
 ## 1. Intended Outcome
 
@@ -398,7 +398,7 @@ P2 is satisfied for the authorized end-to-end recipe: the Team planned, designed
 
 The selected direction expands configurable Agent behavior from Workflow nodes to roles embedded in TeamVersion. It adds a TeamRun resource and a LangGraph runtime while retaining current Workflow data. Apply normal additive schema migrations for new Team records; do not build a legacy Agent conversion or Workflow compatibility layer.
 
-When implementation introduces these capabilities, update the architecture source, applicable `AGENTS.md` conventions, built-in Chat Bot prompt, `worklite-platform` instructions and references, its operation scripts, shared contracts, platform snapshot metadata, and Skill/MCP deletion protection in the same implementation change. The documentation-only direction recorded now must not make Chat Bot claim unsupported Team APIs exist.
+When implementation introduces these capabilities, update the architecture source, applicable `AGENTS_WORKFLOW.md` guidance, built-in Chat Bot prompt, `worklite-platform` instructions and references, its operation scripts, shared contracts, platform snapshot metadata, and Skill/MCP deletion protection in the same implementation change. The documentation-only direction recorded now must not make Chat Bot claim unsupported Team APIs exist.
 
 WorkLite's current rules require explicit authorization for particular verification commands and prohibit automatic server lifecycle changes. Developing this feature does not waive those rules. Team scope for a target repository must also preserve that repository's instructions. Any policy change needed for autonomous test authoring or execution must be agreed explicitly before using it.
 

@@ -44,13 +44,13 @@ export const CHAT_PROJECT_TASK_TOOL = {
 
 export const CHAT_PROJECT_TASK_ANSWER_TOOL = {
   name: 'answer_project_task',
-  description: 'Answer the pending question of a conversation-owned background project task so it resumes running. The taskId and questionId come from the task record or its report; answer only what the user stated.',
+  description: 'Answer the pending question of a conversation-owned background project task so it resumes running. The taskId and questionId come from the task record or its report; the task card is read-only and Chat calls this tool with the user\'s response. Answer only what the user stated.',
   inputSchema: { type: 'object', additionalProperties: false, required: ['taskId', 'questionId', 'answer'], properties: { taskId: { type: 'string' }, questionId: { type: 'string' }, answer: { type: 'string' } } },
 } as const;
 
 export const CHAT_PROJECT_TASK_CANCEL_TOOL = {
   name: 'cancel_project_task',
-  description: 'Cancel an active conversation-owned background project task when the user asks to stop it.',
+  description: 'Cancel an active conversation-owned background project task when the user asks to stop it or has chosen cancel-and-create for a revised goal. Read its returned status; if it is still active, wait and inspect until it settles, and dispatch a replacement project_task only when persisted status is cancelled. On failure or any other terminal status do not dispatch a replacement.',
   inputSchema: { type: 'object', additionalProperties: false, required: ['taskId'], properties: { taskId: { type: 'string' } } },
 } as const;
 

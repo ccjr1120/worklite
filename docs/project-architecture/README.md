@@ -730,7 +730,6 @@ worklite/
 |   `-- desktop/                    # Desktop client development and build guide
 |-- src-tauri/                      # Tauri v2 desktop shell around the web application
 |-- scripts/
-|-- AGENTS.md
 |-- AGENTS_WORKFLOW.md
 |-- package.json
 |-- pnpm-workspace.yaml
@@ -798,6 +797,12 @@ Import validates the envelope, structured edge conditions, and bounded-cycle con
 - Claude Code's `claude -p` stream-json protocol has no native mid-turn input: a live experiment against the installed CLI (2.1.305) confirmed a second `user` message written to stdin mid-turn is buffered and only starts as a new turn after the active turn's `result` event, never altering the turn in progress. Every Claude Code instruction therefore queues.
 - A queued instruction persists on the task row (`chat_codex_tasks.steer_queue`, migration `0045`) and is folded into the task's next run as `userCorrections` in that run's goal JSON, alongside the prior run's evidence, so the task continues the same work instead of being cancelled and redispatched. The system prompt tells the executor to treat `userCorrections` as the current instruction over the original goal where they conflict.
 - The queue is per-task evidence (`delivered`, `queued`, `consumed`) exposed on `ChatProjectTaskView.steerQueue` and visible on the task card; delivery never silently drops an instruction, and a task that is not `running` rejects a new one with a conflict instead of accepting it into nowhere.
+
+### 2026-10-21 — Chat-mediated project-task redirection
+
+- Superseded mid-run steering as the Chat interaction for changing an active task's scope. Chat asks whether to keep the captured task running unchanged or cancel it and create a new task with the revised goal; it never forwards the correction into the active executor turn or its steer queue.
+- A confirmed cancel-and-create path calls the existing cancellation tool, continues waiting and inspecting while the task remains active, and dispatches a new `project_task` only after verifying `cancelled`. A cancellation failure or a different terminal status blocks replacement dispatch. Independent tasks retain the existing parallel-dispatch rules.
+- Project task questions are surfaced as read-only task evidence and answered from the Chat conversation through the existing task tool. Web project-task cards remove direct answer and steering controls; card cancellation uses confirmation and control-local feedback. Existing API routes, stored task data, and historical `steerQueue` evidence remain unchanged.
 
 ### 2026-10-21 — Deterministic Canvas Sticker Workflow node
 

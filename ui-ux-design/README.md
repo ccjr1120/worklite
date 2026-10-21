@@ -94,6 +94,12 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-10-21 - Project executor task summaries and safe redirection
+
+- Reduce the collapsed project task card to goal, elapsed duration and current progress/status; keep final results and executor evidence in expanded details.
+- Move project task questions to read-only evidence in the card and answer them through Chat. Active goal changes ask whether to continue unchanged or cancel-and-create, with replacement dispatch gated on a verified cancelled state.
+- Confirm task-card cancellation and show busy/error feedback locally.
+
 ### 2026-10-21 - Channel-specific new-conversation interaction
 
 - Keep the contextual Web button and Feishu native card button; use the exact text command 「新对话」 for WeChat and document that each adapter owns its channel presentation.

@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
@@ -487,23 +487,36 @@ function CodexActivityGroupSection({ groupKey, items, describeActivity, locale }
   );
 }
 
-function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
+function CodexToolCallPanel({ task: inputTask }: { task: ChatProjectTaskView }) {
   const { t } = useTranslation('assistant');
   const { locale } = useLocale();
   const [expanded, setExpanded] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
-  const [answerDraft, setAnswerDraft] = useState('');
-  const [answering, setAnswering] = useState(false);
   const [cancellingTask, setCancellingTask] = useState(false);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [actionError, setActionError] = useState('');
-  const [steerDraft, setSteerDraft] = useState('');
-  const [steering, setSteering] = useState(false);
-  const [steerNotice, setSteerNotice] = useState('');
+  const [taskSnapshot, setTaskSnapshot] = useState<ChatProjectTaskView | null>(null);
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  const task = taskSnapshot?.id === inputTask.id && Date.parse(taskSnapshot.updatedAt) >= Date.parse(inputTask.updatedAt)
+    ? taskSnapshot
+    : inputTask;
+  const statusKey = toStatusKey(task.status);
+  const live = isLiveStatus(task.status);
+  const pendingQuestion = task.status === 'waiting_for_input' ? task.pendingQuestion : null;
   const pins = useContext(PinTrackingContext);
   const expandRequest = pins?.expandRequest;
   useEffect(() => {
     if (expandRequest?.id === task.id) setExpanded(true);
   }, [expandRequest, task.id]);
+  useEffect(() => {
+    if (!live) return;
+    setClockNow(Date.now());
+    const timer = window.setInterval(() => setClockNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [live, task.id]);
+  useEffect(() => {
+    if (!live && !cancellingTask) setCancelDialogOpen(false);
+  }, [live, cancellingTask]);
   // Expanding the detail view lazy-loads the full persisted activity log (the embedded
   // task payload only carries the recent window used by the collapsed row).
   const [fullActivities, setFullActivities] = useState<CodexActivity[] | null>(null);
@@ -518,60 +531,40 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [expanded, fullActivities, task.id]);
-  const statusKey = toStatusKey(task.status);
-  const live = isLiveStatus(task.status);
-  const pendingQuestion = task.status === 'waiting_for_input' ? task.pendingQuestion : null;
-
-  const submitAnswer = async () => {
-    const question = pendingQuestion;
-    const answer = answerDraft.trim();
-    if (!question || !answer || answering) return;
-    setAnswering(true);
-    setActionError('');
-    try {
-      await api.answerChatProjectTask(task.id, { questionId: question.id, answer });
-      setAnswerDraft('');
-    } catch (error) {
-      setActionError(error instanceof ApiError ? error.message : t('codex.answerFailed'));
-    } finally {
-      setAnswering(false);
-    }
-  };
-
   const cancelTask = async () => {
     if (cancellingTask) return;
     setCancellingTask(true);
     setActionError('');
     try {
-      await api.cancelChatProjectTask(task.id);
+      const updated = await api.cancelChatProjectTask(task.id);
+      setTaskSnapshot(updated);
+      if (isLiveStatus(updated.status)) {
+        setActionError(t('codex.cancelStillRunning'));
+        return;
+      }
+      setCancelDialogOpen(false);
     } catch (error) {
       setActionError(error instanceof ApiError ? error.message : t('codex.cancelFailed'));
     } finally {
       setCancellingTask(false);
     }
   };
-
-  const submitSteer = async () => {
-    const text = steerDraft.trim();
-    if (!text || steering) return;
-    setSteering(true);
-    setActionError('');
-    setSteerNotice('');
-    try {
-      const updated = await api.steerChatProjectTask(task.id, { text });
-      setSteerDraft('');
-      const submitted = updated.steerQueue.at(-1);
-      setSteerNotice(submitted?.status === 'delivered' ? t('codex.steerDelivered') : t('codex.steerQueued'));
-    } catch (error) {
-      setActionError(error instanceof ApiError ? error.message : t('codex.steerFailed'));
-    } finally {
-      setSteering(false);
-    }
-  };
   const goalSummary = codexFirstLine(task.goal);
   const executorName = task.executor ? t(`codex.executorName.${task.executor}`) : t('codex.launchNotCaptured');
   const modelSummary = t('codex.modelLaunch', { model: task.model || t('codex.defaultModel'), mode: executorName });
   const latestActivity = task.activities.at(-1) ?? null;
+  const createdAtMs = Date.parse(task.createdAt);
+  const finishedAtMs = live ? clockNow : Date.parse(task.updatedAt);
+  const elapsedMinutes = Number.isFinite(createdAtMs) && Number.isFinite(finishedAtMs)
+    ? Math.max(0, Math.floor((finishedAtMs - createdAtMs) / 60_000))
+    : 0;
+  const elapsedDuration = elapsedMinutes < 1
+    ? t('codex.elapsedLessThanMinute')
+    : elapsedMinutes < 60
+      ? t('codex.elapsedMinutes', { count: elapsedMinutes })
+      : elapsedMinutes < 24 * 60
+        ? t('codex.elapsedHours', { count: Math.floor(elapsedMinutes / 60), remainder: elapsedMinutes % 60 })
+        : t('codex.elapsedDays', { count: Math.floor(elapsedMinutes / (24 * 60)), remainder: Math.floor((elapsedMinutes % (24 * 60)) / 60) });
   const visibleActivities = fullActivities ?? task.activities;
   const activityGroups: Record<CodexActivityGroup, CodexActivity[]> = { messages: [], tools: [], lifecycle: [] };
   for (const activity of visibleActivities) activityGroups[codexActivityGroup(activity)].push(activity);
@@ -609,6 +602,10 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
     if (phase === 'mcp.call') return t('codex.activity.mcpCall', { tool: codexActivityText(activity, 'toolName') ?? t('codex.activity.unknownTool') });
     return t('codex.activity.unknown', { phase });
   };
+  const progressLine = task.progressText.trim()
+    ? codexFirstLine(task.progressText).replace(/\s+/g, ' ')
+    : latestActivity ? describeActivity(latestActivity) : t('codex.starting');
+  const progressSummary = progressLine.length > 120 ? `${progressLine.slice(0, 119)}…` : progressLine;
   const activityPhaseSummary = Object.entries(task.activityPhases).map(([phase, count]) => `${describeActivity({ phase })} · ${count}`);
   const operationStatusSummary = Object.entries(task.operationStatuses).map(([status, count]) => `${t(`codex.operationStatus.${status}`, { defaultValue: status })} · ${count}`);
 
@@ -623,85 +620,62 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
         type="button"
         className={cn('flex min-h-11 w-full items-start gap-2.5 px-3 py-2 text-left hover:bg-surface-subtle/70', surfaceInteraction, focusRingInset)}
         aria-expanded={expanded}
+        aria-controls={`project-task-details-${task.id}`}
         aria-label={expanded ? t('codex.collapse') : t('codex.expand')}
         onClick={() => setExpanded((value) => !value)}
       >
         <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface-subtle"><FileCode2 className="size-3.5 text-muted-foreground" aria-hidden="true" /></span>
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 flex-1 truncate text-[13px] font-semibold" title={goalSummary}>
-              <span className="text-foreground">{executorName}</span>
-              <span className="mx-1 text-muted-foreground" aria-hidden="true">·</span>
-              <span className="font-normal text-muted-foreground">{goalSummary}</span>
+            <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">
+              {goalSummary}
             </span>
-            <StatusBadge status={statusKey} label={t(`status.${task.status}`)} />
-            {task.stage !== 'succeeded' && task.stage !== 'failed' && task.stage !== 'cancelled' ? (
-              <Badge variant="brand">{t(`codex.stage.${task.stage}`)}</Badge>
-            ) : null}
           </span>
           <span className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-            <span className="max-w-full truncate font-mono" title={task.projectDirectory}>{task.projectDirectory}</span>
+            <span>{t('codex.elapsed', { duration: elapsedDuration })}</span>
             <span aria-hidden="true">·</span>
-            <span className="max-w-full truncate font-mono" title={modelSummary}>{modelSummary}</span>
-            {live ? (
-              <span className="basis-full truncate">
-                {latestActivity ? t('codex.latestActivity', { activity: describeActivity(latestActivity), count: task.activityCount }) : t('codex.starting')}
-              </span>
-            ) : null}
+            <span className="flex min-w-0 items-center gap-1.5">
+              {live
+                ? <Badge variant={task.stage === 'waiting' ? 'warning' : 'brand'}>{t(`codex.stage.${task.stage}`)}</Badge>
+                : <StatusBadge status={statusKey} label={t(`status.${task.status}`)} />}
+              {live ? <span className="min-w-0 truncate">{progressSummary}</span> : null}
+            </span>
           </span>
         </span>
         <ChevronDown className={cn('mt-1 size-4 shrink-0 text-muted-foreground transition-transform duration-[200ms] ease-[var(--ease-out)]', !expanded && '-rotate-90')} aria-hidden="true" />
       </button>
-      {pendingQuestion ? (
-        <div className="space-y-2 border-t border-border px-3 py-2.5">
-          <MessageResponse content={pendingQuestion.question} enabled className="text-[13px] font-medium" />
-          <Textarea
-            value={answerDraft}
-            onChange={(event) => setAnswerDraft(event.target.value)}
-            placeholder={t('codex.answerPlaceholder')}
-            rows={2}
-            disabled={answering}
-            aria-label={t('codex.answerPlaceholder')}
-          />
-          <div className="flex items-center justify-end">
-            <Button type="button" size="compact" disabled={answering || !answerDraft.trim()} aria-busy={answering} onClick={() => void submitAnswer()}>
-              {answering ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : null}
-              {t('codex.answerQuestion')}
-            </Button>
-          </div>
-        </div>
-      ) : null}
-      {task.status === 'running' ? (
-        <div className="space-y-2 border-t border-border px-3 py-2.5">
-          <Textarea
-            value={steerDraft}
-            onChange={(event) => { setSteerDraft(event.target.value); setSteerNotice(''); }}
-            placeholder={t('codex.steerPlaceholder')}
-            rows={2}
-            disabled={steering}
-            aria-label={t('codex.steerPlaceholder')}
-          />
-          <div className="flex items-center justify-between gap-2">
-            {steerNotice ? <p className="text-xs text-muted-foreground">{steerNotice}</p> : <span />}
-            <Button type="button" variant="secondary" size="compact" disabled={steering || !steerDraft.trim()} aria-busy={steering} onClick={() => void submitSteer()}>
-              {steering ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : null}
-              {t('codex.steerSubmit')}
-            </Button>
-          </div>
-        </div>
-      ) : null}
       {live ? (
         <div className="flex items-center justify-end gap-2 border-t border-border px-3 py-2">
-          {actionError ? <p className="mr-auto text-xs text-danger" role="alert">{actionError}</p> : null}
-          <Button type="button" variant="secondary" size="compact" disabled={cancellingTask} aria-busy={cancellingTask} onClick={() => void cancelTask()}>
-            {cancellingTask ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : null}
+          <Button type="button" variant="secondary" size="compact" disabled={cancellingTask} onClick={() => { setActionError(''); setCancelDialogOpen(true); }}>
             {t('codex.cancelTask')}
           </Button>
         </div>
       ) : null}
-      {task.progressText && !task.result ? <div className="max-h-64 overflow-y-auto border-t border-border px-3 py-2.5 text-[13px]"><MessageResponse content={task.progressText} enabled /></div> : null}
+      <Dialog open={cancelDialogOpen} onOpenChange={(open) => { if (!cancellingTask) { setCancelDialogOpen(open); if (open) setActionError(''); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('codex.cancelConfirmTitle')}</DialogTitle>
+            <DialogDescription>{t('codex.cancelConfirmDescription')}</DialogDescription>
+          </DialogHeader>
+          {actionError ? <p className="text-sm text-danger" role="alert">{actionError}</p> : null}
+          <DialogFooter>
+            <Button type="button" variant="secondary" disabled={cancellingTask} onClick={() => setCancelDialogOpen(false)}>{t('codex.cancelKeepRunning')}</Button>
+            <Button type="button" variant="secondary" disabled={cancellingTask} aria-busy={cancellingTask} onClick={() => void cancelTask()}>
+              {cancellingTask ? <LoaderCircle className="size-3.5 motion-safe:animate-spin" aria-hidden="true" /> : null}
+              {cancellingTask ? t('codex.cancellingTask') : t('codex.cancelConfirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {expanded ? (
-        <div className="wl-fade space-y-4 border-t border-border px-3 pb-3 pt-2.5">
+        <div id={`project-task-details-${task.id}`} className="wl-fade space-y-4 border-t border-border px-3 pb-3 pt-2.5">
+          {pendingQuestion ? (
+            <section className="rounded-md border border-warning/30 bg-warning-subtle px-3 py-2.5">
+              <h3 className="text-xs font-medium">{t('codex.pendingQuestion')}</h3>
+              <MessageResponse content={pendingQuestion.question} enabled className="mt-1 text-[13px]" />
+            </section>
+          ) : null}
+          {task.progressText && !task.result ? <section><h3 className="text-xs font-medium">{t('codex.progress')}</h3><div className="mt-1 max-h-64 overflow-y-auto text-[13px]"><MessageResponse content={task.progressText} enabled /></div></section> : null}
           <dl className="grid gap-3 text-xs sm:grid-cols-2">
             <div className="sm:col-span-2">
               <dt className="font-medium text-muted-foreground">{t('codex.goal')}</dt>
