@@ -609,6 +609,8 @@ export type PortkeyGatewayStatsBreakdown = {
   averageLatencyMs: number | null;
   promptTokens: number | null;
   completionTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheCreationTokens: number | null;
   totalTokens: number | null;
   usageRequests: number;
   endpoints: Array<{ endpoint: string; requests: number }>;
@@ -626,6 +628,8 @@ export type PortkeyGatewayStats = {
     averageLatencyMs: number | null;
     promptTokens: number | null;
     completionTokens: number | null;
+    cacheReadTokens: number | null;
+    cacheCreationTokens: number | null;
     totalTokens: number | null;
     usageRequests: number;
   };
@@ -1158,6 +1162,8 @@ export type GatewayRequestLogListItem = {
   teamOperationKey: string | null;
   promptTokens: number | null;
   completionTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheCreationTokens: number | null;
   totalTokens: number | null;
 };
 
