@@ -25,7 +25,7 @@ const DDL = [
     execution_id text NOT NULL REFERENCES agent_executions(id) ON DELETE CASCADE,
     goal text NOT NULL, project_directory text NOT NULL, model text NOT NULL, snapshot text NOT NULL,
     status text NOT NULL, answers text DEFAULT '[]' NOT NULL, pending_question text,
-    activities text DEFAULT '[]' NOT NULL, result text DEFAULT '' NOT NULL, error text,
+    activities text DEFAULT '[]' NOT NULL, steer_queue text DEFAULT '[]' NOT NULL, result text DEFAULT '' NOT NULL, error text,
     reported_at integer,
     worktree_path text, worktree_branch text, base_branch text, base_commit text,
     merge_status text DEFAULT 'not_attempted' NOT NULL, merge_error text,

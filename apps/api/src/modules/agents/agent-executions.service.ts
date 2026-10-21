@@ -282,6 +282,17 @@ export class AgentExecutionsService implements OnModuleInit {
     return this.projectTasks.view(task.id, workspace.id);
   }
 
+  // Submits a mid-run correction without cancelling the task; see ChatProjectTasksService.steer
+  // for delivery vs. queue semantics. The owning conversation's snapshot refreshes either way so
+  // the task card reflects the queued (or delivered) instruction immediately.
+  async steerProjectTask(request: Request, workspaceSlug: string, taskId: string, text: string): Promise<ChatProjectTaskView> {
+    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const view = this.projectTasks.view(taskId, workspace.id);
+    const updated = await this.projectTasks.steer(workspace.id, taskId, text);
+    await this.publishSnapshotForExecution(workspace.id, view.executionId);
+    return updated;
+  }
+
   async retry(request: Request, workspaceSlug: string, agentId: string, executionId: string): Promise<AgentExecutionView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const execution = await this.loadExecution(workspace.id, agentId, executionId);

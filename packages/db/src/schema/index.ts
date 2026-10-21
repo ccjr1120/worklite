@@ -505,6 +505,19 @@ export type StoredChatProjectTaskSnapshot = {
   readOnly?: boolean;
 };
 
+// A user-submitted mid-task steer instruction. Codex may deliver it to the live turn through
+// turn/steer; Claude Code has no native mid-turn input, so its instructions queue here and are
+// handed to the task's next run as part of the goal, carrying the prior run's evidence.
+export type StoredProjectTaskSteerInstruction = {
+  id: string;
+  text: string;
+  createdAt: string;
+  // 'delivered': Codex accepted it into the live turn through turn/steer, evidence only.
+  // 'queued': waiting for the task's next run (Claude Code, or a Codex turn that could not accept it).
+  // 'consumed': a queued instruction the next run has picked up and included in its goal.
+  status: 'delivered' | 'queued' | 'consumed';
+};
+
 // Table names keep their original codex prefix as persisted identifiers.
 export const chatProjectTasks = sqliteTable('chat_codex_tasks', {
   id: text('id').primaryKey().references(() => agentToolCalls.id, { onDelete: 'cascade' }),
@@ -516,6 +529,9 @@ export const chatProjectTasks = sqliteTable('chat_codex_tasks', {
   answers: text('answers', { mode: 'json' }).$type<Array<{ question: string; answer: string }>>().notNull().default([]),
   pendingQuestion: text('pending_question', { mode: 'json' }).$type<StoredAgentPendingQuestion | null>(),
   activities: text('activities', { mode: 'json' }).$type<Array<Record<string, unknown>>>().notNull().default([]),
+  // Mid-run steer instructions the user submitted while this task was active, in submission order.
+  // A delivered or superseded entry is historical evidence; a queued entry is consumed by the next run.
+  steerQueue: text('steer_queue', { mode: 'json' }).$type<StoredProjectTaskSteerInstruction[]>().notNull().default([]),
   result: text('result').notNull().default(''), error: text('error'),
   // Set once the conversation has reported this background task's outcome or question.
   reportedAt: integer('reported_at', { mode: 'timestamp_ms' }),

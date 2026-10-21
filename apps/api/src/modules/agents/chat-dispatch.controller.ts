@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, BadRequestException } from '@nestjs/common';
 import type { Request } from 'express';
-import type { AnswerAgentQuestionRequest, DispatchChatRequest, SaveChatMemoryRequest, UpdateChatMemoryRequest } from '@worklite/contracts';
+import type { AnswerAgentQuestionRequest, DispatchChatRequest, SaveChatMemoryRequest, SteerProjectTaskRequest, UpdateChatMemoryRequest } from '@worklite/contracts';
 import { ChatDispatchService } from './chat-dispatch.service';
 import { ChatConversationsService } from './chat-conversations.service';
 import { ChatMemoriesService } from './chat-memories.service';
@@ -44,6 +44,13 @@ export class ChatDispatchController {
   @Post('project-tasks/:id/cancel')
   cancelProjectTask(@Req() request: Request, @Param('id') id: string) {
     return this.executions.cancelProjectTask(request, 'personal', id);
+  }
+
+  @Post('project-tasks/:id/steer')
+  steerProjectTask(@Req() request: Request, @Param('id') id: string, @Body() input: SteerProjectTaskRequest) {
+    const text = typeof input?.text === 'string' ? input.text : '';
+    if (!text.trim()) throw new BadRequestException('text is required.');
+    return this.executions.steerProjectTask(request, 'personal', id, text);
   }
 
   @Get('channels')

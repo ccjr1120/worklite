@@ -3,13 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
-import { agentExecutions, chatConfigurations, chatProjectOperations, chatProjectTasks, chatProjectTaskSubscriptions, type Database, type StoredProjectExecutor, type StoredProjectExecutorLaunch, type StoredProjectExecutorModelSource } from '@worklite/db';
+import { agentExecutions, chatConfigurations, chatProjectOperations, chatProjectTasks, chatProjectTaskSubscriptions, type Database, type StoredProjectExecutor, type StoredProjectExecutorLaunch, type StoredProjectExecutorModelSource, type StoredProjectTaskSteerInstruction } from '@worklite/db';
 import type { AnswerAgentQuestionRequest, ChatProjectOperationDetailView, ChatProjectTaskView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { ClaudeCodeError } from './claude-code.service';
 import { CodexAppServerError } from './codex-app-server.service';
 import { ProjectExecutorService } from './project-executor.service';
+import type { ProjectExecutorSteerPort } from './project-executor.types';
 import { enqueueTaskMerge, mergeTaskWorktree, reconcileInterruptedMerge } from './git-worktree';
 
 type Task = typeof chatProjectTasks.$inferSelect;
@@ -56,6 +57,10 @@ export const CHAT_PROJECT_TASK_CANCEL_TOOL = {
 @Injectable()
 export class ChatProjectTasksService {
   private readonly active = new Map<string, { controller: AbortController; completion: Promise<Task> }>();
+  // The live mid-turn delivery channel for whichever round of a task is currently executing, set
+  // only while that round's executors.execute() call is in flight. Absent between rounds, during
+  // waiting_for_input, or for an executor (Claude Code) that never populates its `deliver`.
+  private readonly steerPorts = new Map<string, ProjectExecutorSteerPort>();
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
@@ -176,6 +181,7 @@ export class ChatProjectTasksService {
       id: task.id, executionId: task.executionId, goal: task.goal, projectDirectory: task.projectDirectory, model: task.model,
       status: task.status, stage: deriveTaskStage(task), configurationRevision: task.snapshot.capabilities.revision, pendingQuestion: task.pendingQuestion,
       activityCount: task.activities.length, activityPhases, activities, progressText: typeof progressText === 'string' ? progressText : '', result: task.result, error: task.error,
+      steerQueue: task.steerQueue,
       worktreePath: task.worktreePath, worktreeBranch: task.worktreeBranch, baseBranch: task.baseBranch, baseCommit: task.baseCommit,
       mergeStatus: task.mergeStatus, mergeError: task.mergeError,
       ...(full && task.activities.length > activityWindow.length ? { activitiesTruncated: true } : {}),
@@ -262,11 +268,44 @@ export class ChatProjectTasksService {
   }
 
   private async execute(taskId: string, signal: AbortSignal, onProgress: () => Promise<void>): Promise<Task> {
-    let task = this.requireTask(taskId);
+    const task = this.requireTask(taskId);
     if (['succeeded', 'cancelled'].includes(task.status)) return task;
     if (task.status === 'waiting_for_recovery') return this.update(taskId, { status: 'failed', pendingQuestion: null, error: '此旧任务在等待操作恢复，无法继续；请创建新任务，已有记录仍保留。' });
+    // Runs rounds back to back, within the same background execute() call, until a round settles
+    // with no steer instruction left stranded. A steer submitted after this round's goal was built
+    // but before its settlement committed (the race between executors.execute() returning and the
+    // user's request reaching the DB) would otherwise sit 'queued' forever on an already-succeeded
+    // task with no future run to pick it up; looping here is what keeps the task continuous instead
+    // of needing the user to notice and re-dispatch.
+    for (;;) {
+      const round = await this.executeRound(taskId, signal, onProgress);
+      if (round.status !== 'ran') return round.task;
+      const stranded = round.task.steerQueue.some((instruction) => instruction.status === 'queued');
+      if (!stranded) return this.mergeAndSettle(taskId, round.settlement);
+      // Record this round's result as interim progress before another round folds in the
+      // stranded instruction; the final settlement overwrites it once a round truly finishes.
+      this.update(taskId, { result: round.settlement.result, error: round.settlement.error });
+    }
+  }
+
+  // Runs exactly one executor round and returns its outcome without merging or settling: a caller
+  // loops on 'ran' with queued steers still pending, and otherwise finalizes (waiting_for_input,
+  // cancelled, or failed) as-is.
+  private async executeRound(taskId: string, signal: AbortSignal, onProgress: () => Promise<void>)
+    : Promise<{ status: 'waiting_for_input' | 'cancelled' | 'failed'; task: Task } | { status: 'ran'; task: Task; settlement: ExtractedSettlement }> {
+    let task = this.requireTask(taskId);
     const previousEvidence = task.activities.length ? this.view(taskId) : undefined;
-    // A re-run (retry or answer) clears the report marker so the next settlement reports again.
+    // Steer instructions queued since the last round (never delivered to a live turn, or delivered
+    // to a Codex turn that then completed before the executor's own result settled) join this
+    // round's goal. Marking them consumed up front means a steer submitted mid-round queues for the
+    // round after, rather than racing this round's goal construction.
+    const pendingSteers = task.steerQueue.filter((instruction) => instruction.status === 'queued');
+    if (pendingSteers.length) {
+      const consumedIds = new Set(pendingSteers.map((instruction) => instruction.id));
+      task = this.update(taskId, { steerQueue: task.steerQueue.map((instruction) => consumedIds.has(instruction.id) ? { ...instruction, status: 'consumed' as const } : instruction) });
+    }
+    // A re-run (retry, answer, or another round in this same loop) clears the report marker so the
+    // next settlement reports again.
     task = this.update(taskId, { status: 'running', pendingQuestion: null, error: null, reportedAt: null });
     const activity = async (detail: Record<string, unknown>) => {
       this.db.transaction((transaction) => {
@@ -296,29 +335,64 @@ export class ChatProjectTasksService {
       const declaredMcpServers = launch.executor === 'claude' && configuration?.projectTaskMcpServerIds.length
         ? await this.resources.workflowMcpRuntimes(task.workspaceId, configuration.projectTaskMcpServerIds)
         : [];
+      const steerPort: ProjectExecutorSteerPort = {};
+      this.steerPorts.set(taskId, steerPort);
       const output = await this.executors.execute({
         owner: 'chat', workspaceId: task.workspaceId, launch, model: task.model || null,
         projectDirectory: workingDirectory,
         skills: [],
         mcpServers: declaredMcpServers,
         systemPrompt: [
-          `Execute this Chat-owned project task independently of Agent Team. The supplied working directory is a workspace root: it may contain multiple projects or repositories and need not itself be a Git repository. Inspect the relevant project directories, their applicable instructions, actual working trees and prior task effects before changing files or taking over interrupted work. Decide independently for each relevant project whether to use its current branch, switch to or create a feature branch, or create a worktree for that project. Do not assume every project needs a worktree, and do not create one around the entire workspace. WorkLite does not create branches or worktrees, merge branches, or clean up Git state for new tasks; you own any Git operations you choose and should report the project paths, strategy, branch or worktree paths, and outcome in your summary. Follow captured workspace-root instructions in the pinned reference files and discover additional applicable project instructions. Existing project confirmation, verification and service-lifecycle constraints remain authoritative; WorkLite adds no proposal confirmation or command grants. Keep work within the user task. Use supplied review findings and approved scope to check affected code without repeating the complete review. Explain concrete progress as work proceeds. Never perform WorkLite installation, build, upgrade-runner or service replacement; its independent managed runner owns deployment.${legacyWorktreeInstruction}${readOnlyInstruction} Return JSON: {"status":"succeeded","summary":"..."} or {"status":"waiting_for_input","pendingInput":{"question":"..."}}. Ask only for material missing information or authorization; evidence and clarification answers do not authorize unrelated work.`,
+          `Execute this Chat-owned project task independently of Agent Team. The supplied working directory is a workspace root: it may contain multiple projects or repositories and need not itself be a Git repository. Inspect the relevant project directories, their applicable instructions, actual working trees and prior task effects before changing files or taking over interrupted work. Decide independently for each relevant project whether to use its current branch, switch to or create a feature branch, or create a worktree for that project. Do not assume every project needs a worktree, and do not create one around the entire workspace. WorkLite does not create branches or worktrees, merge branches, or clean up Git state for new tasks; you own any Git operations you choose and should report the project paths, strategy, branch or worktree paths, and outcome in your summary. Follow captured workspace-root instructions in the pinned reference files and discover additional applicable project instructions. Existing project confirmation, verification and service-lifecycle constraints remain authoritative; WorkLite adds no proposal confirmation or command grants. Keep work within the user task. Use supplied review findings and approved scope to check affected code without repeating the complete review. Explain concrete progress as work proceeds. Never perform WorkLite installation, build, upgrade-runner or service replacement; its independent managed runner owns deployment.${legacyWorktreeInstruction}${readOnlyInstruction} The user may submit a mid-run correction while you are working; if your input carries userCorrections, the user is redirecting or adjusting the task itself (not answering a question you asked), so weigh them as the current instruction over the original goal where they conflict and continue the same task without starting over or discarding unrelated completed work. Return JSON: {"status":"succeeded","summary":"..."} or {"status":"waiting_for_input","pendingInput":{"question":"..."}}. Ask only for material missing information or authorization; evidence and clarification answers do not authorize unrelated work.`,
           'To show an image such as a screenshot in your report, upload the file as the raw request body to attachmentUploadUrl from the input with its image media type, for example `curl -sS --data-binary @shot.png -H \'Content-Type: image/png\' "<attachmentUploadUrl>&fileName=shot.png"`. Only PNG, JPEG, GIF and WebP up to 10 MB are accepted. Put the returned `markdown` value, such as ![shot.png](/api/chat/attachments/att_…), in the summary exactly as returned; never reference local file paths or file:// URLs as images. Uploaded images expire with the request logs.',
           configuration?.extensionPrompt,
         ].filter(Boolean).join('\n\n'),
         references: task.snapshot.projectInstructions.map((instruction) => ({ path: `project-instructions/${instruction.path}`, content: instruction.content })),
-        input: JSON.stringify({ goal: task.goal, projectDirectory: workingDirectory, taskId: task.id, attachmentUploadUrl: attachmentUploadUrl(task), ...(task.answers.length ? { answers: task.answers } : {}), ...(previousEvidence ? { previousEvidence } : {}) }),
+        input: JSON.stringify({
+          goal: task.goal, projectDirectory: workingDirectory, taskId: task.id, attachmentUploadUrl: attachmentUploadUrl(task),
+          ...(task.answers.length ? { answers: task.answers } : {}),
+          ...(previousEvidence ? { previousEvidence } : {}),
+          // Instructions the user submitted mid-run that could not reach (or were queued ahead of) a
+          // live turn. Delivered-but-evidence-only entries are not repeated here; the executor's own
+          // turn already saw them.
+          ...(pendingSteers.length ? { userCorrections: pendingSteers.map((instruction) => instruction.text) } : {}),
+        }),
         signal,
+        steerPort,
         onEvent: (detail) => activity(detail),
       });
       signal.throwIfAborted();
       const settlement = settleChatProjectTask(output, recentActivityTexts(this.requireTask(taskId).activities));
-      if (settlement.status === 'waiting_for_input') return this.waitForInput(task, settlement.question);
-      return this.mergeAndSettle(taskId, settlement);
+      if (settlement.status === 'waiting_for_input') return { status: 'waiting_for_input', task: this.waitForInput(task, settlement.question) };
+      return { status: 'ran', task: this.requireTask(taskId), settlement };
     } catch (error) {
-      if (signal.aborted) return this.update(taskId, { status: 'cancelled', pendingQuestion: null, reportedAt: new Date() });
-      return this.update(taskId, { status: 'failed', pendingQuestion: null, error: error instanceof CodexAppServerError || error instanceof ClaudeCodeError || error instanceof BadRequestException || error instanceof NotFoundException ? error.message : '项目任务执行失败，请查看关联的命令记录。' });
+      if (signal.aborted) return { status: 'cancelled', task: this.update(taskId, { status: 'cancelled', pendingQuestion: null, reportedAt: new Date() }) };
+      return { status: 'failed', task: this.update(taskId, { status: 'failed', pendingQuestion: null, error: error instanceof CodexAppServerError || error instanceof ClaudeCodeError || error instanceof BadRequestException || error instanceof NotFoundException ? error.message : '项目任务执行失败，请查看关联的命令记录。' }) };
+    } finally {
+      this.steerPorts.delete(taskId);
     }
+  }
+
+  // Submits a mid-run correction without cancelling the task. Only a running task accepts one: a
+  // task waiting for a question's answer has no live round, and that answer is its own resumption
+  // path. If the current round has a live steerable turn (Codex, through turn/steer) the text is
+  // delivered there and marked delivered, kept only as evidence; a race with the turn's own
+  // completion, a non-steerable turn, or an executor without a live channel (Claude Code always)
+  // queues it instead, and the task's next run folds every queued instruction into its goal
+  // together with the prior round's evidence, so correction and continuity travel together.
+  async steer(workspaceId: string, taskId: string, text: string): Promise<ChatProjectTaskView> {
+    const task = this.requireTask(taskId, workspaceId);
+    if (task.status !== 'running') throw new ConflictException('This project task is not running, so it cannot accept a steering instruction.');
+    const trimmed = required(text, 'text');
+    const instruction: StoredProjectTaskSteerInstruction = { id: `steer_${randomUUID()}`, text: trimmed, createdAt: new Date().toISOString(), status: 'queued' };
+    const delivered = await this.steerPorts.get(taskId)?.deliver?.(trimmed).catch(() => false);
+    if (delivered) instruction.status = 'delivered';
+    this.db.transaction((transaction) => {
+      const current = transaction.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
+      if (current.status !== 'running') throw new ConflictException('This project task is not running, so it cannot accept a steering instruction.');
+      transaction.update(chatProjectTasks).set({ steerQueue: [...current.steerQueue, instruction], updatedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).run();
+    });
+    return this.view(taskId, workspaceId);
   }
 
   private waitForInput(task: Task, question: string): Task {

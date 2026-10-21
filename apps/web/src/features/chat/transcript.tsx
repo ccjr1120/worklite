@@ -496,6 +496,9 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
   const [answering, setAnswering] = useState(false);
   const [cancellingTask, setCancellingTask] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [steerDraft, setSteerDraft] = useState('');
+  const [steering, setSteering] = useState(false);
+  const [steerNotice, setSteerNotice] = useState('');
   const pins = useContext(PinTrackingContext);
   const expandRequest = pins?.expandRequest;
   useEffect(() => {
@@ -545,6 +548,24 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
       setActionError(error instanceof ApiError ? error.message : t('codex.cancelFailed'));
     } finally {
       setCancellingTask(false);
+    }
+  };
+
+  const submitSteer = async () => {
+    const text = steerDraft.trim();
+    if (!text || steering) return;
+    setSteering(true);
+    setActionError('');
+    setSteerNotice('');
+    try {
+      const updated = await api.steerChatProjectTask(task.id, { text });
+      setSteerDraft('');
+      const submitted = updated.steerQueue.at(-1);
+      setSteerNotice(submitted?.status === 'delivered' ? t('codex.steerDelivered') : t('codex.steerQueued'));
+    } catch (error) {
+      setActionError(error instanceof ApiError ? error.message : t('codex.steerFailed'));
+    } finally {
+      setSteering(false);
     }
   };
   const goalSummary = codexFirstLine(task.goal);
@@ -650,6 +671,25 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
           </div>
         </div>
       ) : null}
+      {task.status === 'running' ? (
+        <div className="space-y-2 border-t border-border px-3 py-2.5">
+          <Textarea
+            value={steerDraft}
+            onChange={(event) => { setSteerDraft(event.target.value); setSteerNotice(''); }}
+            placeholder={t('codex.steerPlaceholder')}
+            rows={2}
+            disabled={steering}
+            aria-label={t('codex.steerPlaceholder')}
+          />
+          <div className="flex items-center justify-between gap-2">
+            {steerNotice ? <p className="text-xs text-muted-foreground">{steerNotice}</p> : <span />}
+            <Button type="button" variant="secondary" size="compact" disabled={steering || !steerDraft.trim()} aria-busy={steering} onClick={() => void submitSteer()}>
+              {steering ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : null}
+              {t('codex.steerSubmit')}
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {live ? (
         <div className="flex items-center justify-end gap-2 border-t border-border px-3 py-2">
           {actionError ? <p className="mr-auto text-xs text-danger" role="alert">{actionError}</p> : null}
@@ -729,6 +769,23 @@ function CodexToolCallPanel({ task }: { task: ChatProjectTaskView }) {
               </div>
             ) : <p className="mt-2 text-xs text-muted-foreground">{t('codex.noActivities')}</p>}
           </section>
+
+          {task.steerQueue.length > 0 ? (
+            <section>
+              <h3 className="text-xs font-medium text-muted-foreground">{t('codex.steerHistory', { count: task.steerQueue.length })}</h3>
+              <ol className="mt-2 space-y-2 rounded-md border border-border bg-surface-subtle/50 p-2">
+                {task.steerQueue.map((instruction) => (
+                  <li key={instruction.id} className="rounded-sm p-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <StatusBadge status={instruction.status === 'delivered' ? 'completed' : instruction.status === 'consumed' ? 'completed' : 'queued'} label={t(`codex.steerStatus.${instruction.status}`)} />
+                      <span className="text-[11px] text-muted-foreground">{formatDateTime(instruction.createdAt, locale)}</span>
+                    </div>
+                    <p className="mt-1 whitespace-pre-wrap break-words text-xs">{instruction.text}</p>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ) : null}
 
           <section>
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -857,5 +914,5 @@ function StandardToolCallPanel({ call }: { call: AgentToolCallView }) {
   );
 }
 
-export { AssistantTurn, buildTimeline, CancelledNote, codexFirstLine, FailureNote, QuestionNote, QueueRows, SummaryDivider, TranscriptSkeleton, UserMessage, WorkflowRunRow };
+export { AssistantTurn, buildTimeline, CancelledNote, CodexToolCallPanel, codexFirstLine, FailureNote, QuestionNote, QueueRows, SummaryDivider, TranscriptSkeleton, UserMessage, WorkflowRunRow };
 export type { ActiveWorkflowRun, TimelineEntry };
