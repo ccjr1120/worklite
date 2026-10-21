@@ -506,6 +506,8 @@ export type StoredChatProjectTaskSnapshot = {
   projectInstructions: Array<{ path: string; content: string }>;
   capabilities: StoredChatCapabilities;
   readOnly?: boolean;
+  redeployAfterSuccess?: boolean;
+  redeployAuthorization?: { userMessageId: string };
 };
 
 // A user-submitted mid-task steer instruction. Codex may deliver it to the live turn through

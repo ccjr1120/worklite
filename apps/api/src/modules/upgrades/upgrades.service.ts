@@ -3,9 +3,9 @@ import { ModuleRef } from '@nestjs/core';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, openSync, closeSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, resolve, sep, isAbsolute } from 'node:path';
 import { and, eq, inArray } from 'drizzle-orm';
-import { agentExecutions, agentTeamRuns, agentToolCalls, chatSubmissions, commandExecutions, externalChats, workflowRuns, type Database } from '@worklite/db';
+import { agentExecutions, agentTeamRuns, agentToolCalls, chatProjectTasks, chatSubmissions, commandExecutions, externalChats, workflowRuns, type Database } from '@worklite/db';
 import type { WorkliteUpgradeView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { upgradeStateDirectory } from '../../infrastructure/runtime-upgrade-state';
@@ -33,6 +33,8 @@ type UpgradeJob = {
 export class UpgradesService implements OnModuleInit {
   private readonly logger = new Logger(UpgradesService.name);
   private recoveryTimer?: ReturnType<typeof setInterval>;
+  private readonly projectTaskRedeploys = new Map<string, Promise<WorkliteUpgradeView>>();
+  private projectTaskRedeployQueue: Promise<void> = Promise.resolve();
   constructor(@Inject(DATABASE) private readonly db: Database, private readonly modules: ModuleRef) {}
 
   async onModuleInit(): Promise<void> {
@@ -102,6 +104,86 @@ export class UpgradesService implements OnModuleInit {
     atomicWrite(join(directory, 'active.json'), { jobId: id });
     this.launch(job);
     return this.view(id);
+  }
+
+  redeployAfterProjectTask(taskId: string): Promise<WorkliteUpgradeView> {
+    const existing = this.projectTaskRedeploys.get(taskId);
+    if (existing) return existing;
+
+    const pending = this.projectTaskRedeployQueue.then(() => this.startProjectTaskRedeploy(taskId));
+    this.projectTaskRedeploys.set(taskId, pending);
+    this.projectTaskRedeployQueue = pending.then(() => undefined, () => undefined);
+    const cleanup = () => {
+      if (this.projectTaskRedeploys.get(taskId) === pending) this.projectTaskRedeploys.delete(taskId);
+    };
+    void pending.then(cleanup, cleanup);
+    return pending;
+  }
+
+  private async startProjectTaskRedeploy(taskId: string): Promise<WorkliteUpgradeView> {
+    const directory = this.directory();
+    const [task] = await this.db.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).limit(1);
+    const authorization = task?.snapshot.redeployAuthorization;
+    if (!task || task.status !== 'succeeded' || task.snapshot.redeployAfterSuccess !== true || !authorization?.userMessageId) {
+      throw new BadRequestException('Automatic redeployment requires a successfully completed project task with a captured user request.');
+    }
+    if (task.worktreePath || task.snapshot.readOnly === true) {
+      throw new BadRequestException('Automatic redeployment requires task changes in the managed project root checkout.');
+    }
+    const [execution] = await this.db.select().from(agentExecutions)
+      .where(and(eq(agentExecutions.id, task.executionId), eq(agentExecutions.workspaceId, task.workspaceId), eq(agentExecutions.agentId, 'agt_system_helper_chat'))).limit(1);
+    const userMessage = execution?.displayMessages.find((message) => message.role === 'user' && message.id === authorization.userMessageId);
+    const [call] = await this.db.select().from(agentToolCalls).where(and(eq(agentToolCalls.id, task.id), eq(agentToolCalls.executionId, task.executionId))).limit(1);
+    const callInput = call?.input as { redeployAfterSuccess?: unknown } | undefined;
+    if (!execution || !userMessage || call?.status !== 'completed' || call.mcpToolName !== 'project_task' || callInput?.redeployAfterSuccess !== true) {
+      throw new BadRequestException('Automatic redeployment no longer matches its captured Chat request.');
+    }
+
+    const runtime = this.readFile<{ projectRoot: string }>(join(directory, 'current.json'));
+    if (resolve(task.projectDirectory) !== resolve(runtime.projectRoot)) {
+      throw new BadRequestException('Automatic redeployment requires the task to target the managed WorkLite project root.');
+    }
+    const id = `upgrade_${createHash('sha256').update(`${execution.id}:${userMessage.id}`).digest('hex').slice(0, 32)}`;
+    const existingPath = join(directory, 'upgrades', `${id}.json`);
+    if (existsSync(existingPath)) {
+      const existing = this.load(id);
+      if (!['succeeded', 'rolled_back', 'failed'].includes(existing.phase) && existing.confirmedAt) {
+        const activePath = join(directory, 'active.json');
+        const activeJobId = existsSync(activePath) ? this.readFile<{ jobId: string }>(activePath).jobId : undefined;
+        if (activeJobId !== id) {
+          this.requireIdle();
+          atomicWrite(activePath, { jobId: id });
+          this.launch(existing);
+        }
+      }
+      return this.view(id);
+    }
+    this.requireIdle();
+
+    const [chat] = await this.db.select({ id: externalChats.id }).from(externalChats).where(eq(externalChats.executionId, execution.id)).limit(1);
+    const summary = [`项目任务已完成：${task.goal}`, task.result].filter(Boolean).join('\n\n').slice(0, 100_000);
+    const release = JSON.parse(execFileSync(process.execPath, [join(process.env.WORKLITE_RELEASE_ROOT!, 'scripts/upgrade-runner.mjs'), 'prepare', runtime.projectRoot, directory, id], { encoding: 'utf8' })) as { releaseHash: string; releaseDirectory: string };
+    const job: UpgradeJob = {
+      id, ...release, summary, phase: 'authorized', workspaceId: execution.workspaceId,
+      submissionId: id, executionId: execution.id, token: randomBytes(32).toString('hex'), pausedTeams: [], pausedWorkflows: [],
+      confirmedAt: new Date().toISOString(), confirmedBy: userMessage.id,
+      interruptionPolicy: 'cancel_active_work_without_resume',
+      authorization: { userMessageId: userMessage.id, userRequest: userMessage.content, toolCallId: task.id },
+      updatedAt: new Date().toISOString(),
+    };
+    this.save(job);
+    this.db.insert(chatSubmissions).values({ id, workspaceId: execution.workspaceId, chatId: chat?.id, executionId: execution.id, message: summary, target: { kind: 'conversation' }, reference: { kind: 'upgrade', jobId: id } }).onConflictDoNothing().run();
+    atomicWrite(join(directory, 'active.json'), { jobId: id });
+    this.launch(job);
+    return this.view(id);
+  }
+
+  async hasActiveProjectTasksForRoot(taskId: string): Promise<boolean> {
+    const [task] = await this.db.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).limit(1);
+    if (!task) throw new NotFoundException('Chat project task not found.');
+    const active = await this.db.select({ id: chatProjectTasks.id, projectDirectory: chatProjectTasks.projectDirectory }).from(chatProjectTasks)
+      .where(and(eq(chatProjectTasks.workspaceId, task.workspaceId), inArray(chatProjectTasks.status, ['running', 'waiting_for_input', 'waiting_for_recovery'])));
+    return active.some((other) => other.id !== taskId && pathsOverlap(other.projectDirectory, task.projectDirectory));
   }
 
   view(id: string): WorkliteUpgradeView {
@@ -233,6 +315,13 @@ export class UpgradesService implements OnModuleInit {
 }
 
 function alive(pid?: number) { if (!pid) return false; try { process.kill(pid, 0); return true; } catch { return false; } }
+function pathsOverlap(left: string, right: string): boolean {
+  const contains = (parent: string, child: string) => {
+    const path = relative(resolve(parent), resolve(child));
+    return path === '' || (!isAbsolute(path) && path !== '..' && !path.startsWith(`..${sep}`));
+  };
+  return contains(left, right) || contains(right, left);
+}
 function atomicWrite(path: string, value: unknown) { const temporary = `${path}.${process.pid}.tmp`; writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 }); renameSync(temporary, path); }
 
 @Controller('upgrades')
