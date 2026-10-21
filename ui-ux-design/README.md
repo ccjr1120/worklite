@@ -92,6 +92,10 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 
 ## Changelog
 
+### 2026-10-21 - Channel-specific new-conversation interaction
+
+- Keep the contextual Web button and Feishu native card button; use the exact text command 「新对话」 for WeChat and document that each adapter owns its channel presentation.
+
 ### 2026-10-20 - Two predefined Agent Teams
 
 - Clarified that Chat selects and configures both Teams; the existing read-only Team records link and fixed configuration page remain scoped to the Company Project Team.

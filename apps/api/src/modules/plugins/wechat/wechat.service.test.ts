@@ -114,6 +114,44 @@ describe('WechatService#deliver typing indicator', () => {
     expect(endpoints.indexOf('sendtyping')).toBeLessThan(endpoints.indexOf('sendmessage'));
     expect(calls[endpoints.indexOf('sendtyping')].body.status).toBe(2);
   });
+
+  it('uses the exact text command when a new-conversation question is delivered', async () => {
+    const sentTexts: string[] = [];
+    const fetchImpl: FetchLike = async (input, init) => {
+      const endpoint = String(input).split('/ilink/bot/')[1];
+      const body = init?.body ? JSON.parse(init.body) : {};
+      if (endpoint === 'getconfig') return { ok: true, status: 200, text: async () => '{"ret":0,"typing_ticket":"ticket-xyz"}' };
+      if (endpoint === 'sendmessage') {
+        sentTexts.push(body.msg.item_list[0].text_item.text);
+        return { ok: true, status: 200, text: async () => '{"ret":0,"message_id":"m-new-conversation"}' };
+      }
+      return { ok: true, status: 200, text: async () => '{}' };
+    };
+    const update = () => {
+      const query = { set: () => query, where: () => Promise.resolve(undefined) };
+      return query;
+    };
+    const insert = () => {
+      const query = { values: () => query, onConflictDoUpdate: () => Promise.resolve(undefined) };
+      return query;
+    };
+    const db = { select: selectFrom([chatRow]), update, insert };
+    const executions = {
+      get: async () => ({ status: 'waiting_for_input', error: null, messages: [], pendingQuestion: { id: 'q-new', question: 'Click the button to begin a new conversation.', options: [], action: 'new_conversation' } }),
+    };
+    const service = new WechatService(db as never, {} as never, {} as never, executions as never, {} as never, {} as never, {} as never);
+    (service as unknown as { fetchImpl: FetchLike; baseUrl: string; token: string }).fetchImpl = fetchImpl;
+    (service as unknown as { baseUrl: string; token: string }).baseUrl = 'https://ilink.example';
+    (service as unknown as { token: string }).token = 'tok';
+    const submission = {
+      ...baseSubmission,
+      reference: { kind: 'conversation' as const, executionId: 'aex_1', afterMessageId: null, afterSequence: 0 },
+    };
+
+    await (service as unknown as { deliver: (s: typeof submission) => Promise<void> }).deliver(submission);
+
+    expect(sentTexts).toEqual(['请回复「新对话」开始新对话。']);
+  });
 });
 
 describe('WechatService "新对话" command', () => {
@@ -217,6 +255,30 @@ describe('WechatService "新对话" command', () => {
     expect(rows[0].executionId).toBe('aex_1'); // Still bound: the text became the question's answer, not an unbind.
     const events = db.select().from(wechatEvents).all() as Array<{ payload: { action?: { kind: string; questionId: string } } }>;
     expect(events[0].payload.action).toEqual(expect.objectContaining({ kind: 'agent_answer', questionId: 'q_1' }));
+  });
+
+  it('starts a new conversation only when the pending new-conversation question gets the exact command', async () => {
+    db.insert(externalChats).values({ id: CHAT_ID, workspaceId: WORKSPACE_ID, channel: 'wechat', externalId: ALLOWED_USER, userId: ALLOWED_USER, executionId: 'aex_1' }).run();
+    const { instance } = service({ execution: { status: 'waiting_for_input', pendingQuestion: { id: 'q_new', question: 'Click the button to begin.', options: [], action: 'new_conversation', createdAt: new Date().toISOString() } } });
+
+    await (instance as unknown as { receiveMessage: (raw: unknown) => Promise<void> }).receiveMessage(rawMessage('msg-new-exact', '新对话'));
+
+    const events = db.select().from(wechatEvents).all() as Array<{ payload: { action?: { newConversation?: boolean }; form?: { answer: string } } }>;
+    expect(events[0].payload.action?.newConversation).toBe(true);
+    expect(events[0].payload.form?.answer).toBe('新对话');
+  });
+
+  it('does not start a new conversation for other text answering that pending question', async () => {
+    db.insert(externalChats).values({ id: CHAT_ID, workspaceId: WORKSPACE_ID, channel: 'wechat', externalId: ALLOWED_USER, userId: ALLOWED_USER, executionId: 'aex_1' }).run();
+    const { instance } = service({ execution: { status: 'waiting_for_input', pendingQuestion: { id: 'q_new', question: 'Click the button to begin.', options: [], action: 'new_conversation', createdAt: new Date().toISOString() } } });
+
+    await (instance as unknown as { receiveMessage: (raw: unknown) => Promise<void> }).receiveMessage(rawMessage('msg-new-other', '继续当前对话'));
+
+    const rows = db.select().from(externalChats).all() as Array<{ executionId: string | null }>;
+    expect(rows[0].executionId).toBe('aex_1');
+    const events = db.select().from(wechatEvents).all() as Array<{ payload: { action?: { newConversation?: boolean }; form?: { answer: string } } }>;
+    expect(events[0].payload.action).not.toHaveProperty('newConversation');
+    expect(events[0].payload.form?.answer).toBe('继续当前对话');
   });
 
   it('is idempotent on a redelivered message id (no double-unbind, no duplicate submission)', async () => {

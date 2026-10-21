@@ -36,7 +36,7 @@ One reply card per accepted submission plus one task card per project task dispa
 
 Chat Codex and Team developer share direct execution without WorkLite proposal or exact-command approval. Their questions collect material missing information and omit command-grant fields. Chat only orchestrates protected platform operations, Codex tasks, Team Run dispatch and published Workflows. Non-Codex Team roles retain their authorization controls.
 
-- New conversation intent: Chat asks a typed pending question after recognizing the user's request and shows one contextual “新对话” button. Clicking creates and selects the new persisted conversation; old history and task evidence remain. This action is absent from ordinary replies and disappears after acceptance. No permanent reply menu or text-command requirement is introduced.
+- New conversation intent: Chat asks a typed pending question after recognizing the user's request; Feishu renders its contextual action as a native “新对话” card button. The question states the intent without requiring a text command. Activating the button starts a new persisted conversation while retaining old history and task evidence; the action disappears after acceptance.
 
 - Retired command question: a never-started Shell call waiting on removed per-command authorization is cancelled by the server, retaining its history and clearing the invalid question. The server persists the resulting snapshot for replay; later messages return to normal dialogue with no manual stop instruction or extra recovery button is required. Reserved effects still use explicit recovery.
 - Execution boundary: coding, repository investigation and local command tasks delegate directly to Codex; collaborative work uses Team Run dispatch and automation uses published Workflows. Chat has no direct host tools or custom Skill/MCP execution. Historical Shell evidence and explicit uncertain-effect recovery remain inspectable without starting another Command. This rule is shared by Web and Feishu.
@@ -99,6 +99,8 @@ Use native text labels for every card action and status. Input labels are explic
 
 ## Coverage Status
 
+2026-10-21 new-conversation channel adaptation: source inspection and the service test confirm that the pending action is delivered through a native CardKit button whose callback carries `newConversation: true`; the Chat prompt describes Feishu's native button capability. `pnpm exec vitest run apps/api/src/modules/plugins/wechat/wechat.service.test.ts apps/api/src/modules/plugins/feishu/feishu.service.test.ts apps/web/src/features/chat/transcript-question.test.tsx` passed (3 files, 17 tests). Live Feishu delivery and client rendering were not exercised.
+
 2026-10-12 multi-card display source change: one submission now renders one reply card plus one task card per dispatched project task; each task card shows executor, model, stage, status, latest progress text, an item-by-item recent-activity list with total count, the task's pending-question form and cancel control, and persists its own CardKit transport. Full activity history beyond the recent window stays Web-only. No runtime, Feishu client, type check, test, build or deployment was performed.
 
 2026-10-08 authorized deployment of Chat-requested redeployment: `pnpm deploy:local` incremented the public version from 0.1.3 to 0.1.4. Gateway/Web builds, API compilation during isolated startup, preflight on ports 23490–23492 and target readiness on ports 23390–23392 passed before replacement completed. This uses the ordinary local deployment entry and does not initialize a managed baseline. No Feishu client interaction, live Chat redeploy request, browser check, standalone type check or test suite was run.
@@ -134,6 +136,10 @@ This change removes fixed mode menus, adds current-question options and concise 
 Platform rendering, granted permissions, live connection behavior and keyboard/screen-reader behavior remain unverified; no runtime or platform verification was authorized. Inbound images, voice, files and group messages are outside the implemented scope. Web configuration now uses a loading skeleton and local retry. Request-error placement and unrelated plugin differences remain recorded in its page specification.
 
 ## Changelog
+
+### 2026-10-21
+
+- Render Chat's new-conversation intent using the contextual native card button and its bound callback.
 
 ### 2026-10-13
 

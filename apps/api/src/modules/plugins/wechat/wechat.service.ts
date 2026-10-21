@@ -352,13 +352,14 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
     let boundAction: WechatAction | undefined;
     if (execution?.pendingQuestion) {
       const question = execution.pendingQuestion;
+      const startNewConversation = question.action === 'new_conversation' && message.text === '新对话';
       // Recovery decisions have no buttons here; the two exact texts map to the domain decision.
       const recoveryDecision = question.recovery
         ? message.text === '采用已有命令结果' ? 'adopt_command' as const : message.text === '标记操作失败' ? 'mark_failed' as const : undefined
         : undefined;
       boundAction = {
         kind: 'agent_answer', executionId: execution.id, questionId: question.id,
-        ...(question.action === 'new_conversation' ? { newConversation: true } : {}),
+        ...(startNewConversation ? { newConversation: true } : {}),
         ...(recoveryDecision ? { recoveryDecision } : {}),
       };
     }
@@ -366,8 +367,8 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
     // its current execution so the next message starts a fresh one, mirroring the Web "new
     // conversation" action's lazy create (no execution exists until the first real message).
     // It never fires while a pendingQuestion is active — that text instead answers whatever
-    // question is pending (including a model's own new_conversation question, handled above via
-    // boundAction) — so it can never silently swallow an answer. Firing regardless of the bound
+    // question is pending — a new_conversation question accepts only its exact command through
+    // boundAction, while other text remains that question's answer. Firing regardless of the bound
     // execution's status (running, waiting_for_input, completed, cancelled or failed) lets the
     // user step out of a stuck or long-running turn instead of being forced to wait it out; that
     // execution keeps running to its own terminal reply and stays inspectable on Web, only this
@@ -521,11 +522,14 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
         else text = replies.join('\n\n') || '本轮对话已结束。';
       } else if (execution.status === 'waiting_for_input' && execution.pendingQuestion) {
         const question = execution.pendingQuestion;
-        text = question.question;
-        if (question.options.length) text += `\n\n${question.options.map((option, index) => `${index + 1}. ${option}`).join('\n')}`;
-        if (question.action === 'new_conversation') text += '\n\n回复任意内容开始新对话。';
-        else if (question.recovery) text += `\n\n请回复「采用已有命令结果」或「标记操作失败」。${question.recovery.commandExecutionId ? '也可回复其他内容说明处理方式。' : ''}`;
-        else text += '\n\n请直接回复你的答案。';
+        if (question.action === 'new_conversation') {
+          text = '请回复「新对话」开始新对话。';
+        } else {
+          text = question.question;
+          if (question.options.length) text += `\n\n${question.options.map((option, index) => `${index + 1}. ${option}`).join('\n')}`;
+          if (question.recovery) text += `\n\n请回复「采用已有命令结果」或「标记操作失败」。${question.recovery.commandExecutionId ? '也可回复其他内容说明处理方式。' : ''}`;
+          else text += '\n\n请直接回复你的答案。';
+        }
       }
     } else if (reference?.kind === 'team') {
       const run = await this.teams.getRun(request, 'personal', reference.runId);

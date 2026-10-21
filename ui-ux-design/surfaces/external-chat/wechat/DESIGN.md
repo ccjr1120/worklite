@@ -26,7 +26,7 @@ Converse with the master Agent from WeChat private messages without opening the 
 
 ## Primary Task
 
-Send one text message, action budget one — sending text to Chat. Ordinary conversation receives one whole text reply per accepted message. A pending conversation question is answered by replying with ordinary text; an operation-recovery question is answered with the exact texts 「采用已有命令结果」 or 「标记操作失败」. Sending the exact text 「新对话」 unbinds the WeChat chat from its current conversation so the next message starts a fresh one — this works at any time no question is pending, not only after a failure; the unbound conversation's full history remains visible in Web, only this channel's binding moves off it. Team and Workflow tasks dispatched from WeChat report status by plain-text notification; their questions and actions stay on their own Web surfaces.
+Send one text message, action budget one — sending text to Chat. Ordinary conversation receives one whole text reply per accepted message. A pending conversation question is answered by replying with ordinary text; a new-conversation action instructs the user to reply with the exact text 「新对话」. An operation-recovery question is answered with the exact texts 「采用已有命令结果」 or 「标记操作失败」. When no question is pending, sending the exact text 「新对话」 unbinds the WeChat chat from its current conversation so the next message starts fresh; the unbound conversation's full history remains visible in Web, and only this channel's binding moves off it. Team and Workflow tasks dispatched from WeChat report status by plain-text notification; their questions and actions stay on their own Web surfaces.
 
 ## Layout
 
@@ -38,8 +38,8 @@ Web configuration uses shared Field, Input, Button and status semantics in both 
 - Access control: only the bound allowed user's private messages are received; group messages and other senders are ignored without reply.
 - Message: persist the receipt and reply placeholder atomically before dispatch; the user receives one fixed acknowledgement `已收到，正在处理…` only when acceptance itself is the first deliverable state.
 - Reply: deliver whole text replies on terminal state only — no streaming typewriter, no message edits. Long replies are truncated at a fixed byte budget with a pointer to WorkLite for the full content.
-- Choice: a pending conversation question is delivered as text with numbered options; any text answer resumes the bound question. Recovery questions accept only their exact decision texts.
-- Control: the exact text 「新对话」 unbinds the WeChat chat from its current Agent execution whenever no question is pending; the unbound execution keeps running or stays as-is and remains fully visible on Web, and the next WeChat message creates a fresh execution the same way the Web "new conversation" action does. A pending question always takes 「新对话」 as its own answer text instead (including an operation-recovery question's exact decision texts), so a question is never silently discarded.
+- Choice: a pending conversation question is delivered as text with numbered options; ordinary text answers the bound question. A pending new-conversation action shows `请回复「新对话」开始新对话。` and starts a new conversation only for that exact text; other text answers the pending question without unbinding. Recovery questions accept their exact decision texts.
+- Control: when no question is pending, the exact text 「新对话」 unbinds the WeChat chat from its current Agent execution; the unbound execution keeps running or stays as-is and remains fully visible on Web, and the next WeChat message creates a fresh execution the same way the Web "new conversation" action does. A pending question keeps ownership of incoming text; it is never silently discarded.
 - Tasks: Team and Workflow dispatches send one text notification per status change (started, waiting for input, terminal). Their pending questions are not answerable from WeChat and point to WorkLite.
 - Freshness: inbound long-poll resumes from the persisted sync cursor after reconnect or restart; redelivered messages are deduplicated by their platform message id. Outbound deliveries resume from persisted submissions. No manual refresh control.
 - Upgrade: adapter writes freeze with the runtime during a managed upgrade and the connection resumes after completion; in-flight sends are retried from persisted state.
@@ -71,6 +71,7 @@ Web configuration uses shared Field, Input, Button and status semantics in both 
 | `已收到，正在处理…` | State |
 | `请求失败：…` / `对话失败：…` / `本轮对话已取消。` / `本轮对话已结束。` | State |
 | Question text, numbered options and answer hints (`请直接回复你的答案。` etc.) | Action |
+| `请回复「新对话」开始新对话。` / exact `新对话` reply | Action |
 | `【Agent Team】…` / `【工作流】…` / `【WorkLite 部署】…` status notifications | State |
 | `请前往 WorkLite 处理该问题。` | Recovery |
 | Truncation note | Constraint |
@@ -81,11 +82,17 @@ Web configuration uses native labelled inputs, explicit button text and `aria-li
 
 ## Coverage Status
 
+2026-10-21 new-conversation text action: pending actions deliver `请回复「新对话」开始新对话。`; only the exact command enters the new-conversation path, while other text remains the pending answer. `pnpm exec vitest run apps/api/src/modules/plugins/wechat/wechat.service.test.ts apps/api/src/modules/plugins/feishu/feishu.service.test.ts apps/web/src/features/chat/transcript-question.test.tsx` passed (3 files, 17 tests), including delivery copy, exact-command routing and the non-command answer. Real iLink delivery was not exercised.
+
 2026-10-18 initial implementation: QR login (start, server-side status polling with up to two automatic QR refreshes, cancel, expiry), encrypted token persistence, allowed-user binding from the scanning user, private-text intake with platform message-id idempotency, dispatch through the shared channel-neutral external-chat binding, whole-reply terminal delivery with fingerprint dedupe and persisted retry, and reconnect from the persisted sync cursor. Package typechecks and the locale key check pass; lint and unit tests are recorded in the task report. Real iLink QR scanning, live message send/receive, long-poll timeout behavior and platform-side `client_id` idempotency were not exercised and remain unverified.
 
 2026-10-20: generalized the 「新对话」 unbind command. Unit tests cover the command binding/unbinding to an execution of any status, no-op on a duplicate/redelivered command message, no interference with a pending question (ordinary answer, recovery decision, or the model's own new_conversation question), and ordinary messages continuing the existing bound execution. Real iLink message delivery of these paths was not exercised and remains unverified.
 
 ## Changelog
+
+### 2026-10-21
+
+- Replace button-oriented new-conversation copy with the exact 「新对话」 text instruction; require that command while the action is pending and retain other text as the pending answer.
 
 ### 2026-10-20
 
