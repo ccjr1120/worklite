@@ -1218,6 +1218,17 @@ function normalizeUserMessage(input: unknown): string {
   return input.trim();
 }
 
+// capture() can reject with any exception the executor launch or Gateway model resolution raises,
+// including NotFoundException/ServiceUnavailableException from resolving the executor's declared
+// model against the Gateway's registered Providers; only an unrecognized error type falls back to
+// the generic message, so a real, actionable cause (missing Gateway Provider, unreachable Gateway,
+// invalid executor plugin command, etc.) is never silently replaced.
+export function projectTaskCaptureFailureMessage(error: unknown): string {
+  return error instanceof BadRequestException || error instanceof ConflictException || error instanceof NotFoundException || error instanceof ServiceUnavailableException || error instanceof ClaudeCodeError || error instanceof CodexAppServerError
+    ? error.message
+    : '无法启动项目任务，请检查项目目录、执行器插件可用性和 Gateway 模型。';
+}
+
 function normalizeAssistantMessage(input: string): string {
   const trimmed = input.trim();
   return /^\\+$/.test(trimmed) ? '' : input;
