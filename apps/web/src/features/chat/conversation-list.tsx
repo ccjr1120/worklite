@@ -11,22 +11,20 @@ import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
 import { cn } from '@/lib/utils';
 
-type Group = { id: 'live' | 'today' | 'earlier'; items: ChatConversationSummary[] };
+type Group = { id: 'today' | 'earlier'; items: ChatConversationSummary[] };
 
-// Live work is pinned above settled history so a running conversation is found by
-// position and motion, not by reading each row's status text.
+// Items already arrive sorted by updatedAt (desc) from the API; a running conversation
+// is found by position in that order and its live status dot, not a separate section.
 function groupConversations(items: ChatConversationSummary[]): Group[] {
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
-  const live: ChatConversationSummary[] = [];
   const today: ChatConversationSummary[] = [];
   const earlier: ChatConversationSummary[] = [];
   for (const item of items) {
-    if (isLiveStatus(item.status)) live.push(item);
-    else if (new Date(item.updatedAt) >= startOfToday) today.push(item);
+    if (new Date(item.updatedAt) >= startOfToday) today.push(item);
     else earlier.push(item);
   }
-  return ([{ id: 'live', items: live }, { id: 'today', items: today }, { id: 'earlier', items: earlier }] satisfies Group[]).filter((group) => group.items.length > 0);
+  return ([{ id: 'today', items: today }, { id: 'earlier', items: earlier }] satisfies Group[]).filter((group) => group.items.length > 0);
 }
 
 function rowStatusKey(status: ChatConversationSummary['status']) {
@@ -60,15 +58,14 @@ export function ConversationList({ selectedId, onSelect, onNew }: { selectedId: 
           <div className="space-y-4" aria-label={t('history.title')}>
             {groups.map((group) => (
               <section key={group.id} aria-labelledby={`chat-group-${group.id}`}>
-                <h3 id={`chat-group-${group.id}`} className={cn('flex items-center gap-2 px-2.5 pb-1.5 pt-1 text-[11px] font-medium', group.id === 'live' ? 'text-brand-text' : 'text-muted-foreground')}>
-                  {group.id === 'live' ? <span className="wl-live !size-1.5 text-brand" aria-hidden="true" /> : null}
+                <h3 id={`chat-group-${group.id}`} className="flex items-center gap-2 px-2.5 pb-1.5 pt-1 text-[11px] font-medium text-muted-foreground">
                   <span>{t(`history.groups.${group.id}`)}</span>
                   <span className="tabular-nums opacity-70">{group.items.length}</span>
                 </h3>
                 <ul className="wl-stagger space-y-0.5">
                   {group.items.map((item) => {
                     const selected = selectedId === item.id;
-                    const live = group.id === 'live';
+                    const live = isLiveStatus(item.status);
                     const statusKey = rowStatusKey(item.status);
                     return (
                       <li key={item.id}>

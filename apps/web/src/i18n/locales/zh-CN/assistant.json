@@ -104,7 +104,6 @@
     "loadFailed": "无法加载会话记录。",
     "retry": "重试",
     "groups": {
-      "live": "进行中",
       "today": "今天",
       "earlier": "更早"
     },
