@@ -19,7 +19,7 @@ import type { WechatService } from '../plugins/wechat/wechat.service';
 import type { Request } from 'express';
 
 type UpgradeJob = {
-  id: string; releaseHash: string; releaseDirectory: string; summary: string; phase: string;
+  id: string; releaseHash: string; gatewayHash?: string; releaseDirectory: string; summary: string; phase: string;
   workspaceId: string; submissionId: string; executionId: string; token: string;
   pausedTeams: string[]; pausedWorkflows: string[]; runnerPid?: number;
   confirmedAt?: string; confirmedBy?: string; error?: string; updatedAt: string;
@@ -67,7 +67,7 @@ export class UpgradesService implements OnModuleInit {
     const [existing] = await this.db.select().from(chatSubmissions).where(eq(chatSubmissions.id, input.submissionId)).limit(1);
     if (existing?.reference?.kind === 'upgrade') return this.view(existing.reference.jobId);
     const id = `upgrade_${randomUUID()}`;
-    const release = JSON.parse(execFileSync(process.execPath, [join(process.env.WORKLITE_RELEASE_ROOT!, 'scripts/upgrade-runner.mjs'), 'prepare', runtime.projectRoot, directory, id], { encoding: 'utf8' })) as { releaseHash: string; releaseDirectory: string };
+    const release = JSON.parse(execFileSync(process.execPath, [join(runtime.projectRoot, 'scripts/upgrade-runner.mjs'), 'prepare', runtime.projectRoot, directory, id], { encoding: 'utf8' })) as { releaseHash: string; gatewayHash: string; releaseDirectory: string };
     const job: UpgradeJob = { id, ...release, summary: input.summary.trim(), phase: 'proposed', workspaceId: execution.workspaceId, submissionId: input.submissionId, executionId: execution.id, token: randomBytes(32).toString('hex'), pausedTeams: [], pausedWorkflows: [], updatedAt: new Date().toISOString() };
     this.save(job);
     await this.db.insert(chatSubmissions).values({ id: input.submissionId, workspaceId: execution.workspaceId, chatId: chat?.id, executionId: execution.id, message: job.summary, target: { kind: 'conversation' }, reference: { kind: 'upgrade', jobId: id } }).onConflictDoNothing();
@@ -90,7 +90,7 @@ export class UpgradesService implements OnModuleInit {
     if (existsSync(join(directory, 'upgrades', `${id}.json`))) return this.view(id);
     this.requireIdle();
     const runtime = this.readFile<{ projectRoot: string }>(join(directory, 'current.json'));
-    const release = JSON.parse(execFileSync(process.execPath, [join(process.env.WORKLITE_RELEASE_ROOT!, 'scripts/upgrade-runner.mjs'), 'prepare', runtime.projectRoot, directory, id], { encoding: 'utf8' })) as { releaseHash: string; releaseDirectory: string };
+    const release = JSON.parse(execFileSync(process.execPath, [join(runtime.projectRoot, 'scripts/upgrade-runner.mjs'), 'prepare', runtime.projectRoot, directory, id], { encoding: 'utf8' })) as { releaseHash: string; gatewayHash: string; releaseDirectory: string };
     const job: UpgradeJob = {
       id, ...release, summary: input.summary.trim(), phase: 'authorized', workspaceId: execution.workspaceId,
       submissionId: id, executionId: execution.id, token: randomBytes(32).toString('hex'), pausedTeams: [], pausedWorkflows: [],
@@ -162,7 +162,7 @@ export class UpgradesService implements OnModuleInit {
 
     const [chat] = await this.db.select({ id: externalChats.id }).from(externalChats).where(eq(externalChats.executionId, execution.id)).limit(1);
     const summary = [`项目任务已完成：${task.goal}`, task.result].filter(Boolean).join('\n\n').slice(0, 100_000);
-    const release = JSON.parse(execFileSync(process.execPath, [join(process.env.WORKLITE_RELEASE_ROOT!, 'scripts/upgrade-runner.mjs'), 'prepare', runtime.projectRoot, directory, id], { encoding: 'utf8' })) as { releaseHash: string; releaseDirectory: string };
+    const release = JSON.parse(execFileSync(process.execPath, [join(runtime.projectRoot, 'scripts/upgrade-runner.mjs'), 'prepare', runtime.projectRoot, directory, id], { encoding: 'utf8' })) as { releaseHash: string; gatewayHash: string; releaseDirectory: string };
     const job: UpgradeJob = {
       id, ...release, summary, phase: 'authorized', workspaceId: execution.workspaceId,
       submissionId: id, executionId: execution.id, token: randomBytes(32).toString('hex'), pausedTeams: [], pausedWorkflows: [],

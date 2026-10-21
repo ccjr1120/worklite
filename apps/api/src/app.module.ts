@@ -21,7 +21,9 @@ import { AgentTeamsModule } from './modules/agent-teams/agent-teams.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    // Managed releases receive configuration through their inherited process environment;
+    // avoiding dotenv file discovery keeps API cutover startup independent of local files.
+    ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: process.env.WORKLITE_MANAGED_GATEWAY === '1' }),
     DatabaseModule,
     UpgradesModule,
     CommandsModule,
