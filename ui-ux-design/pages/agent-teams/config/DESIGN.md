@@ -20,7 +20,7 @@
 
 ## Purpose
 
-Inspect the one built-in Team's current configuration — basic information, role definitions, and Team memories — without the ability to change it. Chat remains the sole Team write path.
+Inspect the existing Company Project Team's configuration — basic information, role definitions, and Team memories — without the ability to change it. Chat remains the sole write path for both predefined Teams.
 
 ## Primary Task
 
@@ -75,15 +75,19 @@ No value on this page is self-healing: configuration changes only through Chat, 
 
 ## Coverage Status
 
-Verified 2026-10-20 against `apps/web/src/features/agent-teams/team-config.tsx` and `apps/web/src/routes/agent-team-config.tsx`. Differences found: none. The page is served at the fixed route `/agent-team-config` for the one built-in Team, renders only read-only content, maps MCP ids through the workspace server list with id fallback, keeps instructions collapsed by default, and issues no write call. This was a source review plus the component render test `team-config.test.tsx`; no browser verification was run.
+Verified 2026-10-20 against `apps/web/src/features/agent-teams/team-config.tsx` and `apps/web/src/routes/agent-team-config.tsx`. Differences found: none in rendered behavior. The fixed route `/agent-team-config` remains scoped to the Company Project Team; Chat selects and configures either predefined Team. The page renders only read-only content, maps MCP ids through the workspace server list with id fallback, keeps instructions collapsed by default, and issues no write call. This was a source review; no runtime or browser verification was run.
 
 2026-10-20 earlier comparison: verified against `apps/web/src/features/agent-teams/team-config.tsx` when the page was served at the nested route `/agent-teams/:teamId/config`; differences found: none at that time. The nested route was later replaced by the fixed `/agent-team-config` route.
 
 ## Changelog
 
+### 2026-10-20 - Company Team scope
+
+- Clarified that this fixed read-only page shows the existing Company Project Team; Chat configures both predefined Teams.
+
 ### 2026-10-20 - Fixed configuration route
 
-- Replaced the nested `/agent-teams/:teamId/config` route with the fixed `/agent-team-config` route for the one built-in Team; mutual navigation with the records page is unchanged.
+- Replaced the nested `/agent-teams/:teamId/config` route with the fixed `/agent-team-config` route for the Company Project Team; mutual navigation with its records page is unchanged.
 
 ### 2026-10-20
 

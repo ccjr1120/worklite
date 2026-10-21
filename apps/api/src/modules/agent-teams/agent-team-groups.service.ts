@@ -29,7 +29,7 @@ import {
 } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
-import { BUILT_IN_AGENT_TEAM_ID, isValidAgentTeamRoleId } from './agent-team-configuration';
+import { isValidAgentTeamRoleId } from './agent-team-configuration';
 import { AgentTeamRuntimeService } from './agent-team-runtime.service';
 
 @Injectable()
@@ -259,6 +259,7 @@ export class AgentTeamGroupsService {
     const runId = acceptance?.runId ?? `atrun_${randomUUID()}`;
     try {
       await this.runtime.createGroupRun(workspace.id, {
+        teamId: group.teamId,
         groupId: group.id,
         groupMessageId: messageId,
         targetRole: recipientRole as StoredAgentTeamRole,
@@ -441,7 +442,6 @@ export class AgentTeamGroupsService {
   }
 
   private async getTeam(teamId: string, workspaceId: string) {
-    if (teamId !== BUILT_IN_AGENT_TEAM_ID) throw new NotFoundException('Agent Team not found.');
     const [team] = await this.db.select().from(agentTeams)
       .where(and(eq(agentTeams.id, teamId), eq(agentTeams.workspaceId, workspaceId))).limit(1);
     if (!team) throw new NotFoundException('Agent Team not found.');

@@ -42,10 +42,10 @@ export class AgentTeamConfigurationService {
   async update(workspaceId: string, teamId: string, input: UpdateAgentTeamRequest): Promise<AgentTeam> {
     const team = await this.getTeam(workspaceId, teamId);
     if (!input || typeof input !== 'object' || Array.isArray(input)
-      || Object.keys(input).some((key) => !['roles', 'maxConcurrentRuns', 'workingPractice'].includes(key))) {
-      throw new BadRequestException('Only Agent Team roles, working practice and concurrency can be changed.');
+      || Object.keys(input).some((key) => !['roles', 'maxConcurrentRuns', 'workingPractice', 'projectGitPolicy'].includes(key))) {
+      throw new BadRequestException('Only Agent Team roles, working practice, project Git policy and concurrency can be changed.');
     }
-    if (input.roles === undefined && input.maxConcurrentRuns === undefined && input.workingPractice === undefined) {
+    if (input.roles === undefined && input.maxConcurrentRuns === undefined && input.workingPractice === undefined && input.projectGitPolicy === undefined) {
       throw new BadRequestException('At least one Agent Team setting is required.');
     }
     const roles = input.roles === undefined ? team.roles : await this.resolveRoles(workspaceId, input.roles);
@@ -55,10 +55,14 @@ export class AgentTeamConfigurationService {
     if (input.workingPractice !== undefined && typeof input.workingPractice !== 'string') {
       throw new BadRequestException('Team working practice must be text.');
     }
+    if (input.projectGitPolicy !== undefined && typeof input.projectGitPolicy !== 'string') {
+      throw new BadRequestException('Team project Git policy must be text.');
+    }
     const [updated] = await this.db.update(agentTeams).set({
       roles,
       ...(input.maxConcurrentRuns === undefined ? {} : { maxConcurrentRuns: input.maxConcurrentRuns }),
       ...(input.workingPractice === undefined ? {} : { workingPractice: input.workingPractice.trim() }),
+      ...(input.projectGitPolicy === undefined ? {} : { projectGitPolicy: input.projectGitPolicy.trim() }),
       updatedAt: new Date(),
     }).where(and(eq(agentTeams.id, team.id), eq(agentTeams.workspaceId, workspaceId))).returning();
     if (!updated) throw new NotFoundException('Agent Team not found.');

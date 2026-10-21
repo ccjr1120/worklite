@@ -168,7 +168,7 @@ export class AgentTeamManagerToolsService {
 function toTeamView(team: Awaited<ReturnType<AgentTeamConfigurationService['getTeam']>>): AgentTeamView {
   return {
     id: team.id, name: team.name, description: team.description, processId: team.processId, processVersion: team.processVersion,
-    maxConcurrentRuns: team.maxConcurrentRuns, workingPractice: team.workingPractice,
+    maxConcurrentRuns: team.maxConcurrentRuns, workingPractice: team.workingPractice, projectGitPolicy: team.projectGitPolicy,
     roles: team.roles.map((role) => ({
       role: role.role, ...(role.displayName ? { displayName: role.displayName } : {}), publicModelId: role.publicModelId,
       instructions: role.instructions, entryPoints: role.entryPoints, skillIds: role.skills.map((skill) => skill.id),

@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import type { Request } from 'express';
 import type {
   AgentTeamRoleConfiguration,
@@ -35,6 +35,13 @@ export class AgentTeamsService {
   async get(request: Request, workspaceSlug: string, teamId: string): Promise<AgentTeamView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     return toTeamView(await this.getTeam(teamId, workspace.id));
+  }
+
+  async list(request: Request, workspaceSlug: string): Promise<AgentTeamView[]> {
+    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const rows = await this.db.select().from(agentTeams)
+      .where(eq(agentTeams.workspaceId, workspace.id)).orderBy(asc(agentTeams.name));
+    return rows.map(toTeamView);
   }
 
   async update(
@@ -174,6 +181,7 @@ function toTeamView(row: AgentTeam): AgentTeamView {
     processVersion: row.processVersion,
     maxConcurrentRuns: row.maxConcurrentRuns,
     workingPractice: row.workingPractice,
+    projectGitPolicy: row.projectGitPolicy,
     // Stored roles predating orchestration v3 may still carry the removed
     // developerInstances/developerConcurrency fields; reads drop them and the
     // next save persists the clean shape.

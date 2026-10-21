@@ -2,12 +2,16 @@ import type { AgentTeamRole, AgentTeamRoleId } from '@worklite/contracts';
 import { getBmadTeaProcessManifest } from '@worklite/team-runtime';
 
 export const BUILT_IN_AGENT_TEAM_ID = 'agent_team_bmad_tea';
+export const APPLICATION_AGENT_TEAM_ID = 'agent_team_application';
 export const AGENT_TEAM_PROCESS_ID = 'bmad-tea';
 export const AGENT_TEAM_PROCESS_VERSION = '1';
 
+export const DEFAULT_COMPANY_PROJECT_GIT_POLICY = 'Follow the target project instructions and the user\'s named company branch and review workflow. Preserve protected base-branch rules; do not bypass review or integrate into a base branch unless the request requires it.';
+export const DEFAULT_APPLICATION_GIT_POLICY = 'For isolated serial work, prefer the current branch. When work overlaps or runs in parallel, choose branch or worktree isolation per project when it helps coordination. Inspect each project\'s instructions and current state before acting.';
+
 export const DEFAULT_MAX_CONCURRENT_RUNS = 3;
 
-// Existing role ids stay stable; server-created v8 work roles receive dynamic ids captured by each TeamVersion.
+// Existing role ids stay stable; server-created v8-v9 work roles receive dynamic ids captured by each TeamVersion.
 export type AgentTeamRuntimeRole = AgentTeamRoleId;
 
 export function agentTeamContractRole(role: AgentTeamRuntimeRole): AgentTeamRoleId {
@@ -31,7 +35,7 @@ export const AGENT_TEAM_ROLE_TOOL_NAMES: Partial<Record<string, readonly string[
   test_author: ['read', 'write', 'glob', 'grep', 'process_reference'],
   test_runner: ['bash', 'read', 'write', 'glob', 'grep'],
   reviewer: ['read', 'glob', 'grep', 'process_reference'],
-  // The v5-v8 Worktree Manager plans and reports; project executors choose Git operations.
+  // The v5-v9 Worktree Manager plans and reports; project executors choose Git operations.
   'worktree-manager': ['read', 'glob', 'grep', 'process_reference'],
 };
 
@@ -42,7 +46,7 @@ export const AGENT_TEAM_ROLE_INSTRUCTIONS: Partial<Record<string, string>> = {
   test_author: 'Author only the tests required by the confirmed test design and authorized execution scope.',
   test_runner: 'Execute the declared checks through the available command tool, preserve their exact evidence, and distinguish command success from criterion completion.',
   reviewer: 'Independently assess the implementation and test evidence against the original intent. Request scoped repair only when concrete evidence shows a defect.',
-  'worktree-manager': 'For v4 Runs, follow the captured worktree setup and teardown instructions. For v5–v8 work, provide advisory per-project Git strategy recommendations only; project executors inspect the actual repository state and choose their own Git operations.',
+  'worktree-manager': 'For v4 Runs, follow the captured worktree setup and teardown instructions. For v5–v9 work, provide advisory per-project Git strategy recommendations only; project executors inspect the actual repository state and choose their own Git operations.',
 };
 
 export function agentTeamEntryPoints(role: AgentTeamRuntimeRole): readonly string[] {

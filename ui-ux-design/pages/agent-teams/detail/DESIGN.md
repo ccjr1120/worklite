@@ -2,7 +2,7 @@
 
 ## Route
 
-`/agent-teams/:teamId`. Work records are the only page view. One built-in Team has no Team collection or creation/deletion surface. The read-only configuration companion lives at the fixed route `/agent-team-config` ([Configuration](../config/DESIGN.md)).
+`/agent-teams/:teamId`. Work records are the only page view. Two predefined built-in Teams have no Team collection or creation/deletion surface. The existing workspace link and fixed read-only configuration companion point to Company Project Team; Chat selects the Team for dispatch and owns configuration writes for both. The companion lives at `/agent-team-config` ([Configuration](../config/DESIGN.md)).
 
 ## Design Source
 
@@ -78,6 +78,10 @@ Run links are keyboard reachable with visible focus. Status uses icon/text along
 2026-10-20 earlier comparison: the route renders only compact Run summaries and a Chat link; each summary opens read-only Run evidence. No create, configuration, answer or Run-control action remains on the Team page. The summary response exposes no progress percentage, so the list shows status and timestamps only. This was a source review; no runtime or browser verification was run.
 
 ## Changelog
+
+### 2026-10-20 - Two predefined Teams
+
+- Clarified that Chat selects and configures either Team while the existing workspace link and fixed configuration page remain scoped to Company Project Team.
 
 ### 2026-10-20 - Read-only configuration entry
 

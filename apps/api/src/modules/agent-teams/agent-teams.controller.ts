@@ -22,6 +22,11 @@ export class AgentTeamsController {
     private readonly groups: AgentTeamGroupsService,
   ) {}
 
+  @Get()
+  list(@Req() request: Request) {
+    return this.teams.list(request, 'personal');
+  }
+
   @Get(':teamId')
   get(@Req() request: Request, @Param('teamId') teamId: string) {
     return this.teams.get(request, 'personal', teamId);

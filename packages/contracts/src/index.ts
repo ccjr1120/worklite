@@ -1400,6 +1400,7 @@ export type AgentTeamView = {
   processVersion: string;
   roles: AgentTeamRoleConfiguration[];
   workingPractice: string;
+  projectGitPolicy: string;
   // Maximum number of simultaneously active Runs; dispatches beyond it queue FIFO.
   maxConcurrentRuns: number;
   createdAt: string;
@@ -1413,7 +1414,7 @@ export type AgentTeamVersionMetadata = {
   developerExecution?: ProjectExecutorLaunchView | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
   projectExecutorLaunches?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 };
 
 export type AgentTeamTaskAttemptStatus =
@@ -1714,6 +1715,7 @@ export type UpdateAgentTeamRequest = {
   roles?: AgentTeamRoleConfiguration[];
   maxConcurrentRuns?: number;
   workingPractice?: string;
+  projectGitPolicy?: string;
 };
 
 export type CreateAgentTeamRunRequest = {

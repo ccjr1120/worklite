@@ -668,8 +668,9 @@ export type StoredAgentTeamVersionSnapshot = {
   developerExecution: StoredProjectExecutorLaunch | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
   projectExecutorLaunches?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
   workingPractice?: string;
+  projectGitPolicy?: string;
   roles: StoredAgentTeamRoleConfiguration[];
   processFiles: Array<{ path: string; content: string }>;
   recipeDefaults: StoredAgentTeamRecipeDefaults;
@@ -684,6 +685,7 @@ export const agentTeams = sqliteTable('agent_teams', {
   processVersion: text('process_version').notNull(),
   roles: text('roles', { mode: 'json' }).$type<StoredAgentTeamRoleConfiguration[]>().notNull().default([]),
   workingPractice: text('working_practice').notNull().default(''),
+  projectGitPolicy: text('project_git_policy').notNull().default(''),
   // Maximum number of simultaneously active Runs for this Team; dispatches
   // beyond it persist as queued Runs and start FIFO when a slot frees.
   maxConcurrentRuns: integer('max_concurrent_runs').notNull().default(3),

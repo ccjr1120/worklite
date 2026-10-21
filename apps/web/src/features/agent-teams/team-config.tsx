@@ -13,7 +13,7 @@ import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
 
-// The one built-in Team; the configuration route is fixed and carries no id.
+// The fixed read-only configuration route displays the existing Company Project Team.
 const BUILT_IN_TEAM_ID = 'agent_team_bmad_tea';
 const RECORDS_PATH = `/agent-teams/${BUILT_IN_TEAM_ID}`;
 
