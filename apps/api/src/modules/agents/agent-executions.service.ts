@@ -1203,16 +1203,6 @@ export class AgentExecutionsService implements OnModuleInit {
   }
 }
 
-// capture() can reject with any exception raised while resolving the executor launch or its model
-// against the Gateway's registered Providers, including NotFoundException (unknown provider/model)
-// and ServiceUnavailableException (Gateway unreachable); only an unrecognized error type falls back
-// to the generic message, so a real, actionable cause is never silently replaced by it.
-export function projectTaskCaptureFailureMessage(error: unknown): string {
-  return error instanceof BadRequestException || error instanceof ConflictException || error instanceof NotFoundException || error instanceof ServiceUnavailableException || error instanceof ClaudeCodeError || error instanceof CodexAppServerError
-    ? error.message
-    : '无法启动项目任务，请检查项目目录、执行器插件可用性和 Gateway 模型。';
-}
-
 function normalizeUserMessage(input: unknown): string {
   if (typeof input !== 'string' || !input.trim()) throw new BadRequestException('An Agent message is required.');
   return input.trim();
