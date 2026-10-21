@@ -1,6 +1,6 @@
 import { assertRuntimeAdmission } from '../../infrastructure/runtime-upgrade-state';
 import { Lexer } from 'marked';
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, forwardRef, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import type { Request } from 'express';
@@ -66,7 +66,7 @@ export class RunsService {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     private readonly workspaces: WorkspaceService,
-    private readonly agentExecutions: AgentExecutionsService,
+    @Inject(forwardRef(() => AgentExecutionsService)) private readonly agentExecutions: AgentExecutionsService,
     private readonly wechatOfficialAccount: WechatOfficialAccountService,
     private readonly gateway: PortkeyGatewayService,
   ) {

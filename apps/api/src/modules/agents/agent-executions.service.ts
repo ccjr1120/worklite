@@ -1,5 +1,5 @@
 import { assertRuntimeAdmission } from '../../infrastructure/runtime-upgrade-state';
-import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException, type OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, forwardRef, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException, type OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
@@ -94,7 +94,7 @@ export class AgentExecutionsService implements OnModuleInit {
     private readonly invocations: IsolatedAgentInvocationService,
     private readonly plugins: PluginsService,
     private readonly projectTasks: ChatProjectTasksService,
-    private readonly upgrades?: UpgradesService,
+    @Inject(forwardRef(() => UpgradesService)) private readonly upgrades?: UpgradesService,
   ) {}
 
   async onModuleInit(): Promise<void> {
