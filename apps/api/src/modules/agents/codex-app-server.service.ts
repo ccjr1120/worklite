@@ -107,6 +107,7 @@ export class CodexAppServerService {
       });
       session.turnId = turn.turn.id;
       await session.activity('codex.turn_started');
+      if (request.steerPort) request.steerPort.deliver = (text) => session.steer(text);
       const output = await session.result();
       request.signal.throwIfAborted();
       closing = true;
@@ -162,6 +163,25 @@ class CodexAppServerSession {
   }
 
   notify(method: string, params: unknown): Promise<void> { return this.send({ method, params }); }
+
+  // Delivers a mid-run correction into the live turn through turn/steer. Returns false (never
+  // throws) when the turn cannot accept it right now: no active turn, a stale expectedTurnId
+  // raced against the turn's own completion, or a non-steerable turn kind (review/compact); the
+  // caller then falls back to queuing the instruction for the task's next run.
+  async steer(text: string): Promise<boolean> {
+    if (this.failed || !this.threadId || !this.turnId) return false;
+    try {
+      const response = await this.call('turn/steer', {
+        threadId: this.threadId,
+        expectedTurnId: this.turnId,
+        input: [{ type: 'text', text, text_elements: [] }],
+      });
+      if (typeof response?.turnId === 'string') this.turnId = response.turnId;
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   consume(data: string): void {
     this.buffer += data;

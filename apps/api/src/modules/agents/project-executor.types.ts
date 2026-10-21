@@ -28,6 +28,12 @@ export type ProjectExecutorMcpServer = {
   allowedTools: string[];
 };
 
+// A live mid-turn delivery channel an executor may populate once it has a steerable turn (Codex
+// `turn/steer`). `deliver` resolves true only when the executor's own live turn accepted the text;
+// false (including when the executor never populates `deliver` at all, as Claude Code never does)
+// tells the caller to queue the instruction for the task's next run instead.
+export type ProjectExecutorSteerPort = { deliver?: (text: string) => Promise<boolean> };
+
 export type ProjectExecutorRequest = {
   owner: 'chat' | 'team';
   workspaceId: string;
@@ -43,6 +49,8 @@ export type ProjectExecutorRequest = {
   references?: ReadonlyArray<{ path: string; content: string }>;
   signal: AbortSignal;
   correlation?: GatewayCorrelation;
+  // Caller-owned mid-run steering channel; the executor sets `deliver` once a steerable turn exists.
+  steerPort?: ProjectExecutorSteerPort;
   onTextDelta?: (delta: string) => void | Promise<void>;
   onEvent?: (activity: ProjectExecutorActivity) => void | Promise<void>;
 };

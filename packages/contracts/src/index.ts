@@ -361,6 +361,20 @@ export type ChatAttachmentView = {
   expiresAt: string;
 };
 
+// A user-submitted mid-run correction. 'delivered' reached the live Codex turn through turn/steer
+// (evidence only); 'queued' is waiting for the task's next run (Claude Code, or a Codex turn that
+// could not accept it); 'consumed' was picked up by that next run's goal.
+export type ProjectTaskSteerInstruction = {
+  id: string;
+  text: string;
+  createdAt: string;
+  status: 'delivered' | 'queued' | 'consumed';
+};
+
+export type SteerProjectTaskRequest = {
+  text: string;
+};
+
 export type ChatProjectTaskView = {
   executor: ProjectExecutor | null;
   launch?: ProjectExecutorLaunchView;
@@ -370,6 +384,9 @@ export type ChatProjectTaskView = {
   configurationRevision: number; pendingQuestion: AgentPendingQuestion | null;
   activityCount: number; activityPhases: Record<string, number>; activities: Array<Record<string, unknown>>; activitiesTruncated?: boolean; result: string; error: string | null;
   progressText: string;
+  // Submitted mid-run corrections, newest last. A steerable task (running, not yet waiting for a
+  // question) accepts another; a settled task's queue is read-only evidence.
+  steerQueue: ProjectTaskSteerInstruction[];
   operationCount: number; operationStatuses: Record<string, number>;
   operations: Array<{ key: string; toolName: string; status: 'reserved' | 'completed' | 'uncertain' | 'failed'; commandExecutionId: string | null; inputSummary: string | null; failureReason: string | null }>;
   // Historical WorkLite-managed worktree isolation; new project tasks leave these fields empty.

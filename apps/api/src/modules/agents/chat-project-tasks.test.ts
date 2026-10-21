@@ -127,11 +127,26 @@ describe('ChatProjectTasksService.capture workspace behavior', () => {
       execution_id text NOT NULL REFERENCES agent_executions(id) ON DELETE CASCADE,
       goal text NOT NULL, project_directory text NOT NULL, model text NOT NULL, snapshot text NOT NULL,
       status text NOT NULL, answers text DEFAULT '[]' NOT NULL, pending_question text,
-      activities text DEFAULT '[]' NOT NULL, result text DEFAULT '' NOT NULL, error text,
+      activities text DEFAULT '[]' NOT NULL, steer_queue text DEFAULT '[]' NOT NULL, result text DEFAULT '' NOT NULL, error text,
       reported_at integer,
       worktree_path text, worktree_branch text, base_branch text, base_commit text,
       merge_status text DEFAULT 'not_attempted' NOT NULL, merge_error text,
       created_at integer DEFAULT (unixepoch() * 1000) NOT NULL, updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL
+    )`,
+    `CREATE TABLE chat_codex_operations (
+      key text PRIMARY KEY NOT NULL, task_id text NOT NULL REFERENCES chat_codex_tasks(id) ON DELETE CASCADE,
+      task_key text NOT NULL, operation_key text NOT NULL, tool_name text NOT NULL, input_fingerprint text NOT NULL,
+      status text NOT NULL, command_id text, result text, failure_reason text,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL, updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL
+    )`,
+    `CREATE TABLE chat_bot_configurations (
+      workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, revision integer NOT NULL,
+      extension_prompt text DEFAULT '' NOT NULL, summarize_prompt text DEFAULT '' NOT NULL,
+      default_executor text DEFAULT 'claude' NOT NULL, default_executor_models text DEFAULT '{}' NOT NULL,
+      project_task_mcp_server_ids text DEFAULT '[]' NOT NULL,
+      provider_id text, model text NOT NULL, skill_ids text NOT NULL, mcp_server_ids text NOT NULL,
+      created_at integer DEFAULT (unixepoch() * 1000) NOT NULL,
+      PRIMARY KEY (workspace_id, revision)
     )`,
   ];
 
@@ -214,5 +229,102 @@ describe('ChatProjectTasksService.capture workspace behavior', () => {
     await expect(service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_bad', {
       goal: '调查', projectDirectory: repository, readOnly: 'yes',
     })).rejects.toThrow('readOnly must be a boolean.');
+  });
+
+  it('rejects steering a task that is no longer running', async () => {
+    const { service, repository } = setup();
+    const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_change', {
+      goal: '修改 README 标题', projectDirectory: repository,
+    });
+    await service.cancel(task.id);
+    await expect(service.steer(WORKSPACE_ID, task.id, '改成只读调查')).rejects.toThrow('This project task is not running');
+  });
+
+  it('delivers a steer instruction into the live round when the executor accepts it', async () => {
+    const { repository } = setup();
+    const db = createDb(':memory:');
+    dbs.push(db);
+    for (const statement of DDL) db.$client.exec(statement);
+    db.$client.prepare('INSERT INTO workspaces (id) VALUES (?)').run(WORKSPACE_ID);
+    db.$client.prepare('INSERT INTO agents (id) VALUES (?)').run('agt_system_helper_chat');
+    db.$client.prepare('INSERT INTO agent_executions (id, workspace_id, agent_id, capability_snapshot) VALUES (?, ?, ?, ?)')
+      .run(EXECUTION_ID, WORKSPACE_ID, 'agt_system_helper_chat', CAPABILITIES);
+    db.$client.prepare('INSERT INTO agent_tool_calls (id) VALUES (?)').run('acall_live');
+    let releaseExecutor!: () => void;
+    const held = new Promise<void>((resolve) => { releaseExecutor = resolve; });
+    let deliverCalledWith: string | undefined;
+    const executors = {
+      captureLaunch: async () => ({ executor: 'claude' as const, commandArguments: [], baseUrl: 'http://127.0.0.1:23392', model: null }),
+      execute: async (request: { steerPort?: { deliver?: (text: string) => Promise<boolean> } }) => {
+        if (request.steerPort) request.steerPort.deliver = async (text) => { deliverCalledWith = text; return true; };
+        await held;
+        return '{"status":"succeeded","summary":"done"}';
+      },
+    };
+    const resources = { workflowMcpRuntimes: async () => [] } as unknown as WorkspaceResourcesService;
+    const service = new ChatProjectTasksService(db, executors as unknown as ProjectExecutorService, resources);
+    const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_live', { goal: '调查并修复问题', projectDirectory: repository });
+
+    const completion = service.run(task.id, async () => undefined);
+    // Yield so execute() reaches executors.execute() and registers the live steer port before steering.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const steered = await service.steer(WORKSPACE_ID, task.id, '改成先只读调查，不要直接改文件');
+    expect(deliverCalledWith).toBe('改成先只读调查，不要直接改文件');
+    expect(steered.steerQueue).toHaveLength(1);
+    expect(steered.steerQueue[0]).toMatchObject({ status: 'delivered', text: '改成先只读调查，不要直接改文件' });
+
+    releaseExecutor();
+    const settled = await completion;
+    expect(settled.status).toBe('succeeded');
+    // A delivered instruction is retained as historical evidence, not replayed into the next round.
+    expect(settled.steerQueue).toHaveLength(1);
+    expect(settled.steerQueue[0]!.status).toBe('delivered');
+  });
+
+  it('queues a steer instruction and runs another round within the same background execution when the executor has no live channel', async () => {
+    const { repository } = setup();
+    const db = createDb(':memory:');
+    dbs.push(db);
+    for (const statement of DDL) db.$client.exec(statement);
+    db.$client.prepare('INSERT INTO workspaces (id) VALUES (?)').run(WORKSPACE_ID);
+    db.$client.prepare('INSERT INTO agents (id) VALUES (?)').run('agt_system_helper_chat');
+    db.$client.prepare('INSERT INTO agent_executions (id, workspace_id, agent_id, capability_snapshot) VALUES (?, ?, ?, ?)')
+      .run(EXECUTION_ID, WORKSPACE_ID, 'agt_system_helper_chat', CAPABILITIES);
+    db.$client.prepare('INSERT INTO agent_tool_calls (id) VALUES (?)').run('acall_claude');
+    let releaseFirstRound!: () => void;
+    const held = new Promise<void>((resolve) => { releaseFirstRound = resolve; });
+    let secondRoundInput: string | undefined;
+    let round = 0;
+    const executors = {
+      captureLaunch: async () => ({ executor: 'claude' as const, commandArguments: [], baseUrl: 'http://127.0.0.1:23392', model: null }),
+      // Claude Code never populates request.steerPort.deliver, matching its real behavior.
+      execute: async (request: { input: string }) => {
+        round += 1;
+        if (round === 1) { await held; return '{"status":"succeeded","summary":"first round done"}'; }
+        secondRoundInput = request.input;
+        return '{"status":"succeeded","summary":"second round done"}';
+      },
+    };
+    const resources = { workflowMcpRuntimes: async () => [] } as unknown as WorkspaceResourcesService;
+    const service = new ChatProjectTasksService(db, executors as unknown as ProjectExecutorService, resources);
+    const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_claude', { goal: '调查并修复问题', projectDirectory: repository });
+
+    const completion = service.run(task.id, async () => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The steer lands after round 1's goal was already built, so it cannot join round 1; because
+    // round 1's own executor never offers a live channel, it also cannot be delivered. It queues.
+    const steered = await service.steer(WORKSPACE_ID, task.id, '先只调查，不要改文件');
+    expect(steered.steerQueue[0]).toMatchObject({ status: 'queued', text: '先只调查，不要改文件' });
+
+    releaseFirstRound();
+    // The background execution notices the still-queued instruction once round 1 settles and runs
+    // a second round automatically, inside the same run() call, rather than leaving the task
+    // succeeded with a stranded instruction that needs the user to re-dispatch.
+    const settled = await completion;
+    expect(settled.status).toBe('succeeded');
+    expect(settled.result).toBe('second round done');
+    expect(settled.steerQueue[0]!.status).toBe('consumed');
+    expect(round).toBe(2);
+    expect(JSON.parse(secondRoundInput!)).toMatchObject({ userCorrections: ['先只调查，不要改文件'] });
   });
 });
