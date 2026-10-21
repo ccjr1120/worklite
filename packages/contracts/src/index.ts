@@ -350,7 +350,7 @@ export type AgentToolCallStatus = 'running' | 'completed' | 'failed' | 'cancelle
 export type ProjectExecutor = 'codex' | 'claude';
 
 export type ProjectExecutorLaunchView =
-  | { executor: 'codex'; commandArguments: string[]; home: string; model: string; modelProvider: string; settings: Record<string, unknown>; modelSource?: 'task' | 'configuration' | 'executor' }
+  | { executor: 'codex'; commandArguments: string[]; model: string | null; modelSource?: 'task' | 'configuration' | 'executor' }
   | { executor: 'claude'; commandArguments: string[]; baseUrl: string; model: string | null; modelSource?: 'task' | 'configuration' | 'executor' };
 
 export type ChatAttachmentView = {

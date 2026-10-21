@@ -22,14 +22,17 @@ export class ProjectExecutorService {
 
   async captureLaunch(executor: StoredProjectExecutor, model: string | null): Promise<StoredProjectExecutorLaunch> {
     return executor === 'codex'
-      ? this.codex.captureLaunch(await this.plugins.commandArguments(CODEX_CLI_PLUGIN_ID))
+      ? this.codex.captureLaunch(await this.plugins.commandArguments(CODEX_CLI_PLUGIN_ID), model)
       : this.claude.captureLaunch(await this.plugins.commandArguments(CLAUDE_CODE_PLUGIN_ID), model);
   }
 
+  // Codex is not required to use a Gateway model: it runs through the operator's own native configuration.
   async requireModel(workspaceId: string, executor: StoredProjectExecutor, model: string): Promise<void> {
+    const protocols = PROJECT_EXECUTOR_PROTOCOLS[executor];
+    if (!protocols) return;
     const runtime = await this.resources.publicModelRuntime(workspaceId, model);
-    if (!PROJECT_EXECUTOR_PROTOCOLS[executor].includes(runtime.protocol)) {
-      throw new BadRequestException(`${executor === 'codex' ? 'Codex' : 'Claude Code'} 需要 ${PROJECT_EXECUTOR_PROTOCOLS[executor].join(' 或 ')} 协议的 Gateway 模型。`);
+    if (!protocols.includes(runtime.protocol)) {
+      throw new BadRequestException(`Claude Code 需要 ${protocols.join(' 或 ')} 协议的 Gateway 模型。`);
     }
   }
 

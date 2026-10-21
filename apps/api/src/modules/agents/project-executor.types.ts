@@ -65,11 +65,24 @@ export type PreparedProjectExecution = {
   mcpServers: Array<ProjectExecutorMcpServer & { key: string }>;
 };
 
-// Gateway Provider protocols each executor can speak; Provider protocols are never switched to fit an executor.
-export const PROJECT_EXECUTOR_PROTOCOLS: Record<StoredProjectExecutor, readonly string[]> = {
-  codex: ['openai/responses', 'codex/responses'],
+// Gateway Provider protocols Claude Code can speak; Provider protocols are never switched to fit an executor.
+// Codex launches natively through the operator's own configured shell command and is not required to speak a
+// Gateway protocol or use a Gateway-known model, so it has no entry here.
+export const PROJECT_EXECUTOR_PROTOCOLS: Partial<Record<StoredProjectExecutor, readonly string[]>> = {
   claude: ['anthropic/messages'],
 };
+
+// Codex's configured command word is interpolated unquoted into an inline zsh script so shell alias
+// expansion (e.g. cxo, cx) applies the same way it would in an interactive terminal; this restricts it to a
+// bare alias/executable name or path so no shell metacharacter can be injected through plugin configuration.
+const SAFE_COMMAND_WORD = /^[\w./-]+$/;
+
+export function requireSafeCommandWord(word: string | undefined): string {
+  const trimmed = word?.trim();
+  if (!trimmed) throw new BadRequestException('A Codex command is required; configure the Codex plugin command.');
+  if (!SAFE_COMMAND_WORD.test(trimmed)) throw new BadRequestException('The Codex command must be a single alias, executable name or path without shell syntax.');
+  return trimmed;
+}
 
 const GATEWAY_PORTS = [23390, 23391, 23392];
 

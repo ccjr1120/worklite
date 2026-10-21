@@ -1,11 +1,7 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { parse } from 'smol-toml';
+import { Injectable } from '@nestjs/common';
 import type { StoredProjectExecutorLaunch } from '@worklite/db';
 import { CommandsService, type CommandStdioProcess } from '../commands/commands.service';
-import { requireGatewayUrl, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
+import { requireSafeCommandWord, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
 
 type CodexLaunch = Extract<StoredProjectExecutorLaunch, { executor: 'codex' }>;
 
@@ -19,38 +15,21 @@ type RpcMessage = {
   error?: { code: number; message: string };
 };
 
-// Protocol verified against openai/codex rust-v0.157.1. Codex runs with its native tools and the operator's
-// ~/.codex-cli configuration; WorkLite provides no dynamic tools and records the item stream as evidence.
+// Codex's configured command word (e.g. `cxo`, `cx`, `codex`) is launched through the operator's own
+// interactive zsh login shell, exactly like a manual terminal invocation: this resolves ~/.zshrc aliases,
+// functions and PATH the same way the operator's own shell would, so whatever local Codex configuration
+// (home directory, model, Provider) that resolution selects is what runs. WorkLite names no Codex config
+// file or directory here and does not require the resolved model or Provider to exist in the WorkLite
+// Gateway. Protocol verified against openai/codex rust-v0.163.0.
+const LOGIN_SHELL = '/bin/zsh';
+
 @Injectable()
 export class CodexAppServerService {
   constructor(private readonly commands: CommandsService) {}
 
-  async captureLaunch(commandArguments: readonly string[]): Promise<CodexLaunch> {
-    if (commandArguments[0] === 'cxo') throw new BadRequestException('cxo 启动方式已移除；请把 Codex 插件命令配置为 codex 或 cx。');
-    const home = join(homedir(), '.codex-cli');
-    let config: Record<string, any>;
-    try { config = parse(await readFile(join(home, 'config.toml'), 'utf8')); }
-    catch { throw new BadRequestException(`无法读取 Codex 配置：${home}/config.toml。`); }
-    const model = config.model;
-    const modelProvider = config.model_provider ?? 'openai';
-    if (typeof model !== 'string' || !model.trim() || typeof modelProvider !== 'string') throw new BadRequestException('请先在 ~/.codex-cli 配置中设置模型和 Provider。');
-    const provider = config.model_providers?.[modelProvider];
-    if (provider?.wire_api !== 'responses') throw new BadRequestException('~/.codex-cli 的 Codex Provider 必须使用 Responses 协议。');
-    requireGatewayUrl(provider.base_url, '~/.codex-cli 的 Codex Provider');
-    const settings: Record<string, unknown> = { model, model_provider: modelProvider };
-    for (const key of ['model_reasoning_effort', 'service_tier', 'model_catalog_json', 'disable_response_storage']) {
-      if (typeof config[key] === 'string' || typeof config[key] === 'boolean') settings[key] = config[key];
-    }
-    if (typeof config.model_catalog_json === 'string') settings.model_catalog_json = resolve(home, config.model_catalog_json);
-    const captured: Record<string, unknown> = {};
-    for (const key of ['name', 'base_url', 'wire_api', 'requires_openai_auth', 'env_key', 'supports_websockets']) {
-      if (typeof provider[key] === 'string' || typeof provider[key] === 'boolean') captured[key] = provider[key];
-    }
-    settings.model_providers = { [modelProvider]: captured };
-    const args = [...commandArguments];
-    if (args[0] === 'cx') args[0] = 'codex';
-    if (!args.includes('--dangerously-bypass-approvals-and-sandbox')) args.push('--dangerously-bypass-approvals-and-sandbox');
-    return { executor: 'codex', commandArguments: args, home, model, modelProvider, settings };
+  async captureLaunch(commandArguments: readonly string[], model: string | null): Promise<CodexLaunch> {
+    requireSafeCommandWord(commandArguments[0]);
+    return { executor: 'codex', commandArguments: [...commandArguments], model };
   }
 
   async execute(request: ProjectExecutorRequest, prepared: PreparedProjectExecution): Promise<string> {
@@ -71,7 +50,7 @@ export class CodexAppServerService {
     try {
       const mcp = codexMcpServers(prepared);
       process = await this.commands.openStdioProcess(
-        appServerArguments(request, launch, mcp.config), request.projectDirectory, { CODEX_HOME: launch.home, ...mcp.env },
+        appServerArguments(launch, mcp.config), request.projectDirectory, mcp.env,
         (event) => {
           if (event.type === 'stdout') session.consume(event.data);
         },
@@ -90,9 +69,9 @@ export class CodexAppServerService {
       requireSupportedVersion(initialized.userAgent);
       await session.notify('initialized', {});
       if (prepared.skillRoot) await session.call('skills/extraRoots/set', { extraRoots: [prepared.skillRoot] });
+      const model = request.model ?? launch.model;
       const started = await session.call('thread/start', {
-        model: request.model ?? launch.model,
-        modelProvider: launch.modelProvider,
+        ...(model ? { model } : {}),
         cwd: request.projectDirectory,
         approvalPolicy: 'never',
         sandbox: 'danger-full-access',
@@ -310,20 +289,20 @@ function codexMcpServers(prepared: PreparedProjectExecution): { config: Record<s
   return { config, env };
 }
 
-function appServerArguments(request: ProjectExecutorRequest, launch: CodexLaunch, mcpServers: Record<string, unknown>): string[] {
+// Launches the configured command word through the operator's interactive zsh so it resolves exactly like
+// typing it in a terminal (aliases, functions, PATH). The word is interpolated unquoted into the inline script
+// specifically so shell alias expansion applies (quoting it would defeat that); SAFE_COMMAND_WORD in
+// captureLaunch rejects anything containing shell syntax before it reaches here. Everything after the word is
+// forwarded as real argv elements through "$@", never interpolated into the script text.
+function appServerArguments(launch: CodexLaunch, mcpServers: Record<string, unknown>): string[] {
+  const [word, ...fixedArguments] = launch.commandArguments;
   const config: Record<string, unknown> = {
-    ...launch.settings,
     ...mcpServers,
-    model: request.model ?? launch.model,
     approval_policy: 'never',
     sandbox_mode: 'danger-full-access',
-    [`model_providers.${launch.modelProvider}.http_headers`]: {
-      'x-worklite-log-source': request.owner,
-      ...(request.correlation?.teamRunId ? { 'x-worklite-team-run-id': request.correlation.teamRunId } : {}),
-      ...(request.correlation?.teamTaskAttemptId ? { 'x-worklite-team-task-attempt-id': request.correlation.teamTaskAttemptId } : {}),
-    },
   };
-  return [...launch.commandArguments, ...Object.entries(config).flatMap(([key, value]) => ['-c', `${key}=${tomlValue(value)}`]), 'app-server', '--listen', 'stdio://'];
+  const trailingArguments = [...fixedArguments, ...Object.entries(config).flatMap(([key, value]) => ['-c', `${key}=${tomlValue(value)}`]), 'app-server', '--listen', 'stdio://'];
+  return [LOGIN_SHELL, '-ic', `${word} "$@"`, '--', ...trailingArguments];
 }
 
 function tomlValue(value: unknown): string {
@@ -350,3 +329,5 @@ function requireSupportedVersion(userAgent: unknown): void {
     throw new CodexAppServerError(`Codex 版本 ${match?.[0] ?? '未知'} 不支持此执行协议；需要 0.157.1 或更高版本。`);
   }
 }
+
+export { LOGIN_SHELL };

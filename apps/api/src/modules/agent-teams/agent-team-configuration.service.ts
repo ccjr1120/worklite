@@ -115,8 +115,10 @@ export class AgentTeamConfigurationService {
       if (value.executor !== undefined && value.executor !== null && value.executor !== 'claude' && value.executor !== 'codex') throw new BadRequestException(`The executor for Agent Team role ${role} must be claude or codex.`);
       const executor = role === 'developer' ? value.executor ?? 'claude' : value.executor ?? undefined;
       const runtime = publicModelId ? await this.resources.publicModelRuntime(workspaceId, publicModelId) : undefined;
-      if (executor && runtime && !PROJECT_EXECUTOR_PROTOCOLS[executor].includes(runtime.protocol)) {
-        throw new BadRequestException(`The ${role} model must use ${PROJECT_EXECUTOR_PROTOCOLS[executor].join(' or ')} for the ${executor} executor.`);
+      // Codex launches natively and is not required to use a Gateway model; only Claude Code's protocol is checked.
+      const protocols = executor ? PROJECT_EXECUTOR_PROTOCOLS[executor] : undefined;
+      if (executor && runtime && protocols && !protocols.includes(runtime.protocol)) {
+        throw new BadRequestException(`The ${role} model must use ${protocols.join(' or ')} for the ${executor} executor.`);
       }
       if (typeof value.instructions !== 'string' || !value.instructions.trim()) throw new BadRequestException(`Instructions for Agent Team role ${role} are required.`);
       const displayName = value.displayName === undefined ? undefined : value.displayName.trim();

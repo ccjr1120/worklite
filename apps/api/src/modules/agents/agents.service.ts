@@ -155,11 +155,13 @@ export class AgentsService {
       if (executorModelsPatch !== undefined) {
         const [latest] = await this.db.select({ models: chatConfigurations.defaultExecutorModels }).from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
         mergedExecutorModels = mergeExecutorModels(latest?.models, executorModelsPatch);
-        for (const executor of ['claude', 'codex'] as const) {
-          const declared = mergedExecutorModels[executor];
-          if (!declared) continue;
+        // Codex launches natively and is not required to use a Gateway model, so its declared default
+        // is stored as-is without Gateway protocol validation; only Claude Code's declaration is checked.
+        const declared = mergedExecutorModels.claude;
+        if (declared) {
           const runtime = await this.resources.publicModelRuntime(team.id, declared);
-          if (!PROJECT_EXECUTOR_PROTOCOLS[executor].includes(runtime.protocol)) throw new BadRequestException(`${executor === 'codex' ? 'Codex' : 'Claude Code'} 需要 ${PROJECT_EXECUTOR_PROTOCOLS[executor].join(' 或 ')} 协议的 Gateway 模型。`);
+          const protocols = PROJECT_EXECUTOR_PROTOCOLS.claude!;
+          if (!protocols.includes(runtime.protocol)) throw new BadRequestException(`Claude Code 需要 ${protocols.join(' 或 ')} 协议的 Gateway 模型。`);
         }
       }
       const selections = await this.validateAssignments(team.id, undefined, input.mcpServerIds, true);
