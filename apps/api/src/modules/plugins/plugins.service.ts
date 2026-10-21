@@ -71,7 +71,7 @@ export class PluginsService {
 
   async test(pluginId: string): Promise<PluginTestResult> {
     if (!EXECUTABLE_PLUGIN_IDS.includes(pluginId)) throw new BadRequestException('Only executable plugins support command testing.');
-    return this.probe(await this.command(pluginId));
+    return this.probe(pluginId, await this.command(pluginId));
   }
 
   async feishuSecret() {
@@ -99,7 +99,7 @@ export class PluginsService {
   private async toView(row: typeof plugins.$inferSelect): Promise<PluginView> {
     const availability = !EXECUTABLE_PLUGIN_IDS.includes(row.id)
       ? { enabled: true, status: 'available' as const }
-      : this.probe(row.command);
+      : this.probe(row.id, row.command);
     const [officialAccount] = row.id === WECHAT_OFFICIAL_ACCOUNT_PLUGIN_ID
       ? await this.db.select().from(wechatOfficialAccounts).where(eq(wechatOfficialAccounts.workspaceId, row.workspaceId)).limit(1)
       : [];
@@ -149,9 +149,14 @@ export class PluginsService {
     return command;
   }
 
-  private probe(command: string): PluginTestResult {
+  private probe(pluginId: string, command: string): PluginTestResult {
     const [executable, ...argumentsValue] = parsePluginCommand(command);
-    const result = spawnSync(executable === 'cx' ? 'codex' : executable, [...argumentsValue, '--version'], { stdio: 'ignore' });
+    // Codex's command word may be a zsh alias (e.g. cxo, cx) that only resolves inside the operator's own
+    // interactive login shell, exactly like the real launch in codex-app-server.service.ts; probing it
+    // directly as an executable would report a configured alias as missing.
+    const result = pluginId === CODEX_CLI_PLUGIN_ID
+      ? spawnSync('/bin/zsh', ['-ic', `${executable} "$@"`, '--', ...argumentsValue, '--version'], { stdio: 'ignore' })
+      : spawnSync(executable, [...argumentsValue, '--version'], { stdio: 'ignore' });
     const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
     if (errorCode === 'ENOENT') return { enabled: false, status: 'missing' };
     return result.status === 0 ? { enabled: true, status: 'available' } : { enabled: false, status: 'failed' };

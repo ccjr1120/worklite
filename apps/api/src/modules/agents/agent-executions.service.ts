@@ -1,8 +1,6 @@
 import { assertRuntimeAdmission } from '../../infrastructure/runtime-upgrade-state';
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException, type OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { and, asc, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ChatProgressReport, ChatProjectTaskView, ChatTaskReference, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, WorkflowNodeActivityDetail, WorkliteScriptResult } from '@worklite/contracts';
@@ -21,6 +19,7 @@ import { CHAT_PROJECT_TASK_ANSWER_TOOL, CHAT_PROJECT_TASK_CANCEL_TOOL, CHAT_PROJ
 import { buildChatMemoriesPrompt } from './chat-memories.service';
 import { ClaudeCodeError } from './claude-code.service';
 import { CodexAppServerError } from './codex-app-server.service';
+import { requireSafeCommandWord } from './project-executor.types';
 import { CommandsService } from '../commands/commands.service';
 import { executionFailure, executionFailureSource, InvalidAgentToolRequestError, TooManyToolCallsError, type ExecutionFailure } from './agent-execution-failure';
 
@@ -1083,11 +1082,12 @@ export class AgentExecutionsService implements OnModuleInit {
       ...execution.displayMessages.map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}:\n${message.content}`),
     ].join('\n\n');
     await this.db.update(agentExecutions).set({ phase: 'model', updatedAt: new Date() }).where(and(eq(agentExecutions.id, execution.id), eq(agentExecutions.status, 'running')));
-    const commandArguments = await this.plugins.commandArguments(CODEX_CLI_PLUGIN_ID);
-    if (commandArguments[0] === 'cxo') throw new BadRequestException('cxo 启动方式已移除；请把 Codex 插件命令配置为 codex 或 cx。');
-    const alias = commandArguments[0] === 'cx';
-    if (alias) commandArguments.splice(0, 1, 'codex', '--dangerously-bypass-approvals-and-sandbox');
-    const command = (alias ? `CODEX_HOME=${shellQuote(join(homedir(), '.codex-cli'))} ` : '') + [...commandArguments, 'exec', '--json', '--ephemeral', '-'].map(shellQuote).join(' ');
+    const [rawWord, ...fixedArguments] = await this.plugins.commandArguments(CODEX_CLI_PLUGIN_ID);
+    const word = requireSafeCommandWord(rawWord);
+    // The configured command word (e.g. cxo, cx, codex) is launched through the operator's own interactive
+    // zsh login shell so it resolves exactly like a manual terminal invocation, including ~/.zshrc aliases.
+    const trailing = [...fixedArguments, 'exec', '--json', '--ephemeral', '-'];
+    const command = `/bin/zsh -ic ${shellQuote(`${word} "$@"`)} -- ${trailing.map(shellQuote).join(' ')}`;
     const started = await this.commands.createWithInput(command, prompt);
     this.activePluginCommands.set(execution.id, started.id);
     try {

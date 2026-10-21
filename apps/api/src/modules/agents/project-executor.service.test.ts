@@ -19,6 +19,20 @@ function request(mcpServers: ProjectExecutorRequest['mcpServers']): ProjectExecu
   };
 }
 
+describe('ProjectExecutorService.requireModel', () => {
+  it('never calls the Gateway for Codex: it is not required to use a Gateway model', async () => {
+    const resources = { publicModelRuntime: () => { throw new Error('must not be called for codex'); } };
+    const service = new ProjectExecutorService({} as never, {} as never, {} as never, resources as never);
+    await expect(service.requireModel('ws', 'codex', 'gpt-6-luna')).resolves.toBeUndefined();
+  });
+
+  it('still validates Claude Code against the Gateway protocol', async () => {
+    const resources = { publicModelRuntime: async () => ({ protocol: 'openai/chat' }) };
+    const service = new ProjectExecutorService({} as never, {} as never, {} as never, resources as never);
+    await expect(service.requireModel('ws', 'claude', 'some/model')).rejects.toThrow('Claude Code 需要');
+  });
+});
+
 describe('ProjectExecutorService temporary directory', () => {
   it('removes the per-task directory, including injected MCP material, after execution', async () => {
     let directory = '';

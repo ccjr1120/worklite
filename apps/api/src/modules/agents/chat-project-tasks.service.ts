@@ -90,13 +90,11 @@ export class ChatProjectTasksService {
     // Model precedence: task parameter, then the Chat configuration's declared default for this
     // executor, then the executor's own local default. The launch records the effective model and its source.
     const declaredModel = execution.capabilitySnapshot.defaultExecutorModels?.[executor]?.trim() || null;
-    const launch = await this.executors.captureLaunch(executor, requestedModel ?? declaredModel);
-    const model = (requestedModel ?? declaredModel) || (launch.executor === 'codex' ? launch.model : null);
+    const model = requestedModel ?? declaredModel;
+    const launch = await this.executors.captureLaunch(executor, model);
     if (model) await this.executors.requireModel(workspaceId, executor, model);
     const modelSource: StoredProjectExecutorModelSource = requestedModel ? 'task' : declaredModel ? 'configuration' : 'executor';
-    const capturedLaunch: StoredProjectExecutorLaunch = launch.executor === 'codex'
-      ? { ...launch, model: model ?? launch.model, modelSource }
-      : { ...launch, model, modelSource };
+    const capturedLaunch: StoredProjectExecutorLaunch = { ...launch, model, modelSource };
     const projectInstructions: Array<{ path: string; content: string }> = [];
     for (const path of ['AGENTS.md', 'AGENTS_WORKFLOW.md', 'CLAUDE.md']) {
       try { projectInstructions.push({ path, content: await readFile(join(projectDirectory, path), 'utf8') }); }
