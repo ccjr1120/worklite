@@ -18,6 +18,7 @@ import { Route as ModelProvidersRouteImport } from './routes/model-providers'
 import { Route as SettingsRouteRouteImport } from './routes/settings/route'
 import { Route as AgentTeamGroupsGroupIdRouteImport } from './routes/agent-team-groups/$groupId'
 import { Route as AgentTeamRunsRunIdRouteImport } from './routes/agent-team-runs/$runId'
+import { Route as AgentTeamsIndexRouteImport } from './routes/agent-teams/index'
 import { Route as AgentTeamsTeamIdRouteImport } from './routes/agent-teams/$teamId'
 import { Route as ArtifactsArtifactIdRouteImport } from './routes/artifacts/$artifactId'
 import { Route as McpServersIndexRouteImport } from './routes/mcp-servers/index'
@@ -34,6 +35,7 @@ import { Route as SkillsSkillIdRouteImport } from './routes/skills/$skillId'
 import { Route as WorkflowsIndexRouteImport } from './routes/workflows/index'
 import { Route as WorkflowsWorkflowIdRouteImport } from './routes/workflows/$workflowId'
 import { Route as AgentTeamsTeamIdIndexRouteImport } from './routes/agent-teams/$teamId.index'
+import { Route as AgentTeamsTeamIdConfigRouteImport } from './routes/agent-teams/$teamId.config'
 import { Route as WorkflowsWorkflowIdVersionsRouteImport } from './routes/workflows/$workflowId.versions'
 
 const IndexRoute = IndexRouteImport.update({
@@ -79,6 +81,11 @@ const AgentTeamGroupsGroupIdRoute = AgentTeamGroupsGroupIdRouteImport.update({
 const AgentTeamRunsRunIdRoute = AgentTeamRunsRunIdRouteImport.update({
   id: '/agent-team-runs/$runId',
   path: '/agent-team-runs/$runId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentTeamsIndexRoute = AgentTeamsIndexRouteImport.update({
+  id: '/agent-teams/',
+  path: '/agent-teams/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentTeamsTeamIdRoute = AgentTeamsTeamIdRouteImport.update({
@@ -161,6 +168,11 @@ const AgentTeamsTeamIdIndexRoute = AgentTeamsTeamIdIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AgentTeamsTeamIdRoute,
 } as any)
+const AgentTeamsTeamIdConfigRoute = AgentTeamsTeamIdConfigRouteImport.update({
+  id: '/config',
+  path: '/config',
+  getParentRoute: () => AgentTeamsTeamIdRoute,
+} as any)
 const WorkflowsWorkflowIdVersionsRoute =
   WorkflowsWorkflowIdVersionsRouteImport.update({
     id: '/versions',
@@ -188,11 +200,13 @@ export interface FileRoutesByFullPath {
   '/settings/usage': typeof SettingsUsageRoute
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
+  '/agent-teams/': typeof AgentTeamsIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/plugins/': typeof PluginsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/skills/': typeof SkillsIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
+  '/agent-teams/$teamId/config': typeof AgentTeamsTeamIdConfigRoute
   '/workflows/$workflowId/versions': typeof WorkflowsWorkflowIdVersionsRoute
   '/agent-teams/$teamId/': typeof AgentTeamsTeamIdIndexRoute
 }
@@ -214,11 +228,13 @@ export interface FileRoutesByTo {
   '/settings/usage': typeof SettingsUsageRoute
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
+  '/agent-teams': typeof AgentTeamsIndexRoute
   '/mcp-servers': typeof McpServersIndexRoute
   '/plugins': typeof PluginsIndexRoute
   '/settings': typeof SettingsIndexRoute
   '/skills': typeof SkillsIndexRoute
   '/workflows': typeof WorkflowsIndexRoute
+  '/agent-teams/$teamId/config': typeof AgentTeamsTeamIdConfigRoute
   '/workflows/$workflowId/versions': typeof WorkflowsWorkflowIdVersionsRoute
   '/agent-teams/$teamId': typeof AgentTeamsTeamIdIndexRoute
 }
@@ -243,11 +259,13 @@ export interface FileRoutesById {
   '/settings/usage': typeof SettingsUsageRoute
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
+  '/agent-teams/': typeof AgentTeamsIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/plugins/': typeof PluginsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/skills/': typeof SkillsIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
+  '/agent-teams/$teamId/config': typeof AgentTeamsTeamIdConfigRoute
   '/workflows/$workflowId/versions': typeof WorkflowsWorkflowIdVersionsRoute
   '/agent-teams/$teamId/': typeof AgentTeamsTeamIdIndexRoute
 }
@@ -273,11 +291,13 @@ export interface FileRouteTypes {
     | '/settings/usage'
     | '/skills/$skillId'
     | '/workflows/$workflowId'
+    | '/agent-teams/'
     | '/mcp-servers/'
     | '/plugins/'
     | '/settings/'
     | '/skills/'
     | '/workflows/'
+    | '/agent-teams/$teamId/config'
     | '/workflows/$workflowId/versions'
     | '/agent-teams/$teamId/'
   fileRoutesByTo: FileRoutesByTo
@@ -299,11 +319,13 @@ export interface FileRouteTypes {
     | '/settings/usage'
     | '/skills/$skillId'
     | '/workflows/$workflowId'
+    | '/agent-teams'
     | '/mcp-servers'
     | '/plugins'
     | '/settings'
     | '/skills'
     | '/workflows'
+    | '/agent-teams/$teamId/config'
     | '/workflows/$workflowId/versions'
     | '/agent-teams/$teamId'
   id:
@@ -327,11 +349,13 @@ export interface FileRouteTypes {
     | '/settings/usage'
     | '/skills/$skillId'
     | '/workflows/$workflowId'
+    | '/agent-teams/'
     | '/mcp-servers/'
     | '/plugins/'
     | '/settings/'
     | '/skills/'
     | '/workflows/'
+    | '/agent-teams/$teamId/config'
     | '/workflows/$workflowId/versions'
     | '/agent-teams/$teamId/'
   fileRoutesById: FileRoutesById
@@ -353,6 +377,7 @@ export interface RootRouteChildren {
   RunsRunIdRoute: typeof RunsRunIdRoute
   SkillsSkillIdRoute: typeof SkillsSkillIdRoute
   WorkflowsWorkflowIdRoute: typeof WorkflowsWorkflowIdRouteWithChildren
+  AgentTeamsIndexRoute: typeof AgentTeamsIndexRoute
   McpServersIndexRoute: typeof McpServersIndexRoute
   PluginsIndexRoute: typeof PluginsIndexRoute
   SkillsIndexRoute: typeof SkillsIndexRoute
@@ -422,6 +447,13 @@ declare module '@tanstack/react-router' {
       path: '/agent-team-runs/$runId'
       fullPath: '/agent-team-runs/$runId'
       preLoaderRoute: typeof AgentTeamRunsRunIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agent-teams/': {
+      id: '/agent-teams/'
+      path: '/agent-teams'
+      fullPath: '/agent-teams/'
+      preLoaderRoute: typeof AgentTeamsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agent-teams/$teamId': {
@@ -536,6 +568,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentTeamsTeamIdIndexRouteImport
       parentRoute: typeof AgentTeamsTeamIdRoute
     }
+    '/agent-teams/$teamId/config': {
+      id: '/agent-teams/$teamId/config'
+      path: '/config'
+      fullPath: '/agent-teams/$teamId/config'
+      preLoaderRoute: typeof AgentTeamsTeamIdConfigRouteImport
+      parentRoute: typeof AgentTeamsTeamIdRoute
+    }
     '/workflows/$workflowId/versions': {
       id: '/workflows/$workflowId/versions'
       path: '/versions'
@@ -565,10 +604,12 @@ const SettingsRouteRouteWithChildren = SettingsRouteRoute._addFileChildren(
 )
 
 interface AgentTeamsTeamIdRouteChildren {
+  AgentTeamsTeamIdConfigRoute: typeof AgentTeamsTeamIdConfigRoute
   AgentTeamsTeamIdIndexRoute: typeof AgentTeamsTeamIdIndexRoute
 }
 
 const AgentTeamsTeamIdRouteChildren: AgentTeamsTeamIdRouteChildren = {
+  AgentTeamsTeamIdConfigRoute: AgentTeamsTeamIdConfigRoute,
   AgentTeamsTeamIdIndexRoute: AgentTeamsTeamIdIndexRoute,
 }
 
@@ -603,6 +644,7 @@ const rootRouteChildren: RootRouteChildren = {
   RunsRunIdRoute: RunsRunIdRoute,
   SkillsSkillIdRoute: SkillsSkillIdRoute,
   WorkflowsWorkflowIdRoute: WorkflowsWorkflowIdRouteWithChildren,
+  AgentTeamsIndexRoute: AgentTeamsIndexRoute,
   McpServersIndexRoute: McpServersIndexRoute,
   PluginsIndexRoute: PluginsIndexRoute,
   SkillsIndexRoute: SkillsIndexRoute,

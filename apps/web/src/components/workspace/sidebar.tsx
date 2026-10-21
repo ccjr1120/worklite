@@ -17,7 +17,7 @@ const navigationGroups = [
     items: [
       { id: 'chat', labelKey: 'nav.chat', to: '/chat', icon: MessageSquareText },
       { id: 'workflows', labelKey: 'nav.workflows', to: '/workflows', icon: Workflow },
-      { id: 'agentTeam', labelKey: 'nav.agentTeam', to: '/agent-teams/$teamId', icon: UsersRound },
+      { id: 'agentTeam', labelKey: 'nav.agentTeam', to: '/agent-teams', icon: UsersRound },
     ],
   },
   {
@@ -82,7 +82,6 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
     const content = (
       <Link
         to={item.to}
-        params={item.id === 'agentTeam' ? { teamId: 'agent_team_bmad_tea' } : undefined}
         onClick={onNavigate}
         className={cn(
           'wl-press relative z-[1] flex h-9 items-center gap-2.5 rounded-md px-2.5 text-[13px]',

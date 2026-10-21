@@ -35,7 +35,7 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/plugins' }))}>
             <Puzzle className="size-4" /> {t('nav.plugins')}
           </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/agent-teams/$teamId', params: { teamId: 'agent_team_bmad_tea' } }))}>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/agent-teams' }))}>
             <UsersRound className="size-4" /> {t('nav.agentTeam')}
           </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/model-providers', search: { tab: 'providers' } }))}>

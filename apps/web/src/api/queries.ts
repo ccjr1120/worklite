@@ -162,6 +162,10 @@ export function useSkillQuery(workspace: string | undefined, skillId: string) {
   return useQuery({ queryKey: ['skill', skillId] as const, queryFn: () => api.skill(workspace, skillId), enabled: Boolean(skillId && skillId !== 'new') });
 }
 
+export function useAgentTeamsQuery() {
+  return useQuery({ queryKey: ['agent-teams'] as const, queryFn: () => api.agentTeams() });
+}
+
 export function useAgentTeamRecordsQuery(teamId: string) {
   return useQuery({ queryKey: agentTeamRecordsQueryKey(teamId), queryFn: () => api.agentTeamRecords(teamId), enabled: Boolean(teamId), refetchInterval: 5_000 });
 }

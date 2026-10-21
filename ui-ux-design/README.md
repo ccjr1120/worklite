@@ -34,7 +34,7 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 - Providers: [Model providers and Portkey Gateway](pages/model-providers/DESIGN.md), including the dedicated Codex Account Pool
 - Logs: [Gateway statistics and request logs](pages/logs/DESIGN.md), including the shared time range
 - Workflows: [List](pages/workflows/list/DESIGN.md), [Editor](pages/workflows/editor/DESIGN.md), [Versions](pages/workflows/versions/DESIGN.md)
-- Agent Teams: read-only Run records [Detail](pages/agent-teams/detail/DESIGN.md), read-only [Configuration](pages/agent-teams/config/DESIGN.md), read-only transcript archive [Group](pages/agent-teams/group/DESIGN.md), and immutable execution evidence [Run detail](pages/agent-team-runs/detail/DESIGN.md). Team operations and configuration writes live in Chat.
+- Agent Teams: read-only Run records with a Team switcher [Detail](pages/agent-teams/detail/DESIGN.md), read-only per-Team [Configuration](pages/agent-teams/config/DESIGN.md), read-only transcript archive [Group](pages/agent-teams/group/DESIGN.md), and immutable execution evidence [Run detail](pages/agent-team-runs/detail/DESIGN.md). Team operations and configuration writes live in Chat.
 - Runs: [Detail](pages/runs/detail/DESIGN.md), [Node logs](surfaces/workflow-run/node-logs/DESIGN.md)
 - Skills: [List](pages/skills/list/DESIGN.md), [Editor](pages/skills/editor/DESIGN.md)
 - MCP servers: [List](pages/mcp-servers/list/DESIGN.md), [Configuration](pages/mcp-servers/configuration/DESIGN.md)
@@ -50,7 +50,9 @@ The router supplies the shell-level pending and error boundaries through `apps/w
 /chat
 /model-providers
 /logs
+/agent-teams
 /agent-teams/:teamId
+/agent-teams/:teamId/config
 /agent-team-config
 /agent-team-groups/:groupId
 /agent-team-runs/:runId
@@ -72,7 +74,7 @@ The `/model-providers` page is the top-level Providers destination. It uses page
 
 `/logs` is the top-level Logs destination for Gateway transport observability. It uses page-level tabs for Statistics and Requests over one shared time range. Provider and model filters scope both views, model breakdowns open their matching requests, and failed Provider tests can focus the exact captured request. Providers configures what the Gateway dispatches to; Logs reads what it did.
 
-`/agent-teams/:teamId` lists read-only Run summaries without tabs. The workspace link and fixed configuration companion point to the existing Company Project Team; Chat selects between the Company Project Team and Application Development Team for dispatch and owns configuration writes for both. Chat is also the sole user-facing surface for pending-input answers, exact Command grants, Run controls and recovery, role, working-practice, project Git policy, and Team-memory management through protected platform operations. Chat dispatch creates a group-bound Run internally. `/agent-team-groups/:groupId` is a read-only archive for existing persisted group transcripts; direct group creation, message, answer and repository-mutation routes are retired; only Chat-bound reexecution remains. `/agent-team-runs/:runId` displays read-only immutable execution evidence for one captured Run, not a full Run collection. The former editable Team configuration route is retired; `/agent-team-config` is a fixed read-only inspection companion for the Company Project Team. Group and Run evidence remain available from existing records and Chat task cards. A failed managed Team document can be redelivered through its detail or download route without rerunning its producing role. `/runs/:runId` is a Workflow Run log-reading destination reached from a Workflow's Run records dialog, not a top-level collection. There is no Run list route: Runs are reached through their Workflow. Provider request observability is not a Settings page: `/settings` keeps the WorkLite-owned Usage and Audit Log read models, which are business records over Runs and resource mutations rather than Gateway transport records.
+`/agent-teams/:teamId` lists read-only Run summaries without tabs, below a Team switcher that shows both predefined Teams (Company Project Team and Application Development Team) with their focus, concurrency limit and active/queued Run counts and highlights the selected one. `/agent-teams` and the workspace entries open the default Company Project Team; `/agent-teams/:teamId/config` shows the selected Team's read-only configuration below the same switcher. Chat selects between the Teams for dispatch and owns configuration writes for both. Chat is also the sole user-facing surface for pending-input answers, exact Command grants, Run controls and recovery, role, working-practice, project Git policy, and Team-memory management through protected platform operations. Chat dispatch creates a group-bound Run internally. `/agent-team-groups/:groupId` is a read-only archive for existing persisted group transcripts; direct group creation, message, answer and repository-mutation routes are retired; only Chat-bound reexecution remains. `/agent-team-runs/:runId` displays read-only immutable execution evidence for one captured Run, not a full Run collection. The former editable Team configuration route is retired; `/agent-team-config` remains only as a compatibility redirect to `/agent-teams/agent_team_bmad_tea/config`. Group and Run evidence remain available from existing records and Chat task cards. A failed managed Team document can be redelivered through its detail or download route without rerunning its producing role. `/runs/:runId` is a Workflow Run log-reading destination reached from a Workflow's Run records dialog, not a top-level collection. There is no Run list route: Runs are reached through their Workflow. Provider request observability is not a Settings page: `/settings` keeps the WorkLite-owned Usage and Audit Log read models, which are business records over Runs and resource mutations rather than Gateway transport records.
 
 ## Shared Component Inventory
 
@@ -95,6 +97,11 @@ Every phase includes both themes, keyboard behavior, loading and failure states.
 ### 2026-10-21 - Channel-specific new-conversation interaction
 
 - Keep the contextual Web button and Feishu native card button; use the exact text command 「新对话」 for WeChat and document that each adapter owns its channel presentation.
+
+### 2026-10-21 - Visible Agent Team switching
+
+- The [Team records](pages/agent-teams/detail/DESIGN.md) page shows both predefined Teams in a switcher with the selected Team highlighted and URL-driven, names the Team in its heading and on each Run row, and `/agent-teams` plus the workspace entries open the default Team instead of hard-coding it.
+- [Team configuration](pages/agent-teams/config/DESIGN.md) moves to `/agent-teams/:teamId/config` for either Team; `/agent-team-config` redirects to the default Team's configuration.
 
 ### 2026-10-20 - Two predefined Agent Teams
 

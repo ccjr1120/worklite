@@ -12,10 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
-
-// The fixed read-only configuration route displays the existing Company Project Team.
-const BUILT_IN_TEAM_ID = 'agent_team_bmad_tea';
-const RECORDS_PATH = `/agent-teams/${BUILT_IN_TEAM_ID}`;
+import { TeamSwitcher } from './team-switcher';
 
 function roleLabel(role: string, t: (key: string) => string) {
   return t(`role.${role.replaceAll('-', '_')}`);
@@ -73,18 +70,20 @@ function RoleCard({ role, mcpServerNames }: { role: AgentTeamRoleConfiguration; 
   );
 }
 
-export function TeamConfig() {
+export function TeamConfig({ teamId }: { teamId: string }) {
   const { t } = useTranslation('agentTeams');
   const { locale } = useLocale();
-  const teamQuery = useAgentTeamQuery(BUILT_IN_TEAM_ID);
-  const memoriesQuery = useAgentTeamMemoriesQuery(BUILT_IN_TEAM_ID);
+  const teamQuery = useAgentTeamQuery(teamId);
+  const memoriesQuery = useAgentTeamMemoriesQuery(teamId);
   const mcpServersQuery = useMcpServersQuery('personal');
   const notSet = t('config.notSet');
+  const recordsPath = `/agent-teams/${encodeURIComponent(teamId)}`;
+  const crumbs = [{ label: t('title') }, ...(teamQuery.data ? [{ label: teamQuery.data.name, to: recordsPath }] : []), { label: t('config.title') }];
 
   if (teamQuery.isPending) {
     return (
       <PageContainer width="detail">
-        <WorkspaceChrome crumbs={[{ label: t('title'), to: RECORDS_PATH }, { label: t('config.title') }]} />
+        <WorkspaceChrome crumbs={crumbs} />
         <div className="space-y-3" role="status"><Skeleton className="h-8 w-72" /><Skeleton className="h-28 w-full" /><Skeleton className="h-56 w-full" /></div>
       </PageContainer>
     );
@@ -92,7 +91,8 @@ export function TeamConfig() {
   if (teamQuery.isError || !teamQuery.data) {
     return (
       <PageContainer width="detail">
-        <WorkspaceChrome crumbs={[{ label: t('title'), to: RECORDS_PATH }, { label: t('config.title') }]} />
+        <WorkspaceChrome crumbs={crumbs} />
+        <TeamSwitcher teamId={teamId} view="config" />
         <ErrorState title={t('config.title')} description={t('config.loadFailed')} onAction={() => void teamQuery.refetch()} />
       </PageContainer>
     );
@@ -103,12 +103,13 @@ export function TeamConfig() {
 
   return (
     <PageContainer width="detail">
-      <WorkspaceChrome crumbs={[{ label: t('title'), to: RECORDS_PATH }, { label: t('config.title') }]} />
+      <WorkspaceChrome crumbs={crumbs} />
       <PageHeading
         title={t('config.title')}
         description={t('config.description')}
-        actions={<Link to="/agent-teams/$teamId" params={{ teamId: BUILT_IN_TEAM_ID }} className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">{t('config.backToRecords')}</Link>}
+        actions={<Link to="/agent-teams/$teamId" params={{ teamId }} className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">{t('config.backToRecords')}</Link>}
       />
+      <TeamSwitcher teamId={teamId} view="config" />
 
       <section className="rounded-xl border border-border bg-surface p-4 shadow-xs">
         <h2 className="text-sm font-semibold">{t('config.overview.title')}</h2>

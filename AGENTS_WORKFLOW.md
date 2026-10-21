@@ -34,8 +34,7 @@ Use this workflow for any user-interface change, including pages, components, la
 7. Design and implement light and dark modes together. Neither mode may be treated as a fallback or simple color inversion.
 8. Preserve accessibility, including sufficient contrast, visible keyboard focus, non-color status cues, reduced-motion support, and accessible names for icon-only controls.
 9. If implementation reveals a conflict with the design system or requires a new design choice, stop and return to user discussion and explicit confirmation.
-10. Do not create or modify tests. After implementation, only a simple type check is permitted; do not package, build, or run test suites.
-11. Report the design-system basis, shared and page documents read or changed, affected UI surfaces, light and dark mode behavior, and type-check result when handing the task back to the user.
+10. Report the design-system basis, shared and page documents read or changed, affected UI surfaces, light and dark mode behavior, and type-check result when handing the task back to the user.
 
 If a request contains both architecture and UI changes, apply the Project Architecture Change Workflow first, then this workflow. This workflow takes precedence over the General Fallback Workflow for UI work.
 

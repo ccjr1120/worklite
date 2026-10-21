@@ -258,6 +258,7 @@ export const api = {
     return apiGet<GatewayRequestLogList>(`/api/portkey-gateway/request-logs${suffix}`);
   },
   gatewayRequestLog: (requestLogId: string) => apiGet<GatewayRequestLogDetail>(`/api/portkey-gateway/request-logs/${encodeURIComponent(requestLogId)}`),
+  agentTeams: () => apiGet<AgentTeamView[]>('/api/agent-teams'),
   agentTeamRecords: (teamId: string) => apiGet<AgentTeamRunSummary[]>(`/api/agent-teams/${encodeURIComponent(teamId)}/runs`),
   agentTeam: (teamId: string) => apiGet<AgentTeamView>(`/api/agent-teams/${encodeURIComponent(teamId)}`),
   agentTeamMemories: (teamId: string) => apiGet<AgentTeamMemoryView[]>(`/api/agent-teams/${encodeURIComponent(teamId)}/memories`),
