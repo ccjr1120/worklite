@@ -143,7 +143,7 @@ function LogsPage() {
             onFiltersChange={changeFilters}
             focusedRequestId={search.requestLogId}
             onFocusedRequestClear={() => void navigate({ to: '/logs', search: { ...search, requestLogId: undefined } })}
-            onOpenProvider={(provider) => void navigate({ to: '/model-providers', search: { tab: 'providers', provider } })}
+            onOpenProvider={(provider) => void navigate({ to: '/model-providers', search: { provider } })}
           />
         </TabsContent>
       </Tabs>
