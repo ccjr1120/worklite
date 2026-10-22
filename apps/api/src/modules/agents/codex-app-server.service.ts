@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { StoredProjectExecutorLaunch } from '@worklite/db';
 import { CommandsService, type CommandStdioProcess } from '../commands/commands.service';
-import { requireSafeCommandWord, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
+import { requireSafeCommandWord, isGatewayPublicModel, localGatewayBaseUrl, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
 
 type CodexLaunch = Extract<StoredProjectExecutorLaunch, { executor: 'codex' }>;
 
@@ -19,9 +19,12 @@ type RpcMessage = {
 // interactive zsh login shell, exactly like a manual terminal invocation: this resolves ~/.zshrc aliases,
 // functions and PATH the same way the operator's own shell would, so whatever local Codex configuration
 // (home directory, model, Provider) that resolution selects is what runs. WorkLite names no Codex config
-// file or directory here and does not require the resolved model or Provider to exist in the WorkLite
-// Gateway. Protocol verified against openai/codex rust-v0.163.0.
+// file or directory here. A declared Gateway public model additionally receives a per-run
+// `model_providers.worklite` override at launch, so it does not need to exist in the operator's own catalog.
+// Protocol verified against openai/codex rust-v0.163.0.
 const LOGIN_SHELL = '/bin/zsh';
+const GATEWAY_MODEL_PROVIDER = 'worklite';
+const GATEWAY_MODEL_API_KEY_ENV = 'WORKLITE_GATEWAY_API_KEY';
 
 @Injectable()
 export class CodexAppServerService {
@@ -48,7 +51,11 @@ export class CodexAppServerService {
       if (process) void this.commands.cancel(process.executionId).catch(() => undefined);
     };
     try {
-      const mcp = codexMcpServers(prepared);
+      // A declared Gateway public model is served by the WorkLite Gateway through a per-run Responses
+      // Provider; a native Codex model keeps the operator's own Codex configuration untouched.
+      const model = request.model ?? launch.model;
+      const gatewayModel = isGatewayPublicModel(model);
+      const mcp = codexMcpServers(prepared, gatewayModel);
       process = await this.commands.openStdioProcess(
         appServerArguments(launch, mcp.config), request.projectDirectory, mcp.env,
         (event) => {
@@ -69,9 +76,9 @@ export class CodexAppServerService {
       requireSupportedVersion(initialized.userAgent);
       await session.notify('initialized', {});
       if (prepared.skillRoot) await session.call('skills/extraRoots/set', { extraRoots: [prepared.skillRoot] });
-      const model = request.model ?? launch.model;
       const started = await session.call('thread/start', {
         ...(model ? { model } : {}),
+        ...(gatewayModel ? { modelProvider: GATEWAY_MODEL_PROVIDER } : {}),
         cwd: request.projectDirectory,
         approvalPolicy: 'never',
         sandbox: 'danger-full-access',
@@ -274,7 +281,9 @@ class CodexAppServerSession {
 }
 
 // Selected MCP servers join the operator's own servers; bearer tokens travel through the process environment.
-function codexMcpServers(prepared: PreparedProjectExecution): { config: Record<string, unknown>; env: Record<string, string> } {
+// A Gateway-selected model also adds a per-run Responses Provider pointing at the local Gateway, so Codex sends
+// the public `<provider>/<model>` id there instead of requiring it in the operator's own Codex catalog.
+function codexMcpServers(prepared: PreparedProjectExecution, gatewayModel: boolean): { config: Record<string, unknown>; env: Record<string, string> } {
   const config: Record<string, unknown> = {};
   const env: Record<string, string> = {};
   prepared.mcpServers.forEach((server, index) => {
@@ -286,6 +295,21 @@ function codexMcpServers(prepared: PreparedProjectExecution): { config: Record<s
       ...(server.authToken ? { bearer_token_env_var: tokenVariable } : {}),
     };
   });
+  if (gatewayModel) {
+    config.model_provider = GATEWAY_MODEL_PROVIDER;
+    config[`model_providers.${GATEWAY_MODEL_PROVIDER}`] = {
+      name: 'WorkLite Gateway',
+      base_url: `${localGatewayBaseUrl()}/v1`,
+      wire_api: 'responses',
+      env_key: GATEWAY_MODEL_API_KEY_ENV,
+    };
+    // Codex requires the configured key variable to be present; the Gateway resolves the real Provider credential.
+    env[GATEWAY_MODEL_API_KEY_ENV] = 'worklite';
+    // The ChatGPT apps connector (Figma, Sites, ...) adds ~55k tokens of tool definitions to every request and
+    // fills a Gateway model's context early, forcing slow client-side compactions. Forcing `code_mode_only` was
+    // measured too: deepseek-class models made more round trips with it, so the classic tools stay.
+    config['features.apps'] = false;
+  }
   return { config, env };
 }
 

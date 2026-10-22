@@ -118,7 +118,8 @@ export class AgentTeamConfigurationService {
       if (value.executor !== undefined && value.executor !== null && value.executor !== 'claude' && value.executor !== 'codex') throw new BadRequestException(`The executor for Agent Team role ${role} must be claude or codex.`);
       const executor = role === 'developer' ? value.executor ?? 'claude' : value.executor ?? undefined;
       const runtime = publicModelId ? await this.resources.publicModelRuntime(workspaceId, publicModelId) : undefined;
-      // Codex launches natively and is not required to use a Gateway model; only Claude Code's protocol is checked.
+      // A role's publicModelId is always a Gateway public id, so it must speak a protocol its executor
+      // can reach through the Gateway (Claude Code: anthropic/messages, Codex: openai or codex responses).
       const protocols = executor ? PROJECT_EXECUTOR_PROTOCOLS[executor] : undefined;
       if (executor && runtime && protocols && !protocols.includes(runtime.protocol)) {
         throw new BadRequestException(`The ${role} model must use ${protocols.join(' or ')} for the ${executor} executor.`);

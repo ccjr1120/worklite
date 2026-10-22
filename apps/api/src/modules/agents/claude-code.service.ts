@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { StoredProjectExecutorLaunch } from '@worklite/db';
 import { CommandsService, type CommandStdioProcess } from '../commands/commands.service';
 import { McpClientService } from '../mcp-servers/mcp-client.service';
-import { requireGatewayUrl, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
+import { requireGatewayUrl, isGatewayPublicModel, localGatewayBaseUrl, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
 
 type ClaudeLaunch = Extract<StoredProjectExecutorLaunch, { executor: 'claude' }>;
 
@@ -22,6 +22,11 @@ export class ClaudeCodeService {
   constructor(private readonly commands: CommandsService, private readonly mcp: McpClientService) {}
 
   async captureLaunch(commandArguments: readonly string[], model: string | null): Promise<ClaudeLaunch> {
+    // A declared Gateway model is served by the WorkLite Gateway itself; the operator's own Claude Code
+    // base URL (including whatever a provider switcher left in ~/.claude/settings.json) is irrelevant then.
+    if (isGatewayPublicModel(model)) {
+      return { executor: 'claude', commandArguments: [...commandArguments], baseUrl: localGatewayBaseUrl(), model };
+    }
     let settingsEnv: Record<string, unknown> = {};
     try {
       const settings = JSON.parse(await readFile(join(homedir(), '.claude', 'settings.json'), 'utf8')) as { env?: Record<string, unknown> };
@@ -52,12 +57,22 @@ export class ClaudeCodeService {
       await writeFile(promptFile, prepared.systemPrompt, { mode: 0o600 });
       const mcp = await this.mcpArguments(prepared, request.signal);
       const model = request.model ?? launch.model;
+      // `~/.claude/settings.json` env overrides the inherited process environment, so a Gateway-selected
+      // model is routed through a per-task `--settings` file instead of child-process environment variables.
+      const gatewayModel = isGatewayPublicModel(model);
+      let gatewayArguments: string[] = [];
+      if (gatewayModel) {
+        const settingsFile = join(prepared.directory, 'claude-gateway-settings.json');
+        await writeFile(settingsFile, JSON.stringify({ env: { ANTHROPIC_BASE_URL: localGatewayBaseUrl(), ANTHROPIC_AUTH_TOKEN: 'worklite' } }), { mode: 0o600 });
+        gatewayArguments = ['--settings', settingsFile];
+      }
       const argv = [
         ...launch.commandArguments,
         '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
         '--permission-mode', 'bypassPermissions', '--permission-prompt-tool', 'stdio', '--no-session-persistence',
         '--append-system-prompt-file', promptFile,
         ...(model ? ['--model', model] : []),
+        ...gatewayArguments,
         ...(prepared.pluginDirectory ? ['--plugin-dir', prepared.pluginDirectory] : []),
         ...mcp,
       ];

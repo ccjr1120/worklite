@@ -7,7 +7,7 @@ import { CLAUDE_CODE_PLUGIN_ID, CODEX_CLI_PLUGIN_ID, PluginsService } from '../p
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { ClaudeCodeService } from './claude-code.service';
 import { CodexAppServerService } from './codex-app-server.service';
-import { PROJECT_EXECUTOR_PROTOCOLS, type PreparedProjectExecution, type ProjectExecutorRequest, type ProjectExecutorSkill } from './project-executor.types';
+import { PROJECT_EXECUTOR_PROTOCOLS, isGatewayPublicModel, type PreparedProjectExecution, type ProjectExecutorRequest, type ProjectExecutorSkill } from './project-executor.types';
 
 // Chat project tasks and the Team developer role share this boundary. Executors run natively in the project
 // directory; WorkLite only hands over selected Skills, MCP servers and reference files in each executor's own form.
@@ -26,13 +26,16 @@ export class ProjectExecutorService {
       : this.claude.captureLaunch(await this.plugins.commandArguments(CLAUDE_CODE_PLUGIN_ID), model);
   }
 
-  // Codex is not required to use a Gateway model: it runs through the operator's own native configuration.
+  // A native Codex model designation is left to the operator's own Codex configuration; a Gateway public
+  // model must exist and speak a protocol the executor can reach through the Gateway.
   async requireModel(workspaceId: string, executor: StoredProjectExecutor, model: string): Promise<void> {
     const protocols = PROJECT_EXECUTOR_PROTOCOLS[executor];
     if (!protocols) return;
+    if (executor === 'codex' && !isGatewayPublicModel(model)) return;
     const runtime = await this.resources.publicModelRuntime(workspaceId, model);
     if (!protocols.includes(runtime.protocol)) {
-      throw new BadRequestException(`Claude Code 需要 ${protocols.join(' 或 ')} 协议的 Gateway 模型。`);
+      const label = executor === 'codex' ? 'Codex' : 'Claude Code';
+      throw new BadRequestException(`${label} 需要 ${protocols.join(' 或 ')} 协议的 Gateway 模型。`);
     }
   }
 
