@@ -628,8 +628,6 @@ function CodexToolCallPanel({ task: inputTask }: { task: ChatProjectTaskView }) 
             <TruncatedText text={goalSummary} title={task.goal} className="flex-1 text-[13px] font-semibold" />
           </span>
           <span className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-            <span>{t('codex.elapsed', { duration: elapsedDuration })}</span>
-            <span aria-hidden="true">·</span>
             <span className="flex min-w-0 items-center gap-1.5">
               {live
                 ? <Badge variant={task.stage === 'waiting' ? 'warning' : 'brand'}>{t(`codex.stage.${task.stage}`)}</Badge>
@@ -640,13 +638,18 @@ function CodexToolCallPanel({ task: inputTask }: { task: ChatProjectTaskView }) 
         </span>
         <ChevronDown className={cn('mt-1 size-4 shrink-0 text-muted-foreground transition-transform duration-[200ms] ease-[var(--ease-out)]', !expanded && '-rotate-90')} aria-hidden="true" />
       </button>
-      {live ? (
-        <div className="flex items-center justify-end gap-2 border-t border-border px-3 py-2">
-          <Button type="button" variant="secondary" size="compact" disabled={cancellingTask} onClick={() => { setActionError(''); setCancelDialogOpen(true); }}>
+      <div className="flex min-h-9 items-center justify-between gap-2 border-t border-border px-3 py-1.5">
+        <p className="flex min-w-0 flex-1 items-center gap-1.5 text-[11px] text-muted-foreground">
+          <TruncatedText text={executorName} />
+          <span aria-hidden="true">·</span>
+          <TruncatedText text={t('codex.elapsed', { duration: elapsedDuration })} className="shrink-0" />
+        </p>
+        {live ? (
+          <Button type="button" variant="secondary" size="compact" className="shrink-0" disabled={cancellingTask} onClick={() => { setActionError(''); setCancelDialogOpen(true); }}>
             {t('codex.cancelTask')}
           </Button>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
       <Dialog open={cancelDialogOpen} onOpenChange={(open) => { if (!cancellingTask) { setCancelDialogOpen(open); if (open) setActionError(''); } }}>
         <DialogContent>
           <DialogHeader>
@@ -695,10 +698,6 @@ function CodexToolCallPanel({ task: inputTask }: { task: ChatProjectTaskView }) 
             <div className="min-w-0">
               <dt className="font-medium text-muted-foreground">{t('codex.model')}</dt>
               <dd className="mt-1 break-all font-mono">{task.model}</dd>
-            </div>
-            <div>
-              <dt className="font-medium text-muted-foreground">{t('codex.executor')}</dt>
-              <dd className="mt-1">{executorName}</dd>
             </div>
             <div>
               <dt className="font-medium text-muted-foreground">{t('codex.status')}</dt>

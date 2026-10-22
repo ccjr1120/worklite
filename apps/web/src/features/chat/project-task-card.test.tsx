@@ -68,6 +68,32 @@ describe('CodexToolCallPanel project task card', () => {
     expect(screen.queryByText('保留的历史纠偏')).not.toBeInTheDocument();
   });
 
+  it('shows the executor name and elapsed time once in the bottom footer, collapsed and expanded', async () => {
+    const running = task({ executor: 'codex' });
+    vi.mocked(api.chatProjectTask).mockResolvedValue(running);
+    const { container } = render(<CodexToolCallPanel task={running} />);
+    const article = container.querySelector('article')!;
+
+    const footer = () => screen.getByText(/已耗时/).closest('div') as HTMLElement;
+    const assertFooter = () => {
+      const executor = screen.getByText('Codex', { selector: 'span[title]' });
+      const elapsed = screen.getByText(/已耗时/);
+      expect(footer()).toContainElement(executor);
+      expect(footer()).toContainElement(elapsed);
+      expect(executor).toHaveClass('truncate');
+      expect(elapsed).toHaveClass('truncate');
+      expect(executor).toHaveAttribute('title', 'Codex');
+      expect(screen.getAllByText(/已耗时/)).toHaveLength(1);
+    };
+    expect(article.querySelector('button[aria-expanded]')).not.toContainElement(screen.getByText(/已耗时/));
+    assertFooter();
+
+    fireEvent.click(screen.getByRole('button', { name: '展开项目任务详情' }));
+    await waitFor(() => expect(article.querySelector('[id^="project-task-details-"]')).not.toBeNull());
+    assertFooter();
+    expect(article.querySelector('[id^="project-task-details-"]')).not.toContainElement(screen.getByText(/已耗时/));
+  });
+
   it('truncates long progress in the summary while keeping the full text in details', async () => {
     const progress = '进展'.repeat(80);
     const running = task({ progressText: progress });
