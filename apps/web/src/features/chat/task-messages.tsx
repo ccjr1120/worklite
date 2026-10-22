@@ -13,6 +13,8 @@ import { Button } from '@/components/ui/button';
 import { StatusBadge, toStatusKey } from '@/components/status-badge';
 import { Field } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/textarea';
+import { TruncatedText } from '@/components/ui/truncated-text';
+import { toSingleLine } from '@/lib/single-line';
 import { runModeLabel } from '@/features/agent-teams/run-mode';
 
 function WorkflowTask({ submission }: { submission: ChatSubmissionView }) {
@@ -30,11 +32,11 @@ function WorkflowTask({ submission }: { submission: ChatSubmissionView }) {
   }
   return <div className="space-y-2">
     <TaskLink reference={reference} />
-    {query.data ? <div className="flex min-w-0 flex-wrap items-center gap-2 text-[13px] text-muted-foreground"><StatusBadge key={query.data.status} status={toStatusKey(query.data.status)} label={t(`status.${query.data.status}`)} /><span className="min-w-0 truncate">{query.data.workflowName}{query.data.currentStep ? ` · ${query.data.currentStep}` : ''}</span></div> : null}
+    {query.data ? <div className="flex min-w-0 flex-wrap items-center gap-2 text-[13px] text-muted-foreground"><StatusBadge key={query.data.status} status={toStatusKey(query.data.status)} label={t(`status.${query.data.status}`)} /><TruncatedText text={`${query.data.workflowName}${query.data.currentStep ? ` · ${query.data.currentStep}` : ''}`} /></div> : null}
     {query.isError ? <p className="text-[13px] text-danger" role="alert">{t('records.taskLoadFailed')}</p> : null}
     {query.data && ['queued', 'running', 'paused', 'waiting_for_input'].includes(query.data.status) ? <Button variant="secondary" size="compact" onClick={() => void cancel()} disabled={busy}>{busy ? <LoaderCircle className="size-3.5 motion-safe:animate-spin" /> : null}{t('records.cancelTask')}</Button> : null}
     {error ? <p role="alert" className="text-[13px] text-danger">{error}</p> : null}
-    {typeof submission.renderedCard?.content === 'string' ? <MessageResponse content={submission.renderedCard.content} enabled /> : null}
+    {typeof submission.renderedCard?.content === 'string' ? <TruncatedText as="p" text={toSingleLine(submission.renderedCard.content)} title={submission.renderedCard.content} className="text-[13px]" /> : null}
   </div>;
 }
 
@@ -137,9 +139,9 @@ function TeamRunLink({ runId, groupId }: { runId: string; groupId?: string }) {
       <StatusBadge key={run.status} status={toStatusKey(run.status)} label={t(`status.${run.status}`)} />
       {run.progress ? <span className="text-[13px] text-muted-foreground tabular-nums">{tTeams(`progress.phaseValue.${run.progress.phase}`)} · {tTeams('progress.percent', { percent: run.progress.percent })}</span> : null}
     </div> : query.isPending ? <p className="text-[13px] text-muted-foreground" role="status">{t('records.taskLoading')}</p> : null}
-    {run && (run.teamVersion.orchestrationVersion ?? 1) >= 10 ? <p className="whitespace-pre-wrap break-words text-[13px] text-muted-foreground">{runModeLabel(tTeams, run.mode, 10, run.modeDecidedAt)}{run.modeRationale ? ` · ${run.modeRationale}` : ''}</p> : null}
+    {run && (run.teamVersion.orchestrationVersion ?? 1) >= 10 ? <TruncatedText as="p" text={`${runModeLabel(tTeams, run.mode, 10, run.modeDecidedAt)}${run.modeRationale ? ` · ${toSingleLine(run.modeRationale)}` : ''}`} className="text-[13px] text-muted-foreground" /> : null}
     {query.isError ? <p className="text-[13px] text-danger" role="alert">{t('records.taskLoadFailed')}</p> : null}
-    {failure ? <p className="whitespace-pre-wrap break-words text-[13px] text-danger" role="alert">{failure}</p> : null}
+    {failure ? <TruncatedText as="p" text={toSingleLine(failure)} title={failure} className="text-[13px] text-danger" role="alert" /> : null}
     {run ? <TeamRunActions run={run} groupId={groupId} onRunUpdate={onRunUpdate} /> : null}
     {run ? questions.map((question) => <TeamPendingInput key={question.id} run={run} pendingInput={question} owner={run.tasks.find((task) => task.id === question.taskAttemptId)} onRunUpdate={onRunUpdate} />) : null}
     {run ? recoveries.map((pending) => {
@@ -147,9 +149,9 @@ function TeamRunLink({ runId, groupId }: { runId: string; groupId?: string }) {
       if (!operation) return null;
       return <TeamOperationRecovery key={operation.operationKey} run={run} operation={operation} onRunUpdate={onRunUpdate} />;
     }) : null}
-    {run?.outcome ? <div className="text-[13px]"><MessageResponse content={run.outcome.summary} enabled /></div> : null}
-    {run?.outcome?.unresolvedIssues.map((issue) => <p key={issue} className="text-[13px] text-warning">{issue}</p>)}
-    {run?.tasks.filter((task) => task.status === 'running' && task.progressText).map((task) => <div key={task.id} className="text-[13px] text-muted-foreground"><MessageResponse content={task.progressText} enabled /></div>)}
+    {run?.outcome ? <TruncatedText as="p" text={toSingleLine(run.outcome.summary)} title={run.outcome.summary} className="text-[13px]" /> : null}
+    {run?.outcome?.unresolvedIssues.map((issue) => <TruncatedText key={issue} as="p" text={toSingleLine(issue)} title={issue} className="text-[13px] text-warning" />)}
+    {run?.tasks.filter((task) => task.status === 'running' && task.progressText).map((task) => <TruncatedText key={task.id} as="p" text={toSingleLine(task.progressText)} title={task.progressText} className="text-[13px] text-muted-foreground" />)}
   </div>;
 }
 
@@ -179,7 +181,7 @@ function TeamTask({ submission }: { submission: ChatSubmissionView }) {
   const reference = submission.reference;
   return <div className="space-y-2">
     {reference?.kind === 'team' ? <TeamRunLink runId={reference.runId} groupId={reference.groupId} /> : null}
-    {typeof submission.renderedCard?.content === 'string' ? <MessageResponse content={submission.renderedCard.content} enabled /> : null}
+    {typeof submission.renderedCard?.content === 'string' ? <TruncatedText as="p" text={toSingleLine(submission.renderedCard.content)} title={submission.renderedCard.content} className="text-[13px]" /> : null}
   </div>;
 }
 
@@ -202,7 +204,7 @@ function UpgradeTask({ jobId }: { jobId: string }) {
     </p>
     {job ? <p className="break-all font-mono text-xs text-muted-foreground">{t('upgrade.version', { version: job.releaseHash.slice(0, 12) })}</p> : null}
     {query.isError ? <p className="text-[13px] text-muted-foreground" role="status">{t(job ? 'upgrade.reconnecting' : 'upgrade.loadFailed')}</p> : null}
-    {job?.error ? <p className="whitespace-pre-wrap break-words text-[13px] text-danger" role="alert">{job.error}</p> : null}
+    {job?.error ? <TruncatedText as="p" text={toSingleLine(job.error)} title={job.error} className="text-[13px] text-danger" role="alert" /> : null}
   </div>;
 }
 
@@ -211,5 +213,5 @@ function UpgradeTask({ jobId }: { jobId: string }) {
 export function TaskCard({ submission }: { submission: ChatSubmissionView }) {
   const { t } = useTranslation('assistant');
   const pins = useContext(PinTrackingContext);
-  return <section ref={pins?.track(submission.id)} tabIndex={-1} className="wl-enter my-4 space-y-3 rounded-xl border border-border bg-surface p-4 shadow-xs outline-none"><p className="whitespace-pre-wrap break-words text-sm">{submission.message}</p>{submission.error ? <div className="space-y-2"><StatusBadge status="failed" label={t('status.failed')} /><p className="text-[13px] text-danger" role="alert">{submission.error}</p></div> : null}{submission.reference?.kind === 'workflow' ? <WorkflowTask submission={submission} /> : submission.reference?.kind === 'team' ? <TeamTask submission={submission} /> : submission.reference?.kind === 'upgrade' ? <UpgradeTask jobId={submission.reference.jobId} /> : typeof submission.renderedCard?.content === 'string' ? <MessageResponse content={submission.renderedCard.content} enabled /> : null}</section>;
+  return <section ref={pins?.track(submission.id)} tabIndex={-1} className="wl-enter my-4 space-y-3 rounded-xl border border-border bg-surface p-4 shadow-xs outline-none"><TruncatedText as="p" text={toSingleLine(submission.message)} title={submission.message} className="text-sm" />{submission.error ? <div className="space-y-2"><StatusBadge status="failed" label={t('status.failed')} /><TruncatedText as="p" text={toSingleLine(submission.error)} title={submission.error} className="text-[13px] text-danger" role="alert" /></div> : null}{submission.reference?.kind === 'workflow' ? <WorkflowTask submission={submission} /> : submission.reference?.kind === 'team' ? <TeamTask submission={submission} /> : submission.reference?.kind === 'upgrade' ? <UpgradeTask jobId={submission.reference.jobId} /> : typeof submission.renderedCard?.content === 'string' ? <TruncatedText as="p" text={toSingleLine(submission.renderedCard.content)} title={submission.renderedCard.content} className="text-[13px]" /> : null}</section>;
 }

@@ -10,12 +10,14 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { Skeleton } from '@/components/ui/skeleton';
+import { TruncatedText } from '@/components/ui/truncated-text';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
 import type { AppLocale } from '@/i18n/locale';
 import { cn } from '@/lib/utils';
+import { toSingleLine } from '@/lib/single-line';
 import { ApiError, api } from '@/api/client';
 import { useChatProjectOperationQuery } from '@/api/queries';
 import { PinTrackingContext } from './pinned-executions';
@@ -26,10 +28,6 @@ type TurnSegment = { kind: 'message'; item: TranscriptMessage } | { kind: 'tool'
 
 type CodexActivity = ChatProjectTaskView['activities'][number];
 type CodexOperation = ChatProjectTaskView['operations'][number];
-
-function codexFirstLine(value: string): string {
-  return value.trim().split(/\r?\n/, 1)[0] ?? '';
-}
 
 function codexActivityText(activity: CodexActivity, key: string): string | null {
   const value = activity[key];
@@ -403,7 +401,7 @@ function QueueRows({ queued, paused, sendingId, onRemove }: { queued: Array<{ id
         {queued.map((item, index) => (
           <li key={item.id} className="flex items-start gap-2">
             <span className="mt-0.5 shrink-0 font-mono text-xs text-muted-foreground">{index + 1}</span>
-            <span className="min-w-0 flex-1 break-words text-[13px] leading-5">{item.text}</span>
+            <TruncatedText text={item.text} className="flex-1 text-[13px] leading-5" />
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button type="button" variant="ghost" size="icon-compact" aria-label={t('queue.remove')} disabled={sendingId === item.id} onClick={() => onRemove(item.id)}>
@@ -437,10 +435,10 @@ function WorkflowRunRow({ run, workflow, input }: { run: RunView; workflow: Work
             <span className="min-w-0 truncate text-sm font-semibold">{workflow.name}</span>
             <StatusBadge key={statusKey} status={statusKey} label={run.status === 'waiting_for_input' ? t('workflowRun.waitingForConfirmation') : t(`status.${run.status === 'succeeded' ? 'completed' : run.status === 'timed_out' ? 'failed' : run.status}`)} />
           </div>
-          <p className="mt-1 break-words text-[13px] text-muted-foreground">{input || t('workflowRun.emptyInput')}</p>
-          {run.currentStep ? <p className="mt-1 text-xs text-muted-foreground">{t('workflowRun.currentStep', { step: run.currentStep })}</p> : null}
+          <TruncatedText as="p" text={input || t('workflowRun.emptyInput')} className="mt-1 text-[13px] text-muted-foreground" />
+          {run.currentStep ? <TruncatedText as="p" text={t('workflowRun.currentStep', { step: run.currentStep })} className="mt-1 text-xs text-muted-foreground" /> : null}
           {run.status === 'waiting_for_input' ? <p className="mt-2 text-xs text-muted-foreground">{t('workflowRun.openRunHistory')}</p> : null}
-          {failure ? <p className="mt-2 text-xs text-danger">{failure}</p> : null}
+          {failure ? <TruncatedText as="p" text={toSingleLine(failure)} title={failure} className="mt-2 text-xs text-danger" /> : null}
           {run.artifacts && run.artifacts.length > 0 ? (
             <div className="mt-3 flex flex-wrap gap-2">
               {run.artifacts.map((artifact) => (
@@ -549,7 +547,7 @@ function CodexToolCallPanel({ task: inputTask }: { task: ChatProjectTaskView }) 
       setCancellingTask(false);
     }
   };
-  const goalSummary = codexFirstLine(task.goal);
+  const goalSummary = toSingleLine(task.goal);
   const executorName = task.executor ? t(`codex.executorName.${task.executor}`) : t('codex.launchNotCaptured');
   const modelSummary = t('codex.modelLaunch', { model: task.model || t('codex.defaultModel'), mode: executorName });
   const latestActivity = task.activities.at(-1) ?? null;
@@ -603,7 +601,7 @@ function CodexToolCallPanel({ task: inputTask }: { task: ChatProjectTaskView }) 
     return t('codex.activity.unknown', { phase });
   };
   const progressLine = task.progressText.trim()
-    ? codexFirstLine(task.progressText).replace(/\s+/g, ' ')
+    ? toSingleLine(task.progressText)
     : latestActivity ? describeActivity(latestActivity) : t('codex.starting');
   const progressSummary = progressLine.length > 120 ? `${progressLine.slice(0, 119)}…` : progressLine;
   const activityPhaseSummary = Object.entries(task.activityPhases).map(([phase, count]) => `${describeActivity({ phase })} · ${count}`);
@@ -627,9 +625,7 @@ function CodexToolCallPanel({ task: inputTask }: { task: ChatProjectTaskView }) 
         <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface-subtle"><FileCode2 className="size-3.5 text-muted-foreground" aria-hidden="true" /></span>
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">
-              {goalSummary}
-            </span>
+            <TruncatedText text={goalSummary} title={task.goal} className="flex-1 text-[13px] font-semibold" />
           </span>
           <span className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             <span>{t('codex.elapsed', { duration: elapsedDuration })}</span>
@@ -638,7 +634,7 @@ function CodexToolCallPanel({ task: inputTask }: { task: ChatProjectTaskView }) 
               {live
                 ? <Badge variant={task.stage === 'waiting' ? 'warning' : 'brand'}>{t(`codex.stage.${task.stage}`)}</Badge>
                 : <StatusBadge status={statusKey} label={t(`status.${task.status}`)} />}
-              {live ? <span className="min-w-0 truncate">{progressSummary}</span> : null}
+              {live ? <TruncatedText text={progressSummary} title={progressLine} /> : null}
             </span>
           </span>
         </span>
@@ -679,7 +675,7 @@ function CodexToolCallPanel({ task: inputTask }: { task: ChatProjectTaskView }) 
           <dl className="grid gap-3 text-xs sm:grid-cols-2">
             <div className="sm:col-span-2">
               <dt className="font-medium text-muted-foreground">{t('codex.goal')}</dt>
-              <dd className="mt-1 whitespace-pre-wrap break-words">{task.goal}</dd>
+              <dd className="mt-1"><MessageResponse content={task.goal} enabled className="text-xs leading-5" /></dd>
             </div>
             <div className="min-w-0">
               <dt className="font-medium text-muted-foreground">{t('codex.projectDirectory')}</dt>
@@ -794,7 +790,7 @@ function CodexToolCallPanel({ task: inputTask }: { task: ChatProjectTaskView }) 
               <CircleX className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
               <div className="min-w-0 flex-1">
                 <p className="font-medium">{t('codex.error')}</p>
-                <p className="mt-1 whitespace-pre-wrap break-words">{task.error}</p>
+                <MessageResponse content={task.error} enabled className="mt-1 text-xs leading-5" />
               </div>
             </div>
           ) : null}
@@ -888,5 +884,5 @@ function StandardToolCallPanel({ call }: { call: AgentToolCallView }) {
   );
 }
 
-export { AssistantTurn, buildTimeline, CancelledNote, CodexToolCallPanel, codexFirstLine, FailureNote, QuestionNote, QueueRows, SummaryDivider, TranscriptSkeleton, UserMessage, WorkflowRunRow };
+export { AssistantTurn, buildTimeline, CancelledNote, CodexToolCallPanel, FailureNote, QuestionNote, QueueRows, SummaryDivider, TranscriptSkeleton, UserMessage, WorkflowRunRow };
 export type { ActiveWorkflowRun, TimelineEntry };
