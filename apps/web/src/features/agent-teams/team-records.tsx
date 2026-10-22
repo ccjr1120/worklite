@@ -9,6 +9,7 @@ import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
 import { TeamSwitcher } from './team-switcher';
+import { runModeLabel } from './run-mode';
 
 export function TeamRecords({ teamId }: { teamId: string }) {
   const { t } = useTranslation('agentTeams');
@@ -33,7 +34,7 @@ export function TeamRecords({ teamId }: { teamId: string }) {
             <li key={run.id}>
               <Link to="/agent-team-runs/$runId" params={{ runId: run.id }} className="block space-y-2 rounded-lg px-4 py-4 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 <div className="flex flex-wrap items-center gap-3"><StatusBadge status={toStatusKey(run.status)} label={t(`run.status.${run.status}`)} /><span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm font-medium">{run.intent}</span>{teamName ? <span className="shrink-0 rounded-full bg-surface-subtle px-2 py-0.5 text-xs text-muted-foreground">{teamName}</span> : null}</div>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"><span className="font-mono break-all">{run.projectDirectory}</span><span>{t(`run.modeValue.${run.mode}`)}</span><span>{formatDateTime(run.createdAt, locale)}</span>{run.finishedAt ? <span>{t('records.finishedAt')}: {formatDateTime(run.finishedAt, locale)}</span> : null}</div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"><span className="font-mono break-all">{run.projectDirectory}</span><span title={run.modeRationale ?? undefined}>{runModeLabel(t, run.mode, run.orchestrationVersion, run.modeDecidedAt)}</span><span>{formatDateTime(run.createdAt, locale)}</span>{run.finishedAt ? <span>{t('records.finishedAt')}: {formatDateTime(run.finishedAt, locale)}</span> : null}</div>
               </Link>
             </li>
           ))}

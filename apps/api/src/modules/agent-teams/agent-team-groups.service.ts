@@ -29,7 +29,7 @@ import {
 } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
-import { isValidAgentTeamRoleId } from './agent-team-configuration';
+import { AGENT_TEAM_DISPATCHER_ROLE, isValidAgentTeamRoleId } from './agent-team-configuration';
 import { AgentTeamRuntimeService } from './agent-team-runtime.service';
 
 @Injectable()
@@ -44,7 +44,7 @@ export class AgentTeamGroupsService {
     request: Request,
     workspaceSlug: string,
     teamId: string,
-    input: { message: string; projectDirectory: string; mode: 'plan_only' | 'validate_existing' | 'implement_and_validate'; role?: AgentTeamRoleId; submissionId: string; runId: string },
+    input: { message: string; projectDirectory: string; role?: AgentTeamRoleId; submissionId: string; runId: string },
     acceptance: Parameters<AgentTeamRuntimeService['createGroupRun']>[2],
   ): Promise<AgentTeamGroupView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
@@ -57,7 +57,6 @@ export class AgentTeamGroupsService {
       workspaceId: workspace.id,
       teamId,
       title: input.message.trim().slice(0, 96),
-      mode: input.mode,
       createdAt: now,
       updatedAt: now,
     }).onConflictDoNothing();
@@ -70,7 +69,8 @@ export class AgentTeamGroupsService {
     if (!repository) throw new BadRequestException('The Chat project directory was not attached to its task group.');
     return this.sendMessage(request, workspaceSlug, groupId, {
       body: input.message,
-      recipientRole: input.role ?? 'planner',
+      // The Team Dispatcher decides the Run mode unless the user named a role.
+      recipientRole: input.role ?? AGENT_TEAM_DISPATCHER_ROLE,
       repositoryIds: [repository.id],
       submissionId: `chat_${input.submissionId}`,
     }, acceptance);
@@ -265,7 +265,6 @@ export class AgentTeamGroupsService {
         targetRole: recipientRole as StoredAgentTeamRole,
         repositoryIds: requestedIds,
         intent: body,
-        mode: group.mode,
         groupContext,
       }, {
         runId,

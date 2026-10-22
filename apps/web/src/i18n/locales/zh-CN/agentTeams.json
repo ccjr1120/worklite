@@ -8,6 +8,9 @@
       "validate_existing": "验证现有实现",
       "implement_and_validate": "实现并验证"
     },
+    "modeDecided": "本次判定：{{mode}}",
+    "modePending": "调度中，尚未判定模式",
+    "modeRationale": "判定理由",
     "status": {
       "queued": "排队中",
       "running": "运行中",
@@ -212,7 +215,6 @@
     "archive": "历史对话",
     "archiveDescription": "此页面保留历史对话记录；新任务、问题回答和执行操作都在 Chat 中处理。",
     "archiveEmpty": "此记录尚无对话内容。",
-    "transcript": "对话记录",
     "transcript": "对话记录",
     "loadFailed": "无法加载历史对话。",
     "openChat": "打开 Chat",

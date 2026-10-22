@@ -143,6 +143,10 @@ export type AgentTeamTaskResult =
       repairRequests?: AgentTeamTargetedRepairRequest[];
       message?: string;
       handoff?: { role: AgentTeamRoleId; goal: string; repositoryIds?: string[] };
+      dispatchDecision?: {
+        mode: AgentTeamMode;
+        rationale: string;
+      };
     }
   | {
       status: 'waiting_for_input';

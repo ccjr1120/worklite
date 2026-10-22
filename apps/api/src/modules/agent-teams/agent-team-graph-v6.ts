@@ -11,6 +11,7 @@ import {
   type AgentTeamTaskRequest,
   type AgentTeamTaskResult,
 } from '@worklite/team-runtime';
+import { AGENT_TEAM_DISPATCHER_ROLE, agentTeamModeAllowsRole, agentTeamModeEntryRole } from './agent-team-configuration';
 
 const MAX_AUTOMATIC_HANDOFFS = 16;
 
@@ -24,6 +25,8 @@ export type AgentTeamGroupGraphInitial = {
   authorizedCommands: readonly string[];
   projectInstructions: readonly AgentTeamProjectInstructionFile[];
   groupContext: AgentTeamGroupRunContext;
+  // Optional for historical callers/tests; v10 enables Dispatcher routing.
+  orchestrationVersion?: 6 | 7 | 8 | 9 | 10;
 };
 
 type GroupGraphState = {
@@ -91,6 +94,7 @@ export function createAgentTeamGroupGraph(
   checkpointer: BaseCheckpointSaver | undefined,
   initial: AgentTeamGroupGraphInitial,
 ) {
+  const orchestrationVersion = initial.orchestrationVersion ?? 9;
   const runRole = async (state: GroupGraphState): Promise<Partial<GroupGraphState>> => {
     const nextStep = state.step + 1;
     const common = {
@@ -159,8 +163,45 @@ export function createAgentTeamGroupGraph(
       projectDirectory: scopeProjectDirectory,
     };
 
+    const isV10 = orchestrationVersion >= 10;
+    // Plan-only v10 Runs finish after the Planner produces its plan, regardless
+    // of any handoff the Planner attempted.
+    if (isV10 && state.mode === 'plan_only' && state.currentRole === 'planner') {
+      return { step: nextStep, finished: true, pendingInput: null, activeTaskKey: null, assignments: [], ...scopeUpdate };
+    }
+    // The Dispatcher's decision, not its handoff, determines the v10 route.
+    if (isV10 && state.currentRole === AGENT_TEAM_DISPATCHER_ROLE) {
+      const decision = result.dispatchDecision;
+      if (!decision) throw new Error('The v10 Dispatcher completed without a dispatchDecision.');
+      const repositoryIds = result.handoff?.repositoryIds?.length ? result.handoff.repositoryIds : [...scopeSelectedIds];
+      const scopedIds = new Set(scopeContext.repositories.map((repository) => repository.id));
+      if (repositoryIds.some((id) => !scopedIds.has(id))) throw new Error('The Dispatcher requested a repository outside this Run scope.');
+      const goal = result.handoff?.goal?.trim() || state.currentGoal;
+      return {
+        step: nextStep,
+        mode: decision.mode,
+        currentRole: agentTeamModeEntryRole(decision.mode),
+        currentGoal: goal,
+        currentMessage: goal,
+        handoffSummary: [result.message?.trim(), `Dispatch decision: ${decision.mode}. ${decision.rationale}`].filter(Boolean).join('\n'),
+        fileReferences: execution.fileReferences,
+        selectedRepositoryIds: repositoryIds,
+        assignments: [],
+        pendingInput: null,
+        activeTaskKey: null,
+        taskPendingInputIds: {},
+        taskAnswers: {},
+        finished: false,
+        ...(scopeContext === state.groupContext ? {} : { groupContext: scopeContext, projectDirectory: scopeProjectDirectory }),
+      };
+    }
     const handoff = result.handoff;
     if (!handoff) return { step: nextStep, finished: true, pendingInput: null, activeTaskKey: null, assignments: [], ...scopeUpdate };
+    // v10 enforces the decided mode: validation cannot hand work to an
+    // implementation role, and no role may re-enter the Dispatcher.
+    if (isV10 && !agentTeamModeAllowsRole(state.mode, handoff.role)) {
+      return { step: nextStep, finished: true, pendingInput: null, activeTaskKey: null, assignments: [], ...scopeUpdate };
+    }
     if (nextStep >= MAX_AUTOMATIC_HANDOFFS) {
       return { step: nextStep, finished: true, handoffLimitReached: true, pendingInput: null, activeTaskKey: null, assignments: [], ...scopeUpdate };
     }

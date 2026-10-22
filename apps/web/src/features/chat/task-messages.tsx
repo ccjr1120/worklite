@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { StatusBadge, toStatusKey } from '@/components/status-badge';
 import { Field } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/textarea';
+import { runModeLabel } from '@/features/agent-teams/run-mode';
 
 function WorkflowTask({ submission }: { submission: ChatSubmissionView }) {
   const { t } = useTranslation('assistant');
@@ -136,6 +137,7 @@ function TeamRunLink({ runId, groupId }: { runId: string; groupId?: string }) {
       <StatusBadge key={run.status} status={toStatusKey(run.status)} label={t(`status.${run.status}`)} />
       {run.progress ? <span className="text-[13px] text-muted-foreground tabular-nums">{tTeams(`progress.phaseValue.${run.progress.phase}`)} · {tTeams('progress.percent', { percent: run.progress.percent })}</span> : null}
     </div> : query.isPending ? <p className="text-[13px] text-muted-foreground" role="status">{t('records.taskLoading')}</p> : null}
+    {run && (run.teamVersion.orchestrationVersion ?? 1) >= 10 ? <p className="whitespace-pre-wrap break-words text-[13px] text-muted-foreground">{runModeLabel(tTeams, run.mode, 10, run.modeDecidedAt)}{run.modeRationale ? ` · ${run.modeRationale}` : ''}</p> : null}
     {query.isError ? <p className="text-[13px] text-danger" role="alert">{t('records.taskLoadFailed')}</p> : null}
     {failure ? <p className="whitespace-pre-wrap break-words text-[13px] text-danger" role="alert">{failure}</p> : null}
     {run ? <TeamRunActions run={run} groupId={groupId} onRunUpdate={onRunUpdate} /> : null}

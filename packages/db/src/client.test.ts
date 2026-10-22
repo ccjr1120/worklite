@@ -115,4 +115,25 @@ describe('initializeDatabase restart recovery', () => {
     expect(tools['scripts/update-memory.mjs'].inputSchema.required).toEqual(['memoryId']);
     expect(chat.systemPrompt).toContain('project-category memories');
   });
+  it('registers dispatch_task without an Agent Team mode', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+
+    const [script] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/dispatch-task.mjs'))).limit(1);
+    const [manifest] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/tools.json'))).limit(1);
+    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
+
+    const tools = JSON.parse(manifest.content) as Record<string, { name: string; inputSchema: unknown }>;
+    const dispatch = Object.values(tools).find((tool) => tool.name === 'dispatch_task')!;
+    expect(JSON.stringify(dispatch.inputSchema)).not.toContain('plan_only');
+    expect(JSON.stringify(dispatch.inputSchema)).not.toMatch(/"mode"/);
+    // Older callers may still send a mode; the script accepts it but never forwards it.
+    expect(script.content).toContain("'mode', 'role'");
+    expect(script.content).not.toContain("oneOf(target.mode");
+    const [skill] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'SKILL.md'))).limit(1);
+    expect(chat.systemPrompt).toContain('Agent Teams do not accept a mode');
+    expect(chat.systemPrompt).not.toContain('supported mode');
+    expect(skill.content).toContain('Never ask the user to choose a mode');
+    expect(skill.content).not.toContain('supported mode');
+  });
 });

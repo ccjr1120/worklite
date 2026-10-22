@@ -16,6 +16,7 @@ import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { PROJECT_EXECUTOR_PROTOCOLS } from '../agents/project-executor.types';
 import {
   AGENT_TEAM_ROLE_TOOL_NAMES,
+  AGENT_TEAM_DISPATCHER_ROLE,
   agentTeamEntryPoints,
   isValidAgentTeamRoleId,
 } from './agent-team-configuration';
@@ -94,6 +95,7 @@ export class AgentTeamConfigurationService {
   async deleteRole(workspaceId: string, teamId: string, roleId: string): Promise<AgentTeam> {
     const team = await this.getTeam(workspaceId, teamId);
     if (!team.roles.some((role) => role.role === roleId)) throw new NotFoundException('Agent Team role not found.');
+    if (roleId === AGENT_TEAM_DISPATCHER_ROLE) throw new BadRequestException('The Dispatcher role is required and cannot be deleted.');
     return this.update(workspaceId, teamId, { roles: team.roles.filter((role) => role.role !== roleId).map(toPublicRole) });
   }
 
@@ -107,6 +109,7 @@ export class AgentTeamConfigurationService {
       byRole.set(value.role, value);
     }
     if (byRole.has('team-manager')) throw new BadRequestException('Team Manager is not an active work role.');
+    if (!byRole.has(AGENT_TEAM_DISPATCHER_ROLE)) throw new BadRequestException('The Dispatcher role is required.');
 
     const normalized: Array<Omit<StoredAgentTeamRoleConfiguration, 'skills' | 'mcpServers'>> = [];
     for (const [role, value] of byRole) {

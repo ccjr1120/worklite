@@ -114,7 +114,9 @@ export type UpdatePluginRequest = {
 
 export type ChatTarget =
   | { kind: 'conversation' }
-  | { kind: 'team'; teamId: string; projectDirectory: string; mode: 'plan_only' | 'validate_existing' | 'implement_and_validate'; role?: AgentTeamRoleId }
+  // `mode` remains accepted only for older callers. Current dispatch ignores it
+  // and the Team Dispatcher chooses the Run mode.
+  | { kind: 'team'; teamId: string; projectDirectory: string; role?: AgentTeamRoleId; mode?: 'plan_only' | 'validate_existing' | 'implement_and_validate' }
   | { kind: 'workflow'; workflowId: string };
 
 export type ChatTaskReference =
@@ -1414,7 +1416,7 @@ export type AgentTeamVersionMetadata = {
   developerExecution?: ProjectExecutorLaunchView | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
   projectExecutorLaunches?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 };
 
 export type AgentTeamTaskAttemptStatus =
@@ -1542,6 +1544,11 @@ export type AgentTeamTaskResult =
       };
       message?: string;
       handoff?: AgentTeamRoleHandoff;
+      // Set by the v10 Dispatcher. Other roles never author this field.
+      dispatchDecision?: {
+        mode: AgentTeamMode;
+        rationale: string;
+      };
     }
   | {
       status: 'waiting_for_input';
@@ -1563,6 +1570,9 @@ export type AgentTeamRunSummary = {
   intent: string;
   projectDirectory: string;
   mode: AgentTeamMode;
+  modeRationale: string | null;
+  modeDecidedAt: string | null;
+  orchestrationVersion: number;
   status: AgentTeamRunStatus;
   createdAt: string;
   finishedAt: string | null;
@@ -1662,6 +1672,8 @@ export type AgentTeamRunView = {
   intent: string;
   projectDirectory: string;
   mode: AgentTeamMode;
+  modeRationale: string | null;
+  modeDecidedAt: string | null;
   authorizedCommands: string[];
   scopeRevision: number;
   desiredControlState: 'none' | 'pause_requested' | 'cancel_requested';

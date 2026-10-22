@@ -735,15 +735,16 @@ export class WorkspaceResourcesService {
           multiDeveloper: {
             configuration: 'single developer role; the Planner decides per Run how many of the fixed 4 lanes (developer, developer-2, developer-3, developer-4) execute via developmentAssignments without developerId',
             reservedPrimaryId: 'developer',
-            orchestrationVersion: 'new TeamVersions use v9 with no Team Manager role, captured project Git policy for project-executor roles, and working practice plus matching memories in the initially addressed role; v8 has no Team Manager and retains initial-role working practice and memory projections; v7 keeps its protected Team Manager; v6 retains dynamic group handoffs and Developer fan-out; v4 keeps managed worktree lifecycle and v5 keeps advisory per-project strategy; versions 1–8 keep their captured graphs',
+            orchestrationVersion: 'new TeamVersions use v10, which starts at the Team Dispatcher unless the user names a role and enforces the decided mode route; v9 has no Team Manager role, captured project Git policy for project-executor roles, and working practice plus matching memories in the initially addressed role; v8 has no Team Manager and retains initial-role working practice and memory projections; v7 keeps its protected Team Manager; v6 retains dynamic group handoffs and Developer fan-out; v4 keeps managed worktree lifecycle and v5 keeps advisory per-project strategy; versions 1–9 keep their captured graphs and dispatch-time mode',
             taskKeys: 'group_<step>_<role> and group_<step>_developer_<developerId> in v6; earlier versions keep their captured keys',
             assignments: 'planner-produced non-overlapping ownedPaths mapped to lanes in order; targeted repairRequests per developerId; a role output that fails validation earns exactly one corrective re-invocation',
             retryBarrier: 'one retry resumes all failed assignments in the same fan-out; completed siblings never rerun',
             progress: 'run.progress events and run progress view: phase, next step, percent, assignment completion, active developerIds; task events carry developerId and assignmentTitle; attempts carry progressText',
             pendingInputs: 'Chat task cards list every waiting question; each answer uses its own pendingInputId and scopeRevision',
           },
-          worktreeManager: 'v4 creates and manages Run/lane worktrees; v5-v9 use advisory per-project strategy; v6-v9 role handoffs do not create, merge or clean Git state',
+          worktreeManager: 'v4 creates and manages Run/lane worktrees; v5-v10 use advisory per-project strategy; v6-v10 role handoffs do not create, merge or clean Git state',
           modes: ['plan_only', 'validate_existing', 'implement_and_validate'],
+          modeSelection: 'Agent Teams do not accept a mode on dispatch. The v10 Dispatcher decides it and records modeRationale and modeDecidedAt on the Run; historical v1-v9 Runs keep their captured mode.',
           teamRoutes: {
             detail: 'GET /agent-teams/:teamId',
             update: 'PATCH /agent-teams/:teamId',

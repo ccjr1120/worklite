@@ -52,7 +52,7 @@ export const feishuRegistrations = sqliteTable('feishu_registrations', {
 
 export type StoredChatTarget =
   | { kind: 'conversation' }
-  | { kind: 'team'; teamId: string; projectDirectory: string; mode: 'plan_only' | 'validate_existing' | 'implement_and_validate' }
+  | { kind: 'team'; teamId: string; projectDirectory: string; role?: string; /** @deprecated Ignored on new dispatch. */ mode?: 'plan_only' | 'validate_existing' | 'implement_and_validate' }
   | { kind: 'workflow'; workflowId: string };
 export type StoredChatTaskReference =
   | { kind: 'conversation'; executionId: string; afterMessageId: string | null; afterSequence: number; untilMessageId?: string | null; completionStatus?: string; completionError?: string | null }
@@ -673,7 +673,7 @@ export type StoredAgentTeamVersionSnapshot = {
   developerExecution: StoredProjectExecutorLaunch | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
   projectExecutorLaunches?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
   workingPractice?: string;
   projectGitPolicy?: string;
   roles: StoredAgentTeamRoleConfiguration[];
@@ -863,6 +863,10 @@ export const agentTeamRuns = sqliteTable('agent_team_runs', {
   projectDirectory: text('project_directory').notNull(),
   projectInstructions: text('project_instructions', { mode: 'json' }).$type<StoredAgentTeamProjectInstructionFile[]>().notNull().default([]),
   mode: text('mode').$type<StoredAgentTeamMode>().notNull(),
+  // v1-v9 keep the mode captured at dispatch. v10 stores a conservative
+  // placeholder until its Dispatcher commits the decision and rationale.
+  modeRationale: text('mode_rationale'),
+  modeDecidedAt: integer('mode_decided_at', { mode: 'timestamp_ms' }),
   authorizedCommands: text('authorized_commands', { mode: 'json' }).$type<string[]>().notNull().default([]),
   scopeRevision: integer('scope_revision').notNull().default(1),
   desiredControlState: text('desired_control_state').$type<'none' | 'pause_requested' | 'cancel_requested'>().notNull().default('none'),

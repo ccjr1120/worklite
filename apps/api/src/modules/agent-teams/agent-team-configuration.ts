@@ -1,4 +1,4 @@
-import type { AgentTeamRole, AgentTeamRoleId } from '@worklite/contracts';
+import type { AgentTeamMode, AgentTeamRole, AgentTeamRoleId } from '@worklite/contracts';
 import { getBmadTeaProcessManifest } from '@worklite/team-runtime';
 
 export const BUILT_IN_AGENT_TEAM_ID = 'agent_team_bmad_tea';
@@ -11,6 +11,11 @@ export const DEFAULT_APPLICATION_GIT_POLICY = 'For isolated serial work, prefer 
 
 export const DEFAULT_MAX_CONCURRENT_RUNS = 3;
 
+// The Dispatcher is a server-owned built-in role. Its stable id is the default
+// v10 Run recipient; Chat never invents or selects this id.
+export const AGENT_TEAM_DISPATCHER_ROLE = 'dispatcher';
+export const DEFAULT_AGENT_TEAM_ROLE = AGENT_TEAM_DISPATCHER_ROLE;
+
 // Existing role ids stay stable; server-created v8-v9 work roles receive dynamic ids captured by each TeamVersion.
 export type AgentTeamRuntimeRole = AgentTeamRoleId;
 
@@ -19,6 +24,7 @@ export function agentTeamContractRole(role: AgentTeamRuntimeRole): AgentTeamRole
 }
 
 export const AGENT_TEAM_ROLES: readonly AgentTeamRuntimeRole[] = [
+  'dispatcher',
   'planner',
   'test_designer',
   'developer',
@@ -29,6 +35,7 @@ export const AGENT_TEAM_ROLES: readonly AgentTeamRuntimeRole[] = [
 ];
 
 export const AGENT_TEAM_ROLE_TOOL_NAMES: Partial<Record<string, readonly string[]>> = {
+  dispatcher: ['read', 'glob', 'grep', 'process_reference'],
   planner: ['read', 'glob', 'grep', 'process_reference'],
   test_designer: ['read', 'glob', 'grep', 'process_reference'],
   developer: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference'],
@@ -40,6 +47,7 @@ export const AGENT_TEAM_ROLE_TOOL_NAMES: Partial<Record<string, readonly string[
 };
 
 export const AGENT_TEAM_ROLE_INSTRUCTIONS: Partial<Record<string, string>> = {
+  dispatcher: 'Decide how this Run should proceed from the original request and the actual project context: plan only, validate existing behavior, or implement and validate. Inspect without modifying project files, state one-sentence reasoning, and hand off to the correct role. Ask one focused question only when the request is ambiguous and may change production code.',
   planner: 'Clarify the software goal, preserve the user intent, inspect the authorized project context, and produce an implementation plan that downstream roles can execute.',
   test_designer: 'Translate the intent and plan into a test design with explicit evidence requirements. State what each planned check can and cannot establish.',
   developer: 'Implement the smallest direct change that satisfies the intent and authorized plan. Preserve repository instructions and report changes and gaps accurately.',
@@ -48,6 +56,25 @@ export const AGENT_TEAM_ROLE_INSTRUCTIONS: Partial<Record<string, string>> = {
   reviewer: 'Independently assess the implementation and test evidence against the original intent. Request scoped repair only when concrete evidence shows a defect.',
   'worktree-manager': 'For v4 Runs, follow the captured worktree setup and teardown instructions. For v5–v9 work, provide advisory per-project Git strategy recommendations only; project executors inspect the actual repository state and choose their own Git operations.',
 };
+
+// A directly addressed role bypasses the Dispatcher. Validation roles stay on
+// the validation path; any other named role keeps the v9 free handoff chain.
+export function initialAgentTeamModeForRole(role: AgentTeamRoleId): AgentTeamMode {
+  if (role === AGENT_TEAM_DISPATCHER_ROLE) return 'plan_only';
+  if (role === 'test_designer' || role === 'test_runner' || role === 'reviewer') return 'validate_existing';
+  return 'implement_and_validate';
+}
+
+export function agentTeamModeEntryRole(mode: AgentTeamMode): 'planner' | 'test_designer' {
+  return mode === 'validate_existing' ? 'test_designer' : 'planner';
+}
+
+export function agentTeamModeAllowsRole(mode: AgentTeamMode, role: AgentTeamRoleId): boolean {
+  if (role === AGENT_TEAM_DISPATCHER_ROLE || role === 'team-manager') return false;
+  if (mode === 'plan_only') return role === 'planner';
+  if (mode === 'validate_existing') return role === 'planner' || role === 'test_designer' || role === 'test_runner' || role === 'reviewer';
+  return true;
+}
 
 export function agentTeamEntryPoints(role: AgentTeamRuntimeRole): readonly string[] {
   const manifest = getBmadTeaProcessManifest();

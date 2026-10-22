@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { Request } from 'express';
@@ -15,6 +15,7 @@ type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
 
 @Injectable()
 export class ChatDispatchService {
+  private readonly logger = new Logger(ChatDispatchService.name);
   private readonly pending = new Map<string, Promise<DispatchChatResponse>>();
 
   constructor(
@@ -88,10 +89,11 @@ export class ChatDispatchService {
         const digest = createHash('sha256').update(workspace.id + ':' + submission.id).digest('hex');
         const runId = `atrun_chat_${digest}`;
         const groupId = `atgroup_chat_${digest}`;
+        // Agent Teams decide their own Run mode; older callers may still send one.
+        if (target.mode !== undefined) this.logger.warn(`Ignoring deprecated Agent Team mode "${String(target.mode)}" for Chat submission ${submission.id}.`);
         const dispatched = await this.teamGroups.dispatchFromChat(request, 'personal', target.teamId, {
           message: input.message,
           projectDirectory: target.projectDirectory,
-          mode: target.mode,
           role: target.role,
           submissionId: submission.id,
           runId,

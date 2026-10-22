@@ -48,7 +48,7 @@ function team(id: string, name: string, description: string, maxConcurrentRuns: 
 }
 
 function run(id: string, status: AgentTeamRunSummary['status']): AgentTeamRunSummary {
-  return { id, intent: `Goal ${id}`, projectDirectory: '/repo', mode: 'implement_and_validate', status, createdAt: '2026-10-21T08:00:00.000Z', finishedAt: null };
+  return { id, intent: `Goal ${id}`, projectDirectory: '/repo', mode: 'implement_and_validate', modeRationale: null, modeDecidedAt: null, orchestrationVersion: 9, status, createdAt: '2026-10-21T08:00:00.000Z', finishedAt: null };
 }
 
 const teams = [
