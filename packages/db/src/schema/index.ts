@@ -681,7 +681,7 @@ export type StoredAgentTeamVersionSnapshot = {
   developerExecution: StoredProjectExecutorLaunch | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
   projectExecutorLaunches?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
   workingPractice?: string;
   projectGitPolicy?: string;
   roles: StoredAgentTeamRoleConfiguration[];
@@ -770,17 +770,31 @@ export const agentTeamGroupEvents = sqliteTable('agent_team_group_events', {
   createdAt: timestamp('created_at'),
 }, (table) => [primaryKey({ columns: [table.groupId, table.sequence] })]);
 
+export type StoredAgentTeamMemoryAuthor = 'chat' | 'role';
+
 export const agentTeamMemories = sqliteTable('agent_team_memories', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   teamId: text('team_id').notNull().references(() => agentTeams.id, { onDelete: 'cascade' }),
   repositoryId: text('repository_id').references(() => agentTeamRepositories.id, { onDelete: 'cascade' }),
+  // Legacy role-scoped memories are retained but never injected into prompts.
   role: text('role').$type<StoredAgentTeamRole>(),
   content: text('content').notNull(),
   sourceMessageId: text('source_message_id').references(() => agentTeamGroupMessages.id, { onDelete: 'set null' }),
+  // v11 role-scoped provenance. Chat-created memories keep these null.
+  sourceRunId: text('source_run_id'),
+  sourceRole: text('source_role').$type<StoredAgentTeamRole>(),
+  sourceTaskAttemptId: text('source_task_attempt_id'),
+  createdBy: text('created_by').$type<StoredAgentTeamMemoryAuthor>().notNull().default('chat'),
+  // Optional caller-supplied stable key making a role write an upsert instead of a new entry.
+  upsertKey: text('upsert_key'),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
-}, (table) => [index('agent_team_memories_scope_idx').on(table.teamId, table.repositoryId, table.role, table.updatedAt)]);
+}, (table) => [
+  index('agent_team_memories_scope_idx').on(table.teamId, table.repositoryId, table.role, table.updatedAt),
+  unique('agent_team_memories_upsert_idx').on(table.teamId, table.repositoryId, table.upsertKey),
+  index('agent_team_memories_source_run_idx').on(table.sourceRunId),
+]);
 
 
 export type StoredAgentTeamIntakeStatus = 'queued' | 'collecting' | 'starting' | 'started' | 'failed';

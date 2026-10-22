@@ -283,7 +283,7 @@ class CodexAppServerSession {
 // Selected MCP servers join the operator's own servers; bearer tokens travel through the process environment.
 // A Gateway-selected model also adds a per-run Responses Provider pointing at the local Gateway, so Codex sends
 // the public `<provider>/<model>` id there instead of requiring it in the operator's own Codex catalog.
-function codexMcpServers(prepared: PreparedProjectExecution, gatewayModel: boolean): { config: Record<string, unknown>; env: Record<string, string> } {
+export function codexMcpServers(prepared: PreparedProjectExecution, gatewayModel: boolean): { config: Record<string, unknown>; env: Record<string, string> } {
   const config: Record<string, unknown> = {};
   const env: Record<string, string> = {};
   prepared.mcpServers.forEach((server, index) => {

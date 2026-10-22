@@ -1423,7 +1423,7 @@ export type AgentTeamVersionMetadata = {
   developerExecution?: ProjectExecutorLaunchView | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
   projectExecutorLaunches?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
 };
 
 export type AgentTeamTaskAttemptStatus =
@@ -1647,6 +1647,12 @@ export type AgentTeamMemoryView = {
   role: AgentTeamRoleId | null;
   content: string;
   sourceMessageId: string | null;
+  // v11 provenance; absent on memories created before the migration.
+  sourceRunId?: string | null;
+  sourceRole?: AgentTeamRoleId | null;
+  sourceTaskAttemptId?: string | null;
+  createdBy?: 'chat' | 'role';
+  upsertKey?: string | null;
   createdAt: string;
   updatedAt: string;
 };
