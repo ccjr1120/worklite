@@ -1,9 +1,10 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { FolderUp, Plus, Trash2 } from 'lucide-react';
+import { FolderUp, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import type { LocalSkillSyncResult } from '@worklite/contracts';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { AgentResourceNav } from '@/components/agent-resource-nav';
 import { CollectionToolbar } from '@/components/collection-toolbar';
@@ -35,7 +36,19 @@ function SkillListPage() {
   const [deleteTarget, setDeleteTarget] = useState<(typeof all)[number] | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const [syncReport, setSyncReport] = useState<LocalSkillSyncResult | null>(null);
   const { data: all = [], isLoading, isError, refetch } = useSkillsQuery(workspaceSlug);
+  const syncLocalSkills = useMutation({
+    mutationFn: () => api.syncLocalSkills(workspaceSlug),
+    onMutate: () => setSyncReport(null),
+    onSuccess: async (result) => {
+      setSyncReport(result);
+      await queryClient.invalidateQueries({ queryKey: skillsQueryKey(workspaceSlug) });
+      if (!result.available) toast.error(result.unavailableReason ?? t('localSync.failed'));
+      else toast.success(t('localSync.success', { created: result.created, updated: result.updated, unchanged: result.unchanged }));
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : t('localSync.failed')),
+  });
   const importSkill = useMutation({
     mutationFn: (input: { name: string; files: Array<{ path: string; content: string }> }) => api.importSkill(workspaceSlug, input),
     onSuccess: async (skill) => { await queryClient.invalidateQueries({ queryKey: skillsQueryKey(workspaceSlug) }); void navigate({ to: '/skills/$skillId', params: { skillId: skill.id } }); },
@@ -88,6 +101,10 @@ function SkillListPage() {
         placeholder={t('search')}
         actions={
           <div className="flex items-center gap-2">
+            <Button type="button" variant="secondary" onClick={() => syncLocalSkills.mutate()} disabled={syncLocalSkills.isPending}>
+              <RefreshCw className={syncLocalSkills.isPending ? 'size-4 motion-safe:animate-spin' : 'size-4'} />
+              {syncLocalSkills.isPending ? t('localSync.syncing') : t('localSync.action')}
+            </Button>
             <input ref={folderInput} type="file" multiple className="sr-only" onChange={(event) => void handleFolderChange(event)} {...({ webkitdirectory: '' } as Record<string, string>)} />
             <Button type="button" variant="secondary" onClick={() => folderInput.current?.click()} disabled={importSkill.isPending}>
               <FolderUp className="size-4" />
@@ -103,6 +120,21 @@ function SkillListPage() {
         }
       />
       {importError ? <p role="alert" className="mt-3 text-sm text-danger">{importError}</p> : null}
+      {syncReport && (!syncReport.available || syncReport.skipped.length > 0 || syncReport.removed.length > 0) ? (
+        <div className="mt-3 rounded-md border border-border bg-surface-subtle px-3 py-2 text-[13px]">
+          <p className="text-muted-foreground">{t('localSync.root', { root: syncReport.root })}</p>
+          {!syncReport.available ? <p role="alert" className="mt-1 text-danger">{syncReport.unavailableReason}</p> : null}
+          {syncReport.skipped.length > 0 ? (
+            <>
+              <p className="mt-2 font-medium">{t('localSync.skipped')}</p>
+              <ul className="mt-1 space-y-1 text-muted-foreground">
+                {syncReport.skipped.map((item) => <li key={item.directory}><span className="font-mono">{item.directory}</span>: {item.reason}</li>)}
+              </ul>
+            </>
+          ) : null}
+          {syncReport.removed.length > 0 ? <p className="mt-2 text-muted-foreground">{t('localSync.removed', { count: syncReport.removed.length })}</p> : null}
+        </div>
+      ) : null}
       <div className="mt-4">
         {isLoading ? <CollectionLoading label={t('loading')} columns={[t('columns.skill'), t('columns.source'), t('columns.version'), t('columns.updated'), t('columns.actions')]} headerClassName="min-w-[760px] grid-cols-[2fr_1fr_1fr_1fr_40px]" rowClassName="min-w-[760px] whitespace-nowrap grid-cols-[2fr_1fr_1fr_1fr_40px]" /> : isError ? <ErrorState title={t('title')} description={t('loadFailed')} onAction={() => void refetch()} /> : all.length === 0 ? (
           <EmptyState title={t('empty.title')} description={t('empty.description')} />
