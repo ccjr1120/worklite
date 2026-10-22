@@ -288,7 +288,6 @@
     "worktree": "任务 worktree",
     "mergeStatus": { "merging": "正在合并", "merged": "已合并回原分支", "merged_cleanup_pending": "已合并，worktree 待清理", "conflict": "合并冲突，已保留", "skipped_not_git": "非 Git 目录", "skipped_read_only": "只读任务，无 worktree" },
     "model": "模型",
-    "executor": "执行器",
     "executorName": { "codex": "Codex", "claude": "Claude Code" },
     "defaultModel": "执行器默认模型",
     "status": "状态",
