@@ -2,8 +2,8 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n/config';
-import type { AgentTeamMemoryView, AgentTeamView, McpServerView } from '@worklite/contracts';
-import { useAgentTeamMemoriesQuery, useAgentTeamQuery, useAgentTeamRecordsQuery, useAgentTeamsQuery, useMcpServersQuery } from '@/api/queries';
+import type { AgentTeamMemoryView, AgentTeamView, McpServerView, SkillView } from '@worklite/contracts';
+import { useAgentTeamMemoriesQuery, useAgentTeamQuery, useAgentTeamRecordsQuery, useAgentTeamsQuery, useMcpServersQuery, useSkillsQuery } from '@/api/queries';
 import { Route as LegacyAgentTeamConfigRoute } from '@/routes/agent-team-config';
 import { Route as AgentTeamConfigRoute } from '@/routes/agent-teams/$teamId.config';
 import { TeamConfig } from './team-config';
@@ -12,6 +12,7 @@ vi.mock('@/api/queries', () => ({
   useAgentTeamQuery: vi.fn(),
   useAgentTeamMemoriesQuery: vi.fn(),
   useMcpServersQuery: vi.fn(),
+  useSkillsQuery: vi.fn(),
   useAgentTeamsQuery: vi.fn(),
   useAgentTeamRecordsQuery: vi.fn(),
 }));
@@ -76,7 +77,20 @@ const memories: AgentTeamMemoryView[] = [
   },
 ];
 
-function mockQueries(options: { team?: AgentTeamView; memories?: AgentTeamMemoryView[]; mcpServers?: Array<Pick<McpServerView, 'id' | 'name'>> } = {}) {
+const localDinoSkill: SkillView = {
+  id: 'sk_local_dino',
+  workspaceSlug: 'personal',
+  name: 'dino-account',
+  source: 'local',
+  version: '1.2.0',
+  validation: 'valid',
+  description: 'Dino account commands',
+  metadata: { bins: ['dino-cli'] },
+  files: [{ path: 'SKILL.md', content: '# dino-account' }],
+  updatedAt: '2026-10-10T08:00:00.000Z',
+};
+
+function mockQueries(options: { team?: AgentTeamView; memories?: AgentTeamMemoryView[]; mcpServers?: Array<Pick<McpServerView, 'id' | 'name'>>; skills?: SkillView[] } = {}) {
   vi.mocked(useAgentTeamQuery).mockReturnValue({
     isPending: false,
     isError: false,
@@ -92,12 +106,15 @@ function mockQueries(options: { team?: AgentTeamView; memories?: AgentTeamMemory
   vi.mocked(useMcpServersQuery).mockReturnValue({
     data: (options.mcpServers ?? [{ id: 'mcp_1', name: 'Project info' }]) as McpServerView[],
   } as unknown as ReturnType<typeof useMcpServersQuery>);
+  vi.mocked(useSkillsQuery).mockReturnValue({
+    data: options.skills ?? [],
+  } as unknown as ReturnType<typeof useSkillsQuery>);
   vi.mocked(useAgentTeamsQuery).mockReturnValue({ data: [options.team ?? team, otherTeam] } as unknown as ReturnType<typeof useAgentTeamsQuery>);
   vi.mocked(useAgentTeamRecordsQuery).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useAgentTeamRecordsQuery>);
 }
 
 describe('TeamConfig', () => {
-  it('renders the team overview, role configuration and memories read-only', () => {
+  it('renders the team overview, role configuration and memories without unrelated write controls', () => {
     mockQueries();
     render(<TeamConfig teamId="team_1" />);
 
@@ -112,10 +129,23 @@ describe('TeamConfig', () => {
     // Empty fields render the configured placeholder instead of blank space.
     expect(screen.getAllByText('未设置').length).toBeGreaterThan(0);
 
-    // No write controls exist anywhere on the page.
+    // Without available Skills there is nothing to select and no Skill save control.
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /保存|删除|新增|添加/ })).not.toBeInTheDocument();
+  });
+
+  it('lists workspace Skills for a role and saves a checked local Skill', () => {
+    mockQueries({ skills: [localDinoSkill] });
+    render(<TeamConfig teamId="team_1" />);
+
+    const checkbox = screen.getByRole('checkbox', { name: 'dino-account' });
+    expect(checkbox).not.toBeChecked();
+    expect(screen.getByText('本地目录')).toBeInTheDocument();
+
+    fireEvent.click(checkbox);
+    expect(checkbox).toBeChecked();
+    expect(screen.getByRole('button', { name: '保存技能选择' })).toBeInTheDocument();
   });
 
   it('maps MCP server ids to workspace server names and falls back to the id', () => {

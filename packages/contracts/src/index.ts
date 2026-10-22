@@ -1026,9 +1026,11 @@ export type SkillView = {
   id: string;
   workspaceSlug: string;
   name: string;
-  source: 'online' | 'archive' | 'built-in';
+  source: 'online' | 'archive' | 'built-in' | 'local';
   version: string;
   validation: 'valid' | 'invalid' | 'pending';
+  description?: string;
+  metadata?: Record<string, unknown>;
   files: Array<{
     path: string;
     content: string;
@@ -1307,6 +1309,23 @@ export type ExecuteSkillScriptRequest = {
   arguments: string[];
 };
 
+export type LocalSkillSkippedPackageView = {
+  directory: string;
+  reason: string;
+};
+
+export type LocalSkillSyncResult = {
+  root: string;
+  available: boolean;
+  unavailableReason?: string;
+  created: number;
+  updated: number;
+  unchanged: number;
+  removed: string[];
+  retained: Array<{ id: string; reason: string }>;
+  synced: Array<{ id: string; name: string; directory: string }>;
+  skipped: LocalSkillSkippedPackageView[];
+};
 
 export type WorkflowScheduleView = {
   id: string;

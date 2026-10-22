@@ -13,6 +13,7 @@ import type {
   DeleteMcpServerResult,
   ExecuteSkillScriptRequest,
   ImportSkillRequest,
+  LocalSkillSyncResult,
   McpServerReferenceReport,
   McpServerTestResult,
   McpServerView,
@@ -55,6 +56,7 @@ import { listWorkflowNodeCapabilities } from '@worklite/workflow-engine';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from './teams.service';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
+import { localSkillId, localSkillRootDirectory, parseSkillFrontmatter, scanLocalSkillRoot } from '../skills/local-skill-source';
 import { McpClientService } from '../mcp-servers/mcp-client.service';
 import { AGENT_TEAM_ROLES, BUILT_IN_AGENT_TEAM_ID } from '../agent-teams/agent-team-configuration';
 import { isWorkliteNavigationTarget, resolveWorkliteNavigationRoute } from './worklite-navigation';
@@ -193,6 +195,7 @@ function validatePackageFiles(input: unknown): PackageFile[] {
 }
 
 function skillView(row: typeof skills.$inferSelect, workspaceSlug: string, files: PackageFile[]): SkillView {
+  const frontmatter = skillFrontmatter(files);
   return {
     id: row.id,
     workspaceSlug,
@@ -200,9 +203,26 @@ function skillView(row: typeof skills.$inferSelect, workspaceSlug: string, files
     source: row.source,
     version: row.version,
     validation: row.validation,
+    ...(frontmatter.description ? { description: frontmatter.description } : {}),
+    ...(frontmatter.metadata ? { metadata: frontmatter.metadata } : {}),
     files,
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+function skillFrontmatter(files: PackageFile[]): ReturnType<typeof parseSkillFrontmatter> {
+  const skillFile = files.find((file) => file.path === 'SKILL.md');
+  if (!skillFile) return {};
+  try {
+    return parseSkillFrontmatter(skillFile.content);
+  } catch {
+    // A malformed frontmatter must not hide an otherwise readable Skill.
+    return {};
+  }
+}
+
+function samePackageFiles(left: PackageFile[], right: PackageFile[]): boolean {
+  return left.length === right.length && left.every((file, index) => file.path === right[index]?.path && file.content === right[index]?.content);
 }
 
 function providerHeaders(value: string | null): Record<string, string> | undefined {
@@ -228,6 +248,8 @@ const CHAT_AGENT_ID = 'agt_system_helper_chat';
 
 @Injectable()
 export class WorkspaceResourcesService {
+  private readonly localSkillSyncs = new Map<string, Promise<LocalSkillSyncResult>>();
+
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     private readonly workspaces: WorkspaceService,
@@ -235,7 +257,124 @@ export class WorkspaceResourcesService {
     private readonly mcpClient: McpClientService,
   ) {}
 
+  async localSkills(request: Request, workspaceSlug: string, rootDirectory?: string): Promise<LocalSkillSyncResult> {
+    return this.syncLocalSkills(request, workspaceSlug, rootDirectory);
+  }
+
+  /**
+   * Reconcile the operator's shared Skill directory into the existing
+   * skills/skill_files model. The directory stays authoritative for the copied
+   * content, so a role captures a normal Skill snapshot on its next save.
+   */
+  async syncLocalSkills(request: Request, workspaceSlug: string, rootDirectory = localSkillRootDirectory()): Promise<LocalSkillSyncResult> {
+    const key = `${workspaceSlug}\0${rootDirectory}`;
+    const inFlight = this.localSkillSyncs.get(key);
+    if (inFlight) return inFlight;
+    const promise = this.performLocalSkillSync(request, workspaceSlug, rootDirectory).finally(() => this.localSkillSyncs.delete(key));
+    this.localSkillSyncs.set(key, promise);
+    return promise;
+  }
+
+  private async performLocalSkillSync(request: Request, workspaceSlug: string, rootDirectory: string): Promise<LocalSkillSyncResult> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const scan = await scanLocalSkillRoot(rootDirectory);
+    const existingRows = await this.db.select().from(skills).where(and(eq(skills.workspaceId, team.id), eq(skills.source, 'local')));
+    const existingFiles = existingRows.length === 0
+      ? []
+      : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, existingRows.map((row) => row.id))).orderBy(asc(skillFiles.path));
+    const filesBySkill = new Map<string, PackageFile[]>();
+    for (const file of existingFiles) filesBySkill.set(file.skillId, [...(filesBySkill.get(file.skillId) ?? []), { path: file.path, content: file.content }]);
+    const existingById = new Map(existingRows.map((row) => [row.id, row]));
+
+    let created = 0;
+    let updated = 0;
+    let unchanged = 0;
+    const synced: LocalSkillSyncResult['synced'] = [];
+    const scannedIds = new Set<string>();
+    for (const skillPackage of scan.packages) {
+      const id = localSkillId(team.id, skillPackage.directory);
+      scannedIds.add(id);
+      synced.push({ id, name: skillPackage.name, directory: skillPackage.directory });
+      const existing = existingById.get(id);
+      const existingPackage = filesBySkill.get(id) ?? [];
+      const changed = !existing
+        || existing.name !== skillPackage.name
+        || existing.instructions !== skillPackage.instructions
+        || existing.version !== skillPackage.version
+        || existing.validation !== 'valid'
+        || !samePackageFiles(existingPackage, skillPackage.files);
+      if (!existing) {
+        await this.db.transaction((transaction) => {
+          transaction.insert(skills).values({
+            id,
+            workspaceId: team.id,
+            name: skillPackage.name,
+            source: 'local',
+            version: skillPackage.version,
+            validation: 'valid',
+            instructions: skillPackage.instructions,
+            updatedAt: skillPackage.updatedAt,
+          }).run();
+          transaction.insert(skillFiles).values(skillPackage.files.map((file) => ({ skillId: id, ...file }))).run();
+        });
+        created += 1;
+      } else if (changed) {
+        await this.db.transaction((transaction) => {
+          transaction.update(skills).set({
+            name: skillPackage.name,
+            source: 'local',
+            version: skillPackage.version,
+            validation: 'valid',
+            instructions: skillPackage.instructions,
+            updatedAt: new Date(),
+          }).where(and(eq(skills.id, id), eq(skills.workspaceId, team.id))).run();
+          transaction.delete(skillFiles).where(eq(skillFiles.skillId, id)).run();
+          transaction.insert(skillFiles).values(skillPackage.files.map((file) => ({ skillId: id, ...file }))).run();
+        });
+        updated += 1;
+      } else {
+        unchanged += 1;
+      }
+    }
+
+    const removed: string[] = [];
+    const retained: Array<{ id: string; reason: string }> = [];
+    for (const row of existingRows) {
+      if (scannedIds.has(row.id)) continue;
+      const reason = await this.localSkillReferenceReason(team.id, row.id);
+      if (reason) {
+        retained.push({ id: row.id, reason });
+        continue;
+      }
+      await this.db.delete(skills).where(and(eq(skills.id, row.id), eq(skills.workspaceId, team.id)));
+      removed.push(row.id);
+    }
+
+    return {
+      root: scan.root,
+      available: scan.available,
+      ...(scan.unavailableReason ? { unavailableReason: scan.unavailableReason } : {}),
+      created,
+      updated,
+      unchanged,
+      removed,
+      retained,
+      synced,
+      skipped: scan.skipped,
+    };
+  }
+
+  private async localSkillReferenceReason(workspaceId: string, skillId: string): Promise<string | undefined> {
+    const [assignment] = await this.db.select({ agentId: agentSkills.agentId }).from(agentSkills).where(eq(agentSkills.skillId, skillId)).limit(1);
+    if (assignment) return 'assigned to an Agent';
+    if (await this.activeChatCapabilityIsReferenced(workspaceId, 'skills', skillId)) return 'captured by an active Chat turn';
+    if (await this.workflowResourceIsReferenced(workspaceId, 'skillIds', skillId)) return 'referenced by a Workflow draft or published version';
+    if (await this.agentTeamResourceIsReferenced(workspaceId, 'skills', skillId)) return 'referenced by an Agent Team configuration or captured version';
+    return undefined;
+  }
+
   async skills(request: Request, workspaceSlug: string): Promise<SkillView[]> {
+    await this.syncLocalSkills(request, workspaceSlug);
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const rows = (await this.db.select().from(skills).where(eq(skills.workspaceId, team.id)).orderBy(desc(skills.updatedAt))).filter((row) => row.id !== CHAT_PLATFORM_SKILL_ID);
     const files = rows.length === 0 ? [] : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, rows.map((row) => row.id))).orderBy(asc(skillFiles.path));
@@ -294,6 +433,7 @@ export class WorkspaceResourcesService {
     const [existing] = await this.db.select().from(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).limit(1);
     if (!existing) throw new NotFoundException('Skill not found');
     if (existing.source === 'built-in') throw new BadRequestException('Built-in Skills cannot be deleted.');
+    if (existing.source === 'local') throw new BadRequestException('Local directory Skills cannot be deleted from WorkLite. Remove the package from the configured local Skill root instead.');
     // Legacy Chat Skill assignments are ignored and removed by the cascading foreign key.
     const [assignment] = await this.db.select({ agentId: agentSkills.agentId }).from(agentSkills).where(and(eq(agentSkills.skillId, skillId), ne(agentSkills.agentId, CHAT_AGENT_ID))).limit(1);
     if (assignment) throw new BadRequestException('Remove this Skill from every Agent before deleting it.');
@@ -308,6 +448,7 @@ export class WorkspaceResourcesService {
     const [existing] = await this.db.select().from(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).limit(1);
     if (!existing) throw new NotFoundException('Skill not found');
     if (existing.source === 'built-in') throw new BadRequestException('Built-in Skills cannot be changed.');
+    if (existing.source === 'local') throw new BadRequestException('Local directory Skills are read-only in WorkLite. Change the package in the configured local Skill root and scan again.');
     if (Object.keys(input).some((key) => key !== 'name' && key !== 'files')) throw new BadRequestException('Only the Skill name and package files can be changed.');
     const name = input.name === undefined ? existing.name : input.name.trim();
     if (!name) throw new BadRequestException('Skill name is required.');
