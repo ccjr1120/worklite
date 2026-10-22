@@ -527,7 +527,7 @@ function FirstUseGuide({ providerConfigured }: { providerConfigured: boolean }) 
             <span className="text-xs font-medium text-success">{t('common:status.completed')}</span>
           ) : (
             <Button size="compact" asChild>
-              <Link to="/model-providers" search={{ tab: 'providers' }}>{t('common:actions.continue')}<ChevronRight /></Link>
+              <Link to="/model-providers">{t('common:actions.continue')}<ChevronRight /></Link>
             </Button>
           )}
         </li>

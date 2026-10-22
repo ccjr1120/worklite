@@ -38,7 +38,7 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/agent-teams' }))}>
             <UsersRound className="size-4" /> {t('nav.agentTeam')}
           </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/model-providers', search: { tab: 'providers' } }))}>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/model-providers' }))}>
             <KeyRound className="size-4" /> {t('nav.modelProviders')}
           </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/logs', search: { tab: 'statistics', range: '24h' } }))}>

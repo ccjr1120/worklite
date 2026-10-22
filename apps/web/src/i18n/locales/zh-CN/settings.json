@@ -92,9 +92,7 @@
     "deleteAction": "删除提供商",
     "deleted": "提供商已删除",
     "views": {
-      "label": "提供商管理",
       "providers": "模型提供商",
-      "codex": "Codex 账号池",
       "gateway": "Portkey Gateway"
     },
     "gateway": {
@@ -142,6 +140,9 @@
     },
     "codexPool": {
       "title": "Codex 账号池",
+      "dialogTitle": "编辑 Codex 提供商",
+      "dialogDescription": "Codex 提供商通过账号池调度请求，在此添加、导入、启停、刷新或移除账号。",
+      "manage": "Codex 账号池",
       "authMethod": "登录方式",
       "oauth": "ChatGPT 登录",
       "environment": "环境令牌",
