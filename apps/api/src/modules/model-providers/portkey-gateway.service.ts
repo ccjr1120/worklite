@@ -57,6 +57,14 @@ function protocolParts(protocol: ModelProviderProtocol): { adapter: 'openai' | '
   throw new BadRequestException('Unsupported model provider protocol.');
 }
 
+// The Gateway completes an Anthropic base URL with `/v1` before appending its endpoint, so discovery
+// must ask the same completed base for `/models` instead of hitting `<base>/models`.
+function discoveryBaseURL(protocol: ModelProviderProtocol, baseURL: string): string {
+  if (protocol !== 'anthropic/messages') return baseURL;
+  const normalized = baseURL.replace(/\/+$/, '');
+  return /\/v1$/i.test(normalized) ? normalized : `${normalized}/v1`;
+}
+
 function discoveryConfig(input: DiscoverModelProviderRequest): ModelProviderConfig {
   const protocol = input.protocol;
   if (protocol !== 'openai/chat' && protocol !== 'openai/responses' && protocol !== 'anthropic/messages' && protocol !== 'codex/responses') throw new BadRequestException('Unsupported model provider protocol.');
@@ -72,7 +80,7 @@ function discoveryConfig(input: DiscoverModelProviderRequest): ModelProviderConf
   // The guard above already excludes every protocol without a discovery adapter,
   // so this narrows to the Agent-capable adapters rather than widening the config.
   const adapter = protocol === 'anthropic/messages' ? 'anthropic' : protocol === 'codex/responses' ? 'codex' : 'openai';
-  return { id: 'discovery', adapter, apiKey, baseURL, headers };
+  return { id: 'discovery', adapter, apiKey, baseURL: discoveryBaseURL(protocol, baseURL), headers };
 }
 
 function discoveredModelIds(payload: unknown): string[] {

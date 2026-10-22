@@ -284,6 +284,18 @@ function view(provider: GatewayProvider): GatewayProviderView {
   return { id: provider.id, name: provider.name, protocol: provider.protocol, baseURL: provider.baseURL, models: provider.models, updatedAt: provider.updatedAt, status, apiKey: provider.apiKey, maskedKey: provider.apiKey ? maskSecret(provider.apiKey) : '', headerNames: Object.keys(provider.headers ?? {}) };
 }
 
+/**
+ * Claude Code and provider switchers configure an Anthropic-compatible upstream with the base URL that the
+ * client itself completes as `<base>/v1/messages`. The Portkey Anthropic adapter appends only `/messages`,
+ * so an Anthropic base without `/v1` (for example Volcengine Ark's `/api/plan`) must be completed here;
+ * otherwise the request lands on `<base>/messages` and providers reject it with a misleading auth error.
+ */
+export function portkeyCustomHost(provider: Pick<GatewayProvider, 'protocol' | 'baseURL'>): string {
+  if (provider.protocol !== 'anthropic/messages') return provider.baseURL;
+  const normalized = provider.baseURL.trim().replace(/\/+$/, '');
+  return /\/v1$/i.test(normalized) ? normalized : `${normalized}/v1`;
+}
+
 function validateInput(input: unknown, partial = false): Partial<GatewayProvider> {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Provider configuration must be an object.');
   const value = input as Record<string, unknown>;
