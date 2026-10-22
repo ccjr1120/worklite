@@ -151,28 +151,22 @@ describe('TeamRecords', () => {
     expect(screen.getByText('暂无执行记录。').parentElement).toHaveClass('h-12');
   });
 
-  it('keeps the heading, Team tabs and filters mounted behind fixed-height skeleton rows while loading', () => {
+  it('keeps the heading and filters mounted behind fixed-height skeleton rows while loading', () => {
     mockQueries(runsByTeam, { isPending: true });
     render(<TeamRecords teamId="agent_team_bmad_tea" />);
 
     expect(screen.getByRole('heading', { level: 1, name: 'Company Project Team' })).toBeInTheDocument();
-    expect(screen.getByRole('navigation', { name: '选择 Agent Team' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: '按标题搜索' })).toBeDisabled();
     const rows = [...screen.getByRole('status').querySelectorAll('li')];
     expect(rows).toHaveLength(8);
     expect(rows.every((row) => row.className.includes('h-12'))).toBe(true);
   });
 
-  it('offers both Teams as tabs and highlights the selected one', () => {
+  it('does not offer a Team switch on the Run list; that belongs to the configuration view', () => {
     mockQueries();
     render(<TeamRecords teamId="agent_team_application" />);
-
-    const tabs = screen.getByRole('navigation', { name: '选择 Agent Team' });
-    const application = within(tabs).getByRole('link', { name: 'Application Development Team' });
-    const company = within(tabs).getByRole('link', { name: 'Company Project Team' });
-    expect(application).toHaveAttribute('aria-current', 'page');
-    expect(company).not.toHaveAttribute('aria-current');
-    expect(company).toHaveAttribute('href', '/agent-teams/agent_team_bmad_tea');
+    expect(screen.queryByRole('navigation', { name: '选择 Agent Team' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Company Project Team' })).not.toBeInTheDocument();
   });
 
   it('names the selected Team and renders only its Runs', () => {
