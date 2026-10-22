@@ -363,14 +363,21 @@ export type ChatAttachmentView = {
   expiresAt: string;
 };
 
-// A user-submitted mid-run correction. 'delivered' reached the live Codex turn through turn/steer
-// (evidence only); 'queued' is waiting for the task's next run (Claude Code, or a Codex turn that
-// could not accept it); 'consumed' was picked up by that next run's goal.
+// A user-submitted mid-run correction, an increment on the captured goal rather than a replacement.
+// 'delivered' reached the live Codex turn through turn/steer; 'queued' is waiting for the task's
+// next round boundary (Claude Code, or a Codex turn that could not accept it); 'consumed' was
+// injected into the input of the round that started at that boundary. `seq`, `source`, `consumedAt`
+// and `consumedTurn` are absent on instructions recorded before they existed; consumedTurn is the
+// 1-based round of the task in which the instruction was applied.
 export type ProjectTaskSteerInstruction = {
   id: string;
+  seq?: number;
+  source?: 'user';
   text: string;
   createdAt: string;
   status: 'delivered' | 'queued' | 'consumed';
+  consumedAt?: string;
+  consumedTurn?: number;
 };
 
 export type SteerProjectTaskRequest = {

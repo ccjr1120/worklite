@@ -17,6 +17,21 @@ type Task = typeof chatProjectTasks.$inferSelect;
 const RECENT_ACTIVITY_LIMIT = 20;
 const FULL_ACTIVITY_LIMIT = 500;
 const RECENT_OPERATION_LIMIT = 50;
+const STEER_TEXT_LIMIT = 4000;
+const ROUND_STARTED_PHASE = 'task.round_started';
+const SETTLED_STATUSES: ReadonlyArray<Task['status']> = ['succeeded', 'failed', 'cancelled'];
+
+// Round markers and steer lifecycle entries are WorkLite's own bookkeeping in the activity stream,
+// not executor progress, so they never decide the card stage.
+function isBookkeepingPhase(phase: string): boolean {
+  return phase === ROUND_STARTED_PHASE || phase.startsWith('steer.');
+}
+
+// A task's rounds are the executor runs it has made (first run, each answer resumption, each
+// steer-driven follow-up); consumedTurn on a steer instruction refers to this 1-based count.
+function roundCount(activities: Task['activities']): number {
+  return activities.filter((activity) => activity.phase === ROUND_STARTED_PHASE).length;
+}
 
 const attachmentUploadUrl = (task: Task) => {
   const apiUrl = process.env.WORKLITE_API_URL ?? `http://127.0.0.1:${process.env.API_PORT ?? 23391}/api`;
@@ -29,7 +44,7 @@ const attachmentUploadUrl = (task: Task) => {
 export function deriveTaskStage(task: Task): ChatProjectTaskView['stage'] {
   if (task.status === 'succeeded' || task.status === 'failed' || task.status === 'cancelled') return task.status;
   if (task.status === 'waiting_for_input' || task.status === 'waiting_for_recovery') return 'waiting';
-  const latest = [...task.activities].reverse().find((activity) => typeof activity.phase === 'string');
+  const latest = [...task.activities].reverse().find((activity) => typeof activity.phase === 'string' && !isBookkeepingPhase(activity.phase));
   const phase = typeof latest?.phase === 'string' ? latest.phase : '';
   if (/(?:agent_message|item_completed|completed)$/.test(phase)) return 'responding';
   if (/tool_started|tool_completed|mcp\.call|skill\.script/.test(phase)) return 'working';
@@ -191,6 +206,8 @@ export class ChatProjectTasksService {
       ...(typeof activity.commandExecutionId === 'string' ? { commandExecutionId: activity.commandExecutionId } : {}),
       ...(typeof activity.toolName === 'string' ? { toolName: activity.toolName } : {}),
       ...(typeof activity.createdAt === 'string' ? { createdAt: activity.createdAt } : {}),
+      ...(typeof activity.seq === 'number' ? { seq: activity.seq } : {}),
+      ...(typeof activity.round === 'number' ? { round: activity.round } : {}),
     }));
     const operations = allOperations.slice(-RECENT_OPERATION_LIMIT).map(({ key, toolName, status, commandId, result, failureReason }) => ({
       key, toolName, status, commandExecutionId: commandId, inputSummary: operationInputSummary(result, toolName), failureReason,
@@ -317,18 +334,16 @@ export class ChatProjectTasksService {
     : Promise<{ status: 'waiting_for_input' | 'cancelled' | 'failed'; task: Task } | { status: 'ran'; task: Task; settlement: ExtractedSettlement }> {
     let task = this.requireTask(taskId);
     const previousEvidence = task.activities.length ? this.view(taskId) : undefined;
-    // Steer instructions queued since the last round (never delivered to a live turn, or delivered
-    // to a Codex turn that then completed before the executor's own result settled) join this
-    // round's goal. Marking them consumed up front means a steer submitted mid-round queues for the
-    // round after, rather than racing this round's goal construction.
-    const pendingSteers = task.steerQueue.filter((instruction) => instruction.status === 'queued');
-    if (pendingSteers.length) {
-      const consumedIds = new Set(pendingSteers.map((instruction) => instruction.id));
-      task = this.update(taskId, { steerQueue: task.steerQueue.map((instruction) => consumedIds.has(instruction.id) ? { ...instruction, status: 'consumed' as const } : instruction) });
-    }
+    const round = roundCount(task.activities) + 1;
     // A re-run (retry, answer, or another round in this same loop) clears the report marker so the
     // next settlement reports again.
     task = this.update(taskId, { status: 'running', pendingQuestion: null, error: null, reportedAt: null });
+    this.appendActivities(taskId, [{ phase: ROUND_STARTED_PHASE, round, summary: `Round ${round}` }]);
+    // The round boundary: queued steer instructions are marked consumed (with the round number and
+    // time) and handed to this round's input in one transaction, so a later round or a repeated call
+    // can never inject the same instruction twice. Nothing is consumed once the task has settled.
+    const pendingSteers = this.consumeQueuedSteers(taskId, round);
+    task = this.requireTask(taskId);
     const activity = async (detail: Record<string, unknown>) => {
       this.db.transaction((transaction) => {
         const current = transaction.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
@@ -399,26 +414,77 @@ export class ChatProjectTasksService {
     }
   }
 
-  // Submits a mid-run correction without cancelling the task. Only a running task accepts one: a
-  // task waiting for a question's answer has no live round, and that answer is its own resumption
-  // path. If the current round has a live steerable turn (Codex, through turn/steer) the text is
-  // delivered there and marked delivered, kept only as evidence; a race with the turn's own
-  // completion, a non-steerable turn, or an executor without a live channel (Claude Code always)
-  // queues it instead, and the task's next run folds every queued instruction into its goal
-  // together with the prior round's evidence, so correction and continuity travel together.
+  // Submits a mid-run correction without cancelling the task. It is an increment on the captured
+  // goal, never a replacement. Only a running task accepts one: a task waiting for a question's
+  // answer has no live round, and that answer is its own resumption path; a settled task is final.
+  // If the current round has a live steerable turn (Codex, through turn/steer) the text is delivered
+  // there at Codex's own boundary and marked delivered (applied) with this round's number; a race
+  // with the turn's own completion, a non-steerable turn, or an executor without a live channel
+  // (Claude Code always) queues it instead, and the next round boundary injects every queued
+  // instruction into that round's input together with the prior round's evidence.
   async steer(workspaceId: string, taskId: string, text: string): Promise<ChatProjectTaskView> {
-    const task = this.requireTask(taskId, workspaceId);
-    if (task.status !== 'running') throw new ConflictException('This project task is not running, so it cannot accept a steering instruction.');
+    this.requireSteerable(this.requireTask(taskId, workspaceId));
     const trimmed = required(text, 'text');
-    const instruction: StoredProjectTaskSteerInstruction = { id: `steer_${randomUUID()}`, text: trimmed, createdAt: new Date().toISOString(), status: 'queued' };
+    if (trimmed.length > STEER_TEXT_LIMIT) throw new BadRequestException(`text must be at most ${STEER_TEXT_LIMIT} characters.`);
     const delivered = await this.steerPorts.get(taskId)?.deliver?.(trimmed).catch(() => false);
-    if (delivered) instruction.status = 'delivered';
     this.db.transaction((transaction) => {
       const current = transaction.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
-      if (current.status !== 'running') throw new ConflictException('This project task is not running, so it cannot accept a steering instruction.');
-      transaction.update(chatProjectTasks).set({ steerQueue: [...current.steerQueue, instruction], updatedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).run();
+      this.requireSteerable(current);
+      const now = new Date().toISOString();
+      const seq = current.steerQueue.reduce((max, entry, index) => Math.max(max, entry.seq ?? index + 1), 0) + 1;
+      const round = roundCount(current.activities);
+      const instruction: StoredProjectTaskSteerInstruction = {
+        id: `steer_${randomUUID()}`, seq, source: 'user', text: trimmed, createdAt: now,
+        ...(delivered ? { status: 'delivered' as const, consumedAt: now, consumedTurn: round } : { status: 'queued' as const }),
+      };
+      const entries = [{ phase: 'steer.submitted', seq, round, summary: `Steer #${seq} submitted (${instruction.status})` }];
+      if (delivered) entries.push({ phase: 'steer.applied', seq, round, summary: `Steer #${seq} applied in round ${round}` });
+      transaction.update(chatProjectTasks).set({
+        steerQueue: [...current.steerQueue, instruction],
+        activities: [...current.activities, ...entries.map((entry) => ({ ...entry, createdAt: now }))],
+        updatedAt: new Date(),
+      }).where(eq(chatProjectTasks.id, taskId)).run();
     });
     return this.view(taskId, workspaceId);
+  }
+
+  // Why a task cannot take a steering instruction; every message keeps the "not running" prefix.
+  private requireSteerable(task: Task): void {
+    if (task.status === 'running' && task.mergeStatus !== 'merging') return;
+    const reason = task.status === 'waiting_for_input' ? 'it is waiting for an answer to its question; answer the question instead'
+      : task.status === 'running' ? 'its branch is being merged'
+        : SETTLED_STATUSES.includes(task.status) ? `it already ${task.status}`
+          : `its status is ${task.status}`;
+    throw new ConflictException(`This project task is not running, so it cannot accept a steering instruction: ${reason}.`);
+  }
+
+  // Marks every still-queued instruction consumed for `round` and returns them in submission order.
+  // Reads and writes inside one transaction, so a second call finds nothing left; a settled task
+  // consumes nothing.
+  private consumeQueuedSteers(taskId: string, round: number): StoredProjectTaskSteerInstruction[] {
+    return this.db.transaction((transaction) => {
+      const current = transaction.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
+      if (SETTLED_STATUSES.includes(current.status)) return [];
+      const pending = current.steerQueue.filter((instruction) => instruction.status === 'queued' && !instruction.consumedAt)
+        .sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0));
+      if (!pending.length) return [];
+      const now = new Date().toISOString();
+      const consumed = new Map(pending.map((instruction) => [instruction.id, { ...instruction, status: 'consumed' as const, consumedAt: now, consumedTurn: round }]));
+      transaction.update(chatProjectTasks).set({
+        steerQueue: current.steerQueue.map((instruction) => consumed.get(instruction.id) ?? instruction),
+        activities: [...current.activities, ...pending.map((instruction) => ({ phase: 'steer.applied', seq: instruction.seq, round, summary: `Steer #${instruction.seq ?? ''} applied in round ${round}`, createdAt: now }))],
+        updatedAt: new Date(),
+      }).where(eq(chatProjectTasks.id, taskId)).run();
+      return [...consumed.values()];
+    });
+  }
+
+  private appendActivities(taskId: string, entries: Array<Record<string, unknown>>): void {
+    this.db.transaction((transaction) => {
+      const current = transaction.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
+      const createdAt = new Date().toISOString();
+      transaction.update(chatProjectTasks).set({ activities: [...current.activities, ...entries.map((entry) => ({ ...entry, createdAt }))], updatedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).run();
+    });
   }
 
   private waitForInput(task: Task, question: string): Task {
