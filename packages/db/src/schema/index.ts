@@ -515,12 +515,20 @@ export type StoredChatProjectTaskSnapshot = {
 // handed to the task's next run as part of the goal, carrying the prior run's evidence.
 export type StoredProjectTaskSteerInstruction = {
   id: string;
+  // Submission order within the task (1-based) and who wrote it. Absent on rows written before
+  // these fields existed; readers must tolerate that.
+  seq?: number;
+  source?: 'user';
   text: string;
   createdAt: string;
-  // 'delivered': Codex accepted it into the live turn through turn/steer, evidence only.
-  // 'queued': waiting for the task's next run (Claude Code, or a Codex turn that could not accept it).
-  // 'consumed': a queued instruction the next run has picked up and included in its goal.
+  // 'delivered': Codex accepted it into the live turn through turn/steer; counts as applied.
+  // 'queued': waiting for the task's next round boundary (Claude Code, or a Codex turn that could not accept it).
+  // 'consumed': a queued instruction the next round has picked up and injected into its input.
   status: 'delivered' | 'queued' | 'consumed';
+  // When and in which 1-based round of the task it was applied (delivered or consumed). Set once,
+  // together with the status change; an instruction with consumedAt is never injected again.
+  consumedAt?: string;
+  consumedTurn?: number;
 };
 
 // Table names keep their original codex prefix as persisted identifiers.

@@ -327,4 +327,191 @@ describe('ChatProjectTasksService.capture workspace behavior', () => {
     expect(round).toBe(2);
     expect(JSON.parse(secondRoundInput!)).toMatchObject({ userCorrections: ['先只调查，不要改文件'] });
   });
+
+  // A service wired to a scripted executor; `execute` receives each round's request.
+  function scripted(callId: string, execute: (request: { input: string; signal: AbortSignal; steerPort?: { deliver?: (text: string) => Promise<boolean> } }) => Promise<string>) {
+    const db = createDb(':memory:');
+    dbs.push(db);
+    for (const statement of DDL) db.$client.exec(statement);
+    db.$client.prepare('INSERT INTO workspaces (id) VALUES (?)').run(WORKSPACE_ID);
+    db.$client.prepare('INSERT INTO agents (id) VALUES (?)').run('agt_system_helper_chat');
+    db.$client.prepare('INSERT INTO agent_executions (id, workspace_id, agent_id, capability_snapshot) VALUES (?, ?, ?, ?)')
+      .run(EXECUTION_ID, WORKSPACE_ID, 'agt_system_helper_chat', CAPABILITIES);
+    db.$client.prepare('INSERT INTO agent_tool_calls (id) VALUES (?)').run(callId);
+    const executors = {
+      captureLaunch: async () => ({ executor: 'claude' as const, commandArguments: [], baseUrl: 'http://127.0.0.1:23392', model: null }),
+      execute,
+    };
+    const resources = { workflowMcpRuntimes: async () => [] } as unknown as WorkspaceResourcesService;
+    return { db, service: new ChatProjectTasksService(db, executors as unknown as ProjectExecutorService, resources) };
+  }
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const done = (summary: string) => JSON.stringify({ status: 'succeeded', summary });
+  const gate = () => { let open!: () => void; const promise = new Promise<void>((resolve) => { open = resolve; }); return { promise, open }; };
+
+  it('records each appended instruction with a per-task sequence number, source and timestamp', async () => {
+    const { repository } = setup();
+    const hold = gate();
+    const { service } = scripted('acall_seq', async () => { await hold.promise; return done('ok'); });
+    const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_seq', { goal: '调查并修复问题', projectDirectory: repository });
+    const completion = service.run(task.id, async () => undefined);
+    await tick();
+
+    await service.steer(WORKSPACE_ID, task.id, '  第一条  ');
+    const view = await service.steer(WORKSPACE_ID, task.id, '第二条');
+    expect(view.steerQueue.map((entry) => [entry.seq, entry.source, entry.text, entry.status])).toEqual([[1, 'user', '第一条', 'queued'], [2, 'user', '第二条', 'queued']]);
+    expect(view.steerQueue.every((entry) => !Number.isNaN(Date.parse(entry.createdAt)) && entry.consumedAt === undefined)).toBe(true);
+    // The instructions are also visible in the progress stream.
+    expect(view.activities.filter((activity) => activity.phase === 'steer.submitted').map((activity) => activity.seq)).toEqual([1, 2]);
+
+    hold.open();
+    await completion;
+  });
+
+  it('rejects an empty or oversized instruction', async () => {
+    const { repository } = setup();
+    const hold = gate();
+    const { service } = scripted('acall_bad_text', async () => { await hold.promise; return done('ok'); });
+    const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_bad_text', { goal: '调查', projectDirectory: repository });
+    const completion = service.run(task.id, async () => undefined);
+    await tick();
+    await expect(service.steer(WORKSPACE_ID, task.id, '   ')).rejects.toThrow('text is required.');
+    await expect(service.steer(WORKSPACE_ID, task.id, 'x'.repeat(4001))).rejects.toThrow('at most 4000');
+    hold.open();
+    await completion;
+  });
+
+  it('injects queued instructions once, in order, at the next round boundary and keeps the goal unchanged', async () => {
+    const { repository } = setup();
+    const firstRound = gate();
+    const secondRound = gate();
+    const inputs: Array<Record<string, unknown>> = [];
+    const { service } = scripted('acall_boundary', async (request) => {
+      inputs.push(JSON.parse(request.input));
+      if (inputs.length === 1) { await firstRound.promise; return done('round 1'); }
+      if (inputs.length === 2) { await secondRound.promise; return done('round 2'); }
+      return done('round 3');
+    });
+    const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_boundary', { goal: '主目标不变', projectDirectory: repository });
+    const completion = service.run(task.id, async () => undefined);
+    await tick();
+
+    await service.steer(WORKSPACE_ID, task.id, '补充 A');
+    await service.steer(WORKSPACE_ID, task.id, '补充 B');
+    expect(inputs).toHaveLength(1);
+    // Round 1 was already built without them, and the live tool call is never interrupted.
+    expect(inputs[0]).not.toHaveProperty('userCorrections');
+
+    firstRound.open();
+    await tick(); await tick();
+    expect(inputs).toHaveLength(2);
+    expect(inputs[1]).toMatchObject({ goal: '主目标不变', userCorrections: ['补充 A', '补充 B'] });
+    const afterBoundary = service.view(task.id);
+    expect(afterBoundary.steerQueue.map((entry) => [entry.seq, entry.status, entry.consumedTurn])).toEqual([[1, 'consumed', 2], [2, 'consumed', 2]]);
+    expect(afterBoundary.steerQueue.every((entry) => !Number.isNaN(Date.parse(entry.consumedAt!)))).toBe(true);
+    expect(afterBoundary.activities.filter((activity) => activity.phase === 'steer.applied').map((activity) => [activity.seq, activity.round])).toEqual([[1, 2], [2, 2]]);
+
+    // A later steer goes to round 3 alone: earlier instructions are never injected again.
+    await service.steer(WORKSPACE_ID, task.id, '补充 C');
+    secondRound.open();
+    const settled = await completion;
+    expect(inputs).toHaveLength(3);
+    expect(inputs[2]).toMatchObject({ goal: '主目标不变', userCorrections: ['补充 C'] });
+    expect(settled.steerQueue.map((entry) => [entry.seq, entry.status, entry.consumedTurn])).toEqual([[1, 'consumed', 2], [2, 'consumed', 2], [3, 'consumed', 3]]);
+    expect(settled.status).toBe('succeeded');
+    expect(settled.goal).toBe('主目标不变');
+  });
+
+  it('marks a live-delivered instruction applied in the current round and never injects it again', async () => {
+    const { repository } = setup();
+    const hold = gate();
+    const inputs: Array<Record<string, unknown>> = [];
+    const { service } = scripted('acall_delivered', async (request) => {
+      inputs.push(JSON.parse(request.input));
+      if (request.steerPort) request.steerPort.deliver = async () => true;
+      await hold.promise;
+      return done('ok');
+    });
+    const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_delivered', { goal: '目标', projectDirectory: repository });
+    const completion = service.run(task.id, async () => undefined);
+    await tick();
+
+    const view = await service.steer(WORKSPACE_ID, task.id, '实时纠正');
+    expect(view.steerQueue[0]).toMatchObject({ seq: 1, status: 'delivered', consumedTurn: 1 });
+    expect(view.steerQueue[0]!.consumedAt).toBeTruthy();
+    hold.open();
+    const settled = await completion;
+    expect(inputs).toHaveLength(1);
+    expect(settled.steerQueue[0]!.status).toBe('delivered');
+  });
+
+  it('refuses instructions for settled and question-waiting tasks with a specific reason', async () => {
+    const { repository } = setup();
+    const { service, db } = scripted('acall_refuse', async () => done('finished'));
+    const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_refuse', { goal: '目标', projectDirectory: repository });
+
+    db.$client.prepare("UPDATE chat_codex_tasks SET status = 'waiting_for_input' WHERE id = ?").run(task.id);
+    await expect(service.steer(WORKSPACE_ID, task.id, '补充')).rejects.toThrow('waiting for an answer');
+    for (const status of ['succeeded', 'failed', 'cancelled']) {
+      db.$client.prepare('UPDATE chat_codex_tasks SET status = ? WHERE id = ?').run(status, task.id);
+      await expect(service.steer(WORKSPACE_ID, task.id, '补充')).rejects.toThrow(`is not running, so it cannot accept a steering instruction: it already ${status}.`);
+    }
+    expect(service.view(task.id).steerQueue).toEqual([]);
+  });
+
+  it('never consumes a queued instruction once the task is cancelled', async () => {
+    const { repository } = setup();
+    const inputs: string[] = [];
+    const { service } = scripted('acall_cancelled', (request) => {
+      inputs.push(request.input);
+      return new Promise<string>((_resolve, reject) => request.signal.addEventListener('abort', () => reject(new Error('aborted'))));
+    });
+    const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_cancelled', { goal: '目标', projectDirectory: repository });
+    const completion = service.run(task.id, async () => undefined);
+    await tick();
+    await service.steer(WORKSPACE_ID, task.id, '取消前排队');
+
+    await service.cancel(task.id);
+    const settled = await completion;
+    expect(settled.status).toBe('cancelled');
+    expect(inputs).toHaveLength(1);
+    expect(settled.steerQueue[0]).toMatchObject({ status: 'queued' });
+    expect(settled.steerQueue[0]!.consumedAt).toBeUndefined();
+    await expect(service.steer(WORKSPACE_ID, task.id, '取消后追加')).rejects.toThrow('it already cancelled');
+    // Re-running a cancelled task is a no-op, so nothing can consume the leftover instruction.
+    await service.run(task.id, async () => undefined);
+    expect(inputs).toHaveLength(1);
+    expect(service.view(task.id).steerQueue[0]!.status).toBe('queued');
+  });
+
+  it('reads historical tasks whose steer entries predate seq and consumedTurn, and keeps numbering after them', async () => {
+    const { repository } = setup();
+    const hold = gate();
+    const { service, db } = scripted('acall_legacy', async () => { await hold.promise; return done('ok'); });
+    const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_legacy', { goal: '目标', projectDirectory: repository });
+    db.$client.prepare('UPDATE chat_codex_tasks SET steer_queue = ? WHERE id = ?')
+      .run(JSON.stringify([{ id: 'steer_old', text: '历史纠偏', createdAt: '2026-10-21T00:00:01.000Z', status: 'delivered' }]), task.id);
+    expect(service.view(task.id).steerQueue).toEqual([{ id: 'steer_old', text: '历史纠偏', createdAt: '2026-10-21T00:00:01.000Z', status: 'delivered' }]);
+
+    const completion = service.run(task.id, async () => undefined);
+    await tick();
+    const view = await service.steer(WORKSPACE_ID, task.id, '新的补充');
+    expect(view.steerQueue.map((entry) => entry.seq)).toEqual([undefined, 2]);
+    hold.open();
+    await completion;
+  });
+
+  it('keeps steer bookkeeping out of the derived stage and the progress text', async () => {
+    const { repository } = setup();
+    const hold = gate();
+    const { service } = scripted('acall_stage', async () => { await hold.promise; return done('ok'); });
+    const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_stage', { goal: '目标', projectDirectory: repository });
+    const completion = service.run(task.id, async () => undefined);
+    await tick();
+    const view = await service.steer(WORKSPACE_ID, task.id, '补充');
+    expect(view.stage).toBe('starting');
+    expect(view.progressText).toBe('');
+    hold.open();
+    await completion;
+  });
 });

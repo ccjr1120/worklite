@@ -3,12 +3,12 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n/config';
 import type { ChatProjectTaskView } from '@worklite/contracts';
-import { api } from '@/api/client';
+import { ApiError, api } from '@/api/client';
 import { CodexToolCallPanel } from './transcript';
 
 vi.mock('@/api/client', async () => {
   const actual = await vi.importActual<typeof import('@/api/client')>('@/api/client');
-  return { ...actual, api: { ...actual.api, cancelChatProjectTask: vi.fn(), chatProjectTask: vi.fn() } };
+  return { ...actual, api: { ...actual.api, cancelChatProjectTask: vi.fn(), chatProjectTask: vi.fn(), steerChatProjectTask: vi.fn() } };
 });
 
 vi.mock('@/components/locale-provider', () => ({
@@ -235,5 +235,95 @@ describe('CodexToolCallPanel project task card', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('取消请求已返回，但任务仍在运行。请先查看任务状态后再试。');
     expect(screen.getByText('确认停止当前执行？')).toBeVisible();
+  });
+
+  describe('mid-run steer instructions', () => {
+    const steerInput = () => screen.getByRole('textbox', { name: /补充或纠正指令/ });
+
+    it('offers the instruction input only once a running task is expanded, with a collapsed entry point', async () => {
+      render(<CodexToolCallPanel task={task()} />);
+
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '补充指令' }));
+
+      expect(await screen.findByRole('textbox', { name: /补充或纠正指令/ })).toBeVisible();
+      expect(screen.getByRole('button', { name: '发送指令' })).toBeDisabled();
+      expect(screen.queryByRole('button', { name: '补充指令' })).not.toBeInTheDocument();
+    });
+
+    it.each([
+      ['waiting_for_input', 'waiting' as const],
+      ['succeeded', 'succeeded' as const],
+      ['failed', 'failed' as const],
+      ['cancelled', 'cancelled' as const],
+    ])('does not offer the input for a %s task', async (status, stage) => {
+      const settled = task({ status: status as ChatProjectTaskView['status'], stage, progressText: '' });
+      vi.mocked(api.chatProjectTask).mockResolvedValue(settled);
+      render(<CodexToolCallPanel task={settled} />);
+
+      expect(screen.queryByRole('button', { name: '补充指令' })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '展开项目任务详情' }));
+      await waitFor(() => expect(api.chatProjectTask).toHaveBeenCalled());
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '发送指令' })).not.toBeInTheDocument();
+    });
+
+    it('submits the instruction and shows it as pending with the server-recorded sequence', async () => {
+      const queued = task({ steerQueue: [{ id: 'steer_1', seq: 1, source: 'user', text: '先只调查，不要改文件', createdAt: '2026-10-21T00:00:01.000Z', status: 'queued' }], updatedAt: '2026-10-21T00:00:02.000Z' });
+      vi.mocked(api.steerChatProjectTask).mockResolvedValue(queued);
+      render(<CodexToolCallPanel task={task()} />);
+      fireEvent.click(screen.getByRole('button', { name: '补充指令' }));
+
+      fireEvent.change(await screen.findByRole('textbox', { name: /补充或纠正指令/ }), { target: { value: '  先只调查，不要改文件  ' } });
+      fireEvent.click(screen.getByRole('button', { name: '发送指令' }));
+
+      await waitFor(() => expect(api.steerChatProjectTask).toHaveBeenCalledWith('acall_task_card_test', { text: '先只调查，不要改文件' }));
+      expect(await screen.findByText('先只调查，不要改文件')).toBeVisible();
+      expect(screen.getByText('待消费')).toBeVisible();
+      expect(screen.getByText('#1')).toBeVisible();
+      expect(steerInput()).toHaveValue('');
+    });
+
+    it('shows consumed and delivered instructions as applied with their round', async () => {
+      const running = task({
+        steerQueue: [
+          { id: 'steer_1', seq: 1, source: 'user', text: '补充一', createdAt: '2026-10-21T00:00:01.000Z', status: 'consumed', consumedAt: '2026-10-21T00:00:05.000Z', consumedTurn: 2 },
+          { id: 'steer_2', seq: 2, source: 'user', text: '补充二', createdAt: '2026-10-21T00:00:06.000Z', status: 'delivered', consumedAt: '2026-10-21T00:00:06.000Z', consumedTurn: 2 },
+          { id: 'steer_3', seq: 3, source: 'user', text: '补充三', createdAt: '2026-10-21T00:00:07.000Z', status: 'queued' },
+        ],
+        activities: [{ phase: 'steer.applied', seq: 1, round: 2 }],
+      });
+      vi.mocked(api.chatProjectTask).mockResolvedValue(running);
+      render(<CodexToolCallPanel task={running} />);
+      fireEvent.click(screen.getByRole('button', { name: '展开项目任务详情' }));
+
+      expect(await screen.findByText('已应用（第 2 轮）')).toBeVisible();
+      expect(screen.getByText('已应用（第 2 轮，实时送达）')).toBeVisible();
+      expect(screen.getByText('待消费')).toBeVisible();
+    });
+
+    it('marks an instruction left queued on a settled task as not applied', async () => {
+      const cancelled = task({
+        status: 'cancelled', stage: 'cancelled', progressText: '',
+        steerQueue: [{ id: 'steer_1', seq: 1, source: 'user', text: '来不及应用', createdAt: '2026-10-21T00:00:01.000Z', status: 'queued' }],
+      });
+      vi.mocked(api.chatProjectTask).mockResolvedValue(cancelled);
+      render(<CodexToolCallPanel task={cancelled} />);
+      fireEvent.click(screen.getByRole('button', { name: '展开项目任务详情' }));
+
+      expect(await screen.findByText('未应用（任务已结束）')).toBeVisible();
+    });
+
+    it('keeps the draft and shows the server reason when the task stopped accepting instructions', async () => {
+      vi.mocked(api.steerChatProjectTask).mockRejectedValue(new ApiError(409, 'This project task is not running, so it cannot accept a steering instruction: it already cancelled.'));
+      render(<CodexToolCallPanel task={task()} />);
+      fireEvent.click(screen.getByRole('button', { name: '补充指令' }));
+
+      fireEvent.change(await screen.findByRole('textbox', { name: /补充或纠正指令/ }), { target: { value: '补充' } });
+      fireEvent.click(screen.getByRole('button', { name: '发送指令' }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('it already cancelled');
+      expect(steerInput()).toHaveValue('补充');
+    });
   });
 });
