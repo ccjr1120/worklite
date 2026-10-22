@@ -16,7 +16,6 @@ import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
 import { focusRing } from '@/components/ui/interaction';
 import { toSingleLine } from '@/lib/single-line';
-import { TeamTabs } from './team-switcher';
 
 const RUN_STATUSES: AgentTeamRunStatus[] = ['running', 'waiting_for_input', 'queued', 'paused', 'succeeded', 'failed', 'cancelled'];
 const SKELETON_ROWS = 8;
@@ -63,7 +62,6 @@ export function TeamRecords({ teamId }: { teamId: string }) {
         description={t('records.description')}
         actions={<Link to="/agent-teams/$teamId/config" params={{ teamId }} className={`inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-border px-3 text-sm font-medium hover:bg-muted ${focusRing}`}><Settings className="size-4" aria-hidden="true" />{t('config.viewConfig')}</Link>}
       />
-      <TeamTabs teamId={teamId} />
       <div className="flex flex-col gap-2 sm:flex-row" role="search" aria-label={t('records.filters.label')}>
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />

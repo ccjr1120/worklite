@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import type { AgentTeamRunStatus, AgentTeamView } from '@worklite/contracts';
 import { useAgentTeamRecordsQuery, useAgentTeamsQuery } from '@/api/queries';
 import { focusRing } from '@/components/ui/interaction';
-import { Skeleton } from '@/components/ui/skeleton';
 import { TruncatedText } from '@/components/ui/truncated-text';
 import { cn } from '@/lib/utils';
 
@@ -55,30 +54,5 @@ function TeamCard({ team, selected }: { team: AgentTeamView; selected: boolean }
         <div className="flex gap-1"><dt>{t('switcher.queuedRuns')}</dt><dd className="tabular-nums text-foreground">{count(['queued'])}</dd></div>
       </dl>
     </Link>
-  );
-}
-
-/** Compact one-row Team switch for the Run list; the Team cards above belong to the configuration view. */
-export function TeamTabs({ teamId }: { teamId: string }) {
-  const { t } = useTranslation('agentTeams');
-  const query = useAgentTeamsQuery();
-  if (query.isPending) return <Skeleton className="h-9 w-80 max-w-full" role="status" />;
-  if (!query.data?.length) return null;
-
-  return (
-    <nav aria-label={t('switcher.label')} className="flex h-9 gap-1 overflow-x-auto border-b border-border">
-      {query.data.map((team) => (
-        <Link
-          key={team.id}
-          to="/agent-teams/$teamId"
-          params={{ teamId: team.id }}
-          aria-current={team.id === teamId ? 'page' : undefined}
-          title={t(`focus.${team.id}` as never, { defaultValue: '' }) || undefined}
-          className={cn('-mb-px inline-flex shrink-0 items-center whitespace-nowrap border-b-2 px-3 text-sm font-medium transition-colors', team.id === teamId ? 'border-brand text-brand-text' : 'border-transparent text-muted-foreground hover:text-foreground', focusRing)}
-        >
-          {team.name}
-        </Link>
-      ))}
-    </nav>
   );
 }
