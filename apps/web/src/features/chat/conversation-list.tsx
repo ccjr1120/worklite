@@ -6,6 +6,7 @@ import { useChatChannelsQuery, useChatConversationsQuery } from '@/api/queries';
 import { isLiveStatus, StatusDot, toStatusKey } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { TruncatedText } from '@/components/ui/truncated-text';
 import { focusRingInset } from '@/components/ui/interaction';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
@@ -82,12 +83,12 @@ export function ConversationList({ selectedId, onSelect, onNew }: { selectedId: 
                           {selected ? <span className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-brand" aria-hidden="true" /> : null}
                           <StatusDot status={statusKey} className="mt-0.5" />
                           <span className="min-w-0 flex-1">
-                            <span className={cn('block truncate text-[13px]', live || selected ? 'font-semibold' : 'font-medium', !live && !selected && 'text-foreground/85')}>{item.title || t('history.untitled')}</span>
+                            <TruncatedText text={item.title || t('history.untitled')} className={cn('text-[13px]', live || selected ? 'font-semibold' : 'font-medium', !live && !selected && 'text-foreground/85')} />
                             <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-                              <span className="truncate">{channelName(item.channel)}</span>
+                              <TruncatedText text={channelName(item.channel)} className="inline" />
                               <span aria-hidden="true">·</span>
-                              <span className={cn('shrink-0', live && 'font-medium text-brand-text', item.status === 'waiting_for_input' && 'text-warning', item.status === 'failed' && 'text-danger')}>{t(`status.${item.status}`)}</span>
-                              <time className="ml-auto shrink-0 tabular-nums" dateTime={item.updatedAt}>{formatDateTime(item.updatedAt, locale)}</time>
+                              <span className={cn('shrink-0 whitespace-nowrap', live && 'font-medium text-brand-text', item.status === 'waiting_for_input' && 'text-warning', item.status === 'failed' && 'text-danger')}>{t(`status.${item.status}`)}</span>
+                              <time className="ml-auto shrink-0 whitespace-nowrap tabular-nums" dateTime={item.updatedAt}>{formatDateTime(item.updatedAt, locale)}</time>
                             </span>
                           </span>
                         </button>

@@ -81,6 +81,41 @@ describe('CodexToolCallPanel project task card', () => {
     expect(await screen.findByText(progress)).toBeVisible();
   });
 
+  it('keeps the summary on one truncated line with the full text available on hover', () => {
+    const goal = '第一行目标\n## 第二行细节';
+    const running = task({ goal, progressText: '## **检查** 登录状态\n- 后续诊断细节' });
+    render(<CodexToolCallPanel task={running} />);
+
+    const goalLine = screen.getByText('第一行目标');
+    expect(goalLine).toHaveClass('truncate');
+    expect(goalLine).toHaveAttribute('title', goal);
+    const progressLine = screen.getByText('检查 登录状态');
+    expect(progressLine).toHaveClass('truncate');
+    expect(progressLine).toHaveAttribute('title', '检查 登录状态');
+  });
+
+  it('renders executor output as sanitized Markdown in the expanded details', async () => {
+    const completed = task({
+      status: 'succeeded',
+      stage: 'succeeded',
+      progressText: '',
+      result: '## 结果标题\n\n- **加粗项**\n- `行内代码`\n\n[链接](https://example.com)\n\n<script data-xss="1">alert(1)</script>\n\n[坏链接](javascript:alert(1))',
+      error: '**失败原因**',
+    });
+    vi.mocked(api.chatProjectTask).mockResolvedValue(completed);
+    const { container } = render(<CodexToolCallPanel task={completed} />);
+    fireEvent.click(screen.getByRole('button', { name: '展开项目任务详情' }));
+
+    expect(await screen.findByRole('heading', { name: '结果标题' })).toBeVisible();
+    expect(screen.getByText('加粗项')).toHaveAttribute('data-streamdown', 'strong');
+    expect(screen.getByText('行内代码').tagName).toBe('CODE');
+    expect(screen.getByText('失败原因')).toHaveAttribute('data-streamdown', 'strong');
+    // Raw HTML is dropped and unsafe URLs never become clickable links.
+    expect(container.querySelector('script, [data-xss]')).toBeNull();
+    expect(screen.getAllByRole('button', { name: /链接/ }).map((link) => link.textContent)).toEqual(['链接']);
+    expect(container.innerHTML).not.toMatch(/href="javascript:/i);
+  });
+
   it('keeps task questions read-only and places the question in expanded details', async () => {
     const waiting = task({
       status: 'waiting_for_input',

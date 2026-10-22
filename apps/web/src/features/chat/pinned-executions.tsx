@@ -4,6 +4,7 @@ import type { ChatProjectTaskView, ChatSubmissionView, RunView } from '@worklite
 import { useAgentTeamRunQuery, useRunQuery, useWorkliteUpgradeQuery } from '@/api/queries';
 import { isLiveStatus, StatusDot, toStatusKey } from '@/components/status-badge';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
+import { TruncatedText } from '@/components/ui/truncated-text';
 import { cn } from '@/lib/utils';
 
 type PinTracking = {
@@ -149,8 +150,8 @@ function PinnedRow({ candidate, visible, onLive, onReveal }: {
         className={cn('flex w-full min-w-0 items-center gap-2.5 px-3 py-2 text-left', surfaceInteraction, focusRingInset)}
       >
         <StatusDot status={statusKey} />
-        <span className="min-w-0 shrink truncate text-[13px] font-medium">{state.title}</span>
-        {state.progress ? <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{state.progress}</span> : <span className="flex-1" />}
+        <TruncatedText text={state.title} className="shrink text-[13px] font-medium" />
+        {state.progress ? <TruncatedText text={state.progress} className="flex-1 text-xs text-muted-foreground" /> : <span className="flex-1" />}
       </button>
     </li>
   );
