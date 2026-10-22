@@ -155,7 +155,15 @@ export class AgentTeamConfigurationService {
     const rows = skillIds.size === 0 ? [] : await this.db.select().from(skills).where(and(eq(skills.workspaceId, workspaceId), inArray(skills.id, [...skillIds])));
     if (rows.length !== skillIds.size) throw new NotFoundException('A selected Skill was not found in this workspace.');
     const files = rows.length === 0 ? [] : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, rows.map((row) => row.id))).orderBy(asc(skillFiles.path));
-    return new Map(rows.map((row) => [row.id, { id: row.id, name: row.name, files: files.filter((file) => file.skillId === row.id).map((file) => ({ path: file.path, content: file.content })) }]));
+    // Carry the stored instruction text alongside the package files, matching the
+    // Workflow Agent node path, so a Skill whose instructions are not only in
+    // SKILL.md still reaches the Team role verbatim.
+    return new Map(rows.map((row) => [row.id, {
+      id: row.id,
+      name: row.name,
+      instructions: row.instructions,
+      files: files.filter((file) => file.skillId === row.id).map((file) => ({ path: file.path, content: file.content })),
+    }]));
   }
 
   private async resolveMcpServers(workspaceId: string, serverIds: ReadonlySet<string>) {

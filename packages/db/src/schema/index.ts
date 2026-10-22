@@ -628,6 +628,9 @@ export type StoredAgentTeamOperationRecoveryDecision =
 export type StoredAgentTeamSkillSnapshot = {
   id: string;
   name: string;
+  // The Skill's captured instruction text (normally its SKILL.md) so a Team role
+  // receives the same instructions a Workflow Agent node receives.
+  instructions?: string;
   files: Array<{ path: string; content: string }>;
 };
 
