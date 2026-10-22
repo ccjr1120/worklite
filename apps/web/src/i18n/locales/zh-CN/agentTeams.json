@@ -171,7 +171,14 @@
     "empty": "暂无执行记录。",
     "openChat": "在 Chat 中发起任务",
     "finishedAt": "结束时间",
-    "loadFailed": "无法加载工作记录"
+    "loadFailed": "无法加载工作记录",
+    "filters": {
+      "label": "筛选运行记录",
+      "keyword": "按标题搜索",
+      "status": "按状态筛选",
+      "allStatuses": "全部状态"
+    },
+    "noMatch": "没有符合筛选条件的记录。"
   },
   "config": {
     "title": "Team 配置",
