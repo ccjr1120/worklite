@@ -62,6 +62,17 @@ export function monitorFailureState(failures: number, failingForMs: number): { s
 // instead of split so one delivery state stays one platform message.
 const MAX_TEXT_BYTES = 3_500;
 const TRUNCATION_NOTE = '\n\n……（内容过长已截断，完整内容请在 WorkLite 查看）';
+// Cut on a UTF-8 character boundary instead of re-measuring the whole string per code unit: a
+// long failed-turn reply can otherwise spend seconds in the delivery sweep, and a naive slice can
+// leave a split multi-byte character for the platform to reject.
+export function truncateWechatText(value: string): string {
+  if (Buffer.byteLength(value) <= MAX_TEXT_BYTES) return value;
+  const budget = Math.max(0, MAX_TEXT_BYTES - Buffer.byteLength(TRUNCATION_NOTE));
+  const bytes = Buffer.from(value, 'utf8');
+  let end = Math.min(budget, bytes.length);
+  while (end > 0 && end < bytes.length && (bytes[end] & 0b1100_0000) === 0b1000_0000) end -= 1;
+  return bytes.subarray(0, end).toString('utf8') + TRUNCATION_NOTE;
+}
 // Mirrors the reference iLink client's getconfig cache window; refetching every poll would
 // be wasteful since the ticket outlives any single turn.
 const TYPING_TICKET_TTL_MS = 60 * 60_000;
@@ -564,11 +575,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
       if (chat) await this.signalTyping(chat.externalId, chat.contextToken ?? undefined, false);
       return;
     }
-    if (Buffer.byteLength(text) > MAX_TEXT_BYTES) {
-      let cut = text;
-      while (Buffer.byteLength(cut) > MAX_TEXT_BYTES - Buffer.byteLength(TRUNCATION_NOTE)) cut = cut.slice(0, -1);
-      text = cut + TRUNCATION_NOTE;
-    }
+    text = truncateWechatText(text);
     const fingerprint = digest(JSON.stringify({ kind: reference?.kind ?? 'pending', text, terminal }));
     if (fingerprint === submission.deliveryFingerprint) {
       if (terminal) await this.db.update(chatSubmissions).set({ settled: true }).where(eq(chatSubmissions.id, submission.id));

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDb, initializeDatabase, externalChats, chatSubmissions, wechatEvents, type Database } from '@worklite/db';
 import type { AgentExecutionView } from '@worklite/contracts';
-import { monitorFailureState, WECHAT_CONNECT_FAILURE_ESCALATION_MS, WechatService } from './wechat.service';
+import { monitorFailureState, truncateWechatText, WECHAT_CONNECT_FAILURE_ESCALATION_MS, WechatService } from './wechat.service';
 import type { FetchLike } from './ilink';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -26,6 +26,27 @@ function emptyQuery(): unknown {
   };
   return query;
 }
+
+describe('truncateWechatText', () => {
+  it('leaves a reply under the platform limit untouched', () => {
+    const text = '普通回复';
+    expect(truncateWechatText(text)).toBe(text);
+  });
+
+  it('keeps the platform limit and appends the truncation note', () => {
+    const text = 'a'.repeat(10_000);
+    const truncated = truncateWechatText(text);
+    expect(Buffer.byteLength(truncated)).toBeLessThanOrEqual(3_500);
+    expect(truncated.endsWith('完整内容请在 WorkLite 查看）')).toBe(true);
+    expect(truncated.startsWith('a'.repeat(100))).toBe(true);
+  });
+
+  it('never splits a multi-byte character', () => {
+    const truncated = truncateWechatText('微信渠道长回复'.repeat(1_000));
+    expect(truncated).not.toContain('�');
+    expect(Buffer.byteLength(truncated)).toBeLessThanOrEqual(3_500);
+  });
+});
 
 describe('monitorFailureState', () => {
   it('stays silent below three consecutive failures', () => {
