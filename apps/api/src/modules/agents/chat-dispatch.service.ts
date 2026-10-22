@@ -104,10 +104,16 @@ export class ChatDispatchService {
       if (!accepted.reference) throw new Error('Conversation dispatch did not commit a task reference.');
       return { submissionId: submission.id, reference: accepted.reference };
     } catch (error) {
-      const message = error instanceof BadRequestException || error instanceof ConflictException || error instanceof NotFoundException
-        ? error.message : '任务提交失败，请查看关联执行记录。';
-      await this.db.update(chatSubmissions).set({ error: message, updatedAt: new Date() })
-        .where(and(eq(chatSubmissions.id, submission.id), isNull(chatSubmissions.reference)));
+      // A busy conversation is retryable: the channel adapters keep the inbound message queued
+      // and redeliver it once the turn settles. Recording it as a failed submission would push a
+      // spurious "请求失败" reply to WeChat/Feishu while the message is still waiting to run.
+      const retryable = error instanceof ConflictException && /already running|pending answer required/.test(error.message);
+      if (!retryable) {
+        const message = error instanceof BadRequestException || error instanceof ConflictException || error instanceof NotFoundException
+          ? error.message : '任务提交失败，请查看关联执行记录。';
+        await this.db.update(chatSubmissions).set({ error: message, updatedAt: new Date() })
+          .where(and(eq(chatSubmissions.id, submission.id), isNull(chatSubmissions.reference)));
+      }
       throw error;
     }
   }

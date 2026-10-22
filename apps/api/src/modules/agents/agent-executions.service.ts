@@ -22,7 +22,7 @@ import { CodexAppServerError } from './codex-app-server.service';
 import { requireSafeCommandWord } from './project-executor.types';
 import { CommandsService } from '../commands/commands.service';
 import { UpgradesService } from '../upgrades/upgrades.service';
-import { executionFailure, executionFailureSource, InvalidAgentToolRequestError, TooManyToolCallsError, type ExecutionFailure } from './agent-execution-failure';
+import { executionFailure, executionFailureSource, type ExecutionFailure } from './agent-execution-failure';
 
 const CHAT_AGENT_ID = 'agt_system_helper_chat';
 const WORKLITE_PLATFORM_SKILL_ID = 'sk_worklite_platform';
@@ -35,7 +35,43 @@ const MAX_HELPER_TOOL_ROUNDS = 24;
 const MAX_WORKFLOW_TOOL_ROUNDS = 20;
 
 type WorkflowAgentActivityReporter = (detail: Extract<WorkflowNodeActivityDetail, { phase: 'model.round' | 'skill.script' | 'mcp.call' }>) => void | Promise<void>;
-const MAX_TOOL_CALLS_PER_STEP = 4;
+// A model response may legitimately batch independent calls: changing every role of a Team to
+// one model is one call per role, so an ordinary request arrives as eight calls in one step.
+// The runtime executes those one at a time and treats anything past this ceiling as a deferred
+// call with an explanatory tool result. Reaching the ceiling is a model mistake the next step can
+// correct; it must never fail the whole turn and strand the conversation.
+const MAX_TOOL_CALLS_PER_STEP = 16;
+const DEFERRED_TOOL_CALL_OUTPUT = 'This tool call was not executed: the model response contained more tool calls than one step allows. Reissue this call in a later step.';
+
+export type ToolCallAdmission = {
+  index: number;
+  total: number;
+  toolName: string;
+  chatOnly: boolean;
+  hasBuiltinTool: boolean;
+  hasSkill: boolean;
+  hasScript: boolean;
+  hasMcpTool: boolean;
+  clarificationPass: boolean;
+  projectTaskWithOtherTools: boolean;
+  pendingQuestion: boolean;
+};
+
+// Returns the model-facing reason a requested call is not executed, or null to run it. A reason
+// is a normal tool result the model can act on, never an execution failure.
+export function toolCallRejection(input: ToolCallAdmission): string | null {
+  if (input.index >= MAX_TOOL_CALLS_PER_STEP) return DEFERRED_TOOL_CALL_OUTPUT;
+  if (input.chatOnly && input.toolName !== 'skill_script' && !input.hasBuiltinTool) return 'Chat may only dispatch tasks and use protected platform operations.';
+  if (input.toolName === 'skill_script' && (!input.hasSkill || !input.hasScript)) return 'The model requested a Skill script that is not assigned or executable.';
+  if (input.toolName.startsWith('mcp_') && !input.hasMcpTool) return 'The model requested an MCP tool that is not assigned or available.';
+  if (input.clarificationPass && input.toolName !== 'update_plan' && input.toolName !== 'ask_user') return 'Only clarification tools are available during the planning clarification pass.';
+  // A plan update settles immediately, so it may accompany the one project task it describes.
+  if (input.toolName === 'project_task' && input.projectTaskWithOtherTools) return '一次模型响应只能派发一个 project_task（可同时更新计划）。若一个目标涉及多个项目，请将共同工作区根目录作为单个任务目录重新派发；独立任务请分开派发。';
+  if (input.toolName === 'ask_user' && !input.chatOnly) return 'Only Chat may ask a conversation question.';
+  if (input.toolName === 'ask_user' && input.total !== 1) return 'The clarification tool must be requested in its own model step.';
+  if (input.toolName === 'ask_user' && input.pendingQuestion) return 'Only one clarification question may be active.';
+  return null;
+}
 
 
 const HELPER_BUILTIN_TOOLS = [
@@ -536,7 +572,6 @@ export class AgentExecutionsService implements OnModuleInit {
       const result = await createModelGateway().generateAgentStep({ provider: runtime.provider, model: runtime.model, systemPrompt, messages: inferenceMessages, skillScripts: availableSkillScripts, builtinTools: builtinToolDefinitions, mcpTools: availableMcpTools, maxToolRounds: MAX_HELPER_TOOL_ROUNDS, abortSignal: abortController.signal, onTextDelta: (delta) => this.persistEvent(executionId, { kind: 'message_delta', messageId: streamedMessageId, delta, ...messagePresentation }) });
       const responseText = normalizeAssistantMessage(result.text);
       if (!responseText && result.toolCalls.length === 0) throw new Error('Empty Agent response');
-      if (result.toolCalls.length > MAX_TOOL_CALLS_PER_STEP) throw new TooManyToolCallsError();
       const currentExecution = await this.loadExecution(workspace.id, execution.agentId, executionId);
       if (currentExecution.status !== 'running') return this.toView(currentExecution);
       const modelMessages = [...modelMessagesBeforeInference, ...result.responseMessages] as StoredAgentModelMessage[];
@@ -548,42 +583,47 @@ export class AgentExecutionsService implements OnModuleInit {
       const executionAuthorization = execution.executionAuthorization;
       const runningCallIds: string[] = [];
       const immediateCallIds: string[] = [];
+      // Rejected and over-limit calls are still persisted with a tool result: the model reads the
+      // reason in the next step instead of the turn dying with an opaque execution failure.
+      const settledCallIds: string[] = [];
       let turnUpdated = false;
 
       this.db.transaction((transaction) => {
         const updated = transaction.update(agentExecutions).set({ status, phase, errorCode: null, modelMessages, displayMessages, plan, pendingQuestion, contextDropped: (execution.contextDropped ?? 0) + result.contextDropped, error: null, updatedAt: new Date() }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'running'))).run();
         if (updated.changes === 0) return;
         turnUpdated = true;
-        for (const requestedCall of result.toolCalls) {
+        for (const [index, requestedCall] of result.toolCalls.entries()) {
           const callId = `acall_${randomUUID()}`;
-          if (agent.id === CHAT_AGENT_ID && requestedCall.toolName !== 'skill_script' && !builtinToolDefinitions.some((tool) => tool.name === requestedCall.toolName)) throw new BadRequestException('Chat may only dispatch tasks and use protected platform operations.');
           const workingDirectory = process.cwd();
           const skill = requestedCall.toolName === 'skill_script' ? assignedSkills.find((item) => item.id === requestedCall.skillId) : undefined;
           const script = skill?.files.find((file) => file.path === requestedCall.scriptPath && file.path.startsWith('scripts/') && file.content.startsWith('#!'));
           const mcpTool = mcpTools.find((tool) => tool.name === requestedCall.toolName);
-          if (requestedCall.toolName === 'skill_script' && (!skill || !script)) throw new BadRequestException('The model requested a Skill script that is not assigned or executable.');
-          if (requestedCall.toolName.startsWith('mcp_') && !mcpTool) throw new BadRequestException('The model requested an MCP tool that is not assigned or available.');
-          if (clarificationPass && requestedCall.toolName !== 'update_plan' && requestedCall.toolName !== 'ask_user') throw new BadRequestException('Only clarification tools are available during the planning clarification pass.');
-          // A plan update settles immediately, so it may accompany the one project task it describes.
-          if (requestedCall.toolName === 'project_task' && result.toolCalls.some((call) => call !== requestedCall && call.toolName !== 'update_plan')) {
-            throw new InvalidAgentToolRequestError('一次模型响应只能派发一个 project_task（可同时更新计划）。若一个目标涉及多个项目，请将共同工作区根目录作为单个任务目录重新派发；独立任务请分开派发。');
+          // A rejected call is recorded as a failed tool call with a credential-safe reason. The
+          // model receives that reason as its tool result and can correct the request next step,
+          // so one malformed or over-limit call never fails the whole turn.
+          let rejection = toolCallRejection({
+            index,
+            total: result.toolCalls.length,
+            toolName: requestedCall.toolName,
+            chatOnly: agent.id === CHAT_AGENT_ID,
+            hasBuiltinTool: builtinToolDefinitions.some((tool) => tool.name === requestedCall.toolName),
+            hasSkill: Boolean(skill),
+            hasScript: Boolean(script),
+            hasMcpTool: Boolean(mcpTool),
+            clarificationPass,
+            projectTaskWithOtherTools: requestedCall.toolName === 'project_task' && result.toolCalls.some((call) => call !== requestedCall && call.toolName !== 'update_plan'),
+            pendingQuestion: pendingQuestion !== null,
+          });
+          if (!rejection && requestedCall.toolName === 'update_plan') {
+            try { plan = parsePlan(requestedCall.input); } catch (error) { rejection = error instanceof BadRequestException ? error.message : 'The plan update could not be applied.'; }
+          } else if (!rejection && requestedCall.toolName === 'ask_user') {
+            try { pendingQuestion = createPendingQuestion(requestedCall.input); status = 'waiting_for_input'; phase = 'model'; } catch (error) { rejection = error instanceof BadRequestException ? error.message : 'The conversation question could not be created.'; }
           }
-          if (requestedCall.toolName === 'ask_user') {
-            if (agent.id !== CHAT_AGENT_ID) throw new BadRequestException('Only Chat may ask a conversation question.');
-            if (result.toolCalls.length !== 1) throw new BadRequestException('The clarification tool must be requested in its own model step.');
-            if (pendingQuestion) throw new BadRequestException('Only one clarification question may be active.');
-            pendingQuestion = createPendingQuestion(requestedCall.input);
-            status = 'waiting_for_input';
-            phase = 'model';
-          }
-          if (requestedCall.toolName === 'update_plan') {
-            plan = parsePlan(requestedCall.input);
-            immediateCallIds.push(callId);
-          } else if (requestedCall.toolName !== 'ask_user') {
-            runningCallIds.push(callId);
-          }
-          transaction.insert(agentToolCalls).values({ id: callId, executionId, workspaceId: workspace.id, agentId: execution.agentId, toolCallId: requestedCall.toolCallId, shell: null, toolName: requestedCall.toolName === 'skill_script' ? 'skill_script' : requestedCall.toolName.startsWith('mcp_') ? 'mcp' : 'builtin', workingDirectory, skillId: skill?.id ?? null, skillName: skill?.name ?? null, scriptPath: script?.path ?? null, mcpServerId: mcpTool?.serverId ?? null, mcpToolName: requestedCall.toolName.startsWith('mcp_') ? mcpTool?.remoteName ?? null : requestedCall.modelToolName ?? requestedCall.toolName, input: requestedCall.input, arguments: requestedCall.arguments ?? [], packageFiles: skill?.files ?? [], status: requestedCall.toolName === 'ask_user' ? 'running' : requestedCall.toolName === 'update_plan' ? 'completed' : 'running', output: requestedCall.toolName === 'update_plan' ? formatPlan(plan) : '' }).run();
-          transaction.insert(auditLogs).values({ id: `audit_${randomUUID()}`, workspaceId: workspace.id, action: requestedCall.toolName === 'skill_script' ? 'skill_script.requested' : requestedCall.toolName === 'ask_user' ? 'agent_execution.question_requested' : `${requestedCall.toolName}.requested`, resource: callId, metadata: { agentId: execution.agentId, executionId, toolName: requestedCall.toolName, skillId: skill?.id ?? null, scriptPath: script?.path ?? null, mcpServerId: mcpTool?.serverId ?? null, mcpToolName: mcpTool?.remoteName ?? null } }).run();
+          if (rejection) settledCallIds.push(callId);
+          else if (requestedCall.toolName === 'update_plan') immediateCallIds.push(callId);
+          else if (requestedCall.toolName !== 'ask_user') runningCallIds.push(callId);
+          transaction.insert(agentToolCalls).values({ id: callId, executionId, workspaceId: workspace.id, agentId: execution.agentId, toolCallId: requestedCall.toolCallId, shell: null, toolName: requestedCall.toolName === 'skill_script' ? 'skill_script' : requestedCall.toolName.startsWith('mcp_') ? 'mcp' : 'builtin', workingDirectory, skillId: skill?.id ?? null, skillName: skill?.name ?? null, scriptPath: script?.path ?? null, mcpServerId: mcpTool?.serverId ?? null, mcpToolName: requestedCall.toolName.startsWith('mcp_') ? mcpTool?.remoteName ?? null : requestedCall.modelToolName ?? requestedCall.toolName, input: requestedCall.input, arguments: requestedCall.arguments ?? [], packageFiles: skill?.files ?? [], status: rejection ? 'failed' : requestedCall.toolName === 'update_plan' ? 'completed' : 'running', output: rejection ?? (requestedCall.toolName === 'update_plan' ? formatPlan(plan) : ''), finishedAt: rejection ? new Date() : null }).run();
+          transaction.insert(auditLogs).values({ id: `audit_${randomUUID()}`, workspaceId: workspace.id, action: rejection ? `${requestedCall.toolName}.rejected` : requestedCall.toolName === 'skill_script' ? 'skill_script.requested' : requestedCall.toolName === 'ask_user' ? 'agent_execution.question_requested' : `${requestedCall.toolName}.requested`, resource: callId, metadata: { agentId: execution.agentId, executionId, toolName: requestedCall.toolName, skillId: skill?.id ?? null, scriptPath: script?.path ?? null, mcpServerId: mcpTool?.serverId ?? null, mcpToolName: mcpTool?.remoteName ?? null, ...(rejection ? { rejection } : {}) } }).run();
         }
         transaction.update(agentExecutions).set({ status, phase, plan, pendingQuestion, executionAuthorization }).where(eq(agentExecutions.id, executionId)).run();
         if (status === 'completed') {
@@ -592,17 +632,21 @@ export class AgentExecutionsService implements OnModuleInit {
         }
       });
       if (turnUpdated) {
-        for (const callId of [...immediateCallIds, ...runningCallIds]) {
+        for (const callId of [...immediateCallIds, ...runningCallIds, ...settledCallIds]) {
           const [call] = await this.db.select().from(agentToolCalls).where(eq(agentToolCalls.id, callId)).limit(1);
           if (call) await this.persistEvent(executionId, { kind: 'tool_call', call: toToolCallView(call) });
         }
         await this.publishSnapshotForExecution(workspace.id, executionId);
       }
-      if (turnUpdated && immediateCallIds.length > 0) {
+      if (turnUpdated && (immediateCallIds.length > 0 || settledCallIds.length > 0)) {
         await this.resumeAfterToolCalls(request, workspaceSlug, workspace.id, execution.agentId, executionId);
       }
       if (turnUpdated && runningCallIds.length > 0) {
-        void Promise.all(runningCallIds.map((callId) => this.executeToolCall(request, workspaceSlug, workspace.id, execution.agentId, executionId, callId))).catch(async () => {
+        // Run a batch in request order. Platform scripts such as update_agent_team_role
+        // read-modify-write the same Team record, so parallel calls would silently drop updates.
+        void (async () => {
+          for (const callId of runningCallIds) await this.executeToolCall(request, workspaceSlug, workspace.id, execution.agentId, executionId, callId);
+        })().catch(async () => {
           await this.markExecutionFailed(workspace.id, executionId, executionFailure(new Error('Skill execution failed')));
         });
       }
