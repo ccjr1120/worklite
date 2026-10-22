@@ -84,7 +84,7 @@ export function TeamConfig({ teamId }: { teamId: string }) {
     return (
       <PageContainer width="detail">
         <WorkspaceChrome crumbs={crumbs} />
-        <div className="space-y-3" role="status"><Skeleton className="h-8 w-72" /><Skeleton className="h-28 w-full" /><Skeleton className="h-56 w-full" /></div>
+        <div className="space-y-3" role="status"><Skeleton className="h-8 w-72" /><Skeleton className="h-24 w-full" /><Skeleton className="h-56 w-full" /></div>
       </PageContainer>
     );
   }
@@ -92,7 +92,7 @@ export function TeamConfig({ teamId }: { teamId: string }) {
     return (
       <PageContainer width="detail">
         <WorkspaceChrome crumbs={crumbs} />
-        <TeamSwitcher teamId={teamId} view="config" />
+        <TeamSwitcher teamId={teamId} />
         <ErrorState title={t('config.title')} description={t('config.loadFailed')} onAction={() => void teamQuery.refetch()} />
       </PageContainer>
     );
@@ -109,7 +109,7 @@ export function TeamConfig({ teamId }: { teamId: string }) {
         description={t('config.description')}
         actions={<Link to="/agent-teams/$teamId" params={{ teamId }} className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">{t('config.backToRecords')}</Link>}
       />
-      <TeamSwitcher teamId={teamId} view="config" />
+      <TeamSwitcher teamId={teamId} />
 
       <section className="rounded-xl border border-border bg-surface p-4 shadow-xs">
         <h2 className="text-sm font-semibold">{t('config.overview.title')}</h2>

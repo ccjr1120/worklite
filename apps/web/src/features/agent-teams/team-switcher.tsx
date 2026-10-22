@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import type { AgentTeamRunStatus, AgentTeamView } from '@worklite/contracts';
 import { useAgentTeamRecordsQuery, useAgentTeamsQuery } from '@/api/queries';
 import { focusRing } from '@/components/ui/interaction';
+import { Skeleton } from '@/components/ui/skeleton';
+import { TruncatedText } from '@/components/ui/truncated-text';
 import { cn } from '@/lib/utils';
 
 // `/agent-teams` and the legacy `/agent-team-config` path open the existing Company Project Team.
@@ -10,21 +12,20 @@ export const DEFAULT_AGENT_TEAM_ID = 'agent_team_bmad_tea';
 
 const ACTIVE_RUN_STATUSES: AgentTeamRunStatus[] = ['running', 'waiting_for_input', 'paused'];
 
-type TeamView = 'records' | 'config';
-
-export function TeamSwitcher({ teamId, view }: { teamId: string; view: TeamView }) {
+/** Team cards for the configuration view; each links to the same configuration page of that Team. */
+export function TeamSwitcher({ teamId }: { teamId: string }) {
   const { t } = useTranslation('agentTeams');
   const query = useAgentTeamsQuery();
   if (!query.data?.length) return null;
 
   return (
     <nav aria-label={t('switcher.label')} className="grid gap-3 md:grid-cols-2">
-      {query.data.map((team) => <TeamCard key={team.id} team={team} selected={team.id === teamId} view={view} />)}
+      {query.data.map((team) => <TeamCard key={team.id} team={team} selected={team.id === teamId} />)}
     </nav>
   );
 }
 
-function TeamCard({ team, selected, view }: { team: AgentTeamView; selected: boolean; view: TeamView }) {
+function TeamCard({ team, selected }: { team: AgentTeamView; selected: boolean }) {
   const { t } = useTranslation('agentTeams');
   // Each card reuses the per-Team Run-summary query, so the selected Team's counts share the records request.
   const runs = useAgentTeamRecordsQuery(team.id);
@@ -33,7 +34,7 @@ function TeamCard({ team, selected, view }: { team: AgentTeamView; selected: boo
 
   return (
     <Link
-      to={view === 'config' ? '/agent-teams/$teamId/config' : '/agent-teams/$teamId'}
+      to="/agent-teams/$teamId/config"
       params={{ teamId: team.id }}
       aria-current={selected ? 'page' : undefined}
       className={cn(
@@ -42,17 +43,42 @@ function TeamCard({ team, selected, view }: { team: AgentTeamView; selected: boo
         focusRing,
       )}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-semibold break-words">{team.name}</span>
-        {focus ? <span className="rounded-full bg-surface-subtle px-2 py-0.5 text-xs text-muted-foreground">{focus}</span> : null}
-        {selected ? <span className="ml-auto text-xs font-medium text-brand-text">{t('switcher.current')}</span> : null}
+      <div className="flex items-center gap-2">
+        <TruncatedText text={team.name} className="text-sm font-semibold" />
+        {focus ? <span className="shrink-0 whitespace-nowrap rounded-full bg-surface-subtle px-2 py-0.5 text-xs text-muted-foreground">{focus}</span> : null}
+        {selected ? <span className="ml-auto shrink-0 whitespace-nowrap text-xs font-medium text-brand-text">{t('switcher.current')}</span> : null}
       </div>
-      {team.description ? <p className="mt-1.5 text-[13px] break-words text-muted-foreground">{team.description}</p> : null}
-      <dl className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      {team.description ? <TruncatedText as="p" text={team.description} className="mt-1.5 text-[13px] text-muted-foreground" /> : null}
+      <dl className="mt-3 flex gap-x-4 overflow-hidden whitespace-nowrap text-xs text-muted-foreground">
         <div className="flex gap-1"><dt>{t('switcher.maxConcurrentRuns')}</dt><dd className="tabular-nums text-foreground">{team.maxConcurrentRuns}</dd></div>
         <div className="flex gap-1"><dt>{t('switcher.activeRuns')}</dt><dd className="tabular-nums text-foreground">{count(ACTIVE_RUN_STATUSES)}</dd></div>
         <div className="flex gap-1"><dt>{t('switcher.queuedRuns')}</dt><dd className="tabular-nums text-foreground">{count(['queued'])}</dd></div>
       </dl>
     </Link>
+  );
+}
+
+/** Compact one-row Team switch for the Run list; the Team cards above belong to the configuration view. */
+export function TeamTabs({ teamId }: { teamId: string }) {
+  const { t } = useTranslation('agentTeams');
+  const query = useAgentTeamsQuery();
+  if (query.isPending) return <Skeleton className="h-9 w-80 max-w-full" role="status" />;
+  if (!query.data?.length) return null;
+
+  return (
+    <nav aria-label={t('switcher.label')} className="flex h-9 gap-1 overflow-x-auto border-b border-border">
+      {query.data.map((team) => (
+        <Link
+          key={team.id}
+          to="/agent-teams/$teamId"
+          params={{ teamId: team.id }}
+          aria-current={team.id === teamId ? 'page' : undefined}
+          title={t(`focus.${team.id}` as never, { defaultValue: '' }) || undefined}
+          className={cn('-mb-px inline-flex shrink-0 items-center whitespace-nowrap border-b-2 px-3 text-sm font-medium transition-colors', team.id === teamId ? 'border-brand text-brand-text' : 'border-transparent text-muted-foreground hover:text-foreground', focusRing)}
+        >
+          {team.name}
+        </Link>
+      ))}
+    </nav>
   );
 }
