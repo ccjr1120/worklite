@@ -26,7 +26,7 @@ export type AgentTeamGroupGraphInitial = {
   projectInstructions: readonly AgentTeamProjectInstructionFile[];
   groupContext: AgentTeamGroupRunContext;
   // Optional for historical callers/tests; v10 enables Dispatcher routing.
-  orchestrationVersion?: 6 | 7 | 8 | 9 | 10;
+  orchestrationVersion?: 6 | 7 | 8 | 9 | 10 | 11;
 };
 
 type GroupGraphState = {
