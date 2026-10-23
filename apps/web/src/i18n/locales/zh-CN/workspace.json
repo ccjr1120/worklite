@@ -35,6 +35,7 @@
   },
   "breadcrumbs": "面包屑导航",
   "openNavigation": "打开导航",
+  "reload": "刷新页面",
   "route": {
     "loading": "正在加载页面...",
     "errorTitle": "无法加载此页面",

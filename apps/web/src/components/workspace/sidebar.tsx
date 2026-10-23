@@ -8,6 +8,7 @@ import { isLiveStatus } from '@/components/status-badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { focusRingInset } from '@/components/ui/interaction';
 import { WorkLiteMark } from '@/components/worklite-mark';
+import { reloadPage } from '@/lib/reload';
 import { cn } from '@/lib/utils';
 
 const navigationGroups = [
@@ -106,15 +107,7 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
 
   return (
     <aside className={cn('flex h-full shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-[280ms] ease-[var(--ease-out)]', collapsed ? 'w-14' : 'w-[240px]')}>
-      <div className={cn('flex h-14 items-center px-3', collapsed && 'justify-center px-2')}>
-        <Link to="/chat" aria-label="WorkLite" className={cn('wl-press flex items-center gap-2.5 rounded-md p-1', focusRingInset)}>
-          <span className="flex size-8 items-center justify-center rounded-md bg-brand-subtle">
-            <WorkLiteMark className="size-6" />
-          </span>
-          {collapsed ? null : <span className="text-[15px] font-semibold tracking-[-0.01em]">WorkLite</span>}
-        </Link>
-      </div>
-      <nav ref={navRef} className="relative flex-1 overflow-y-auto px-2 pb-3 pt-2" aria-label={t('nav.title')}>
+      <nav ref={navRef} className="relative flex-1 overflow-y-auto px-2 pb-3 pt-3" aria-label={t('nav.title')}>
         {pill ? (
           <span
             aria-hidden="true"
@@ -139,15 +132,31 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
           ))}
         </div>
       </nav>
-      <div className={cn('shrink-0 border-t border-border py-2', collapsed ? 'px-1' : 'px-3')}>
-        <p
-          className={cn(
-            'truncate font-mono text-muted-foreground',
-            collapsed ? 'text-center text-[10px]' : 'text-[11px]',
-          )}
-        >
-          {APP_VERSION_LABEL}
-        </p>
+      {/* The footer carries the brand mark and build version as one reload control, so the
+          identity is visible without a separate header row. */}
+      <div className={cn('shrink-0 border-t border-border p-2', collapsed && 'px-1.5')}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={reloadPage}
+              aria-label={`${t('reload')} · ${APP_VERSION_LABEL}`}
+              className={cn(
+                'wl-press flex w-full items-center gap-2.5 rounded-md p-1.5 text-left hover:bg-surface-subtle',
+                collapsed && 'flex-col justify-center gap-1 px-0',
+                focusRingInset,
+              )}
+            >
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-brand-subtle">
+                <WorkLiteMark className="size-6" />
+              </span>
+              <span className={cn('font-mono text-muted-foreground', collapsed ? 'text-[10px] leading-none' : 'min-w-0 flex-1 truncate text-[11px]')}>
+                {APP_VERSION_LABEL}
+              </span>
+            </button>
+          </TooltipTrigger>
+          {collapsed ? <TooltipContent side="right">{t('reload')}</TooltipContent> : null}
+        </Tooltip>
       </div>
     </aside>
   );
