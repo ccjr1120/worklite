@@ -23,7 +23,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { CHAT_AGENT_ID } from '@worklite/contracts';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
-import { useCodexAccountUsagesQuery, useCodexAuthQuery, useModelProvidersQuery, usePortkeyGatewayQuery } from '@/api/queries';
+import { useCodexAccountUsagesQuery, useCodexAuthQuery, useModelProvidersQuery, usePortkeyGatewayQuery, useWebSearchSettingsQuery } from '@/api/queries';
 import { ApiError, api } from '@/api/client';
 import { queryClient } from '@/lib/query-client';
 import { formatDateTime, formatList } from '@/i18n/format';
@@ -477,6 +477,7 @@ function ModelProvidersPage() {
     <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome crumbs={[{ label: t('providers.title') }]} />
       <PageHeading title={t('providers.title')} description={t('providers.description')} />
+      <WebSearchPanel t={(key) => t(key as never)} locale={locale} />
       <GatewayPanel
         gateway={gatewayQuery.data}
         providers={modelProviders}
@@ -715,6 +716,117 @@ function ModelProvidersPage() {
         onConfirm={() => void removeProvider()}
       />
     </div>
+  );
+}
+
+function WebSearchPanel({ t, locale }: { t: (key: string) => string; locale: AppLocale }) {
+  const settingsQuery = useWebSearchSettingsQuery();
+  const settings = settingsQuery.data;
+  const [apiKey, setApiKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearBusy, setClearBusy] = useState(false);
+  const [clearError, setClearError] = useState('');
+
+  async function saveKey() {
+    const key = apiKey.trim();
+    if (!key) {
+      setError(t('providers.webSearch.keyRequired'));
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await api.saveWebSearchKey({ apiKey: key });
+      // The key is write-only. Drop it from component state as soon as the server
+      // confirms the write so it is not kept around for later renders.
+      setApiKey('');
+      await queryClient.invalidateQueries({ queryKey: ['web-search-settings'] });
+      toast.success(t('providers.webSearch.saved'));
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : t('providers.webSearch.saveFailed'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clearKey() {
+    setClearBusy(true);
+    setClearError('');
+    try {
+      await api.clearWebSearchKey();
+      setApiKey('');
+      setConfirmClear(false);
+      await queryClient.invalidateQueries({ queryKey: ['web-search-settings'] });
+      toast.success(t('providers.webSearch.cleared'));
+    } catch (caught: unknown) {
+      setClearError(caught instanceof Error ? caught.message : t('providers.webSearch.clearFailed'));
+    } finally {
+      setClearBusy(false);
+    }
+  }
+
+  return (
+    <section className="mt-6 w-full rounded-xl border border-border bg-surface p-4 shadow-xs" aria-labelledby="web-search-title">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 id="web-search-title" className="text-base font-semibold">{t('providers.webSearch.title')}</h2>
+          <p className="mt-1 text-[13px] text-muted-foreground">{t('providers.webSearch.description')}</p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-xs font-medium text-muted-foreground">{t('providers.webSearch.status')}</p>
+          <p className={`mt-1 text-sm font-medium ${settings?.configured ? 'text-success' : 'text-muted-foreground'}`}>
+            {settings ? settings.configured ? t('providers.webSearch.configured') : t('providers.webSearch.notConfigured') : t('providers.webSearch.loading')}
+          </p>
+          {settings?.updatedAt ? <p className="mt-1 text-xs text-muted-foreground">{t('providers.webSearch.updatedAt')}: {formatDateTime(settings.updatedAt, locale)}</p> : null}
+        </div>
+      </div>
+      {settingsQuery.isError ? <p className="mt-3 text-[13px] text-danger" role="alert">{t('providers.webSearch.loadFailed')}</p> : null}
+      <form
+        className="mt-4 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-end"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveKey();
+        }}
+      >
+        <Field label={t('providers.webSearch.apiKey')} htmlFor="web-search-api-key" hint={t('providers.webSearch.hint')} error={error} className="min-w-0 flex-1">
+          <PasswordInput
+            id="web-search-api-key"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder={settings?.configured ? t('providers.webSearch.replacePlaceholder') : t('providers.webSearch.placeholder')}
+            value={apiKey}
+            onChange={(event) => {
+              setApiKey(event.target.value);
+              setError('');
+            }}
+            disabled={busy}
+          />
+        </Field>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button type="submit" disabled={busy || !apiKey.trim()}>
+            {busy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}
+            {t('providers.webSearch.save')}
+          </Button>
+          <Button type="button" variant="secondary" disabled={busy || !settings?.configured} onClick={() => { setClearError(''); setConfirmClear(true); }}>
+            {t('providers.webSearch.clear')}
+          </Button>
+        </div>
+      </form>
+      <ConfirmDialog
+        open={confirmClear}
+        onOpenChange={(nextOpen) => { if (!nextOpen) { setConfirmClear(false); setClearError(''); } }}
+        title={t('providers.webSearch.clearTitle')}
+        description={t('providers.webSearch.clearDescription')}
+        confirmLabel={t('providers.webSearch.clearAction')}
+        cancelLabel={t('common:actions.cancel')}
+        busyLabel={t('providers.webSearch.clearAction')}
+        error={clearError}
+        busy={clearBusy}
+        onConfirm={() => void clearKey()}
+      />
+    </section>
   );
 }
 

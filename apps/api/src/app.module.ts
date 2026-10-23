@@ -7,6 +7,7 @@ import { HomeModule } from './modules/home/home.module';
 import { AgentsModule } from './modules/agents/agents.module';
 import { SkillsModule } from './modules/skills/skills.module';
 import { McpServersModule } from './modules/mcp-servers/mcp-servers.module';
+import { WebSearchModule } from './modules/web-search/web-search.module';
 import { WorkflowsModule } from './modules/workflows/workflows.module';
 import { WorkflowRevisionsModule } from './modules/workflow-revisions/workflow-revisions.module';
 import { RunsModule } from './modules/runs/runs.module';
@@ -36,6 +37,7 @@ import { LocalProjectsModule } from './modules/local-projects/local-projects.mod
     AgentsModule,
     SkillsModule,
     McpServersModule,
+    WebSearchModule,
     WorkflowsModule,
     WorkflowRevisionsModule,
     RunsModule,
