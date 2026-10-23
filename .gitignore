@@ -14,3 +14,4 @@ apps/api/data/
 .idea
 .vscode/*
 !.vscode/extensions.json
+codex-session-*.md
