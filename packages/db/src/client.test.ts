@@ -193,4 +193,46 @@ describe('initializeDatabase restart recovery', () => {
     expect(skill.content).toContain('call steer_project_task');
     expect(skill.content).not.toContain('never steer or append a correction');
   });
+
+  it('registers the direct Workflow inspection platform tool', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+
+    const files = await db.select().from(schema.skillFiles).where(eq(schema.skillFiles.skillId, 'sk_worklite_platform'));
+    const content = new Map(files.map((file) => [file.path, file.content]));
+    const tools = JSON.parse(content.get('scripts/tools.json')!) as Record<string, { name: string; inputSchema: { required?: string[]; properties: Record<string, { enum?: string[]; minimum?: number; maximum?: number }> } }>;
+    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
+
+    expect(content.get('scripts/inspect-workflow.mjs')).toContain('/versions');
+    expect(content.get('scripts/inspect-workflow.mjs')).toContain('/schedule');
+    expect(content.get('scripts/inspect-workflow.mjs')).toContain("versionsMode === 'none'");
+    expect(content.get('scripts/inspect-workflow.mjs')).toContain('omittedVersionDefinitions');
+    expect(tools['scripts/inspect-workflow.mjs'].name).toBe('inspect_workflow');
+    expect(tools['scripts/inspect-workflow.mjs'].inputSchema.required ?? []).toEqual([]);
+    expect(tools['scripts/inspect-workflow.mjs'].inputSchema.properties.versions.enum).toEqual(['latest', 'all', 'none']);
+    expect(tools['scripts/inspect-workflow.mjs'].inputSchema.properties.runLimit.maximum).toBe(20);
+    expect(content.get('SKILL.md')).toContain('inspect_workflow');
+    expect(content.get('SKILL.md')).toContain('never a reason to delegate');
+    expect(chat.systemPrompt).toContain('inspect_workflow');
+  });
+
+  it('registers query_platform as a bounded, redacting GET-only read tool', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+
+    const files = await db.select().from(schema.skillFiles).where(eq(schema.skillFiles.skillId, 'sk_worklite_platform'));
+    const content = new Map(files.map((file) => [file.path, file.content]));
+    const tools = JSON.parse(content.get('scripts/tools.json')!) as Record<string, { name: string; inputSchema: { required?: string[]; properties: Record<string, { enum?: string[] }> } }>;
+    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
+
+    expect(content.get('scripts/query-platform.mjs')).toContain("raw.method !== 'GET'");
+    expect(content.get('scripts/query-platform.mjs')).toContain("decoded === '..'");
+    expect(content.get('scripts/query-platform.mjs')).toContain("redirect: 'error'");
+    expect(content.get('scripts/query-platform.mjs')).toContain('SENSITIVE_KEYS');
+    expect(tools['scripts/query-platform.mjs'].name).toBe('query_platform');
+    expect(tools['scripts/query-platform.mjs'].inputSchema.required).toEqual(['path']);
+    expect(tools['scripts/query-platform.mjs'].inputSchema.properties.method.enum).toEqual(['GET']);
+    expect(content.get('SKILL.md')).toContain('query_platform');
+    expect(chat.systemPrompt).toContain('query_platform');
+  });
 });

@@ -392,14 +392,18 @@ export class RunsService {
     this.wechatOfficialAccount.subscribe((actionId) => this.queueCompletedAction(actionId));
   }
 
-  async list(request: Request, workspaceSlug: string): Promise<RunView[]> {
+  async list(request: Request, workspaceSlug: string, options: { workflowId?: string; limit?: number } = {}): Promise<RunView[]> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const rows = await this.db.select({ run: workflowRuns, workflow: workflows, version: workflowVersions })
+    // The filters are read-only projections for bounded inspection; an omitted option keeps the full list.
+    const conditions = [eq(workflowRuns.workspaceId, team.id)];
+    if (options.workflowId) conditions.push(eq(workflowRuns.workflowId, options.workflowId));
+    const statement = this.db.select({ run: workflowRuns, workflow: workflows, version: workflowVersions })
       .from(workflowRuns)
       .innerJoin(workflows, eq(workflowRuns.workflowId, workflows.id))
       .innerJoin(workflowVersions, eq(workflowRuns.workflowVersionId, workflowVersions.id))
-      .where(eq(workflowRuns.workspaceId, team.id))
+      .where(and(...conditions))
       .orderBy(desc(workflowRuns.createdAt));
+    const rows = options.limit === undefined ? await statement : await statement.limit(options.limit);
     return Promise.all(rows.map(({ run, workflow, version }) => this.toView(run, workflow, version, workspaceSlug, 'You', false)));
   }
 
