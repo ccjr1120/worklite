@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Headers, Param, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Header, Headers, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type { CreateRunRequest, RunProgressEvent } from '@worklite/contracts';
 import { RunsService } from './runs.service';
@@ -8,8 +8,13 @@ export class RunsController {
   constructor(private readonly runs: RunsService) {}
 
   @Get('runs')
-  list(@Req() request: Request) {
-    return this.runs.list(request, 'personal');
+  list(@Req() request: Request, @Query('workflowId') workflowId?: string, @Query('limit') limit?: string) {
+    // Read-only filters keep a Workflow inspection bounded instead of loading every workspace Run.
+    const parsedLimit = limit === undefined ? undefined : Number(limit);
+    return this.runs.list(request, 'personal', {
+      workflowId: workflowId?.trim() || undefined,
+      limit: Number.isInteger(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 200) : undefined,
+    });
   }
 
   @Get('runs/:runId')
