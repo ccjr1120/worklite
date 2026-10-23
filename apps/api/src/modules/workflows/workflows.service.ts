@@ -508,7 +508,7 @@ function validateDefinition(definition: StoredWorkflowDefinition, requireComplet
     if (source.id === target.id) throw new BadRequestException('A workflow node cannot connect to itself.');
     if (!sourcePort || !targetPort) throw new BadRequestException('The workflow edge references an unavailable port.');
     if (!portsCompatible(sourcePort, targetPort)) throw new BadRequestException('The workflow edge connects incompatible ports.');
-    if (!isGeneratedImageConnectionAllowed(source, target, edge.sourcePort, edge.targetPort)) throw new BadRequestException('Generated image output may connect only to the WeChat v2 coverImage input.');
+    if (!isGeneratedImageConnectionAllowed(source, target, edge.sourcePort, edge.targetPort)) throw new BadRequestException('Generated image output may connect only to the WeChat v2 coverImage or images input, or to an Artifact data input.');
     if (definition.edges.some((candidate) => candidate.id !== edge.id && candidate.sourceNodeId === edge.sourceNodeId && candidate.sourcePort === edge.sourcePort && candidate.targetNodeId === edge.targetNodeId && candidate.targetPort === edge.targetPort)) throw new BadRequestException('The workflow contains a duplicate connection.');
     validateEdgeControlFlow(edge);
     edgeIds.add(edge.id);
@@ -682,6 +682,15 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
       if (value.text.align !== undefined && value.text.align !== 'left' && value.text.align !== 'center' && value.text.align !== 'right') throw new BadRequestException('Canvas Sticker node text.align must be left, center, or right.');
     }
   }
+  if (type === 'worklite/canvas-render') {
+    if (typeof value.width !== 'number' || !Number.isInteger(value.width) || value.width < 16 || value.width > 4096) throw new BadRequestException('Canvas Render node width must be an integer between 16 and 4096.');
+    if (typeof value.height !== 'number' || !Number.isInteger(value.height) || value.height < 16 || value.height > 4096) throw new BadRequestException('Canvas Render node height must be an integer between 16 and 4096.');
+    if (value.width * value.height > 8_000_000) throw new BadRequestException('Canvas Render node canvas area must not exceed 8000000 pixels.');
+    if (value.backgroundColor !== undefined && (typeof value.backgroundColor !== 'string' || !CANVAS_STICKER_COLOR_PATTERN.test(value.backgroundColor.trim()))) throw new BadRequestException('Canvas Render node backgroundColor must be a #hex, rgb(a)(), or transparent color.');
+    if (value.key !== undefined && (typeof value.key !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(value.key))) throw new BadRequestException('Canvas Render node key must be 1-64 characters of letters, digits, dots, underscores, or hyphens.');
+    if (value.timeoutMs !== undefined && (typeof value.timeoutMs !== 'number' || !Number.isInteger(value.timeoutMs) || value.timeoutMs < 100 || value.timeoutMs > 60000)) throw new BadRequestException('Canvas Render node timeoutMs must be an integer between 100 and 60000.');
+    if (value.maxOutputBytes !== undefined && (typeof value.maxOutputBytes !== 'number' || !Number.isInteger(value.maxOutputBytes) || value.maxOutputBytes < 1024 || value.maxOutputBytes > 33554432)) throw new BadRequestException('Canvas Render node maxOutputBytes must be an integer between 1024 and 33554432.');
+  }
   if (type === 'worklite/timer') {
     if (typeof value.enabled !== 'boolean') throw new BadRequestException('Timer node enabled must be a boolean.');
     if (typeof value.intervalSeconds !== 'number' || !Number.isFinite(value.intervalSeconds) || value.intervalSeconds < 300) throw new BadRequestException('Timer node intervalSeconds must be a finite number of at least 300.');
@@ -750,9 +759,13 @@ function isGeneratedImageConnectionAllowed(
   sourcePort: string,
   targetPort: string,
 ): boolean {
-  const isImageOutput = (source.type === 'worklite/image' || source.type === 'worklite/canvas-sticker') && source.typeVersion === '1' && sourcePort === 'output';
-  const isWeChatCoverInput = target.type === 'wechat-official-account/publish' && target.typeVersion === '2' && targetPort === 'coverImage';
-  return isImageOutput === isWeChatCoverInput;
+  const isImageOutput = (source.type === 'worklite/image' || source.type === 'worklite/canvas-sticker' || source.type === 'worklite/canvas-render') && source.typeVersion === '1' && sourcePort === 'output';
+  const isWeChatImageInput = target.type === 'wechat-official-account/publish' && target.typeVersion === '2' && (targetPort === 'coverImage' || targetPort === 'images');
+  const isArtifactDataTarget = target.type === 'worklite/artifact' && targetPort === 'data';
+  // Only generated images may feed WeChat's cover/illustration inputs, and a
+  // generated image may not be consumed as ordinary text/JSON. Everything else
+  // keeps the normal port compatibility rules.
+  return isImageOutput ? isWeChatImageInput || isArtifactDataTarget : !isWeChatImageInput;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -497,3 +497,81 @@ describe('WorkspaceResourcesService public Agent model validation', () => {
     await expect(resources().assertPublicAgentModel(model)).rejects.toBeInstanceOf(error);
   });
 });
+
+function canvasRenderDefinition(configOverrides: Record<string, unknown> = {}, target: 'cover' | 'images' | 'artifact' = 'cover'): StoredWorkflowDefinition {
+  const render = {
+    id: 'render',
+    position: { x: 0, y: 0 },
+    type: 'worklite/canvas-render',
+    typeVersion: '1',
+    config: { width: 900, height: 383, backgroundColor: '#ffffff', key: 'cover', ...configOverrides },
+    errorPolicy: 'stop' as const,
+  };
+  if (target === 'artifact') {
+    return {
+      schemaVersion: 4,
+      input: {},
+      defaults: { errorPolicy: 'stop' },
+      nodes: [
+        render,
+        { id: 'artifact', position: { x: 300, y: 0 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'figure', type: 'json' }, errorPolicy: 'stop' },
+      ],
+      edges: [{ id: 'edge-artifact', sourceNodeId: 'render', sourcePort: 'output', targetNodeId: 'artifact', targetPort: 'data' }],
+    };
+  }
+  return {
+    schemaVersion: 4,
+    input: {},
+    defaults: { errorPolicy: 'stop' },
+    nodes: [
+      render,
+      { id: 'wechat', position: { x: 300, y: 0 }, type: 'wechat-official-account/publish', typeVersion: '2', config: { accountId: 'wechat_official_account_personal', mode: 'draft' }, errorPolicy: 'stop' },
+    ],
+    edges: [{ id: 'edge-image', sourceNodeId: 'render', sourcePort: 'output', targetNodeId: 'wechat', targetPort: target === 'cover' ? 'coverImage' : 'images' }],
+  };
+}
+
+describe('WorkflowsService Canvas Render node validation', () => {
+  async function service() {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+    const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) } as unknown as WorkspaceService;
+    const resources = {} as WorkspaceResourcesService;
+    return new WorkflowsService(db, workspaces, {} as WorkflowSchedulesService, resources);
+  }
+
+  it.each(['cover', 'images', 'artifact'] as const)('accepts a Canvas Render node connected to the %s input', async (target) => {
+    const workflows = await service();
+    const created = await workflows.create(request, 'personal', { name: `Canvas render ${target}`, definition: canvasRenderDefinition({}, target) });
+    expect(node(created, 'render').type).toBe('worklite/canvas-render');
+  });
+
+  it('keeps ordinary non-image output flowing into an Artifact data input', async () => {
+    const workflows = await service();
+    const definition: StoredWorkflowDefinition = {
+      schemaVersion: 4,
+      input: {},
+      defaults: { errorPolicy: 'stop' },
+      nodes: [
+        { id: 'input', position: { x: 0, y: 0 }, type: 'worklite/input', typeVersion: '1', config: {}, errorPolicy: 'stop' },
+        { id: 'artifact', position: { x: 300, y: 0 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'summary', type: 'text' }, errorPolicy: 'stop' },
+      ],
+      edges: [{ id: 'edge-artifact', sourceNodeId: 'input', sourcePort: 'output', targetNodeId: 'artifact', targetPort: 'data' }],
+    };
+    const created = await workflows.create(request, 'personal', { name: 'Artifact from input', definition });
+    expect(node(created, 'artifact').type).toBe('worklite/artifact');
+  });
+
+  it('rejects dimensions outside the supported range or an oversized canvas', async () => {
+    const workflows = await service();
+    await expect(workflows.create(request, 'personal', { name: 'Bad render width', definition: canvasRenderDefinition({ width: 8 }) })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(workflows.create(request, 'personal', { name: 'Bad render area', definition: canvasRenderDefinition({ width: 4000, height: 4000 }) })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects invalid protection settings', async () => {
+    const workflows = await service();
+    await expect(workflows.create(request, 'personal', { name: 'Bad render timeout', definition: canvasRenderDefinition({ timeoutMs: 10 }) })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(workflows.create(request, 'personal', { name: 'Bad render key', definition: canvasRenderDefinition({ key: 'not allowed' }) })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(workflows.create(request, 'personal', { name: 'Bad render color', definition: canvasRenderDefinition({ backgroundColor: 'blue' }) })).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
