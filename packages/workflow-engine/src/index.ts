@@ -1,6 +1,25 @@
-import type { WorkflowDefinition, WorkflowEdgeDefinition } from '@worklite/contracts';
+import type { WorkflowDefinition, WorkflowEdgeDefinition, WorkflowNodeDefinition } from '@worklite/contracts';
 
 export type JsonSchema = Readonly<Record<string, unknown>>;
+
+// Every node may carry a short display label and a one-sentence description so
+// editors and run views can show what a step does instead of only its type name.
+export const WORKFLOW_NODE_LABEL_MAX_LENGTH = 40;
+export const WORKFLOW_NODE_DESCRIPTION_MAX_LENGTH = 200;
+
+function withNodeIdentity(schema: JsonSchema): JsonSchema {
+  const properties = schema.properties && typeof schema.properties === 'object' && !Array.isArray(schema.properties)
+    ? schema.properties as Record<string, unknown>
+    : {};
+  return {
+    ...schema,
+    properties: {
+      label: { type: 'string', minLength: 1, maxLength: WORKFLOW_NODE_LABEL_MAX_LENGTH },
+      description: { type: 'string', minLength: 1, maxLength: WORKFLOW_NODE_DESCRIPTION_MAX_LENGTH },
+      ...properties,
+    },
+  };
+}
 
 export type WorkflowPortDefinition = {
   name: string;
@@ -19,6 +38,12 @@ export type WorkflowNodeCapability = {
   inputSchema: JsonSchema;
   outputSchema: JsonSchema;
   configSchema: JsonSchema;
+  /**
+   * A join node does not consume one FIFO queue per port. The scheduler holds
+   * one value per incoming edge and only fires once every eligible edge has a
+   * value, then emits those values as one ordered array.
+   */
+  aggregation?: 'join';
 };
 
 export type ArtifactRef = {
@@ -88,7 +113,7 @@ export function mountWorkflowPlugin(registry: NodeTypeRegistry, plugin: Workflow
   return plugin.register(registry) ?? (() => undefined);
 }
 
-const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
+const WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
   {
     id: 'worklite/input',
     version: '1',
@@ -196,9 +221,12 @@ const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     version: '1',
     name: 'Image Generation',
     purpose: 'Generate PNG images from a text prompt.',
-    inputs: [{ name: 'prompt', required: true, dataType: 'string', multiple: false }],
+    inputs: [
+      { name: 'prompt', required: false, dataType: 'string', multiple: false },
+      { name: 'context', required: false, dataType: 'json', multiple: false },
+    ],
     outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
-    inputSchema: { type: 'object', required: ['prompt'], properties: { prompt: { type: 'string' } } },
+    inputSchema: { type: 'object', properties: { prompt: { type: 'string' }, context: {} } },
     outputSchema: { type: 'object' },
     configSchema: {
       type: 'object',
@@ -209,6 +237,7 @@ const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
         background: { type: 'string', enum: ['opaque', 'transparent'] },
         quality: { type: 'string', enum: ['low', 'medium', 'high'] },
         size: { type: 'string', enum: ['1024x1024', '1536x1024', '1024x1536'] },
+        promptPath: { type: 'string', minLength: 1 },
       },
     },
   },
@@ -334,7 +363,7 @@ const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
     inputSchema: { type: 'object' },
     outputSchema: {},
-    configSchema: { type: 'object', required: ['model', 'systemPrompt', 'skillIds', 'mcpServerIds'], properties: { model: { type: 'string' }, systemPrompt: { type: 'string' }, outputFormat: { type: 'string', enum: ['text', 'json'] }, outputContract: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } }, passthroughKeys: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } }, maxToolCalls: { type: 'integer', minimum: 1 }, maxToolRounds: { type: 'integer', minimum: 1 }, maxToolResultChars: { type: 'integer', minimum: 1 }, skillIds: { type: 'array', items: { type: 'string' } }, mcpServerIds: { type: 'array', items: { type: 'string' } } } },
+    configSchema: { type: 'object', required: ['model', 'systemPrompt', 'skillIds', 'mcpServerIds'], properties: { model: { type: 'string' }, systemPrompt: { type: 'string' }, outputFormat: { type: 'string', enum: ['text', 'json'] }, outputContract: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } }, passthroughKeys: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } }, allowEmptyOutputKeys: { type: 'array', items: { type: 'string', minLength: 1 } }, maxToolCalls: { type: 'integer', minimum: 1 }, maxToolRounds: { type: 'integer', minimum: 1 }, maxToolResultChars: { type: 'integer', minimum: 1 }, skillIds: { type: 'array', items: { type: 'string' } }, mcpServerIds: { type: 'array', items: { type: 'string' } } } },
   },
   {
     id: 'worklite/branch',
@@ -396,7 +425,107 @@ const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
       },
     },
   },
+  {
+    id: 'worklite/map',
+    version: '1',
+    name: 'Array Map',
+    purpose: 'Run an inline subgraph once for every element of a JSON array and return the results in item order.',
+    inputs: [
+      { name: 'items', required: true, dataType: 'json', multiple: false },
+      { name: 'context', required: false, dataType: 'json', multiple: false },
+    ],
+    outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
+    inputSchema: {
+      type: 'object',
+      required: ['items'],
+      properties: { items: {}, context: {} },
+    },
+    outputSchema: { type: 'array' },
+    configSchema: {
+      type: 'object',
+      required: ['subgraph'],
+      properties: {
+        itemsPath: { type: 'string' },
+        subgraph: {
+          type: 'object',
+          required: ['nodes', 'edges'],
+          properties: { nodes: { type: 'array' }, edges: { type: 'array' } },
+        },
+        bindings: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['nodeId', 'field', 'path'],
+            properties: {
+              nodeId: { type: 'string', minLength: 1 },
+              field: { type: 'string', minLength: 1 },
+              path: { type: 'string', minLength: 1 },
+            },
+          },
+        },
+        outputNodeId: { type: 'string', minLength: 1 },
+        entryPort: { type: 'string', minLength: 1 },
+        continueOnError: { type: 'boolean' },
+        maxItems: { type: 'integer', minimum: 1 },
+      },
+    },
+  },
+  {
+    id: 'worklite/join',
+    version: '1',
+    name: 'Join Barrier',
+    purpose: 'Wait for every sibling branch and emit their outputs as one ordered JSON array.',
+    inputs: [{ name: 'input', required: true, dataType: 'json', multiple: true }],
+    outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
+    inputSchema: { type: 'object', required: ['input'], properties: { input: { type: 'array' } } },
+    outputSchema: { type: 'array' },
+    configSchema: {
+      type: 'object',
+      properties: {
+        orderBy: {
+          type: 'object',
+          required: ['path'],
+          properties: {
+            path: { type: 'string', minLength: 1 },
+            direction: { type: 'string', enum: ['asc', 'desc'] },
+          },
+        },
+      },
+    },
+    aggregation: 'join',
+  },
+  {
+    id: 'worklite/compose-article',
+    version: '1',
+    name: 'Compose Article',
+    purpose: 'Resolve inline image placeholders into generated images and enforce deterministic article invariants.',
+    inputs: [
+      { name: 'article', required: true, dataType: 'json', multiple: false },
+      { name: 'images', required: true, dataType: 'json', multiple: false },
+      { name: 'coverImage', required: true, dataType: 'json', multiple: false },
+    ],
+    outputs: [{ name: 'output', required: false, dataType: 'string', multiple: true }],
+    inputSchema: {
+      type: 'object',
+      required: ['article', 'images', 'coverImage'],
+      properties: { article: {}, images: { type: 'array' }, coverImage: { type: 'object' } },
+    },
+    outputSchema: { type: 'string' },
+    configSchema: {
+      type: 'object',
+      properties: {
+        titlePath: { type: 'string', minLength: 1 },
+        articlePath: { type: 'string', minLength: 1 },
+        unusedImagePolicy: { type: 'string', enum: ['drop', 'append'] },
+      },
+    },
+  },
 ];
+
+const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = WORKFLOW_NODE_CAPABILITIES.map((capability) => ({
+  ...capability,
+  configSchema: withNodeIdentity(capability.configSchema),
+}));
 
 export function listWorkflowNodeCapabilities(): WorkflowNodeCapability[] {
   return WORKLITE_WORKFLOW_NODE_CAPABILITIES.map((capability) => ({
@@ -450,6 +579,11 @@ export type WorkflowActiveInvocation = WorkflowScheduledInvocation & {
 export type WorkflowSchedulerState = {
   ready: WorkflowScheduledInvocation[];
   pendingInputs: Record<string, Record<string, unknown[]>>;
+  /**
+   * Join nodes buffer one queue per incoming edge, keyed by edge id, so
+   * sibling outputs can be ordered deterministically by definition edge order.
+   */
+  joinBuffers?: Record<string, Record<string, unknown[]>>;
   edgeTraversals: Record<string, number>;
   latestOutputs: Record<string, unknown>;
   terminalOutputs: Record<string, unknown>;
@@ -570,11 +704,62 @@ function connectedInputPorts(definition: WorkflowDefinition, nodeId: string): Se
   return new Set(definition.edges.filter((edge) => edge.targetNodeId === nodeId).map((edge) => edge.targetPort));
 }
 
+function orderJoinValues(values: unknown[], config: unknown): unknown[] {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return values;
+  const orderBy = (config as Record<string, unknown>).orderBy;
+  if (!orderBy || typeof orderBy !== 'object' || Array.isArray(orderBy)) return values;
+  const path = (orderBy as Record<string, unknown>).path;
+  if (typeof path !== 'string' || !path.trim()) return values;
+  const direction = (orderBy as Record<string, unknown>).direction === 'desc' ? -1 : 1;
+  return values
+    .map((value, index) => ({ value, index }))
+    .sort((left, right) => {
+      const leftValue = readWorkflowOutputPath(left.value, path);
+      const rightValue = readWorkflowOutputPath(right.value, path);
+      const leftKey = leftValue.exists ? leftValue.value : undefined;
+      const rightKey = rightValue.exists ? rightValue.value : undefined;
+      let comparison = 0;
+      if (typeof leftKey === 'number' && typeof rightKey === 'number') comparison = leftKey - rightKey;
+      else if (typeof leftKey === 'string' && typeof rightKey === 'string') comparison = leftKey.localeCompare(rightKey);
+      else if (leftKey === undefined || leftKey === null) comparison = rightKey === undefined || rightKey === null ? 0 : 1;
+      else comparison = rightKey === undefined || rightKey === null ? -1 : 0;
+      if (comparison === 0) return left.index - right.index;
+      return comparison * direction;
+    })
+    .map((entry) => entry.value);
+}
+
+function takeReadyJoinInput(definition: WorkflowDefinition, state: WorkflowSchedulerState, nodeId: string, config: unknown): Record<string, unknown> | undefined {
+  const incoming = definition.edges.filter((edge) => edge.targetNodeId === nodeId);
+  if (incoming.length === 0) return undefined;
+  const buffers = state.joinBuffers?.[nodeId] ?? {};
+  // An edge whose bounded budget is exhausted can no longer contribute, so it
+  // must not block the barrier. Feedback edges should not target a join; the
+  // API validation rejects that shape to keep the barrier forward-only.
+  const eligible = incoming.filter((edge) => edge.maxTraversals === undefined
+    || (state.edgeTraversals[edge.id] ?? 0) < edge.maxTraversals
+    || (buffers[edge.id]?.length ?? 0) > 0);
+  if (eligible.length === 0) return undefined;
+  if (eligible.some((edge) => (buffers[edge.id]?.length ?? 0) === 0)) return undefined;
+  const values = eligible.map((edge) => (buffers[edge.id] as unknown[]).shift());
+  for (const edge of eligible) {
+    if ((buffers[edge.id]?.length ?? 0) === 0) delete buffers[edge.id];
+  }
+  if (state.joinBuffers) {
+    if (Object.keys(buffers).length === 0) delete state.joinBuffers[nodeId];
+    else state.joinBuffers[nodeId] = buffers;
+  }
+  return { input: orderJoinValues(values, config) };
+}
+
 function takeReadyInput(definition: WorkflowDefinition, state: WorkflowSchedulerState, nodeId: string): Record<string, unknown> | undefined {
   const node = definition.nodes.find((candidate) => candidate.id === nodeId);
   if (!node) return undefined;
   const capability = resolveWorkflowNodeCapability(node.type, node.typeVersion);
   if (!capability) throw new Error(`Node Type is not registered: ${node.type}@${node.typeVersion}`);
+  if (capability.aggregation === 'join' && definition.edges.some((edge) => edge.targetNodeId === nodeId)) {
+    return takeReadyJoinInput(definition, state, nodeId, node.config);
+  }
   const connected = connectedInputPorts(definition, nodeId);
   const pending = state.pendingInputs[nodeId] ?? {};
   const connectedPorts = capability.inputs.filter((port) => connected.has(port.name));
@@ -643,11 +828,22 @@ export function commitWorkflowInvocation(definition: WorkflowDefinition, state: 
   const candidateNodeIds = new Set<string>();
   for (const edge of traversedEdges) {
     state.edgeTraversals[edge.id] = (state.edgeTraversals[edge.id] ?? 0) + 1;
-    const nodeInputs = state.pendingInputs[edge.targetNodeId] ?? {};
-    const values = nodeInputs[edge.targetPort] ?? [];
-    values.push(normalizedOutput);
-    nodeInputs[edge.targetPort] = values;
-    state.pendingInputs[edge.targetNodeId] = nodeInputs;
+    const target = definition.nodes.find((candidate) => candidate.id === edge.targetNodeId);
+    const targetCapability = target ? resolveWorkflowNodeCapability(target.type, target.typeVersion) : undefined;
+    if (targetCapability?.aggregation === 'join') {
+      state.joinBuffers ??= {};
+      const nodeBuffers = state.joinBuffers[edge.targetNodeId] ?? {};
+      const values = nodeBuffers[edge.id] ?? [];
+      values.push(normalizedOutput);
+      nodeBuffers[edge.id] = values;
+      state.joinBuffers[edge.targetNodeId] = nodeBuffers;
+    } else {
+      const nodeInputs = state.pendingInputs[edge.targetNodeId] ?? {};
+      const values = nodeInputs[edge.targetPort] ?? [];
+      values.push(normalizedOutput);
+      nodeInputs[edge.targetPort] = values;
+      state.pendingInputs[edge.targetNodeId] = nodeInputs;
+    }
     candidateNodeIds.add(edge.targetNodeId);
   }
   enqueueReadyInvocations(definition, state, candidateNodeIds);
@@ -687,14 +883,390 @@ export function createGenericAgentNodeType(execute: GenericAgentNodeExecutor): N
       },
     },
     outputSchema: {},
-    configSchema: {
+    configSchema: withNodeIdentity({
       type: 'object',
       required: ['agentVersionId'],
       properties: {
         agentVersionId: { type: 'string' },
         outputSchema: { type: 'object' },
       },
-    },
+    }),
     execute,
   };
+}
+
+export type WorkflowSubgraphDefinition = {
+  nodes: WorkflowNodeDefinition[];
+  edges: WorkflowEdgeDefinition[];
+};
+
+export type WorkflowMapBinding = {
+  nodeId: string;
+  field: string;
+  path: string;
+};
+
+export type WorkflowMapScope = {
+  item: unknown;
+  index: number;
+  context: unknown;
+};
+
+export type WorkflowMapNodeRequest = {
+  node: WorkflowNodeDefinition;
+  input: Record<string, unknown>;
+  config: unknown;
+  item: unknown;
+  index: number;
+  context: unknown;
+  signal: AbortSignal;
+};
+
+export type WorkflowMapNodeExecutor = (request: WorkflowMapNodeRequest) => Promise<unknown>;
+
+export type ExecuteWorkflowMapRequest = {
+  /** The value delivered to the map node's items port; itemsPath is applied here. */
+  itemsValue: unknown;
+  context: unknown;
+  config: unknown;
+  executeNode: WorkflowMapNodeExecutor;
+  signal: AbortSignal;
+  onElementError?: (error: Error, index: number, total: number) => void | Promise<void>;
+};
+
+function asWorkflowRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function cloneWorkflowValue<T>(value: T): T {
+  return value === undefined ? value : structuredClone(value);
+}
+
+function readWorkflowSubgraph(value: unknown): WorkflowSubgraphDefinition {
+  const record = asWorkflowRecord(value);
+  if (!record || !Array.isArray(record.nodes) || !Array.isArray(record.edges)) {
+    throw new Error('Map config requires a subgraph containing nodes and edges.');
+  }
+  return { nodes: record.nodes as WorkflowNodeDefinition[], edges: record.edges as WorkflowEdgeDefinition[] };
+}
+
+function readWorkflowMapBindings(value: unknown): WorkflowMapBinding[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error('Map bindings must be an array.');
+  return value.map((entry, index) => {
+    const record = asWorkflowRecord(entry);
+    if (!record
+      || typeof record.nodeId !== 'string' || !record.nodeId.trim()
+      || typeof record.field !== 'string' || !record.field.trim()
+      || typeof record.path !== 'string' || !record.path.trim()) {
+      throw new Error(`Map binding ${index} requires nodeId, field, and path strings.`);
+    }
+    return { nodeId: record.nodeId.trim(), field: record.field.trim(), path: record.path.trim() };
+  });
+}
+
+function writeWorkflowConfigPath(target: Record<string, unknown>, path: string, value: unknown): void {
+  const segments = path.split('.').map((segment) => segment.trim()).filter(Boolean);
+  if (segments.length === 0) throw new Error('Map binding field must be a non-empty path.');
+  let current = target;
+  for (const segment of segments.slice(0, -1)) {
+    const existing = asWorkflowRecord(current[segment]);
+    if (!existing) {
+      const next: Record<string, unknown> = {};
+      current[segment] = next;
+      current = next;
+    } else {
+      current = existing;
+    }
+  }
+  current[segments[segments.length - 1]] = cloneWorkflowValue(value);
+}
+
+function applyWorkflowMapBindings(config: unknown, bindings: WorkflowMapBinding[], nodeId: string, scope: WorkflowMapScope): unknown {
+  const matching = bindings.filter((binding) => binding.nodeId === nodeId);
+  if (matching.length === 0) return config;
+  const base = asWorkflowRecord(config);
+  const next: Record<string, unknown> = base ? structuredClone(base) : {};
+  for (const binding of matching) {
+    const located = readWorkflowOutputPath(scope, binding.path);
+    if (!located.exists) throw new Error(`Map binding path "${binding.path}" does not exist for node "${nodeId}".`);
+    writeWorkflowConfigPath(next, binding.field, located.value);
+  }
+  return next;
+}
+
+function throwIfWorkflowAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw new Error('Workflow execution was aborted.');
+}
+
+function injectWorkflowMapEntry(ready: WorkflowScheduledInvocation[], subgraph: WorkflowDefinition, scope: WorkflowMapScope, entryPort: string | undefined): void {
+  const rootIds = new Set(subgraph.nodes.filter((node) => !subgraph.edges.some((edge) => edge.targetNodeId === node.id)).map((node) => node.id));
+  for (const invocation of ready) {
+    if (!rootIds.has(invocation.nodeId)) continue;
+    const node = subgraph.nodes.find((candidate) => candidate.id === invocation.nodeId);
+    if (!node) continue;
+    const capability = resolveWorkflowNodeCapability(node.type, node.typeVersion);
+    if (!capability) throw new Error(`Node Type is not registered: ${node.type}@${node.typeVersion}`);
+    const port = entryPort ? capability.inputs.find((candidate) => candidate.name === entryPort) : capability.inputs[0];
+    if (!port) throw new Error(entryPort
+      ? `Map entry port "${entryPort}" does not exist on subgraph root "${node.id}".`
+      : `Map subgraph root "${node.id}" has no input port to receive the current item.`);
+    invocation.input[port.name] = port.dataType === 'string'
+      ? (typeof scope.item === 'string' ? scope.item : JSON.stringify(scope.item))
+      : { item: scope.item, index: scope.index, context: scope.context };
+  }
+}
+
+async function executeWorkflowMapElement(params: {
+  subgraph: WorkflowDefinition;
+  scope: WorkflowMapScope;
+  bindings: WorkflowMapBinding[];
+  configuredOutputNodeId: string | undefined;
+  entryPort: string | undefined;
+  executeNode: WorkflowMapNodeExecutor;
+  signal: AbortSignal;
+}): Promise<unknown> {
+  const { subgraph, scope, bindings, configuredOutputNodeId, entryPort, executeNode, signal } = params;
+  const state = createWorkflowSchedulerState(subgraph);
+  injectWorkflowMapEntry(state.ready, subgraph, scope, entryPort);
+
+  let invocations = 0;
+  while (state.ready.length > 0) {
+    throwIfWorkflowAborted(signal);
+    const invocation = takeNextWorkflowInvocation(state);
+    if (!invocation) break;
+    invocations += 1;
+    if (invocations > 10000) throw new Error('Map subgraph exceeded the per-element invocation safety limit.');
+    const node = subgraph.nodes.find((candidate) => candidate.id === invocation.nodeId);
+    if (!node) throw new Error(`Map subgraph references an unavailable node: ${invocation.nodeId}`);
+    const configuration = applyWorkflowMapBindings(node.config, bindings, node.id, scope);
+    const attempts = node.errorPolicy === 'retry' ? 2 : 1;
+    let output: unknown;
+    let failure: unknown;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        output = await executeNode({
+          node,
+          input: invocation.input,
+          config: configuration,
+          item: scope.item,
+          index: scope.index,
+          context: scope.context,
+          signal,
+        });
+        failure = undefined;
+        break;
+      } catch (error) {
+        failure = error;
+        throwIfWorkflowAborted(signal);
+      }
+    }
+    if (failure !== undefined) throw failure instanceof Error ? failure : new Error(String(failure));
+    commitWorkflowInvocation(subgraph, state, node.id, output);
+  }
+
+  const recordedTerminals = Object.keys(state.terminalOutputs);
+  const outputNodeId = configuredOutputNodeId ?? (recordedTerminals.length === 1 ? recordedTerminals[0] : undefined);
+  if (!outputNodeId) throw new Error('Map requires outputNodeId when the subgraph has multiple terminal nodes.');
+  if (!subgraph.nodes.some((node) => node.id === outputNodeId)) throw new Error(`Map output node "${outputNodeId}" does not exist in the subgraph.`);
+  if (!Object.hasOwn(state.terminalOutputs, outputNodeId)) throw new Error(`Map output node "${outputNodeId}" did not produce an output.`);
+  return state.terminalOutputs[outputNodeId];
+}
+
+/**
+ * Serial array map. Each element gets an isolated scheduler state and cloned
+ * item/context, and results are appended by item index rather than completion
+ * order. Parallelism can be added inside this loop later without changing the
+ * node contract or the scheduler.
+ */
+export async function executeWorkflowMap(request: ExecuteWorkflowMapRequest): Promise<unknown[]> {
+  const config = asWorkflowRecord(request.config);
+  if (!config) throw new Error('Map node config must be an object.');
+  const subgraph = readWorkflowSubgraph(config.subgraph);
+  if (subgraph.nodes.length === 0) throw new Error('Map subgraph must contain at least one node.');
+  const definition: WorkflowDefinition = {
+    schemaVersion: 4,
+    input: {},
+    defaults: { errorPolicy: 'stop' },
+    nodes: subgraph.nodes,
+    edges: subgraph.edges,
+  };
+  validateWorkflowControlFlow(definition);
+
+  const itemsPath = typeof config.itemsPath === 'string' ? config.itemsPath.trim() : '';
+  let itemsValue = request.itemsValue;
+  if (itemsPath) {
+    const located = readWorkflowOutputPath(request.itemsValue, itemsPath);
+    if (!located.exists) throw new Error(`Map items path "${itemsPath}" does not exist.`);
+    itemsValue = located.value;
+  }
+  if (!Array.isArray(itemsValue)) throw new Error('Map requires a JSON array on the items port.');
+  const maxItems = typeof config.maxItems === 'number' && Number.isInteger(config.maxItems) && config.maxItems > 0 ? config.maxItems : undefined;
+  if (maxItems !== undefined && itemsValue.length > maxItems) {
+    throw new Error(`Map received ${itemsValue.length} items but maxItems is ${maxItems}.`);
+  }
+  const continueOnError = config.continueOnError === true;
+  const bindings = readWorkflowMapBindings(config.bindings);
+  const configuredOutputNodeId = typeof config.outputNodeId === 'string' && config.outputNodeId.trim() ? config.outputNodeId.trim() : undefined;
+  const entryPort = typeof config.entryPort === 'string' && config.entryPort.trim() ? config.entryPort.trim() : undefined;
+  const results: unknown[] = [];
+
+  for (let index = 0; index < itemsValue.length; index += 1) {
+    throwIfWorkflowAborted(request.signal);
+    const scope: WorkflowMapScope = {
+      item: cloneWorkflowValue(itemsValue[index]),
+      index,
+      context: cloneWorkflowValue(request.context),
+    };
+    try {
+      results.push(await executeWorkflowMapElement({
+        subgraph: definition,
+        scope,
+        bindings,
+        configuredOutputNodeId,
+        entryPort,
+        executeNode: request.executeNode,
+        signal: request.signal,
+      }));
+    } catch (error) {
+      if (request.signal.aborted) throw error;
+      if (!continueOnError) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Map element ${index} failed: ${message}`);
+      }
+      await request.onElementError?.(error instanceof Error ? error : new Error(String(error)), index, itemsValue.length);
+    }
+  }
+  return results;
+}
+
+export type ComposeWorkflowArticleConfig = {
+  titlePath?: string;
+  articlePath?: string;
+  unusedImagePolicy?: 'drop' | 'append';
+};
+
+const WORKLITE_IMAGE_PLACEHOLDER_PATTERN = /!\[([^\]]*)\]\(\s*worklite-image:([^)\s]+)\s*\)/g;
+
+function readComposeConfigString(config: unknown, key: keyof ComposeWorkflowArticleConfig): string | undefined {
+  const record = asWorkflowRecord(config);
+  const value = record?.[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function validateComposedWorkflowImage(value: unknown, label: string, requireKey: boolean): string | undefined {
+  const record = asWorkflowRecord(value);
+  if (!record || record.type !== 'workflow_image' || record.mediaType !== 'image/png') {
+    throw new Error(`${label} must be a generated workflow_image with mediaType image/png.`);
+  }
+  if (!Array.isArray(record.data) || record.data.length === 0) throw new Error(`${label} has no image data.`);
+  for (const entry of record.data) {
+    const data = asWorkflowRecord(entry);
+    if (!data || typeof data.b64Json !== 'string' || !data.b64Json) throw new Error(`${label} has invalid image data.`);
+  }
+  if (!requireKey) return undefined;
+  const key = typeof record.key === 'string' ? record.key.trim() : '';
+  if (!key) throw new Error(`${label} must carry a key.`);
+  return key;
+}
+
+function scanMarkdownH1Headings(markdown: string): string[] {
+  const headings: string[] = [];
+  let fenceMarker: '`' | '~' | undefined;
+  let fenceLength = 0;
+  for (const line of markdown.split(/\r?\n/)) {
+    const fence = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      const marker = fence[1][0] as '`' | '~';
+      const length = fence[1].length;
+      if (!fenceMarker) {
+        fenceMarker = marker;
+        fenceLength = length;
+      } else if (marker === fenceMarker && length >= fenceLength && line.trim() === fence[1]) {
+        fenceMarker = undefined;
+        fenceLength = 0;
+      }
+      continue;
+    }
+    if (fenceMarker) continue;
+    const heading = /^ {0,3}#(?!#)[ \t]+(.+?)[ \t]*#*[ \t]*$/.exec(line);
+    if (heading) headings.push(heading[1].trim());
+  }
+  if (fenceMarker) throw new Error('Compose requires every Markdown code fence to be closed.');
+  return headings;
+}
+
+/**
+ * Deterministic article composition/validation. It never silently repairs the
+ * article: a malformed placeholder, missing image, duplicate key, or heading
+ * mismatch fails the node so the run surface reports it.
+ */
+export function composeWorkflowArticle(input: unknown, config: unknown): string {
+  const record = asWorkflowRecord(input) ?? {};
+  const articleValue = record.article;
+  let source: Record<string, unknown> | undefined;
+  let markdown: string;
+  if (typeof articleValue === 'string') {
+    markdown = articleValue;
+  } else {
+    source = asWorkflowRecord(articleValue);
+    if (!source) throw new Error('Compose requires an article string or JSON object.');
+    const articlePath = readComposeConfigString(config, 'articlePath') ?? 'article';
+    const located = readWorkflowOutputPath(source, articlePath);
+    if (!located.exists || typeof located.value !== 'string') throw new Error(`Compose article path "${articlePath}" must resolve to a string.`);
+    markdown = located.value;
+  }
+  const titlePath = readComposeConfigString(config, 'titlePath') ?? 'title';
+  let expectedTitle: string | undefined;
+  if (source) {
+    const located = readWorkflowOutputPath(source, titlePath);
+    if (located.exists && typeof located.value === 'string' && located.value.trim()) expectedTitle = located.value.trim();
+  }
+
+  const headings = scanMarkdownH1Headings(markdown);
+  if (headings.length !== 1) throw new Error(`Compose requires exactly one H1 heading, found ${headings.length}.`);
+  if (expectedTitle && headings[0] !== expectedTitle) {
+    throw new Error(`Compose H1 "${headings[0]}" does not match title "${expectedTitle}".`);
+  }
+
+  const placeholderCount = (markdown.match(/worklite-image:/g) ?? []).length;
+  const placeholders = [...markdown.matchAll(WORKLITE_IMAGE_PLACEHOLDER_PATTERN)];
+  if (placeholderCount !== placeholders.length) throw new Error('Compose found a malformed worklite-image placeholder.');
+
+  const rawImages = record.images;
+  const imageEntries = Array.isArray(rawImages) ? rawImages : [];
+  const flattenedImages: unknown[] = [];
+  for (const entry of imageEntries) {
+    if (Array.isArray(entry)) flattenedImages.push(...entry);
+    else flattenedImages.push(entry);
+  }
+  const keys: string[] = [];
+  const seenKeys = new Set<string>();
+  for (const entry of flattenedImages) {
+    const key = validateComposedWorkflowImage(entry, 'Inline image', true) as string;
+    if (seenKeys.has(key)) throw new Error(`Compose found duplicate image key "${key}".`);
+    seenKeys.add(key);
+    keys.push(key);
+  }
+  const referenced = new Set<string>();
+  for (const placeholder of placeholders) {
+    const key = placeholder[2];
+    referenced.add(key);
+    if (!seenKeys.has(key)) throw new Error(`Compose placeholder references missing image "${key}". Available keys: ${keys.join(', ') || '(none)'}.`);
+  }
+
+  validateComposedWorkflowImage(record.coverImage, 'Cover image', false);
+
+  const unused = keys.filter((key) => !referenced.has(key));
+  const policy = readComposeConfigString(config, 'unusedImagePolicy') ?? 'drop';
+  if (policy === 'append' && unused.length > 0) {
+    const appended = unused.map((key) => `![${key}](worklite-image:${key})`).join('\n\n');
+    markdown = `${markdown.trimEnd()}\n\n${appended}\n`;
+  }
+  if (unused.length > 0 && policy === 'drop') {
+    // Explicitly documented policy: unused generated images are dropped from the
+    // article rather than forced in, keeping the author's outline authoritative.
+  }
+  return markdown;
 }

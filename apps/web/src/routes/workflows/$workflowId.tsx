@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import { ArrowLeft, Bot, Braces, Check, Copy, Download, FilePlus2, FileSearch, FileText, GitBranch, Image as ImageIcon, LayoutDashboard, ListChecks, Palette, Plus, Redo2, Search, Send, SlidersHorizontal, Sticker, Timer, Trash2, Undo2, Workflow, X } from 'lucide-react';
+import { ArrowLeft, Bot, Braces, Check, Copy, Download, FileCheck2, FilePlus2, FileSearch, FileText, GitBranch, GitMerge, Image as ImageIcon, Layers, LayoutDashboard, ListChecks, Palette, Plus, Redo2, Search, Send, SlidersHorizontal, Sticker, Timer, Trash2, Undo2, Workflow, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
@@ -16,11 +16,12 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { type WorkflowCanvasEdge, type WorkflowCanvasEdgeData, type WorkflowCanvasNode, type WorkflowCanvasNodeType, type WorkflowConnection, type WorkflowSystemOneRank } from '@/components/workflow-canvas-nodes';
+import { type WorkflowCanvasEdge, type WorkflowCanvasEdgeData, type WorkflowCanvasNode, type WorkflowCanvasNodeData, type WorkflowCanvasNodeType, type WorkflowConnection, type WorkflowSystemOneRank } from '@/components/workflow-canvas-nodes';
 import { WorkflowFlowDiagram } from '@/components/workflow-flow-diagram';
 import { calculateWorkflowFlowLayout } from '@/components/workflow-flow-layout';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { api } from '@/api/client';
+import { readNodeIdentity, WORKFLOW_NODE_DESCRIPTION_MAX_LENGTH, WORKFLOW_NODE_LABEL_MAX_LENGTH } from '@/features/workflows/node-identity';
 import { useMcpServersQuery, useModelProvidersQuery, runsQueryKey, useSkillsQuery, useWorkflowQuery, useWorkflowScheduleQuery, workflowScheduleQueryKey, workflowsQueryKey } from '@/api/queries';
 import { queryClient } from '@/lib/query-client';
 import { formatDateTime } from '@/i18n/format';
@@ -70,6 +71,8 @@ function WorkflowEditorPage() {
   const [edgeValueErrors, setEdgeValueErrors] = useState<Record<string, boolean>>({});
   const [systemOneQuestionDrafts, setSystemOneQuestionDrafts] = useState<Record<string, string>>({});
   const [systemOneQuestionErrors, setSystemOneQuestionErrors] = useState<Record<string, boolean>>({});
+  const [structuredConfigDrafts, setStructuredConfigDrafts] = useState<Record<string, string>>({});
+  const [structuredConfigErrors, setStructuredConfigErrors] = useState<Record<string, boolean>>({});
   const appliedLayoutSignature = useRef('');
   const canvasRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -85,6 +88,8 @@ function WorkflowEditorPage() {
     setEdgeValueErrors({});
     setSystemOneQuestionDrafts({});
     setSystemOneQuestionErrors({});
+    setStructuredConfigDrafts({});
+    setStructuredConfigErrors({});
   }, [setEdges, setNodes, t]);
 
   const graphLayoutSignature = useMemo(() => JSON.stringify([
@@ -173,6 +178,9 @@ function WorkflowEditorPage() {
   const filteredStickerVisible = !paletteQuery.trim() || `${t('editor.stickerNode')} ${t('editor.stickerNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredRenderVisible = !paletteQuery.trim() || `${t('editor.renderNode')} ${t('editor.renderNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
   const filteredWechatVisible = !paletteQuery.trim() || `${t('editor.wechatNode')} ${t('editor.wechatNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
+  const filteredMapVisible = !paletteQuery.trim() || `${t('editor.mapNode')} ${t('editor.mapNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
+  const filteredJoinVisible = !paletteQuery.trim() || `${t('editor.joinNode')} ${t('editor.joinNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
+  const filteredComposeVisible = !paletteQuery.trim() || `${t('editor.composeNode')} ${t('editor.composeNodeDescription')}`.toLowerCase().includes(paletteQuery.trim().toLowerCase());
 
   function currentDefinition(): WorkflowDefinition {
     return {
@@ -344,6 +352,35 @@ function WorkflowEditorPage() {
     setSaveState('unsaved');
   }
 
+  function replaceRawConfig(nodeId: string, config: Record<string, unknown>) {
+    setNodes((current) => current.map((node) => node.id === nodeId ? { ...node, data: { ...node.data, rawConfig: config } } : node));
+    setSaveState('unsaved');
+  }
+
+  function updateRawConfigField(nodeId: string, key: string, value: unknown) {
+    setNodes((current) => current.map((node) => {
+      if (node.id !== nodeId) return node;
+      const next = { ...readStructuredConfig(node.data) };
+      if (value === undefined) delete next[key];
+      else next[key] = value;
+      return { ...node, data: { ...node.data, rawConfig: next } };
+    }));
+    setSaveState('unsaved');
+  }
+
+  function updateStructuredConfigJson(nodeId: string, draft: string) {
+    setStructuredConfigDrafts((current) => ({ ...current, [nodeId]: draft }));
+    setSaveState('unsaved');
+    try {
+      const parsed = JSON.parse(draft);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Node config must be an object.');
+      setStructuredConfigErrors((current) => ({ ...current, [nodeId]: false }));
+      replaceRawConfig(nodeId, parsed as Record<string, unknown>);
+    } catch {
+      setStructuredConfigErrors((current) => ({ ...current, [nodeId]: true }));
+    }
+  }
+
   function addArtifactNode(sourceNodeId?: string) {
     const id = createId('artifact');
     const node: WorkflowCanvasNode = {
@@ -397,6 +434,46 @@ function WorkflowEditorPage() {
     addNode(node, sourceNodeId);
   }
 
+  function addMapNode(sourceNodeId?: string) {
+    const id = createId('map');
+    const stepId = createId('map-step');
+    const node: WorkflowCanvasNode = {
+      id,
+      type: 'map',
+      position: nextPosition(),
+      selected: true,
+      data: {
+        nodeType: 'map',
+        label: t('editor.mapNode'),
+        rawConfig: {
+          subgraph: {
+            nodes: [{
+              id: stepId,
+              position: { x: 0, y: 0 },
+              type: 'worklite/agent',
+              typeVersion: '1',
+              config: { label: t('editor.mapStepLabel'), model: '', systemPrompt: '', outputFormat: 'text', skillIds: [], mcpServerIds: [] },
+              errorPolicy: executionPolicy,
+            }],
+            edges: [],
+          },
+        },
+        errorPolicy: executionPolicy,
+      },
+    };
+    addNode(node, sourceNodeId);
+  }
+
+  function addJoinNode(sourceNodeId?: string) {
+    const id = createId('join');
+    addNode({ id, type: 'join', position: nextPosition(), selected: true, data: { nodeType: 'join', label: t('editor.joinNode'), rawConfig: {}, errorPolicy: executionPolicy } }, sourceNodeId);
+  }
+
+  function addComposeNode(sourceNodeId?: string) {
+    const id = createId('compose');
+    addNode({ id, type: 'compose', position: nextPosition(), selected: true, data: { nodeType: 'compose', label: t('editor.composeNode'), rawConfig: { unusedImagePolicy: 'drop' }, errorPolicy: executionPolicy } }, sourceNodeId);
+  }
+
   function addWechatPublishNode(sourceNodeId?: string) {
     const id = createId('wechat');
     const node: WorkflowCanvasNode = {
@@ -421,8 +498,11 @@ function WorkflowEditorPage() {
                 : node.data.nodeType === 'image' ? 'prompt'
                   : node.data.nodeType === 'canvasSticker' ? 'text'
                     : node.data.nodeType === 'canvasRender' ? 'code'
-                      : node.data.nodeType === 'wechatPublish' ? sourceNode?.data.nodeType === 'image' || sourceNode?.data.nodeType === 'canvasSticker' || sourceNode?.data.nodeType === 'canvasRender' ? 'coverImage' : 'article'
-                        : null;
+                      : node.data.nodeType === 'map' ? 'items'
+                        : node.data.nodeType === 'join' ? 'input'
+                          : node.data.nodeType === 'compose' ? sourceNode?.data.nodeType === 'image' || sourceNode?.data.nodeType === 'canvasSticker' || sourceNode?.data.nodeType === 'canvasRender' ? 'images' : 'article'
+                            : node.data.nodeType === 'wechatPublish' ? sourceNode?.data.nodeType === 'image' || sourceNode?.data.nodeType === 'canvasSticker' || sourceNode?.data.nodeType === 'canvasRender' ? 'coverImage' : 'article'
+                              : null;
       const connection = sourceNode && targetHandle ? { source: sourceNode.id, sourceHandle: 'output', target: node.id, targetHandle } : null;
       if (!connection || !canConnect(connection, [...nodes, node], edges)) {
         toast.error(t('editor.invalidConnection'));
@@ -449,6 +529,9 @@ function WorkflowEditorPage() {
     else if (nodeType === 'image') addImageNode(sourceNodeId);
     else if (nodeType === 'canvasSticker') addCanvasStickerNode(sourceNodeId);
     else if (nodeType === 'canvasRender') addCanvasRenderNode(sourceNodeId);
+    else if (nodeType === 'map') addMapNode(sourceNodeId);
+    else if (nodeType === 'join') addJoinNode(sourceNodeId);
+    else if (nodeType === 'compose') addComposeNode(sourceNodeId);
     else addWechatPublishNode(sourceNodeId);
   }
 
@@ -457,6 +540,18 @@ function WorkflowEditorPage() {
       if (edge.source === nodeId || edge.target === nodeId) clearEdgeValueState(edge.id);
     }
     clearSystemOneQuestionState(nodeId);
+    setStructuredConfigDrafts((current) => {
+      if (!(nodeId in current)) return current;
+      const next = { ...current };
+      delete next[nodeId];
+      return next;
+    });
+    setStructuredConfigErrors((current) => {
+      if (!(nodeId in current)) return current;
+      const next = { ...current };
+      delete next[nodeId];
+      return next;
+    });
     setNodes((current) => current.filter((node) => node.id !== nodeId));
     setEdges((current) => current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId));
     setSaveState('unsaved');
@@ -693,11 +788,11 @@ function WorkflowEditorPage() {
     const sourceNode = sourceNodeId ? nodes.find((node) => node.id === sourceNodeId) : undefined;
     const compatibleTypes: WorkflowCanvasNodeType[] = sourceNodeId
       ? sourceNode
-        ? sourceNode.data.nodeType === 'image' || sourceNode.data.nodeType === 'canvasSticker' || sourceNode.data.nodeType === 'canvasRender' ? ['artifact', 'wechatPublish']
+        ? sourceNode.data.nodeType === 'image' || sourceNode.data.nodeType === 'canvasSticker' || sourceNode.data.nodeType === 'canvasRender' ? ['artifact', 'wechatPublish', 'compose']
           : sourceNode.data.nodeType === 'input' ? ['agent']
-            : ['agent', 'branch', 'systemOne', 'systemOneMap', 'dashboard', 'artifact', 'artifactQuery', 'image', 'canvasSticker', 'canvasRender', 'wechatPublish']
+            : ['agent', 'branch', 'systemOne', 'systemOneMap', 'dashboard', 'artifact', 'artifactQuery', 'image', 'canvasSticker', 'canvasRender', 'wechatPublish', 'map', 'join', 'compose']
         : []
-      : ['input', 'timer', 'agent', 'branch', 'systemOne', 'systemOneMap', 'dashboard', 'artifact', 'artifactQuery', 'image', 'canvasSticker', 'canvasRender', 'wechatPublish'];
+      : ['input', 'timer', 'agent', 'branch', 'systemOne', 'systemOneMap', 'dashboard', 'artifact', 'artifactQuery', 'image', 'canvasSticker', 'canvasRender', 'wechatPublish', 'map', 'join', 'compose'];
     const availableTypes = compatibleTypes.filter((nodeType) => {
       if (nodeType === 'timer' && nodes.some((node) => node.data.nodeType === 'timer')) return false;
       if (nodeType === 'dashboard' && nodes.some((node) => node.data.nodeType === 'dashboard')) return false;
@@ -717,6 +812,9 @@ function WorkflowEditorPage() {
       canvasSticker: filteredStickerVisible,
       canvasRender: filteredRenderVisible,
       wechatPublish: filteredWechatVisible,
+      map: filteredMapVisible,
+      join: filteredJoinVisible,
+      compose: filteredComposeVisible,
     };
     const hasFilteredNodes = availableTypes.some((nodeType) => filteredTypes[nodeType]);
     const canShow = (nodeType: WorkflowCanvasNodeType) => availableTypes.includes(nodeType);
@@ -739,6 +837,9 @@ function WorkflowEditorPage() {
           {canShow('image') && filteredImageVisible ? <PaletteButton icon={<ImageIcon className="size-5 text-foreground" />} title={t('editor.imageNode')} description={t('editor.imageNodeDescription')} onClick={choose('image')} /> : null}
           {canShow('canvasSticker') && filteredStickerVisible ? <PaletteButton icon={<Sticker className="size-5 text-foreground" />} title={t('editor.stickerNode')} description={t('editor.stickerNodeDescription')} onClick={choose('canvasSticker')} /> : null}
           {canShow('canvasRender') && filteredRenderVisible ? <PaletteButton icon={<Palette className="size-5 text-foreground" />} title={t('editor.renderNode')} description={t('editor.renderNodeDescription')} onClick={choose('canvasRender')} /> : null}
+          {canShow('map') && filteredMapVisible ? <PaletteButton icon={<Layers className="size-5 text-foreground" />} title={t('editor.mapNode')} description={t('editor.mapNodeDescription')} onClick={choose('map')} /> : null}
+          {canShow('join') && filteredJoinVisible ? <PaletteButton icon={<GitMerge className="size-5 text-foreground" />} title={t('editor.joinNode')} description={t('editor.joinNodeDescription')} onClick={choose('join')} /> : null}
+          {canShow('compose') && filteredComposeVisible ? <PaletteButton icon={<FileCheck2 className="size-5 text-foreground" />} title={t('editor.composeNode')} description={t('editor.composeNodeDescription')} onClick={choose('compose')} /> : null}
           {canShow('wechatPublish') && filteredWechatVisible ? <PaletteButton icon={<Send className="size-5 text-foreground" />} title={t('editor.wechatNode')} description={t('editor.wechatNodeDescription')} onClick={choose('wechatPublish')} /> : null}
           {!hasFilteredNodes ? <p className="px-2 py-3 text-[12px] text-muted-foreground">{t('editor.noNodeMatches', { search: paletteQuery })}</p> : null}
         </div>
@@ -748,9 +849,10 @@ function WorkflowEditorPage() {
 
   const inspector = selectedNode ? (
     <div className="flex min-h-0 w-full min-w-0 flex-col">
-      <div className="flex items-start gap-2"><Button type="button" variant="ghost" size="icon-compact" aria-label={t('editor.closeInspector')} onClick={clearGraphSelection}><X className="size-4" /></Button><div className="min-w-0 flex-1"><p className="text-xs font-medium text-muted-foreground">{nodeTypeLabel(selectedNode.data.nodeType, t)}</p><h2 className="mt-1 truncate text-sm font-semibold">{selectedNode.data.label}</h2></div></div>
+      <div className="flex items-start gap-2"><Button type="button" variant="ghost" size="icon-compact" aria-label={t('editor.closeInspector')} onClick={clearGraphSelection}><X className="size-4" /></Button><div className="min-w-0 flex-1"><p className="text-xs font-medium text-muted-foreground">{nodeTypeLabel(selectedNode.data.nodeType, t)}</p><h2 className="mt-1 truncate text-sm font-semibold">{selectedNode.data.label.trim() || nodeTypeLabel(selectedNode.data.nodeType, t)}</h2></div></div>
       <div className="mt-5 flex flex-col gap-4">
-        <Field label={t('editor.nodeName')} htmlFor="node-name"><Input id="node-name" value={selectedNode.data.label} onChange={(event) => { const label = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, label } } : node)); setSaveState('unsaved'); }} /></Field>
+        <Field label={t('editor.nodeName')} htmlFor="node-name" hint={t('editor.nodeNameHint', { max: WORKFLOW_NODE_LABEL_MAX_LENGTH })}><Input id="node-name" maxLength={WORKFLOW_NODE_LABEL_MAX_LENGTH} value={selectedNode.data.label} onChange={(event) => { const label = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, label } } : node)); setSaveState('unsaved'); }} /></Field>
+        <Field label={t('editor.nodeDescription')} htmlFor="node-description" hint={t('editor.nodeDescriptionHint', { max: WORKFLOW_NODE_DESCRIPTION_MAX_LENGTH })}><Textarea id="node-description" rows={3} maxLength={WORKFLOW_NODE_DESCRIPTION_MAX_LENGTH} value={selectedNode.data.description ?? ''} placeholder={t('editor.nodeDescriptionPlaceholder')} onChange={(event) => { const description = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, description } } : node)); setSaveState('unsaved'); }} /></Field>
         {selectedNode.data.nodeType === 'timer' ? <>
           <label className="flex items-center gap-2 text-[13px]"><Checkbox checked={selectedNode.data.timerEnabled !== false} onCheckedChange={(checked) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, timerEnabled: checked === true } } : node)); setSaveState('unsaved'); }} aria-label={t('editor.timerEnabled')} /><span>{t('editor.timerEnabled')}</span></label>
           <Field label={t('editor.timerInterval')} htmlFor="timer-interval"><div className="flex items-center gap-2"><Input id="timer-interval" type="number" min={5} step={1} value={String(Math.round((selectedNode.data.timerIntervalSeconds ?? 300) / 60))} onChange={(event) => { const intervalSeconds = Math.round(Number(event.target.value) * 60); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, timerIntervalSeconds: intervalSeconds } } : node)); setSaveState('unsaved'); }} /><span className="text-[13px] text-muted-foreground">{t('editor.timerMinutes')}</span></div></Field>
@@ -805,6 +907,7 @@ function WorkflowEditorPage() {
           <Field label={t('editor.imageBackground')} htmlFor="image-background"><Select value={selectedNode.data.imageBackground ?? 'opaque'} onValueChange={(value) => { const imageBackground = value as 'opaque' | 'transparent'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, imageBackground } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="image-background"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="opaque">{t('editor.imageBackgrounds.opaque')}</SelectItem><SelectItem value="transparent">{t('editor.imageBackgrounds.transparent')}</SelectItem></SelectContent></Select></Field>
           <Field label={t('editor.imageQuality')} htmlFor="image-quality"><Select value={selectedNode.data.imageQuality ?? 'medium'} onValueChange={(value) => { const imageQuality = value as 'low' | 'medium' | 'high'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, imageQuality } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="image-quality"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="low">{t('editor.imageQualities.low')}</SelectItem><SelectItem value="medium">{t('editor.imageQualities.medium')}</SelectItem><SelectItem value="high">{t('editor.imageQualities.high')}</SelectItem></SelectContent></Select></Field>
           <Field label={t('editor.imageSize')} htmlFor="image-size"><Select value={selectedNode.data.imageSize ?? '1024x1024'} onValueChange={(value) => { const imageSize = value as '1024x1024' | '1536x1024' | '1024x1536'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, imageSize } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="image-size"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="1024x1024">1024×1024</SelectItem><SelectItem value="1536x1024">1536×1024</SelectItem><SelectItem value="1024x1536">1024×1536</SelectItem></SelectContent></Select></Field>
+          <Field label={t('editor.imagePromptPath')} htmlFor="image-prompt-path" hint={t('editor.imagePromptPathHint')}><Input id="image-prompt-path" className="font-mono text-[12px]" value={typeof readStructuredConfig(selectedNode.data).promptPath === 'string' ? readStructuredConfig(selectedNode.data).promptPath as string : ''} onChange={(event) => updateRawConfigField(selectedNode.id, 'promptPath', event.target.value.trim() ? event.target.value.trim() : undefined)} /></Field>
           <p className="text-[12px] text-muted-foreground">{t('editor.imageConnectionHint')}</p>
         </> : null}
         {selectedNode.data.nodeType === 'canvasSticker' ? <>
@@ -829,6 +932,26 @@ function WorkflowEditorPage() {
           <Field label={t('editor.renderMaxOutputBytes')} htmlFor="render-max-output-bytes"><Input id="render-max-output-bytes" type="number" min={1024} max={33554432} step={1024} value={String(selectedNode.data.renderMaxOutputBytes ?? 8388608)} onChange={(event) => { const renderMaxOutputBytes = Number(event.target.value); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, renderMaxOutputBytes: Number.isFinite(renderMaxOutputBytes) ? renderMaxOutputBytes : 8388608 } } : node)); setSaveState('unsaved'); }} /></Field>
           <p className="text-[12px] text-muted-foreground">{t('editor.renderHint')}</p>
           <p className="text-[12px] text-muted-foreground">{t('editor.imageConnectionHint')}</p>
+        </> : null}
+        {selectedNode.data.nodeType === 'map' || selectedNode.data.nodeType === 'join' ? <>
+          <Field label={t('editor.nodeConfigJson')} htmlFor="node-config-json" hint={t('editor.nodeConfigJsonHint')}>
+            <Textarea id="node-config-json" className="min-h-48 font-mono text-[12px]" spellCheck={false} aria-invalid={structuredConfigErrors[selectedNode.id] || undefined} value={structuredConfigDrafts[selectedNode.id] ?? JSON.stringify(readStructuredConfig(selectedNode.data), null, 2)} onChange={(event) => updateStructuredConfigJson(selectedNode.id, event.target.value)} />
+            {structuredConfigErrors[selectedNode.id] ? <p className="mt-1 text-[12px] text-danger" role="alert">{t('editor.nodeConfigJsonInvalid')}</p> : null}
+          </Field>
+          {selectedNode.data.nodeType === 'map' ? <p className="text-[12px] text-muted-foreground">{t('editor.mapConfigHint')}</p> : <p className="text-[12px] text-muted-foreground">{t('editor.joinConfigHint')}</p>}
+          <Field label={t('editor.errorPolicy')} htmlFor="structured-policy"><Select value={selectedNode.data.errorPolicy} onValueChange={(value) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, errorPolicy: value as 'stop' | 'retry' } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="structured-policy"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="stop">{t('editor.stop')}</SelectItem><SelectItem value="retry">{t('editor.retry')}</SelectItem></SelectContent></Select></Field>
+        </> : null}
+        {selectedNode.data.nodeType === 'compose' ? <>
+          <Field label={t('editor.composeUnusedPolicy')} htmlFor="compose-unused-policy" hint={t('editor.composeUnusedPolicyHint')}>
+            <Select value={typeof readStructuredConfig(selectedNode.data).unusedImagePolicy === 'string' ? readStructuredConfig(selectedNode.data).unusedImagePolicy as string : 'drop'} onValueChange={(value) => updateRawConfigField(selectedNode.id, 'unusedImagePolicy', value)}>
+              <SelectTrigger id="compose-unused-policy"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="drop">{t('editor.composeUnusedPolicies.drop')}</SelectItem><SelectItem value="append">{t('editor.composeUnusedPolicies.append')}</SelectItem></SelectContent>
+            </Select>
+          </Field>
+          <Field label={t('editor.composeTitlePath')} htmlFor="compose-title-path"><Input id="compose-title-path" className="font-mono text-[12px]" value={typeof readStructuredConfig(selectedNode.data).titlePath === 'string' ? readStructuredConfig(selectedNode.data).titlePath as string : ''} placeholder="title" onChange={(event) => updateRawConfigField(selectedNode.id, 'titlePath', event.target.value.trim() ? event.target.value.trim() : undefined)} /></Field>
+          <Field label={t('editor.composeArticlePath')} htmlFor="compose-article-path"><Input id="compose-article-path" className="font-mono text-[12px]" value={typeof readStructuredConfig(selectedNode.data).articlePath === 'string' ? readStructuredConfig(selectedNode.data).articlePath as string : ''} placeholder="article" onChange={(event) => updateRawConfigField(selectedNode.id, 'articlePath', event.target.value.trim() ? event.target.value.trim() : undefined)} /></Field>
+          <p className="text-[12px] text-muted-foreground">{t('editor.composeHint')}</p>
+          <Field label={t('editor.errorPolicy')} htmlFor="compose-policy"><Select value={selectedNode.data.errorPolicy} onValueChange={(value) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, errorPolicy: value as 'stop' | 'retry' } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="compose-policy"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="stop">{t('editor.stop')}</SelectItem><SelectItem value="retry">{t('editor.retry')}</SelectItem></SelectContent></Select></Field>
         </> : null}
         {selectedNode.data.nodeType === 'wechatPublish' ? <>
           <Field label={t('editor.wechatAccount')} htmlFor="wechat-account"><Select value={selectedNode.data.wechatAccountId ?? 'wechat_official_account_personal'} onValueChange={(wechatAccountId) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, wechatAccountId } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="wechat-account"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="wechat_official_account_personal">{t('editor.wechatPersonalAccount')}</SelectItem></SelectContent></Select></Field>
@@ -1012,11 +1135,30 @@ function toSystemOneRank(value: unknown): WorkflowSystemOneRank | undefined {
   };
 }
 
+const workflowNodeTypeLabels: Record<WorkflowCanvasNodeType, string> = {
+  input: 'Workflow Input',
+  timer: 'Timer',
+  agent: 'Agent',
+  branch: 'Choice Branch',
+  systemOne: 'TypeSafe System One',
+  systemOneMap: 'TypeSafe System One Map',
+  dashboard: 'Dashboard',
+  artifact: 'Artifact',
+  artifactQuery: 'Artifact Query',
+  wechatPublish: 'WeChat Official Account',
+  image: 'Image Generation',
+  canvasSticker: 'Canvas Sticker',
+  canvasRender: 'Canvas Render',
+  map: 'Array Map',
+  join: 'Join Barrier',
+  compose: 'Compose Article',
+};
+
 function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
   return definition.nodes.map((node) => {
     const config = asRecord(node.config);
-    const nodeType = node.type === 'worklite/input' ? 'input' : node.type === 'worklite/timer' ? 'timer' : node.type === 'worklite/branch' ? 'branch' : node.type === 'typesafe/systemone' ? 'systemOne' : node.type === 'typesafe/systemone-map' ? 'systemOneMap' : node.type === 'worklite/dashboard' ? 'dashboard' : node.type === 'worklite/artifact' ? 'artifact' : node.type === 'worklite/artifact-query' ? 'artifactQuery' : node.type === 'worklite/image' ? 'image' : node.type === 'worklite/canvas-sticker' ? 'canvasSticker' : node.type === 'worklite/canvas-render' ? 'canvasRender' : node.type === 'wechat-official-account/publish' ? 'wechatPublish' : 'agent';
-    const label = typeof config.label === 'string' ? config.label : nodeType === 'input' ? 'Workflow Input' : nodeType === 'timer' ? 'Timer' : nodeType === 'branch' ? 'Choice Branch' : nodeType === 'systemOne' ? 'TypeSafe System One' : nodeType === 'systemOneMap' ? 'TypeSafe System One Map' : nodeType === 'dashboard' ? 'Dashboard' : nodeType === 'artifact' ? 'Artifact' : nodeType === 'artifactQuery' ? 'Artifact Query' : nodeType === 'image' ? 'Image Generation' : nodeType === 'canvasSticker' ? 'Canvas Sticker' : nodeType === 'canvasRender' ? 'Canvas Render' : nodeType === 'wechatPublish' ? 'WeChat Official Account' : 'Agent';
+    const nodeType = node.type === 'worklite/input' ? 'input' : node.type === 'worklite/timer' ? 'timer' : node.type === 'worklite/branch' ? 'branch' : node.type === 'typesafe/systemone' ? 'systemOne' : node.type === 'typesafe/systemone-map' ? 'systemOneMap' : node.type === 'worklite/dashboard' ? 'dashboard' : node.type === 'worklite/artifact' ? 'artifact' : node.type === 'worklite/artifact-query' ? 'artifactQuery' : node.type === 'worklite/image' ? 'image' : node.type === 'worklite/canvas-sticker' ? 'canvasSticker' : node.type === 'worklite/canvas-render' ? 'canvasRender' : node.type === 'worklite/map' ? 'map' : node.type === 'worklite/join' ? 'join' : node.type === 'worklite/compose-article' ? 'compose' : node.type === 'wechat-official-account/publish' ? 'wechatPublish' : 'agent';
+    const identity = readNodeIdentity(config, workflowNodeTypeLabels[nodeType]);
     const stickerTextConfig = asRecord(config.text);
     return {
       id: node.id,
@@ -1024,7 +1166,8 @@ function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
       position: node.position,
       data: {
         nodeType,
-        label,
+        label: identity.label,
+        ...(identity.description ? { description: identity.description } : {}),
         model: typeof config.model === 'string' ? config.model : '',
         systemPrompt: typeof config.systemPrompt === 'string' ? config.systemPrompt : '',
         outputFormat: config.outputFormat === 'json' || config.outputFormat === 'text' ? config.outputFormat : 'text',
@@ -1068,6 +1211,7 @@ function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
         renderKey: typeof config.key === 'string' ? config.key : undefined,
         renderTimeoutMs: typeof config.timeoutMs === 'number' && Number.isInteger(config.timeoutMs) ? config.timeoutMs : 10000,
         renderMaxOutputBytes: typeof config.maxOutputBytes === 'number' && Number.isInteger(config.maxOutputBytes) ? config.maxOutputBytes : 8388608,
+        rawConfig: config,
         errorPolicy: node.errorPolicy,
       },
     };
@@ -1138,7 +1282,9 @@ function canConnect(connection: { source: string | null; sourceHandle?: string |
   const imageTargetAllowed = (targetNode.data.nodeType === 'wechatPublish'
     && targetNode.data.wechatNodeVersion !== '1'
     && (targetHandle === 'coverImage' || targetHandle === 'images'))
-    || (targetNode.data.nodeType === 'artifact' && targetHandle === 'data');
+    || (targetNode.data.nodeType === 'artifact' && targetHandle === 'data')
+    || (targetNode.data.nodeType === 'compose' && (targetHandle === 'coverImage' || targetHandle === 'images'))
+    || (targetNode.data.nodeType === 'join' && targetHandle === 'input');
   const imageConnectionAllowed = !imageSource || imageTargetAllowed;
   if (!imageConnectionAllowed) return false;
   if (targetNode.data.nodeType === 'dashboard' || targetNode.data.nodeType === 'artifact') {
@@ -1155,6 +1301,12 @@ function canConnect(connection: { source: string | null; sourceHandle?: string |
     if (targetHandle !== 'text') return false;
   } else if (targetNode.data.nodeType === 'canvasRender') {
     if (targetHandle !== 'code') return false;
+  } else if (targetNode.data.nodeType === 'map') {
+    if (targetHandle !== 'items' && targetHandle !== 'context') return false;
+  } else if (targetNode.data.nodeType === 'compose') {
+    if (targetHandle !== 'article' && targetHandle !== 'images' && targetHandle !== 'coverImage') return false;
+  } else if (targetNode.data.nodeType === 'join') {
+    if (targetHandle !== 'input') return false;
   } else if (targetNode.data.nodeType === 'wechatPublish') {
     if (targetNode.data.wechatNodeVersion === '1') {
       if (targetHandle !== 'article' && targetHandle !== 'metadata') return false;
@@ -1165,6 +1317,7 @@ function canConnect(connection: { source: string | null; sourceHandle?: string |
     return false;
   }
   if (edges.some((edge) => edge.source === source && edge.target === target && (edge.sourceHandle ?? 'output') === sourcePort && (edge.targetHandle ?? 'input') === targetHandle)) return false;
+  if (targetNode.data.nodeType === 'join' && targetHandle === 'input') return true;
   const incomingEdges = edges.filter((edge) => edge.target === target && (edge.targetHandle ?? 'input') === targetHandle);
   if (incomingEdges.length === 0) return true;
   if (targetNode.data.nodeType !== 'agent' || targetHandle !== 'context') return false;
@@ -1190,13 +1343,22 @@ function wouldCreateCycle(source: string, target: string, edges: WorkflowCanvasE
 }
 
 function toDefinitionNode(node: WorkflowCanvasNode): WorkflowNodeDefinition {
-  const base = { label: node.data.label };
+  const description = node.data.description?.trim();
+  // Start from the loaded config so fields the inspector does not render (output
+  // contracts, passthroughs, subgraphs, prompt paths) survive a save.
+  const base = { ...(node.data.rawConfig ?? {}), label: node.data.label, ...(description ? { description } : {}) };
   let type = 'worklite/agent';
   let config: Record<string, unknown> = base;
   if (node.data.nodeType === 'input') {
     type = 'worklite/input';
   } else if (node.data.nodeType === 'branch') {
     type = 'worklite/branch';
+  } else if (node.data.nodeType === 'map') {
+    type = 'worklite/map';
+  } else if (node.data.nodeType === 'join') {
+    type = 'worklite/join';
+  } else if (node.data.nodeType === 'compose') {
+    type = 'worklite/compose-article';
   } else if (node.data.nodeType === 'systemOne') {
     type = 'typesafe/systemone';
     config = { ...base, model: node.data.model ?? '', questions: node.data.systemOneQuestions ?? {} };
@@ -1286,6 +1448,15 @@ function toDefinitionNode(node: WorkflowCanvasNode): WorkflowNodeDefinition {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+// Identity stays in the dedicated name/description fields; the JSON editor
+// round-trips every execution config field the inspector does not render.
+function readStructuredConfig(data: WorkflowCanvasNodeData): Record<string, unknown> {
+  const record = { ...(data.rawConfig ?? {}) };
+  delete record.label;
+  delete record.description;
+  return record;
 }
 
 function nodeLabel(nodes: WorkflowCanvasNode[], nodeId: string): string {

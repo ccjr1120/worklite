@@ -19,7 +19,7 @@ import {
   type StoredWorkflowExecutionState,
   type StoredWorkflowNode,
 } from '@worklite/db';
-import { commitWorkflowInvocation, createWorkflowSchedulerState, NodeTypeRegistry, readWorkflowOutputPath, resolveWorkflowNodeCapability, takeNextWorkflowInvocation, workflowRunResult, type NodeExecutionRequest, type PendingNodeExecutionResult, type WorkflowSchedulerState } from '@worklite/workflow-engine';
+import { commitWorkflowInvocation, composeWorkflowArticle, createWorkflowSchedulerState, executeWorkflowMap, NodeTypeRegistry, readWorkflowOutputPath, resolveWorkflowNodeCapability, takeNextWorkflowInvocation, workflowRunResult, type NodeExecutionRequest, type PendingNodeExecutionResult, type WorkflowSchedulerState } from '@worklite/workflow-engine';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from '../agents/agent-executions.service';
@@ -155,7 +155,7 @@ export class RunsService {
         );
         if (config.outputFormat !== 'json') return { output: response };
         const output = parseWorkflowAgentJson(response);
-        assertWorkflowAgentOutputContract(output, config.outputContract);
+        assertWorkflowAgentOutputContract(output, config.outputContract, config.allowEmptyOutputKeys);
         if (Array.isArray(config.passthroughKeys)) {
           const source = asRecord(context);
           const target = asRecord(output);
@@ -276,8 +276,15 @@ export class RunsService {
       execute: async (request) => {
         const config = asRecord(request.config);
         const input = asRecord(request.input);
-        const prompt = typeof input?.prompt === 'string' ? input.prompt : '';
         if (!config || config.model !== 'codex/gpt-image-2') throw new Error('Image node requires the codex/gpt-image-2 model.');
+        let prompt = typeof input?.prompt === 'string' ? input.prompt : '';
+        const promptPath = typeof config.promptPath === 'string' && config.promptPath.trim() ? config.promptPath.trim() : '';
+        if (!prompt.trim() && promptPath) {
+          const source = Object.prototype.hasOwnProperty.call(input ?? {}, 'context') ? input?.context : request.context.variables.workflowInput;
+          const located = readWorkflowOutputPath(source, promptPath);
+          if (!located.exists || typeof located.value !== 'string') throw new Error(`Image node prompt path "${promptPath}" must resolve to a string.`);
+          prompt = located.value;
+        }
         if (!prompt.trim()) throw new Error('Image node requires a prompt.');
         if (typeof config.n !== 'number' || !Number.isInteger(config.n) || config.n < 1) throw new Error('Image node image count must be a positive integer.');
         if (config.background !== 'opaque' && config.background !== 'transparent') throw new Error('Image node background is invalid.');
@@ -331,6 +338,48 @@ export class RunsService {
           },
         };
       },
+    });
+    this.registry.register({
+      ...capability('worklite/map'),
+      execute: async (request) => {
+        const input = asRecord(request.input) ?? {};
+        const context = Object.prototype.hasOwnProperty.call(input, 'context') ? input.context : request.context.variables.workflowInput;
+        const output = await executeWorkflowMap({
+          itemsValue: input.items,
+          context,
+          config: request.config,
+          signal: request.signal,
+          executeNode: async ({ node, input: nodeInput, config, signal }) => {
+            const nodeType = this.registry.resolve(node.type, node.typeVersion);
+            const result = await nodeType.execute({
+              input: nodeInput,
+              config,
+              context: { ...request.context, pendingActionId: randomUUID() },
+              signal,
+            });
+            if (result.status === 'waiting_for_input') throw new Error(`Map subgraph node "${node.id}" cannot wait for input.`);
+            return result.output;
+          },
+          onElementError: (error, index, total) => this.publishActivity(
+            request.context.workflowRunId,
+            request.context.nodeId,
+            request.context.nodeRunId,
+            { phase: 'map.element', index, total, status: 'skipped', message: error.message },
+          ),
+        });
+        return { output };
+      },
+    });
+    this.registry.register({
+      ...capability('worklite/join'),
+      execute: async ({ input }) => {
+        const values = asRecord(input)?.input;
+        return { output: Array.isArray(values) ? values : [] };
+      },
+    });
+    this.registry.register({
+      ...capability('worklite/compose-article'),
+      execute: async ({ input, config }) => ({ output: composeWorkflowArticle(input, config) }),
     });
     this.registry.register({
       ...capability('wechat-official-account/publish', '1'),
@@ -916,10 +965,13 @@ function parseWorkflowAgentJson(value: string): unknown {
 // Valid JSON is not the same thing as the node's intended result. Without a declared contract an
 // Agent could commit a progress note or a raw tool-call object, and every downstream node would
 // consume it as though the node had produced its evidence.
-function assertWorkflowAgentOutputContract(output: unknown, contract: unknown): void {
+function assertWorkflowAgentOutputContract(output: unknown, contract: unknown, allowEmptyOutputKeys?: unknown): void {
   if (!Array.isArray(contract) || contract.length === 0) return;
   const keys = contract.filter((key): key is string => typeof key === 'string' && key.trim().length > 0);
   if (keys.length === 0) return;
+  const emptyAllowed = new Set(Array.isArray(allowEmptyOutputKeys)
+    ? allowEmptyOutputKeys.filter((key): key is string => typeof key === 'string' && key.trim().length > 0)
+    : []);
   const record = asRecord(output);
   if (!record) throw new Error(`Agent node JSON output requires an object containing ${keys.join(', ')}.`);
   const missing = keys.filter((key) => {
@@ -927,7 +979,7 @@ function assertWorkflowAgentOutputContract(output: unknown, contract: unknown): 
     const value = record[key];
     if (value === null || value === undefined) return true;
     if (typeof value === 'string' && value.trim().length === 0) return true;
-    return Array.isArray(value) && value.length === 0;
+    return Array.isArray(value) && value.length === 0 && !emptyAllowed.has(key);
   });
   if (missing.length > 0) throw new Error(`Agent node JSON output is missing required keys: ${missing.join(', ')}.`);
 }

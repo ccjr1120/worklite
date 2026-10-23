@@ -192,6 +192,7 @@ export type StoredWorkflowActiveInvocation = StoredWorkflowScheduledInvocation &
 export type StoredWorkflowExecutionState = {
   ready: StoredWorkflowScheduledInvocation[];
   pendingInputs: Record<string, Record<string, unknown[]>>;
+  joinBuffers?: Record<string, Record<string, unknown[]>>;
   edgeTraversals: Record<string, number>;
   latestOutputs: Record<string, unknown>;
   terminalOutputs: Record<string, unknown>;

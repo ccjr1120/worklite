@@ -34,7 +34,7 @@ import {
   type StoredWorkflowDefinition,
   type StoredWorkflowEditOperation,
 } from '@worklite/db';
-import { listWorkflowNodeCapabilities, validateWorkflowControlFlow, workflowEdgeRequiresComparisonValue, type WorkflowNodeCapability, type WorkflowPortDefinition } from '@worklite/workflow-engine';
+import { listWorkflowNodeCapabilities, resolveWorkflowNodeCapability, validateWorkflowControlFlow, workflowEdgeRequiresComparisonValue, WORKFLOW_NODE_DESCRIPTION_MAX_LENGTH, WORKFLOW_NODE_LABEL_MAX_LENGTH, type WorkflowNodeCapability, type WorkflowPortDefinition } from '@worklite/workflow-engine';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
@@ -475,7 +475,14 @@ function applyOperations(current: StoredWorkflowDefinition, operations: Workflow
   return next;
 }
 
-function validateDefinition(definition: StoredWorkflowDefinition, requireCompleteAgents: boolean): void {
+type WorkflowValidationOptions = {
+  /** False while validating a Map subgraph, which forbids nested Map nodes. */
+  allowMap?: boolean;
+  /** Input ports satisfied by Map element injection rather than an edge. */
+  injectedInputs?: Map<string, Set<string>>;
+};
+
+function validateDefinition(definition: StoredWorkflowDefinition, requireCompleteAgents: boolean, options: WorkflowValidationOptions = {}): void {
   if (definition.schemaVersion !== 4) throw new BadRequestException('Workflow schema version 4 is required.');
   if (!definition.input || !definition.defaults || !['stop', 'retry'].includes(definition.defaults.errorPolicy) || !Array.isArray(definition.nodes) || !Array.isArray(definition.edges)) throw new BadRequestException('The workflow definition is invalid.');
   const ids = new Set<string>();
@@ -489,7 +496,7 @@ function validateDefinition(definition: StoredWorkflowDefinition, requireComplet
     if (!node.id || ids.has(node.id) || !node.type || !node.typeVersion || !['stop', 'retry'].includes(node.errorPolicy) || !Number.isFinite(node.position?.x) || !Number.isFinite(node.position?.y)) throw new BadRequestException('The workflow contains an invalid node.');
     const capability = capabilities.get(`${node.type}@${node.typeVersion}`);
     if (!capability) throw new BadRequestException(`The node type ${node.type}@${node.typeVersion} is not supported.`);
-    validateNodeConfig(node.config, capability, node.type, requireCompleteAgents);
+    validateNodeConfig(node.config, capability, node.type, requireCompleteAgents, options.allowMap !== false);
     ids.add(node.id);
   });
 
@@ -508,7 +515,12 @@ function validateDefinition(definition: StoredWorkflowDefinition, requireComplet
     if (source.id === target.id) throw new BadRequestException('A workflow node cannot connect to itself.');
     if (!sourcePort || !targetPort) throw new BadRequestException('The workflow edge references an unavailable port.');
     if (!portsCompatible(sourcePort, targetPort)) throw new BadRequestException('The workflow edge connects incompatible ports.');
-    if (!isGeneratedImageConnectionAllowed(source, target, edge.sourcePort, edge.targetPort)) throw new BadRequestException('Generated image output may connect only to the WeChat v2 coverImage or images input, or to an Artifact data input.');
+    if (targetCapability?.aggregation === 'join' && edge.maxTraversals !== undefined) throw new BadRequestException('A bounded feedback edge cannot target a Join barrier.');
+    // A Join waits for one value on every incoming edge. A predicate or fallback
+    // edge can be skipped, so the barrier would wait forever; fan-in must stay
+    // unconditional.
+    if (targetCapability?.aggregation === 'join' && edge.condition !== undefined) throw new BadRequestException('A conditional edge cannot target a Join barrier.');
+    if (!isGeneratedImageConnectionAllowed(source, target, edge.sourcePort, edge.targetPort, definition)) throw new BadRequestException('Generated image output may connect only to the WeChat v2 coverImage or images input, a Compose Article image input, a Join input, or an Artifact data input.');
     if (definition.edges.some((candidate) => candidate.id !== edge.id && candidate.sourceNodeId === edge.sourceNodeId && candidate.sourcePort === edge.sourcePort && candidate.targetNodeId === edge.targetNodeId && candidate.targetPort === edge.targetPort)) throw new BadRequestException('The workflow contains a duplicate connection.');
     validateEdgeControlFlow(edge);
     edgeIds.add(edge.id);
@@ -522,7 +534,7 @@ function validateDefinition(definition: StoredWorkflowDefinition, requireComplet
     for (const node of definition.nodes) {
       const capability = capabilities.get(`${node.type}@${node.typeVersion}`);
       for (const port of capability?.inputs ?? []) {
-        if (port.required && !definition.edges.some((edge) => edge.targetNodeId === node.id && edge.targetPort === port.name)) throw new BadRequestException(`Every required ${port.name} input must be connected before publication.`);
+        if (port.required && !options.injectedInputs?.get(node.id)?.has(port.name) && !definition.edges.some((edge) => edge.targetNodeId === node.id && edge.targetPort === port.name)) throw new BadRequestException(`Every required ${port.name} input must be connected before publication.`);
       }
     }
   }
@@ -596,7 +608,7 @@ function validateEdgeControlFlow(edge: StoredWorkflowDefinition['edges'][number]
   if (!requiresValue && 'value' in edge.condition) throw new BadRequestException('The workflow edge predicate operator cannot define a comparison value.');
 }
 
-function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, type: string, requireCompleteAgents: boolean): void {
+function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, type: string, requireCompleteAgents: boolean, allowMap = true): void {
   if (!isRecord(value)) throw new BadRequestException(`${capability.name} node configuration must be an object.`);
   const required = Array.isArray(capability.configSchema.required) ? capability.configSchema.required.filter((key): key is string => typeof key === 'string') : [];
   const allowedMissing = type === 'worklite/agent' && !requireCompleteAgents
@@ -613,6 +625,7 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
     if (!(key in value)) continue;
     validateSchemaValue(value[key], schema, `${capability.name} node ${key}`);
   }
+  validateNodeIdentity(value, capability);
   if (type === 'worklite/agent') {
     if (value.systemPrompt !== undefined && typeof value.systemPrompt !== 'string') throw new BadRequestException('Agent node systemPrompt must be a string.');
     if (value.outputFormat !== undefined && value.outputFormat !== 'text' && value.outputFormat !== 'json') throw new BadRequestException('Agent node outputFormat must be text or json.');
@@ -628,6 +641,15 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
     if (value.passthroughKeys !== undefined) {
       if (!Array.isArray(value.passthroughKeys) || !value.passthroughKeys.length || value.passthroughKeys.some((key) => typeof key !== 'string' || !key.trim()) || new Set(value.passthroughKeys).size !== value.passthroughKeys.length) throw new BadRequestException('Agent node passthroughKeys must be unique non-empty key names.');
       if (value.outputFormat !== 'json') throw new BadRequestException('Agent node passthroughKeys requires outputFormat json.');
+    }
+    if (value.allowEmptyOutputKeys !== undefined) {
+      if (!Array.isArray(value.allowEmptyOutputKeys) || value.allowEmptyOutputKeys.some((key) => typeof key !== 'string' || !key.trim()) || new Set(value.allowEmptyOutputKeys).size !== value.allowEmptyOutputKeys.length) throw new BadRequestException('Agent node allowEmptyOutputKeys must be unique non-empty key names.');
+      if (value.outputFormat !== 'json') throw new BadRequestException('Agent node allowEmptyOutputKeys requires outputFormat json.');
+      if (Array.isArray(value.outputContract)) {
+        const contract = new Set((value.outputContract as string[]).map((key) => key.trim()));
+        const outside = (value.allowEmptyOutputKeys as string[]).filter((key) => !contract.has(key.trim()));
+        if (outside.length > 0) throw new BadRequestException(`Agent node allowEmptyOutputKeys must be part of outputContract: ${outside.join(', ')}.`);
+      }
     }
     if (requireCompleteAgents && (typeof value.model !== 'string' || !/^[^/]+\/.+/.test(value.model.trim()))) throw new BadRequestException('Every Agent node must contain a public provider/model id before publication.');
   }
@@ -666,6 +688,19 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
     if (value.background !== 'opaque' && value.background !== 'transparent') throw new BadRequestException('Image node background must be opaque or transparent.');
     if (value.quality !== 'low' && value.quality !== 'medium' && value.quality !== 'high') throw new BadRequestException('Image node quality must be low, medium, or high.');
     if (value.size !== '1024x1024' && value.size !== '1536x1024' && value.size !== '1024x1536') throw new BadRequestException('Image node size is not supported.');
+    if (value.promptPath !== undefined && !isWorkflowValuePath(value.promptPath)) throw new BadRequestException('Image node promptPath must be a dot-delimited output path.');
+  }
+  if (type === 'worklite/map') validateMapNodeConfig(value, capability, requireCompleteAgents, allowMap);
+  if (type === 'worklite/join') {
+    if (value.orderBy !== undefined) {
+      if (!isRecord(value.orderBy) || !isWorkflowValuePath(value.orderBy.path)) throw new BadRequestException('Join node orderBy path must be a dot-delimited output path.');
+      if (value.orderBy.direction !== undefined && value.orderBy.direction !== 'asc' && value.orderBy.direction !== 'desc') throw new BadRequestException('Join node orderBy direction must be asc or desc.');
+    }
+  }
+  if (type === 'worklite/compose-article') {
+    if (value.titlePath !== undefined && !isWorkflowValuePath(value.titlePath)) throw new BadRequestException('Compose Article titlePath must be a dot-delimited output path.');
+    if (value.articlePath !== undefined && !isWorkflowValuePath(value.articlePath)) throw new BadRequestException('Compose Article articlePath must be a dot-delimited output path.');
+    if (value.unusedImagePolicy !== undefined && value.unusedImagePolicy !== 'drop' && value.unusedImagePolicy !== 'append') throw new BadRequestException('Compose Article unusedImagePolicy must be drop or append.');
   }
   if (type === 'worklite/canvas-sticker') {
     if (typeof value.width !== 'number' || !Number.isInteger(value.width) || value.width < 64 || value.width > 2048) throw new BadRequestException('Canvas Sticker node width must be an integer between 64 and 2048.');
@@ -701,6 +736,105 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
       if (!Array.isArray(value.layout[region])) throw new BadRequestException(`Dashboard node layout ${region} must be an array.`);
       value.layout[region].forEach((element, index) => validateDashboardElement(element, `Dashboard node layout ${region} element ${index + 1}`));
     }
+  }
+}
+
+// A Map subgraph is executed serially inside one outer invocation, so it may
+// only contain side-effect-free nodes that the run loop can execute directly.
+const MAP_SUBGRAPH_NODE_TYPES = new Set([
+  'worklite/agent',
+  'worklite/branch',
+  'worklite/image',
+  'worklite/canvas-sticker',
+  'worklite/canvas-render',
+  'typesafe/systemone',
+  'typesafe/systemone-map',
+]);
+
+const WORKFLOW_VALUE_PATH_PATTERN = /^(?:\$|\$\.[^.\s]+(?:\.[^.\s]+)*|(?!\$)[^.\s]+(?:\.[^.\s]+)*)$/;
+const WORKFLOW_CONFIG_PATH_PATTERN = /^(?!\$)[^.\s]+(?:\.[^.\s]+)*$/;
+
+function isWorkflowValuePath(value: unknown): value is string {
+  return typeof value === 'string' && WORKFLOW_VALUE_PATH_PATTERN.test(value.trim());
+}
+
+function isWorkflowConfigPath(value: unknown): value is string {
+  return typeof value === 'string' && WORKFLOW_CONFIG_PATH_PATTERN.test(value.trim());
+}
+
+function validateMapNodeConfig(value: Record<string, unknown>, capability: WorkflowNodeCapability, requireCompleteAgents: boolean, allowMap: boolean): void {
+  if (!allowMap) throw new BadRequestException('Map nodes cannot be nested inside another Map.');
+  const subgraph = value.subgraph;
+  if (!isRecord(subgraph) || !Array.isArray(subgraph.nodes) || !Array.isArray(subgraph.edges)) throw new BadRequestException(`${capability.name} node subgraph must contain nodes and edges arrays.`);
+  const nodes = subgraph.nodes;
+  const edges = subgraph.edges;
+  if (nodes.length === 0) throw new BadRequestException(`${capability.name} node subgraph must contain at least one node.`);
+  nodes.forEach((nested, index) => {
+    if (!isRecord(nested) || typeof nested.type !== 'string' || !MAP_SUBGRAPH_NODE_TYPES.has(nested.type)) {
+      throw new BadRequestException(`${capability.name} subgraph node ${index + 1} has a type that cannot run inside a Map.`);
+    }
+  });
+  if (value.itemsPath !== undefined && !isWorkflowValuePath(value.itemsPath)) throw new BadRequestException(`${capability.name} node itemsPath must be a dot-delimited output path.`);
+  const entryPort = value.entryPort === undefined ? undefined : value.entryPort;
+  if (entryPort !== undefined && (typeof entryPort !== 'string' || !entryPort.trim())) throw new BadRequestException(`${capability.name} node entryPort must be a non-empty port name.`);
+  if (value.outputNodeId !== undefined && (typeof value.outputNodeId !== 'string' || !value.outputNodeId.trim())) throw new BadRequestException(`${capability.name} node outputNodeId must be a non-empty node id.`);
+  if (value.continueOnError !== undefined && typeof value.continueOnError !== 'boolean') throw new BadRequestException(`${capability.name} node continueOnError must be a boolean.`);
+  if (value.maxItems !== undefined && (typeof value.maxItems !== 'number' || !Number.isInteger(value.maxItems) || value.maxItems < 1)) throw new BadRequestException(`${capability.name} node maxItems must be a positive integer.`);
+
+  const nodeIds = new Set(nodes.filter(isRecord).map((nested) => nested.id).filter((id): id is string => typeof id === 'string' && Boolean(id.trim())));
+  if (value.outputNodeId !== undefined && !nodeIds.has(value.outputNodeId as string)) throw new BadRequestException(`${capability.name} node outputNodeId must reference a subgraph node.`);
+  if (value.bindings !== undefined) {
+    if (!Array.isArray(value.bindings)) throw new BadRequestException(`${capability.name} node bindings must be an array.`);
+    value.bindings.forEach((binding, index) => {
+      if (!isRecord(binding)
+        || typeof binding.nodeId !== 'string' || !binding.nodeId.trim() || !nodeIds.has(binding.nodeId)
+        || !isWorkflowConfigPath(binding.field)
+        || !isWorkflowValuePath(binding.path)) {
+        throw new BadRequestException(`${capability.name} binding ${index + 1} requires an existing nodeId, a config field path, and an item/context output path.`);
+      }
+    });
+  }
+
+  const roots = nodes.filter((nested) => isRecord(nested) && typeof nested.id === 'string' && !edges.some((edge) => isRecord(edge) && edge.targetNodeId === nested.id));
+  const injectedInputs = new Map<string, Set<string>>();
+  for (const root of roots) {
+    if (!isRecord(root) || typeof root.id !== 'string' || typeof root.type !== 'string' || typeof root.typeVersion !== 'string') continue;
+    const rootCapability = resolveWorkflowNodeCapability(root.type, root.typeVersion);
+    if (!rootCapability) continue;
+    const port = typeof entryPort === 'string' && entryPort.trim()
+      ? rootCapability.inputs.find((candidate) => candidate.name === entryPort.trim())
+      : rootCapability.inputs[0];
+    if (!port) throw new BadRequestException(`${capability.name} subgraph root ${root.id} has no input port available for the current element.`);
+    injectedInputs.set(root.id, new Set([port.name]));
+  }
+
+  const nestedDefinition: StoredWorkflowDefinition = {
+    schemaVersion: 4,
+    input: {},
+    defaults: { errorPolicy: 'stop' },
+    nodes: nodes as StoredWorkflowDefinition['nodes'],
+    edges: edges as StoredWorkflowDefinition['edges'],
+  };
+  validateDefinition(nestedDefinition, requireCompleteAgents, { allowMap: false, injectedInputs });
+
+  if (requireCompleteAgents && value.outputNodeId === undefined) {
+    const terminals = nodes.filter((nested) => isRecord(nested) && typeof nested.id === 'string' && !edges.some((edge) => isRecord(edge) && edge.sourceNodeId === nested.id));
+    if (terminals.length !== 1) throw new BadRequestException(`${capability.name} node must name outputNodeId when the subgraph has multiple terminal nodes.`);
+  }
+}
+
+// `label` and `description` are optional display metadata rather than execution
+// configuration, so older definitions that omit them stay valid.
+function validateNodeIdentity(value: Record<string, unknown>, capability: WorkflowNodeCapability): void {
+  if (value.label !== undefined) {
+    if (typeof value.label !== 'string') throw new BadRequestException(`${capability.name} node label must be a string.`);
+    if (!value.label.trim()) throw new BadRequestException(`${capability.name} node label must not be empty.`);
+    if (value.label.length > WORKFLOW_NODE_LABEL_MAX_LENGTH) throw new BadRequestException(`${capability.name} node label must be at most ${WORKFLOW_NODE_LABEL_MAX_LENGTH} characters.`);
+  }
+  if (value.description !== undefined) {
+    if (typeof value.description !== 'string') throw new BadRequestException(`${capability.name} node description must be a string.`);
+    if (!value.description.trim()) throw new BadRequestException(`${capability.name} node description must not be empty.`);
+    if (value.description.length > WORKFLOW_NODE_DESCRIPTION_MAX_LENGTH) throw new BadRequestException(`${capability.name} node description must be at most ${WORKFLOW_NODE_DESCRIPTION_MAX_LENGTH} characters.`);
   }
 }
 
@@ -753,19 +887,62 @@ function portsCompatible(source: WorkflowPortDefinition, target: WorkflowPortDef
   return source.dataType === target.dataType || source.dataType === 'json' || target.dataType === 'json';
 }
 
+function isGeneratedImageNode(node: StoredWorkflowDefinition['nodes'][number]): boolean {
+  return (node.type === 'worklite/image' || node.type === 'worklite/canvas-sticker' || node.type === 'worklite/canvas-render') && node.typeVersion === '1';
+}
+
+// Aggregate nodes hide their producers inside config, so WeChat's image inputs
+// can only accept them when the graph proves the aggregated value is still made
+// of generated images: a Map whose terminal subgraph node renders an image, or a
+// Join fed exclusively by image producers.
+function producesGeneratedImages(node: StoredWorkflowDefinition['nodes'][number], definition: StoredWorkflowDefinition, seen = new Set<string>()): boolean {
+  if (isGeneratedImageNode(node)) return true;
+  if (seen.has(node.id)) return false;
+  const nextSeen = new Set(seen).add(node.id);
+  if (node.type === 'worklite/map' && node.typeVersion === '1') {
+    const config = isRecord(node.config) ? node.config : {};
+    const subgraph = isRecord(config.subgraph) ? config.subgraph : null;
+    if (!subgraph || !Array.isArray(subgraph.nodes)) return false;
+    const nested = subgraph.nodes.filter(isRecord);
+    const nestedEdges = Array.isArray(subgraph.edges) ? subgraph.edges.filter(isRecord) : [];
+    const outputNodeId = typeof config.outputNodeId === 'string' && config.outputNodeId.trim() ? config.outputNodeId.trim() : undefined;
+    const terminalIds = outputNodeId
+      ? [outputNodeId]
+      : nested.map((entry) => entry.id).filter((id): id is string => typeof id === 'string' && !nestedEdges.some((edge) => edge.sourceNodeId === id));
+    if (terminalIds.length !== 1) return false;
+    const terminal = nested.find((entry) => entry.id === terminalIds[0]);
+    return Boolean(terminal && typeof terminal.type === 'string'
+      && (terminal.type === 'worklite/image' || terminal.type === 'worklite/canvas-sticker' || terminal.type === 'worklite/canvas-render'));
+  }
+  if (node.type === 'worklite/join' && node.typeVersion === '1') {
+    const incoming = definition.edges.filter((edge) => edge.targetNodeId === node.id);
+    return incoming.length > 0 && incoming.every((edge) => {
+      const source = definition.nodes.find((candidate) => candidate.id === edge.sourceNodeId);
+      return source ? producesGeneratedImages(source, definition, nextSeen) : false;
+    });
+  }
+  return false;
+}
+
 function isGeneratedImageConnectionAllowed(
   source: StoredWorkflowDefinition['nodes'][number],
   target: StoredWorkflowDefinition['nodes'][number],
   sourcePort: string,
   targetPort: string,
+  definition: StoredWorkflowDefinition,
 ): boolean {
-  const isImageOutput = (source.type === 'worklite/image' || source.type === 'worklite/canvas-sticker' || source.type === 'worklite/canvas-render') && source.typeVersion === '1' && sourcePort === 'output';
+  const isImageOutput = isGeneratedImageNode(source) && sourcePort === 'output';
+  const isAggregateImageOutput = (source.type === 'worklite/map' || source.type === 'worklite/join') && sourcePort === 'output' && producesGeneratedImages(source, definition);
   const isWeChatImageInput = target.type === 'wechat-official-account/publish' && target.typeVersion === '2' && (targetPort === 'coverImage' || targetPort === 'images');
   const isArtifactDataTarget = target.type === 'worklite/artifact' && targetPort === 'data';
+  const isComposeImageInput = target.type === 'worklite/compose-article' && targetPort === 'images';
+  const isComposeCoverInput = target.type === 'worklite/compose-article' && targetPort === 'coverImage';
+  const isJoinInput = target.type === 'worklite/join' && targetPort === 'input';
   // Only generated images may feed WeChat's cover/illustration inputs, and a
-  // generated image may not be consumed as ordinary text/JSON. Everything else
-  // keeps the normal port compatibility rules.
-  return isImageOutput ? isWeChatImageInput || isArtifactDataTarget : !isWeChatImageInput;
+  // generated image may not be consumed as ordinary text/JSON. Compose and Join
+  // need the image objects intact, so they join Artifact as explicit sinks.
+  if (isImageOutput || isAggregateImageOutput) return isWeChatImageInput || isArtifactDataTarget || isComposeImageInput || isComposeCoverInput || isJoinInput;
+  return !isWeChatImageInput;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -62,6 +62,12 @@
     "modelRound": "第 {{round}} 轮，模型 {{model}}，结束原因 {{finishReason}}",
     "skillScript": "技能 {{skill}} 执行了 {{path}}，退出码 {{exitCode}}",
     "mcpCall": "MCP 工具 {{tool}} {{status}}",
+  "mapElement": "数组第 {{index}}/{{total}} 个元素{{status}}{{message}}",
+  "mapElementStatus": {
+    "succeeded": "已完成",
+    "failed": "失败",
+    "skipped": "已跳过"
+  },
     "edgeDecision": "已评估出向连线",
     "edgeTerminal": "没有匹配的出向连线，该节点结束了此分支",
     "edgeTraversed": "前往 {{target}}.{{port}}",
@@ -73,6 +79,7 @@
       "model.round": "模型",
       "skill.script": "技能",
       "mcp.call": "MCP",
+    "map.element": "数组",
       "edge.decision": "路由"
     },
     "phase": {

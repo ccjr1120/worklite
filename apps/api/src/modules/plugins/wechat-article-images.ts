@@ -34,7 +34,10 @@ export function findInlineImageReferences(markdown: string): InlineImageReferenc
 
 export function validateGeneratedInlineImages(value: unknown): GeneratedInlineImage[] {
   if (value === undefined || value === null) return [];
-  const entries = Array.isArray(value) ? value : [value];
+  // A multiple input port arrives as an array of committed values, so an array
+  // map's ordered output reaches this node as one nested array. Flatten exactly
+  // one level; deeper nesting would mean the author connected the wrong graph.
+  const entries = Array.isArray(value) ? value.flatMap((entry) => (Array.isArray(entry) ? entry : [entry])) : [value];
   const images: GeneratedInlineImage[] = [];
   entries.forEach((entry, index) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(`WeChat Official Account inline image ${index + 1} is not a generated image output.`);
