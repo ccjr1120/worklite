@@ -6,7 +6,6 @@ import { useChatConversationsQuery } from '@/api/queries';
 import { isLiveStatus } from '@/components/status-badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { focusRingInset } from '@/components/ui/interaction';
-import { UserMenu } from '@/components/workspace/user-menu';
 import { WorkLiteMark } from '@/components/worklite-mark';
 import { cn } from '@/lib/utils';
 
@@ -138,7 +137,6 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
           ))}
         </div>
       </nav>
-      <div className="border-t border-border p-2"><UserMenu collapsed={collapsed} /></div>
     </aside>
   );
 }

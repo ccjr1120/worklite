@@ -29,15 +29,6 @@
     "open": "打开命令菜单",
     "search": "搜索"
   },
-  "userMenu": {
-    "label": "用户菜单",
-    "personalWorkspace": "个人工作台",
-    "localOnly": "仅本地存储",
-    "appearance": "外观",
-    "shortcuts": "键盘快捷键",
-    "shortcutsDescription": "常用工作区命令。",
-    "commandMenu": "命令菜单"
-  },
   "offline": {
     "message": "正在重新连接。本地编辑会保留在此设备上，直到连接恢复。"
   },
