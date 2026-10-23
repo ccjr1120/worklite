@@ -13,7 +13,9 @@ export class RunsController {
     const parsedLimit = limit === undefined ? undefined : Number(limit);
     return this.runs.list(request, 'personal', {
       workflowId: workflowId?.trim() || undefined,
-      limit: Number.isInteger(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 200) : undefined,
+      limit: typeof parsedLimit === 'number' && Number.isInteger(parsedLimit) && parsedLimit > 0
+        ? Math.min(parsedLimit, 200)
+        : undefined,
     });
   }
 
