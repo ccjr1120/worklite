@@ -23,6 +23,24 @@ export function attachmentImagesAsText(markdown: string): string {
   return markdown.replace(ATTACHMENT_IMAGE, (_match, alt: string, id: string) => `[图片：${alt.trim() || id}，请在 Web 查看]`);
 }
 
+export type AttachmentImageReference = { alt: string; id: string };
+
+/** Lists the Chat attachment images embedded in a reply, in the order they appear. */
+export function attachmentImageReferences(markdown: string): AttachmentImageReference[] {
+  return Array.from(markdown.matchAll(ATTACHMENT_IMAGE), (match) => ({ alt: (match[1] ?? '').trim(), id: match[2]! }));
+}
+
+/**
+ * Removes attachment image markdown from a reply so a channel can send the images as native
+ * media instead of exposing a URL it cannot render.
+ */
+export function detachAttachmentImages(markdown: string): { text: string; references: AttachmentImageReference[] } {
+  const references = attachmentImageReferences(markdown);
+  // Remove the line the reference occupied, but keep surrounding blank-line paragraphs intact.
+  const text = markdown.replace(ATTACHMENT_IMAGE, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return { text, references };
+}
+
 @Injectable()
 export class ChatAttachmentsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ChatAttachmentsService.name);

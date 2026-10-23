@@ -1,5 +1,6 @@
+import { createDecipheriv } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { ILinkApiError, MESSAGE_TYPE_BOT, MESSAGE_STATE_FINISH, fetchTypingTicket, getUpdates, mediaLabel, parseILinkJson, parseInboundMessage, pollQrCodeStatus, sendTextMessage, sendTyping, type FetchLike } from './ilink';
+import { ILinkApiError, MESSAGE_ITEM_IMAGE, MESSAGE_TYPE_BOT, MESSAGE_STATE_FINISH, aesEcbPaddedSize, fetchTypingTicket, getUpdates, mediaLabel, parseILinkJson, parseInboundMessage, pollQrCodeStatus, sendImageMessage, sendTextMessage, sendTyping, uploadImageToCdn, type FetchLike } from './ilink';
 
 const okFetch = (body: string): FetchLike => async () => ({ ok: true, status: 200, text: async () => body });
 
@@ -107,6 +108,78 @@ describe('sendTextMessage', () => {
     const failure = await sendTextMessage(okFetch('{"ret":-2,"errmsg":"invalid session"}'), { baseUrl: 'https://ilink.example', token: 'tok', toUserId: 'user-a', text: '回复', contextToken: '', clientId: 'c' }).catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(ILinkApiError);
     expect((failure as ILinkApiError).ret).toBe(-2);
+  });
+});
+
+describe('image outbound', () => {
+  const image = Buffer.from('fake-png-bytes-for-upload');
+
+  function imageFetch(captured: Array<{ url: string; body: string; ciphertext?: Buffer }>): FetchLike {
+    return async (input, init) => {
+      const body = typeof init?.body === 'string' ? init.body : '';
+      captured.push({ url: input, body, ...(init?.body instanceof Uint8Array ? { ciphertext: Buffer.from(init.body) } : {}) });
+      if (input.endsWith('/ilink/bot/getuploadurl')) {
+        return { ok: true, status: 200, text: async () => '{"ret":0,"upload_full_url":"https://cdn.example/upload?sig=1"}' };
+      }
+      if (input === 'https://cdn.example/upload?sig=1') {
+        return { ok: true, status: 200, text: async () => '', headers: { get: (name) => name === 'x-encrypted-param' ? 'download-param-1' : null } };
+      }
+      return { ok: true, status: 200, text: async () => '{"ret":0,"message_id":"img-1"}' };
+    };
+  }
+
+  it('negotiates an upload URL, posts AES-128-ECB ciphertext and sends an image_item', async () => {
+    const captured: Array<{ url: string; body: string; ciphertext?: Buffer }> = [];
+    const fetchImpl = imageFetch(captured);
+    const uploaded = await uploadImageToCdn(fetchImpl, { baseUrl: 'https://ilink.example', token: 'tok', toUserId: 'user-a', image });
+
+    expect(uploaded.downloadEncryptedQueryParam).toBe('download-param-1');
+    expect(uploaded.fileSize).toBe(image.length);
+    expect(uploaded.fileSizeCiphertext).toBe(aesEcbPaddedSize(image.length));
+    const uploadRequest = JSON.parse(captured[0].body) as Record<string, unknown>;
+    expect(uploadRequest.media_type).toBe(1);
+    expect(uploadRequest.aeskey).toBe(uploaded.aeskey);
+    expect(uploadRequest.rawfilemd5).toMatch(/^[0-9a-f]{32}$/);
+
+    const ciphertext = captured[1].ciphertext!;
+    expect(ciphertext.length).toBe(uploaded.fileSizeCiphertext);
+    const decipher = createDecipheriv('aes-128-ecb', Buffer.from(uploaded.aeskey, 'hex'), null);
+    expect(Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString()).toBe(image.toString());
+
+    const sent = await sendImageMessage(fetchImpl, {
+      baseUrl: 'https://ilink.example', token: 'tok', toUserId: 'user-a',
+      image: uploaded, contextToken: 'ctx-1', clientId: 'client-img-1',
+    });
+    expect(sent.messageId).toBe('img-1');
+    const sendBody = JSON.parse(captured.at(-1)!.body) as { msg: { context_token?: string; client_id?: string; item_list: Array<{ type?: number; image_item?: { media?: Record<string, unknown>; mid_size?: number } }> } };
+    expect(sendBody.msg.context_token).toBe('ctx-1');
+    expect(sendBody.msg.client_id).toBe('client-img-1');
+    expect(sendBody.msg.item_list[0]).toMatchObject({
+      type: MESSAGE_ITEM_IMAGE,
+      image_item: { media: { encrypt_query_param: 'download-param-1', encrypt_type: 1 }, mid_size: uploaded.fileSizeCiphertext },
+    });
+    expect(sendBody.msg.item_list[0].image_item?.media?.aes_key).toBe(Buffer.from(uploaded.aeskey, 'utf8').toString('base64'));
+  });
+
+  it('fails when the platform rejects the upload request', async () => {
+    const failure = await uploadImageToCdn(okFetch('{"ret":-2,"errmsg":"invalid session"}'), { baseUrl: 'https://ilink.example', token: 'tok', toUserId: 'user-a', image }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ILinkApiError);
+    expect((failure as ILinkApiError).ret).toBe(-2);
+  });
+
+  it('aborts on a CDN client error instead of retrying', async () => {
+    let uploads = 0;
+    const fetchImpl: FetchLike = async (input) => {
+      if (input.endsWith('/ilink/bot/getuploadurl')) {
+        return { ok: true, status: 200, text: async () => '{"ret":0,"upload_param":"param-1"}' };
+      }
+      uploads += 1;
+      return { ok: false, status: 400, text: async () => '', headers: { get: (name) => name === 'x-error-message' ? 'bad signature' : null } };
+    };
+    const failure = await uploadImageToCdn(fetchImpl, { baseUrl: 'https://ilink.example', token: 'tok', toUserId: 'user-a', image }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ILinkApiError);
+    expect((failure as ILinkApiError).httpStatus).toBe(400);
+    expect(uploads).toBe(1);
   });
 });
 

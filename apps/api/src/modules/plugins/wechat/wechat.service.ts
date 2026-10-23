@@ -1,20 +1,22 @@
-import { BadRequestException, ConflictException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { createHash } from 'node:crypto';
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { readFile } from 'node:fs/promises';
+import { and, asc, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { WechatLoginView } from '@worklite/contracts';
-import { chatSubmissions, externalChats, wechatEvents, type Database } from '@worklite/db';
+import { chatSubmissions, externalChats, wechatEvents, workflowPendingActions, type Database } from '@worklite/db';
 import { DATABASE } from '../../../infrastructure/database.module';
 import { assertRuntimeAdmission, runtimeAdmissionClosed, runtimeWritesFrozen, upgradePhase } from '../../../infrastructure/runtime-upgrade-state';
 import { AgentExecutionsService } from '../../agents/agent-executions.service';
 import { CHAT_AGENT_ID, ChatDispatchService } from '../../agents/chat-dispatch.service';
+import { ChatAttachmentsService, detachAttachmentImages } from '../../agents/chat-attachments.service';
 import { AgentTeamsService } from '../../agent-teams/agent-teams.service';
 import { RunsService } from '../../runs/runs.service';
 import { UpgradesService } from '../../upgrades/upgrades.service';
 import { encryptSecret, PluginsService } from '../plugins.service';
 import { statusText } from '../feishu/feishu-cards';
-import { fetchBotQrCode, fetchTypingTicket, getUpdates, ILINK_DEFAULT_BASE_URL, ILINK_STALE_TOKEN_ERRCODE, ILinkApiError, mediaLabel, parseInboundMessage, pollQrCodeStatus, sendTextMessage, sendTyping, MESSAGE_TYPE_USER, type FetchLike, type ILinkInboundMessage, type ILinkRawMessage } from './ilink';
+import { fetchBotQrCode, fetchTypingTicket, getUpdates, ILINK_DEFAULT_BASE_URL, ILINK_STALE_TOKEN_ERRCODE, ILinkApiError, mediaLabel, parseInboundMessage, pollQrCodeStatus, sendImageMessage, sendTextMessage, sendTyping, uploadImageToCdn, MESSAGE_TYPE_USER, type FetchLike, type ILinkInboundMessage, type ILinkRawMessage } from './ilink';
 
 type Json = Record<string, unknown>;
 type Submission = typeof chatSubmissions.$inferSelect;
@@ -85,6 +87,20 @@ export function truncateWechatText(value: string): string {
 // Mirrors the reference iLink client's getconfig cache window; refetching every poll would
 // be wasteful since the ticket outlives any single turn.
 const TYPING_TICKET_TTL_MS = 60 * 60_000;
+// Workflow human gates whose payload is a scannable QR rather than a control on the Web page.
+const QR_ACTION_TYPES = new Set(['wechat_login', 'wechat_publish_confirmation']);
+// A failed QR upload must not retry on every 2s work tick; the code stays valid while the
+// pending action is open, so a minute of backoff still delivers comfortably inside its window.
+const QR_PUSH_RETRY_MS = 60_000;
+const IMAGE_DATA_URL = /^data:(image\/(?:png|jpeg|gif|webp));base64,(.+)$/s;
+
+/** Decodes the data URL the WeChat Official Account node captures for its QR code. */
+export function decodeWechatImageDataUrl(value: string): { mimeType: string; buffer: Buffer } | null {
+  const match = IMAGE_DATA_URL.exec(value.trim());
+  if (!match) return null;
+  const buffer = Buffer.from(match[2]!, 'base64');
+  return buffer.length ? { mimeType: match[1]!, buffer } : null;
+}
 
 @Injectable()
 export class WechatService implements OnModuleInit, OnModuleDestroy {
@@ -98,8 +114,11 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
   private unsubscribers: Array<() => void> = [];
   private allowedUserId = '';
   private token = '';
+  private workspaceId = '';
   private baseUrl = ILINK_DEFAULT_BASE_URL;
   private login: LoginSession | null = null;
+  // Per-QR backoff for image pushes that failed; cleared on success or when the action closes.
+  private readonly qrAttempts = new Map<string, number>();
   // getconfig's typing_ticket has its own validity window independent of the bot token;
   // cache it per user instead of fetching before every typing signal.
   private readonly typingTickets = new Map<string, { ticket: string; fetchedAt: number }>();
@@ -112,6 +131,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
     private readonly teams: AgentTeamsService,
     private readonly runs: RunsService,
     private readonly upgrades: UpgradesService,
+    private readonly attachments: ChatAttachmentsService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -263,6 +283,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
     }
     this.stopped = false;
     this.allowedUserId = config.wechatAllowedUserId;
+    this.workspaceId = config.workspaceId;
     this.token = config.botToken;
     this.baseUrl = config.wechatBaseUrl || ILINK_DEFAULT_BASE_URL;
     const state = async (status: 'connecting' | 'connected' | 'error', reason: string | null = null) => {
@@ -500,6 +521,9 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
         try { await this.deliver(submission); }
         catch { await this.plugins.updateWechat({ wechatLastError: '微信消息投递失败，恢复后自动继续投递。' }); }
       }
+      // QR gates are independent of Chat submissions: a Run started on the Web page still needs
+      // the code on the user's bound WeChat, and this sweep retries until the platform accepts it.
+      await this.pushPendingQrImages();
     } catch {
       await this.plugins.updateWechat({ wechatLastError: '微信消息处理暂时失败，已接收的消息会在恢复后继续处理。' }).catch(() => undefined);
     } finally { this.busy = false; }
@@ -546,6 +570,70 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
       const [acceptedAnswer] = await this.db.select({ reference: chatSubmissions.reference }).from(chatSubmissions).where(eq(chatSubmissions.id, eventId)).limit(1);
       if (acceptedAnswer?.reference?.kind === 'conversation') await this.db.update(externalChats).set({ executionId: acceptedAnswer.reference.executionId, updatedAt: new Date() }).where(and(eq(externalChats.id, chatId), eq(externalChats.executionId, action.executionId)));
     }
+  }
+
+  // A QR human gate is unusable on a channel that only shows text, so every pending WeChat login
+  // or publication confirmation is pushed to the bound user as its own image message. The
+  // delivery key includes the QR content: a refreshed code sends again, while a redelivery of the
+  // same code is skipped even across restarts.
+  private async pushPendingQrImages(): Promise<void> {
+    if (!this.token || !this.allowedUserId || !this.workspaceId || runtimeAdmissionClosed()) return;
+    const actions = await this.db.select().from(workflowPendingActions)
+      .where(and(
+        eq(workflowPendingActions.workspaceId, this.workspaceId),
+        eq(workflowPendingActions.status, 'pending'),
+        isNotNull(workflowPendingActions.qrCode),
+      ));
+    for (const action of actions) {
+      if (!QR_ACTION_TYPES.has(action.type) || !action.qrCode) continue;
+      const key = `qr:${action.id}:${digest(action.qrCode).slice(0, 16)}`;
+      if (action.expiresAt && action.expiresAt.getTime() <= Date.now()) { this.qrAttempts.delete(key); continue; }
+      if (await this.deliveryExists(key)) { this.qrAttempts.delete(key); continue; }
+      const image = decodeWechatImageDataUrl(action.qrCode);
+      if (!image) continue;
+      if (Date.now() - (this.qrAttempts.get(key) ?? 0) < QR_PUSH_RETRY_MS) continue;
+      this.qrAttempts.set(key, Date.now());
+      const [chat] = await this.db.select().from(externalChats)
+        .where(and(
+          eq(externalChats.workspaceId, this.workspaceId),
+          eq(externalChats.channel, 'wechat'),
+          eq(externalChats.userId, this.allowedUserId),
+        ))
+        .orderBy(desc(externalChats.updatedAt)).limit(1);
+      const toUserId = chat?.externalId || this.allowedUserId;
+      // Outbound records reference external_chats, and a Web-triggered Run may be the first
+      // thing this bot ever pushes, so materialize the conversation row before recording.
+      const chatId = chat?.id ?? `wechat:${toUserId}`;
+      if (!chat) await this.db.insert(externalChats).values({ id: chatId, workspaceId: this.workspaceId, channel: 'wechat', externalId: toUserId, userId: this.allowedUserId }).onConflictDoNothing();
+      const clientId = digest(`wechat:${key}`).slice(0, 32);
+      try {
+        const uploaded = await uploadImageToCdn(this.fetchImpl, { baseUrl: this.baseUrl, token: this.token, toUserId, image: image.buffer });
+        const result = await sendImageMessage(this.fetchImpl, { baseUrl: this.baseUrl, token: this.token, toUserId, image: uploaded, contextToken: chat?.contextToken ?? '', clientId });
+        await this.recordDelivery(chatId, key, 'done', {
+          operation: 'image.send', purpose: 'workflow-qr', actionId: action.id, runId: action.runId,
+          clientId, messageId: result.messageId || null, mimeType: image.mimeType, size: image.buffer.length,
+        });
+        this.qrAttempts.delete(key);
+      } catch (error) {
+        const reason = error instanceof ILinkApiError ? error.message : '微信二维码图片发送暂时失败。';
+        this.logger.warn(`WeChat workflow QR image push failed (action=${action.id}): ${reason}`);
+        await this.recordDelivery(chatId, key, 'failed', {
+          operation: 'image.send', purpose: 'workflow-qr', actionId: action.id, runId: action.runId,
+          clientId, mimeType: image.mimeType, size: image.buffer.length,
+        }, reason).catch(() => undefined);
+      }
+    }
+  }
+
+  // Resolves a Chat attachment through the same service that serves it on the Web, uploads its
+  // bytes to the iLink CDN, and sends it as a native image message.
+  private async sendAttachmentImage(chat: typeof externalChats.$inferSelect, attachmentId: string, key: string): Promise<{ messageId: string; mimeType: string; size: number }> {
+    const { attachment, path } = this.attachments.open(chat.workspaceId, attachmentId);
+    const image = await readFile(path);
+    const clientId = digest(`wechat:${key}`).slice(0, 32);
+    const uploaded = await uploadImageToCdn(this.fetchImpl, { baseUrl: this.baseUrl, token: this.token, toUserId: chat.externalId, image });
+    const result = await sendImageMessage(this.fetchImpl, { baseUrl: this.baseUrl, token: this.token, toUserId: chat.externalId, image: uploaded, contextToken: chat.contextToken ?? '', clientId });
+    return { messageId: result.messageId || clientId, mimeType: attachment.mimeType, size: image.length };
   }
 
   // WeChat delivers whole text messages; there is no editable card or typewriter channel.
@@ -608,7 +696,10 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
         text = `【工作流】「${run.workflowName}」${statusText[run.status] ?? run.status}`;
         if (run.result != null) text += `\n\n${typeof run.result === 'string' ? run.result : JSON.stringify(run.result, null, 2)}`;
       } else if (run.pendingAction) {
-        text = `【工作流】「${run.workflowName}」需要操作\n${run.pendingAction.title}\n${run.pendingAction.description}\n\n请前往 WorkLite 处理。`;
+        // The QR itself is pushed as a separate image by the pending-action sweep; the text
+        // message only explains the gate so the two never race into a single mixed message.
+        const hint = run.pendingAction.qrCode ? '二维码已单独发送，请直接扫码；也可在 WorkLite 查看。' : '请前往 WorkLite 处理。';
+        text = `【工作流】「${run.workflowName}」需要操作\n${run.pendingAction.title}\n${run.pendingAction.description}\n\n${hint}`;
       } else {
         text = `【工作流】「${run.workflowName}」已开始执行${run.currentStep ? `\n当前步骤：${run.currentStep}` : ''}`;
       }
@@ -621,8 +712,13 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
       if (chat) await this.signalTyping(chat.externalId, chat.contextToken ?? undefined, false);
       return;
     }
-    text = truncateWechatText(text);
-    const fingerprint = digest(JSON.stringify({ kind: reference?.kind ?? 'pending', text, terminal }));
+    // Chat replies may carry the attachment markdown the platform's upload route returns. WeChat
+    // cannot fetch those WorkLite URLs, so each reference becomes a native image message and the
+    // remaining prose stays one text message.
+    const { text: bodyText, references } = detachAttachmentImages(text);
+    text = truncateWechatText(bodyText);
+    const imageIds = [...new Set(references.map((reference) => reference.id))];
+    const fingerprint = digest(JSON.stringify({ kind: reference?.kind ?? 'pending', text, images: imageIds, terminal }));
     if (fingerprint === submission.deliveryFingerprint) {
       if (terminal) await this.db.update(chatSubmissions).set({ settled: true }).where(eq(chatSubmissions.id, submission.id));
       return;
@@ -636,9 +732,42 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
     const clientId = digest(`wechat:${submission.id}:${fingerprint}`).slice(0, 32);
     const key = `${submission.id}:${fingerprint.slice(0, 16)}`;
     try {
-      const result = await sendTextMessage(this.fetchImpl, { baseUrl: this.baseUrl, token: this.token, toUserId: chat.externalId, text, contextToken: chat.contextToken ?? '', clientId });
-      await this.db.update(chatSubmissions).set({ outputMessageId: result.messageId || clientId, deliveryFingerprint: fingerprint, settled: terminal, updatedAt: new Date() }).where(eq(chatSubmissions.id, submission.id));
-      await this.recordDelivery(chatId, key, 'done', { operation: 'message.send', clientId, messageId: result.messageId || null, text });
+      let lastMessageId = '';
+      const notes: string[] = [];
+      for (const attachmentId of imageIds) {
+        const imageKey = `${key}:image:${attachmentId}`;
+        // A retry after the text send failed must not upload and send the same image again.
+        if (await this.deliveryExists(imageKey)) continue;
+        try {
+          const sent = await this.sendAttachmentImage(chat, attachmentId, imageKey);
+          lastMessageId = sent.messageId || lastMessageId;
+          await this.recordDelivery(chatId, imageKey, 'done', {
+            operation: 'image.send', purpose: 'chat-attachment', attachmentId,
+            clientId: digest(`wechat:${imageKey}`).slice(0, 32), messageId: sent.messageId, mimeType: sent.mimeType, size: sent.size,
+          });
+        } catch (error) {
+          // An expired attachment can never be uploaded; keep the reply readable instead of
+          // retrying it forever, unlike transient transport failures which stay retryable.
+          if (error instanceof NotFoundException) {
+            notes.push('[图片已过期或不存在，请在 WorkLite 查看]');
+            await this.recordDelivery(chatId, imageKey, 'failed', { operation: 'image.send', purpose: 'chat-attachment', attachmentId }, error.message);
+            continue;
+          }
+          const reason = error instanceof ILinkApiError ? error.message : '微信图片发送暂时失败，恢复后将继续投递。';
+          await this.recordDelivery(chatId, imageKey, 'failed', { operation: 'image.send', purpose: 'chat-attachment', attachmentId }, reason);
+          if (error instanceof ILinkApiError && (error.errcode === ILINK_STALE_TOKEN_ERRCODE || error.ret === ILINK_STALE_TOKEN_ERRCODE)) {
+            await this.plugins.updateWechat({ wechatStatus: 'error', wechatLastError: '微信登录已过期，请重新扫码登录。' });
+          }
+          throw error;
+        }
+      }
+      const finalText = [text, ...notes].filter(Boolean).join('\n\n');
+      if (finalText) {
+        const result = await sendTextMessage(this.fetchImpl, { baseUrl: this.baseUrl, token: this.token, toUserId: chat.externalId, text: finalText, contextToken: chat.contextToken ?? '', clientId });
+        lastMessageId = result.messageId || lastMessageId;
+        await this.recordDelivery(chatId, key, 'done', { operation: 'message.send', clientId, messageId: result.messageId || null, text: finalText });
+      }
+      await this.db.update(chatSubmissions).set({ outputMessageId: lastMessageId || clientId, deliveryFingerprint: fingerprint, settled: terminal, updatedAt: new Date() }).where(eq(chatSubmissions.id, submission.id));
     } catch (error) {
       const reason = error instanceof ILinkApiError ? error.message : '微信消息发送暂时失败，恢复后将继续投递。';
       await this.recordDelivery(chatId, key, 'failed', { operation: 'message.send', clientId, text }, reason);
@@ -664,6 +793,12 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       this.logger.debug(`WeChat typing indicator signal failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /** True once this exact outbound item has been accepted by the platform. */
+  private async deliveryExists(key: string): Promise<boolean> {
+    const [existing] = await this.db.select({ id: wechatEvents.id }).from(wechatEvents).where(eq(wechatEvents.id, `outbound:${key}:done`)).limit(1);
+    return Boolean(existing);
   }
 
   private async recordDelivery(chatId: string, key: string, status: 'done' | 'failed', payload: Json, error: string | null = null) {
