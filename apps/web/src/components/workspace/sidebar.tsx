@@ -3,6 +3,7 @@ import { MessageSquareText, KeyRound, Puzzle, ScrollText, Settings, UsersRound, 
 import { useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChatConversationsQuery } from '@/api/queries';
+import { APP_VERSION_LABEL } from '@/app-version';
 import { isLiveStatus } from '@/components/status-badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { focusRingInset } from '@/components/ui/interaction';
@@ -137,6 +138,16 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
           ))}
         </div>
       </nav>
+      <div className={cn('shrink-0 border-t border-border py-2', collapsed ? 'px-1' : 'px-3')}>
+        <p
+          className={cn(
+            'truncate font-mono text-muted-foreground',
+            collapsed ? 'text-center text-[10px]' : 'text-[11px]',
+          )}
+        >
+          {APP_VERSION_LABEL}
+        </p>
+      </div>
     </aside>
   );
 }
