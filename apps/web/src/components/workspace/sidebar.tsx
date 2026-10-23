@@ -1,5 +1,5 @@
 import { Link, useRouterState } from '@tanstack/react-router';
-import { MessageSquareText, KeyRound, Puzzle, ScrollText, Settings, UsersRound, Workflow } from 'lucide-react';
+import { FileText, MessageSquareText, KeyRound, Puzzle, ScrollText, Settings, UsersRound, Workflow } from 'lucide-react';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChatConversationsQuery } from '@/api/queries';
@@ -17,6 +17,7 @@ const navigationGroups = [
     items: [
       { id: 'chat', labelKey: 'nav.chat', to: '/chat', icon: MessageSquareText },
       { id: 'workflows', labelKey: 'nav.workflows', to: '/workflows', icon: Workflow },
+      { id: 'artifacts', labelKey: 'nav.artifacts', to: '/artifacts', icon: FileText },
       { id: 'agentTeam', labelKey: 'nav.agentTeam', to: '/agent-teams', icon: UsersRound },
     ],
   },
@@ -56,7 +57,7 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
 
   function primaryActive(id: NavItem['id'], to: string) {
     if (id === 'settings') return pathname.startsWith('/settings');
-    if (id === 'workflows') return ['/workflows', '/artifacts', '/runs'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+    if (id === 'workflows') return ['/workflows', '/runs'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
     if (id === 'agentTeam') return ['/agent-teams', '/agent-team-runs', '/agent-team-groups'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
     if (id === 'plugins') return ['/plugins', '/skills', '/mcp-servers'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
     return pathname === to || pathname.startsWith(`${to}/`);

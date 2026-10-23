@@ -1,6 +1,6 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
-import type { AssignHomeBoardRequest, CreateHomeBoardCategoryRequest, GatewayRequestLogQuery, GatewayTimeRange, UpdateChatMemoryRequest, UpdateHomeBoardCategoryRequest } from '@worklite/contracts';
+import type { ArtifactListQuery, AssignHomeBoardRequest, CreateHomeBoardCategoryRequest, GatewayRequestLogQuery, GatewayTimeRange, UpdateChatMemoryRequest, UpdateHomeBoardCategoryRequest } from '@worklite/contracts';
 
 export const workflowScheduleQueryKey = (workflowId: string) => ['workflow-schedule', workflowId] as const;
 export const pluginsQueryKey = () => ['plugins'] as const;
@@ -247,6 +247,14 @@ export function useGatewayRequestLogQuery(requestLogId?: string) {
     queryKey: ['gateway-request-log', requestLogId ?? ''] as const,
     queryFn: () => api.gatewayRequestLog(requestLogId as string),
     enabled: Boolean(requestLogId),
+  });
+}
+
+export function useArtifactListQuery(workspace: string | undefined, query: ArtifactListQuery) {
+  return useQuery({
+    queryKey: ['artifacts', query] as const,
+    queryFn: () => api.artifacts(workspace, query),
+    placeholderData: keepPreviousData,
   });
 }
 

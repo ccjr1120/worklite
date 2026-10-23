@@ -3,7 +3,9 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID }
 import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type {
-  ArtifactView,
+  ArtifactDetailView,
+  ArtifactListPageView,
+  ArtifactListQuery,
   AuditEventView,
   CreateMcpServerRequest,
   UpdateMcpServerRequest,
@@ -58,6 +60,7 @@ import { WorkspaceService } from './teams.service';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
 import { localSkillId, localSkillRootDirectory, parseSkillFrontmatter, scanLocalSkillRoot } from '../skills/local-skill-source';
 import { McpClientService } from '../mcp-servers/mcp-client.service';
+import { getArtifactDetail, listArtifacts } from '../artifacts/artifacts-query';
 import { AGENT_TEAM_ROLES, BUILT_IN_AGENT_TEAM_ID } from '../agent-teams/agent-team-configuration';
 import { isWorkliteNavigationTarget, resolveWorkliteNavigationRoute } from './worklite-navigation';
 
@@ -1146,17 +1149,16 @@ export class WorkspaceResourcesService {
     if (!row) throw new NotFoundException('Model provider not found');
   }
 
-  async artifactsList(request: Request, workspaceSlug: string): Promise<ArtifactView[]> {
+  async artifactsList(request: Request, workspaceSlug: string, query: ArtifactListQuery = {}): Promise<ArtifactListPageView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const rows = await this.db.select({ artifact: artifacts, workflowName: workflows.name }).from(artifacts).leftJoin(workflows, eq(artifacts.workflowId, workflows.id)).where(eq(artifacts.workspaceId, team.id)).orderBy(desc(artifacts.createdAt));
-    return rows.map(({ artifact, workflowName }) => this.toArtifact(artifact, workspaceSlug, workflowName ?? 'Unknown workflow'));
+    return listArtifacts(this.db, team.id, workspaceSlug, query);
   }
 
-  async artifact(request: Request, workspaceSlug: string, artifactId: string): Promise<ArtifactView> {
+  async artifact(request: Request, workspaceSlug: string, artifactId: string): Promise<ArtifactDetailView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [row] = await this.db.select({ artifact: artifacts, workflowName: workflows.name }).from(artifacts).leftJoin(workflows, eq(artifacts.workflowId, workflows.id)).where(and(eq(artifacts.id, artifactId), eq(artifacts.workspaceId, team.id))).limit(1);
-    if (!row) throw new NotFoundException('Artifact not found');
-    return this.toArtifact(row.artifact, workspaceSlug, row.workflowName ?? 'Unknown workflow');
+    const artifact = await getArtifactDetail(this.db, team.id, workspaceSlug, artifactId);
+    if (!artifact) throw new NotFoundException('Artifact not found');
+    return artifact;
   }
 
   async deleteArtifact(request: Request, workspaceSlug: string, artifactId: string): Promise<void> {
@@ -1204,9 +1206,6 @@ export class WorkspaceResourcesService {
     return rows.map(({ audit }) => ({ id: audit.id, actor: 'You', action: audit.action, resource: audit.resource, timestamp: audit.createdAt.toISOString(), metadata: JSON.stringify(audit.metadata) }));
   }
 
-  private toArtifact(row: typeof artifacts.$inferSelect, workspaceSlug: string, workflowName: string): ArtifactView {
-    return { id: row.id, workspaceSlug, name: row.name, type: row.type, workflowName, runId: row.runId ?? '', size: row.size, createdAt: row.createdAt.toISOString(), content: row.content };
-  }
 }
 
 function workflowNodesReferencingMcpServer(definition: StoredWorkflowDefinition, serverId: string): string[] {

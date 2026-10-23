@@ -29,7 +29,9 @@ import type {
   WorkflowDetailView,
   WorkflowVersionView,
   UpdateAgentRequest,
-  ArtifactView,
+  ArtifactDetailView,
+  ArtifactListPageView,
+  ArtifactListQuery,
   AuditEventView,
   GatewayRequestLogDetail,
   GatewayRequestLogList,
@@ -241,8 +243,15 @@ export const api = {
   discoverModelProviderModels: (input: DiscoverModelProviderRequest) => apiPost<DiscoverModelProviderResult>('/api/portkey-gateway/model-providers/discover-models', input),
   testModelProvider: (_workspace: string | undefined, providerId: string, input: TestModelProviderRequest) => apiPost<ModelProviderTestResult>(`/api/portkey-gateway/providers/${encodeURIComponent(providerId)}/test`, input),
   deleteModelProvider: (_workspace: string | undefined, providerId: string) => apiDelete(`/api/portkey-gateway/providers/${encodeURIComponent(providerId)}`),
-  artifacts: (_workspace?: string) => apiGet<ArtifactView[]>('/api/artifacts'),
-  artifact: (_workspace: string | undefined, artifactId: string) => apiGet<ArtifactView>(`/api/artifacts/${encodeURIComponent(artifactId)}`),
+  artifacts: (_workspace: string | undefined, query: ArtifactListQuery = {}) => {
+    const search = new URLSearchParams();
+    if (query.search?.trim()) search.set('search', query.search.trim());
+    if (query.workflowId?.trim()) search.set('workflowId', query.workflowId.trim());
+    if (query.page) search.set('page', String(query.page));
+    if (query.pageSize) search.set('pageSize', String(query.pageSize));
+    return apiGet<ArtifactListPageView>(`/api/artifacts${search.size > 0 ? `?${search.toString()}` : ''}`);
+  },
+  artifact: (_workspace: string | undefined, artifactId: string) => apiGet<ArtifactDetailView>(`/api/artifacts/${encodeURIComponent(artifactId)}`),
   deleteArtifact: (_workspace: string | undefined, artifactId: string) => apiDelete(`/api/artifacts/${encodeURIComponent(artifactId)}`),
   usage: (_workspace?: string) => apiGet<UsageRow[]>('/api/usage'),
   auditLogs: (_workspace?: string) => apiGet<AuditEventView[]>('/api/audit-logs'),

@@ -1,4 +1,5 @@
 import { Component, lazy, Suspense, type ReactNode } from 'react';
+import type { Components, UrlTransform } from 'streamdown';
 import { cn } from '@/lib/utils';
 
 type StreamingMarkdownProps = {
@@ -6,6 +7,8 @@ type StreamingMarkdownProps = {
   streaming?: boolean;
   className?: string;
   enabled?: boolean;
+  components?: Components;
+  urlTransform?: UrlTransform;
 };
 
 const StreamingMarkdownView = lazy(() => import('./streaming-markdown-view'));
@@ -29,6 +32,8 @@ function StreamingMarkdown({
   streaming = false,
   className,
   enabled = true,
+  components,
+  urlTransform,
 }: StreamingMarkdownProps) {
   if (!enabled) {
     return <PlainTextMarkdown content={content} className={className} />;
@@ -38,7 +43,7 @@ function StreamingMarkdown({
   return (
     <MarkdownBoundary resetKey={content} fallback={plain}>
       <Suspense fallback={plain}>
-        <StreamingMarkdownView content={content} streaming={streaming} className={className} />
+        <StreamingMarkdownView content={content} streaming={streaming} className={className} components={components} urlTransform={urlTransform} />
       </Suspense>
     </MarkdownBoundary>
   );
