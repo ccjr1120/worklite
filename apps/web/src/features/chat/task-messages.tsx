@@ -1,7 +1,7 @@
 import { Link } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
-import { useContext, useState, type FormEvent } from 'react';
-import { LoaderCircle, Pause, Play, RefreshCw, RotateCcw, Square } from 'lucide-react';
+import { useContext, useEffect, useState, type FormEvent } from 'react';
+import { ChevronDown, LoaderCircle, Pause, Play, RefreshCw, RotateCcw, Square, Users } from 'lucide-react';
 import type { AgentTeamPendingInputView, AgentTeamRunView, AgentTeamTaskAttemptView, ChatSubmissionView } from '@worklite/contracts';
 import { agentTeamGroupQueryKey, agentTeamRunQueryKey, useAgentTeamRunQuery, useRunQuery, useWorkliteUpgradeQuery } from '@/api/queries';
 import { TaskLink } from './records';
@@ -10,12 +10,15 @@ import { MessageResponse } from '@/components/ai-elements/message';
 import { api } from '@/api/client';
 import { queryClient } from '@/lib/query-client';
 import { Button } from '@/components/ui/button';
-import { StatusBadge, toStatusKey } from '@/components/status-badge';
+import { StatusBadge, StatusDot, toStatusKey } from '@/components/status-badge';
+import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { Field } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/textarea';
 import { TruncatedText } from '@/components/ui/truncated-text';
 import { toSingleLine } from '@/lib/single-line';
+import { cn } from '@/lib/utils';
 import { runModeLabel } from '@/features/agent-teams/run-mode';
+import { formatElapsed, isSettledTeamRun, teamCurrentLabel, teamRoleLabel } from '@/features/agent-teams/team-run-summary';
 
 function WorkflowTask({ submission }: { submission: ChatSubmissionView }) {
   const { t } = useTranslation('assistant');
@@ -104,8 +107,7 @@ function TeamRunActions({ run, groupId, onRunUpdate }: { run: AgentTeamRunView; 
     finally { setBusy(''); }
   }
 
-  return <div className="space-y-2">
-    <div className="flex flex-wrap gap-2">
+  return <div className="flex flex-wrap items-center justify-end gap-2">
       {active ? <>
         {run.desiredControlState !== 'pause_requested' ? <Button type="button" variant="secondary" size="compact" disabled={Boolean(busy)} onClick={() => void perform('pause', () => api.pauseAgentTeamRun(run.id))}><Pause className="size-3.5" aria-hidden="true" />{t('controls.pause')}</Button> : null}
         <Button type="button" variant="secondary" size="compact" disabled={Boolean(busy)} onClick={() => void perform('cancel', () => api.cancelAgentTeamRun(run.id))}><Square className="size-3.5" aria-hidden="true" />{t('controls.cancel')}</Button>
@@ -114,44 +116,9 @@ function TeamRunActions({ run, groupId, onRunUpdate }: { run: AgentTeamRunView; 
         <Button type="button" variant="secondary" size="compact" disabled={Boolean(busy)} onClick={() => void perform('cancel', () => api.cancelAgentTeamRun(run.id))}><Square className="size-3.5" aria-hidden="true" />{t('controls.cancel')}</Button>
       </> : null}
       {groupId && ['succeeded', 'failed', 'cancelled'].includes(run.status) && !reexecutedRunId ? <Button type="button" variant="secondary" size="compact" disabled={Boolean(busy)} onClick={() => void reexecute()}><RefreshCw className="size-3.5" aria-hidden="true" />{t('controls.reexecute')}</Button> : null}
-    </div>
     {run.tasks.filter((task) => task.status === 'failed' && task.retryable).map((task) => <Button key={task.taskKey} type="button" variant="secondary" size="compact" disabled={Boolean(busy)} onClick={() => void perform(`retry:${task.taskKey}`, () => api.retryAgentTeamTask(run.id, task.taskKey))}><RotateCcw className="size-3.5" aria-hidden="true" />{t('tasks.retryTask', { taskKey: task.taskKey })}</Button>)}
-    {reexecutedRunId ? <Link to="/agent-team-runs/$runId" params={{ runId: reexecutedRunId }} className="inline-block text-[13px] text-brand-text underline underline-offset-4">{t('group.openRun')}</Link> : null}
-    {error ? <p className="text-[13px] text-danger" role="alert">{error}</p> : null}
-  </div>;
-}
-
-function TeamRunLink({ runId, groupId }: { runId: string; groupId?: string }) {
-  const { t } = useTranslation('assistant');
-  const { t: tTeams } = useTranslation('agentTeams');
-  const query = useAgentTeamRunQuery('personal', runId);
-  const run = query.data;
-  const failure = run?.status === 'failed' ? [...run.tasks].reverse().find((task) => task.status === 'failed')?.error : null;
-  const questions = run?.pendingInputs.filter((input) => input.status === 'pending' && input.kind === 'question') ?? [];
-  const recoveries = run?.pendingInputs.filter((input) => input.status === 'pending' && input.kind === 'operation_recovery') ?? [];
-  function onRunUpdate(updated: AgentTeamRunView) {
-    queryClient.setQueryData(agentTeamRunQueryKey(updated.id), updated);
-    void queryClient.invalidateQueries({ queryKey: ['agent-team-records', updated.teamId] });
-  }
-  return <div className="space-y-2">
-    <Link to="/agent-team-runs/$runId" params={{ runId }} className="text-[13px] text-brand-text underline underline-offset-4">{t('records.openTask')}</Link>
-    {run ? <div className="flex flex-wrap items-center gap-2">
-      <StatusBadge key={run.status} status={toStatusKey(run.status)} label={t(`status.${run.status}`)} />
-      {run.progress ? <span className="text-[13px] text-muted-foreground tabular-nums">{tTeams(`progress.phaseValue.${run.progress.phase}`)} · {tTeams('progress.percent', { percent: run.progress.percent })}</span> : null}
-    </div> : query.isPending ? <p className="text-[13px] text-muted-foreground" role="status">{t('records.taskLoading')}</p> : null}
-    {run && (run.teamVersion.orchestrationVersion ?? 1) >= 10 ? <TruncatedText as="p" text={`${runModeLabel(tTeams, run.mode, 10, run.modeDecidedAt)}${run.modeRationale ? ` · ${toSingleLine(run.modeRationale)}` : ''}`} className="text-[13px] text-muted-foreground" /> : null}
-    {query.isError ? <p className="text-[13px] text-danger" role="alert">{t('records.taskLoadFailed')}</p> : null}
-    {failure ? <TruncatedText as="p" text={toSingleLine(failure)} title={failure} className="text-[13px] text-danger" role="alert" /> : null}
-    {run ? <TeamRunActions run={run} groupId={groupId} onRunUpdate={onRunUpdate} /> : null}
-    {run ? questions.map((question) => <TeamPendingInput key={question.id} run={run} pendingInput={question} owner={run.tasks.find((task) => task.id === question.taskAttemptId)} onRunUpdate={onRunUpdate} />) : null}
-    {run ? recoveries.map((pending) => {
-      const operation = run.operations.find((item) => item.operationKey === pending.operationKey);
-      if (!operation) return null;
-      return <TeamOperationRecovery key={operation.operationKey} run={run} operation={operation} onRunUpdate={onRunUpdate} />;
-    }) : null}
-    {run?.outcome ? <TruncatedText as="p" text={toSingleLine(run.outcome.summary)} title={run.outcome.summary} className="text-[13px]" /> : null}
-    {run?.outcome?.unresolvedIssues.map((issue) => <TruncatedText key={issue} as="p" text={toSingleLine(issue)} title={issue} className="text-[13px] text-warning" />)}
-    {run?.tasks.filter((task) => task.status === 'running' && task.progressText).map((task) => <TruncatedText key={task.id} as="p" text={toSingleLine(task.progressText)} title={task.progressText} className="text-[13px] text-muted-foreground" />)}
+    {reexecutedRunId ? <Link to="/agent-team-runs/$runId" params={{ runId: reexecutedRunId }} className="text-[13px] text-brand-text underline underline-offset-4">{t('group.openRun')}</Link> : null}
+    {error ? <p className="basis-full text-right text-[13px] text-danger" role="alert">{error}</p> : null}
   </div>;
 }
 
@@ -177,12 +144,115 @@ function TeamOperationRecovery({ run, operation, onRunUpdate }: { run: AgentTeam
   </form>;
 }
 
-function TeamTask({ submission }: { submission: ChatSubmissionView }) {
-  const reference = submission.reference;
-  return <div className="space-y-2">
-    {reference?.kind === 'team' ? <TeamRunLink runId={reference.runId} groupId={reference.groupId} /> : null}
-    {typeof submission.renderedCard?.content === 'string' ? <TruncatedText as="p" text={toSingleLine(submission.renderedCard.content)} title={submission.renderedCard.content} className="text-[13px]" /> : null}
-  </div>;
+// Mirrors the project task card: a one-line summary (goal, status, phase and current role) and
+// a footer with the role's model and elapsed time; task-level evidence stays collapsed. Pending
+// questions and recovery decisions stay visible because the Run is blocked on them.
+function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissionView; runId: string; groupId?: string }) {
+  const { t } = useTranslation('assistant');
+  const { t: tTeams } = useTranslation('agentTeams');
+  const pins = useContext(PinTrackingContext);
+  const query = useAgentTeamRunQuery('personal', runId);
+  const run = query.data;
+  const [expanded, setExpanded] = useState(false);
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  const live = run ? !isSettledTeamRun(run) : !submission.settled && !submission.error;
+  const expandRequest = pins?.expandRequest;
+  useEffect(() => {
+    if (expandRequest?.id === submission.id) setExpanded(true);
+  }, [expandRequest, submission.id]);
+  useEffect(() => {
+    if (!live) return;
+    setClockNow(Date.now());
+    const timer = window.setInterval(() => setClockNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [live, runId]);
+  function onRunUpdate(updated: AgentTeamRunView) {
+    queryClient.setQueryData(agentTeamRunQueryKey(updated.id), updated);
+    void queryClient.invalidateQueries({ queryKey: ['agent-team-records', updated.teamId] });
+  }
+  const failure = run?.status === 'failed' ? [...run.tasks].reverse().find((task) => task.status === 'failed')?.error : null;
+  const questions = run?.pendingInputs.filter((input) => input.status === 'pending' && input.kind === 'question') ?? [];
+  const recoveries = run?.pendingInputs.filter((input) => input.status === 'pending' && input.kind === 'operation_recovery') ?? [];
+  const current = run && live ? run.current : null;
+  const runEndMs = run && !live ? Date.parse(run.finishedAt ?? run.updatedAt) : clockNow;
+  const totalElapsed = run ? formatElapsed(t, run.createdAt, runEndMs) : null;
+  const roleElapsed = current && current.activeCount === 1 ? formatElapsed(t, current.startedAt, clockNow) : null;
+  const phase = run && live ? `${tTeams(`progress.phaseValue.${run.progress.phase}`)} · ${tTeams('progress.percent', { percent: run.progress.percent })}` : null;
+  const progressLine = current?.progressText.trim() ? toSingleLine(current.progressText) : current?.assignmentTitle ?? null;
+  const assignments = run && live && run.progress.totalAssignments > 0 ? tTeams('progress.assignments', { completed: run.progress.completedAssignments, total: run.progress.totalAssignments }) : null;
+  const meta = [
+    current ? teamCurrentLabel(t, tTeams, current) : run && live ? t('teamRun.betweenRoles') : null,
+    current ? current.model || t('teamRun.defaultModel') : null,
+    roleElapsed ? t('teamRun.roleElapsed', { duration: roleElapsed }) : null,
+    assignments,
+    totalElapsed ? t('teamRun.totalElapsed', { duration: totalElapsed }) : null,
+  ].filter((part): part is string => Boolean(part));
+  const statusKey = submission.error ? 'failed' : run ? toStatusKey(run.status) : 'queued';
+  const detailsId = `team-run-details-${submission.id}`;
+
+  return <article
+    ref={pins?.track(submission.id)}
+    tabIndex={-1}
+    className={cn('wl-enter my-2 overflow-hidden rounded-lg border bg-surface shadow-xs transition-[border-color,box-shadow] duration-[200ms] outline-none', live && run ? 'border-brand/40 wl-live-glow' : statusKey === 'failed' ? 'border-danger/30' : 'border-border')}
+    aria-label={t('teamRun.panel')}
+  >
+    <button
+      type="button"
+      className={cn('flex min-h-11 w-full items-start gap-2.5 px-3 py-2 text-left hover:bg-surface-subtle/70', surfaceInteraction, focusRingInset)}
+      aria-expanded={expanded}
+      aria-controls={detailsId}
+      aria-label={expanded ? t('teamRun.collapse') : t('teamRun.expand')}
+      onClick={() => setExpanded((value) => !value)}
+    >
+      <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface-subtle"><Users className="size-3.5 text-muted-foreground" aria-hidden="true" /></span>
+      <span className="min-w-0 flex-1">
+        <TruncatedText text={toSingleLine(submission.message)} title={submission.message} className="block text-[13px] font-semibold" />
+        <span className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <StatusBadge key={statusKey} status={statusKey} label={t(`status.${submission.error ? 'failed' : run?.status ?? 'queued'}`)} />
+          {phase ? <span className="shrink-0 tabular-nums">{phase}</span> : null}
+          {progressLine ? <TruncatedText text={progressLine} title={current?.progressText || progressLine} /> : null}
+        </span>
+      </span>
+      <ChevronDown className={cn('mt-1 size-4 shrink-0 text-muted-foreground transition-transform duration-[200ms] ease-[var(--ease-out)]', !expanded && '-rotate-90')} aria-hidden="true" />
+    </button>
+    <div className="flex min-h-9 flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-1.5">
+      <p className="flex min-w-0 flex-1 items-center gap-1.5 text-[11px] text-muted-foreground">
+        {meta.map((part, index) => <span key={index} className={cn('flex min-w-0 items-center gap-1.5', index > 1 && 'shrink-0')}>{index ? <span aria-hidden="true">·</span> : null}<TruncatedText text={part} /></span>)}
+        {!run && query.isPending ? <span role="status">{t('records.taskLoading')}</span> : null}
+      </p>
+      {run ? <TeamRunActions run={run} groupId={groupId} onRunUpdate={onRunUpdate} /> : null}
+    </div>
+    {submission.error || query.isError || failure || questions.length || recoveries.length ? <div className="space-y-2 border-t border-border px-3 py-2.5">
+      {submission.error ? <TruncatedText as="p" text={toSingleLine(submission.error)} title={submission.error} className="text-[13px] text-danger" role="alert" /> : null}
+      {query.isError ? <p className="text-[13px] text-danger" role="alert">{t('records.taskLoadFailed')}</p> : null}
+      {failure ? <TruncatedText as="p" text={toSingleLine(failure)} title={failure} className="text-[13px] text-danger" role="alert" /> : null}
+      {run ? questions.map((question) => <TeamPendingInput key={question.id} run={run} pendingInput={question} owner={run.tasks.find((task) => task.id === question.taskAttemptId)} onRunUpdate={onRunUpdate} />) : null}
+      {run ? recoveries.map((pending) => {
+        const operation = run.operations.find((item) => item.operationKey === pending.operationKey);
+        if (!operation) return null;
+        return <TeamOperationRecovery key={operation.operationKey} run={run} operation={operation} onRunUpdate={onRunUpdate} />;
+      }) : null}
+    </div> : null}
+    {expanded ? <div id={detailsId} className="wl-fade space-y-3 border-t border-border px-3 pb-3 pt-2.5 text-[13px]">
+      {run && (run.teamVersion.orchestrationVersion ?? 1) >= 10 ? <TruncatedText as="p" text={`${runModeLabel(tTeams, run.mode, 10, run.modeDecidedAt)}${run.modeRationale ? ` · ${toSingleLine(run.modeRationale)}` : ''}`} className="text-muted-foreground" /> : null}
+      {run?.outcome ? <MessageResponse content={run.outcome.summary} enabled /> : null}
+      {run?.outcome?.unresolvedIssues.map((issue) => <TruncatedText key={issue} as="p" text={toSingleLine(issue)} title={issue} className="text-warning" />)}
+      {run?.tasks.length ? <section className="space-y-1.5">
+        <h3 className="text-xs font-medium">{t('teamRun.tasks')}</h3>
+        <ol className="space-y-1">
+          {run.tasks.map((task) => {
+            const elapsed = formatElapsed(t, task.startedAt ?? task.createdAt, task.finishedAt ? Date.parse(task.finishedAt) : clockNow);
+            return <li key={task.id} className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <StatusDot status={toStatusKey(task.status)} label={t(`status.${task.status}`)} />
+              <TruncatedText text={[teamRoleLabel(tTeams, task), task.assignmentTitle ?? task.taskKey, task.model, elapsed].filter(Boolean).join(' · ')} />
+            </li>;
+          })}
+        </ol>
+      </section> : null}
+      {typeof submission.renderedCard?.content === 'string' ? <TruncatedText as="p" text={toSingleLine(submission.renderedCard.content)} title={submission.renderedCard.content} /> : null}
+      <Link to="/agent-team-runs/$runId" params={{ runId }} className="inline-block text-brand-text underline underline-offset-4">{t('teamRun.openRun')}</Link>
+    </div> : null}
+  </article>;
 }
 
 function UpgradeTask({ jobId }: { jobId: string }) {
@@ -213,5 +283,6 @@ function UpgradeTask({ jobId }: { jobId: string }) {
 export function TaskCard({ submission }: { submission: ChatSubmissionView }) {
   const { t } = useTranslation('assistant');
   const pins = useContext(PinTrackingContext);
-  return <section ref={pins?.track(submission.id)} tabIndex={-1} className="wl-enter my-4 space-y-3 rounded-xl border border-border bg-surface p-4 shadow-xs outline-none"><TruncatedText as="p" text={toSingleLine(submission.message)} title={submission.message} className="text-sm" />{submission.error ? <div className="space-y-2"><StatusBadge status="failed" label={t('status.failed')} /><TruncatedText as="p" text={toSingleLine(submission.error)} title={submission.error} className="text-[13px] text-danger" role="alert" /></div> : null}{submission.reference?.kind === 'workflow' ? <WorkflowTask submission={submission} /> : submission.reference?.kind === 'team' ? <TeamTask submission={submission} /> : submission.reference?.kind === 'upgrade' ? <UpgradeTask jobId={submission.reference.jobId} /> : typeof submission.renderedCard?.content === 'string' ? <TruncatedText as="p" text={toSingleLine(submission.renderedCard.content)} title={submission.renderedCard.content} className="text-[13px]" /> : null}</section>;
+  if (submission.reference?.kind === 'team') return <TeamRunCard submission={submission} runId={submission.reference.runId} groupId={submission.reference.groupId} />;
+  return <section ref={pins?.track(submission.id)} tabIndex={-1} className="wl-enter my-4 space-y-3 rounded-xl border border-border bg-surface p-4 shadow-xs outline-none"><TruncatedText as="p" text={toSingleLine(submission.message)} title={submission.message} className="text-sm" />{submission.error ? <div className="space-y-2"><StatusBadge status="failed" label={t('status.failed')} /><TruncatedText as="p" text={toSingleLine(submission.error)} title={submission.error} className="text-[13px] text-danger" role="alert" /></div> : null}{submission.reference?.kind === 'workflow' ? <WorkflowTask submission={submission} /> : submission.reference?.kind === 'upgrade' ? <UpgradeTask jobId={submission.reference.jobId} /> : typeof submission.renderedCard?.content === 'string' ? <TruncatedText as="p" text={toSingleLine(submission.renderedCard.content)} title={submission.renderedCard.content} className="text-[13px]" /> : null}</section>;
 }
