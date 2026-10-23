@@ -1,6 +1,7 @@
 import { Context } from 'hono';
 import { getRuntimeKey } from 'hono/adapter';
 import { recordRequestLog, recordRequestStat, type GatewayRequestLogResponse } from '../../worklite/provider-registry';
+import { normalizeTokenUsage, usageFromStreamEvents } from '../../worklite/token-usage';
 
 let logId = 0;
 const MAX_RESPONSE_LENGTH = 100000;
@@ -61,17 +62,6 @@ function parseStreamCapture(raw: string): unknown[] {
     }
   }
   return events;
-}
-
-function usageFromStreamEvents(events: readonly unknown[]): Record<string, unknown> | undefined {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (!event || typeof event !== 'object' || Array.isArray(event)) continue;
-    const record = event as Record<string, unknown>;
-    const usage = record.usage ?? (record.response && typeof record.response === 'object' && !Array.isArray(record.response) ? (record.response as Record<string, unknown>).usage : undefined);
-    if (usage && typeof usage === 'object' && !Array.isArray(usage)) return usage as Record<string, unknown>;
-  }
-  return undefined;
 }
 
 async function captureResponse(c: Context, streaming: boolean): Promise<{ capture: GatewayRequestLogResponse; usage?: Record<string, unknown> }> {
@@ -135,21 +125,15 @@ async function processLog(c: Context, start: number) {
   const model = modelSeparator > 0 ? requestedModel.slice(modelSeparator + 1) : requestedModel;
   const usage = captured.usage
     ?? (responseBody && typeof responseBody === 'object' && responseBody.usage && typeof responseBody.usage === 'object' ? responseBody.usage : undefined);
-  const tokenValue = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) ? value : null;
   const endpoint = new URL(c.req.url).pathname;
-  const promptTokens = tokenValue(usage?.prompt_tokens ?? usage?.input_tokens);
-  const completionTokens = tokenValue(usage?.completion_tokens ?? usage?.output_tokens);
-  const reportedTotalTokens = tokenValue(usage?.total_tokens ?? usage?.totalTokens);
-  const totalTokens = reportedTotalTokens ?? (promptTokens !== null && completionTokens !== null ? promptTokens + completionTokens : null);
+  const tokenUsage = normalizeTokenUsage(usage, endpoint);
   recordRequestStat({
     provider,
     model,
     endpoint,
     status: c.res.status,
     durationMs: ms,
-    promptTokens,
-    completionTokens,
-    totalTokens,
+    ...tokenUsage,
   });
 
   const correlationHeader = (name: string): string | null => {
@@ -171,9 +155,7 @@ async function processLog(c: Context, start: number) {
       teamRunId: correlationHeader('x-worklite-team-run-id'),
       teamTaskAttemptId: correlationHeader('x-worklite-team-task-attempt-id'),
       teamOperationKey: correlationHeader('x-worklite-team-operation-key'),
-      promptTokens,
-      completionTokens,
-      totalTokens,
+      ...tokenUsage,
       request: requestOptionsArray[0].transformedRequest?.body ?? requestOptionsArray[0].requestParams ?? null,
       response: captured.capture,
     });

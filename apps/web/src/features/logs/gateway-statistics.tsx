@@ -44,7 +44,7 @@ function BreakdownRow({ row, open, onToggle, onViewRequests, locale, metricValue
         <div className="grid gap-4 border-t border-border bg-surface-subtle px-4 py-4 text-[13px] sm:grid-cols-2 lg:grid-cols-4">
           <Detail label={t('statistics.endpoints')} value={row.endpoints.map((item) => `${item.endpoint} (${item.requests})`).join(', ') || t('statistics.unavailable')} />
           <Detail label={t('statistics.statuses')} value={row.statuses.map((item) => `${item.status} (${item.requests})`).join(', ') || t('statistics.unavailable')} />
-          <Detail label={t('statistics.tokens')} value={`${t('statistics.input')}: ${metricValue(row.promptTokens)} · ${t('statistics.output')}: ${metricValue(row.completionTokens)} · ${t('statistics.total')}: ${metricValue(row.totalTokens)}`} />
+          <Detail label={t('statistics.tokens')} value={`${t('statistics.input')}: ${metricValue(row.promptTokens)} · ${t('statistics.cacheRead')}: ${metricValue(row.cacheReadTokens)} · ${t('statistics.cacheCreation')}: ${metricValue(row.cacheCreationTokens)} · ${t('statistics.output')}: ${metricValue(row.completionTokens)} · ${t('statistics.total')}: ${metricValue(row.totalTokens)}`} />
           <Button type="button" variant="secondary" size="compact" className="w-fit" aria-label={t('statistics.viewRequestsForModel', { provider: row.provider, model: row.model })} onClick={onViewRequests}><ScrollText className="size-4" aria-hidden="true" />{t('statistics.viewRequests')}</Button>
         </div>
       ) : null}
@@ -120,6 +120,7 @@ function GatewayStatistics({ from, to, filters = {}, onFiltersChange, onViewRequ
         <Metric label={t('statistics.averageLatency')} value={metricValue(scopedSummary?.averageLatencyMs ?? null, ' ms')} />
         <Metric label={t('statistics.totalTokens')} value={metricValue(scopedSummary?.totalTokens ?? null)} />
       </div>
+      <p className="text-xs text-muted-foreground">{t('statistics.tokenDefinition')}</p>
       <div className="overflow-hidden rounded-lg border border-border bg-surface">
         <div className="hidden grid-cols-[1.2fr_1.4fr_0.7fr_0.8fr_0.9fr] gap-3 border-b border-border bg-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid">
           <span>{t('statistics.provider')}</span>

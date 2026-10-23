@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import BetterSqlite3 from 'better-sqlite3';
 import { codexAuthStatus } from './codex-auth';
 import { codexModels } from './codex-transport';
+import { freshPromptTokens, type InputTokenSemantics } from './token-usage';
 
 export type GatewayProviderProtocol = 'openai/chat' | 'openai/responses' | 'anthropic/messages' | 'codex/responses' | 'typesafe/systemone';
 
@@ -40,6 +41,8 @@ export type GatewayStats = {
     averageLatencyMs: number | null;
     promptTokens: number | null;
     completionTokens: number | null;
+    cacheReadTokens: number | null;
+    cacheCreationTokens: number | null;
     totalTokens: number | null;
     usageRequests: number;
   };
@@ -52,6 +55,8 @@ export type GatewayStats = {
     averageLatencyMs: number | null;
     promptTokens: number | null;
     completionTokens: number | null;
+    cacheReadTokens: number | null;
+    cacheCreationTokens: number | null;
     totalTokens: number | null;
     usageRequests: number;
     endpoints: Array<{ endpoint: string; requests: number }>;
@@ -117,6 +122,9 @@ function getDatabase(): BetterSqlite3.Database {
       status INTEGER NOT NULL,
       duration_ms INTEGER NOT NULL,
       prompt_tokens INTEGER,
+      input_token_semantics TEXT,
+      cache_read_tokens INTEGER,
+      cache_creation_tokens INTEGER,
       completion_tokens INTEGER,
       total_tokens INTEGER
     );
@@ -138,6 +146,9 @@ function getDatabase(): BetterSqlite3.Database {
       team_task_attempt_id TEXT,
       team_operation_key TEXT,
       prompt_tokens INTEGER,
+      input_token_semantics TEXT,
+      cache_read_tokens INTEGER,
+      cache_creation_tokens INTEGER,
       completion_tokens INTEGER,
       total_tokens INTEGER,
       request_body TEXT,
@@ -148,9 +159,22 @@ function getDatabase(): BetterSqlite3.Database {
     CREATE INDEX IF NOT EXISTS gateway_request_logs_provider_model_idx ON gateway_request_logs(provider_name, model);
     CREATE INDEX IF NOT EXISTS gateway_request_logs_workflow_run_idx ON gateway_request_logs(workflow_run_id);
   `);
+  addMissingRequestStatColumns(database);
   addMissingRequestLogColumns(database);
   pruneRequestLogs(database);
   return database;
+}
+
+function addMissingRequestStatColumns(database: BetterSqlite3.Database): void {
+  const columns = new Set(database.prepare('PRAGMA table_info(gateway_request_stats)').all().map((column) => (column as { name: string }).name));
+  const additions: Array<[string, string]> = [
+    ['input_token_semantics', 'TEXT'],
+    ['cache_read_tokens', 'INTEGER'],
+    ['cache_creation_tokens', 'INTEGER'],
+  ];
+  for (const [name, type] of additions) {
+    if (!columns.has(name)) database.prepare(`ALTER TABLE gateway_request_stats ADD COLUMN ${name} ${type}`).run();
+  }
 }
 
 function addMissingRequestLogColumns(database: BetterSqlite3.Database): void {
@@ -159,6 +183,9 @@ function addMissingRequestLogColumns(database: BetterSqlite3.Database): void {
     ['team_run_id', 'TEXT'],
     ['team_task_attempt_id', 'TEXT'],
     ['team_operation_key', 'TEXT'],
+    ['input_token_semantics', 'TEXT'],
+    ['cache_read_tokens', 'INTEGER'],
+    ['cache_creation_tokens', 'INTEGER'],
   ];
   for (const [name, type] of additions) {
     if (!columns.has(name)) database.prepare(`ALTER TABLE gateway_request_logs ADD COLUMN ${name} ${type}`).run();
@@ -465,19 +492,25 @@ export function recordRequestStat(input: {
   status: number;
   durationMs: number;
   promptTokens?: number | null;
+  inputTokenSemantics?: InputTokenSemantics | null;
+  cacheReadTokens?: number | null;
+  cacheCreationTokens?: number | null;
   completionTokens?: number | null;
   totalTokens?: number | null;
 }): void {
-  getDatabase().prepare(`INSERT INTO gateway_request_stats (occurred_at, provider_name, model, endpoint, status, duration_ms, prompt_tokens, completion_tokens, total_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(Date.now(), input.provider || 'Unknown', input.model || 'Unknown', input.endpoint || '/', input.status, Math.max(0, Math.round(input.durationMs)), input.promptTokens ?? null, input.completionTokens ?? null, input.totalTokens ?? null);
+  getDatabase().prepare(`INSERT INTO gateway_request_stats (occurred_at, provider_name, model, endpoint, status, duration_ms, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(Date.now(), input.provider || 'Unknown', input.model || 'Unknown', input.endpoint || '/', input.status, Math.max(0, Math.round(input.durationMs)), input.promptTokens ?? null, input.inputTokenSemantics ?? null, input.cacheReadTokens ?? null, input.cacheCreationTokens ?? null, input.completionTokens ?? null, input.totalTokens ?? null);
 }
 
 export function requestStats(query: GatewayTimeRangeQuery = {}): GatewayStats {
   const { fromMs, toMs } = resolveTimeRange(query);
-  const records = getDatabase().prepare('SELECT provider_name, model, endpoint, status, duration_ms, prompt_tokens, completion_tokens, total_tokens FROM gateway_request_stats WHERE occurred_at >= ? AND occurred_at <= ? ORDER BY occurred_at DESC').all(fromMs, toMs) as Array<{ provider_name: string; model: string; endpoint: string; status: number; duration_ms: number; prompt_tokens: number | null; completion_tokens: number | null; total_tokens: number | null }>;
+  const records = getDatabase().prepare('SELECT provider_name, model, endpoint, status, duration_ms, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens FROM gateway_request_stats WHERE occurred_at >= ? AND occurred_at <= ? ORDER BY occurred_at DESC').all(fromMs, toMs) as Array<{ provider_name: string; model: string; endpoint: string; status: number; duration_ms: number; prompt_tokens: number | null; input_token_semantics: InputTokenSemantics | null; cache_read_tokens: number | null; cache_creation_tokens: number | null; completion_tokens: number | null; total_tokens: number | null }>;
+  const freshInput = (record: typeof records[number]) => freshPromptTokens(record.prompt_tokens, record.input_token_semantics, record.cache_read_tokens, record.cache_creation_tokens);
   const successful = records.filter((record) => record.status >= 200 && record.status < 400).length;
   const summaryTokens = {
-    promptTokens: nullableTotal(records.map((record) => record.prompt_tokens)),
+    promptTokens: nullableTotal(records.map(freshInput)),
     completionTokens: nullableTotal(records.map((record) => record.completion_tokens)),
+    cacheReadTokens: nullableTotal(records.map((record) => record.cache_read_tokens)),
+    cacheCreationTokens: nullableTotal(records.map((record) => record.cache_creation_tokens)),
     totalTokens: nullableTotal(records.map((record) => record.total_tokens)),
   };
   const groups = new Map<string, typeof records>();
@@ -502,8 +535,10 @@ export function requestStats(query: GatewayTimeRangeQuery = {}): GatewayStats {
       successful: groupSuccessful,
       failed: group.length - groupSuccessful,
       averageLatencyMs: Math.round(group.reduce((total, record) => total + record.duration_ms, 0) / group.length),
-      promptTokens: nullableTotal(group.map((record) => record.prompt_tokens)),
+      promptTokens: nullableTotal(group.map(freshInput)),
       completionTokens: nullableTotal(group.map((record) => record.completion_tokens)),
+      cacheReadTokens: nullableTotal(group.map((record) => record.cache_read_tokens)),
+      cacheCreationTokens: nullableTotal(group.map((record) => record.cache_creation_tokens)),
       totalTokens: nullableTotal(group.map((record) => record.total_tokens)),
       usageRequests: group.filter((record) => record.total_tokens !== null).length,
       endpoints: [...endpointCounts.entries()].map(([endpoint, requests]) => ({ endpoint, requests })),
@@ -548,6 +583,9 @@ type GatewayRequestLogRow = {
   team_task_attempt_id: string | null;
   team_operation_key: string | null;
   prompt_tokens: number | null;
+  input_token_semantics: InputTokenSemantics | null;
+  cache_read_tokens: number | null;
+  cache_creation_tokens: number | null;
   completion_tokens: number | null;
   total_tokens: number | null;
   request_body: string | null;
@@ -559,7 +597,7 @@ type GatewayRequestLogListRow = Omit<GatewayRequestLogRow, 'request_body' | 'res
 
 // The list view never reads the captured bodies: selecting them pulled ~25 MB from
 // disk per page. Only the single-log detail query fetches them.
-const REQUEST_LOG_LIST_COLUMNS = 'id, occurred_at, provider_name, model, endpoint, status, duration_ms, streaming, source, workflow_run_id, node_run_id, team_run_id, team_task_attempt_id, team_operation_key, prompt_tokens, completion_tokens, total_tokens, response_kind';
+const REQUEST_LOG_LIST_COLUMNS = 'id, occurred_at, provider_name, model, endpoint, status, duration_ms, streaming, source, workflow_run_id, node_run_id, team_run_id, team_task_attempt_id, team_operation_key, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens, response_kind';
 
 export function recordRequestLog(input: {
   id?: string | null;
@@ -576,6 +614,9 @@ export function recordRequestLog(input: {
   teamTaskAttemptId?: string | null;
   teamOperationKey?: string | null;
   promptTokens?: number | null;
+  inputTokenSemantics?: InputTokenSemantics | null;
+  cacheReadTokens?: number | null;
+  cacheCreationTokens?: number | null;
   completionTokens?: number | null;
   totalTokens?: number | null;
   request: unknown;
@@ -583,7 +624,7 @@ export function recordRequestLog(input: {
 }): string {
   const database = getDatabase();
   const id = input.id?.trim() || `glog_${randomUUID()}`;
-  database.prepare(`INSERT INTO gateway_request_logs (id, occurred_at, provider_name, model, endpoint, status, duration_ms, streaming, source, workflow_run_id, node_run_id, team_run_id, team_task_attempt_id, team_operation_key, prompt_tokens, completion_tokens, total_tokens, request_body, response_kind, response_body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+  database.prepare(`INSERT INTO gateway_request_logs (id, occurred_at, provider_name, model, endpoint, status, duration_ms, streaming, source, workflow_run_id, node_run_id, team_run_id, team_task_attempt_id, team_operation_key, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens, request_body, response_kind, response_body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     id,
     Date.now(),
     input.provider || 'Unknown',
@@ -599,6 +640,9 @@ export function recordRequestLog(input: {
     input.teamTaskAttemptId ?? null,
     input.teamOperationKey ?? null,
     input.promptTokens ?? null,
+    input.inputTokenSemantics ?? null,
+    input.cacheReadTokens ?? null,
+    input.cacheCreationTokens ?? null,
     input.completionTokens ?? null,
     input.totalTokens ?? null,
     safeJsonText(input.request),
@@ -660,8 +704,10 @@ function requestLogListItem(row: GatewayRequestLogListRow) {
     teamRunId: row.team_run_id,
     teamTaskAttemptId: row.team_task_attempt_id,
     teamOperationKey: row.team_operation_key,
-    promptTokens: row.prompt_tokens,
+    promptTokens: freshPromptTokens(row.prompt_tokens, row.input_token_semantics, row.cache_read_tokens, row.cache_creation_tokens),
     completionTokens: row.completion_tokens,
+    cacheReadTokens: row.cache_read_tokens,
+    cacheCreationTokens: row.cache_creation_tokens,
     totalTokens: row.total_tokens,
   };
 }
