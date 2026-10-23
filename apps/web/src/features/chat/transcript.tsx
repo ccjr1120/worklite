@@ -302,7 +302,7 @@ function QuestionNote({ question, onAnswer, busy }: { question: NonNullable<Agen
         {question.recovery.commandExecutionId ? <Button type="button" variant="secondary" size="compact" disabled={busy} onClick={() => onAnswer(t('codex.adopt'), { recoveryDecision: 'adopt_command' })}>{t('codex.adopt')}</Button> : null}
         <Button type="button" variant="secondary" size="compact" disabled={busy} onClick={() => onAnswer(t('codex.markFailed'), { recoveryDecision: 'mark_failed' })}>{t('codex.markFailed')}</Button>
       </div> : null}
-      {question.options.length > 0 ? <div className="mt-2 flex flex-wrap gap-2">{question.options.map((option) => <Button key={option} type="button" variant="secondary" size="compact" disabled={busy} onClick={() => { setSelected(option); onAnswer(option); }}>{busy && selected === option ? <LoaderCircle className="size-3.5 motion-safe:animate-spin" /> : null}{option}</Button>)}</div> : null}
+      {question.options.length > 0 ? <div className="mt-2 flex min-w-0 max-w-full flex-wrap gap-2">{question.options.map((option) => <Button key={option} type="button" variant="secondary" size="compact" className="min-w-0 max-w-full" title={option} disabled={busy} onClick={() => { setSelected(option); onAnswer(option); }}>{busy && selected === option ? <LoaderCircle className="size-3.5 motion-safe:animate-spin" /> : null}<span className="min-w-0 max-w-full truncate">{option}</span></Button>)}</div> : null}
     </div>
   );
 }
