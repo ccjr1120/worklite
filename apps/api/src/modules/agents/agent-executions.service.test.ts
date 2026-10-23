@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
-import { projectTaskCaptureFailureMessage, toolCallRejection, type ToolCallAdmission } from './agent-executions.service';
+import { projectTaskCaptureFailureMessage, projectTaskSteerOutput, toolCallRejection, type ToolCallAdmission } from './agent-executions.service';
+import { CHAT_PROJECT_TASK_STEER_TOOL, CHAT_PROJECT_TASK_TOOL } from './chat-project-tasks.service';
 import { ClaudeCodeError } from './claude-code.service';
 import { CodexAppServerError } from './codex-app-server.service';
 
@@ -78,5 +79,28 @@ describe('projectTaskCaptureFailureMessage', () => {
   it('falls back to the generic message for an unrecognized error type', () => {
     expect(projectTaskCaptureFailureMessage(new Error('ECONNRESET'))).toBe('无法启动项目任务，请检查项目目录、执行器插件可用性和 Gateway 模型。');
     expect(projectTaskCaptureFailureMessage('not an Error instance')).toBe('无法启动项目任务，请检查项目目录、执行器插件可用性和 Gateway 模型。');
+  });
+});
+
+describe('steer_project_task', () => {
+  const instruction = { id: 'steer_1', seq: 2, source: 'user' as const, text: '只调查', createdAt: '2026-10-23T00:00:00.000Z' };
+
+  it('reports a live Codex delivery', () => {
+    const output = projectTaskSteerOutput({ id: 'task_1', executor: 'codex', steerQueue: [{ ...instruction, status: 'delivered' }] });
+    expect(output).toContain('补充指令 #2已送达');
+    expect(output).toContain('状态: delivered');
+  });
+
+  it('reports a Claude Code instruction queued for the follow-up round', () => {
+    const output = projectTaskSteerOutput({ id: 'task_1', executor: 'claude', steerQueue: [{ ...instruction, status: 'queued' }] });
+    expect(output).toContain('状态: queued');
+    expect(output).toContain('Claude Code 无法在执行中途接收输入');
+    expect(output).toContain('userCorrections');
+  });
+
+  it('is described as a supported correction path instead of a forbidden one', () => {
+    expect(CHAT_PROJECT_TASK_STEER_TOOL.inputSchema.required).toEqual(['taskId', 'text']);
+    expect(CHAT_PROJECT_TASK_TOOL.description).toContain('steer_project_task');
+    expect(CHAT_PROJECT_TASK_TOOL.description).not.toContain('never steers');
   });
 });
