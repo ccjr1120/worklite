@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "aliases": [
+    {
+      "alias": "dino-datahub",
+      "absolutePath": "/Users/ccjr/development/company/dino/dino-app",
+      "note": "Example only. The user calls this project dino-datahub while the directory name and Git remote are dino-app.",
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}
