@@ -14,6 +14,7 @@ import { focusRingInset } from '@/components/ui/interaction';
 import { queryClient } from '@/lib/query-client';
 import { cn } from '@/lib/utils';
 import { Composer, SLASH_COMMANDS, type SlashCommand } from './composer';
+import { clearNewConversationDraft, readChatDraft, writeChatDraft } from './draft-storage';
 import { Configuration } from './configuration';
 import { Memories } from './memories';
 import { downloadExecutionLog } from './execution-log';
@@ -109,7 +110,7 @@ function ChatWorkspace() {
   const [execution, setExecution] = useState<AgentExecutionView | null>(null);
   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowView | null>(null);
   const [workflowRun, setWorkflowRun] = useState<ActiveWorkflowRun | null>(null);
-  const [draft, setDraft] = useState(() => conversationDrafts.get(selectedConversationId ?? 'new')?.draft ?? '');
+  const [draft, setDraft] = useState(() => readChatDraft(selectedConversationId) ?? conversationDrafts.get(selectedConversationId ?? 'new')?.draft ?? '');
   const [settingsOpen, setSettingsOpen] = useState(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories');
   const [settingsSection, setSettingsSection] = useState<SettingsSection>(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories' ? locationSearch.view : 'configuration');
   const [configSelection, setConfigSelection] = useState('');
@@ -196,7 +197,12 @@ function ChatWorkspace() {
     ++mainRequestGenerationRef.current;
     observedEventRef.current = { executionId: '', sequence: 0 };
     conversationDrafts.set(selectedConversationId ?? 'new', { draft, queued, paused: queuePaused });
-    const remembered = id ? conversationDrafts.get(id) : undefined;
+    // Persist the outgoing draft at switch time as well, so the next keystroke is never
+    // required before the draft is safe on disk.
+    writeChatDraft(selectedConversationId, draft);
+    // Read the entry before dropping the new-conversation slot: its draft has to return
+    // when the reader comes back to a conversation the server has not created yet.
+    const remembered = conversationDrafts.get(id ?? 'new');
     if (!id) conversationDrafts.delete('new');
     pendingDispatch.current = null;
     setSelectedConversationId(id);
@@ -213,7 +219,7 @@ function ChatWorkspace() {
     setLoadingExecution(Boolean(id));
     if (!id) setRecordsOpen(false);
     setQueued(remembered?.queued ?? []);
-    setDraft(remembered?.draft ?? '');
+    setDraft(readChatDraft(id) ?? remembered?.draft ?? '');
     setQueuePaused(remembered?.paused ?? false);
     setError('');
     setSwitcherOpen(false);
@@ -223,6 +229,9 @@ function ChatWorkspace() {
 
   useEffect(() => {
     conversationDrafts.set(selectedConversationId ?? 'new', { draft, queued, paused: queuePaused });
+    // Keystone of draft persistence: every composer edit belongs to the conversation that
+    // is selected right now, so a route change, reload or conversation switch can restore it.
+    writeChatDraft(selectedConversationId, draft);
   }, [selectedConversationId, draft, queued, queuePaused]);
 
   useEffect(() => () => { ++mainRequestGenerationRef.current; }, []);
@@ -495,6 +504,12 @@ function ChatWorkspace() {
         setWorkflowRun({ workflow: selectedWorkflow, run, input: trimmedMessage });
         setSelectedWorkflow(null);
         setDraft('');
+        // A workflow dispatch from the new-conversation composer created a conversation;
+        // retire the temporary draft so the next new conversation starts empty.
+        if (!selectedConversationId) {
+          conversationDrafts.delete('new');
+          clearNewConversationDraft();
+        }
         setMentionDismissed(false);
       } catch (runError) {
         if (generation !== mainRequestGenerationRef.current) return;
@@ -529,6 +544,7 @@ function ChatWorkspace() {
       enqueue(trimmedMessage);
       return;
     }
+    const fromNewConversation = selectedConversationId === null;
     setBusy(true);
     setError('');
     try {
@@ -542,6 +558,12 @@ function ChatWorkspace() {
       setQueuePaused(false);
       void applyCompletedResults(next);
       setDraft('');
+      // The accepted message now belongs to the created conversation, so the new-conversation
+      // slot must not keep a copy that would surface when the reader starts another chat.
+      if (fromNewConversation) {
+        conversationDrafts.delete('new');
+        clearNewConversationDraft();
+      }
     } catch (requestError) {
       if (generation !== mainRequestGenerationRef.current) return;
       setError(apiErrorMessage(requestError, t('assistant:execution.requestFailed')));
