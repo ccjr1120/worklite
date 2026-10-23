@@ -100,7 +100,7 @@ describe('WechatService#deliver typing indicator', () => {
     const calls: Array<{ endpoint: string; body: Record<string, unknown> }> = [];
     const fetchImpl: FetchLike = async (input, init) => {
       const endpoint = String(input).split('/ilink/bot/')[1];
-      const body = init?.body ? JSON.parse(init.body) : {};
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {};
       calls.push({ endpoint, body });
       if (endpoint === 'getconfig') return { ok: true, status: 200, text: async () => '{"ret":0,"typing_ticket":"ticket-xyz"}' };
       return { ok: true, status: 200, text: async () => '{}' };
@@ -122,7 +122,7 @@ describe('WechatService#deliver typing indicator', () => {
     const calls: Array<{ endpoint: string; body: Record<string, unknown> }> = [];
     const fetchImpl: FetchLike = async (input, init) => {
       const endpoint = String(input).split('/ilink/bot/')[1];
-      const body = init?.body ? JSON.parse(init.body) : {};
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {};
       calls.push({ endpoint, body });
       if (endpoint === 'getconfig') return { ok: true, status: 200, text: async () => '{"ret":0,"typing_ticket":"ticket-xyz"}' };
       if (endpoint === 'sendmessage') return { ok: true, status: 200, text: async () => '{"ret":0,"message_id":"m1"}' };
@@ -153,7 +153,7 @@ describe('WechatService#deliver typing indicator', () => {
     const sentTexts: string[] = [];
     const fetchImpl: FetchLike = async (input, init) => {
       const endpoint = String(input).split('/ilink/bot/')[1];
-      const body = init?.body ? JSON.parse(init.body) : {};
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {};
       if (endpoint === 'getconfig') return { ok: true, status: 200, text: async () => '{"ret":0,"typing_ticket":"ticket-xyz"}' };
       if (endpoint === 'sendmessage') {
         sentTexts.push(body.msg.item_list[0].text_item.text);
@@ -221,7 +221,7 @@ describe('WechatService "新对话" command', () => {
     const sends: string[] = [];
     const fetchImpl: FetchLike = async (input, init) => {
       const endpoint = String(input).split('/ilink/bot/')[1];
-      const body = init?.body ? JSON.parse(init.body) as { msg?: { item_list?: Array<{ text_item?: { text?: string } }> } } : {};
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) as { msg?: { item_list?: Array<{ text_item?: { text?: string } }> } } : {};
       if (endpoint === 'sendmessage') {
         sends.push(body.msg?.item_list?.[0]?.text_item?.text ?? '');
         return { ok: true, status: 200, text: async () => '{"ret":0,"message_id":"reply-1"}' };

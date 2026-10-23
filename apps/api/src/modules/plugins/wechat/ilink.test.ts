@@ -85,7 +85,7 @@ describe('getUpdates', () => {
 describe('sendTextMessage', () => {
   it('echoes the context token and idempotency client id', async () => {
     let captured = '';
-    const fetchImpl: FetchLike = async (_input, init) => { captured = init?.body ?? ''; return { ok: true, status: 200, text: async () => '{"ret":0,"message_id":"12345678901234567890"}' }; };
+    const fetchImpl: FetchLike = async (_input, init) => { captured = typeof init?.body === 'string' ? init.body : ''; return { ok: true, status: 200, text: async () => '{"ret":0,"message_id":"12345678901234567890"}' }; };
     const result = await sendTextMessage(fetchImpl, { baseUrl: 'https://ilink.example', token: 'tok', toUserId: 'user-a', text: '回复', contextToken: 'ctx-1', clientId: 'client-1' });
     expect(result.messageId).toBe('12345678901234567890');
     const body = JSON.parse(captured) as { msg: Record<string, unknown> };
@@ -98,7 +98,7 @@ describe('sendTextMessage', () => {
 
   it('omits the context token when none was issued', async () => {
     let captured = '';
-    const fetchImpl: FetchLike = async (_input, init) => { captured = init?.body ?? ''; return { ok: true, status: 200, text: async () => '{"ret":0}' }; };
+    const fetchImpl: FetchLike = async (_input, init) => { captured = typeof init?.body === 'string' ? init.body : ''; return { ok: true, status: 200, text: async () => '{"ret":0}' }; };
     await sendTextMessage(fetchImpl, { baseUrl: 'https://ilink.example', token: 'tok', toUserId: 'user-a', text: '回复', contextToken: '', clientId: 'client-1' });
     const body = JSON.parse(captured) as { msg: Record<string, unknown> };
     expect('context_token' in body.msg).toBe(false);
@@ -199,7 +199,7 @@ describe('fetchTypingTicket', () => {
 describe('sendTyping', () => {
   it('posts the typing status with the given ticket', async () => {
     let captured = '';
-    const fetchImpl: FetchLike = async (_input, init) => { captured = init?.body ?? ''; return { ok: true, status: 200, text: async () => '{}' }; };
+    const fetchImpl: FetchLike = async (_input, init) => { captured = typeof init?.body === 'string' ? init.body : ''; return { ok: true, status: 200, text: async () => '{}' }; };
     await sendTyping(fetchImpl, { baseUrl: 'https://ilink.example', token: 'tok', userId: 'user-a', typingTicket: 'ticket-abc' });
     const body = JSON.parse(captured) as Record<string, unknown>;
     expect(body.ilink_user_id).toBe('user-a');
@@ -209,7 +209,7 @@ describe('sendTyping', () => {
 
   it('posts the cancel status when cancel is requested', async () => {
     let captured = '';
-    const fetchImpl: FetchLike = async (_input, init) => { captured = init?.body ?? ''; return { ok: true, status: 200, text: async () => '{}' }; };
+    const fetchImpl: FetchLike = async (_input, init) => { captured = typeof init?.body === 'string' ? init.body : ''; return { ok: true, status: 200, text: async () => '{}' }; };
     await sendTyping(fetchImpl, { baseUrl: 'https://ilink.example', token: 'tok', userId: 'user-a', typingTicket: 'ticket-abc', cancel: true });
     const body = JSON.parse(captured) as Record<string, unknown>;
     expect(body.status).toBe(2);
