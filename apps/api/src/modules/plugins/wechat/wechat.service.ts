@@ -14,7 +14,7 @@ import { RunsService } from '../../runs/runs.service';
 import { UpgradesService } from '../../upgrades/upgrades.service';
 import { encryptSecret, PluginsService } from '../plugins.service';
 import { statusText } from '../feishu/feishu-cards';
-import { fetchBotQrCode, fetchTypingTicket, getUpdates, ILINK_DEFAULT_BASE_URL, ILINK_STALE_TOKEN_ERRCODE, ILinkApiError, mediaLabel, parseInboundMessage, pollQrCodeStatus, sendTextMessage, sendTyping, MESSAGE_TYPE_USER, type FetchLike, type ILinkRawMessage } from './ilink';
+import { fetchBotQrCode, fetchTypingTicket, getUpdates, ILINK_DEFAULT_BASE_URL, ILINK_STALE_TOKEN_ERRCODE, ILinkApiError, mediaLabel, parseInboundMessage, pollQrCodeStatus, sendTextMessage, sendTyping, MESSAGE_TYPE_USER, type FetchLike, type ILinkInboundMessage, type ILinkRawMessage } from './ilink';
 
 type Json = Record<string, unknown>;
 type Submission = typeof chatSubmissions.$inferSelect;
@@ -57,6 +57,15 @@ export function monitorFailureState(failures: number, failingForMs: number): { s
   if (failures < 3) return null;
   if (failingForMs >= WECHAT_CONNECT_FAILURE_ESCALATION_MS) return { status: 'error', reason: '微信连接持续失败，请检查网络或重新扫码登录。' };
   return { status: 'connecting', reason: '微信连接暂时失败，正在自动重试。' };
+}
+
+// The text-only channel's one adapter-owned command. Matching is deliberately exact (after
+// trimming) rather than semantic: a message is either the command or an ordinary request, so
+// the adapter can start a new conversation without ever handing the command to the model.
+const NEW_CONVERSATION_COMMANDS = new Set(['新对话', '/新对话', '／新对话']);
+export const WECHAT_NEW_CONVERSATION_REPLY = '已开启新对话。';
+export function isWechatNewConversationCommand(text: string): boolean {
+  return NEW_CONVERSATION_COMMANDS.has(text.trim());
 }
 // WeChat text messages are whole sends with no edit channel; overlong content is truncated
 // instead of split so one delivery state stays one platform message.
@@ -359,11 +368,17 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
     await this.db.insert(externalChats).values({ id: chatId, workspaceId: 'workspace_personal', channel: 'wechat', externalId: message.fromUserId, userId: message.fromUserId, contextToken: message.contextToken || null }).onConflictDoNothing();
     if (message.contextToken) await this.db.update(externalChats).set({ contextToken: message.contextToken, updatedAt: new Date() }).where(eq(externalChats.id, chatId));
     const [chat] = await this.db.select().from(externalChats).where(eq(externalChats.id, chatId)).limit(1);
+    // Adapter-owned command short-circuit. It runs before any pending-question binding, chat
+    // submission, execution creation or dispatch, so the text never reaches the Chat runtime.
+    if (isWechatNewConversationCommand(message.text)) {
+      await this.startNewConversationFromCommand(chat, message);
+      return;
+    }
     const execution = chat.executionId ? await this.executions.get(request, 'personal', CHAT_AGENT_ID, chat.executionId) : undefined;
     let boundAction: WechatAction | undefined;
     if (execution?.pendingQuestion) {
       const question = execution.pendingQuestion;
-      const startNewConversation = question.action === 'new_conversation' && message.text === '新对话';
+      const startNewConversation = question.action === 'new_conversation' && isWechatNewConversationCommand(message.text);
       // Recovery decisions have no buttons here; the two exact texts map to the domain decision.
       const recoveryDecision = question.recovery
         ? message.text === '采用已有命令结果' ? 'adopt_command' as const : message.text === '标记操作失败' ? 'mark_failed' as const : undefined
@@ -374,17 +389,6 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
         ...(recoveryDecision ? { recoveryDecision } : {}),
       };
     }
-    // "新对话" is the one plain-text command on this text-only channel: it unbinds the chat from
-    // its current execution so the next message starts a fresh one, mirroring the Web "new
-    // conversation" action's lazy create (no execution exists until the first real message).
-    // It never fires while a pendingQuestion is active — that text instead answers whatever
-    // question is pending — a new_conversation question accepts only its exact command through
-    // boundAction, while other text remains that question's answer. Firing regardless of the bound
-    // execution's status (running, waiting_for_input, completed, cancelled or failed) lets the
-    // user step out of a stuck or long-running turn instead of being forced to wait it out; that
-    // execution keeps running to its own terminal reply and stays inspectable on Web, only this
-    // channel's routing moves off it.
-    const startNewConversation = !boundAction && message.text === '新对话' && Boolean(chat.executionId);
     const eventId = `message:${message.messageId}`;
     this.db.transaction((transaction) => {
       const receipt = transaction.insert(wechatEvents).values({
@@ -399,15 +403,57 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
           ...(boundAction ? { action: boundAction, form: { answer: message.text } } : {}),
         },
       }).onConflictDoNothing().run();
-      let submissionExecutionId = chat.executionId;
-      if (receipt.changes > 0 && startNewConversation && chat.executionId) {
-        const unbound = transaction.update(externalChats).set({ executionId: null, updatedAt: new Date() }).where(and(eq(externalChats.id, chatId), eq(externalChats.executionId, chat.executionId))).run();
-        if (unbound.changes === 0) throw new ConflictException('This WeChat conversation is no longer bound to that Agent execution.');
-        submissionExecutionId = null;
-      }
-      if (receipt.changes > 0 && message.text && !boundAction) transaction.insert(chatSubmissions).values({ id: eventId, workspaceId: chat.workspaceId, chatId, executionId: submissionExecutionId, message: message.text, target: { kind: 'conversation' } }).run();
+      if (receipt.changes > 0 && message.text && !boundAction) transaction.insert(chatSubmissions).values({ id: eventId, workspaceId: chat.workspaceId, chatId, executionId: chat.executionId, message: message.text, target: { kind: 'conversation' } }).run();
     });
     void this.work();
+  }
+
+  // "新对话" mirrors Web's New Conversation navigation: it only moves this channel off its
+  // current execution, so the next real message creates the new conversation lazily. The old
+  // execution keeps running (or stays inspectable) with its history and task evidence intact.
+  // The receipt is single-use, so a redelivered platform message cannot unbind a conversation
+  // the user started afterwards, and it is marked done so the delivery worker never forwards
+  // the command text to the Agent.
+  private async startNewConversationFromCommand(chat: typeof externalChats.$inferSelect, message: ILinkInboundMessage): Promise<void> {
+    const eventId = `message:${message.messageId}`;
+    let accepted = false;
+    this.db.transaction((transaction) => {
+      const receipt = transaction.insert(wechatEvents).values({
+        id: eventId, chatId: chat.id, status: 'done',
+        payload: {
+          command: 'new_conversation',
+          text: message.text,
+          context: {
+            messageId: message.messageId, createTimeMs: message.createTimeMs,
+            ...(message.mediaKind ? { mediaKind: message.mediaKind } : {}),
+            ...(message.contextToken ? { contextToken: message.contextToken } : {}),
+          },
+        },
+      }).onConflictDoNothing().run();
+      if (receipt.changes === 0) return;
+      accepted = true;
+      if (!chat.executionId) return;
+      const unbound = transaction.update(externalChats).set({ executionId: null, updatedAt: new Date() }).where(and(eq(externalChats.id, chat.id), eq(externalChats.executionId, chat.executionId))).run();
+      if (unbound.changes === 0) throw new ConflictException('This WeChat conversation is no longer bound to that Agent execution.');
+    });
+    if (accepted) await this.confirmNewConversation(chat, eventId);
+  }
+
+  // The conversation switch already committed, so a transient confirmation failure must not
+  // break the monitor's long-poll loop; the outbound record keeps the failure inspectable.
+  private async confirmNewConversation(chat: typeof externalChats.$inferSelect, eventId: string): Promise<void> {
+    if (!this.token) return;
+    const text = WECHAT_NEW_CONVERSATION_REPLY;
+    const clientId = digest(`wechat:${eventId}:new-conversation`).slice(0, 32);
+    const key = `new-conversation:${eventId}`;
+    try {
+      const result = await sendTextMessage(this.fetchImpl, { baseUrl: this.baseUrl, token: this.token, toUserId: chat.externalId, text, contextToken: chat.contextToken ?? '', clientId });
+      await this.recordDelivery(chat.id, key, 'done', { operation: 'message.send', clientId, messageId: result.messageId || null, text });
+    } catch (error) {
+      const reason = error instanceof ILinkApiError ? error.message : '微信消息发送暂时失败。';
+      this.logger.warn(`WeChat new-conversation confirmation failed (non-fatal): ${reason}`);
+      await this.recordDelivery(chat.id, key, 'failed', { operation: 'message.send', clientId, text }, reason).catch(() => undefined);
+    }
   }
 
   private async work(): Promise<void> {
