@@ -1,0 +1,379 @@
+{
+  "schemaVersion": 4,
+  "input": {
+    "example": "我想了解 AI Agent 为什么开始被用来干活"
+  },
+  "defaults": {
+    "errorPolicy": "retry"
+  },
+  "nodes": [
+    {
+      "id": "wn_9c7e4ed0-2f35-4fe3-a488-22b7b9eebe92",
+      "position": {
+        "x": 80,
+        "y": 80
+      },
+      "type": "worklite/input",
+      "typeVersion": "1",
+      "config": {
+        "label": "写作想法输入",
+        "description": "一次运行的想法或选题输入。"
+      },
+      "errorPolicy": "stop"
+    },
+    {
+      "id": "wn_7744e0e2-9653-47ae-977e-569b565dd1ce",
+      "position": {
+        "x": 380,
+        "y": 80
+      },
+      "type": "worklite/agent",
+      "typeVersion": "1",
+      "config": {
+        "label": "调研与策划",
+        "description": "一次调用完成调研、大纲、图片清单与英文封面提示词。",
+        "model": "pp-kimi/kimi-k3",
+        "outputFormat": "json",
+        "outputContract": [
+          "title",
+          "topic",
+          "readerQuestions",
+          "findings",
+          "outline",
+          "images",
+          "coverPrompt"
+        ],
+        "allowEmptyOutputKeys": [
+          "images"
+        ],
+        "skillIds": [
+          "sk_029f68e6-1b9e-4a65-a230-be02a78e5521",
+          "sk_fa6143da-e62d-4a16-bbf8-bd8df148dba2",
+          "sk_ea37cc32-6f30-47d1-a120-2ebef9321d30"
+        ],
+        "mcpServerIds": [],
+        "maxToolCalls": 20,
+        "maxToolRounds": 12,
+        "maxToolResultChars": 16000,
+        "systemPrompt": "你是一名中文公众号的调研编辑。读者没有专业背景，想搞清楚一个东西「是什么、在干什么、有没有用」。一次调用里完成四件事：调研、列大纲、决定配图、写英文封面提示词。\n\n第一步，读懂输入的想法，判断读者真正想弄清什么，把它变成 2–4 个新手会问、而且能形成判断的问题——它为什么出现、它实际替谁做了什么、用与不用差在哪。\n\n第二步，带着问题查证。可用技能：\n- github-current-popularity：查 GitHub 项目的近期动向与代码细节（README、提交、release、issue）。\n- zhihu-research：查中文讨论、真实使用体验、踩坑记录。\n- official-docs-fetch：读取已经拿到的官方文档链接，不要猜域名。\n先判断证据在哪儿，再决定查什么、按什么顺序。不是每个技能都必须用。\n\n要留下能被核对的材料：项目名、具体做法、真实使用反馈、明确的限制与失败案例。不要拿 star 数、榜单排名、融资新闻当结论，数字只在能说明问题时出现。findings 数量由材料质量决定，够支撑每个问题即可，宁可少也不要凑数；每条都要有出处和原文摘录。\n\n第三步，按读者理解的顺序给出 outline：3–6 节，每节一个 heading 和 2–4 条 points。不要套「背景—概述—总结」。\n\n第四步，决定配图：只画确实能降低理解成本的示意图，0–3 张，宁缺毋滥。每张图给出 key（只用小写字母、数字、连字符，例如 fig-a）、intent（这张图要讲清什么）、evidence（依据哪条 finding 或原文）。内容不需要图就返回空数组。\n\n最后写 coverPrompt：一条英文生图提示词，正方形封面，紧扣文章的核心对象或核心对比，可以抽象；构图干净、配色克制；不要出现文字、字母、数字、logo、水印或界面截图。\n\n只输出 JSON，不要代码围栏或解释：\n{\"title\": \"研究标签（不是最终标题）\", \"topic\": \"一句话说清这次讲什么\", \"readerQuestions\": [\"问题1\", \"问题2\"], \"findings\": [{\"claim\": \"结论性的一句话\", \"detail\": \"具体做法、例子或数字，能被复述的细节\", \"source\": \"来源（链接、仓库名或文档名）\", \"quote\": \"原文摘录\"}], \"outline\": [{\"heading\": \"小节标题\", \"points\": [\"要点\"]}], \"images\": [{\"key\": \"fig-a\", \"intent\": \"这张图要说明什么\", \"evidence\": \"依据的 finding 或原文\"}], \"coverPrompt\": \"English image prompt\"}"
+      },
+      "errorPolicy": "retry"
+    },
+    {
+      "id": "wn_d37922f4-c1fc-4692-aac7-fb1a4539f22f",
+      "position": {
+        "x": 700,
+        "y": 80
+      },
+      "type": "worklite/agent",
+      "typeVersion": "1",
+      "config": {
+        "label": "撰写文章",
+        "description": "按大纲写全文，并按 planner 给的 key 插入图片占位符。",
+        "model": "codex/gpt-6-luna",
+        "outputFormat": "json",
+        "outputContract": [
+          "title",
+          "article",
+          "evidenceUsed"
+        ],
+        "passthroughKeys": [
+          "topic",
+          "readerQuestions",
+          "findings",
+          "outline",
+          "images",
+          "coverPrompt"
+        ],
+        "skillIds": [],
+        "mcpServerIds": [],
+        "systemPrompt": "你在给中文公众号写一篇解释性文章。读者没听说过这个东西，也没有专业背景。他读完应该能用自己的话讲出来：这是什么、它在做什么、对自己有没有用。\n\n输入是一个 JSON，里面至少有 topic、readerQuestions、findings、outline、images、coverPrompt。按 outline 的顺序写，但不要把它写成小标题清单——每一节要连成能读的段落。\n\n必须讲明白三件事，顺序和篇幅可以不同：\n1. 这是什么：用新手能听懂的话说清，术语第一次出现就先解释。\n2. 它在做什么：讲机制或流程，配具体例子、类比或真实说法。\n3. 有没有用：对谁有用、要付出什么代价、什么情况下其实用不上。有争议就直说。\n\n写作时：\n- 只依据 findings 说话，调研里没有的东西不要写，不要编数字或拿不存在的对比撑场面。\n- 不要罗列数据、堆表格，不要写「综上所述」「本文」这类套话。\n- 长度由内容决定，讲完就停。\n- 不要加段首缩进，不要写代码块。\n\n配图：images 里的每一项是一张会由系统自动生成的示意图。在正文里需要它的位置插入占位符，格式严格为 ![图的说明](worklite-image:<key>)：\n- key 必须原样来自 images，不能自己发明；每张图最多用一次；只放在真正帮助理解的位置。\n- images 为空时不要写任何 worklite-image 占位符。\n\n如果输入里带着 revise、notes 和上一版 title/article（返修轮），只改 notes 指出的问题，其余保持不动，不要借机重写全文。\n\n标题与结构：article 的第一行必须是 # <title>，且与 JSON 里的 title 完全一致；正文只能有这一个一级标题。\n\n输出 JSON：\n{\"title\": \"文章标题\", \"article\": \"完整 markdown，第一行是 # 标题\", \"evidenceUsed\": [\"实际用到的来源\"]}"
+      },
+      "errorPolicy": "retry"
+    },
+    {
+      "id": "wn_4119ce7d-8a63-4829-8c81-c2f50e27f20a",
+      "position": {
+        "x": 1020,
+        "y": 80
+      },
+      "type": "worklite/agent",
+      "typeVersion": "1",
+      "config": {
+        "label": "新手审稿",
+        "description": "以新手视角判断可读性、证据、夸大与配图价值，只回答是否返修。",
+        "model": "pp-kimi/kimi-k3",
+        "outputFormat": "json",
+        "outputContract": [
+          "revise",
+          "notes"
+        ],
+        "passthroughKeys": [
+          "title",
+          "article",
+          "topic",
+          "readerQuestions",
+          "findings",
+          "outline",
+          "images",
+          "coverPrompt"
+        ],
+        "skillIds": [],
+        "mcpServerIds": [],
+        "systemPrompt": "你代表第一次读到这篇文章的新手。判断的是他能不能读懂并被说服，而不是文章符不符合某种写作规范。\n\n输入是一个 JSON：title、article、topic、readerQuestions、findings、outline、images，可能还有上一轮的 notes。\n\n只看四件事：\n1. 读完能不能说出这是什么东西、它在做什么。说不出来就是最大的问题。\n2. 关键说法有没有具体例子或调研依据支撑，还是在讲空话。\n3. 有没有夸大或含混——「颠覆」「全面领先」这类没有依据的断言。\n4. 示意图的位置和说明是否真的帮助理解；images 里的图有没有被合理使用。\n\n不要按字数、段落长度、句子长短、标题句式、语气词或某个词该不该用来判缺陷；文章结构也不必统一，讲不一样的东西结构本来就该不一样。只有明显妨碍理解的地方才算问题。\n\n最多提三个最值得改的问题，按重要性排序，说清该怎么改。返修额度只有一次：第一轮抓主要问题，第二轮只看上一轮的问题有没有被解决，不要提新的小毛病。\n\n只决定要不要返修：revise 为 true 表示需要作者再改一版；notes 写清要改什么。通过时 revise 为 false，notes 写「无」。\n\n只输出 JSON：\n{\"revise\": false, \"notes\": \"无\"}"
+      },
+      "errorPolicy": "retry"
+    },
+    {
+      "id": "wn_4c0b6f2e-71d5-4c8a-9a63-5b2f0f0c9a11",
+      "position": {
+        "x": 80,
+        "y": 320
+      },
+      "type": "worklite/map",
+      "typeVersion": "1",
+      "config": {
+        "label": "配图批量生成",
+        "description": "按图片清单逐张生成示意图，并按清单顺序聚合成 images[]。",
+        "itemsPath": "images",
+        "maxItems": 3,
+        "entryPort": "context",
+        "outputNodeId": "wn_map_render_9a4b8e2d",
+        "bindings": [
+          {
+            "nodeId": "wn_map_render_9a4b8e2d",
+            "field": "key",
+            "path": "item.key"
+          }
+        ],
+        "subgraph": {
+          "nodes": [
+            {
+              "id": "wn_map_agent_6f1d2c5a",
+              "position": {
+                "x": 0,
+                "y": 0
+              },
+              "type": "worklite/agent",
+              "typeVersion": "1",
+              "config": {
+                "label": "绘图脚本",
+                "model": "codex/gpt-6.1-sol",
+                "outputFormat": "text",
+                "skillIds": [],
+                "mcpServerIds": [],
+                "systemPrompt": "你会拿到一个 JSON：{\"item\": {...}, \"index\": 0, \"context\": {...}}。\n- item 是本次要画的一张示意图：key 是图片标识，intent 说明这张图要讲清什么，evidence 是依据的原文或调研结论。\n- context 是整篇文章的调研计划（title、topic、outline、findings），用来保持术语和事实一致。\n\n写一段 JavaScript，用 Canvas 2D API 画出 intent 表达的那张示意图。\n\n运行环境：脚本在沙箱中同步执行，可以直接使用 ctx、canvas、width、height、backgroundColor、fontFamily。没有 DOM、没有网络、没有 require/import、没有定时器，也没有 Date 和 Math.random。画完即结束。\n\n画法：用几何图形、连线、箭头和文字标签表达结构与流程，不要做装饰性插画，不要画 logo，不要编造材料里没有的数字。配色控制在 2–3 个颜色（多张图共用同一套色），保证手机缩小后还看得清。文字用 fontFamily，字号不要小于 20；画布 1080x720，重要内容留出边距。\n\n只输出可直接执行的脚本语句（可以定义并调用自己的函数），不要 markdown 代码围栏，不要解释，不要 import/export。"
+              },
+              "errorPolicy": "retry"
+            },
+            {
+              "id": "wn_map_render_9a4b8e2d",
+              "position": {
+                "x": 320,
+                "y": 0
+              },
+              "type": "worklite/canvas-render",
+              "typeVersion": "1",
+              "config": {
+                "width": 1080,
+                "height": 720,
+                "backgroundColor": "#ffffff",
+                "key": "image",
+                "timeoutMs": 15000
+              },
+              "errorPolicy": "retry"
+            }
+          ],
+          "edges": [
+            {
+              "id": "we_map_script_render",
+              "sourceNodeId": "wn_map_agent_6f1d2c5a",
+              "sourcePort": "output",
+              "targetNodeId": "wn_map_render_9a4b8e2d",
+              "targetPort": "code"
+            }
+          ]
+        }
+      },
+      "errorPolicy": "stop"
+    },
+    {
+      "id": "wn_07ac56b4-ac24-4ac3-9983-ad7b1458432e",
+      "position": {
+        "x": 700,
+        "y": 320
+      },
+      "type": "worklite/image",
+      "typeVersion": "1",
+      "config": {
+        "label": "封面图",
+        "description": "用 planner 的英文封面提示词生成 1024 方形封面。",
+        "model": "codex/gpt-image-2",
+        "n": 1,
+        "background": "opaque",
+        "quality": "medium",
+        "size": "1024x1024",
+        "promptPath": "coverPrompt"
+      },
+      "errorPolicy": "stop"
+    },
+    {
+      "id": "wn_81f6a4d3-2c47-4b9e-8f5a-6d0e7b3c4f21",
+      "position": {
+        "x": 1020,
+        "y": 320
+      },
+      "type": "worklite/compose-article",
+      "typeVersion": "1",
+      "config": {
+        "label": "文章组装校验",
+        "description": "校验标题、围栏、占位符与封面，输出最终 Markdown。",
+        "titlePath": "title",
+        "articlePath": "article",
+        "unusedImagePolicy": "drop"
+      },
+      "errorPolicy": "stop"
+    },
+    {
+      "id": "wn_c2853561-39a3-42e3-bb65-73b6e7b30b6c",
+      "position": {
+        "x": 1320,
+        "y": 560
+      },
+      "type": "wechat-official-account/publish",
+      "typeVersion": "2",
+      "config": {
+        "label": "公众号草稿",
+        "description": "把最终文章、配图与封面写入个人公众号草稿箱。",
+        "accountId": "wechat_official_account_personal",
+        "mode": "draft"
+      },
+      "errorPolicy": "stop"
+    },
+    {
+      "id": "wn_8f63d381-4197-4b21-9c5a-b990cebcd397",
+      "position": {
+        "x": 1020,
+        "y": 560
+      },
+      "type": "worklite/artifact",
+      "typeVersion": "1",
+      "config": {
+        "label": "文章产物",
+        "name": "Article",
+        "type": "markdown"
+      },
+      "errorPolicy": "stop"
+    }
+  ],
+  "edges": [
+    {
+      "id": "we_input_planner",
+      "sourceNodeId": "wn_9c7e4ed0-2f35-4fe3-a488-22b7b9eebe92",
+      "sourcePort": "output",
+      "targetNodeId": "wn_7744e0e2-9653-47ae-977e-569b565dd1ce",
+      "targetPort": "context"
+    },
+    {
+      "id": "we_planner_writer",
+      "sourceNodeId": "wn_7744e0e2-9653-47ae-977e-569b565dd1ce",
+      "sourcePort": "output",
+      "targetNodeId": "wn_d37922f4-c1fc-4692-aac7-fb1a4539f22f",
+      "targetPort": "context"
+    },
+    {
+      "id": "we_writer_reviewer",
+      "sourceNodeId": "wn_d37922f4-c1fc-4692-aac7-fb1a4539f22f",
+      "sourcePort": "output",
+      "targetNodeId": "wn_4119ce7d-8a63-4829-8c81-c2f50e27f20a",
+      "targetPort": "context"
+    },
+    {
+      "id": "we_reviewer_writer_revision",
+      "sourceNodeId": "wn_4119ce7d-8a63-4829-8c81-c2f50e27f20a",
+      "sourcePort": "output",
+      "targetNodeId": "wn_d37922f4-c1fc-4692-aac7-fb1a4539f22f",
+      "targetPort": "context",
+      "condition": {
+        "kind": "predicate",
+        "path": "$.revise",
+        "operator": "equals",
+        "value": true
+      },
+      "maxTraversals": 1
+    },
+    {
+      "id": "we_reviewer_compose",
+      "sourceNodeId": "wn_4119ce7d-8a63-4829-8c81-c2f50e27f20a",
+      "sourcePort": "output",
+      "targetNodeId": "wn_81f6a4d3-2c47-4b9e-8f5a-6d0e7b3c4f21",
+      "targetPort": "article",
+      "condition": {
+        "kind": "fallback"
+      }
+    },
+    {
+      "id": "we_planner_map_items",
+      "sourceNodeId": "wn_7744e0e2-9653-47ae-977e-569b565dd1ce",
+      "sourcePort": "output",
+      "targetNodeId": "wn_4c0b6f2e-71d5-4c8a-9a63-5b2f0f0c9a11",
+      "targetPort": "items"
+    },
+    {
+      "id": "we_planner_map_context",
+      "sourceNodeId": "wn_7744e0e2-9653-47ae-977e-569b565dd1ce",
+      "sourcePort": "output",
+      "targetNodeId": "wn_4c0b6f2e-71d5-4c8a-9a63-5b2f0f0c9a11",
+      "targetPort": "context"
+    },
+    {
+      "id": "we_map_compose_images",
+      "sourceNodeId": "wn_4c0b6f2e-71d5-4c8a-9a63-5b2f0f0c9a11",
+      "sourcePort": "output",
+      "targetNodeId": "wn_81f6a4d3-2c47-4b9e-8f5a-6d0e7b3c4f21",
+      "targetPort": "images"
+    },
+    {
+      "id": "we_planner_cover",
+      "sourceNodeId": "wn_7744e0e2-9653-47ae-977e-569b565dd1ce",
+      "sourcePort": "output",
+      "targetNodeId": "wn_07ac56b4-ac24-4ac3-9983-ad7b1458432e",
+      "targetPort": "context"
+    },
+    {
+      "id": "we_cover_compose",
+      "sourceNodeId": "wn_07ac56b4-ac24-4ac3-9983-ad7b1458432e",
+      "sourcePort": "output",
+      "targetNodeId": "wn_81f6a4d3-2c47-4b9e-8f5a-6d0e7b3c4f21",
+      "targetPort": "coverImage"
+    },
+    {
+      "id": "we_compose_artifact",
+      "sourceNodeId": "wn_81f6a4d3-2c47-4b9e-8f5a-6d0e7b3c4f21",
+      "sourcePort": "output",
+      "targetNodeId": "wn_8f63d381-4197-4b21-9c5a-b990cebcd397",
+      "targetPort": "data"
+    },
+    {
+      "id": "we_compose_wechat_article",
+      "sourceNodeId": "wn_81f6a4d3-2c47-4b9e-8f5a-6d0e7b3c4f21",
+      "sourcePort": "output",
+      "targetNodeId": "wn_c2853561-39a3-42e3-bb65-73b6e7b30b6c",
+      "targetPort": "article"
+    },
+    {
+      "id": "we_map_wechat_images",
+      "sourceNodeId": "wn_4c0b6f2e-71d5-4c8a-9a63-5b2f0f0c9a11",
+      "sourcePort": "output",
+      "targetNodeId": "wn_c2853561-39a3-42e3-bb65-73b6e7b30b6c",
+      "targetPort": "images"
+    },
+    {
+      "id": "we_cover_wechat_cover",
+      "sourceNodeId": "wn_07ac56b4-ac24-4ac3-9983-ad7b1458432e",
+      "sourcePort": "output",
+      "targetNodeId": "wn_c2853561-39a3-42e3-bb65-73b6e7b30b6c",
+      "targetPort": "coverImage"
+    }
+  ]
+}

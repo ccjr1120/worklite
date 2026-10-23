@@ -575,3 +575,55 @@ describe('WorkflowsService Canvas Render node validation', () => {
     await expect(workflows.create(request, 'personal', { name: 'Bad render color', definition: canvasRenderDefinition({ backgroundColor: 'blue' }) })).rejects.toBeInstanceOf(BadRequestException);
   });
 });
+
+describe('WorkflowsService node label and description validation', () => {
+  function labeledDefinition(label: unknown, description?: unknown): StoredWorkflowDefinition {
+    const next = definition();
+    next.nodes[1].config = {
+      ...(next.nodes[1].config as Record<string, unknown>),
+      ...(label === undefined ? {} : { label }),
+      ...(description === undefined ? {} : { description }),
+    };
+    return next;
+  }
+
+  it('accepts optional label and description and persists them through draft updates', async () => {
+    const { workflows, created } = await setup();
+    const patch = {
+      ...(node(created, 'agent-1').config as Record<string, unknown>),
+      label: '选题调研',
+      description: '把输入想法整理成可核查的研究问题。',
+    };
+    const updated = await workflows.applyOperations(request, 'personal', created.id, {
+      baseRevisionId: created.draft.revisionId,
+      operations: [{ type: 'updateNode', nodeId: 'agent-1', patch: { config: patch } }],
+    });
+    expect(node(updated, 'agent-1').config).toMatchObject({ label: '选题调研', description: '把输入想法整理成可核查的研究问题。' });
+  });
+
+  it('keeps legacy definitions without label or description valid', async () => {
+    const { created } = await setup();
+    expect(node(created, 'agent-1').config).not.toHaveProperty('label');
+    expect(node(created, 'agent-1').config).not.toHaveProperty('description');
+  });
+
+  it('rejects an overlong label with a readable message', async () => {
+    const { workflows } = await setup();
+    await expect(workflows.create(request, 'personal', { name: 'Long label', definition: labeledDefinition('x'.repeat(41)) }))
+      .rejects.toThrow('label must be at most 40 characters');
+  });
+
+  it('rejects an overlong description with a readable message', async () => {
+    const { workflows } = await setup();
+    await expect(workflows.create(request, 'personal', { name: 'Long description', definition: labeledDefinition('Agent', 'x'.repeat(201)) }))
+      .rejects.toThrow('description must be at most 200 characters');
+  });
+
+  it('rejects a non-string label or a blank description', async () => {
+    const { workflows } = await setup();
+    await expect(workflows.create(request, 'personal', { name: 'Numeric label', definition: labeledDefinition(42) }))
+      .rejects.toThrow('label must be a string');
+    await expect(workflows.create(request, 'personal', { name: 'Blank description', definition: labeledDefinition('Agent', '   ') }))
+      .rejects.toThrow('description must not be empty');
+  });
+});

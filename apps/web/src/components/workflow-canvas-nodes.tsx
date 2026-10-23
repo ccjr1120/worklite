@@ -1,11 +1,11 @@
-import { Bot, Braces, FileSearch, FileText, GitBranch, Image as ImageIcon, LayoutDashboard, ListChecks, Palette, Send, Sticker, Timer } from 'lucide-react';
+import { Bot, Braces, FileCheck2, FileSearch, FileText, GitBranch, GitMerge, Image as ImageIcon, Layers, LayoutDashboard, ListChecks, Palette, Send, Sticker, Timer } from 'lucide-react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import type { WorkflowDashboardLayout, WorkflowEdgeCondition } from '@worklite/contracts';
 import { cn } from '@/lib/utils';
 
-export type WorkflowCanvasNodeType = 'input' | 'timer' | 'agent' | 'branch' | 'systemOne' | 'systemOneMap' | 'dashboard' | 'artifact' | 'artifactQuery' | 'wechatPublish' | 'image' | 'canvasSticker' | 'canvasRender';
+export type WorkflowCanvasNodeType = 'input' | 'timer' | 'agent' | 'branch' | 'systemOne' | 'systemOneMap' | 'dashboard' | 'artifact' | 'artifactQuery' | 'wechatPublish' | 'image' | 'canvasSticker' | 'canvasRender' | 'map' | 'join' | 'compose';
 
 export type WorkflowSystemOneRank = {
   path: string;
@@ -17,6 +17,7 @@ export type WorkflowSystemOneRank = {
 export type WorkflowCanvasNodeData = {
   nodeType: WorkflowCanvasNodeType;
   label: string;
+  description?: string;
   model?: string;
   systemPrompt?: string;
   outputFormat?: 'text' | 'json';
@@ -60,6 +61,11 @@ export type WorkflowCanvasNodeData = {
   renderKey?: string;
   renderTimeoutMs?: number;
   renderMaxOutputBytes?: number;
+  /**
+   * Original node config, kept so the inspector can round-trip fields it does
+   * not render (output contracts, subgraphs, bindings) without losing them.
+   */
+  rawConfig?: Record<string, unknown>;
   errorPolicy: 'stop' | 'retry';
 };
 
@@ -120,6 +126,16 @@ export function workflowNodeInputs(node: WorkflowCanvasNode, t: TFunction<'workf
     image: [{ id: 'prompt', label: t('editor.imagePromptPort') }],
     canvasSticker: [{ id: 'text', label: t('editor.stickerTextPort') }],
     canvasRender: [{ id: 'code', label: t('editor.renderCodePort') }],
+    map: [
+      { id: 'items', label: t('editor.mapItemsPort') },
+      { id: 'context', label: t('editor.mapContextPort') },
+    ],
+    join: [{ id: 'input', label: t('editor.joinInputPort') }],
+    compose: [
+      { id: 'article', label: t('editor.composeArticlePort') },
+      { id: 'images', label: t('editor.composeImagesPort') },
+      { id: 'coverImage', label: t('editor.composeCoverPort') },
+    ],
   };
   return inputs[node.data.nodeType];
 }
@@ -139,6 +155,9 @@ function workflowNodeKind(nodeType: WorkflowCanvasNodeType, t: TFunction<'workfl
     image: t('editor.imageNode'),
     canvasSticker: t('editor.stickerNode'),
     canvasRender: t('editor.renderNode'),
+    map: t('editor.mapNode'),
+    join: t('editor.joinNode'),
+    compose: t('editor.composeNode'),
   };
   return kinds[nodeType];
 }
@@ -195,8 +214,14 @@ export function WorkflowStageNode({
     image: <ImageIcon className={iconClass} aria-hidden="true" />,
     canvasSticker: <Sticker className={iconClass} aria-hidden="true" />,
     canvasRender: <Palette className={iconClass} aria-hidden="true" />,
+    map: <Layers className={iconClass} aria-hidden="true" />,
+    join: <GitMerge className={iconClass} aria-hidden="true" />,
+    compose: <FileCheck2 className={iconClass} aria-hidden="true" />,
   }[node.data.nodeType];
   const kind = workflowNodeKind(node.data.nodeType, t);
+  // The author-facing label wins; a definition without one keeps showing the type name.
+  const title = node.data.label.trim() || kind;
+  const description = node.data.description?.trim() || undefined;
   const inputs = workflowNodeInputs(node, t);
   const rowCount = Math.max(inputs.length, 1);
 
@@ -208,7 +233,7 @@ export function WorkflowStageNode({
       data-flow-node={node.id}
       data-selected={selected || undefined}
       role="group"
-      aria-label={`${node.data.label}, ${kind}${statusDescription ? `, ${statusDescription}` : ''}`}
+      aria-label={`${title}, ${kind}${description ? `, ${description}` : ''}${statusDescription ? `, ${statusDescription}` : ''}`}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest('[data-flow-port-type]')) return;
         onSelect(node.id);
@@ -217,8 +242,10 @@ export function WorkflowStageNode({
       <button type="button" className="workflow-node-heading" aria-pressed={selected} onClick={(event) => { event.stopPropagation(); onSelect(node.id); }}>
         {icon}
         <span className="min-w-0 text-left">
-          <span className="workflow-node-title" title={node.data.label}>{node.data.label}</span>
-          {node.data.label.trim() !== kind ? <span className="workflow-node-kind">{kind}</span> : null}
+          <span className="workflow-node-title" title={title}>{title}</span>
+          {description
+            ? <span className="workflow-node-description" title={description}>{description}</span>
+            : title !== kind ? <span className="workflow-node-kind">{kind}</span> : null}
         </span>
         {statusIndicator}
       </button>

@@ -994,6 +994,7 @@ export type WorkflowNodeActivityPhase =
   | 'model.round'
   | 'skill.script'
   | 'mcp.call'
+  | 'map.element'
   | 'edge.decision';
 
 export type WorkflowNodeActivityEdgeDecision = {
@@ -1012,6 +1013,7 @@ export type WorkflowNodeActivityDetail =
   | { phase: 'model.round'; round: number; model: string; finishReason: string | null; toolCalls: number; contextDropped: number }
   | { phase: 'skill.script'; skillId: string; skillName: string; scriptPath: string; arguments: string[]; commandExecutionId: string; exitCode: number | null; status: 'succeeded' | 'failed' }
   | { phase: 'mcp.call'; serverId: string; toolName: string; input: unknown; result: string; status: 'succeeded' | 'failed' }
+  | { phase: 'map.element'; index: number; total: number; status: 'succeeded' | 'failed' | 'skipped'; message?: string }
   | { phase: 'edge.decision'; decisions: WorkflowNodeActivityEdgeDecision[]; terminal: boolean };
 
 export type WorkflowNodeActivityEventPayload = {

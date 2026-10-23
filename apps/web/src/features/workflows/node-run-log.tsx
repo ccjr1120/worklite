@@ -95,6 +95,7 @@ function ActivityEntry({ activity, locale }: { activity: WorkflowNodeActivityVie
     if (detail.phase === 'model.round') return t('nodeLog.modelRound', { round: detail.round + 1, model: detail.model, finishReason: detail.finishReason ?? t('nodeLog.finishReasonUnknown') });
     if (detail.phase === 'skill.script') return t('nodeLog.skillScript', { skill: detail.skillName, path: detail.scriptPath, exitCode: detail.exitCode ?? t('nodeLog.exitCodeUnknown') });
     if (detail.phase === 'mcp.call') return t('nodeLog.mcpCall', { tool: detail.toolName, status: detail.status });
+    if (detail.phase === 'map.element') return t('nodeLog.mapElement', { index: detail.index + 1, total: detail.total, status: t(`nodeLog.mapElementStatus.${detail.status}`), message: detail.message ?? '' });
     return detail.terminal ? t('nodeLog.edgeTerminal') : t('nodeLog.edgeDecision');
   }
 

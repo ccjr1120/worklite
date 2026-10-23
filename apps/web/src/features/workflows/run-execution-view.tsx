@@ -9,6 +9,7 @@ import { useWorkflowVersionsQuery } from '@/api/queries';
 import { durationParts, formatDateTime } from '@/i18n/format';
 import type { AppLocale } from '@/i18n/locale';
 import { cn } from '@/lib/utils';
+import { readNodeIdentity } from './node-identity';
 import { NodeRunLogEntry, toRecordStatus } from './node-run-log';
 
 const NODE_WIDTH = 220;
@@ -45,6 +46,9 @@ function nodeTypeFor(node: WorkflowNodeDefinition): WorkflowCanvasNodeType {
     'worklite/image': 'image',
     'worklite/canvas-sticker': 'canvasSticker',
     'worklite/canvas-render': 'canvasRender',
+    'worklite/map': 'map',
+    'worklite/join': 'join',
+    'worklite/compose-article': 'compose',
     'wechat-official-account/publish': 'wechatPublish',
     'worklite/agent': 'agent',
   };
@@ -68,14 +72,19 @@ function toFlowNode(node: WorkflowNodeDefinition, t: TFunction<'workflows'>): Wo
     image: t('editor.imageNode'),
     canvasSticker: t('editor.stickerNode'),
     canvasRender: t('editor.renderNode'),
+    map: t('editor.mapNode'),
+    join: t('editor.joinNode'),
+    compose: t('editor.composeNode'),
   };
+  const identity = readNodeIdentity(config, fallbackLabels[nodeType]);
   return {
     id: node.id,
     type: nodeType,
     position: node.position,
     data: {
       nodeType,
-      label: typeof config?.label === 'string' ? config.label : fallbackLabels[nodeType],
+      label: identity.label,
+      ...(identity.description ? { description: identity.description } : {}),
       errorPolicy: node.errorPolicy,
       wechatNodeVersion: node.typeVersion === '1' ? '1' : '2',
     },
@@ -380,7 +389,10 @@ function RunExecutionView({ run, locale, loading, failed, compact = false }: Run
 
       {selectedNode ? (
         <section className="mt-4 max-h-[40vh] overflow-auto rounded-xl border border-border bg-surface p-3 shadow-xs" aria-labelledby={`run-node-details-${run.id}-title`}>
-          <h4 id={`run-node-details-${run.id}-title`} className="mb-2 text-sm font-semibold">{selectedNode.data.label}</h4>
+          <header className="mb-2">
+            <h4 id={`run-node-details-${run.id}-title`} className="text-sm font-semibold">{selectedNode.data.label}</h4>
+            {selectedNode.data.description ? <p className="mt-1 text-[12px] text-muted-foreground">{selectedNode.data.description}</p> : null}
+          </header>
           {selectedNodeRuns.length === 0 ? (
             <p className="text-[13px] text-muted-foreground">{tRun('noLogs')}</p>
           ) : (
