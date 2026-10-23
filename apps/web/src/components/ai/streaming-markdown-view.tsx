@@ -1,21 +1,27 @@
-import { Streamdown } from 'streamdown';
+import { Streamdown, type Components, type UrlTransform } from 'streamdown';
 import 'streamdown/styles.css';
 import { cn } from '@/lib/utils';
 import { MarkdownImage } from './markdown-image';
-
-const components = { img: MarkdownImage };
 
 type StreamingMarkdownViewProps = {
   content: string;
   streaming?: boolean;
   className?: string;
+  components?: Components;
+  urlTransform?: UrlTransform;
 };
 
 function StreamingMarkdownView({
   content,
   streaming = false,
   className,
+  components,
+  urlTransform,
 }: StreamingMarkdownViewProps) {
+  // Callers can replace any element, but an omitted image component must still
+  // resolve to the shared attachment-aware renderer.
+  const resolvedComponents: Components = { ...components, img: components?.img ?? MarkdownImage };
+
   return (
     <Streamdown
       mode={streaming ? 'streaming' : 'static'}
@@ -24,7 +30,8 @@ function StreamingMarkdownView({
       skipHtml
       dir="auto"
       controls={{ code: { copy: true }, table: { copy: true } }}
-      components={components}
+      components={resolvedComponents}
+      urlTransform={urlTransform}
       className={cn(
         'min-w-0 break-words text-sm leading-6',
         '[&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0',

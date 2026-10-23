@@ -1081,7 +1081,7 @@ function runResumable(run: typeof workflowRuns.$inferSelect): boolean {
 }
 
 function toArtifactView(row: typeof artifacts.$inferSelect, workspaceSlug: string, workflowName: string): ArtifactView {
-  return { id: row.id, workspaceSlug, name: row.name, type: row.type, workflowName, runId: row.runId ?? '', size: row.size, createdAt: row.createdAt?.toISOString() ?? null, content: row.content };
+  return { id: row.id, workspaceSlug, name: row.name, type: row.type, workflowId: row.workflowId ?? null, workflowName, runId: row.runId ?? '', size: row.size, createdAt: row.createdAt?.toISOString() ?? '', content: row.content };
 }
 
 function toPendingActionView(row: typeof workflowPendingActions.$inferSelect): WorkflowPendingActionView {

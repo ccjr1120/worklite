@@ -1220,11 +1220,57 @@ export type ArtifactView = {
   workspaceSlug: string;
   name: string;
   type: 'json' | 'text' | 'markdown' | 'unsupported';
+  workflowId: string | null;
   workflowName: string;
   runId: string;
   size: string;
   createdAt: string;
   content: string;
+};
+
+/** A list row keeps only what the reading page needs; the full content stays in the detail call. */
+export type ArtifactListItemView = {
+  id: string;
+  workspaceSlug: string;
+  name: string;
+  type: 'json' | 'text' | 'markdown' | 'unsupported';
+  workflowId: string | null;
+  workflowName: string;
+  runId: string;
+  size: string;
+  createdAt: string;
+  contentLength: number;
+  summary: string;
+};
+
+export type ArtifactListPageView = {
+  items: ArtifactListItemView[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
+export type ArtifactListQuery = {
+  search?: string;
+  workflowId?: string;
+  page?: number;
+  pageSize?: number;
+};
+
+/**
+ * A `worklite-image:<key>` reference and the URL resolved from the run, when one
+ * exists. `url` stays null when only the WeChat draft holds the uploaded image.
+ */
+export type ArtifactInlineImageView = {
+  key: string;
+  alt: string;
+  url: string | null;
+};
+
+export type ArtifactDetailView = ArtifactView & {
+  contentLength: number;
+  inlineImages: ArtifactInlineImageView[];
 };
 
 export type AuditEventView = {

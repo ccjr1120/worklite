@@ -62,7 +62,20 @@ export class WorkspaceResourcesController {
   resolveNavigation(@Req() request: Request, @Body() body: { target?: unknown }) { return this.resources.resolveNavigation(request, 'personal', body); }
 
   @Get('artifacts')
-  artifacts(@Req() request: Request) { return this.resources.artifactsList(request, 'personal'); }
+  artifacts(
+    @Req() request: Request,
+    @Query('search') search?: string,
+    @Query('workflowId') workflowId?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.resources.artifactsList(request, 'personal', {
+      search,
+      workflowId,
+      page: page === undefined ? undefined : Number(page),
+      pageSize: pageSize === undefined ? undefined : Number(pageSize),
+    });
+  }
 
   @Get('artifacts/:artifactId')
   artifact(@Req() request: Request, @Param('artifactId') artifactId: string) { return this.resources.artifact(request, 'personal', artifactId); }

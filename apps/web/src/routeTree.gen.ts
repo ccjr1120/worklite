@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AgentTeamConfigRouteImport } from './routes/agent-team-config'
+import { Route as ArtifactsRouteImport } from './routes/artifacts'
 import { Route as ChatRouteImport } from './routes/chat'
 import { Route as HomeRouteImport } from './routes/home'
 import { Route as LogsRouteImport } from './routes/logs'
@@ -20,6 +21,7 @@ import { Route as AgentTeamGroupsGroupIdRouteImport } from './routes/agent-team-
 import { Route as AgentTeamRunsRunIdRouteImport } from './routes/agent-team-runs/$runId'
 import { Route as AgentTeamsIndexRouteImport } from './routes/agent-teams/index'
 import { Route as AgentTeamsTeamIdRouteImport } from './routes/agent-teams/$teamId'
+import { Route as ArtifactsIndexRouteImport } from './routes/artifacts/index'
 import { Route as ArtifactsArtifactIdRouteImport } from './routes/artifacts/$artifactId'
 import { Route as McpServersIndexRouteImport } from './routes/mcp-servers/index'
 import { Route as McpServersServerIdRouteImport } from './routes/mcp-servers/$serverId'
@@ -46,6 +48,11 @@ const IndexRoute = IndexRouteImport.update({
 const AgentTeamConfigRoute = AgentTeamConfigRouteImport.update({
   id: '/agent-team-config',
   path: '/agent-team-config',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ArtifactsRoute = ArtifactsRouteImport.update({
+  id: '/artifacts',
+  path: '/artifacts',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChatRoute = ChatRouteImport.update({
@@ -93,10 +100,15 @@ const AgentTeamsTeamIdRoute = AgentTeamsTeamIdRouteImport.update({
   path: '/agent-teams/$teamId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ArtifactsIndexRoute = ArtifactsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ArtifactsRoute,
+} as any)
 const ArtifactsArtifactIdRoute = ArtifactsArtifactIdRouteImport.update({
-  id: '/artifacts/$artifactId',
-  path: '/artifacts/$artifactId',
-  getParentRoute: () => rootRouteImport,
+  id: '/$artifactId',
+  path: '/$artifactId',
+  getParentRoute: () => ArtifactsRoute,
 } as any)
 const McpServersIndexRoute = McpServersIndexRouteImport.update({
   id: '/mcp-servers/',
@@ -184,6 +196,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRouteRouteWithChildren
   '/agent-team-config': typeof AgentTeamConfigRoute
+  '/artifacts': typeof ArtifactsRouteWithChildren
   '/chat': typeof ChatRoute
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
@@ -201,6 +214,7 @@ export interface FileRoutesByFullPath {
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
   '/agent-teams/': typeof AgentTeamsIndexRoute
+  '/artifacts/': typeof ArtifactsIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/plugins/': typeof PluginsIndexRoute
   '/settings/': typeof SettingsIndexRoute
@@ -229,6 +243,7 @@ export interface FileRoutesByTo {
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
   '/agent-teams': typeof AgentTeamsIndexRoute
+  '/artifacts': typeof ArtifactsIndexRoute
   '/mcp-servers': typeof McpServersIndexRoute
   '/plugins': typeof PluginsIndexRoute
   '/settings': typeof SettingsIndexRoute
@@ -243,6 +258,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRouteRouteWithChildren
   '/agent-team-config': typeof AgentTeamConfigRoute
+  '/artifacts': typeof ArtifactsRouteWithChildren
   '/chat': typeof ChatRoute
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
@@ -260,6 +276,7 @@ export interface FileRoutesById {
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
   '/agent-teams/': typeof AgentTeamsIndexRoute
+  '/artifacts/': typeof ArtifactsIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/plugins/': typeof PluginsIndexRoute
   '/settings/': typeof SettingsIndexRoute
@@ -275,6 +292,7 @@ export interface FileRouteTypes {
     | '/'
     | '/settings'
     | '/agent-team-config'
+    | '/artifacts'
     | '/chat'
     | '/home'
     | '/logs'
@@ -292,6 +310,7 @@ export interface FileRouteTypes {
     | '/skills/$skillId'
     | '/workflows/$workflowId'
     | '/agent-teams/'
+    | '/artifacts/'
     | '/mcp-servers/'
     | '/plugins/'
     | '/settings/'
@@ -320,6 +339,7 @@ export interface FileRouteTypes {
     | '/skills/$skillId'
     | '/workflows/$workflowId'
     | '/agent-teams'
+    | '/artifacts'
     | '/mcp-servers'
     | '/plugins'
     | '/settings'
@@ -333,6 +353,7 @@ export interface FileRouteTypes {
     | '/'
     | '/settings'
     | '/agent-team-config'
+    | '/artifacts'
     | '/chat'
     | '/home'
     | '/logs'
@@ -350,6 +371,7 @@ export interface FileRouteTypes {
     | '/skills/$skillId'
     | '/workflows/$workflowId'
     | '/agent-teams/'
+    | '/artifacts/'
     | '/mcp-servers/'
     | '/plugins/'
     | '/settings/'
@@ -364,6 +386,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   SettingsRouteRoute: typeof SettingsRouteRouteWithChildren
   AgentTeamConfigRoute: typeof AgentTeamConfigRoute
+  ArtifactsRoute: typeof ArtifactsRouteWithChildren
   ChatRoute: typeof ChatRoute
   HomeRoute: typeof HomeRoute
   LogsRoute: typeof LogsRoute
@@ -371,7 +394,6 @@ export interface RootRouteChildren {
   AgentTeamGroupsGroupIdRoute: typeof AgentTeamGroupsGroupIdRoute
   AgentTeamRunsRunIdRoute: typeof AgentTeamRunsRunIdRoute
   AgentTeamsTeamIdRoute: typeof AgentTeamsTeamIdRouteWithChildren
-  ArtifactsArtifactIdRoute: typeof ArtifactsArtifactIdRoute
   McpServersServerIdRoute: typeof McpServersServerIdRoute
   PluginsPluginIdRoute: typeof PluginsPluginIdRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
@@ -398,6 +420,13 @@ declare module '@tanstack/react-router' {
       path: '/agent-team-config'
       fullPath: '/agent-team-config'
       preLoaderRoute: typeof AgentTeamConfigRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/artifacts': {
+      id: '/artifacts'
+      path: '/artifacts'
+      fullPath: '/artifacts'
+      preLoaderRoute: typeof ArtifactsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/chat': {
@@ -463,12 +492,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentTeamsTeamIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/artifacts/': {
+      id: '/artifacts/'
+      path: '/'
+      fullPath: '/artifacts/'
+      preLoaderRoute: typeof ArtifactsIndexRouteImport
+      parentRoute: typeof ArtifactsRoute
+    }
     '/artifacts/$artifactId': {
       id: '/artifacts/$artifactId'
-      path: '/artifacts/$artifactId'
+      path: '/$artifactId'
       fullPath: '/artifacts/$artifactId'
       preLoaderRoute: typeof ArtifactsArtifactIdRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof ArtifactsRoute
     }
     '/mcp-servers/': {
       id: '/mcp-servers/'
@@ -603,6 +639,20 @@ const SettingsRouteRouteWithChildren = SettingsRouteRoute._addFileChildren(
   SettingsRouteRouteChildren,
 )
 
+interface ArtifactsRouteChildren {
+  ArtifactsArtifactIdRoute: typeof ArtifactsArtifactIdRoute
+  ArtifactsIndexRoute: typeof ArtifactsIndexRoute
+}
+
+const ArtifactsRouteChildren: ArtifactsRouteChildren = {
+  ArtifactsArtifactIdRoute: ArtifactsArtifactIdRoute,
+  ArtifactsIndexRoute: ArtifactsIndexRoute,
+}
+
+const ArtifactsRouteWithChildren = ArtifactsRoute._addFileChildren(
+  ArtifactsRouteChildren,
+)
+
 interface AgentTeamsTeamIdRouteChildren {
   AgentTeamsTeamIdConfigRoute: typeof AgentTeamsTeamIdConfigRoute
   AgentTeamsTeamIdIndexRoute: typeof AgentTeamsTeamIdIndexRoute
@@ -631,6 +681,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SettingsRouteRoute: SettingsRouteRouteWithChildren,
   AgentTeamConfigRoute: AgentTeamConfigRoute,
+  ArtifactsRoute: ArtifactsRouteWithChildren,
   ChatRoute: ChatRoute,
   HomeRoute: HomeRoute,
   LogsRoute: LogsRoute,
@@ -638,7 +689,6 @@ const rootRouteChildren: RootRouteChildren = {
   AgentTeamGroupsGroupIdRoute: AgentTeamGroupsGroupIdRoute,
   AgentTeamRunsRunIdRoute: AgentTeamRunsRunIdRoute,
   AgentTeamsTeamIdRoute: AgentTeamsTeamIdRouteWithChildren,
-  ArtifactsArtifactIdRoute: ArtifactsArtifactIdRoute,
   McpServersServerIdRoute: McpServersServerIdRoute,
   PluginsPluginIdRoute: PluginsPluginIdRoute,
   RunsRunIdRoute: RunsRunIdRoute,

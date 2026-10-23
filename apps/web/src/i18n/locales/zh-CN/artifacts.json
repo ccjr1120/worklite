@@ -18,6 +18,31 @@
     "created": "创建时间",
     "actions": "操作"
   },
+  "list": {
+    "searchPlaceholder": "搜索产物名称或工作流",
+    "filterWorkflow": "按工作流筛选",
+    "allWorkflows": "全部工作流",
+    "count": "共 {{count}} 个",
+    "length": "{{count}} 字符",
+    "page": "第 {{page}} / {{pages}} 页",
+    "previous": "上一页",
+    "next": "下一页",
+    "loading": "正在加载产物...",
+    "loadFailed": "无法加载产物列表",
+    "loadFailedDescription": "请检查本地服务是否可用，然后重试。",
+    "noWorkflowMatches": "没有来自“{{workflow}}”的产物。",
+    "selectTitle": "选择一个产物",
+    "selectDescription": "从左侧选择文章或数据产物，在这里阅读全文。",
+    "back": "返回产物列表"
+  },
+  "reader": {
+    "copy": "复制全文",
+    "copied": "已复制全文",
+    "copyFailed": "无法复制产物内容。",
+    "viewRun": "查看来源运行",
+    "unresolvedImages": "该产物保留了未解析的内嵌图占位符，真实图片见公众号草稿。",
+    "imagePlaceholder": "内嵌图占位符未解析"
+  },
   "details": {
     "loading": "正在加载产物...",
     "loadFailedTitle": "产物",

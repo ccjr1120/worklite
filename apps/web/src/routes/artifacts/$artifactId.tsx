@@ -1,21 +1,22 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { Trash2 } from 'lucide-react';
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import { ArrowLeft, Copy, Download, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
+import { ApiError, api } from '@/api/client';
+import { artifactsQueryKey, useArtifactQuery } from '@/api/queries';
 import { ConfirmDialog } from '@/components/confirm-dialog';
-import { Button } from '@/components/ui/button';
-import { CopyableId } from '@/components/copyable-id';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
+import { useLocale } from '@/components/locale-provider';
 import { PageHeading } from '@/components/page-heading';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
-import { useLocale } from '@/components/locale-provider';
+import { ArtifactReader } from '@/features/artifacts/artifact-reader';
 import { formatDateTime } from '@/i18n/format';
-import { api } from '@/api/client';
-import { artifactsQueryKey, useArtifactQuery } from '@/api/queries';
 import { queryClient } from '@/lib/query-client';
-import { toast } from 'sonner';
 
 export const Route = createFileRoute('/artifacts/$artifactId')({
   component: ArtifactDetailsPage,
@@ -43,8 +44,8 @@ function ArtifactDetailsPage() {
   const { locale } = useLocale();
   const { artifactId } = Route.useParams();
   const navigate = useNavigate();
-  const workspaceSlug = "personal";
-  const { data: artifact, isLoading, isError, refetch } = useArtifactQuery(workspaceSlug, artifactId);
+  const workspaceSlug = 'personal';
+  const { data: artifact, isLoading, isError, error, refetch } = useArtifactQuery(workspaceSlug, artifactId);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState('');
@@ -57,11 +58,12 @@ function ArtifactDetailsPage() {
       await api.deleteArtifact(workspaceSlug, artifact.id);
       setDeleteOpen(false);
       toast.success(t('delete.success'));
+      queryClient.removeQueries({ queryKey: ['artifact', artifact.id] });
       await queryClient.invalidateQueries({ queryKey: artifactsQueryKey() });
       await queryClient.invalidateQueries({ queryKey: ['run', artifact.runId] });
-      void navigate({ to: '/workflows' });
-    } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : t('delete.failed'));
+      void navigate({ to: '/artifacts' });
+    } catch (failure) {
+      setDeleteError(failure instanceof Error ? failure.message : t('delete.failed'));
     } finally {
       setDeleteBusy(false);
     }
@@ -81,67 +83,119 @@ function ArtifactDetailsPage() {
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
+  async function copyArtifact() {
+    if (!artifact) return;
+    try {
+      await navigator.clipboard.writeText(artifact.content);
+      toast.success(t('reader.copied'));
+    } catch {
+      toast.error(t('reader.copyFailed'));
+    }
+  }
+
+  const backButton = (
+    <Button asChild variant="ghost" size="icon-compact" className="md:hidden">
+      <Link to="/artifacts" aria-label={t('list.back')}><ArrowLeft className="size-4" /></Link>
+    </Button>
+  );
+
   if (isLoading) {
     return (
-      <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
-        <WorkspaceChrome crumbs={[{ label: t('title'), to: '/workflows' }]} />
-        <div role="status" aria-busy="true" aria-live="polite">
+      <div className="mx-auto w-full max-w-[900px] px-4 py-6 md:px-8">
+        <WorkspaceChrome crumbs={[{ label: t('title'), to: '/artifacts' }]} back={backButton} />
+        <div role="status" aria-busy="true" aria-live="polite" className="mt-5">
           <span className="sr-only">{t('details.loading')}</span>
-          <Skeleton className="h-8 w-64" />
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            {Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-4 w-32" />)}
+          <Skeleton className="h-6 w-2/3" />
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            {Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-4 w-28" />)}
           </div>
-          <Skeleton className="mt-6 h-64 w-full rounded-lg" />
+          <Skeleton className="mt-6 h-72 w-full rounded-xl" />
         </div>
       </div>
     );
   }
 
-  if (isError) {
+  const notFound = isError && error instanceof ApiError && error.status === 404;
+
+  if (notFound || (!isError && !artifact)) {
     return (
-      <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
-        <WorkspaceChrome crumbs={[{ label: t('title'), to: '/workflows' }]} />
-        <ErrorState title={t('details.loadFailedTitle')} description={t('details.loadFailed')} onAction={() => void refetch()} />
+      <div className="mx-auto w-full max-w-[900px] px-4 py-6 md:px-8">
+        <WorkspaceChrome crumbs={[{ label: t('title'), to: '/artifacts' }]} back={backButton} />
+        <div className="mt-6">
+          <EmptyState title={t('details.unavailableTitle')} description={t('details.unavailableDescription')} />
+        </div>
       </div>
     );
   }
 
-  if (!artifact) {
+  if (isError || !artifact) {
     return (
-      <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
-        <WorkspaceChrome crumbs={[{ label: t('title'), to: '/workflows' }]} />
-        <EmptyState title={t('details.unavailableTitle')} description={t('details.unavailableDescription')} />
+      <div className="mx-auto w-full max-w-[900px] px-4 py-6 md:px-8">
+        <WorkspaceChrome crumbs={[{ label: t('title'), to: '/artifacts' }]} back={backButton} />
+        <div className="mt-6">
+          <ErrorState title={t('details.loadFailedTitle')} description={t('details.loadFailed')} onAction={() => void refetch()} />
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
+    <div className="mx-auto w-full max-w-[900px] px-4 py-6 md:px-8">
       <WorkspaceChrome
-        crumbs={[{ label: artifact.name }]}
+        crumbs={[{ label: t('title'), to: '/artifacts' }, { label: artifact.name }]}
+        back={backButton}
         actions={
-          <div className="flex items-center gap-2">
-            <Button type="button" variant="ghost" size="icon-compact" aria-label={t('delete.action', { name: artifact.name })} title={t('delete.action', { name: artifact.name })} onClick={() => { setDeleteError(''); setDeleteOpen(true); }}><Trash2 className="size-4" /></Button>
-            {artifact.type === 'unsupported' ? null : <Button size="compact" variant="secondary" onClick={downloadArtifact}>{t('common:actions.download')}</Button>}
+          <div className="flex items-center gap-1.5">
+            <Button type="button" variant="ghost" size="compact" onClick={() => void copyArtifact()}>
+              <Copy className="size-4" />
+              {t('reader.copy')}
+            </Button>
+            {artifact.type === 'unsupported' ? null : (
+              <Button type="button" variant="ghost" size="icon-compact" aria-label={t('common:actions.download')} onClick={downloadArtifact}>
+                <Download className="size-4" />
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-compact"
+              className="text-danger hover:text-danger"
+              aria-label={t('delete.action', { name: artifact.name })}
+              onClick={() => { setDeleteError(''); setDeleteOpen(true); }}
+            >
+              <Trash2 className="size-4" />
+            </Button>
           </div>
         }
       />
-      <PageHeading title={artifact.name} description={`${artifact.type} · ${artifact.size}`} />
-      <div className="mt-4 flex flex-wrap items-center gap-3 text-[13px] text-muted-foreground">
-        <CopyableId value={artifact.id} />
-        <span>{artifact.workflowName}</span>
-        <span>{artifact.runId ? t('details.run', { value: artifact.runId }) : t('details.noRun')}</span>
-        <span className="tabular-nums">{formatDateTime(artifact.createdAt, locale)}</span>
-      </div>
-      <div className="mt-6 overflow-auto rounded-xl border border-border bg-surface p-4 shadow-xs">
-        {artifact.type === 'unsupported' ? (
-          <p className="text-[13px] text-muted-foreground">{t('details.unsupported')}</p>
-        ) : artifact.content === '' ? (
-          <p className="text-[13px] text-muted-foreground">{t('details.emptyContent')}</p>
+
+      {artifact.type === 'markdown' ? null : <PageHeading className="mt-5" title={artifact.name} />}
+
+      <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-muted-foreground">
+        <Badge variant="brand">{artifact.type}</Badge>
+        {artifact.workflowId ? (
+          <Link to="/workflows/$workflowId" params={{ workflowId: artifact.workflowId }} className="truncate font-medium text-brand-text underline-offset-2 hover:underline">
+            {artifact.workflowName}
+          </Link>
         ) : (
-          <pre className="whitespace-pre-wrap font-mono text-[13px]">{artifact.content}</pre>
+          <span className="truncate">{artifact.workflowName}</span>
         )}
+        {artifact.runId ? (
+          <Link to="/runs/$runId" params={{ runId: artifact.runId }} className="font-medium text-brand-text underline-offset-2 hover:underline">
+            {t('reader.viewRun')}
+          </Link>
+        ) : (
+          <span>{t('details.noRun')}</span>
+        )}
+        <span className="tabular-nums">{formatDateTime(artifact.createdAt, locale)}</span>
+        <span className="tabular-nums">{artifact.size}</span>
+        <span className="tabular-nums">{t('list.length', { count: artifact.contentLength })}</span>
       </div>
+
+      <div className="mt-5">
+        <ArtifactReader artifact={artifact} />
+      </div>
+
       <ConfirmDialog
         open={deleteOpen}
         onOpenChange={(nextOpen) => { setDeleteOpen(nextOpen); if (!nextOpen) setDeleteError(''); }}
