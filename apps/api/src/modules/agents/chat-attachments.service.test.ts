@@ -5,7 +5,7 @@ import { NotFoundException, PayloadTooLargeException, UnsupportedMediaTypeExcept
 import type { ConfigService } from '@nestjs/config';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDb, type Database } from '@worklite/db';
-import { ChatAttachmentsService, MAX_ATTACHMENT_BYTES, attachmentImagesAsText } from './chat-attachments.service';
+import { ChatAttachmentsService, MAX_ATTACHMENT_BYTES, attachmentImagesAsText, detachAttachmentImages } from './chat-attachments.service';
 
 const WORKSPACE_ID = 'workspace_personal';
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
@@ -102,5 +102,26 @@ describe('attachmentImagesAsText', () => {
   it('replaces attachment images with a Web note and leaves other Markdown intact', () => {
     const markdown = 'Done.\n\n![首页截图](/api/chat/attachments/att_1234-ab)\n![](http://127.0.0.1:23391/api/chat/attachments/att_99)\n![logo](https://example.com/logo.png)';
     expect(attachmentImagesAsText(markdown)).toBe('Done.\n\n[图片：首页截图，请在 Web 查看]\n[图片：att_99，请在 Web 查看]\n![logo](https://example.com/logo.png)');
+  });
+});
+
+describe('detachAttachmentImages', () => {
+  it('returns the referenced ids and the prose a channel should send natively', () => {
+    const markdown = 'Done.\n\n![首页截图](/api/chat/attachments/att_1234-ab)\n![shot](http://127.0.0.1:23391/api/chat/attachments/att_99)\n![logo](https://example.com/logo.png)';
+    expect(detachAttachmentImages(markdown)).toEqual({
+      text: 'Done.\n\n![logo](https://example.com/logo.png)',
+      references: [
+        { alt: '首页截图', id: 'att_1234-ab' },
+        { alt: 'shot', id: 'att_99' },
+      ],
+    });
+  });
+
+  it('removes every reference when the reply is only images', () => {
+    const markdown = '![a](/api/chat/attachments/att_1)\n![b](/api/chat/attachments/att_2)';
+    expect(detachAttachmentImages(markdown)).toEqual({
+      text: '',
+      references: [{ alt: 'a', id: 'att_1' }, { alt: 'b', id: 'att_2' }],
+    });
   });
 });

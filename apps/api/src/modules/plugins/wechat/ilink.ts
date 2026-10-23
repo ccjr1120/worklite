@@ -1,11 +1,14 @@
-import { randomInt } from 'node:crypto';
+import { createCipheriv, createHash, randomBytes, randomInt } from 'node:crypto';
 
 // iLink bot protocol client for the WeChat conversation channel. The protocol shape follows
 // Tencent's MIT-licensed @tencent-weixin/openclaw-weixin plugin (v2.4.10), reimplemented here
 // as pure functions with an injectable fetch so tests and mocks sit at the network boundary.
-// Only the private-chat text subset WorkLite's first version needs is implemented.
+// Text and image outbound are implemented; other media stays inbound-labelled only.
 
 export const ILINK_DEFAULT_BASE_URL = 'https://ilinkai.weixin.qq.com';
+// Media uploads are independent of the regional bot API host: getuploadurl returns a full URL,
+// and this base only serves as the documented fallback when it does not.
+export const ILINK_CDN_BASE_URL = 'https://novac2c.cdn.weixin.qq.com/c2c';
 export const ILINK_BOT_TYPE = '3';
 export const ILINK_STALE_TOKEN_ERRCODE = -14;
 export const ILINK_APP_ID = 'bot';
@@ -14,9 +17,11 @@ const CLIENT_VERSION = (1 << 16) | (0 << 8) | 0;
 const CHANNEL_VERSION = '1.0.0';
 const LONG_POLL_TIMEOUT_MS = 35_000;
 const API_TIMEOUT_MS = 15_000;
+const CDN_UPLOAD_TIMEOUT_MS = 60_000;
 const QR_POLL_TIMEOUT_MS = 40_000;
+const CDN_UPLOAD_RETRIES = 3;
 
-export type FetchLike = (input: string, init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal }) => Promise<{ ok: boolean; status: number; text: () => Promise<string> }>;
+export type FetchLike = (input: string, init?: { method?: string; headers?: Record<string, string>; body?: string | Uint8Array; signal?: AbortSignal }) => Promise<{ ok: boolean; status: number; text: () => Promise<string>; headers?: { get: (name: string) => string | null } }>;
 
 export class ILinkApiError extends Error {
   constructor(message: string, readonly ret: number | null = null, readonly errcode: number | null = null, readonly httpStatus: number | null = null) {
@@ -59,6 +64,10 @@ export type ILinkUpdates = {
 export const MESSAGE_TYPE_USER = 1;
 export const MESSAGE_TYPE_BOT = 2;
 export const MESSAGE_STATE_FINISH = 2;
+export const MESSAGE_ITEM_TEXT = 1;
+export const MESSAGE_ITEM_IMAGE = 2;
+// proto: UploadMediaType
+const UPLOAD_MEDIA_IMAGE = 1;
 // sendtyping status: 1 sets the typing indicator, 2 cancels it.
 const TYPING_STATUS_TYPING = 1;
 const TYPING_STATUS_CANCEL = 2;
@@ -147,7 +156,7 @@ export async function sendTextMessage(fetchImpl: FetchLike, options: { baseUrl: 
       client_id: options.clientId,
       message_type: MESSAGE_TYPE_BOT,
       message_state: MESSAGE_STATE_FINISH,
-      item_list: [{ type: 1, text_item: { text: options.text } }],
+      item_list: [{ type: MESSAGE_ITEM_TEXT, text_item: { text: options.text } }],
       // The reply context issued with the inbound message must be echoed on every send.
       ...(options.contextToken ? { context_token: options.contextToken } : {}),
     },
@@ -155,6 +164,142 @@ export async function sendTextMessage(fetchImpl: FetchLike, options: { baseUrl: 
   }, options.token, API_TIMEOUT_MS);
   const ret = asNumber(parsed.ret);
   if (ret !== 0) throw new ILinkApiError(asString(parsed.errmsg) || `iLink sendmessage failed (ret=${ret}).`, ret, asNumber(parsed.errcode));
+  return { messageId: asString(parsed.message_id) };
+}
+
+// Image uploads follow the same three-step flow as the reference client: ask getuploadurl for a
+// pre-signed CDN target, POST the AES-128-ECB ciphertext there, then reference the returned
+// download parameter in an image_item. The AES key travels hex-encoded to getuploadurl and as a
+// base64 string (of that hex text, mirroring the reference client) on the sent image item.
+export type ILinkUploadedImage = {
+  filekey: string;
+  downloadEncryptedQueryParam: string;
+  /** Hex-encoded AES-128 key, as accepted by getuploadurl. */
+  aeskey: string;
+  /** Plaintext byte length. */
+  fileSize: number;
+  /** AES-128-ECB ciphertext byte length, reported as the image's mid_size. */
+  fileSizeCiphertext: number;
+};
+
+/** PKCS7 padding always adds a block, so the ciphertext size rounds up from size + 1. */
+export function aesEcbPaddedSize(plaintextSize: number): number {
+  return Math.ceil((plaintextSize + 1) / 16) * 16;
+}
+
+export function encryptAesEcb(plaintext: Buffer, key: Buffer): Buffer {
+  const cipher = createCipheriv('aes-128-ecb', key, null);
+  return Buffer.concat([cipher.update(plaintext), cipher.final()]);
+}
+
+// The fallback URL shape used when getuploadurl omits upload_full_url.
+export function buildCdnUploadUrl(cdnBaseUrl: string, uploadParam: string, filekey: string): string {
+  return `${cdnBaseUrl}/upload?encrypted_query_param=${encodeURIComponent(uploadParam)}&filekey=${encodeURIComponent(filekey)}`;
+}
+
+export function imageItem(uploaded: ILinkUploadedImage): Record<string, unknown> {
+  return {
+    media: {
+      encrypt_query_param: uploaded.downloadEncryptedQueryParam,
+      aes_key: Buffer.from(uploaded.aeskey, 'utf8').toString('base64'),
+      encrypt_type: 1,
+    },
+    mid_size: uploaded.fileSizeCiphertext,
+  };
+}
+
+async function fetchUploadUrl(fetchImpl: FetchLike, options: {
+  baseUrl: string; token: string; toUserId: string; filekey: string; rawsize: number;
+  rawfilemd5: string; filesize: number; aeskey: string;
+}): Promise<{ uploadFullUrl: string; uploadParam: string }> {
+  const parsed = await post(fetchImpl, `${options.baseUrl}/ilink/bot/getuploadurl`, {
+    filekey: options.filekey,
+    media_type: UPLOAD_MEDIA_IMAGE,
+    to_user_id: options.toUserId,
+    rawsize: options.rawsize,
+    rawfilemd5: options.rawfilemd5,
+    filesize: options.filesize,
+    no_need_thumb: true,
+    aeskey: options.aeskey,
+    base_info: baseInfo(),
+  }, options.token, API_TIMEOUT_MS);
+  const ret = asNumber(parsed.ret);
+  if (ret !== 0) throw new ILinkApiError(asString(parsed.errmsg) || `iLink getuploadurl failed (ret=${ret}).`, ret, asNumber(parsed.errcode));
+  return { uploadFullUrl: asString(parsed.upload_full_url).trim(), uploadParam: asString(parsed.upload_param) };
+}
+
+// The CDN signals success with 200 plus an x-encrypted-param header; client errors are final,
+// while server errors are retried because the pre-signed target stays valid.
+async function uploadCiphertext(fetchImpl: FetchLike, url: string, ciphertext: Buffer): Promise<string> {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= CDN_UPLOAD_RETRIES; attempt += 1) {
+    try {
+      const response = await fetchImpl(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: ciphertext,
+        signal: AbortSignal.timeout(CDN_UPLOAD_TIMEOUT_MS),
+      });
+      if (response.status >= 400 && response.status < 500) {
+        const detail = response.headers?.get('x-error-message') || '';
+        throw new ILinkApiError(`iLink CDN rejected the image upload (HTTP ${response.status})${detail ? `: ${detail}` : '.'}`, null, null, response.status);
+      }
+      if (response.status !== 200) {
+        const detail = response.headers?.get('x-error-message') || `HTTP ${response.status}`;
+        throw new ILinkApiError(`iLink CDN image upload failed: ${detail}`, null, null, response.status);
+      }
+      const downloadParam = response.headers?.get('x-encrypted-param');
+      if (!downloadParam) throw new ILinkApiError('iLink CDN upload response did not include a download parameter.', null, null, response.status);
+      return downloadParam;
+    } catch (error) {
+      lastError = error;
+      if (error instanceof ILinkApiError && error.httpStatus !== null && error.httpStatus < 500) throw error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new ILinkApiError('iLink CDN image upload failed.');
+}
+
+export async function uploadImageToCdn(fetchImpl: FetchLike, options: {
+  baseUrl: string; token: string; toUserId: string; image: Buffer; cdnBaseUrl?: string;
+}): Promise<ILinkUploadedImage> {
+  if (!options.image.length) throw new ILinkApiError('Cannot upload an empty image.');
+  const rawsize = options.image.length;
+  const rawfilemd5 = createHash('md5').update(options.image).digest('hex');
+  const filesize = aesEcbPaddedSize(rawsize);
+  const filekey = randomBytes(16).toString('hex');
+  const aeskey = randomBytes(16);
+  const upload = await fetchUploadUrl(fetchImpl, {
+    baseUrl: options.baseUrl, token: options.token, toUserId: options.toUserId,
+    filekey, rawsize, rawfilemd5, filesize, aeskey: aeskey.toString('hex'),
+  });
+  const uploadUrl = upload.uploadFullUrl
+    || (upload.uploadParam ? buildCdnUploadUrl(options.cdnBaseUrl ?? ILINK_CDN_BASE_URL, upload.uploadParam, filekey) : '');
+  if (!uploadUrl) throw new ILinkApiError('iLink did not return an image upload URL.');
+  const ciphertext = encryptAesEcb(options.image, aeskey);
+  const downloadEncryptedQueryParam = await uploadCiphertext(fetchImpl, uploadUrl, ciphertext);
+  return {
+    filekey, downloadEncryptedQueryParam, aeskey: aeskey.toString('hex'),
+    fileSize: rawsize, fileSizeCiphertext: ciphertext.length,
+  };
+}
+
+export async function sendImageMessage(fetchImpl: FetchLike, options: {
+  baseUrl: string; token: string; toUserId: string; image: ILinkUploadedImage; contextToken: string; clientId: string;
+}): Promise<{ messageId: string }> {
+  const parsed = await post(fetchImpl, `${options.baseUrl}/ilink/bot/sendmessage`, {
+    msg: {
+      from_user_id: '',
+      to_user_id: options.toUserId,
+      client_id: options.clientId,
+      message_type: MESSAGE_TYPE_BOT,
+      message_state: MESSAGE_STATE_FINISH,
+      item_list: [{ type: MESSAGE_ITEM_IMAGE, image_item: imageItem(options.image) }],
+      ...(options.contextToken ? { context_token: options.contextToken } : {}),
+    },
+    base_info: baseInfo(),
+  }, options.token, API_TIMEOUT_MS);
+  const ret = asNumber(parsed.ret);
+  if (ret !== 0) throw new ILinkApiError(asString(parsed.errmsg) || `iLink sendmessage (image) failed (ret=${ret}).`, ret, asNumber(parsed.errcode));
   return { messageId: asString(parsed.message_id) };
 }
 

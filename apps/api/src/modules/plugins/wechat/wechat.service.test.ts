@@ -106,7 +106,7 @@ describe('WechatService#deliver typing indicator', () => {
       return { ok: true, status: 200, text: async () => '{}' };
     };
     const db = { select: selectFrom([chatRow]), update: () => { throw new Error('deliver must not write when nothing is ready to report'); } };
-    const service = new WechatService(db as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    const service = new WechatService(db as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
     (service as unknown as { fetchImpl: FetchLike; baseUrl: string; token: string }).fetchImpl = fetchImpl;
     (service as unknown as { baseUrl: string }).baseUrl = 'https://ilink.example';
     (service as unknown as { token: string }).token = 'tok';
@@ -135,7 +135,7 @@ describe('WechatService#deliver typing indicator', () => {
       update: () => { const query = { set: (patch: Record<string, unknown>) => { updates.push(patch); return query; }, where: () => Promise.resolve(undefined) }; return query; },
       insert: () => { const query = { values: (v: Record<string, unknown>) => { inserts.push(v); return query; }, onConflictDoUpdate: () => Promise.resolve(undefined), onConflictDoNothing: () => Promise.resolve(undefined) }; return query; },
     };
-    const service = new WechatService(db as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    const service = new WechatService(db as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
     (service as unknown as { fetchImpl: FetchLike }).fetchImpl = fetchImpl;
     (service as unknown as { baseUrl: string }).baseUrl = 'https://ilink.example';
     (service as unknown as { token: string }).token = 'tok';
@@ -173,7 +173,7 @@ describe('WechatService#deliver typing indicator', () => {
     const executions = {
       get: async () => ({ status: 'waiting_for_input', error: null, messages: [], pendingQuestion: { id: 'q-new', question: 'Click the button to begin a new conversation.', options: [], action: 'new_conversation' } }),
     };
-    const service = new WechatService(db as never, {} as never, {} as never, executions as never, {} as never, {} as never, {} as never);
+    const service = new WechatService(db as never, {} as never, {} as never, executions as never, {} as never, {} as never, {} as never, {} as never);
     (service as unknown as { fetchImpl: FetchLike; baseUrl: string; token: string }).fetchImpl = fetchImpl;
     (service as unknown as { baseUrl: string; token: string }).baseUrl = 'https://ilink.example';
     (service as unknown as { token: string }).token = 'tok';
@@ -228,7 +228,7 @@ describe('WechatService "新对话" command', () => {
       }
       return { ok: true, status: 200, text: async () => '{}' };
     };
-    const instance = new WechatService(db as never, {} as never, dispatches as never, executions as never, {} as never, {} as never, {} as never);
+    const instance = new WechatService(db as never, {} as never, dispatches as never, executions as never, {} as never, {} as never, {} as never, {} as never);
     (instance as unknown as { allowedUserId: string }).allowedUserId = ALLOWED_USER;
     if (options.transport) {
       (instance as unknown as { fetchImpl: FetchLike }).fetchImpl = fetchImpl;
@@ -413,7 +413,7 @@ describe('WechatService monitor under an upgrade freeze', () => {
       updateWechat: async (patch: Record<string, unknown>) => { updates.push(patch); },
     };
     const db = { select: emptyQuery, update: emptyQuery, insert: emptyQuery };
-    const service = new WechatService(db as never, plugins as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    const service = new WechatService(db as never, plugins as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
     (service as unknown as { fetchImpl: FetchLike }).fetchImpl = fetchImpl;
 
     try {
