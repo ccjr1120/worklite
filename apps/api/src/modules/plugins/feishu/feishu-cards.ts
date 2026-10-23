@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { attachmentImagesAsText } from '../../agents/chat-attachments.service';
-import type { ChatProjectTaskView } from '@worklite/contracts';
+import type { AgentTeamRunView, ChatProjectTaskView } from '@worklite/contracts';
 
 export type FeishuAction =
   | { kind: 'answer'; runId: string; pendingInputId: string; scopeRevision: number }
@@ -15,6 +15,8 @@ export type CardButton = { label: string; action: FeishuAction };
 export type CardState = {
   title: string;
   status: string;
+  // Secondary notation line under the status, e.g. a Team Run's current role, model and elapsed time.
+  meta?: string;
   content: string;
   replyContent?: string;
   buttons: CardButton[];
@@ -73,6 +75,7 @@ export function renderCard(submissionId: string, state: CardState): SavedCard {
     ...(['正在思考…', '正在回复…', '正在处理…', '正在执行', '正在启动'].includes(state.status)
       ? { icon: { tag: 'standard_icon', token: 'loading_outlined', color: 'grey' } } : {}),
   });
+  if (state.meta) elements.push({ tag: 'div', element_id: 'meta', text: { ...text(state.meta), text_size: 'notation', text_color: 'grey' } });
   // Card Markdown images need a Feishu img_key, so WorkLite attachment images become a note pointing to Web.
   if (state.content || state.conversation) elements.push({ tag: 'markdown', element_id: 'reply', content: attachmentImagesAsText(state.content) || ' ' });
   if (state.details) elements.push({
@@ -183,4 +186,44 @@ export function renderTaskCard(submissionId: string, task: ChatProjectTaskView):
     actions, content: outcome || goal,
     ...(replyAction ? { replyAction, questionText } : {}),
   };
+}
+
+const TEAM_ROLE_NAMES: Record<string, string> = {
+  planner: 'Planner', 'test-designer': 'Test Designer', developer: 'Developer', 'test-author': 'Test Author',
+  'test-runner': 'Test Runner', reviewer: 'Reviewer', 'worktree-manager': 'Worktree Manager', 'team-manager': 'Team Manager',
+};
+
+export function teamRoleName(task: { role: string; roleName: string | null }): string {
+  return task.roleName ?? TEAM_ROLE_NAMES[task.role] ?? task.role;
+}
+
+export function formatElapsed(fromIso: string | null, toMs: number): string | null {
+  const from = fromIso ? Date.parse(fromIso) : NaN;
+  if (!Number.isFinite(from) || !Number.isFinite(toMs)) return null;
+  const minutes = Math.max(0, Math.floor((toMs - from) / 60_000));
+  if (minutes < 1) return '不到 1 分钟';
+  if (minutes < 60) return `${minutes} 分钟`;
+  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟`;
+  return `${Math.floor(minutes / (24 * 60))} 天 ${Math.floor((minutes % (24 * 60)) / 60)} 小时`;
+}
+
+// The Team card's one-line summary, matching the Web card: current role (or the in-flight count
+// when Developer lanes run in parallel), its model, the role's elapsed time and the Run total.
+export function teamRunMeta(run: AgentTeamRunView, now = Date.now()): string {
+  const settled = ['succeeded', 'failed', 'cancelled'].includes(run.status);
+  const runEnd = settled ? Date.parse(run.finishedAt ?? run.updatedAt) : now;
+  const parts: string[] = [];
+  const current = run.current;
+  if (current && !settled) {
+    let role = teamRoleName(current);
+    if (current.activeCount > 1) role = current.activeRoleCount > 1 ? `${current.activeCount} 个角色进行中` : `${role} ×${current.activeCount}`;
+    parts.push(role);
+    if (current.model) parts.push(current.model);
+    const roleElapsed = formatElapsed(current.startedAt, now);
+    if (roleElapsed && current.activeCount === 1) parts.push(`本角色 ${roleElapsed}`);
+  }
+  if (run.progress?.totalAssignments && !settled) parts.push(`开发任务 ${run.progress.completedAssignments}/${run.progress.totalAssignments}`);
+  const total = formatElapsed(run.createdAt, runEnd);
+  if (total) parts.push(`总耗时 ${total}`);
+  return parts.join(' · ');
 }

@@ -1466,9 +1466,30 @@ export type AgentTeamTaskAttemptView = {
   developerId: string | null;
   assignmentTitle: string | null;
   progressText: string;
+  // Derived from the captured Team version: the role's display name (null for built-in roles
+  // without one) and the public model id the attempt runs on (the role's model, else the Team
+  // default for WorkLite Agent roles, else the captured executor launch model).
+  roleName: string | null;
+  model: string | null;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+};
+
+// The in-flight attempt a compact Run card leads with: the most recently started attempt that is
+// running or waiting, plus how many attempts are in flight (parallel Developer lanes).
+export type AgentTeamRunCurrentView = {
+  taskAttemptId: string;
+  taskKey: string;
+  role: AgentTeamRoleId;
+  roleName: string | null;
+  model: string | null;
+  status: AgentTeamTaskAttemptStatus;
+  assignmentTitle: string | null;
+  progressText: string;
+  startedAt: string | null;
+  activeCount: number;
+  activeRoleCount: number;
 };
 
 export type AgentTeamDocumentView = {
@@ -1715,6 +1736,7 @@ export type AgentTeamRunView = {
   operations: AgentTeamOperationView[];
   activities: AgentTeamRunEvent[];
   progress: AgentTeamRunProgress;
+  current: AgentTeamRunCurrentView | null;
   outcome: AgentTeamRunOutcome | null;
   // Run-level worktree evidence recorded by the Worktree Manager stage; null
   // for Runs on orchestration versions without it or before setup completes.

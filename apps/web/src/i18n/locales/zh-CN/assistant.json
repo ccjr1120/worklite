@@ -419,5 +419,18 @@
   },
   "attachment": {
     "expired": "图片已过期"
+  },
+  "teamRun": {
+    "panel": "Agent Team 任务",
+    "expand": "展开团队任务详情",
+    "collapse": "收起团队任务详情",
+    "activeRoles": "{{count}} 个角色进行中",
+    "parallelRole": "{{role}} ×{{count}}",
+    "betweenRoles": "等待下一个角色",
+    "roleElapsed": "本角色 {{duration}}",
+    "totalElapsed": "总耗时 {{duration}}",
+    "defaultModel": "默认模型",
+    "tasks": "角色任务",
+    "openRun": "打开任务详情"
   }
 }

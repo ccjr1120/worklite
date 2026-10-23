@@ -115,6 +115,7 @@ import {
   type AgentTeamWorktreeTaskResult,
 } from './agent-team-graph-v4';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
+import { deriveRunCurrent, effectiveTaskModel, taskRoleName } from './agent-team-run-summary';
 import { CommandsService } from '../commands/commands.service';
 import { createAgentTeamGroupGraph, type AgentTeamGroupGraphInitial, type AgentTeamGroupGraphState } from './agent-team-graph-v6';
 
@@ -613,6 +614,11 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       }
     }
     const worktree = runWorktreeColumns(run);
+    const teamDefaultModel = this.config.get<string>('AGENT_TEAM_DEFAULT_PUBLIC_MODEL_ID') ?? '';
+    const tasks = taskRows.map((row) => toTaskAttemptView(row, progressTextByAttemptId.get(row.id) ?? '', {
+      roleName: taskRoleName(version.snapshot, row.role),
+      model: effectiveTaskModel(version.snapshot, row, teamDefaultModel),
+    }));
     return {
       id: run.id,
       teamId: run.teamId,
@@ -641,12 +647,13 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       authorizedCommands: run.authorizedCommands,
       scopeRevision: run.scopeRevision,
       desiredControlState: run.desiredControlState,
-      tasks: taskRows.map((row) => toTaskAttemptView(row, progressTextByAttemptId.get(row.id) ?? '')),
+      tasks,
       documents: documentRows.map(toDocumentView),
       pendingInputs: pendingRows.map(toPendingInputView),
       operations: operationRows.map(toOperationView),
       activities: activityRows.map((row) => ({ runId: row.runId, sequence: row.sequence, type: row.type, payload: row.payload, createdAt: row.createdAt.toISOString() })),
       progress: deriveRunProgress(run, taskRows),
+      current: deriveRunCurrent(tasks),
       outcome: isRunOutcome(run.outcome) ? run.outcome : null,
       createdAt: run.createdAt.toISOString(),
       updatedAt: run.updatedAt.toISOString(),
@@ -3829,7 +3836,11 @@ function parseRepairRequests(value: unknown): AgentTeamTargetedRepairRequest[] |
   });
 }
 
-function toTaskAttemptView(row: typeof agentTeamTaskAttempts.$inferSelect, progressText = ''): AgentTeamTaskAttemptView {
+function toTaskAttemptView(
+  row: typeof agentTeamTaskAttempts.$inferSelect,
+  progressText = '',
+  derived: Pick<AgentTeamTaskAttemptView, 'roleName' | 'model'> = { roleName: null, model: null },
+): AgentTeamTaskAttemptView {
   return {
     id: row.id,
     taskKey: row.taskKey,
@@ -3843,6 +3854,7 @@ function toTaskAttemptView(row: typeof agentTeamTaskAttempts.$inferSelect, progr
     developerId: row.developerId,
     assignmentTitle: row.assignmentTitle,
     progressText,
+    ...derived,
     createdAt: row.createdAt.toISOString(),
     startedAt: row.startedAt?.toISOString() ?? null,
     finishedAt: row.finishedAt?.toISOString() ?? null,
