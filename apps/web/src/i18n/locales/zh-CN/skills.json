@@ -20,7 +20,17 @@
   "source": {
     "online": "在线",
     "archive": "压缩包",
-    "built-in": "内置"
+    "built-in": "内置",
+    "local": "本地目录"
+  },
+  "localSync": {
+    "action": "扫描本地技能",
+    "syncing": "正在扫描...",
+    "success": "本地技能已同步：新增 {{created}}，更新 {{updated}}，未变化 {{unchanged}}。",
+    "failed": "无法扫描本地技能目录。",
+    "root": "来源目录：{{root}}",
+    "skipped": "以下目录未导入：",
+    "removed": "已移除 {{count}} 个本地目录中已不存在的技能。"
   },
   "terminal": {
     "warning": "产品内置的 scripts/run.sh 会把唯一的命令参数交给 /bin/sh -lc 执行。它没有沙箱，并拥有 WorkLite 进程用户的宿主权限，包括访问可用文件和网络。"
@@ -64,6 +74,8 @@
     },
     "readOnly": "只读",
     "builtInReadOnly": "平台内置包",
+    "localReadOnly": "本地目录包，只读；请在 ~/.agents/skills 中修改后重新扫描。",
+    "localBins": "命令行依赖：{{bins}}",
     "nameRequired": "请先输入技能名称再保存。",
     "saveFailed": "无法保存技能。请检查包内容后重试。",
     "loading": "正在加载技能...",

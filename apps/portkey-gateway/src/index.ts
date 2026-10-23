@@ -26,7 +26,6 @@ import { imageGenerationsHandler } from './handlers/imageGenerationsHandler';
 import { createSpeechHandler } from './handlers/createSpeechHandler';
 import { createTranscriptionHandler } from './handlers/createTranscriptionHandler';
 import { createTranslationHandler } from './handlers/createTranslationHandler';
-import { modelsHandler } from './handlers/modelsHandler';
 import { realTimeHandler } from './handlers/realtimeHandler';
 import filesHandler from './handlers/filesHandler';
 import batchesHandler from './handlers/batchesHandler';
@@ -34,11 +33,13 @@ import finetuneHandler from './handlers/finetuneHandler';
 import { messagesHandler } from './handlers/messagesHandler';
 import { imageEditsHandler } from './handlers/imageEditsHandler';
 import { messagesCountTokensHandler } from './handlers/messagesCountTokensHandler';
+import { modelsHandler } from './handlers/modelsHandler';
 import modelResponsesHandler from './handlers/modelResponsesHandler';
-import { createProvider, deleteProvider, getProvider, listProviders, prepareGatewayDatabase, providerView, requestLog, requestLogs, requestStats, updateProvider } from './worklite/provider-registry';
+import { createProvider, deleteProvider, getProvider, listProviders, portkeyCustomHost, prepareGatewayDatabase, providerView, requestLog, requestLogs, requestStats, updateProvider } from './worklite/provider-registry';
 import { codexAuthStatus, deleteCodexAccount, importCodexAccounts, refreshCodexAccount, startCodexLogin, startCodexOAuthCallbackServer, updateCodexAccount } from './worklite/codex-auth';
 import { codexAccountUsages, codexRateLimits } from './worklite/codex-transport';
 import { isSystemOneProtocol, systemOnePassthrough, systemOneTest } from './worklite/systemone-transport';
+import { resolveUnifiedModel, UnifiedProxyError, type UnifiedProxyOperation } from './worklite/unified-proxy';
 
 // utils
 import { logger } from './apm';
@@ -49,6 +50,7 @@ import { createCacheBackendsRedis } from './shared/services/cache';
 // Create a new Hono server instance
 const app = new Hono();
 const runtime = getRuntimeKey();
+const internalProviderRequests = new WeakSet<Request>();
 
 async function dispatchInternal(request: Request, c: Context): Promise<Response> {
   return runtime === 'workerd' ? app.fetch(request, c.env, c.executionCtx) : app.fetch(request, c.env);
@@ -98,6 +100,11 @@ if (runtime === 'node') {
  * Returns a greeting message.
  */
 app.get('/', (c) => c.text('AI Gateway says hey!'));
+app.get('/worklite/runtime', (c) => c.json({
+  releaseHash: process.env.WORKLITE_RELEASE_HASH ?? null,
+  gatewayHash: process.env.WORKLITE_GATEWAY_HASH ?? null,
+  wrapperPid: process.env.WORKLITE_GATEWAY_PID ? Number(process.env.WORKLITE_GATEWAY_PID) : null,
+}));
 
 app.get('/worklite/providers', async (c) => c.json(await listProviders()));
 app.get('/worklite/stats', (c) => {
@@ -167,6 +174,23 @@ const responseContentText = (content: unknown): string => {
   )).join('');
 };
 
+// Providers often explain a rejected provider test in their error body; surfacing it avoids reporting a
+// misleading generic failure (for example an authentication error caused by a wrong request path).
+const upstreamErrorText = (raw: string): string => {
+  try {
+    const payload = JSON.parse(raw) as { error?: unknown; message?: unknown };
+    const error = payload?.error;
+    const message = typeof error === 'string'
+      ? error
+      : error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string'
+        ? (error as { message: string }).message
+        : payload?.message;
+    return typeof message === 'string' ? message.trim().slice(0, 500) : '';
+  } catch {
+    return '';
+  }
+};
+
 const parseResponsesTestOutput = (payload: ResponsesTestPayload): string => {
   const sections: string[] = [];
 
@@ -213,7 +237,7 @@ app.post('/worklite/providers/:providerId/test', async (c) => {
         ? 'openai'
         : null;
   if (!adapter) return c.json({ message: 'Unsupported model provider protocol.' }, 400);
-  const headers = new Headers({ 'content-type': 'application/json', 'x-portkey-config': JSON.stringify({ provider: adapter, api_key: provider.apiKey, custom_host: provider.baseURL, ...(Object.keys(provider.headers ?? {}).length > 0 ? { forward_headers: Object.keys(provider.headers ?? {}) } : {}) }) });
+  const headers = new Headers({ 'content-type': 'application/json', 'x-portkey-config': JSON.stringify({ provider: adapter, api_key: provider.apiKey, custom_host: portkeyCustomHost(provider), ...(Object.keys(provider.headers ?? {}).length > 0 ? { forward_headers: Object.keys(provider.headers ?? {}) } : {}) }) });
   for (const [name, value] of Object.entries(provider.headers ?? {})) headers.set(name, value);
   const requestLogId = `glog_${crypto.randomUUID()}`;
   headers.set('x-worklite-log-source', 'provider_test');
@@ -231,11 +255,20 @@ app.post('/worklite/providers/:providerId/test', async (c) => {
     : isResponses
       ? { model, input: prompt, max_output_tokens: 1024 }
       : { model, messages: [{ role: 'user', content: prompt }], max_tokens: 32 };
-  const upstream = await dispatchInternal(new Request(new URL(path, c.req.url), { method: 'POST', headers, body: JSON.stringify(body) }), c);
-  if (!upstream.ok) return c.json({ message: 'Provider connection failed.', requestLogId }, upstream.status as 400);
+  const testRequest = new Request(new URL(path, c.req.url), { method: 'POST', headers, body: JSON.stringify(body) });
+  // A provider test already has an explicit provider config and uses the
+  // provider's bare model id. Skip the public unified-model selector, which
+  // expects a providerName/modelId pair and would reject this request before
+  // request logging is initialized.
+  internalProviderRequests.add(testRequest);
+  const upstream = await dispatchInternal(testRequest, c);
   const raw = await upstream.text();
+  if (!upstream.ok) {
+    const detail = upstreamErrorText(raw);
+    return c.json({ message: detail ? `Provider connection failed: ${detail}` : 'Provider connection failed.', requestLogId }, upstream.status as 400);
+  }
   let payload: { choices?: Array<{ message?: { content?: string } }>; content?: Array<{ type?: string; text?: string }>; output_text?: string; output?: Array<{ type?: string; content?: unknown; summary?: unknown }> } = {};
-  try { payload = JSON.parse(raw); } catch {}
+  try { payload = JSON.parse(raw); } catch { /* Keep the empty payload when the upstream response is not JSON. */ }
   const streamedResponse = [...raw.matchAll(/"delta":"((?:\\.|[^"\\])*)"/g)].map((match) => JSON.parse(`"${match[1]}"`)).join('');
   const response = provider.protocol === 'openai/responses'
     ? parseResponsesTestOutput(payload) || payload.output_text || streamedResponse
@@ -284,15 +317,48 @@ app.all('/worklite/proxy/*', async (c) => {
         ? 'openai'
         : null;
   if (!adapter) return c.json({ error: { message: 'Unsupported model provider protocol.' } }, 400);
-  const config = { provider: adapter, api_key: provider.apiKey, custom_host: provider.baseURL, ...(Object.keys(provider.headers ?? {}).length > 0 ? { forward_headers: Object.keys(provider.headers ?? {}) } : {}) };
+  const config = { provider: adapter, api_key: provider.apiKey, custom_host: portkeyCustomHost(provider), ...(Object.keys(provider.headers ?? {}).length > 0 ? { forward_headers: Object.keys(provider.headers ?? {}) } : {}) };
   const headers = new Headers(c.req.raw.headers);
   headers.delete('x-worklite-provider-id');
   headers.set('x-worklite-stat-provider', provider.name);
   headers.set('x-portkey-config', JSON.stringify(config));
   for (const [name, value] of Object.entries(provider.headers ?? {})) headers.set(name, value);
   const body = c.req.method === 'GET' || c.req.method === 'HEAD' ? undefined : await c.req.text();
-  return dispatchInternal(new Request(new URL(`/v1/${operation}`, c.req.url), { method: c.req.method, headers, body }), c);
+  const internalRequest = new Request(new URL(`/v1/${operation}`, c.req.url), { method: c.req.method, headers, body });
+  internalProviderRequests.add(internalRequest);
+  return dispatchInternal(internalRequest, c);
 });
+
+async function unifiedProxy(c: Context, operation: UnifiedProxyOperation): Promise<Response> {
+  const rawBody = await c.req.text();
+  let payload: unknown;
+  try { payload = JSON.parse(rawBody); }
+  catch { return c.json({ error: { message: 'The request body must be valid JSON.' } }, 400); }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return c.json({ error: { message: 'The request body must be a JSON object.' } }, 400);
+  const body = payload as Record<string, unknown>;
+  let selection: ReturnType<typeof resolveUnifiedModel>;
+  try { selection = resolveUnifiedModel(body.model, operation, await listProviders()); }
+  catch (error) {
+    if (error instanceof UnifiedProxyError) return c.json({ error: { message: error.message } }, error.status);
+    throw error;
+  }
+  const headers = new Headers(c.req.raw.headers);
+  headers.set('x-worklite-provider-id', selection.providerId);
+  if (!headers.has('x-worklite-log-id')) headers.set('x-worklite-log-id', `glog_${crypto.randomUUID()}`);
+  if (!headers.has('x-worklite-log-source')) headers.set('x-worklite-log-source', 'external');
+  headers.delete('content-length');
+  const query = new URL(c.req.url).search;
+  const request = new Request(new URL(`/worklite/proxy/${operation}${query}`, c.req.url), {
+    method: c.req.method,
+    headers,
+    body: JSON.stringify({ ...body, model: selection.modelId }),
+  });
+  return dispatchInternal(request, c);
+}
+
+function unifiedRoute(operation: UnifiedProxyOperation) {
+  return (c: Context, next: () => Promise<void>) => internalProviderRequests.has(c.req.raw) ? next() : unifiedProxy(c, operation);
+}
 
 // Use prettyJSON middleware for all routes
 app.use('*', prettyJSON());
@@ -303,7 +369,15 @@ if (getRuntimeKey() === 'node') {
 }
 
 // Support the /v1/models endpoint
-app.get('/v1/models', modelsHandler);
+app.get('/v1/models', modelsHandler, async (c) => c.json({
+  object: 'list',
+  data: (await listProviders()).flatMap((provider) => provider.models.map((model) => ({
+    id: `${provider.name}/${model}`,
+    object: 'model' as const,
+    created: 0,
+    owned_by: provider.name,
+  }))),
+}));
 
 // Use hooks middleware for all routes
 app.use('*', hooks);
@@ -341,7 +415,8 @@ if (runtime === 'node') {
 /**
  * POST route for '/v1/messages' in anthropic format
  */
-app.post('/v1/messages', requestValidator, messagesHandler);
+app.post('/v1/messages', unifiedRoute('messages'), requestValidator, messagesHandler);
+app.post('/v1/systemone', unifiedRoute('systemone'));
 
 app.post(
   '/v1/messages/count_tokens',
@@ -353,7 +428,7 @@ app.post(
  * POST route for '/v1/chat/completions'.
  * Handles requests by passing them to the chatCompletionsHandler.
  */
-app.post('/v1/chat/completions', requestValidator, chatCompletionsHandler);
+app.post('/v1/chat/completions', unifiedRoute('chat/completions'), requestValidator, chatCompletionsHandler);
 
 /**
  * POST route for '/v1/completions'.
@@ -371,7 +446,7 @@ app.post('/v1/embeddings', requestValidator, embeddingsHandler);
  * POST route for '/v1/images/generations'.
  * Handles requests by passing them to the imageGenerations handler.
  */
-app.post('/v1/images/generations', requestValidator, imageGenerationsHandler);
+app.post('/v1/images/generations', unifiedRoute('images/generations'), requestValidator, imageGenerationsHandler);
 
 /**
  * POST route for '/v1/images/edits'.
@@ -442,6 +517,7 @@ app.get('/v1/batches', requestValidator, batchesHandler('listBatches', 'GET'));
 // responses
 app.post(
   '/v1/responses',
+  unifiedRoute('responses'),
   requestValidator,
   modelResponsesHandler('createModelResponse', 'POST')
 );

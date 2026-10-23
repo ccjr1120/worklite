@@ -1,11 +1,11 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { StoredProjectExecutorLaunch } from '@worklite/db';
 import { CommandsService, type CommandStdioProcess } from '../commands/commands.service';
 import { McpClientService } from '../mcp-servers/mcp-client.service';
-import { requireGatewayUrl, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
+import { requireGatewayUrl, isGatewayPublicModel, localGatewayBaseUrl, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
 
 type ClaudeLaunch = Extract<StoredProjectExecutorLaunch, { executor: 'claude' }>;
 
@@ -22,6 +22,11 @@ export class ClaudeCodeService {
   constructor(private readonly commands: CommandsService, private readonly mcp: McpClientService) {}
 
   async captureLaunch(commandArguments: readonly string[], model: string | null): Promise<ClaudeLaunch> {
+    // A declared Gateway model is served by the WorkLite Gateway itself; the operator's own Claude Code
+    // base URL (including whatever a provider switcher left in ~/.claude/settings.json) is irrelevant then.
+    if (isGatewayPublicModel(model)) {
+      return { executor: 'claude', commandArguments: [...commandArguments], baseUrl: localGatewayBaseUrl(), model };
+    }
     let settingsEnv: Record<string, unknown> = {};
     try {
       const settings = JSON.parse(await readFile(join(homedir(), '.claude', 'settings.json'), 'utf8')) as { env?: Record<string, unknown> };
@@ -52,12 +57,22 @@ export class ClaudeCodeService {
       await writeFile(promptFile, prepared.systemPrompt, { mode: 0o600 });
       const mcp = await this.mcpArguments(prepared, request.signal);
       const model = request.model ?? launch.model;
+      // `~/.claude/settings.json` env overrides the inherited process environment, so a Gateway-selected
+      // model is routed through a per-task `--settings` file instead of child-process environment variables.
+      const gatewayModel = isGatewayPublicModel(model);
+      let gatewayArguments: string[] = [];
+      if (gatewayModel) {
+        const settingsFile = join(prepared.directory, 'claude-gateway-settings.json');
+        await writeFile(settingsFile, JSON.stringify({ env: { ANTHROPIC_BASE_URL: localGatewayBaseUrl(), ANTHROPIC_AUTH_TOKEN: 'worklite' } }), { mode: 0o600 });
+        gatewayArguments = ['--settings', settingsFile];
+      }
       const argv = [
         ...launch.commandArguments,
         '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
         '--permission-mode', 'bypassPermissions', '--permission-prompt-tool', 'stdio', '--no-session-persistence',
         '--append-system-prompt-file', promptFile,
         ...(model ? ['--model', model] : []),
+        ...gatewayArguments,
         ...(prepared.pluginDirectory ? ['--plugin-dir', prepared.pluginDirectory] : []),
         ...mcp,
       ];
@@ -96,20 +111,42 @@ export class ClaudeCodeService {
   // Selected MCP servers are added to the operator's own through an owner-only config file, never through argv.
   // Claude Code has no per-server tool allowlist, so tools outside the captured allowlist are disallowed by name.
   private async mcpArguments(prepared: PreparedProjectExecution, signal: AbortSignal): Promise<string[]> {
-    const servers: Record<string, unknown> = {};
-    const disallowed: string[] = [];
-    for (const server of prepared.mcpServers) {
-      let tools: Array<{ name: string }>;
-      try { tools = await this.mcp.discover({ endpoint: server.endpoint, ...(server.authToken ? { authToken: server.authToken } : {}) }, signal); }
-      catch { continue; }
-      servers[server.key] = { type: 'http', url: server.endpoint, ...(server.authToken ? { headers: { Authorization: `Bearer ${server.authToken}` } } : {}) };
-      disallowed.push(...tools.filter((tool) => !server.allowedTools.includes(tool.name)).map((tool) => `mcp__${server.key}__${tool.name}`));
-    }
-    if (Object.keys(servers).length === 0) return [];
-    const file = join(prepared.directory, 'mcp.json');
-    await writeFile(file, JSON.stringify({ mcpServers: servers }), { mode: 0o600 });
-    return ['--mcp-config', file, ...(disallowed.length ? ['--disallowedTools', ...disallowed] : [])];
+    return writeClaudeMcpConfiguration(prepared.directory, prepared.mcpServers, (server) => this.mcp.discover(
+      { endpoint: server.endpoint, ...(server.authToken ? { authToken: server.authToken } : {}) },
+      signal,
+    ));
   }
+}
+
+const mcpLogger = new Logger('ClaudeCodeMcp');
+
+/**
+ * Writes the owner-only mcp.json and returns the Claude Code argv fragment. A server
+ * whose discovery fails is skipped rather than injected unvetted, but the failure is
+ * logged: silently dropping the WorkLite Team memory server would hide its tools.
+ */
+export async function writeClaudeMcpConfiguration(
+  directory: string,
+  servers: ReadonlyArray<{ key: string; endpoint: string; authToken?: string; allowedTools: string[] }>,
+  discover: (server: { key: string; endpoint: string; authToken?: string }) => Promise<Array<{ name: string }>>,
+): Promise<string[]> {
+  const configured: Record<string, unknown> = {};
+  const disallowed: string[] = [];
+  for (const server of servers) {
+    let tools: Array<{ name: string }>;
+    try {
+      tools = await discover(server);
+    } catch (error) {
+      mcpLogger.warn(`MCP server ${server.key} could not be discovered and was not injected into Claude Code: ${error instanceof Error ? error.message : 'unknown error'}`);
+      continue;
+    }
+    configured[server.key] = { type: 'http', url: server.endpoint, ...(server.authToken ? { headers: { Authorization: `Bearer ${server.authToken}` } } : {}) };
+    disallowed.push(...tools.filter((tool) => !server.allowedTools.includes(tool.name)).map((tool) => `mcp__${server.key}__${tool.name}`));
+  }
+  if (Object.keys(configured).length === 0) return [];
+  const file = join(directory, 'mcp.json');
+  await writeFile(file, JSON.stringify({ mcpServers: configured }), { mode: 0o600 });
+  return ['--mcp-config', file, ...(disallowed.length ? ['--disallowedTools', ...disallowed] : [])];
 }
 
 class ClaudeCodeSession {

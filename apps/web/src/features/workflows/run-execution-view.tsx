@@ -44,6 +44,7 @@ function nodeTypeFor(node: WorkflowNodeDefinition): WorkflowCanvasNodeType {
     'worklite/artifact-query': 'artifactQuery',
     'worklite/image': 'image',
     'worklite/canvas-sticker': 'canvasSticker',
+    'worklite/canvas-render': 'canvasRender',
     'wechat-official-account/publish': 'wechatPublish',
     'worklite/agent': 'agent',
   };
@@ -66,6 +67,7 @@ function toFlowNode(node: WorkflowNodeDefinition, t: TFunction<'workflows'>): Wo
     wechatPublish: t('editor.wechatNode'),
     image: t('editor.imageNode'),
     canvasSticker: t('editor.stickerNode'),
+    canvasRender: t('editor.renderNode'),
   };
   return {
     id: node.id,

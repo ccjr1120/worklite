@@ -114,7 +114,9 @@ export type UpdatePluginRequest = {
 
 export type ChatTarget =
   | { kind: 'conversation' }
-  | { kind: 'team'; teamId: string; projectDirectory: string; mode: 'plan_only' | 'validate_existing' | 'implement_and_validate'; role?: AgentTeamRoleId }
+  // `mode` remains accepted only for older callers. Current dispatch ignores it
+  // and the Team Dispatcher chooses the Run mode.
+  | { kind: 'team'; teamId: string; projectDirectory: string; role?: AgentTeamRoleId; mode?: 'plan_only' | 'validate_existing' | 'implement_and_validate' }
   | { kind: 'workflow'; workflowId: string };
 
 export type ChatTaskReference =
@@ -361,14 +363,21 @@ export type ChatAttachmentView = {
   expiresAt: string;
 };
 
-// A user-submitted mid-run correction. 'delivered' reached the live Codex turn through turn/steer
-// (evidence only); 'queued' is waiting for the task's next run (Claude Code, or a Codex turn that
-// could not accept it); 'consumed' was picked up by that next run's goal.
+// A user-submitted mid-run correction, an increment on the captured goal rather than a replacement.
+// 'delivered' reached the live Codex turn through turn/steer; 'queued' is waiting for the task's
+// next round boundary (Claude Code, or a Codex turn that could not accept it); 'consumed' was
+// injected into the input of the round that started at that boundary. `seq`, `source`, `consumedAt`
+// and `consumedTurn` are absent on instructions recorded before they existed; consumedTurn is the
+// 1-based round of the task in which the instruction was applied.
 export type ProjectTaskSteerInstruction = {
   id: string;
+  seq?: number;
+  source?: 'user';
   text: string;
   createdAt: string;
   status: 'delivered' | 'queued' | 'consumed';
+  consumedAt?: string;
+  consumedTurn?: number;
 };
 
 export type SteerProjectTaskRequest = {
@@ -1021,9 +1030,11 @@ export type SkillView = {
   id: string;
   workspaceSlug: string;
   name: string;
-  source: 'online' | 'archive' | 'built-in';
+  source: 'online' | 'archive' | 'built-in' | 'local';
   version: string;
   validation: 'valid' | 'invalid' | 'pending';
+  description?: string;
+  metadata?: Record<string, unknown>;
   files: Array<{
     path: string;
     content: string;
@@ -1304,6 +1315,23 @@ export type ExecuteSkillScriptRequest = {
   arguments: string[];
 };
 
+export type LocalSkillSkippedPackageView = {
+  directory: string;
+  reason: string;
+};
+
+export type LocalSkillSyncResult = {
+  root: string;
+  available: boolean;
+  unavailableReason?: string;
+  created: number;
+  updated: number;
+  unchanged: number;
+  removed: string[];
+  retained: Array<{ id: string; reason: string }>;
+  synced: Array<{ id: string; name: string; directory: string }>;
+  skipped: LocalSkillSkippedPackageView[];
+};
 
 export type WorkflowScheduleView = {
   id: string;
@@ -1420,7 +1448,7 @@ export type AgentTeamVersionMetadata = {
   developerExecution?: ProjectExecutorLaunchView | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
   projectExecutorLaunches?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
 };
 
 export type AgentTeamTaskAttemptStatus =
@@ -1444,9 +1472,30 @@ export type AgentTeamTaskAttemptView = {
   developerId: string | null;
   assignmentTitle: string | null;
   progressText: string;
+  // Derived from the captured Team version: the role's display name (null for built-in roles
+  // without one) and the public model id the attempt runs on (the role's model, else the Team
+  // default for WorkLite Agent roles, else the captured executor launch model).
+  roleName: string | null;
+  model: string | null;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+};
+
+// The in-flight attempt a compact Run card leads with: the most recently started attempt that is
+// running or waiting, plus how many attempts are in flight (parallel Developer lanes).
+export type AgentTeamRunCurrentView = {
+  taskAttemptId: string;
+  taskKey: string;
+  role: AgentTeamRoleId;
+  roleName: string | null;
+  model: string | null;
+  status: AgentTeamTaskAttemptStatus;
+  assignmentTitle: string | null;
+  progressText: string;
+  startedAt: string | null;
+  activeCount: number;
+  activeRoleCount: number;
 };
 
 export type AgentTeamDocumentView = {
@@ -1548,6 +1597,11 @@ export type AgentTeamTaskResult =
       };
       message?: string;
       handoff?: AgentTeamRoleHandoff;
+      // Set by the v10 Dispatcher. Other roles never author this field.
+      dispatchDecision?: {
+        mode: AgentTeamMode;
+        rationale: string;
+      };
     }
   | {
       status: 'waiting_for_input';
@@ -1569,6 +1623,9 @@ export type AgentTeamRunSummary = {
   intent: string;
   projectDirectory: string;
   mode: AgentTeamMode;
+  modeRationale: string | null;
+  modeDecidedAt: string | null;
+  orchestrationVersion: number;
   status: AgentTeamRunStatus;
   createdAt: string;
   finishedAt: string | null;
@@ -1636,6 +1693,12 @@ export type AgentTeamMemoryView = {
   role: AgentTeamRoleId | null;
   content: string;
   sourceMessageId: string | null;
+  // v11 provenance; absent on memories created before the migration.
+  sourceRunId?: string | null;
+  sourceRole?: AgentTeamRoleId | null;
+  sourceTaskAttemptId?: string | null;
+  createdBy?: 'chat' | 'role';
+  upsertKey?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -1668,6 +1731,8 @@ export type AgentTeamRunView = {
   intent: string;
   projectDirectory: string;
   mode: AgentTeamMode;
+  modeRationale: string | null;
+  modeDecidedAt: string | null;
   authorizedCommands: string[];
   scopeRevision: number;
   desiredControlState: 'none' | 'pause_requested' | 'cancel_requested';
@@ -1677,6 +1742,7 @@ export type AgentTeamRunView = {
   operations: AgentTeamOperationView[];
   activities: AgentTeamRunEvent[];
   progress: AgentTeamRunProgress;
+  current: AgentTeamRunCurrentView | null;
   outcome: AgentTeamRunOutcome | null;
   // Run-level worktree evidence recorded by the Worktree Manager stage; null
   // for Runs on orchestration versions without it or before setup completes.

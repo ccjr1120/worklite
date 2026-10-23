@@ -16,6 +16,7 @@ import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
+import { runModeLabel } from './run-mode';
 import { formatDateTime } from '@/i18n/format';
 
 function roleLabel(role: string, t: (key: string) => string) {
@@ -95,7 +96,8 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
         <div className="mt-3 flex flex-wrap items-center gap-3"><StatusBadge status={toStatusKey(run.status)} label={t(`run.status.${run.status}`)} /><CopyableId value={run.id} /><span className="text-xs text-muted-foreground">v{run.teamVersion.version} · {formatDateTime(run.createdAt, locale)}</span>{run.groupId ? <Link to="/agent-team-groups/$groupId" params={{ groupId: run.groupId }} className="text-[13px] text-brand-text underline underline-offset-4">{t('run.openArchive')}</Link> : null}</div>
         <dl className="mt-4 grid gap-4 text-[13px] md:grid-cols-2">
           <div><dt className="text-muted-foreground">{t('run.version')}</dt><dd className="mt-1 font-mono">v{run.teamVersion.version} · {run.teamVersion.orchestrationVersion ? `v${run.teamVersion.orchestrationVersion}` : t('run.versionUnknown')}</dd></div>
-          <div><dt className="text-muted-foreground">{t('run.mode')}</dt><dd className="mt-1">{t(`run.modeValue.${run.mode}`)}</dd></div>
+          <div><dt className="text-muted-foreground">{t('run.mode')}</dt><dd className="mt-1">{runModeLabel(t, run.mode, run.teamVersion.orchestrationVersion ?? 1, run.modeDecidedAt)}</dd></div>
+          {run.modeRationale ? <div className="md:col-span-2"><dt className="text-muted-foreground">{t('run.modeRationale')}</dt><dd className="mt-1 whitespace-pre-wrap break-words">{run.modeRationale}</dd></div> : null}
           <div><dt className="text-muted-foreground">{t('run.project')}</dt><dd className="mt-1 font-mono break-all">{run.projectDirectory}</dd></div>
           <div><dt className="text-muted-foreground">{t('run.scopeRevision')}</dt><dd className="mt-1 font-mono tabular-nums">{run.scopeRevision}</dd></div>
           {run.worktreeBasePath ? <div><dt className="text-muted-foreground">{t('run.worktreeBasePath')}</dt><dd className="mt-1 font-mono break-all">{run.worktreeBasePath}</dd></div> : null}

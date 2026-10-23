@@ -57,6 +57,14 @@ function protocolParts(protocol: ModelProviderProtocol): { adapter: 'openai' | '
   throw new BadRequestException('Unsupported model provider protocol.');
 }
 
+// The Gateway completes an Anthropic base URL with `/v1` before appending its endpoint, so discovery
+// must ask the same completed base for `/models` instead of hitting `<base>/models`.
+function discoveryBaseURL(protocol: ModelProviderProtocol, baseURL: string): string {
+  if (protocol !== 'anthropic/messages') return baseURL;
+  const normalized = baseURL.replace(/\/+$/, '');
+  return /\/v1$/i.test(normalized) ? normalized : `${normalized}/v1`;
+}
+
 function discoveryConfig(input: DiscoverModelProviderRequest): ModelProviderConfig {
   const protocol = input.protocol;
   if (protocol !== 'openai/chat' && protocol !== 'openai/responses' && protocol !== 'anthropic/messages' && protocol !== 'codex/responses') throw new BadRequestException('Unsupported model provider protocol.');
@@ -72,7 +80,7 @@ function discoveryConfig(input: DiscoverModelProviderRequest): ModelProviderConf
   // The guard above already excludes every protocol without a discovery adapter,
   // so this narrows to the Agent-capable adapters rather than widening the config.
   const adapter = protocol === 'anthropic/messages' ? 'anthropic' : protocol === 'codex/responses' ? 'codex' : 'openai';
-  return { id: 'discovery', adapter, apiKey, baseURL, headers };
+  return { id: 'discovery', adapter, apiKey, baseURL: discoveryBaseURL(protocol, baseURL), headers };
 }
 
 function discoveredModelIds(payload: unknown): string[] {
@@ -120,6 +128,7 @@ function isSystemOneTestInput(value: unknown): value is SystemOneTestInput {
 export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PortkeyGatewayService.name);
   private readonly activeGatewayPort = GATEWAY_PORT;
+  private readonly managedGateway = process.env.WORKLITE_MANAGED_GATEWAY === '1';
   private gateway: ChildProcess | null = null;
   private gatewayReady = false;
   private startup: Promise<void> | null = null;
@@ -136,6 +145,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
   }
 
   async status(): Promise<PortkeyGatewayView> {
+    if (this.managedGateway) await this.refreshManagedStatus();
     return this.snapshot();
   }
 
@@ -239,8 +249,8 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     return this.gatewayJson<ModelProviderTestResult>(`/worklite/providers/${encodeURIComponent(providerId)}/test`, { method: 'POST', body: JSON.stringify(input), headers: { 'content-type': 'application/json' } });
   }
 
-  async models(request: Request): Promise<PortkeyGatewayModelList> {
-    this.ensureGateway();
+  async models(_request: Request): Promise<PortkeyGatewayModelList> {
+    await this.ensureGatewayForDiscovery();
     const providers = await this.providers();
     return {
       object: 'list',
@@ -304,7 +314,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
   }
 
   async proxy(request: Request, response: Response, providerId: string, operation: GatewayProxyOperation, selectedModel?: string): Promise<void> {
-    this.ensureGateway();
+    await this.ensureGatewayForDiscovery();
     const provider = (await this.providers()).find((candidate) => candidate.id === providerId);
     if (!provider) throw new BadRequestException('Model provider not found.');
     const model = selectedModel?.trim() || provider.models[0];
@@ -484,8 +494,20 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     return { models };
   }
 
-  private ensureGateway(): void {
-    if (!this.gatewayReady || this.gatewayStatus !== 'running') throw new ServiceUnavailableException('Portkey Gateway is unavailable while it is starting or recovering.');
+  private async refreshManagedStatus(): Promise<boolean> {
+    try {
+      const response = await fetch(`http://127.0.0.1:${this.activeGatewayPort}/`, { signal: AbortSignal.timeout(500) });
+      if (response.ok) {
+        this.gatewayReady = true;
+        this.markStatus('running', null);
+        return true;
+      }
+    } catch {
+      // The independent Gateway supervisor retries a failed child process.
+    }
+    this.gatewayReady = false;
+    this.markStatus('failed', 'Portkey Gateway is unavailable while it is restarting.');
+    return false;
   }
 
   private async gatewayJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -511,12 +533,14 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async ensureGatewayForDiscovery(): Promise<void> {
+    if (this.managedGateway && await this.refreshManagedStatus()) return;
     if (this.gatewayReady && this.gatewayStatus === 'running') return;
     const gateway = await this.start();
     if (gateway.status !== 'running') throw new ServiceUnavailableException(gateway.error ?? 'Portkey Gateway failed to start for model discovery.');
   }
 
   private async startGateway(): Promise<void> {
+    if (this.managedGateway) return this.waitUntilReady();
     if (this.gateway && !this.gateway.killed) return this.waitUntilReady();
     const gatewayEntry = portkeyRequire.resolve('@portkey-ai/gateway/build/start-server.js');
     const preload = resolve(process.cwd(), 'portkey-local-bind.cjs');
@@ -563,7 +587,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     // seconds and ends as soon as the process exits.
     const deadline = Date.now() + 15 * 60_000;
     while (Date.now() < deadline) {
-      if (!this.gateway) throw new Error('Portkey Gateway exited before it became ready.');
+      if (!this.managedGateway && !this.gateway) throw new Error('Portkey Gateway exited before it became ready.');
       try {
         const response = await fetch(`http://127.0.0.1:${this.activeGatewayPort}/`, { signal: AbortSignal.timeout(500) });
         if (response.ok) {

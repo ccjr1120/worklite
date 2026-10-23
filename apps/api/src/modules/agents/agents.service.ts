@@ -7,7 +7,7 @@ import { agentExecutions, chatConfigurations, agentMcpServers, agentVersions, ag
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { WorkspaceService } from '../teams/teams.service';
-import { PROJECT_EXECUTOR_PROTOCOLS } from './project-executor.types';
+import { PROJECT_EXECUTOR_PROTOCOLS, isGatewayPublicModel } from './project-executor.types';
 
 const WORKLITE_PLATFORM_SKILL_ID = 'sk_worklite_platform';
 const CHAT_AGENT_ID = 'agt_system_helper_chat';
@@ -155,13 +155,17 @@ export class AgentsService {
       if (executorModelsPatch !== undefined) {
         const [latest] = await this.db.select({ models: chatConfigurations.defaultExecutorModels }).from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
         mergedExecutorModels = mergeExecutorModels(latest?.models, executorModelsPatch);
-        // Codex launches natively and is not required to use a Gateway model, so its declared default
-        // is stored as-is without Gateway protocol validation; only Claude Code's declaration is checked.
-        const declared = mergedExecutorModels.claude;
-        if (declared) {
+        // A native Codex designation is left to the operator's own Codex configuration; a declared Gateway
+        // public model must exist and speak a protocol the executor can reach through the Gateway.
+        for (const executor of ['claude', 'codex'] as const) {
+          const declared = mergedExecutorModels[executor];
+          if (!declared || (executor === 'codex' && !isGatewayPublicModel(declared))) continue;
           const runtime = await this.resources.publicModelRuntime(team.id, declared);
-          const protocols = PROJECT_EXECUTOR_PROTOCOLS.claude!;
-          if (!protocols.includes(runtime.protocol)) throw new BadRequestException(`Claude Code 需要 ${protocols.join(' 或 ')} 协议的 Gateway 模型。`);
+          const protocols = PROJECT_EXECUTOR_PROTOCOLS[executor]!;
+          if (!protocols.includes(runtime.protocol)) {
+            const label = executor === 'codex' ? 'Codex' : 'Claude Code';
+            throw new BadRequestException(`${label} 需要 ${protocols.join(' 或 ')} 协议的 Gateway 模型。`);
+          }
         }
       }
       const selections = await this.validateAssignments(team.id, undefined, input.mcpServerIds, true);

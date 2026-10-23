@@ -11,6 +11,7 @@ const commands = [
   [process.execPath, [join(root, 'apps/api/dist/main.js')], join(root, 'apps/api')],
   ['pnpm', ['exec', 'vite', 'preview', '--host', '127.0.0.1', '--strictPort', '--port', environment.WEB_PORT], join(root, 'apps/web')],
 ];
+environment.WORKLITE_MANAGED_GATEWAY = '1';
 for (const [executable, args, cwd] of commands) {
   const child = spawn(executable, args, { cwd, env: environment, stdio: 'inherit' });
   children.push(child);

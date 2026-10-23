@@ -110,7 +110,7 @@ if (
             await sendWithTimeout(() =>
               stream.writeSSE({ event: 'heartbeat', data: 'pulse' })
             );
-          } catch (error) {
+          } catch {
             // console.error(`Heartbeat failed for client ${clientId}:`, error);
             clearInterval(heartbeatInterval);
             removeLogClient(clientId);
@@ -124,7 +124,7 @@ if (
             resolve(undefined);
           });
         });
-      } catch (error) {
+      } catch {
         // console.error(`Error in log stream for client ${clientId}:`, error);
       } finally {
         // Remove this client when the connection is closed
@@ -147,6 +147,22 @@ const server = serve({
   fetch: app.fetch,
   port: port,
 });
+
+let shuttingDown = false;
+function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const forceClose = setTimeout(() => {
+    process.exit(1);
+  }, 12_000);
+  forceClose.unref();
+  server.close(() => {
+    clearTimeout(forceClose);
+    process.exit(0);
+  });
+}
+process.once('SIGTERM', shutdown);
+process.once('SIGINT', shutdown);
 
 const url = `http://localhost:${port}`;
 

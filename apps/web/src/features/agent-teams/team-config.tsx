@@ -1,9 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, LoaderCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { AgentTeamRoleConfiguration } from '@worklite/contracts';
-import { useAgentTeamMemoriesQuery, useAgentTeamQuery, useMcpServersQuery } from '@/api/queries';
+import { toast } from 'sonner';
+import type { AgentTeamRoleConfiguration, SkillView } from '@worklite/contracts';
+import { api } from '@/api/client';
+import { useAgentTeamMemoriesQuery, useAgentTeamQuery, useMcpServersQuery, useSkillsQuery } from '@/api/queries';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { queryClient } from '@/lib/query-client';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
 import { PageContainer, PageHeading } from '@/components/page-heading';
@@ -33,11 +39,44 @@ function StringList({ items, notSet, mono = false }: { items: string[]; notSet: 
   );
 }
 
-function RoleCard({ role, mcpServerNames }: { role: AgentTeamRoleConfiguration; mcpServerNames: Map<string, string> }) {
-  const { t } = useTranslation('agentTeams');
+function RoleCard({ teamId, role, skills, mcpServerNames }: { teamId: string; role: AgentTeamRoleConfiguration; skills: SkillView[]; mcpServerNames: Map<string, string> }) {
+  const { t } = useTranslation(['agentTeams', 'skills']);
   const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const [selectedSkillIds, setSelectedSkillIds] = useState(role.skillIds);
+  const [savingSkills, setSavingSkills] = useState(false);
+  const [skillsError, setSkillsError] = useState('');
   const notSet = t('config.notSet');
   const mcpServers = role.mcpServerIds.map((id) => mcpServerNames.get(id) ?? id);
+  const skillOptions = useMemo(() => {
+    const known = new Map(skills.map((skill) => [skill.id, skill]));
+    const missing = role.skillIds
+      .filter((id) => !known.has(id))
+      .map((id) => ({ id, name: id } as Pick<SkillView, 'id' | 'name'> & { source?: SkillView['source'] }));
+    return [...skills, ...missing];
+  }, [role.skillIds, skills]);
+  const skillsDirty = [...selectedSkillIds].sort().join('\0') !== [...role.skillIds].sort().join('\0');
+
+  useEffect(() => {
+    setSelectedSkillIds(role.skillIds);
+  }, [role.skillIds]);
+
+  async function saveSkills() {
+    if (!skillsDirty || savingSkills) return;
+    setSavingSkills(true);
+    setSkillsError('');
+    try {
+      await api.updateAgentTeamRole(teamId, role.role, { skillIds: selectedSkillIds });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['agent-team', teamId] }),
+        queryClient.invalidateQueries({ queryKey: ['agent-teams'] }),
+      ]);
+      toast.success(t('config.roles.skillsSaved'));
+    } catch (error) {
+      setSkillsError(error instanceof Error ? error.message : t('config.roles.skillsSaveFailed'));
+    } finally {
+      setSavingSkills(false);
+    }
+  }
 
   return (
     <article className="rounded-xl border border-border bg-surface p-4 shadow-xs">
@@ -49,7 +88,43 @@ function RoleCard({ role, mcpServerNames }: { role: AgentTeamRoleConfiguration; 
         <div><dt className="text-muted-foreground">{t('config.roles.model')}</dt><dd className="mt-1 font-mono break-all">{role.publicModelId || <NotSet label={notSet} />}</dd></div>
         <div><dt className="text-muted-foreground">{t('config.roles.executor')}</dt><dd className="mt-1">{role.executor ?? <NotSet label={notSet} />}</dd></div>
         <div><dt className="text-muted-foreground">{t('config.roles.entryPoints')}</dt><dd className="mt-1"><StringList items={role.entryPoints} notSet={notSet} mono /></dd></div>
-        <div><dt className="text-muted-foreground">{t('config.roles.skills')}</dt><dd className="mt-1"><StringList items={role.skillIds} notSet={notSet} mono /></dd></div>
+        <div className="md:col-span-2">
+          <dt className="text-muted-foreground">{t('config.roles.skills')}</dt>
+          <dd className="mt-1">
+            {skillOptions.length === 0 ? <NotSet label={notSet} /> : (
+              <div className="grid gap-1.5 sm:grid-cols-2">
+                {skillOptions.map((skill) => (
+                  <label key={skill.id} className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5">
+                    <Checkbox
+                      checked={selectedSkillIds.includes(skill.id)}
+                      onCheckedChange={(checked) => {
+                        setSkillsError('');
+                        setSelectedSkillIds((current) => checked === true
+                          ? [...new Set([...current, skill.id])]
+                          : current.filter((id) => id !== skill.id));
+                      }}
+                      aria-label={skill.name}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-[13px]">{skill.name}</span>
+                    {skill.source ? <Badge variant="neutral">{t(`skills:source.${skill.source}` as never)}</Badge> : null}
+                  </label>
+                ))}
+              </div>
+            )}
+            {skillsDirty ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Button type="button" size="compact" onClick={() => void saveSkills()} disabled={savingSkills}>
+                  {savingSkills ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}
+                  {t('config.roles.saveSkills')}
+                </Button>
+                <Button type="button" size="compact" variant="ghost" onClick={() => { setSelectedSkillIds(role.skillIds); setSkillsError(''); }} disabled={savingSkills}>
+                  {t('config.roles.cancelSkills')}
+                </Button>
+              </div>
+            ) : skillOptions.length > 0 ? <p className="mt-2 text-xs text-muted-foreground">{t('config.roles.skillsApplyNextRun')}</p> : null}
+            {skillsError ? <p role="alert" className="mt-1.5 text-xs text-danger">{skillsError}</p> : null}
+          </dd>
+        </div>
         <div><dt className="text-muted-foreground">{t('config.roles.mcpServers')}</dt><dd className="mt-1"><StringList items={mcpServers} notSet={notSet} /></dd></div>
         <div><dt className="text-muted-foreground">{t('config.roles.tools')}</dt><dd className="mt-1"><StringList items={role.toolNames} notSet={notSet} mono /></dd></div>
       </dl>
@@ -76,6 +151,7 @@ export function TeamConfig({ teamId }: { teamId: string }) {
   const teamQuery = useAgentTeamQuery(teamId);
   const memoriesQuery = useAgentTeamMemoriesQuery(teamId);
   const mcpServersQuery = useMcpServersQuery('personal');
+  const skillsQuery = useSkillsQuery('personal');
   const notSet = t('config.notSet');
   const recordsPath = `/agent-teams/${encodeURIComponent(teamId)}`;
   const crumbs = [{ label: t('title') }, ...(teamQuery.data ? [{ label: teamQuery.data.name, to: recordsPath }] : []), { label: t('config.title') }];
@@ -84,7 +160,7 @@ export function TeamConfig({ teamId }: { teamId: string }) {
     return (
       <PageContainer width="detail">
         <WorkspaceChrome crumbs={crumbs} />
-        <div className="space-y-3" role="status"><Skeleton className="h-8 w-72" /><Skeleton className="h-28 w-full" /><Skeleton className="h-56 w-full" /></div>
+        <div className="space-y-3" role="status"><Skeleton className="h-8 w-72" /><Skeleton className="h-24 w-full" /><Skeleton className="h-56 w-full" /></div>
       </PageContainer>
     );
   }
@@ -92,7 +168,7 @@ export function TeamConfig({ teamId }: { teamId: string }) {
     return (
       <PageContainer width="detail">
         <WorkspaceChrome crumbs={crumbs} />
-        <TeamSwitcher teamId={teamId} view="config" />
+        <TeamSwitcher teamId={teamId} />
         <ErrorState title={t('config.title')} description={t('config.loadFailed')} onAction={() => void teamQuery.refetch()} />
       </PageContainer>
     );
@@ -100,6 +176,7 @@ export function TeamConfig({ teamId }: { teamId: string }) {
 
   const team = teamQuery.data;
   const mcpServerNames = new Map((mcpServersQuery.data ?? []).map((server) => [server.id, server.name]));
+  const availableSkills = (skillsQuery.data ?? []).filter((skill) => skill.id !== 'sk_worklite_platform');
 
   return (
     <PageContainer width="detail">
@@ -109,7 +186,7 @@ export function TeamConfig({ teamId }: { teamId: string }) {
         description={t('config.description')}
         actions={<Link to="/agent-teams/$teamId" params={{ teamId }} className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">{t('config.backToRecords')}</Link>}
       />
-      <TeamSwitcher teamId={teamId} view="config" />
+      <TeamSwitcher teamId={teamId} />
 
       <section className="rounded-xl border border-border bg-surface p-4 shadow-xs">
         <h2 className="text-sm font-semibold">{t('config.overview.title')}</h2>
@@ -127,7 +204,7 @@ export function TeamConfig({ teamId }: { teamId: string }) {
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold">{t('config.roles.title')}</h2>
-        {team.roles.length ? team.roles.map((role) => <RoleCard key={role.role} role={role} mcpServerNames={mcpServerNames} />) : <EmptyState title={t('config.roles.title')} description={t('config.roles.empty')} />}
+        {team.roles.length ? team.roles.map((role) => <RoleCard key={role.role} teamId={teamId} role={role} skills={availableSkills} mcpServerNames={mcpServerNames} />) : <EmptyState title={t('config.roles.title')} description={t('config.roles.empty')} />}
       </section>
 
       <section className="space-y-3">

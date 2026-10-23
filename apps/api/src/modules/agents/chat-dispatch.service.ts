@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { Request } from 'express';
@@ -15,6 +15,7 @@ type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
 
 @Injectable()
 export class ChatDispatchService {
+  private readonly logger = new Logger(ChatDispatchService.name);
   private readonly pending = new Map<string, Promise<DispatchChatResponse>>();
 
   constructor(
@@ -88,10 +89,11 @@ export class ChatDispatchService {
         const digest = createHash('sha256').update(workspace.id + ':' + submission.id).digest('hex');
         const runId = `atrun_chat_${digest}`;
         const groupId = `atgroup_chat_${digest}`;
+        // Agent Teams decide their own Run mode; older callers may still send one.
+        if (target.mode !== undefined) this.logger.warn(`Ignoring deprecated Agent Team mode "${String(target.mode)}" for Chat submission ${submission.id}.`);
         const dispatched = await this.teamGroups.dispatchFromChat(request, 'personal', target.teamId, {
           message: input.message,
           projectDirectory: target.projectDirectory,
-          mode: target.mode,
           role: target.role,
           submissionId: submission.id,
           runId,
@@ -102,10 +104,16 @@ export class ChatDispatchService {
       if (!accepted.reference) throw new Error('Conversation dispatch did not commit a task reference.');
       return { submissionId: submission.id, reference: accepted.reference };
     } catch (error) {
-      const message = error instanceof BadRequestException || error instanceof ConflictException || error instanceof NotFoundException
-        ? error.message : '任务提交失败，请查看关联执行记录。';
-      await this.db.update(chatSubmissions).set({ error: message, updatedAt: new Date() })
-        .where(and(eq(chatSubmissions.id, submission.id), isNull(chatSubmissions.reference)));
+      // A busy conversation is retryable: the channel adapters keep the inbound message queued
+      // and redeliver it once the turn settles. Recording it as a failed submission would push a
+      // spurious "请求失败" reply to WeChat/Feishu while the message is still waiting to run.
+      const retryable = error instanceof ConflictException && /already running|pending answer required/.test(error.message);
+      if (!retryable) {
+        const message = error instanceof BadRequestException || error instanceof ConflictException || error instanceof NotFoundException
+          ? error.message : '任务提交失败，请查看关联执行记录。';
+        await this.db.update(chatSubmissions).set({ error: message, updatedAt: new Date() })
+          .where(and(eq(chatSubmissions.id, submission.id), isNull(chatSubmissions.reference)));
+      }
       throw error;
     }
   }

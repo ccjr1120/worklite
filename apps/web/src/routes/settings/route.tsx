@@ -1,5 +1,6 @@
 import { createFileRoute, Link, Outlet, useRouterState } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
+import { APP_VERSION_LABEL } from '@/app-version';
 import { cn } from '@/lib/utils';
 
 export const Route = createFileRoute('/settings')({
@@ -38,6 +39,9 @@ function SettingsLayout() {
             );
           })}
         </ul>
+        <p className="mt-4 hidden px-2 text-xs text-muted-foreground md:block">
+          {t('nav.version')} <span className="font-mono">{APP_VERSION_LABEL}</span>
+        </p>
       </nav>
       <div className="min-w-0 flex-1">
         <Outlet />

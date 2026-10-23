@@ -6,6 +6,7 @@ import { createServer } from 'node:net';
 import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, lstatSync, readlinkSync, symlinkSync, chmodSync, rmSync, openSync, closeSync, writeSync } from 'node:fs';
+import { gatewayFingerprint } from './gateway-fingerprint.mjs';
 
 const [command, ...args] = process.argv.slice(2);
 const sleep = (milliseconds) => new Promise((done) => setTimeout(done, milliseconds));
@@ -43,18 +44,27 @@ function prepare(projectRoot, state, id) {
     manifest.push({ path: gatewayConfigurationPath, mode: info.mode, symlink: false, hash: createHash('sha256').update(readFileSync(destination)).digest('hex') });
   }
   const releaseHash = createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
-  write(join(root, 'release-manifest.json'), { releaseHash, files: manifest });
-  return { releaseHash, releaseDirectory: root };
+  const gatewayHash = gatewayFingerprint(manifest, process.env);
+  write(join(root, 'release-manifest.json'), { releaseHash, gatewayHash, files: manifest });
+  return { releaseHash, gatewayHash, releaseDirectory: root };
 }
 
-function assertRelease(release) {
+function assertRelease(release, verifyGatewayConfiguration = false) {
   const manifest = read(join(release.releaseDirectory, 'release-manifest.json'));
   if (manifest.releaseHash !== release.releaseHash || createHash('sha256').update(JSON.stringify(manifest.files)).digest('hex') !== release.releaseHash) throw new Error('Release manifest changed.');
+  if (release.gatewayHash && manifest.gatewayHash !== release.gatewayHash) throw new Error('Gateway release manifest changed.');
+  if (verifyGatewayConfiguration && gatewayFingerprint(manifest.files, process.env) !== release.gatewayHash) throw new Error('Gateway configuration changed after the release was confirmed.');
   for (const file of manifest.files) {
     const path = join(release.releaseDirectory, file.path);
     const hash = createHash('sha256').update(file.symlink ? readlinkSync(path) : readFileSync(path)).digest('hex');
     if (hash !== file.hash || lstatSync(path).mode !== file.mode) throw new Error('Release source changed after confirmation.');
   }
+}
+
+function releaseGatewayHash(release) {
+  if (release.gatewayHash) return release.gatewayHash;
+  const manifest = read(join(release.releaseDirectory, 'release-manifest.json'));
+  return manifest.gatewayHash ?? gatewayFingerprint(manifest.files, process.env);
 }
 
 async function withRouteTreeRestored(root, operation) {
@@ -106,6 +116,18 @@ function processGroup(pid) {
   return Number(execFileSync('ps', ['-p', String(pid), '-o', 'pgid='], { encoding: 'utf8' }).trim());
 }
 
+function processGroupPids(pgid) {
+  return execFileSync('ps', ['-axo', 'pid=,pgid='], { encoding: 'utf8' }).trim().split(/\r?\n/)
+    .map((line) => line.trim().split(/\s+/).map(Number))
+    .filter(([pid, group]) => Number.isInteger(pid) && group === pgid)
+    .map(([pid]) => pid);
+}
+
+function canKeepGateway(gateway) {
+  if (!gateway?.pid || !alive(gateway.pid)) return false;
+  return listeners(gateway.port).every((pid) => processGroup(pid) === gateway.pid);
+}
+
 function groupAlive(pgid) {
   try { process.kill(-pgid, 0); return true; }
   catch (error) { return error?.code !== 'ESRCH'; }
@@ -151,7 +173,7 @@ function profileEnvironment(runtime, data, ports, preflight) {
   return { ...process.env, API_HOST: '127.0.0.1', WEB_PORT: String(ports[0]), API_PORT: String(ports[1]), PORTKEY_GATEWAY_PORT: String(ports[2]),
     SQLITE_PATH: join(data, 'worklite.db'), PORTKEY_GATEWAY_DB_PATH: join(data, 'worklite-gateway.db'), AGENT_TEAM_CHECKPOINT_PATH: join(data, 'agent-teams/checkpoints.sqlite'),
     WORKLITE_RELEASE_ROOT: runtime.releaseDirectory, WORKLITE_RELEASE_HASH: runtime.releaseHash, WORKLITE_PROJECT_ROOT: runtime.projectRoot,
-    WORKLITE_RUNTIME_STATE_DIR: preflight ? '' : runtime.stateDirectory, WORKLITE_PREFLIGHT: preflight ? '1' : '0' };
+    WORKLITE_RUNTIME_STATE_DIR: preflight ? '' : runtime.stateDirectory, WORKLITE_PREFLIGHT: preflight ? '1' : '0', WORKLITE_MANAGED_GATEWAY: '1' };
 }
 
 function launch(runtime, data, ports, preflight, log) {
@@ -159,22 +181,68 @@ function launch(runtime, data, ports, preflight, log) {
   child.unref(); return child.pid;
 }
 
-async function ready(pid, ports, hash) {
+function launchGateway(runtime, data, port, preflight, log, supervisorDirectory = runtime.releaseDirectory) {
+  const environment = {
+    ...process.env,
+    PORTKEY_GATEWAY_PORT: String(port),
+    TRUSTED_CUSTOM_HOSTS: process.env.PORTKEY_TRUSTED_CUSTOM_HOSTS?.trim() || 'localhost,127.0.0.1,::1,host.docker.internal',
+    PORTKEY_GATEWAY_DB_PATH: join(data, 'worklite-gateway.db'),
+    WORKLITE_RELEASE_ROOT: runtime.releaseDirectory,
+    WORKLITE_RELEASE_HASH: runtime.releaseHash,
+    WORKLITE_GATEWAY_HASH: runtime.gatewayHash,
+    WORKLITE_DATA_DIRECTORY: data,
+    WORKLITE_PREFLIGHT: preflight ? '1' : '0',
+  };
+  const child = spawn(process.execPath, [join(supervisorDirectory, 'scripts/managed-gateway.mjs')], {
+    cwd: supervisorDirectory,
+    env: environment,
+    detached: true,
+    stdio: ['ignore', log, log],
+  });
+  child.unref();
+  return { pid: child.pid, port, gatewayHash: runtime.gatewayHash, releaseHash: runtime.releaseHash, releaseDirectory: runtime.releaseDirectory, supervisorDirectory };
+}
+
+async function gatewayReady(gateway, requireIdentity = true) {
+  const deadline = Date.now() + 15 * 60_000;
+  while (Date.now() < deadline) {
+    if (!alive(gateway.pid)) throw new Error('The managed Gateway exited before readiness.');
+    try {
+      const root = await fetch(`http://127.0.0.1:${gateway.port}/`, { signal: AbortSignal.timeout(1000) });
+      const runtime = requireIdentity
+        ? await fetch(`http://127.0.0.1:${gateway.port}/worklite/runtime`, { signal: AbortSignal.timeout(1000) })
+        : null;
+      if (root.ok && (!requireIdentity || runtime?.ok)) {
+        const identity = runtime ? await runtime.json() : null;
+        if (!requireIdentity || (identity.gatewayHash === gateway.gatewayHash && identity.wrapperPid === gateway.pid)) {
+          const owners = listeners(gateway.port);
+          if (owners.length > 0 && owners.every((pid) => processGroup(pid) === gateway.pid)) return;
+        }
+      }
+    } catch { /* The candidate Gateway is still starting. */ }
+    await sleep(250);
+  }
+  throw new Error(`Gateway readiness timed out on port ${gateway.port}.`);
+}
+
+async function ready(pid, ports, hash, gateway) {
   // A one-time database VACUUM can keep a large deployment busy for minutes; an
   // exited runtime still fails immediately below.
   const deadline = Date.now() + 15 * 60_000;
   while (Date.now() < deadline) {
     if (!alive(pid)) throw new Error('The managed runtime exited before readiness.');
     try {
-      const responses = await Promise.all([fetch(`http://127.0.0.1:${ports[0]}/`, { signal: AbortSignal.timeout(1000) }), fetch(`http://127.0.0.1:${ports[1]}/api/upgrades/runtime`, { signal: AbortSignal.timeout(1000) }), fetch(`http://127.0.0.1:${ports[2]}/`, { signal: AbortSignal.timeout(1000) })]);
+      const responses = await Promise.all([fetch(`http://127.0.0.1:${ports[0]}/`, { signal: AbortSignal.timeout(1000) }), fetch(`http://127.0.0.1:${ports[1]}/api/upgrades/runtime`, { signal: AbortSignal.timeout(1000) }), fetch(`http://127.0.0.1:${ports[2]}/worklite/runtime`, { signal: AbortSignal.timeout(1000) })]);
       if (responses.every((response) => response.ok)) {
         const runtime = await responses[1].json();
-        if (runtime.releaseHash === hash && runtime.wrapperPid === pid) {
-          const listenersOwned = ports.every((port) => {
+        const gatewayRuntime = await responses[2].json();
+        if (runtime.releaseHash === hash && runtime.wrapperPid === pid && gatewayRuntime.gatewayHash === gateway.gatewayHash && gatewayRuntime.wrapperPid === gateway.pid) {
+          const listenersOwned = ports.slice(0, 2).every((port) => {
             const listeners = execFileSync('lsof', ['-t', `-iTCP:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8' }).trim().split(/\s+/).filter(Boolean);
             return listeners.length > 0 && listeners.every((listener) => Number(execFileSync('ps', ['-p', listener, '-o', 'pgid='], { encoding: 'utf8' }).trim()) === pid);
           });
-          if (listenersOwned) return;
+          const gatewayListeners = listeners(ports[2]);
+          if (listenersOwned && gatewayListeners.length > 0 && gatewayListeners.every((listener) => processGroup(listener) === gateway.pid)) return;
         }
       }
     } catch { /* The candidate is still starting. */ }
@@ -194,21 +262,86 @@ async function stop(pid, releaseDirectory) {
   try { process.kill(-pid, 'SIGKILL'); } catch { /* All owned processes already exited. */ }
 }
 
-async function stopImmediately(runtime) {
+async function stopGateway(gateway) {
+  if (!gateway) return;
+  if (!gateway.pid || !alive(gateway.pid)) {
+    const owners = listeners(gateway.port);
+    if (owners.length > 0) {
+      for (const pid of owners) {
+        const command = execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' });
+        if (processGroup(pid) !== gateway.pid || !command.includes('build/start-server.js') || !command.includes(gateway.releaseDirectory)) {
+          throw new Error(`Gateway port ${gateway.port} has an unowned listener; it was left untouched.`);
+        }
+      }
+      try { process.kill(-gateway.pid, 'SIGKILL'); } catch (error) { if (error?.code !== 'ESRCH') throw error; }
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline && listeners(gateway.port).length > 0) await sleep(50);
+    }
+    await portsFree([gateway.port]);
+    return;
+  }
+  if (gateway.legacyProcessGroup) {
+    const command = execFileSync('ps', ['-p', String(gateway.pid), '-o', 'command='], { encoding: 'utf8' });
+    if (processGroup(gateway.pid) !== gateway.legacyProcessGroup || !command.includes('build/start-server.js') || !command.includes(gateway.releaseDirectory)) {
+      throw new Error('The recorded legacy Gateway PID is not owned by the expected release; refusing to stop it.');
+    }
+    if (listeners(gateway.port).some((pid) => pid !== gateway.pid)) throw new Error(`Gateway port ${gateway.port} has an unexpected listener; it was left untouched.`);
+    process.kill(gateway.pid, 'SIGTERM');
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline && listeners(gateway.port).length > 0) await sleep(100);
+    if (listeners(gateway.port).length > 0 && alive(gateway.pid)) process.kill(gateway.pid, 'SIGKILL');
+    await portsFree([gateway.port]);
+    return;
+  }
+  const processCommand = execFileSync('ps', ['-p', String(gateway.pid), '-o', 'command='], { encoding: 'utf8' });
+  if (!processCommand.includes(join(gateway.supervisorDirectory ?? gateway.releaseDirectory, 'scripts/managed-gateway.mjs')) || processGroup(gateway.pid) !== gateway.pid) {
+    throw new Error('The recorded PID is not the owned managed Gateway supervisor; refusing to stop it.');
+  }
+  for (const pid of listeners(gateway.port)) {
+    if (processGroup(pid) !== gateway.pid) throw new Error(`Gateway port ${gateway.port} has a listener outside the managed Gateway process group; it was left untouched.`);
+  }
+  process.kill(gateway.pid, 'SIGTERM');
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline && (groupAlive(gateway.pid) || listeners(gateway.port).length > 0)) await sleep(100);
+  if (groupAlive(gateway.pid)) {
+    try { process.kill(-gateway.pid, 'SIGKILL'); } catch (error) { if (error?.code !== 'ESRCH') throw error; }
+  }
+  const killDeadline = Date.now() + 5_000;
+  while (Date.now() < killDeadline && (groupAlive(gateway.pid) || listeners(gateway.port).length > 0)) await sleep(100);
+  await portsFree([gateway.port]);
+}
+
+async function stopImmediately(runtime, { preserveLegacyGateway = false } = {}) {
   if (!alive(runtime.pid)) return;
   const processCommand = execFileSync('ps', ['-p', String(runtime.pid), '-o', 'command='], { encoding: 'utf8' });
   if (!processCommand.includes(join(runtime.releaseDirectory, 'scripts/managed-runtime.mjs')) || processGroup(runtime.pid) !== runtime.pid) {
     throw new Error('The recorded PID is not the owned managed runtime process group; refusing to stop it.');
   }
-  for (const port of runtime.ports) {
+  let preservedGatewayPid;
+  if (preserveLegacyGateway && !runtime.gateway) {
+    const gatewayListeners = listeners(runtime.ports[2]);
+    if (gatewayListeners.length !== 1 || processGroup(gatewayListeners[0]) !== runtime.pid) throw new Error('The legacy Gateway listener cannot be isolated safely from the managed runtime.');
+    const gatewayCommand = execFileSync('ps', ['-p', String(gatewayListeners[0]), '-o', 'command='], { encoding: 'utf8' });
+    if (!gatewayCommand.includes('build/start-server.js') || !gatewayCommand.includes(runtime.releaseDirectory)) throw new Error('The legacy Gateway listener is not owned by the recorded release.');
+    preservedGatewayPid = gatewayListeners[0];
+  }
+  const runtimePorts = runtime.gateway || preservedGatewayPid ? runtime.ports.slice(0, 2) : runtime.ports;
+  for (const port of runtimePorts) {
     for (const pid of listeners(port)) {
       if (processGroup(pid) !== runtime.pid) throw new Error(`Port ${port} has a listener outside the managed runtime process group; it was left untouched.`);
     }
   }
-  process.kill(-runtime.pid, 'SIGKILL');
+  if (preservedGatewayPid) {
+    for (const pid of processGroupPids(runtime.pid)) if (pid !== preservedGatewayPid) {
+      try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error?.code !== 'ESRCH') throw error; }
+    }
+  } else {
+    process.kill(-runtime.pid, 'SIGKILL');
+  }
   const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline && runtime.ports.some((port) => listeners(port).length > 0)) await sleep(50);
-  await portsFree(runtime.ports);
+  while (Date.now() < deadline && runtimePorts.some((port) => listeners(port).length > 0)) await sleep(50);
+  await portsFree(runtimePorts);
+  if (preservedGatewayPid && listeners(runtime.ports[2]).some((pid) => pid !== preservedGatewayPid)) throw new Error('The preserved legacy Gateway port changed ownership during cutover.');
 }
 
 async function preflight(runtime, release, log, id) {
@@ -218,10 +351,18 @@ async function preflight(runtime, release, log, id) {
   mkdirSync(data, { recursive: true });
   const candidate = { ...runtime, ...release };
   let pid;
+  let gateway;
   try {
     await withRouteTreeRestored(candidate.releaseDirectory, async () => {
-      try { pid = launch(candidate, data, runtime.preflightPorts, true, log); await ready(pid, runtime.preflightPorts, candidate.releaseHash); }
-      finally { if (pid) await stop(pid, candidate.releaseDirectory); }
+      try {
+        gateway = launchGateway(candidate, data, runtime.preflightPorts[2], true, log);
+        await gatewayReady(gateway);
+        pid = launch(candidate, data, runtime.preflightPorts, true, log);
+        await ready(pid, runtime.preflightPorts, candidate.releaseHash, gateway);
+      } finally {
+        if (pid) await stop(pid, candidate.releaseDirectory);
+        if (gateway) await stopGateway(gateway);
+      }
     });
   } finally { rmSync(data, { recursive: true, force: true }); }
 }
@@ -241,10 +382,18 @@ async function install(profile) {
     await build(release.releaseDirectory, log);
     await preflight(runtime, release, log, id);
     await freeTargetPorts(runtime);
-    write(currentPath, runtime);
-    runtime.pid = launch(runtime, dataDirectory, runtime.ports, false, log); write(currentPath, runtime);
-    try { await ready(runtime.pid, runtime.ports, runtime.releaseHash); }
-    catch (error) { await stop(runtime.pid, runtime.releaseDirectory); rmSync(currentPath); throw error; }
+    runtime.gateway = launchGateway(runtime, dataDirectory, runtime.ports[2], false, log);
+    try {
+      await gatewayReady(runtime.gateway);
+      runtime.pid = launch(runtime, dataDirectory, runtime.ports, false, log);
+      write(currentPath, runtime);
+      await ready(runtime.pid, runtime.ports, runtime.releaseHash, runtime.gateway);
+    } catch (error) {
+      if (runtime.pid) await stop(runtime.pid, runtime.releaseDirectory);
+      await stopGateway(runtime.gateway);
+      rmSync(currentPath, { force: true });
+      throw error;
+    }
     process.stdout.write(`Managed WorkLite baseline started on port ${runtime.ports[0]}.\n`);
   } finally { closeSync(log); }
 }
@@ -258,7 +407,7 @@ function readActiveUpgrade(stateDirectory) {
 
 function verifiedOrphanGroups(runtime) {
   const groups = new Set();
-  for (const port of runtime.ports) {
+  for (const port of (runtime.gateway ? runtime.ports.slice(0, 2) : runtime.ports)) {
     for (const pid of listeners(port)) {
       const pgid = processGroup(pid);
       let command = '';
@@ -271,17 +420,32 @@ function verifiedOrphanGroups(runtime) {
   return [...groups];
 }
 
-async function stopOrphanGroups(runtime, groups) {
+async function stopOrphanGroups(runtime, groups, preservedGatewayPid) {
   for (const pgid of groups) {
-    try { process.kill(-pgid, 'SIGKILL'); }
-    catch (error) { if (error?.code !== 'ESRCH') throw error; }
-    const groupHasTargetListener = () => runtime.ports.some((port) => listeners(port).some((pid) => {
+    if (preservedGatewayPid && processGroup(preservedGatewayPid) === pgid) {
+      for (const pid of processGroupPids(pgid)) if (pid !== preservedGatewayPid) {
+        try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error?.code !== 'ESRCH') throw error; }
+      }
+    } else {
+      try { process.kill(-pgid, 'SIGKILL'); }
+      catch (error) { if (error?.code !== 'ESRCH') throw error; }
+    }
+    const targetPorts = preservedGatewayPid || runtime.gateway ? runtime.ports.slice(0, 2) : runtime.ports;
+    const groupHasTargetListener = () => targetPorts.some((port) => listeners(port).some((pid) => {
       try { return processGroup(pid) === pgid; } catch { return false; }
     }));
     const deadline = Date.now() + 5_000;
     while (Date.now() < deadline && groupHasTargetListener()) await sleep(50);
     if (groupHasTargetListener()) throw new Error('A verified orphan listener did not stop after interruption.');
   }
+}
+
+function legacyGatewayRecord(runtime, gatewayHash) {
+  const gatewayListeners = listeners(runtime.ports[2]);
+  if (gatewayListeners.length !== 1 || processGroup(gatewayListeners[0]) !== runtime.pid) return null;
+  const command = execFileSync('ps', ['-p', String(gatewayListeners[0]), '-o', 'command='], { encoding: 'utf8' });
+  if (!command.includes('build/start-server.js') || !command.includes(runtime.releaseDirectory)) return null;
+  return { pid: gatewayListeners[0], port: runtime.ports[2], gatewayHash, releaseHash: runtime.releaseHash, releaseDirectory: runtime.releaseDirectory, legacyProcessGroup: runtime.pid };
 }
 
 function assertNoActiveUpgrade(state) {
@@ -367,6 +531,12 @@ async function run(state, id) {
   const previous = job.previous ?? current;
   const phase = (value, extra = {}) => { job = { ...read(jobPath), ...extra, phase: value, runnerPid: process.pid, updatedAt: new Date().toISOString() }; write(jobPath, job); };
   let stage = 'upgrade initialization';
+  const candidateGatewayHash = releaseGatewayHash(job);
+  const previousGatewayHash = releaseGatewayHash(previous);
+  const gatewayHasChanged = candidateGatewayHash !== previousGatewayHash;
+  let previousGatewayStopped = false;
+  let candidateGateway;
+  let keptGateway = null;
   const targetUrl = `http://127.0.0.1:${previous.ports[1]}/api/upgrades/runtime`;
   async function verifyTargetOwnership() {
     // The target API can stall for several seconds while the host is under build load;
@@ -412,18 +582,37 @@ async function run(state, id) {
   }
   async function stopFailedCandidate() {
     const running = read(currentPath);
-    if (!running?.pid || !running.releaseDirectory || resolve(running.releaseDirectory) !== resolve(job.releaseDirectory)) return null;
-    try { await stopImmediately(running); return null; }
-    catch (error) {
-      const detail = describeError(error);
-      writeSync(log, 'Failed candidate stop error: ' + detail + String.fromCharCode(10));
-      return detail;
+    let details = [];
+    if (running?.pid && running.releaseDirectory && resolve(running.releaseDirectory) === resolve(job.releaseDirectory)) {
+      try { await stopImmediately(running); }
+      catch (error) { details.push(describeError(error)); }
+    }
+    if (candidateGateway) {
+      try { await stopGateway(candidateGateway); candidateGateway = null; }
+      catch (error) { details.push(describeError(error)); }
+    }
+    return details.length ? details.join('; ') : null;
+  }
+  async function restorePreviousGateway() {
+    if (!gatewayHasChanged || !previousGatewayStopped) return null;
+    try {
+      const supervisorDirectory = previous.gateway?.supervisorDirectory ?? job.releaseDirectory;
+      const restored = launchGateway({ ...previous, gatewayHash: previousGatewayHash }, previous.dataDirectory, previous.ports[2], false, log, supervisorDirectory);
+      await gatewayReady(restored, Boolean(previous.gateway));
+      const active = read(currentPath);
+      if (active) { active.gateway = restored; active.gatewayHash = previousGatewayHash; write(currentPath, active); }
+      writeSync(log, `Restored previous Gateway ${previousGatewayHash} on port ${previous.ports[2]}.\n`);
+      return null;
+    } catch (error) {
+      return describeError(error);
     }
   }
   async function failCutover(detail) {
     const stopError = await stopFailedCandidate();
     const stopNotice = stopError ? ' 候选服务停止失败：' + stopError + '。' : '';
-    phase('failed', { error: '升级在「' + stage + '」阶段失败：' + detail + '。未自动恢复旧程序或数据库；线上数据库可能已被部分迁移。' + stopNotice + '请检查当前部署和升级日志，并手动修复或重新部署。' });
+    const recoveryError = await restorePreviousGateway();
+    const recoveryNotice = recoveryError ? ` 旧 Gateway 恢复失败：${recoveryError}。` : previousGatewayStopped ? ' 已恢复旧 Gateway。' : '';
+    phase('failed', { error: '升级在「' + stage + '」阶段失败：' + detail + '。未自动恢复旧 API/Web 或数据库；数据库可能已被部分迁移。' + recoveryNotice + stopNotice + '请检查当前部署和升级日志，并手动修复或重新部署。' });
   }
   try {
     if (['frozen', 'switching', 'recovering'].includes(job.phase)) {
@@ -433,7 +622,7 @@ async function run(state, id) {
     }
     phase('preflighting', { previous });
     stage = 'release integrity check';
-    assertRelease(job);
+    assertRelease(job, true);
     stage = 'target runtime availability check';
     if (!job.targetUnavailable) await verifyTargetOwnership();
     if (!job.candidatePreflighted) {
@@ -452,19 +641,49 @@ async function run(state, id) {
       if (!handoff.interrupted) await cancelLegacyHandoff();
       else { stage = 'freezing runtime writes'; await call('freeze'); job = read(jobPath); }
     } else {
+      const legacyGateway = !previous.gateway && !gatewayHasChanged ? legacyGatewayRecord(previous, previousGatewayHash) : null;
+      const managedGateway = canKeepGateway(previous.gateway) ? previous.gateway : null;
+      keptGateway = !gatewayHasChanged ? managedGateway ?? legacyGateway : null;
       const groups = verifiedOrphanGroups(previous);
-      await stopOrphanGroups(previous, groups);
-      await portsFree(previous.ports);
+      await stopOrphanGroups(previous, groups, legacyGateway?.pid);
+      await portsFree(previous.ports.slice(0, 2));
+      if (previous.gateway && !keptGateway) {
+        await stopGateway(previous.gateway);
+        previousGatewayStopped = gatewayHasChanged;
+      } else if (gatewayHasChanged) {
+        previousGatewayStopped = true;
+      }
     }
     phase('frozen', { interruptionPolicy: 'cancel_active_work_without_resume' });
     stage = 'stopping previous release';
-    await stopImmediately(previous);
-    await portsFree(previous.ports);
+    if (!job.targetUnavailable) {
+      const legacyGateway = !previous.gateway && !gatewayHasChanged ? legacyGatewayRecord(previous, previousGatewayHash) : null;
+      const managedGateway = canKeepGateway(previous.gateway) ? previous.gateway : null;
+      keptGateway = !gatewayHasChanged ? managedGateway ?? legacyGateway : null;
+      if (previous.gateway && !keptGateway) {
+        await stopGateway(previous.gateway);
+        previousGatewayStopped = gatewayHasChanged;
+      } else if (gatewayHasChanged) {
+        previousGatewayStopped = true;
+      }
+      await stopImmediately(previous, { preserveLegacyGateway: Boolean(keptGateway && !previous.gateway) });
+      await portsFree(previous.ports.slice(0, 2));
+      if (!previous.gateway && gatewayHasChanged) previousGatewayStopped = true;
+    }
+    if (!keptGateway) await portsFree([previous.ports[2]]);
     phase('switching');
     stage = 'starting candidate release';
-    const candidate = { ...previous, releaseHash: job.releaseHash, releaseDirectory: job.releaseDirectory };
-    candidate.pid = launch(candidate, candidate.dataDirectory, candidate.ports, false, log); write(currentPath, candidate);
-    await ready(candidate.pid, candidate.ports, candidate.releaseHash);
+    const candidate = { ...previous, releaseHash: job.releaseHash, gatewayHash: candidateGatewayHash, releaseDirectory: job.releaseDirectory };
+    if (keptGateway) {
+      candidate.gateway = keptGateway;
+    } else {
+      candidateGateway = launchGateway(candidate, candidate.dataDirectory, candidate.ports[2], false, log);
+      candidate.gateway = candidateGateway;
+      await gatewayReady(candidateGateway);
+    }
+    candidate.pid = launch(candidate, candidate.dataDirectory, candidate.ports, false, log);
+    write(currentPath, candidate);
+    await ready(candidate.pid, candidate.ports, candidate.releaseHash, candidate.gateway);
     phase('succeeded', { interruptionPolicy: 'cancel_active_work_without_resume' });
     stage = 'reconnecting Feishu';
     try { await call('complete'); }

@@ -18,15 +18,19 @@ import { CommandsModule } from './modules/commands/commands.module';
 import { PluginsModule } from './modules/plugins/plugins.module';
 import { UpgradesModule } from './modules/upgrades/upgrades.module';
 import { AgentTeamsModule } from './modules/agent-teams/agent-teams.module';
+import { LocalProjectsModule } from './modules/local-projects/local-projects.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    // Managed releases receive configuration through their inherited process environment;
+    // avoiding dotenv file discovery keeps API cutover startup independent of local files.
+    ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: process.env.WORKLITE_MANAGED_GATEWAY === '1' }),
     DatabaseModule,
     UpgradesModule,
     CommandsModule,
     PluginsModule,
     AgentTeamsModule,
+    LocalProjectsModule,
     WorkspaceModule,
     HomeModule,
     AgentsModule,

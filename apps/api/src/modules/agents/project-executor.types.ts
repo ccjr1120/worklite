@@ -65,12 +65,26 @@ export type PreparedProjectExecution = {
   mcpServers: Array<ProjectExecutorMcpServer & { key: string }>;
 };
 
-// Gateway Provider protocols Claude Code can speak; Provider protocols are never switched to fit an executor.
-// Codex launches natively through the operator's own configured shell command and is not required to speak a
-// Gateway protocol or use a Gateway-known model, so it has no entry here.
+// Gateway Provider protocols each executor can speak; Provider protocols are never switched to fit an executor.
+// Codex still launches through the operator's own shell command, but a declared Gateway public model is served
+// through the Gateway's Responses endpoint instead of the operator's native Provider.
 export const PROJECT_EXECUTOR_PROTOCOLS: Partial<Record<StoredProjectExecutor, readonly string[]>> = {
   claude: ['anthropic/messages'],
+  codex: ['openai/responses', 'codex/responses'],
 };
+
+// A Gateway public model id is `<providerName>/<modelId>` (Provider names cannot contain "/"). Anything else,
+// including an empty value, is the executor's own native model designation and runs through local configuration.
+export function isGatewayPublicModel(model: string | null | undefined): boolean {
+  if (typeof model !== 'string') return false;
+  const separator = model.indexOf('/');
+  return separator > 0 && separator < model.length - 1;
+}
+
+// Chat and Team executors run on the same host as this API; the Gateway sidecar owns this port.
+export function localGatewayBaseUrl(): string {
+  return `http://127.0.0.1:${Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392)}`;
+}
 
 // Codex's configured command word is interpolated unquoted into an inline zsh script so shell alias
 // expansion (e.g. cxo, cx) applies the same way it would in an interactive terminal; this restricts it to a

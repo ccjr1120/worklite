@@ -35,20 +35,16 @@ import { GatewayRequestLogs, type RequestLogFilters } from '@/features/logs/requ
 
 type ProviderActivity = { provider: ModelProviderView; from: string; to: string; model?: string; statusClass?: RequestLogFilters['statusClass'] };
 
-const MODEL_PROVIDER_TABS = ['providers', 'codex'] as const;
-type ModelProviderTab = (typeof MODEL_PROVIDER_TABS)[number];
 type ModelProvidersSearch = {
-  tab: ModelProviderTab;
   provider?: string;
 };
 
-function isModelProviderTab(value: unknown): value is ModelProviderTab {
-  return typeof value === 'string' && MODEL_PROVIDER_TABS.includes(value as ModelProviderTab);
+function isBuiltInCodexProvider(provider: ModelProviderView): boolean {
+  return provider.name === 'codex' && provider.protocol === 'codex/responses';
 }
 
 export const Route = createFileRoute('/model-providers')({
   validateSearch: (search: Record<string, unknown>): ModelProvidersSearch => ({
-    tab: isModelProviderTab(search.tab) ? search.tab : 'providers',
     provider: typeof search.provider === 'string' && search.provider.trim() ? search.provider.trim() : undefined,
   }),
   component: ModelProvidersPage,
@@ -197,13 +193,14 @@ function ModelProvidersPage() {
   const { t } = useTranslation(['settings', 'common']);
   const { locale } = useLocale();
   const workspaceSlug = 'personal';
-  const { tab: view, provider: requestedProvider } = Route.useSearch();
+  const { provider: requestedProvider } = Route.useSearch();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [testDialog, setTestDialog] = useState<ProviderTestDialog | null>(null);
   const [providerActivity, setProviderActivity] = useState<ProviderActivity | null>(null);
   const [providerActivityTab, setProviderActivityTab] = useState<'statistics' | 'requests'>('statistics');
   const [dialog, setDialog] = useState<ProviderDialog | null>(null);
+  const [codexPoolOpen, setCodexPoolOpen] = useState(false);
   const [deleteProvider, setDeleteProvider] = useState<ModelProviderView | null>(null);
   const [name, setName] = useState('');
   const [apiKey, setApiKey] = useState('');
@@ -222,7 +219,7 @@ function ModelProvidersPage() {
   const { data: modelProviders = [], isLoading, isError, refetch } = useModelProvidersQuery(workspaceSlug);
   const gatewayQuery = usePortkeyGatewayQuery();
   const codexAuthQuery = useCodexAuthQuery();
-  const codexUsageQuery = useCodexAccountUsagesQuery(view === 'codex');
+  const codexUsageQuery = useCodexAccountUsagesQuery(codexPoolOpen);
   const [codexAuthBusy, setCodexAuthBusy] = useState(false);
   const [busyCodexAccountIds, setBusyCodexAccountIds] = useState<Set<string>>(() => new Set());
   const [codexAccountErrors, setCodexAccountErrors] = useState<Record<string, string>>({});
@@ -234,11 +231,6 @@ function ModelProvidersPage() {
 
   const codexAccountState = codexAuthQuery.data?.accounts.map((account) => `${account.id}:${account.enabled}`).join('|') ?? '';
 
-  function changeView(value: string) {
-    if (!isModelProviderTab(value)) return;
-    void navigate({ to: '/model-providers', search: () => ({ tab: value }) });
-  }
-
   const openProviderActivity = useCallback((provider: ModelProviderView) => {
     const to = new Date().toISOString();
     setProviderActivity({ provider, from: new Date(Date.now() - 24 * 60 * 60 * 1_000).toISOString(), to });
@@ -249,7 +241,7 @@ function ModelProvidersPage() {
     if (!requestedProvider || isLoading || isError) return;
     const provider = modelProviders.find((item) => item.name === requestedProvider);
     if (provider) openProviderActivity(provider);
-    void navigate({ to: '/model-providers', search: (current) => ({ tab: isModelProviderTab(current.tab) ? current.tab : 'providers', provider: undefined }), replace: true });
+    void navigate({ to: '/model-providers', search: () => ({ provider: undefined }), replace: true });
   }, [requestedProvider, isLoading, isError, modelProviders, navigate, openProviderActivity]);
 
   useEffect(() => {
@@ -485,12 +477,6 @@ function ModelProvidersPage() {
     <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome crumbs={[{ label: t('providers.title') }]} />
       <PageHeading title={t('providers.title')} description={t('providers.description')} />
-      <Tabs value={view} onValueChange={changeView} className="mt-6">
-        <TabsList aria-label={t('providers.views.label')}>
-              <TabsTrigger value="providers">{t('providers.views.providers')}</TabsTrigger>
-          <TabsTrigger value="codex">{t('providers.views.codex')}</TabsTrigger>
-        </TabsList>
-        <TabsContent value="providers">
       <GatewayPanel
         gateway={gatewayQuery.data}
         providers={modelProviders}
@@ -533,13 +519,13 @@ function ModelProvidersPage() {
                     <Button variant="secondary" size="compact" onClick={() => openProviderTest(provider)} disabled={testDialog?.status === 'loading' && testDialog.provider.id === provider.id}>
                       {testDialog?.status === 'loading' && testDialog.provider.id === provider.id ? t('providers.testing') : t('providers.test')}
                     </Button>
-                    {provider.name === 'codex' && provider.protocol === 'codex/responses' ? null : <Tooltip>
+                    <Tooltip>
                       <TooltipTrigger asChild>
-                        <Button variant="ghost" size="icon-compact" aria-label={t('providers.edit')} onClick={() => openEdit(provider)}><Pencil /></Button>
+                        <Button variant="ghost" size="icon-compact" aria-label={t('providers.edit')} onClick={() => isBuiltInCodexProvider(provider) ? setCodexPoolOpen(true) : openEdit(provider)}><Pencil /></Button>
                       </TooltipTrigger>
                       <TooltipContent>{t('providers.edit')}</TooltipContent>
-                    </Tooltip>}
-                    {provider.name === 'codex' && provider.protocol === 'codex/responses' ? null : <Tooltip>
+                    </Tooltip>
+                    {isBuiltInCodexProvider(provider) ? null : <Tooltip>
                       <TooltipTrigger asChild>
                         <Button variant="ghost" size="icon-compact" aria-label={t('providers.delete')} onClick={() => { setDeleteError(''); setDeleteProvider(provider); }}><Trash2 /></Button>
                       </TooltipTrigger>
@@ -552,11 +538,16 @@ function ModelProvidersPage() {
           )}
         </div>
       </section>
-        </TabsContent>
-        <TabsContent value="codex">
+
+      <Dialog open={codexPoolOpen} onOpenChange={setCodexPoolOpen}>
+        <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t('providers.codexPool.dialogTitle')}</DialogTitle>
+            <DialogDescription>{t('providers.codexPool.dialogDescription')}</DialogDescription>
+          </DialogHeader>
           <CodexAccountPool auth={codexAuthQuery.data} usage={codexUsageQuery.data} usageLoading={codexUsageQuery.isLoading} usageError={codexUsageQuery.isError} authBusy={codexAuthBusy} busyAccountIds={busyCodexAccountIds} accountErrors={codexAccountErrors} onLogin={() => void startCodexAuth()} importRef={codexImportRef} onImport={(file) => void importCodexAccounts(file)} onToggleAccount={(accountId, enabled) => void setCodexAccountEnabled(accountId, enabled)} onRefreshAccount={(accountId) => void refreshCodexAccount(accountId)} onDeleteAccount={(accountId) => void deleteCodexAccount(accountId)} locale={locale} t={(key) => t(key as never)} />
-        </TabsContent>
-      </Tabs>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(providerActivity)} onOpenChange={(open) => !open && setProviderActivity(null)}>
         <DialogContent className="max-h-[90vh] max-w-6xl overflow-y-auto">
@@ -566,7 +557,7 @@ function ModelProvidersPage() {
                 <DialogTitle>{providerActivity?.provider.name}</DialogTitle>
                 <DialogDescription>{providerActivity?.provider.protocol} · {t('providers.activity.last24h')}</DialogDescription>
               </div>
-              {providerActivity ? <div className="flex items-center gap-2">{providerActivity.provider.status === 'connected' ? <span className="text-xs text-muted-foreground">{t('providers.configured')}</span> : <StatusBadge status={providerActivity.provider.status} />}{providerActivity.provider.name === 'codex' && providerActivity.provider.protocol === 'codex/responses' ? null : <Button type="button" variant="secondary" size="compact" onClick={() => { const provider = providerActivity.provider; setProviderActivity(null); openEdit(provider); }}><Pencil className="size-4" aria-hidden="true" />{t('providers.edit')}</Button>}</div> : null}
+              {providerActivity ? <div className="flex items-center gap-2">{providerActivity.provider.status === 'connected' ? <span className="text-xs text-muted-foreground">{t('providers.configured')}</span> : <StatusBadge status={providerActivity.provider.status} />}<Button type="button" variant="secondary" size="compact" onClick={() => { const provider = providerActivity.provider; setProviderActivity(null); if (isBuiltInCodexProvider(provider)) setCodexPoolOpen(true); else openEdit(provider); }}><Pencil className="size-4" aria-hidden="true" />{t('providers.edit')}</Button></div> : null}
             </div>
           </DialogHeader>
           {providerActivity ? <>
@@ -646,6 +637,7 @@ function ModelProvidersPage() {
           </Field>
           <Field label={t('providers.headers')} htmlFor="provider-headers" hint={t('providers.headersHint')} error={headersError}><Textarea id="provider-headers" autoComplete="off" className="min-h-28 font-mono text-[13px]" placeholder={t('providers.headersPlaceholder')} value={headersText} aria-invalid={Boolean(headersError)} onChange={(event) => { setHeadersText(event.target.value); setHeadersError(''); }} /></Field>
           <DialogFooter>
+            {dialog?.mode === 'edit' && protocol === 'codex/responses' ? <Button variant="secondary" className="sm:mr-auto" onClick={() => { closeProviderDialog(); setCodexPoolOpen(true); }} disabled={providerBusy}>{t('providers.codexPool.manage')}</Button> : null}
             <Button variant="secondary" onClick={closeProviderDialog} disabled={providerBusy}>{t('common:actions.cancel')}</Button>
             <Button onClick={() => void saveProvider()} disabled={providerBusy || !name.trim()}>{providerBusy ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}{t(dialog?.mode === 'edit' ? 'providers.editAction' : 'providers.createAction')}</Button>
           </DialogFooter>
@@ -768,9 +760,9 @@ function CodexAccountPool({ auth, usage, usageLoading, usageError, authBusy, bus
   const accounts = auth?.accounts ?? [];
   const enabledAccounts = accounts.filter((account) => account.enabled).length;
   const authStatus = auth?.status === 'connected' ? 'connected' : auth?.status === 'login_pending' ? 'pending' : auth?.status === 'error' ? 'invalid' : 'unconfigured';
-  return <section className="space-y-5" aria-labelledby="codex-account-pool-title">
+  return <section className="space-y-5" aria-label={t('providers.codexPool.title')}>
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div><h2 id="codex-account-pool-title" className="text-base font-semibold">{t('providers.codexPool.title')}</h2><div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-muted-foreground">
+      <div><div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-muted-foreground">
         <StatusBadge status={authStatus} />
         <span>{t('providers.codexPool.authMethod')}: {auth?.authMethod === 'oauth' ? t('providers.codexPool.oauth') : auth?.authMethod === 'environment' ? t('providers.codexPool.environment') : t('common:empty.dash')}</span>
         <span>{t('providers.codexPool.enabledAccounts', { enabled: enabledAccounts, total: accounts.length })}</span>

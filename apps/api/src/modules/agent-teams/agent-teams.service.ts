@@ -15,6 +15,7 @@ import type {
 import {
   agentTeams,
   agentTeamRuns,
+  agentTeamVersions,
   type AgentTeam,
   type Database,
 } from '@worklite/db';
@@ -74,10 +75,18 @@ export class AgentTeamsService {
     await this.getTeam(teamId, workspace.id);
     const rows = await this.db.select({ id: agentTeamRuns.id, intent: agentTeamRuns.intent,
       projectDirectory: agentTeamRuns.projectDirectory, mode: agentTeamRuns.mode,
+      modeRationale: agentTeamRuns.modeRationale, modeDecidedAt: agentTeamRuns.modeDecidedAt, snapshot: agentTeamVersions.snapshot,
       status: agentTeamRuns.status, createdAt: agentTeamRuns.createdAt, finishedAt: agentTeamRuns.finishedAt,
-    }).from(agentTeamRuns).where(and(eq(agentTeamRuns.teamId, teamId), eq(agentTeamRuns.workspaceId, workspace.id)))
+    }).from(agentTeamRuns).innerJoin(agentTeamVersions, eq(agentTeamVersions.id, agentTeamRuns.teamVersionId))
+      .where(and(eq(agentTeamRuns.teamId, teamId), eq(agentTeamRuns.workspaceId, workspace.id)))
       .orderBy(desc(agentTeamRuns.createdAt));
-    return rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString(), finishedAt: row.finishedAt?.toISOString() ?? null }));
+    return rows.map(({ snapshot, ...row }) => ({
+      ...row,
+      modeDecidedAt: row.modeDecidedAt?.toISOString() ?? null,
+      orchestrationVersion: snapshot.orchestrationVersion ?? 1,
+      createdAt: row.createdAt.toISOString(),
+      finishedAt: row.finishedAt?.toISOString() ?? null,
+    }));
   }
 
   async createRun(

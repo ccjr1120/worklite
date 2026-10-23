@@ -16,6 +16,7 @@ import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { PROJECT_EXECUTOR_PROTOCOLS } from '../agents/project-executor.types';
 import {
   AGENT_TEAM_ROLE_TOOL_NAMES,
+  AGENT_TEAM_DISPATCHER_ROLE,
   agentTeamEntryPoints,
   isValidAgentTeamRoleId,
 } from './agent-team-configuration';
@@ -94,6 +95,7 @@ export class AgentTeamConfigurationService {
   async deleteRole(workspaceId: string, teamId: string, roleId: string): Promise<AgentTeam> {
     const team = await this.getTeam(workspaceId, teamId);
     if (!team.roles.some((role) => role.role === roleId)) throw new NotFoundException('Agent Team role not found.');
+    if (roleId === AGENT_TEAM_DISPATCHER_ROLE) throw new BadRequestException('The Dispatcher role is required and cannot be deleted.');
     return this.update(workspaceId, teamId, { roles: team.roles.filter((role) => role.role !== roleId).map(toPublicRole) });
   }
 
@@ -107,6 +109,7 @@ export class AgentTeamConfigurationService {
       byRole.set(value.role, value);
     }
     if (byRole.has('team-manager')) throw new BadRequestException('Team Manager is not an active work role.');
+    if (!byRole.has(AGENT_TEAM_DISPATCHER_ROLE)) throw new BadRequestException('The Dispatcher role is required.');
 
     const normalized: Array<Omit<StoredAgentTeamRoleConfiguration, 'skills' | 'mcpServers'>> = [];
     for (const [role, value] of byRole) {
@@ -115,7 +118,8 @@ export class AgentTeamConfigurationService {
       if (value.executor !== undefined && value.executor !== null && value.executor !== 'claude' && value.executor !== 'codex') throw new BadRequestException(`The executor for Agent Team role ${role} must be claude or codex.`);
       const executor = role === 'developer' ? value.executor ?? 'claude' : value.executor ?? undefined;
       const runtime = publicModelId ? await this.resources.publicModelRuntime(workspaceId, publicModelId) : undefined;
-      // Codex launches natively and is not required to use a Gateway model; only Claude Code's protocol is checked.
+      // A role's publicModelId is always a Gateway public id, so it must speak a protocol its executor
+      // can reach through the Gateway (Claude Code: anthropic/messages, Codex: openai or codex responses).
       const protocols = executor ? PROJECT_EXECUTOR_PROTOCOLS[executor] : undefined;
       if (executor && runtime && protocols && !protocols.includes(runtime.protocol)) {
         throw new BadRequestException(`The ${role} model must use ${protocols.join(' or ')} for the ${executor} executor.`);
@@ -151,7 +155,15 @@ export class AgentTeamConfigurationService {
     const rows = skillIds.size === 0 ? [] : await this.db.select().from(skills).where(and(eq(skills.workspaceId, workspaceId), inArray(skills.id, [...skillIds])));
     if (rows.length !== skillIds.size) throw new NotFoundException('A selected Skill was not found in this workspace.');
     const files = rows.length === 0 ? [] : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, rows.map((row) => row.id))).orderBy(asc(skillFiles.path));
-    return new Map(rows.map((row) => [row.id, { id: row.id, name: row.name, files: files.filter((file) => file.skillId === row.id).map((file) => ({ path: file.path, content: file.content })) }]));
+    // Carry the stored instruction text alongside the package files, matching the
+    // Workflow Agent node path, so a Skill whose instructions are not only in
+    // SKILL.md still reaches the Team role verbatim.
+    return new Map(rows.map((row) => [row.id, {
+      id: row.id,
+      name: row.name,
+      instructions: row.instructions,
+      files: files.filter((file) => file.skillId === row.id).map((file) => ({ path: file.path, content: file.content })),
+    }]));
   }
 
   private async resolveMcpServers(workspaceId: string, serverIds: ReadonlySet<string>) {

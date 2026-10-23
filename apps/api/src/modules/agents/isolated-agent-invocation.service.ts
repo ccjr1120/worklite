@@ -159,11 +159,23 @@ export class IsolatedAgentInvocationService {
       : assignedSkills.flatMap((skill) => skill.files
         .filter((file) => file.path.startsWith('scripts/') && file.content.startsWith('#!'))
         .map((file) => ({ skillId: skill.id, skillName: skill.name, path: file.path })));
+    // WorkLite Agent Team roles receive the same Skill instructions a Workflow
+    // Agent node receives. Their package files stay in the captured snapshot, so
+    // references are read through skill_reference instead of a project path.
+    const skillReferences = request.role
+      ? assignedSkills.flatMap((skill) => skill.files
+        .filter((file) => file.path.startsWith('references/') && file.content.trim())
+        .map((file) => ({ skillId: skill.id, skillName: skill.name, path: file.path })))
+      : [];
     const skillInstructions = assignedSkills
       .map((skill) => `## ${skill.name}\n${skill.instructions.trim()}`)
       .filter((value) => value.trim())
       .join('\n\n');
+    const availableSkills = assignedSkills.length > 0
+      ? assignedSkills.map((skill) => `- ${skill.name} (${skill.id})`).join('\n')
+      : '';
     const scriptList = availableSkillScripts.map((script) => `- Skill ${script.skillName} (${script.skillId}): ${script.path}`).join('\n');
+    const referenceList = skillReferences.map((reference) => `- Skill ${reference.skillName} (${reference.skillId}): ${reference.path}`).join('\n');
     const requestedBuiltinToolNames = request.role && request.builtinToolNames
       ? selectBuiltinToolNames(request.role, request.builtinToolNames)
       : request.builtinToolNames ?? [];
@@ -173,9 +185,15 @@ export class IsolatedAgentInvocationService {
       .filter((definition) => request.role || definition.name !== 'process_reference');
     const effectiveSystemPrompt = [
       request.systemPrompt.trim(),
+      request.role && assignedSkills.length > 0
+        ? `Skills assigned to this role are already loaded and their instructions follow below. Follow them directly; do not search the project for a Skill directory.\n${availableSkills}`
+        : '',
       skillInstructions ? `Assigned Skill instructions:\n\n${skillInstructions}` : '',
       availableSkillScripts.length > 0 ? 'Skill scripts execute immediately without user approval.' : '',
       scriptList ? `Assigned executable Skill scripts:\n${scriptList}\nUse skill_script only with an exact listed Skill id and script path.` : '',
+      skillReferences.length > 0
+        ? `Skill reference files (read with skill_reference using the exact Skill id and path):\n${referenceList}`
+        : '',
       request.role && request.projectDirectory
         ? [
           'Project execution context:',
@@ -194,6 +212,16 @@ export class IsolatedAgentInvocationService {
     const runtime = await this.resources.publicModelRuntime(request.workspaceId, request.publicModelId);
     const contextText = typeof request.context === 'string' ? request.context : JSON.stringify(request.context);
     const maxRounds = Math.min(request.limits?.maxToolRounds ?? MAX_TOOL_ROUNDS, MAX_TOOL_ROUNDS);
+    const skillReferenceTool: GatewayToolDefinition = {
+      name: 'skill_reference',
+      description: 'Read a reference file from a Skill assigned to this role.',
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['skillId', 'path'],
+        properties: { skillId: { type: 'string' }, path: { type: 'string' } },
+      },
+    };
     const result = await createModelGateway().runWorkflowAgent({
       provider: runtime.provider,
       model: runtime.model,
@@ -202,7 +230,11 @@ export class IsolatedAgentInvocationService {
       jsonOutput: request.jsonOutput,
       correlation: request.correlation,
       skillScripts: availableSkillScripts,
-      builtinTools: [...builtinDefinitions, ...(request.managedTools ?? [])],
+      builtinTools: [
+        ...builtinDefinitions,
+        ...(request.managedTools ?? []),
+        ...(request.role && skillReferences.length > 0 ? [skillReferenceTool] : []),
+      ],
       mcpTools,
       maxToolRounds: maxRounds,
       maxToolCalls: request.limits?.maxToolCalls,
@@ -226,7 +258,9 @@ export class IsolatedAgentInvocationService {
   ): Promise<WorkflowAgentToolResult> {
     request.signal.throwIfAborted();
     this.validateProcessReference(request, call);
-    if (call.toolName === 'read_team_document') {
+    if (call.toolName === 'read_team_document' || call.toolName === 'skill_reference') {
+      // Both tools only read immutable captured content, so they bypass the command
+      // journal: a rejected path carries no uncertain external effect.
       return (await this.runToolEffect(request, assignedSkills, mcpTools, selectedBuiltinToolNames, call)).output;
     }
     // An unauthorized bash command never executed, so the rejection carries no uncertain
@@ -425,6 +459,24 @@ export class IsolatedAgentInvocationService {
       } finally {
         request.signal.removeEventListener('abort', cancel);
       }
+    }
+
+    if (call.toolName === 'skill_reference') {
+      if (!request.role) throw new BadRequestException('Skill references are unavailable for this Agent invocation.');
+      const input = call.input as { skillId?: unknown; path?: unknown } | null;
+      const skillId = requiredString(input?.skillId, 'skillId');
+      const path = requiredString(input?.path, 'path');
+      const skill = assignedSkills.find((item) => item.id === skillId);
+      // Only an exact captured reference path is readable; the assignment snapshot
+      // is the allowlist and no filesystem path is resolved from user input.
+      const reference = skill?.files.find((file) => file.path === path && file.path.startsWith('references/'));
+      if (!skill || !reference) throw new BadRequestException('The isolated Agent requested an unavailable Skill reference.');
+      return {
+        output: {
+          type: 'text',
+          value: boundedToolResult(`# ${skill.name}: ${path}\n\n${reference.content}`, request.limits?.maxToolResultChars),
+        },
+      };
     }
 
     if (isBuiltinTool(call.toolName)) {

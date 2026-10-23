@@ -54,8 +54,10 @@ function SkillEditorPage() {
 
   const selectedFile = files.find((file) => file.path === selectedPath) ?? files[0];
   const isBuiltIn = skill?.source === 'built-in';
+  const isLocal = skill?.source === 'local';
+  const readOnlySource = isBuiltIn || isLocal;
   const isTerminalCommand = skill?.id === 'sk_terminal_command';
-  const editable = isNew || Boolean(skill && !isBuiltIn);
+  const editable = isNew || Boolean(skill && !readOnlySource);
   const packageGroups = useMemo(() => groupPackageFiles(files), [files]);
 
   useEffect(() => {
@@ -220,7 +222,7 @@ function SkillEditorPage() {
   }
 
   async function deleteSkill() {
-    if (isNew || isBuiltIn || deleteBusy) return;
+    if (isNew || readOnlySource || deleteBusy) return;
     setDeleteBusy(true);
     setDeleteError('');
     try {
@@ -263,7 +265,7 @@ function SkillEditorPage() {
         ) : (
           <div className="flex items-start gap-2">
             <CapabilityIcon className="mt-0.5 size-4 shrink-0 text-brand" aria-hidden="true" />
-            <div className="min-w-0"><p className="truncate text-sm font-semibold">{skill?.name}</p><p className="mt-1 text-xs text-muted-foreground">{t('editor.builtInReadOnly')}</p></div>
+            <div className="min-w-0"><p className="truncate text-sm font-semibold">{skill?.name}</p><p className="mt-1 text-xs text-muted-foreground">{isLocal ? t('editor.localReadOnly') : t('editor.builtInReadOnly')}</p></div>
           </div>
         )}
 
@@ -290,10 +292,22 @@ function SkillEditorPage() {
           <PackageTree groups={packageGroups} selectedPath={selectedFile?.path} onSelect={setSelectedPath} />
         </div>
 
-        {isBuiltIn ? (
+        {isBuiltIn || isLocal ? (
           <div className="mt-5 border-t border-border pt-4">
-            <div className="flex flex-wrap gap-2"><Badge variant="neutral">{t('source.built-in')}</Badge></div>
-            <p className={cn('mt-3 text-xs leading-5', isTerminalCommand ? 'text-warning' : 'text-muted-foreground')}>{isTerminalCommand ? t('terminal.warning') : t('platform.boundary')}</p>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="neutral">{isLocal ? t('source.local') : t('source.built-in')}</Badge>
+              {isLocal && skill?.version ? <Badge variant="neutral">{skill.version}</Badge> : null}
+            </div>
+            {isBuiltIn ? (
+              <p className={cn('mt-3 text-xs leading-5', isTerminalCommand ? 'text-warning' : 'text-muted-foreground')}>{isTerminalCommand ? t('terminal.warning') : t('platform.boundary')}</p>
+            ) : null}
+            {isLocal ? (
+              <div className="mt-3 space-y-2 text-xs leading-5 text-muted-foreground">
+                <p>{t('editor.localReadOnly')}</p>
+                {skill?.description ? <p>{skill.description}</p> : null}
+                {Array.isArray(skill?.metadata?.bins) ? <p>{t('editor.localBins', { bins: (skill.metadata.bins as string[]).join(', ') })}</p> : null}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </aside>

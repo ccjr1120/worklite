@@ -13,6 +13,7 @@ import type {
   DeleteMcpServerResult,
   ExecuteSkillScriptRequest,
   ImportSkillRequest,
+  LocalSkillSyncResult,
   McpServerReferenceReport,
   McpServerTestResult,
   McpServerView,
@@ -55,6 +56,7 @@ import { listWorkflowNodeCapabilities } from '@worklite/workflow-engine';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from './teams.service';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
+import { localSkillId, localSkillRootDirectory, parseSkillFrontmatter, scanLocalSkillRoot } from '../skills/local-skill-source';
 import { McpClientService } from '../mcp-servers/mcp-client.service';
 import { AGENT_TEAM_ROLES, BUILT_IN_AGENT_TEAM_ID } from '../agent-teams/agent-team-configuration';
 import { isWorkliteNavigationTarget, resolveWorkliteNavigationRoute } from './worklite-navigation';
@@ -193,6 +195,7 @@ function validatePackageFiles(input: unknown): PackageFile[] {
 }
 
 function skillView(row: typeof skills.$inferSelect, workspaceSlug: string, files: PackageFile[]): SkillView {
+  const frontmatter = skillFrontmatter(files);
   return {
     id: row.id,
     workspaceSlug,
@@ -200,9 +203,26 @@ function skillView(row: typeof skills.$inferSelect, workspaceSlug: string, files
     source: row.source,
     version: row.version,
     validation: row.validation,
+    ...(frontmatter.description ? { description: frontmatter.description } : {}),
+    ...(frontmatter.metadata ? { metadata: frontmatter.metadata } : {}),
     files,
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+function skillFrontmatter(files: PackageFile[]): ReturnType<typeof parseSkillFrontmatter> {
+  const skillFile = files.find((file) => file.path === 'SKILL.md');
+  if (!skillFile) return {};
+  try {
+    return parseSkillFrontmatter(skillFile.content);
+  } catch {
+    // A malformed frontmatter must not hide an otherwise readable Skill.
+    return {};
+  }
+}
+
+function samePackageFiles(left: PackageFile[], right: PackageFile[]): boolean {
+  return left.length === right.length && left.every((file, index) => file.path === right[index]?.path && file.content === right[index]?.content);
 }
 
 function providerHeaders(value: string | null): Record<string, string> | undefined {
@@ -228,6 +248,8 @@ const CHAT_AGENT_ID = 'agt_system_helper_chat';
 
 @Injectable()
 export class WorkspaceResourcesService {
+  private readonly localSkillSyncs = new Map<string, Promise<LocalSkillSyncResult>>();
+
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     private readonly workspaces: WorkspaceService,
@@ -235,7 +257,124 @@ export class WorkspaceResourcesService {
     private readonly mcpClient: McpClientService,
   ) {}
 
+  async localSkills(request: Request, workspaceSlug: string, rootDirectory?: string): Promise<LocalSkillSyncResult> {
+    return this.syncLocalSkills(request, workspaceSlug, rootDirectory);
+  }
+
+  /**
+   * Reconcile the operator's shared Skill directory into the existing
+   * skills/skill_files model. The directory stays authoritative for the copied
+   * content, so a role captures a normal Skill snapshot on its next save.
+   */
+  async syncLocalSkills(request: Request, workspaceSlug: string, rootDirectory = localSkillRootDirectory()): Promise<LocalSkillSyncResult> {
+    const key = `${workspaceSlug}\0${rootDirectory}`;
+    const inFlight = this.localSkillSyncs.get(key);
+    if (inFlight) return inFlight;
+    const promise = this.performLocalSkillSync(request, workspaceSlug, rootDirectory).finally(() => this.localSkillSyncs.delete(key));
+    this.localSkillSyncs.set(key, promise);
+    return promise;
+  }
+
+  private async performLocalSkillSync(request: Request, workspaceSlug: string, rootDirectory: string): Promise<LocalSkillSyncResult> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const scan = await scanLocalSkillRoot(rootDirectory);
+    const existingRows = await this.db.select().from(skills).where(and(eq(skills.workspaceId, team.id), eq(skills.source, 'local')));
+    const existingFiles = existingRows.length === 0
+      ? []
+      : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, existingRows.map((row) => row.id))).orderBy(asc(skillFiles.path));
+    const filesBySkill = new Map<string, PackageFile[]>();
+    for (const file of existingFiles) filesBySkill.set(file.skillId, [...(filesBySkill.get(file.skillId) ?? []), { path: file.path, content: file.content }]);
+    const existingById = new Map(existingRows.map((row) => [row.id, row]));
+
+    let created = 0;
+    let updated = 0;
+    let unchanged = 0;
+    const synced: LocalSkillSyncResult['synced'] = [];
+    const scannedIds = new Set<string>();
+    for (const skillPackage of scan.packages) {
+      const id = localSkillId(team.id, skillPackage.directory);
+      scannedIds.add(id);
+      synced.push({ id, name: skillPackage.name, directory: skillPackage.directory });
+      const existing = existingById.get(id);
+      const existingPackage = filesBySkill.get(id) ?? [];
+      const changed = !existing
+        || existing.name !== skillPackage.name
+        || existing.instructions !== skillPackage.instructions
+        || existing.version !== skillPackage.version
+        || existing.validation !== 'valid'
+        || !samePackageFiles(existingPackage, skillPackage.files);
+      if (!existing) {
+        await this.db.transaction((transaction) => {
+          transaction.insert(skills).values({
+            id,
+            workspaceId: team.id,
+            name: skillPackage.name,
+            source: 'local',
+            version: skillPackage.version,
+            validation: 'valid',
+            instructions: skillPackage.instructions,
+            updatedAt: skillPackage.updatedAt,
+          }).run();
+          transaction.insert(skillFiles).values(skillPackage.files.map((file) => ({ skillId: id, ...file }))).run();
+        });
+        created += 1;
+      } else if (changed) {
+        await this.db.transaction((transaction) => {
+          transaction.update(skills).set({
+            name: skillPackage.name,
+            source: 'local',
+            version: skillPackage.version,
+            validation: 'valid',
+            instructions: skillPackage.instructions,
+            updatedAt: new Date(),
+          }).where(and(eq(skills.id, id), eq(skills.workspaceId, team.id))).run();
+          transaction.delete(skillFiles).where(eq(skillFiles.skillId, id)).run();
+          transaction.insert(skillFiles).values(skillPackage.files.map((file) => ({ skillId: id, ...file }))).run();
+        });
+        updated += 1;
+      } else {
+        unchanged += 1;
+      }
+    }
+
+    const removed: string[] = [];
+    const retained: Array<{ id: string; reason: string }> = [];
+    for (const row of existingRows) {
+      if (scannedIds.has(row.id)) continue;
+      const reason = await this.localSkillReferenceReason(team.id, row.id);
+      if (reason) {
+        retained.push({ id: row.id, reason });
+        continue;
+      }
+      await this.db.delete(skills).where(and(eq(skills.id, row.id), eq(skills.workspaceId, team.id)));
+      removed.push(row.id);
+    }
+
+    return {
+      root: scan.root,
+      available: scan.available,
+      ...(scan.unavailableReason ? { unavailableReason: scan.unavailableReason } : {}),
+      created,
+      updated,
+      unchanged,
+      removed,
+      retained,
+      synced,
+      skipped: scan.skipped,
+    };
+  }
+
+  private async localSkillReferenceReason(workspaceId: string, skillId: string): Promise<string | undefined> {
+    const [assignment] = await this.db.select({ agentId: agentSkills.agentId }).from(agentSkills).where(eq(agentSkills.skillId, skillId)).limit(1);
+    if (assignment) return 'assigned to an Agent';
+    if (await this.activeChatCapabilityIsReferenced(workspaceId, 'skills', skillId)) return 'captured by an active Chat turn';
+    if (await this.workflowResourceIsReferenced(workspaceId, 'skillIds', skillId)) return 'referenced by a Workflow draft or published version';
+    if (await this.agentTeamResourceIsReferenced(workspaceId, 'skills', skillId)) return 'referenced by an Agent Team configuration or captured version';
+    return undefined;
+  }
+
   async skills(request: Request, workspaceSlug: string): Promise<SkillView[]> {
+    await this.syncLocalSkills(request, workspaceSlug);
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const rows = (await this.db.select().from(skills).where(eq(skills.workspaceId, team.id)).orderBy(desc(skills.updatedAt))).filter((row) => row.id !== CHAT_PLATFORM_SKILL_ID);
     const files = rows.length === 0 ? [] : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, rows.map((row) => row.id))).orderBy(asc(skillFiles.path));
@@ -294,6 +433,7 @@ export class WorkspaceResourcesService {
     const [existing] = await this.db.select().from(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).limit(1);
     if (!existing) throw new NotFoundException('Skill not found');
     if (existing.source === 'built-in') throw new BadRequestException('Built-in Skills cannot be deleted.');
+    if (existing.source === 'local') throw new BadRequestException('Local directory Skills cannot be deleted from WorkLite. Remove the package from the configured local Skill root instead.');
     // Legacy Chat Skill assignments are ignored and removed by the cascading foreign key.
     const [assignment] = await this.db.select({ agentId: agentSkills.agentId }).from(agentSkills).where(and(eq(agentSkills.skillId, skillId), ne(agentSkills.agentId, CHAT_AGENT_ID))).limit(1);
     if (assignment) throw new BadRequestException('Remove this Skill from every Agent before deleting it.');
@@ -308,6 +448,7 @@ export class WorkspaceResourcesService {
     const [existing] = await this.db.select().from(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).limit(1);
     if (!existing) throw new NotFoundException('Skill not found');
     if (existing.source === 'built-in') throw new BadRequestException('Built-in Skills cannot be changed.');
+    if (existing.source === 'local') throw new BadRequestException('Local directory Skills are read-only in WorkLite. Change the package in the configured local Skill root and scan again.');
     if (Object.keys(input).some((key) => key !== 'name' && key !== 'files')) throw new BadRequestException('Only the Skill name and package files can be changed.');
     const name = input.name === undefined ? existing.name : input.name.trim();
     if (!name) throw new BadRequestException('Skill name is required.');
@@ -626,7 +767,7 @@ export class WorkspaceResourcesService {
         troubleshooting: {
           evidenceOwner: 'Chat',
           repairOwner: 'Chat-owned project task or collaborative Agent Team Run',
-          chatHostTools: [], chatDirectTools: ['project_task', 'answer_project_task', 'cancel_project_task', 'update_plan', 'ask_user'], chatProjectTaskDispatch: 'one project_task per model response; use one common workspace root for a goal spanning projects; rejected batches report invalid_tool_request', chatPlatformTools: 'one typed tool per protected worklite-platform script, declared in scripts/tools.json', chatCustomSkillsAndMcp: 'not selectable; neither the Chat model loop nor its project executors receive custom Skills or MCP servers',
+          chatHostTools: [], chatDirectTools: ['project_task', 'answer_project_task', 'steer_project_task', 'cancel_project_task', 'update_plan', 'ask_user'], chatProjectTaskDispatch: 'one project_task per model response; use one common workspace root for a goal spanning projects; rejected batches report invalid_tool_request', chatPlatformTools: 'one typed tool per protected worklite-platform script, declared in scripts/tools.json', chatCustomSkillsAndMcp: 'not selectable; neither the Chat model loop nor its project executors receive custom Skills or MCP servers',
           repairDispatchTool: 'dispatch_task',
           repairDispatchRoute: 'POST /chat/dispatch',
           repairDispatch: 'project_task for independent Chat execution; Chat dispatch_task creates an Agent Team group chat and binds its first role task to a Run',
@@ -649,11 +790,11 @@ export class WorkspaceResourcesService {
         },
         chatAttachments: { upload: 'POST /chat/attachments (raw image body; image/png, image/jpeg, image/gif or image/webp; at most 10 MB; optional fileName, conversationId, projectTaskId query)', read: 'GET /chat/attachments/:id', delete: 'DELETE /chat/attachments/:id', reference: '![description](/api/chat/attachments/att_…)', storage: '.data/deployment/chat-attachments', retention: 'CHAT_ATTACHMENT_RETENTION_HOURS, default 12 hours like Gateway request logs', producers: 'project executors receive attachmentUploadUrl in task input', feishu: 'replaced by a text note pointing to Web' },
         chatShell: { available: false, historicalEvidence: 'existing Chat conversation records', uncertainRecovery: ['adopt_command', 'mark_failed'], automaticReplay: false },
-        projectExecutors: { tool: 'project_task', executors: { codex: { pluginId: 'codex-cli-chat', transport: 'App Server stdio JSON-RPC', launch: "configured command word (e.g. cxo, cx, codex) run through the operator's own interactive login shell, exactly like a manual terminal invocation; resolves the operator's own ~/.zshrc aliases, functions and PATH, so it uses whichever local Codex configuration that resolution selects", minimumVersion: '0.157.1', modelProtocols: 'none required; Codex runs natively and its model/Provider need not exist in the WorkLite Gateway', skills: 'skills/extraRoots/set', mcp: '-c mcp_servers with enabled_tools and env bearer token' }, claude: { pluginId: 'claude-code', transport: 'claude -p stream-json control protocol', configuration: '~/.claude', minimumVersion: '2.1.259', modelProtocols: ['anthropic/messages'], skills: '--plugin-dir', mcp: 'owner-only --mcp-config file plus --disallowedTools' } }, defaultExecutor: 'Chat configuration defaultExecutor (claude unless changed); Team developer role executor', defaultModels: "Chat configuration defaultExecutorModels declares one default model per executor; precedence is the task model parameter, then the declared default, then the executor local default; Claude Code's declaration must be a Gateway public model on an anthropic/messages Provider, while Codex's declaration is passed through to its native launch without Gateway validation", gateway: 'Claude Code must reach the WorkLite Gateway; Codex is not required to', nativeTools: true, worklitePlatformToolsForExecutors: false, localConfiguration: 'complete operator configuration', approvals: 'none; executors run without approvals', operationJournal: false, uncertainRecovery: false, interruption: 'task fails without replay; inspect the project state', evidence: 'executor event stream activity, public reply text and process Command', progressText: 'latest complete public executor message; retained after cancellation or failure', chatTaskPrompt: 'task-specific prompt plus immutable user extension; pinned project instructions; previous evidence only on later attempts', capturedLaunch: true, olderSnapshots: 'new task or Run required', readRoute: 'GET /chat/project-tasks/:id', listRoute: 'GET /chat/project-tasks (workspace-wide, across conversations)', subscribeRoute: 'POST /chat/project-tasks/:id/subscribe (one-shot settlement report into the subscribing conversation)', answerRoute: 'POST /chat/project-tasks/:id/answer', cancelRoute: 'POST /chat/project-tasks/:id/cancel', historicalOperationRoute: 'GET /chat/project-tasks/:id?operationKey=:operationKey', inspectTool: 'inspect_project_task', crossConversationTools: ['list_project_tasks', 'subscribe_project_task', 'wait_project_task'], taskOwner: 'Chat conversation', execution: 'background dispatch-and-return; the turn settles at dispatch and settlement or a task question triggers one automatic report turn when the conversation idles', concurrency: 'unlimited parallel tasks per workspace when dispatched separately; each model response may contain at most one project_task call; each new task starts at its workspace root and the executor chooses a Git strategy per project; WorkLite does not create worktrees, merge branches or clean up executor-managed Git state; historical tasks retain their captured worktree behavior', worktree: 'new tasks may use a project-specific worktree when the executor chooses it; no worktree or merge is required; historical WorkLite-managed worktrees keep their captured merge behavior', controlTools: ['answer_project_task', 'cancel_project_task'], independentOfTeam: true, authorization: 'direct execution; no WorkLite proposal confirmation or command grants', automaticReplay: false, cancellation: 'Chat turn cancellation also cancels the conversation active background tasks' },
-        chatCapabilities: { cancellation: { route: 'POST /agents/agt_system_helper_chat/executions/:executionId/cancel', states: ['running', 'waiting_for_input'], retained: ['messages', 'draft', 'execution evidence'], uncertainEffects: 'structured recovery; no automatic replay' }, orchestration: { directHostTools: false, customSkillExecution: false, directMcpCalls: false, platformTools: 'typed protected worklite-platform tools only', executorCapabilities: 'none; Chat has no Skill/MCP selection and project executors use their native tools; Claude Code project tasks receive the Chat configuration\'s declared projectTaskMcpServerIds', codingTarget: 'project_task', localCommandTarget: 'project_task', collaborationTarget: 'Chat-dispatched Agent Team Run operated from its Chat task card', automationTarget: 'published Workflow' }, newConversation: { intentOwner: 'Chat', presentation: { web: 'contextual button', feishu: 'native card button', wechat: 'exact text command: 新对话' }, action: 'ask_user action new_conversation', submitRoute: 'POST /chat/dispatch', retainsHistory: true, cancelsDomainTasks: false }, configuration: 'revisioned user extensions', turnSnapshot: true, updatesApply: 'next user turn', configureRoute: 'PATCH /agents/agt_system_helper_chat', memory: { store: 'workspace-level chat_memories rows with content, category, source conversation and timestamps', categories: ['rule', 'preference', 'project', 'project_state', 'workflow', 'other'], categoryMetadata: '@worklite/contracts CHAT_MEMORY_CATEGORY_META is the single source for which categories are always injected (rule, preference) versus on-demand', tools: ['list_memories', 'save_memory', 'update_memory', 'delete_memory'], routes: ['GET /chat/memories', 'GET /chat/memories/:id', 'POST /chat/memories', 'PATCH /chat/memories/:id', 'DELETE /chat/memories/:id'], injection: 'bounded projection captured per accepted turn into the capability snapshot system prompt: rule and preference categories inject full content, other categories inject only an id/category/summary catalog for on-demand reads through list_memories', bounds: { contentChars: 2000, entries: 100, promptEntries: 50, promptChars: 6000, catalogEntries: 50, catalogChars: 2000 }, management: 'Web Chat settings dialog, grouped and filterable by category' } },
+        projectExecutors: { tool: 'project_task', executors: { codex: { pluginId: 'codex-cli-chat', transport: 'App Server stdio JSON-RPC', launch: "configured command word (e.g. cxo, cx, codex) run through the operator's own interactive login shell, exactly like a manual terminal invocation; resolves the operator's own ~/.zshrc aliases, functions and PATH, so a native Codex model uses whichever local Codex configuration that resolution selects; a declared Gateway public model is served through a per-run model_providers.worklite Responses Provider", minimumVersion: '0.157.1', modelProtocols: 'a native Codex model needs no Gateway protocol; a declared Gateway public model requires openai/responses or codex/responses and is served through the Gateway', skills: 'skills/extraRoots/set', mcp: '-c mcp_servers with enabled_tools and env bearer token' }, claude: { pluginId: 'claude-code', transport: 'claude -p stream-json control protocol', configuration: '~/.claude for native defaults, or a per-task --settings override for a declared Gateway model', minimumVersion: '2.1.259', modelProtocols: ['anthropic/messages'], skills: '--plugin-dir', mcp: 'owner-only --mcp-config file plus --disallowedTools' } }, defaultExecutor: 'Chat configuration defaultExecutor (claude unless changed); Team developer role executor', defaultModels: "Chat configuration defaultExecutorModels declares one default model per executor; precedence is the task model parameter, then the declared default, then the executor local default; Claude Code's declaration must be a Gateway public model on an anthropic/messages Provider, while Codex's declaration may be a native model or a Gateway public model on openai/responses or codex/responses", gateway: 'both executors use the WorkLite Gateway for a declared Gateway model; a native Codex model uses its local configuration', nativeTools: true, worklitePlatformToolsForExecutors: false, localConfiguration: 'complete operator configuration', approvals: 'none; executors run without approvals', operationJournal: false, uncertainRecovery: false, interruption: 'task fails without replay; inspect the project state', evidence: 'executor event stream activity, public reply text and process Command', progressText: 'latest complete public executor message; retained after cancellation or failure', chatTaskPrompt: 'task-specific prompt plus immutable user extension; pinned project instructions; previous evidence only on later attempts; active scope changes ask continue unchanged or cancel/create, never steer; replacement waits for persisted cancelled status', capturedLaunch: true, olderSnapshots: 'new task or Run required', readRoute: 'GET /chat/project-tasks/:id', listRoute: 'GET /chat/project-tasks (workspace-wide, across conversations)', subscribeRoute: 'POST /chat/project-tasks/:id/subscribe (one-shot settlement report into the subscribing conversation)', answerRoute: 'POST /chat/project-tasks/:id/answer', cancelRoute: 'POST /chat/project-tasks/:id/cancel', historicalOperationRoute: 'GET /chat/project-tasks/:id?operationKey=:operationKey', inspectTool: 'inspect_project_task', crossConversationTools: ['list_project_tasks', 'subscribe_project_task', 'wait_project_task'], taskOwner: 'Chat conversation', execution: 'background dispatch-and-return; the turn settles at dispatch and settlement or a task question triggers one automatic report turn when the conversation idles', concurrency: 'unlimited parallel tasks per workspace when dispatched separately; each model response may contain at most one project_task call; each new task starts at its workspace root and the executor chooses a Git strategy per project; WorkLite does not create worktrees, merge branches or clean up executor-managed Git state; historical tasks retain their captured worktree behavior', worktree: 'new tasks may use a project-specific worktree when the executor chooses it; no worktree or merge is required; historical WorkLite-managed worktrees keep their captured merge behavior', controlTools: ['answer_project_task', 'cancel_project_task'], taskQuestions: 'read-only on the task card; user answers in Chat through answer_project_task', taskCardSummary: ['goal', 'elapsed duration', 'current progress or terminal status'], taskCardCancellation: 'explicit confirmation with local busy and error feedback', taskScopeChanges: 'ask_user to continue captured task unchanged or cancel-and-create; verify cancelled before replacement dispatch', chatSteering: false, independentOfTeam: true, authorization: 'direct execution; no WorkLite proposal confirmation or command grants', automaticReplay: false, cancellation: 'Chat turn cancellation also cancels the conversation active background tasks' },
+        chatCapabilities: { cancellation: { route: 'POST /agents/agt_system_helper_chat/executions/:executionId/cancel', states: ['running', 'waiting_for_input'], retained: ['messages', 'draft', 'execution evidence'], uncertainEffects: 'structured recovery; no automatic replay' }, orchestration: { directHostTools: false, customSkillExecution: false, directMcpCalls: false, platformTools: 'typed protected worklite-platform tools only', executorCapabilities: 'none; Chat has no Skill/MCP selection and project executors use their native tools; Claude Code project tasks receive the Chat configuration\'s declared projectTaskMcpServerIds', codingTarget: 'project_task', localCommandTarget: 'project_task', collaborationTarget: 'Chat-dispatched Agent Team Run operated from its Chat task card', automationTarget: 'published Workflow' }, localProjects: { tool: 'search_local_projects', scope: 'metadata only: git marker, HEAD, remote origin, root manifest name/description/workspaces and README title/first paragraph', excluded: ['source files', '.env and credential files', 'Git objects', 'symlinks outside the scan root'], categories: ['company', 'self', 'temp', 'forks', 'other'], root: 'WORKLITE_LOCAL_PROJECTS_ROOT or ~/development', refresh: 'lazy first bounded scan, TTL background refresh, explicit refresh request', aliases: { file: 'local-project-aliases.json next to the index cache; WORKLITE_LOCAL_PROJECTS_ALIASES_PATH overrides', tools: ['list_local_project_aliases', 'set_local_project_alias', 'remove_local_project_alias'], precedence: 'exact alias (2000) above every metadata field (exact metadata 1000); fuzzy aliases above every metadata field', scope: 'existing directories inside the local project root; tools write only the alias dictionary and never touch project code or Git state' } }, newConversation: { intentOwner: 'Chat', presentation: { web: 'contextual button', feishu: 'native card button', wechat: 'exact text command: 新对话' }, action: 'ask_user action new_conversation', submitRoute: 'POST /chat/dispatch', retainsHistory: true, cancelsDomainTasks: false }, configuration: 'revisioned user extensions', turnSnapshot: true, updatesApply: 'next user turn', configureRoute: 'PATCH /agents/agt_system_helper_chat', memory: { store: 'workspace-level chat_memories rows with content, category, source conversation and timestamps', categories: ['rule', 'preference', 'project', 'project_state', 'workflow', 'other'], categoryMetadata: '@worklite/contracts CHAT_MEMORY_CATEGORY_META is the single source for which categories are always injected (rule, preference) versus on-demand', tools: ['list_memories', 'save_memory', 'update_memory', 'delete_memory'], routes: ['GET /chat/memories', 'GET /chat/memories/:id', 'POST /chat/memories', 'PATCH /chat/memories/:id', 'DELETE /chat/memories/:id'], injection: 'bounded projection captured per accepted turn into the capability snapshot system prompt: rule and preference categories inject full content, other categories inject only an id/category/summary catalog for on-demand reads through list_memories', bounds: { contentChars: 2000, entries: 100, promptEntries: 50, promptChars: 6000, catalogEntries: 50, catalogChars: 2000 }, management: 'Web Chat settings dialog, grouped and filterable by category' } },
         upgrades: { operatorDeploymentVersion: { command: 'pnpm deploy:local', source: 'apps/web/package.json', bump: 'patch before compilation on every invocation', initialBaseline: 'established when current.json is absent after isolated empty-data readiness preflight', laterDeployment: 'confirmed operator job; isolated readiness preflight uses disposable empty data', legacyTakeover: 'verified PID file, project start-local.mjs command, repository cwd, process group and target listeners only', unknownListeners: 'left untouched; deployment fails', failedAttempt: 'consumes source version; no automatic program or data rollback after cutover; live databases may be partially migrated', gitMutations: false, preflightData: 'disposable empty directory; live databases are not copied', databaseBackups: false, automaticRollback: false, managedRelease: 'immutable manifest-bound code version' }, proposeRoute: 'POST /upgrades', redeployRoute: 'POST /upgrades/redeploy', redeployTool: 'redeploy', inspectRoute: 'GET /upgrades/:id', authorization: 'explicit current Chat user request; no second confirmation', authorizationBinding: 'persisted user message and immutable release', combinedRepairRedeploy: 'project_task redeployAfterSuccess; managed runner starts after success from the managed project root checkout', deduplication: 'one job per execution and user message', profile: 'current managed runtime only; no model override', progress: 'original conversation; automatic observation after reconnect', requiresManagedBaseline: true, projectRoot: process.env.WORKLITE_PROJECT_ROOT ?? null, phases: ['proposed', 'authorized', 'preflighting', 'draining', 'frozen', 'switching', 'recovering', 'succeeded', 'rolled_back', 'failed'], uninterruptedIngress: false, interruptionPolicy: 'cancel active Agent, Team, Workflow and Command work after isolated preflight; never automatically resume' },
         chat: { workspaceRoute: '/chat', channelsRoute: 'GET /chat/channels', conversationsRoute: 'GET /chat/conversations', conversationRoute: 'GET /chat/conversations/:id', recordsRoute: 'GET /chat/conversations/:id/records', recordsSnapshots: 'latest snapshot plus all non-snapshot events', maxSkillScriptOutputChars: 60000, diagnosticTool: { name: 'inspect_chat_conversation', records: 'current evidence and status/receipt metadata; repeated snapshots and cards referenced', fullToolOutputInput: 'toolCallId', completeEvidence: 'fullRecordsRoute', inferenceHistory: 'raw replay snapshots replaced with explicit retained-evidence references; original history unchanged' }, channels: [{ id: 'web', builtIn: true, presentation: ['streaming', 'markdown', 'questions'] }, { id: 'feishu', builtIn: false, presentation: ['native streamed cards', 'collapsed task details', 'forms', 'QR images', 'files'] }, { id: 'wechat', builtIn: false, presentation: ['text messages'] }], histories: 'server-persisted; unrelated conversations remain separate', backgroundConversations: { start: 'start_chat_conversation', monitor: ['wait_chat_conversation', 'inspect_chat_conversation'], reply: 'message_chat_conversation', userActivation: false, origin: 'first user message names the starting conversation', messaging: 'only conversations started from the current conversation', nesting: false, recoveryQuestions: 'user only' }, masterAgentId: 'agt_system_helper_chat', dispatchRoute: 'POST /chat/dispatch', taskFeedback: 'task state is independent of Chat turn; Team questions, failures and failed dispatches remain visible', teamDispatch: { owner: 'Chat Agent', recordsRoute: 'GET /agent-teams/:teamId/runs', groupRoute: 'read-only archive at /agent-team-groups/:groupId', runRoute: 'read-only evidence at /agent-team-runs/:runId', requires: ['named teamId', 'goal', 'absolute existing projectDirectory', 'mode'], initialRole: 'Planner unless the user names an active work role', submissionReference: ['groupId', 'runId'], entry: 'dispatch_task creates a hidden persistent group and bound Run; Chat owns the task card and all follow-up actions', controls: ['answer', 'exact command grant through structured task-card field', 'pause', 'resume', 'cancel', 'retry', 'reexecute', 'recover'], roleControl: 'Chat task card controls the bound Run; reexecution creates a new group message and Run', commandAuthorization: 'non-project-executor commands require exact strings entered by the user in a structured Web Chat task card or Feishu form; prose and text-only WeChat never grant them', contextIsolation: ['initially addressed role', 'selected repositories', 'v8-v9 working practice and matching Team memories go only to the initially addressed role', 'v9 project Git policy goes to every project-executor role'], handoffs: 'summary and immutable file references; recipients read document content on demand', busyTeam: 'queue the bound Run when maxConcurrentRuns is reached; start queued Runs FIFO when an active slot opens' }, targets: ['conversation', 'team', 'workflow'], workflowVersions: 'published only', externalPluginId: 'feishu-bot', mergeHistories: false, webAccess: 'inspect and continue selected persisted conversation', feishu: { privateChat: true, defaultTarget: 'conversation', persistentTargetSelection: false, choices: 'current pending Agent question; plan not required', replyProgress: 'separate queued, thinking, responding and processing component in the same CardKit entity', cardPresentation: { transport: 'CardKit JSON 2.0 entity', requiredPermission: 'cardkit:card:write', replyAnimation: 'native fast typewriter', updates: 'component-local; full card for structural transitions', progressIcon: 'neutral native loading icon; no custom animation', taskDetails: 'default-collapsed Team task attempts and Workflow node execution statuses', visibleContext: ['current task or step', 'outcome', 'questions', 'failures', 'QR images', 'authorization forms', 'controls'], streamingLifecycle: 'model output only; close for tools, questions and terminal states; renew platform window', persistedDelivery: ['cardId', 'sequence', 'last delivered card', 'streaming start', 'pending idempotent UUID and exact payload'], legacyCardConversion: false }, completedDialogue: 'content without task header or completion label', taskAnswers: 'reply to the task card or submit its form', groupChat: false, inbound: ['text', 'card actions'], outbound: ['updated response cards', 'task questions and controls', 'QR images', 'Team documents', 'Workflow Artifacts'], configurationRoute: '/chat?view=channels', applicationRegistration: { available: true, archetype: 'PersonalAgent', startRoute: 'POST /plugins/feishu-bot/feishu/registration', cancelRoute: 'DELETE /plugins/feishu-bot/feishu/registration', operator: 'user through Web configuration', automaticCredentialPersistence: true, userBinding: 'automatic when returned, otherwise manual', resumable: true, manualExistingApplication: true, platformSetup: ['bot capability', 'IM permissions', 'long-connection message and card subscriptions', 'publication'], userOAuth: false, runtimeCompatibility: 'requires authorized real integration' }, wechat: { pluginId: 'wechat-bot', protocol: 'Tencent iLink bot long-poll', login: { startRoute: 'POST /plugins/wechat-bot/wechat/login', cancelRoute: 'DELETE /plugins/wechat-bot/wechat/login', mechanism: 'QR scan; scanning user becomes the allowed user', credentialStorage: 'encrypted bot token in the plugin row' }, privateChat: true, groupChat: false, inbound: ['text'], outbound: ['whole text replies', 'conversation question prompts', 'task status notifications'], streaming: false, cards: false, media: false, defaultTarget: 'conversation', questionAnswers: 'plain text answers to Chat pending questions; Chat Agent handles Team actions, while exact-command grants require a structured Web Chat or Feishu field', disconnectRoute: 'POST /plugins/wechat-bot/wechat/disconnect', configurationRoute: '/chat?view=channels', staleToken: 'status error; user re-logins by QR' } } },
-        supportedResourceOperations: ['inspect Gateway statistics and request logs', 'delegate independent project work to a Codex or Claude Code project executor', 'inspect Chat project task activity', 'dispatch collaborative repair to Agent Team', 'inspect Chat conversations and full saved records', 'start, monitor and answer a background Chat conversation', 'inspect and update Chat capabilities', 'save, update, list and delete workspace long-term memories', 'propose and inspect managed upgrades', 'redeploy WorkLite on explicit user request, directly or after a successful authorized project_task', 'inspect workspace resources', 'inspect Workflow capabilities', 'inspect and configure Agent Teams', 'inspect Agent Team Run records, archived group transcripts, Runs and documents', 'manage Team/repository-scoped memories and working practice through Chat', 'answer, control, recover and retry Agent Team Runs from Chat', 'dispatch Chat-owned Agent Team Runs and published Workflow tasks', 'navigate to known WorkLite pages and a Workflow editor by name or id', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server (connects and discovers its tools automatically)', 'delete MCP server with explicit confirmation and reference-protected force', 'create Workflow draft', 'edit Workflow draft from a logical plan', 'replace Workflow draft Agent models', 'publish Workflow draft', 'delete Workflow with explicit confirmation and guarded force', 'change appearance', 'change language'],
+        supportedResourceOperations: ['inspect Gateway statistics and request logs', 'delegate independent project work to a Codex or Claude Code project executor', 'inspect Chat project task activity', 'dispatch collaborative repair to Agent Team', 'inspect Chat conversations and full saved records', 'start, monitor and answer a background Chat conversation', 'inspect and update Chat capabilities', 'save, update, list and delete workspace long-term memories', 'propose and inspect managed upgrades', 'redeploy WorkLite on explicit user request, directly or after a successful authorized project_task', 'inspect workspace resources', 'locate local projects from the read-only metadata index', 'inspect Workflow capabilities', 'inspect and configure Agent Teams', 'inspect Agent Team Run records, archived group transcripts, Runs and documents', 'manage Team/repository-scoped memories and working practice through Chat', 'answer, control, recover and retry Agent Team Runs from Chat', 'dispatch Chat-owned Agent Team Runs and published Workflow tasks', 'navigate to known WorkLite pages and a Workflow editor by name or id', 'create non-secret model Provider draft', 'create Skill package', 'create remote MCP server (connects and discovers its tools automatically)', 'delete MCP server with explicit confirmation and reference-protected force', 'create Workflow draft', 'edit Workflow draft from a logical plan', 'replace Workflow draft Agent models', 'publish Workflow draft', 'delete Workflow with explicit confirmation and guarded force', 'change appearance', 'change language'],
         modelProviderProxy: {
           protocols: ['openai/chat', 'openai/responses', 'anthropic/messages', 'codex/responses', 'typesafe/systemone'],
           requiresExplicitProtocol: true,
@@ -706,24 +847,24 @@ export class WorkspaceResourcesService {
           busyDispatch: 'persist as queued when maxConcurrentRuns is reached; start queued Runs FIFO when an active slot opens',
           maxConcurrentRuns: { configurable: true, minimum: 1, default: 3 },
           submissionBinding: 'stable submission id atomically binds groupId and runId; repeated delivery is idempotent',
-          orchestrationVersion: { newRuns: 9, defaultInitialRole: 'planner', handoffs: 'role handoffs continue inside the group-bound Run over the captured dynamic role directory', historicalVersions: [1, 2, 3, 4, 5, 6, 7, 8] },
-          historicalTeamManager: { role: 'team-manager', appliesTo: 'captured v1-v7 TeamVersions only; new v8-v9 Runs have no Team Manager work role' },
+          orchestrationVersion: { newRuns: 11, defaultInitialRole: 'dispatcher', handoffs: 'role handoffs continue inside the group-bound Run over the captured dynamic role directory', historicalVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] },
+          historicalTeamManager: { role: 'team-manager', appliesTo: 'captured v1-v7 TeamVersions only; new v8-v11 Runs have no Team Manager work role' },
           groupRoutes: {
             persistence: 'groups bind Chat submissions and preserve transcript and repository context for captured Runs',
             archive: 'GET /agent-team-groups/:groupId is read-only history; no user-facing composer, answer, repository mutation or controls',
             operations: 'Chat dispatch and protected Chat platform tools own user-requested actions',
             retiredRoutes: 'Direct group creation, message, answer, group repository and Team group-list APIs are removed; only archive reads/events and Chat-bound reexecution remain',
           },
-          teamMemory: { routes: 'GET/POST/PATCH/DELETE /agent-teams/:teamId/memories through protected Chat platform tools', scope: ['Team', 'canonical repository'], injection: 'v8-v9 bounded projection into the initially addressed role only; handoff roles receive neither; historical v1-v7 retain captured injection behavior', writeOwner: 'Chat Agent; Team roles do not manage or save memories' },
-          workingPractice: 'captured by each new v8-v9 group Run and injected into the initially addressed role only',
-          projectGitPolicy: { perTeam: true, editableThrough: 'update_agent_team with teamId', capturedBy: 'new v9 TeamVersion', injection: 'every project-executor work role in the captured Run', enforcement: 'guidance for native project executors; WorkLite does not create, merge, or clean Git branches or worktrees' },
+          teamMemory: { routes: 'GET/POST/PATCH/DELETE /agent-teams/:teamId/memories through protected Chat platform tools', scope: ['Team', 'canonical repository'], injection: 'v11 initially addressed role receives the full captured projection and every other role a bounded index; v8-v10 keep the bounded initial-role projection only; historical v1-v7 retain captured injection behavior', writeOwner: 'Chat has full management; v11 roles may search, read and write Team memories within the Run repository scope through managed tools or the per-task executor MCP endpoint' },
+          workingPractice: 'captured by each new v8-v11 group Run and injected into the initially addressed role only',
+          projectGitPolicy: { perTeam: true, editableThrough: 'update_agent_team with teamId', capturedBy: 'new v9-v11 TeamVersion', injection: 'every project-executor work role in the captured Run', enforcement: 'guidance for native project executors; WorkLite does not create, merge, or clean Git branches or worktrees' },
           runWebRoute: '/agent-team-runs/:runId',
           predefinedTeamIds: agentTeamRows.map((team) => team.id),
           roles: [...AGENT_TEAM_ROLES],
           dynamicRoleDirectory: { customIds: 'server-assigned stable opaque ids', workRoleCrud: ['POST /agent-teams/:teamId/roles', 'PATCH /agent-teams/:teamId/roles/:roleId', 'DELETE /agent-teams/:teamId/roles/:roleId'], historicalProtectedRole: 'team-manager in captured v1-v7 versions' },
           developerExecution: {
             executors: ['claude', 'codex'],
-            roleField: 'developer defaults to claude; orchestration v7-v9 captures executor launches for configured work roles with an executor',
+            roleField: 'developer defaults to claude; orchestration v7-v11 captures executor launches for configured work roles with an executor',
             capturedLaunch: true,
             olderSnapshots: 'new Run required',
             nativeTools: true,
@@ -735,15 +876,16 @@ export class WorkspaceResourcesService {
           multiDeveloper: {
             configuration: 'single developer role; the Planner decides per Run how many of the fixed 4 lanes (developer, developer-2, developer-3, developer-4) execute via developmentAssignments without developerId',
             reservedPrimaryId: 'developer',
-            orchestrationVersion: 'new TeamVersions use v9 with no Team Manager role, captured project Git policy for project-executor roles, and working practice plus matching memories in the initially addressed role; v8 has no Team Manager and retains initial-role working practice and memory projections; v7 keeps its protected Team Manager; v6 retains dynamic group handoffs and Developer fan-out; v4 keeps managed worktree lifecycle and v5 keeps advisory per-project strategy; versions 1–8 keep their captured graphs',
+            orchestrationVersion: 'new TeamVersions use v11, which keeps the v10 Team Dispatcher mode decision and adds role search/read/write Team memory plus a bounded memory index for non-initial roles; v10 starts at the Team Dispatcher unless the user names a role and enforces the decided mode route; v9 has no Team Manager role, captured project Git policy for project-executor roles, and working practice plus matching memories in the initially addressed role; v8 has no Team Manager and retains initial-role working practice and memory projections; v7 keeps its protected Team Manager; v6 retains dynamic group handoffs and Developer fan-out; v4 keeps managed worktree lifecycle and v5 keeps advisory per-project strategy; versions 1–10 keep their captured graphs, prompts, tool surfaces and dispatch-time mode',
             taskKeys: 'group_<step>_<role> and group_<step>_developer_<developerId> in v6; earlier versions keep their captured keys',
             assignments: 'planner-produced non-overlapping ownedPaths mapped to lanes in order; targeted repairRequests per developerId; a role output that fails validation earns exactly one corrective re-invocation',
             retryBarrier: 'one retry resumes all failed assignments in the same fan-out; completed siblings never rerun',
             progress: 'run.progress events and run progress view: phase, next step, percent, assignment completion, active developerIds; task events carry developerId and assignmentTitle; attempts carry progressText',
             pendingInputs: 'Chat task cards list every waiting question; each answer uses its own pendingInputId and scopeRevision',
           },
-          worktreeManager: 'v4 creates and manages Run/lane worktrees; v5-v9 use advisory per-project strategy; v6-v9 role handoffs do not create, merge or clean Git state',
+          worktreeManager: 'v4 creates and manages Run/lane worktrees; v5-v11 use advisory per-project strategy; v6-v11 role handoffs do not create, merge or clean Git state',
           modes: ['plan_only', 'validate_existing', 'implement_and_validate'],
+          modeSelection: 'Agent Teams do not accept a mode on dispatch. The v10-v11 Dispatcher decides it and records modeRationale and modeDecidedAt on the Run; historical v1-v9 Runs keep their captured mode.',
           teamRoutes: {
             detail: 'GET /agent-teams/:teamId',
             update: 'PATCH /agent-teams/:teamId',

@@ -4,7 +4,9 @@ import type { ChatProjectTaskView, ChatSubmissionView, RunView } from '@worklite
 import { useAgentTeamRunQuery, useRunQuery, useWorkliteUpgradeQuery } from '@/api/queries';
 import { isLiveStatus, StatusDot, toStatusKey } from '@/components/status-badge';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
+import { TruncatedText } from '@/components/ui/truncated-text';
 import { cn } from '@/lib/utils';
+import { isSettledTeamRun, teamCurrentLabel } from '@/features/agent-teams/team-run-summary';
 
 type PinTracking = {
   track: (id: string) => (element: HTMLElement | null) => void;
@@ -149,8 +151,8 @@ function PinnedRow({ candidate, visible, onLive, onReveal }: {
         className={cn('flex w-full min-w-0 items-center gap-2.5 px-3 py-2 text-left', surfaceInteraction, focusRingInset)}
       >
         <StatusDot status={statusKey} />
-        <span className="min-w-0 shrink truncate text-[13px] font-medium">{state.title}</span>
-        {state.progress ? <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{state.progress}</span> : <span className="flex-1" />}
+        <TruncatedText text={state.title} className="shrink text-[13px] font-medium" />
+        {state.progress ? <TruncatedText text={state.progress} className="flex-1 text-xs text-muted-foreground" /> : <span className="flex-1" />}
       </button>
     </li>
   );
@@ -163,6 +165,7 @@ function firstLine(value: string): string {
 // Each kind reads its status from the same queries its card already uses, so the bar adds no request.
 function usePinnedRowState(candidate: PinCandidate): RowState {
   const { t } = useTranslation('assistant');
+  const { t: tTeams } = useTranslation('agentTeams');
   const reference = candidate.kind === 'submission' ? candidate.submission.reference : null;
   const workflow = useRunQuery('personal', reference?.kind === 'workflow' ? reference.runId : '', reference?.kind === 'workflow');
   const teamRun = useAgentTeamRunQuery('personal', reference?.kind === 'team' ? reference.runId : '');
@@ -184,7 +187,8 @@ function usePinnedRowState(candidate: PinCandidate): RowState {
     return { live: run ? isLiveStatus(run.status) : !submission.settled, status: run?.status ?? 'queued', title: run?.workflowName ?? title, progress: run?.currentStep ?? null };
   }
   if (reference?.kind === 'team') {
-    if (teamRun.data) return { live: isLiveStatus(teamRun.data.status), status: teamRun.data.status, title, progress: null };
+    const run = teamRun.data;
+    if (run) return { live: isLiveStatus(run.status), status: run.status, title, progress: run.current && !isSettledTeamRun(run) ? teamCurrentLabel(t, tTeams, run.current) : null };
     return { live: !submission.settled, status: 'queued', title, progress: null };
   }
   if (reference?.kind === 'upgrade') {

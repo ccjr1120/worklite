@@ -52,7 +52,7 @@ export const feishuRegistrations = sqliteTable('feishu_registrations', {
 
 export type StoredChatTarget =
   | { kind: 'conversation' }
-  | { kind: 'team'; teamId: string; projectDirectory: string; mode: 'plan_only' | 'validate_existing' | 'implement_and_validate' }
+  | { kind: 'team'; teamId: string; projectDirectory: string; role?: string; /** @deprecated Ignored on new dispatch. */ mode?: 'plan_only' | 'validate_existing' | 'implement_and_validate' }
   | { kind: 'workflow'; workflowId: string };
 export type StoredChatTaskReference =
   | { kind: 'conversation'; executionId: string; afterMessageId: string | null; afterSequence: number; untilMessageId?: string | null; completionStatus?: string; completionError?: string | null }
@@ -352,7 +352,7 @@ export const commandExecutionEvents = sqliteTable('command_execution_events', {
 }, (table) => [index('command_execution_events_command_sequence_idx').on(table.commandId, table.sequence)]);
 
 export const skills = sqliteTable('skills', {
-  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), source: text('source').$type<'online' | 'archive' | 'built-in'>().notNull(), version: text('version').notNull().default('draft'), validation: text('validation').$type<'valid' | 'invalid' | 'pending'>().notNull().default('pending'), instructions: text('instructions').notNull().default(''), updatedAt: timestamp('updated_at'),
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), source: text('source').$type<'online' | 'archive' | 'built-in' | 'local'>().notNull(), version: text('version').notNull().default('draft'), validation: text('validation').$type<'valid' | 'invalid' | 'pending'>().notNull().default('pending'), instructions: text('instructions').notNull().default(''), updatedAt: timestamp('updated_at'),
 });
 
 export const skillFiles = sqliteTable('skill_files', {
@@ -515,12 +515,20 @@ export type StoredChatProjectTaskSnapshot = {
 // handed to the task's next run as part of the goal, carrying the prior run's evidence.
 export type StoredProjectTaskSteerInstruction = {
   id: string;
+  // Submission order within the task (1-based) and who wrote it. Absent on rows written before
+  // these fields existed; readers must tolerate that.
+  seq?: number;
+  source?: 'user';
   text: string;
   createdAt: string;
-  // 'delivered': Codex accepted it into the live turn through turn/steer, evidence only.
-  // 'queued': waiting for the task's next run (Claude Code, or a Codex turn that could not accept it).
-  // 'consumed': a queued instruction the next run has picked up and included in its goal.
+  // 'delivered': Codex accepted it into the live turn through turn/steer; counts as applied.
+  // 'queued': waiting for the task's next round boundary (Claude Code, or a Codex turn that could not accept it).
+  // 'consumed': a queued instruction the next round has picked up and injected into its input.
   status: 'delivered' | 'queued' | 'consumed';
+  // When and in which 1-based round of the task it was applied (delivered or consumed). Set once,
+  // together with the status change; an instruction with consumedAt is never injected again.
+  consumedAt?: string;
+  consumedTurn?: number;
 };
 
 // Table names keep their original codex prefix as persisted identifiers.
@@ -620,6 +628,9 @@ export type StoredAgentTeamOperationRecoveryDecision =
 export type StoredAgentTeamSkillSnapshot = {
   id: string;
   name: string;
+  // The Skill's captured instruction text (normally its SKILL.md) so a Team role
+  // receives the same instructions a Workflow Agent node receives.
+  instructions?: string;
   files: Array<{ path: string; content: string }>;
 };
 
@@ -673,7 +684,7 @@ export type StoredAgentTeamVersionSnapshot = {
   developerExecution: StoredProjectExecutorLaunch | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
   projectExecutorLaunches?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
   workingPractice?: string;
   projectGitPolicy?: string;
   roles: StoredAgentTeamRoleConfiguration[];
@@ -762,17 +773,31 @@ export const agentTeamGroupEvents = sqliteTable('agent_team_group_events', {
   createdAt: timestamp('created_at'),
 }, (table) => [primaryKey({ columns: [table.groupId, table.sequence] })]);
 
+export type StoredAgentTeamMemoryAuthor = 'chat' | 'role';
+
 export const agentTeamMemories = sqliteTable('agent_team_memories', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   teamId: text('team_id').notNull().references(() => agentTeams.id, { onDelete: 'cascade' }),
   repositoryId: text('repository_id').references(() => agentTeamRepositories.id, { onDelete: 'cascade' }),
+  // Legacy role-scoped memories are retained but never injected into prompts.
   role: text('role').$type<StoredAgentTeamRole>(),
   content: text('content').notNull(),
   sourceMessageId: text('source_message_id').references(() => agentTeamGroupMessages.id, { onDelete: 'set null' }),
+  // v11 role-scoped provenance. Chat-created memories keep these null.
+  sourceRunId: text('source_run_id'),
+  sourceRole: text('source_role').$type<StoredAgentTeamRole>(),
+  sourceTaskAttemptId: text('source_task_attempt_id'),
+  createdBy: text('created_by').$type<StoredAgentTeamMemoryAuthor>().notNull().default('chat'),
+  // Optional caller-supplied stable key making a role write an upsert instead of a new entry.
+  upsertKey: text('upsert_key'),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
-}, (table) => [index('agent_team_memories_scope_idx').on(table.teamId, table.repositoryId, table.role, table.updatedAt)]);
+}, (table) => [
+  index('agent_team_memories_scope_idx').on(table.teamId, table.repositoryId, table.role, table.updatedAt),
+  unique('agent_team_memories_upsert_idx').on(table.teamId, table.repositoryId, table.upsertKey),
+  index('agent_team_memories_source_run_idx').on(table.sourceRunId),
+]);
 
 
 export type StoredAgentTeamIntakeStatus = 'queued' | 'collecting' | 'starting' | 'started' | 'failed';
@@ -863,6 +888,10 @@ export const agentTeamRuns = sqliteTable('agent_team_runs', {
   projectDirectory: text('project_directory').notNull(),
   projectInstructions: text('project_instructions', { mode: 'json' }).$type<StoredAgentTeamProjectInstructionFile[]>().notNull().default([]),
   mode: text('mode').$type<StoredAgentTeamMode>().notNull(),
+  // v1-v9 keep the mode captured at dispatch. v10 stores a conservative
+  // placeholder until its Dispatcher commits the decision and rationale.
+  modeRationale: text('mode_rationale'),
+  modeDecidedAt: integer('mode_decided_at', { mode: 'timestamp_ms' }),
   authorizedCommands: text('authorized_commands', { mode: 'json' }).$type<string[]>().notNull().default([]),
   scopeRevision: integer('scope_revision').notNull().default(1),
   desiredControlState: text('desired_control_state').$type<'none' | 'pause_requested' | 'cancel_requested'>().notNull().default('none'),

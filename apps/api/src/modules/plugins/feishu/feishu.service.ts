@@ -11,7 +11,7 @@ import { AgentTeamDocumentsService } from '../../agent-teams/agent-team-document
 import { AgentTeamsService } from '../../agent-teams/agent-teams.service';
 import { RunsService } from '../../runs/runs.service';
 import { PluginsService } from '../plugins.service';
-import { renderCard, renderTaskCard, statusText, type CardButton, type CardState, type CardTransport, type CardUpdate, type FeishuAction, type FeishuCard, type SavedCard } from './feishu-cards';
+import { renderCard, renderTaskCard, statusText, teamRoleName, teamRunMeta, type CardButton, type CardState, type CardTransport, type CardUpdate, type FeishuAction, type FeishuCard, type SavedCard } from './feishu-cards';
 import { runtimeAdmissionClosed, runtimeWritesFrozen } from '../../../infrastructure/runtime-upgrade-state';
 import { UpgradesService } from '../../upgrades/upgrades.service';
 import type { ChatProjectTaskView } from '@worklite/contracts';
@@ -433,12 +433,13 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       const phaseText: Record<string, string> = { planning: '规划中', test_design: '测试设计中', development: '开发中', test_authoring: '测试编写中', test_execution: '测试执行中', review: '审查中', repair: '修复中', waiting: '等待输入', terminal: '已结束' };
       state.status = statusText[run.status] ?? run.status;
       if (run.progress && !['succeeded', 'failed', 'cancelled'].includes(run.status)) state.status += ` · ${phaseText[run.progress.phase] ?? run.progress.phase} ${run.progress.percent}%`;
+      state.meta = teamRunMeta(run);
       state.details = run.tasks.map((task) => {
         const progressLine = task.progressText.trim().split(/\r?\n/, 1)[0] ?? '';
-        return `- ${task.taskKey} · ${statusText[task.status] ?? task.status}${progressLine ? ` · ${progressLine}` : ''}`;
+        return `- ${[task.taskKey, teamRoleName(task), task.model, statusText[task.status] ?? task.status, progressLine].filter(Boolean).join(' · ')}`;
       }).join('\n');
       const active = [...run.tasks].reverse().find((task) => task.retryable || ['running', 'waiting_for_input', 'waiting_for_recovery'].includes(task.status));
-      state.content = `${run.intent}\n\n${active ? `当前任务：${active.taskKey}` : ''}`;
+      state.content = `${run.intent}${active ? `\n\n当前任务：${active.assignmentTitle ?? active.taskKey}` : ''}`;
       if (run.status === 'failed' && active?.error) state.content += `\n\n${active.error}`;
       const pending = run.pendingInputs.find((item) => item.status === 'pending');
       if (pending?.kind === 'question') {

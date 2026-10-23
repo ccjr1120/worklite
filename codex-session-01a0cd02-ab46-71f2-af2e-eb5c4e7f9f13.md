@@ -3020,7 +3020,7 @@
 
 我准备的流程是一个新工作流：`Workflow Input → WeChat Official Account v1（Save draft）`，运行输入是一篇包含正文、分级小标题、重点句、引用、列表和表格的静态示例文章，不含 Agent，也不接原工作流。开发 API 的 `3391` 端口当前无法连接，所以还不能创建或运行它。
 
-仓库的 [AGENTS.md](/Users/ccjr/development/self/work-lite/AGENTS.md) 明确要求：服务不可用时，必须先取得授权才能启动 WorkLite 服务。我只需要启动开发 API（`3391`），不会启动或切换到部署环境。
+仓库的 AGENTS.md 明确要求：服务不可用时，必须先取得授权才能启动 WorkLite 服务。我只需要启动开发 API（`3391`），不会启动或切换到部署环境。
 
 ## Assistant
 

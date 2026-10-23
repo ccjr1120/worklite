@@ -71,7 +71,7 @@ function Composer({
             {selectedWorkflow ? (
               <span className="wl-enter mb-1.5 inline-flex h-7 max-w-[min(16rem,70%)] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-brand/30 bg-brand-subtle pl-2.5 pr-1.5 text-[13px] font-medium text-foreground">
                 <Play className="size-3.5 shrink-0 text-brand" aria-hidden="true" />
-                <span className="truncate">{selectedWorkflow.name}</span>
+                <span className="truncate" title={selectedWorkflow.name}>{selectedWorkflow.name}</span>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button type="button" className={cn('wl-press rounded-full p-0.5 text-muted-foreground hover:bg-surface hover:text-foreground', focusRingInset)} aria-label={t('mentions.remove')} onClick={onRemoveWorkflow}>
@@ -142,7 +142,7 @@ function Composer({
                   {mentionMatches.map((workflow) => (
                     <CommandItem key={workflow.id} value={`mention:${workflow.id}`} onSelect={() => onSelectMention(workflow)}>
                       <Play className="size-4 shrink-0 text-brand" aria-hidden="true" />
-                      <span className="truncate">{workflow.name}</span>
+                      <span className="truncate" title={workflow.name}>{workflow.name}</span>
                     </CommandItem>
                   ))}
                 </>
