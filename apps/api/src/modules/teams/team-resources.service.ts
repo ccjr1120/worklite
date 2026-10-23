@@ -767,7 +767,7 @@ export class WorkspaceResourcesService {
         troubleshooting: {
           evidenceOwner: 'Chat',
           repairOwner: 'Chat-owned project task or collaborative Agent Team Run',
-          chatHostTools: [], chatDirectTools: ['project_task', 'answer_project_task', 'cancel_project_task', 'update_plan', 'ask_user'], chatProjectTaskDispatch: 'one project_task per model response; use one common workspace root for a goal spanning projects; rejected batches report invalid_tool_request', chatPlatformTools: 'one typed tool per protected worklite-platform script, declared in scripts/tools.json', chatCustomSkillsAndMcp: 'not selectable; neither the Chat model loop nor its project executors receive custom Skills or MCP servers',
+          chatHostTools: [], chatDirectTools: ['project_task', 'answer_project_task', 'steer_project_task', 'cancel_project_task', 'update_plan', 'ask_user'], chatProjectTaskDispatch: 'one project_task per model response; use one common workspace root for a goal spanning projects; rejected batches report invalid_tool_request', chatPlatformTools: 'one typed tool per protected worklite-platform script, declared in scripts/tools.json', chatCustomSkillsAndMcp: 'not selectable; neither the Chat model loop nor its project executors receive custom Skills or MCP servers',
           repairDispatchTool: 'dispatch_task',
           repairDispatchRoute: 'POST /chat/dispatch',
           repairDispatch: 'project_task for independent Chat execution; Chat dispatch_task creates an Agent Team group chat and binds its first role task to a Run',

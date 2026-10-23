@@ -184,4 +184,13 @@ describe('initializeDatabase restart recovery', () => {
     expect(skill.content).toContain('Never ask the user to choose a mode');
     expect(skill.content).not.toContain('supported mode');
   });
+
+  it('documents steering a running project task instead of forbidding it', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+
+    const [skill] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'SKILL.md'))).limit(1);
+    expect(skill.content).toContain('call steer_project_task');
+    expect(skill.content).not.toContain('never steer or append a correction');
+  });
 });
