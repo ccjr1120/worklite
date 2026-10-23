@@ -11,6 +11,7 @@ import { wechatOfficialAccounts, wechatPublications, workflowPendingActions, typ
 import type { WechatOfficialAccountView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { decryptSecret, encryptSecret, WECHAT_OFFICIAL_ACCOUNT_ID } from './plugins.service';
+import { applyInlineImageUrls, findInlineImageReferences, planInlineImageUploads, validateGeneratedInlineImages, type GeneratedInlineImage } from './wechat-article-images';
 
 type ActionListener = (actionId: string) => void;
 type BrowserSession = { browser: Browser; context: BrowserContext; page: Page };
@@ -42,6 +43,10 @@ export class WechatOfficialAccountService {
     if (!accountId || (mode !== 'draft' && mode !== 'publish')) throw new Error('WeChat Official Account node requires an account and mode.');
     if (!article.trim()) throw new Error('WeChat Official Account node requires Markdown article input.');
     const coverImage = version === '2' ? validateGeneratedCover(input?.coverImage) : null;
+    const inlineImages = version === '2' ? validateGeneratedInlineImages(input?.images) : [];
+    // Resolve dangling placeholders before opening a browser session: a bad
+    // article should fail with one readable node error, not a half-filled draft.
+    planInlineImageUploads(article, inlineImages);
     const account = await this.getAccountRow(accountId);
     const idempotencyKey = `${request.context.workflowRunId}:${request.context.nodeRunId}`;
     const publication = await this.ensurePublication(request, accountId, mode, article, metadata, idempotencyKey);
@@ -60,11 +65,11 @@ export class WechatOfficialAccountService {
       return { status: 'waiting_for_input', pendingAction: await this.openDraftForConfirmation(request.context.pendingActionId, publication, account.encryptedStorageState) };
     }
 
-    if (!coverImage) return this.compose(request.context.pendingActionId, publication, account.encryptedStorageState, request.signal);
+    if (!coverImage) return this.compose(request.context.pendingActionId, publication, account.encryptedStorageState, request.signal, inlineImages);
     const coverPath = join(tmpdir(), `worklite-wechat-cover-${randomUUID()}.png`);
     await writeFile(coverPath, Buffer.from(coverImage.b64Json, 'base64'));
     try {
-      return await this.compose(request.context.pendingActionId, publication, account.encryptedStorageState, request.signal, coverPath);
+      return await this.compose(request.context.pendingActionId, publication, account.encryptedStorageState, request.signal, inlineImages, coverPath);
     } finally {
       await rm(coverPath, { force: true }).catch(() => undefined);
     }
@@ -136,7 +141,7 @@ export class WechatOfficialAccountService {
     }
   }
 
-  private async compose(actionId: string, publication: typeof wechatPublications.$inferSelect, encryptedStorageState: string, signal: AbortSignal, coverPath?: string): Promise<NodeExecutionResult> {
+  private async compose(actionId: string, publication: typeof wechatPublications.$inferSelect, encryptedStorageState: string, signal: AbortSignal, inlineImages: GeneratedInlineImage[] = [], coverPath?: string): Promise<NodeExecutionResult> {
     this.assertAccountAvailable(actionId);
     const session = await this.createSession(encryptedStorageState);
     this.sessions.set(actionId, session);
@@ -151,7 +156,7 @@ export class WechatOfficialAccountService {
       const token = new URL(session.page.url()).searchParams.get('token');
       if (!token) throw new Error('WeChat Official Account session did not provide an editor token.');
       await session.page.goto(`https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&isNew=1&type=10&token=${encodeURIComponent(token)}&lang=en_US`, { waitUntil: 'domcontentloaded' });
-      await fillArticle(session.page, publication.title, publication.article, coverPath);
+      await fillArticle(session.page, publication.title, publication.article, inlineImages, coverPath);
       if (signal.aborted) throw new Error('Workflow run cancelled.');
       const draftId = await saveDraft(session.page);
       await this.db.update(wechatPublications).set({ status: 'draft_saved', draftId, lastError: null, updatedAt: new Date() }).where(eq(wechatPublications.id, publication.id));
@@ -385,7 +390,7 @@ function loginQrCode(page: Page) {
   return page.locator('img.login__type__container__scan__qrcode').first();
 }
 
-async function fillArticle(page: Page, title: string, article: string, coverPath?: string): Promise<void> {
+async function fillArticle(page: Page, title: string, article: string, inlineImages: GeneratedInlineImage[], coverPath?: string): Promise<void> {
   const titleEditor = page.locator('.ProseMirror').first();
   await titleEditor.waitFor({ state: 'visible', timeout: 20_000 });
   await titleEditor.click();
@@ -393,13 +398,18 @@ async function fillArticle(page: Page, title: string, article: string, coverPath
 
   const bodyEditor = await articleEditor(page);
   await bodyEditor.waitFor({ state: 'visible', timeout: 20_000 });
-  const html = markdownToHtml(article.replace(/^#\s+.+$/m, '').trim() || article);
+  const articleBody = article.replace(/^#\s+.+$/m, '').trim() || article;
+  // Illustrations are uploaded before the body is written: the material
+  // library returns a WeChat CDN URL, and the Markdown/HTML pass then renders
+  // an ordinary <img> the editor already accepts.
+  const renderedArticle = await uploadInlineArticleImages(page, articleBody, inlineImages);
+  const html = markdownToHtml(renderedArticle);
   // The article editor is ProseMirror, so pasted markup is reparsed against its
   // schema and the inline styles the article depends on are dropped. Hand the
   // HTML to the editor's own content API first and keep the paste as a fallback.
   if (!await setArticleBodyThroughEditorApi(page, html)) await pasteArticleBody(page, bodyEditor, html);
   await titleEditor.click();
-  await assertArticleBody(bodyEditor, article, html);
+  await assertArticleBody(bodyEditor, renderedArticle, html);
   // Version 1 nodes have no cover input. Leave the cover unset rather than
   // uploading a substitute image the author never asked for.
   if (coverPath) await setCoverImage(page, coverPath);
@@ -481,12 +491,17 @@ async function pasteArticleBody(page: Page, bodyEditor: Locator, html: string): 
 }
 
 async function assertArticleBody(bodyEditor: Locator, article: string, html: string): Promise<void> {
-  const expectedLine = article.replace(/^#\s+.+$/m, '').split(/\r?\n/).map((line) => line.trim()).find((line) => line && !line.startsWith('#'));
+  // A leading illustration has no text to look for, so the first paragraph
+  // check skips image-only lines instead of reading their Markdown as prose.
+  const expectedLine = article.replace(/^#\s+.+$/m, '').split(/\r?\n/)
+    .map((line) => line.replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim())
+    .find((line) => line && !line.startsWith('#'));
   const expectedExcerpt = expectedLine?.replace(/^>\s*/, '').replace(/[*_`]/g, '').slice(0, 32);
   const structure = await bodyEditor.evaluate((element) => ({
     text: (element.textContent ?? '').replace(/\s+/g, ' ').trim(),
     blockCount: element.querySelectorAll('p,h1,h2,h3,h4,h5,h6,blockquote,ul,ol,table').length,
     styledCount: element.querySelectorAll('[style]').length,
+    imageCount: element.querySelectorAll('img').length,
   }));
   const expectedBlockCount = html.match(/<(?:p|h[1-6]|blockquote|ul|ol|table)\b/g)?.length ?? 0;
   const expectedStyledCount = html.match(/\sstyle="/g)?.length ?? 0;
@@ -497,6 +512,8 @@ async function assertArticleBody(bodyEditor: Locator, article: string, html: str
   if (expectedStyledCount > 0 && structure.styledCount * 2 < expectedStyledCount) {
     throw new Error(`WeChat editor discarded the article styles: ${structure.styledCount} of ${expectedStyledCount} styled elements remain.`);
   }
+  const expectedImageCount = html.match(/<img\b/g)?.length ?? 0;
+  if (expectedImageCount > structure.imageCount) throw new Error(`WeChat editor dropped inline images: ${structure.imageCount} of ${expectedImageCount} remain.`);
 }
 
 async function saveDraft(page: Page): Promise<string> {
@@ -1116,6 +1133,132 @@ function escapeHtml(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 }
 
+async function uploadInlineArticleImages(page: Page, article: string, images: GeneratedInlineImage[]): Promise<string> {
+  if (findInlineImageReferences(article).length === 0) return article;
+  const plan = planInlineImageUploads(article, images);
+  const urls = new Map<string, string>();
+  for (const upload of plan.uploads) {
+    const imagePath = join(tmpdir(), `worklite-wechat-inline-${randomUUID()}.png`);
+    await writeFile(imagePath, Buffer.from(upload.b64Json, 'base64'));
+    try {
+      urls.set(upload.uploadKey, await uploadImageToMaterial(page, imagePath, upload.uploadKey));
+    } finally {
+      await rm(imagePath, { force: true }).catch(() => undefined);
+    }
+  }
+  return applyInlineImageUrls(article, plan, urls);
+}
+
+// The article's own image control opens the same material picker the cover
+// flow uses. Uploading here puts the PNG in the account's material library and
+// yields the mmbiz CDN URL that belongs in the article body; the picker is then
+// dismissed without selecting anything, so the upload itself changes no draft
+// content.
+const ARTICLE_IMAGE_CONTROLS = ['#js_editor_insertimage', '.js_insertmedia', '.js_insertimage', '.edui-for-insertimage', '[data-action="insertimage"]'];
+
+async function uploadImageToMaterial(page: Page, imagePath: string, label: string): Promise<string> {
+  await openArticleImagePicker(page);
+  const imageDialog = page.locator('.weui-desktop-dialog_img-picker:visible').last();
+  try {
+    await imageDialog.waitFor({ state: 'visible', timeout: 20_000 });
+    const fileInput = imageDialog.locator('.js_upload_btn_container input[type="file"], input[type="file"]').last();
+    const items = imageDialog.locator('.weui-desktop-img-picker__item');
+    const before = await pickerItemSources(items);
+    const beforeKeys = new Set(before.map(thumbnailIdentity));
+    await fileInput.setInputFiles(imagePath);
+
+    const uploadDeadline = Date.now() + 30_000;
+    let sources = before;
+    let addedIndex = -1;
+    while (Date.now() < uploadDeadline) {
+      sources = await pickerItemSources(items);
+      addedIndex = sources.findIndex((source) => {
+        const identity = thumbnailIdentity(source);
+        return identity.length >= 32 && !beforeKeys.has(identity);
+      });
+      if (addedIndex >= 0) break;
+      await delay(500);
+    }
+    if (addedIndex < 0) {
+      await page.screenshot({ path: '/tmp/worklite-inline-image-upload-timeout.png', fullPage: true }).catch(() => undefined);
+      await writeFile('/tmp/worklite-inline-image-upload-dom.json', JSON.stringify({ label, before, after: sources }, null, 2), 'utf8').catch(() => undefined);
+      throw new Error(`WeChat did not add the inline image "${label}" to the material library. The picker held ${before.length} items before the upload and ${sources.length} after.`);
+    }
+    return materialImageUrl(sources[addedIndex]!, label);
+  } finally {
+    await closeImagePicker(page);
+  }
+}
+
+async function openArticleImagePicker(page: Page): Promise<void> {
+  for (const selector of ARTICLE_IMAGE_CONTROLS) {
+    const control = page.locator(selector).first();
+    if (!await control.isVisible().catch(() => false)) continue;
+    await control.click({ force: true }).catch(() => undefined);
+    if (await imagePickerVisible(page, 2_000)) return;
+  }
+  const labeled = page.locator('button:visible, a:visible, [role="button"]:visible').filter({ hasText: /^(图片|Image)$/ }).last();
+  if (await labeled.isVisible().catch(() => false)) {
+    await labeled.click({ force: true }).catch(() => undefined);
+    if (await imagePickerVisible(page, 2_000)) return;
+  }
+  // Fall back to the cover's material picker: it uploads to the same library,
+  // and dismissing it without a selection leaves the cover untouched.
+  const cover = page.locator('#js_cover_area');
+  if (await cover.isVisible().catch(() => false)) {
+    await cover.scrollIntoViewIfNeeded().catch(() => undefined);
+    await cover.click({ force: true }).catch(() => undefined);
+    const imageLibraryButton = page.locator('#js_cover_area .js_imagedialog:visible, #js_cover_null .js_imagedialog:visible').last();
+    if (await imageLibraryButton.isVisible().catch(() => false)) {
+      await imageLibraryButton.click({ force: true }).catch(() => undefined);
+      if (await imagePickerVisible(page, 5_000)) return;
+    }
+  }
+  await page.screenshot({ path: '/tmp/worklite-inline-image-control-timeout.png', fullPage: true }).catch(() => undefined);
+  throw new Error('WeChat editor image insert control is unavailable, so inline images could not be uploaded.');
+}
+
+async function imagePickerVisible(page: Page, timeout: number): Promise<boolean> {
+  return page.locator('.weui-desktop-dialog_img-picker:visible').last()
+    .waitFor({ state: 'visible', timeout })
+    .then(() => true)
+    .catch(() => false);
+}
+
+async function closeImagePicker(page: Page): Promise<void> {
+  const imageDialog = page.locator('.weui-desktop-dialog_img-picker:visible').last();
+  if (!await imageDialog.isVisible().catch(() => false)) return;
+  await page.keyboard.press('Escape').catch(() => undefined);
+  if (await imagePickerVisible(page, 600)) {
+    const closeButton = imageDialog
+      .locator('.weui-desktop-dialog__close, .weui-desktop-dialog__close-btn, button[aria-label="Close"], button[aria-label="关闭"]')
+      .first();
+    if (await closeButton.isVisible().catch(() => false)) await closeButton.click({ force: true }).catch(() => undefined);
+  }
+  if (await imagePickerVisible(page, 1_500)) throw new Error('WeChat image picker stayed open after uploading an inline image.');
+}
+
+async function pickerItemSources(items: Locator): Promise<string[]> {
+  return items.evaluateAll((elements) => elements.map((element) => {
+    const view = element.ownerDocument.defaultView;
+    for (const node of [element, ...Array.from(element.querySelectorAll('*'))]) {
+      const source = node.getAttribute('src') ?? node.getAttribute('data-src') ?? '';
+      if (source) return source;
+      const background = view?.getComputedStyle(node).backgroundImage ?? '';
+      if (background && background !== 'none') return background;
+    }
+    return (element.textContent ?? '').trim();
+  }));
+}
+
+function materialImageUrl(source: string, label: string): string {
+  const value = source.match(/url\(["']?(.*?)["']?\)/)?.[1] ?? source;
+  if (!/^https?:\/\//.test(value) || !/mmbiz/.test(value)) {
+    throw new Error(`WeChat returned an unusable material URL for inline image "${label}": ${thumbnailIdentity(value) || 'empty'}.`);
+  }
+  return value;
+}
+
 async function setCoverImage(page: Page, coverPath: string): Promise<void> {
   const cover = page.locator('#js_cover_area');
   await cover.waitFor({ state: 'visible', timeout: 20_000 });
@@ -1304,16 +1447,7 @@ async function materialReferences(root: Locator): Promise<string[]> {
 
 // One picker item's identity, used to tell a newly uploaded material apart.
 async function pickerItemIdentities(items: Locator): Promise<string[]> {
-  return items.evaluateAll((elements) => elements.map((element) => {
-    const view = element.ownerDocument.defaultView;
-    for (const node of [element, ...Array.from(element.querySelectorAll('*'))]) {
-      const source = node.getAttribute('src') ?? node.getAttribute('data-src') ?? '';
-      if (source) return source;
-      const background = view?.getComputedStyle(node).backgroundImage ?? '';
-      if (background && background !== 'none') return background;
-    }
-    return (element.textContent ?? '').trim();
-  }));
+  return pickerItemSources(items);
 }
 
 // A wrong material selection is a failure, not something to publish silently,

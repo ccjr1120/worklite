@@ -36,7 +36,7 @@ function teamRun(overrides: Partial<AgentTeamRunView> = {}): AgentTeamRunView {
   return {
     id: 'atr_1', teamId: 'team_1', groupId: null, targetRole: null, repositoryIds: [],
     teamVersion: { id: 'atv_1', version: 1, createdAt: '2026-10-23T00:00:00.000Z', orchestrationVersion: 11 },
-    status: 'running', intent: '实现登录页', projectDirectory: '/tmp/project', mode: 'implement', modeRationale: null, modeDecidedAt: null,
+    status: 'running', intent: '实现登录页', projectDirectory: '/tmp/project', mode: 'implement_and_validate', modeRationale: null, modeDecidedAt: null,
     authorizedCommands: [], scopeRevision: 0, desiredControlState: 'none',
     tasks: [attempt({}), reviewer], documents: [], pendingInputs: [], operations: [], activities: [],
     progress: { phase: 'review', nextStep: 'review', totalAssignments: 0, completedAssignments: 0, activeDeveloperIds: [], waitingReason: null, percent: 80 },

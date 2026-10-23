@@ -115,6 +115,54 @@ describe('initializeDatabase restart recovery', () => {
     expect(tools['scripts/update-memory.mjs'].inputSchema.required).toEqual(['memoryId']);
     expect(chat.systemPrompt).toContain('project-category memories');
   });
+  it('registers the read-only local project lookup tool', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+
+    const [script] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/search-local-projects.mjs'))).limit(1);
+    const [manifest] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/tools.json'))).limit(1);
+    const [skill] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'SKILL.md'))).limit(1);
+    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
+
+    expect(script.content).toContain('/local-projects/search');
+    expect(script.content).toContain("raw.refresh === true");
+    const tools = JSON.parse(manifest.content) as Record<string, { name: string; inputSchema: { required: string[]; properties: Record<string, { type?: string; maximum?: number }> } }>;
+    expect(tools['scripts/search-local-projects.mjs'].name).toBe('search_local_projects');
+    expect(tools['scripts/search-local-projects.mjs'].inputSchema.required).toEqual(['query']);
+    expect(tools['scripts/search-local-projects.mjs'].inputSchema.properties.limit.maximum).toBe(50);
+    expect(tools['scripts/search-local-projects.mjs'].inputSchema.properties.refresh.type).toBe('boolean');
+    expect(skill.content).toContain('search_local_projects resolves a fuzzy project name');
+    expect(skill.content).toContain('metadata-only local project index');
+    expect(chat.systemPrompt).toContain('search_local_projects');
+  });
+
+  it('registers project alias tools that write only the alias dictionary', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+
+    const files = await db.select().from(schema.skillFiles).where(eq(schema.skillFiles.skillId, 'sk_worklite_platform'));
+    const content = new Map(files.map((file) => [file.path, file.content]));
+    const tools = JSON.parse(content.get('scripts/tools.json')!) as Record<string, { name: string; inputSchema: { required?: string[] } }>;
+    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
+
+    expect(content.get('scripts/set-local-project-alias.mjs')).toContain("method: 'PUT'");
+    expect(content.get('scripts/set-local-project-alias.mjs')).toContain('/local-projects/aliases');
+    expect(content.get('scripts/remove-local-project-alias.mjs')).toContain("method: 'DELETE'");
+    expect(content.get('scripts/list-local-project-aliases.mjs')).toContain('/local-projects/aliases');
+    expect(tools['scripts/set-local-project-alias.mjs'].name).toBe('set_local_project_alias');
+    expect(tools['scripts/set-local-project-alias.mjs'].inputSchema.required).toEqual(['alias', 'absolutePath']);
+    expect(tools['scripts/remove-local-project-alias.mjs'].name).toBe('remove_local_project_alias');
+    expect(tools['scripts/remove-local-project-alias.mjs'].inputSchema.required).toEqual(['alias']);
+    expect(tools['scripts/list-local-project-aliases.mjs'].name).toBe('list_local_project_aliases');
+    expect(tools['scripts/list-local-project-aliases.mjs'].inputSchema.required ?? []).toEqual([]);
+    // The model must not invent mappings: only user-stated ones are recorded.
+    expect(content.get('scripts/tools.json')).toContain('never guess a mapping');
+    expect(content.get('SKILL.md')).toContain('set_local_project_alias');
+    expect(content.get('SKILL.md')).toContain('dino-datahub');
+    expect(chat.systemPrompt).toContain('set_local_project_alias');
+    expect(chat.systemPrompt).toContain('never guessed or bulk-generated');
+  });
+
   it('registers dispatch_task without an Agent Team mode', async () => {
     db = createDb(':memory:');
     await initializeDatabase(db);

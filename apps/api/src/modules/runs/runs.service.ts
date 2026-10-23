@@ -26,6 +26,7 @@ import { AgentExecutionsService } from '../agents/agent-executions.service';
 import { WechatOfficialAccountService } from '../plugins/wechat-official-account.service';
 import { PortkeyGatewayService } from '../model-providers/portkey-gateway.service';
 import { renderCanvasSticker, validateCanvasStickerConfig } from './canvas-sticker';
+import { renderCanvasScript, validateCanvasRenderCode, validateCanvasRenderConfig } from './canvas-render';
 
 type RunListener = (event: RunProgressEvent) => void;
 type PreparedArtifactNode = {
@@ -307,6 +308,26 @@ export class RunsService {
             model: 'worklite/canvas-sticker',
             mediaType: 'image/png',
             data: [{ b64Json: png.toString('base64') }],
+          },
+        };
+      },
+    });
+    this.registry.register({
+      ...capability('worklite/canvas-render'),
+      execute: async (request) => {
+        const config = validateCanvasRenderConfig(request.config);
+        const input = asRecord(request.input);
+        const code = validateCanvasRenderCode(input?.code);
+        const rendered = await renderCanvasScript(config, code, request.signal);
+        return {
+          output: {
+            type: 'workflow_image',
+            model: 'worklite/canvas-render',
+            mediaType: 'image/png',
+            width: rendered.width,
+            height: rendered.height,
+            ...(config.key ? { key: config.key } : {}),
+            data: [{ b64Json: rendered.png.toString('base64') }],
           },
         };
       },
@@ -958,6 +979,9 @@ type GeneratedWorkflowImage = {
   type: 'workflow_image';
   model: string;
   mediaType: 'image/png';
+  width?: number;
+  height?: number;
+  key?: string;
   data: Array<{ b64Json: string }>;
 };
 
@@ -982,6 +1006,9 @@ function sanitizeWorkflowImages<T>(value: T): T {
     model: value.model,
     mediaType: value.mediaType,
     imageCount: value.data.length,
+    ...(typeof value.width === 'number' ? { width: value.width } : {}),
+    ...(typeof value.height === 'number' ? { height: value.height } : {}),
+    ...(typeof value.key === 'string' ? { key: value.key } : {}),
   } as T;
   if (!value || typeof value !== 'object') return value;
   const output: Record<string, unknown> = {};
