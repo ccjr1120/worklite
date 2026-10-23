@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router';
-import { AlertCircle, ChevronDown, FileStack, LoaderCircle, QrCode, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertCircle, Check, ChevronDown, FileStack, LoaderCircle, QrCode, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ArtifactView, RunProgressEvent, RunView } from '@worklite/contracts';
 import { RunExecutionView } from './run-execution-view';
@@ -96,8 +96,17 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
   const failureReason = failedNode?.error ?? getRunFailureReason(runDetail);
   const duration = run.durationSeconds == null ? null : durationParts(run.durationSeconds);
   const [qrReplacing, setQrReplacing] = useState(false);
+  const [qrRefreshError, setQrRefreshError] = useState<string | null>(null);
+  const [qrRefreshed, setQrRefreshed] = useState(false);
+  const [qrCacheBust, setQrCacheBust] = useState(0);
   const [cancelBusy, setCancelBusy] = useState(false);
   const [expiryTick, setExpiryTick] = useState(0);
+  const qrRefreshingRef = useRef(false);
+  const qrRefreshedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (qrRefreshedTimerRef.current) clearTimeout(qrRefreshedTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (!expanded) return;
@@ -120,9 +129,42 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
   const pendingStatus = pendingAction?.status ?? null;
   const pendingExpiresAt = pendingAction?.expiresAt ?? null;
 
-  // An expired code is replaced automatically: the server can observe the staleness,
-  // so the panel never asks the user to refresh it. Each distinct expiry marker is
-  // attempted once, so a server that returns an equally stale code cannot spin.
+  // A single entry point for both automatic expiry replacement and a manual
+  // click on the code. The in-flight ref is authoritative so a double click or
+  // a click racing the expiry timer still produces exactly one refresh.
+  const refreshQrCode = useCallback(async () => {
+    if (qrRefreshingRef.current) return;
+    qrRefreshingRef.current = true;
+    setQrReplacing(true);
+    setQrRefreshError(null);
+    setQrRefreshed(false);
+    if (qrRefreshedTimerRef.current) {
+      clearTimeout(qrRefreshedTimerRef.current);
+      qrRefreshedTimerRef.current = null;
+    }
+    try {
+      const next = await api.refreshRunPendingAction('personal', run.id);
+      queryClient.setQueryData(['run', run.id], next);
+      setQrCacheBust((value) => value + 1);
+      setQrRefreshed(true);
+      qrRefreshedTimerRef.current = setTimeout(() => {
+        setQrRefreshed(false);
+        qrRefreshedTimerRef.current = null;
+      }, 2_500);
+    } catch (cause) {
+      // Keep the previous code visible so the user can still try to scan it,
+      // and surface the server's reason instead of failing silently.
+      setQrRefreshError(cause instanceof Error && cause.message ? cause.message : t('runs:pendingAction.refreshFailed'));
+    } finally {
+      qrRefreshingRef.current = false;
+      setQrReplacing(false);
+    }
+  }, [run.id, t]);
+
+  // An expired code is also replaced automatically, so the user does not have
+  // to intervene; a manual click on the code goes through the same path. Each
+  // distinct expiry marker is attempted once, so a server that returns an
+  // equally stale code cannot spin.
   const replacedExpiryRef = useRef('');
 
   useEffect(() => {
@@ -131,21 +173,8 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
     const marker = `${pendingStatus ?? ''}:${pendingExpiresAt ?? ''}`;
     if (!expired || replacedExpiryRef.current === marker) return;
     replacedExpiryRef.current = marker;
-    let cancelled = false;
-    setQrReplacing(true);
-    void api
-      .refreshRunPendingAction('personal', run.id)
-      .then((next) => {
-        if (!cancelled) queryClient.setQueryData(['run', run.id], next);
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) setQrReplacing(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [expanded, hasPendingAction, pendingStatus, pendingExpiresAt, expiryTick, run.id]);
+    void refreshQrCode();
+  }, [expanded, hasPendingAction, pendingStatus, pendingExpiresAt, expiryTick, refreshQrCode]);
 
   useEffect(() => {
     if (!expanded || pendingExpiresAt === null) return;
@@ -198,13 +227,39 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
                     </div>
                     <StatusBadge status="waiting_for_input" />
                   </div>
-                  {pendingAction.qrCode ? <img src={pendingAction.qrCode} alt={t('runs:pendingAction.qrAlt')} className={cn('mt-4 size-48 rounded-md border border-border bg-white object-contain p-2 transition-opacity', qrReplacing && 'opacity-40')} /> : null}
+                  {pendingAction.qrCode ? (
+                    <div className="mt-4">
+                      <button
+                        type="button"
+                        onClick={() => void refreshQrCode()}
+                        disabled={qrReplacing}
+                        title={t('runs:pendingAction.refreshHint')}
+                        aria-label={t('runs:pendingAction.refreshHint')}
+                        aria-busy={qrReplacing}
+                        className="group block w-fit cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 focus-visible:ring-offset-2 disabled:cursor-wait"
+                      >
+                        <img
+                          key={qrCacheBust}
+                          src={withQrCacheBust(pendingAction.qrCode, qrCacheBust)}
+                          alt={t('runs:pendingAction.qrAlt')}
+                          className={cn('size-48 rounded-md border border-border bg-white object-contain p-2 transition-[opacity,border-color] group-hover:border-brand/50', qrReplacing && 'opacity-40')}
+                        />
+                      </button>
+                      <p className="mt-1.5 text-[13px] text-muted-foreground">{t('runs:pendingAction.refreshHint')}</p>
+                    </div>
+                  ) : null}
                   {qrReplacing ? (
                     <p className="mt-2 flex items-center gap-1.5 text-[13px] text-muted-foreground" role="status">
                       <LoaderCircle className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
                       {t('runs:pendingAction.replacing')}
                     </p>
+                  ) : qrRefreshed ? (
+                    <p className="mt-2 flex items-center gap-1.5 text-[13px] text-success" role="status">
+                      <Check className="size-3.5" aria-hidden="true" />
+                      {t('runs:pendingAction.refreshed')}
+                    </p>
                   ) : null}
+                  {qrRefreshError ? <p className="mt-2 text-[13px] text-danger" role="alert">{qrRefreshError}</p> : null}
                   <div className="mt-4 flex flex-wrap gap-2">
                     <Button type="button" size="compact" variant="ghost" onClick={() => void cancelRun()} disabled={cancelBusy}>{cancelBusy ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <X aria-hidden="true" />}{t('runs:pendingAction.cancel')}</Button>
                   </div>
@@ -253,6 +308,13 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
       </article>
     </li>
   );
+}
+
+function withQrCacheBust(source: string, version: number): string {
+  if (version === 0) return source;
+  // The backend returns a fresh data URI on every capture, but a hash keeps the
+  // element's URL distinct even if two captures happen to serialize identically.
+  return source.startsWith('data:') ? `${source}#refresh=${version}` : `${source}${source.includes('?') ? '&' : '?'}refresh=${version}`;
 }
 
 function getRunFailureReason(run: RunView | undefined): string | null {
