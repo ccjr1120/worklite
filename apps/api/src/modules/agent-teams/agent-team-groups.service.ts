@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, desc, eq, gt, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { basename, isAbsolute, resolve } from 'node:path';
@@ -24,6 +24,7 @@ import {
   agentTeamPendingInputs,
   agentTeamRuns,
   agentTeams,
+  chatSubmissions,
   type Database,
   type StoredAgentTeamRole,
 } from '@worklite/db';
@@ -321,12 +322,32 @@ export class AgentTeamGroupsService {
       const [message] = await this.db.select().from(agentTeamGroupMessages).where(eq(agentTeamGroupMessages.id, run.groupMessageId)).limit(1);
       if (!message) throw new NotFoundException('The original group message was not found.');
       const initialRole = run.targetRole === 'team-manager' ? 'planner' : run.targetRole;
+      const submissionId = `reexecute_${run.id}_${randomUUID()}`;
+      // A Run bound to a Chat conversation keeps its replacement in that conversation: the new
+      // Run gets its own task submission, so its card, pin, progress and terminal report follow it.
+      const [binding] = await this.db.select().from(chatSubmissions)
+        .where(and(eq(chatSubmissions.workspaceId, workspace.id), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'team'`, sql`json_extract(${chatSubmissions.reference}, '$.runId') = ${run.id}`))
+        .limit(1);
+      const reference = binding?.reference?.kind === 'team' ? binding.reference : null;
       await this.sendMessage(request, workspaceSlug, groupId, {
         body: message.body,
         recipientRole: initialRole,
         repositoryIds: run.repositoryIds,
-        submissionId: `reexecute_${run.id}_${randomUUID()}`,
-      });
+        submissionId,
+      }, binding && reference ? {
+        runId: `atrun_${randomUUID()}`,
+        accept: (transaction, acceptedRunId) => {
+          transaction.insert(chatSubmissions).values({
+            id: submissionId,
+            workspaceId: binding.workspaceId,
+            chatId: binding.chatId,
+            executionId: binding.executionId,
+            message: binding.message,
+            target: binding.target,
+            reference: { ...reference, runId: acceptedRunId },
+          }).run();
+        },
+      } : undefined);
     }
     await this.db.transaction((transaction) => {
       for (const run of runs) {

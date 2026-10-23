@@ -1,9 +1,10 @@
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Request } from 'express';
-import { createDb, initializeDatabase, agentTeamRuns, agentTeamVersions, agentTeams, type Database } from '@worklite/db';
+import { createDb, initializeDatabase, agentTeamRuns, agentTeamVersions, agentTeams, chatSubmissions, type Database } from '@worklite/db';
 import { AgentTeamGroupsService } from './agent-team-groups.service';
 import { AgentTeamsService } from './agent-teams.service';
 import type { AgentTeamConfigurationService } from './agent-team-configuration.service';
@@ -42,10 +43,19 @@ async function setup() {
     createdAt: now,
     updatedAt: now,
   });
+  await db.insert(agentTeamVersions).values({ id: 'atver_mock', workspaceId: 'workspace_personal', teamId: 'agent_team_test', version: 99, snapshot: { processId: 'bmad-tea', processVersion: '1', manifestHash: '', developerExecution: { kind: 'codex_app_server' }, orchestrationVersion: 11, roles: [] } as never, createdAt: now });
   const created: Array<Parameters<AgentTeamRuntimeService['createGroupRun']>[1]> = [];
   const runtime = {
     readGroupProjectInstructions: async () => [],
-    createGroupRun: async (_workspaceId: string, request: Parameters<AgentTeamRuntimeService['createGroupRun']>[1]) => { created.push(request); },
+    createGroupRun: async (_workspaceId: string, request: Parameters<AgentTeamRuntimeService['createGroupRun']>[1], acceptance: Parameters<AgentTeamRuntimeService['createGroupRun']>[2]) => {
+      created.push(request);
+      // Like the real runtime, the Run row commits together with its acceptance.
+      const at = new Date();
+      db!.transaction((transaction) => {
+        transaction.insert(agentTeamRuns).values({ id: acceptance.runId, workspaceId: 'workspace_personal', teamId: request.teamId, teamVersionId: 'atver_mock', intent: request.intent, projectDirectory: '', mode: 'plan_only', langGraphThreadId: `atthread_${acceptance.runId}`, groupId: request.groupId, groupMessageId: request.groupMessageId, targetRole: request.targetRole, repositoryIds: request.repositoryIds, createdAt: at, updatedAt: at }).run();
+        acceptance.accept(transaction, acceptance.runId);
+      });
+    },
   } as unknown as AgentTeamRuntimeService;
   const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal' }) } as unknown as WorkspaceService;
   const project = mkdtempSync(join(tmpdir(), 'worklite-team-dispatch-'));
@@ -84,6 +94,45 @@ describe('AgentTeamGroupsService.dispatchFromChat', () => {
     }, { runId: 'atrun_named', accept: () => undefined });
 
     expect(created[0]!.targetRole).toBe('reviewer');
+  });
+});
+
+describe('AgentTeamGroupsService.control', () => {
+  async function dispatchedRun() {
+    const context = await setup();
+    const groupId = `atgroup_chat_${createHash('sha256').update('workspace_personal:sub_team').digest('hex')}`;
+    await db!.insert(chatSubmissions).values({ id: 'sub_team', workspaceId: 'workspace_personal', executionId: 'aex_chat', message: '修复重考状态', target: { kind: 'team', teamId: 'agent_team_test', projectDirectory: context.project } });
+    await context.service.dispatchFromChat(request, 'personal', 'agent_team_test', {
+      message: '修复重考状态', projectDirectory: context.project, submissionId: 'sub_team', runId: 'atrun_first',
+    }, { runId: 'atrun_first', accept: (transaction, runId) => {
+      // Chat stores the group id with the Run reference (see ChatDispatchService).
+      const reference = { kind: 'team' as const, teamId: 'agent_team_test', runId, groupId };
+      transaction.update(chatSubmissions).set({ reference }).run();
+    } });
+    await db!.update(agentTeamRuns).set({ status: 'cancelled', finishedAt: new Date() });
+    return { ...context, groupId };
+  }
+
+  it('binds a re-executed Chat Run to the same conversation as a new task submission', async () => {
+    const { service, groupId } = await dispatchedRun();
+    await service.control(request, 'personal', groupId, { operation: 'reexecute', runIds: ['atrun_first'] });
+
+    const rows = await db!.select().from(chatSubmissions);
+    expect(rows).toHaveLength(2);
+    const original = rows.find((row) => row.id === 'sub_team');
+    const replacement = rows.find((row) => row.id !== 'sub_team');
+    expect(original!.reference).toMatchObject({ kind: 'team', runId: 'atrun_first' });
+    expect(replacement).toMatchObject({ executionId: 'aex_chat', chatId: null, message: '修复重考状态', target: original!.target, settled: false });
+    expect(replacement!.reference).toMatchObject({ kind: 'team', teamId: 'agent_team_test', groupId });
+    expect((replacement!.reference as { runId: string }).runId).not.toBe('atrun_first');
+  });
+
+  it('re-executes a Run without a Chat binding without creating a submission', async () => {
+    const { service, groupId } = await dispatchedRun();
+    await db!.delete(chatSubmissions);
+    await service.control(request, 'personal', groupId, { operation: 'reexecute', runIds: ['atrun_first'] });
+
+    expect(await db!.select().from(chatSubmissions)).toHaveLength(0);
   });
 });
 
