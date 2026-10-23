@@ -3,7 +3,8 @@
     "title": "设置",
     "usage": "用量",
     "auditLog": "审计日志",
-    "appearance": "外观"
+    "appearance": "外观",
+    "version": "版本"
   },
   "providers": {
     "title": "模型提供商",

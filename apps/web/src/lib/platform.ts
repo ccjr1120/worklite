@@ -15,8 +15,4 @@ function commandShortcutLabel(): string {
   return isApplePlatform() ? '⌘K' : 'Ctrl K';
 }
 
-function commandShortcutKeys(): string[] {
-  return isApplePlatform() ? ['⌘', 'K'] : ['Ctrl', 'K'];
-}
-
-export { commandShortcutKeys, commandShortcutLabel };
+export { commandShortcutLabel };
