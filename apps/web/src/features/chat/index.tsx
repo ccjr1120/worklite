@@ -193,13 +193,20 @@ function ChatWorkspace() {
     void navigate({ to: '/chat', search: { view: value, conversation: selectedConversationId ?? undefined } });
   }
 
-  function selectConversation(id: string | null) {
+  function selectConversation(id: string | null, options?: { discardDraft?: boolean }) {
     ++mainRequestGenerationRef.current;
     observedEventRef.current = { executionId: '', sequence: 0 };
-    conversationDrafts.set(selectedConversationId ?? 'new', { draft, queued, paused: queuePaused });
-    // Persist the outgoing draft at switch time as well, so the next keystroke is never
-    // required before the draft is safe on disk.
-    writeChatDraft(selectedConversationId, draft);
+    if (options?.discardDraft) {
+      // A slash command is not composer content: retire the text instead of carrying it
+      // into the conversation being left, where it would come back as a restored draft.
+      conversationDrafts.set(selectedConversationId ?? 'new', { draft: '', queued, paused: queuePaused });
+      writeChatDraft(selectedConversationId, '');
+    } else {
+      conversationDrafts.set(selectedConversationId ?? 'new', { draft, queued, paused: queuePaused });
+      // Persist the outgoing draft at switch time as well, so the next keystroke is never
+      // required before the draft is safe on disk.
+      writeChatDraft(selectedConversationId, draft);
+    }
     // Read the entry before dropping the new-conversation slot: its draft has to return
     // when the reader comes back to a conversation the server has not created yet.
     const remembered = conversationDrafts.get(id ?? 'new');
@@ -672,7 +679,7 @@ function ChatWorkspace() {
       return;
     }
     if (command === '/new') {
-      selectConversation(null);
+      selectConversation(null, { discardDraft: true });
       return;
     }
     if (command === '/summarize') {
