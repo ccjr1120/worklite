@@ -268,17 +268,18 @@ const WORKLITE_WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     id: 'wechat-official-account/publish',
     version: '2',
     name: 'WeChat Official Account',
-    purpose: 'Save a Markdown article with a generated PNG cover as a WeChat Official Account draft or publish it with human QR confirmation.',
+    purpose: 'Save a Markdown article with a generated PNG cover and optional inline images as a WeChat Official Account draft or publish it with human QR confirmation.',
     inputs: [
       { name: 'article', required: true, dataType: 'string', multiple: false },
       { name: 'metadata', required: false, dataType: 'json', multiple: false },
       { name: 'coverImage', required: true, dataType: 'json', multiple: false },
+      { name: 'images', required: false, dataType: 'json', multiple: true },
     ],
     outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
     inputSchema: {
       type: 'object',
       required: ['article', 'coverImage'],
-      properties: { article: { type: 'string' }, metadata: { type: 'object' }, coverImage: { type: 'object' } },
+      properties: { article: { type: 'string' }, metadata: { type: 'object' }, coverImage: { type: 'object' }, images: { type: 'array', items: { type: 'object' } } },
     },
     outputSchema: { type: 'object' },
     configSchema: {
