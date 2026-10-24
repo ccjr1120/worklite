@@ -4,6 +4,7 @@ import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { AgentVersionView, AgentView, CreateAgentRequest, ModelProviderView, UpdateAgentRequest } from '@worklite/contracts';
 import { agentExecutions, chatConfigurations, agentMcpServers, agentVersions, agents, agentSkills, mcpServers, scheduledAgentTasks, skills, type Database, type StoredProjectExecutor } from '@worklite/db';
+import { normalizePublicModelList } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { WorkspaceService } from '../teams/teams.service';
@@ -151,20 +152,24 @@ export class AgentsService {
       // Declared per-executor default models merge into the stored declarations; every declared model must
       // speak the protocol its executor supports, including declarations kept from the previous revision.
       const executorModelsPatch = input.defaultExecutorModels === undefined ? undefined : parseExecutorModelsPatch(input.defaultExecutorModels);
-      let mergedExecutorModels: Partial<Record<StoredProjectExecutor, string>> | undefined;
+      let mergedExecutorModels: Partial<Record<StoredProjectExecutor, string | string[]>> | undefined;
       if (executorModelsPatch !== undefined) {
         const [latest] = await this.db.select({ models: chatConfigurations.defaultExecutorModels }).from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
         mergedExecutorModels = mergeExecutorModels(latest?.models, executorModelsPatch);
-        // A native Codex designation is left to the operator's own Codex configuration; a declared Gateway
-        // public model must exist and speak a protocol the executor can reach through the Gateway.
+        // A native Codex designation is left to the operator's own Codex configuration; every declared
+        // Gateway public model candidate must exist and speak a protocol the executor can reach through
+        // the Gateway.
         for (const executor of ['claude', 'codex'] as const) {
           const declared = mergedExecutorModels[executor];
-          if (!declared || (executor === 'codex' && !isGatewayPublicModel(declared))) continue;
-          const runtime = await this.resources.publicModelRuntime(team.id, declared);
-          const protocols = PROJECT_EXECUTOR_PROTOCOLS[executor]!;
-          if (!protocols.includes(runtime.protocol)) {
-            const label = executor === 'codex' ? 'Codex' : 'Claude Code';
-            throw new BadRequestException(`${label} 需要 ${protocols.join(' 或 ')} 协议的 Gateway 模型。`);
+          if (!declared) continue;
+          for (const candidateModelId of normalizePublicModelList(declared)) {
+            if (executor === 'codex' && !isGatewayPublicModel(candidateModelId)) continue;
+            const runtime = await this.resources.publicModelRuntime(team.id, candidateModelId);
+            const protocols = PROJECT_EXECUTOR_PROTOCOLS[executor]!;
+            if (!protocols.includes(runtime.protocol)) {
+              const label = executor === 'codex' ? 'Codex' : 'Claude Code';
+              throw new BadRequestException(`${label} 需要 ${protocols.join(' 或 ')} 协议的 Gateway 模型。`);
+            }
           }
         }
       }
@@ -345,22 +350,24 @@ function normalizeResourceIds(input: unknown, resourceName: string): string[] {
   return [...new Set(input.map((value) => value.trim()).filter(Boolean))];
 }
 
-// A string declares a model, null or an empty string clears the declaration; other keys are rejected.
-function parseExecutorModelsPatch(input: unknown): Partial<Record<StoredProjectExecutor, string | null>> {
+// A string declares one model, an array declares an ordered list of fallback candidates, null
+// or an empty string clears the declaration; other keys are rejected.
+function parseExecutorModelsPatch(input: unknown): Partial<Record<StoredProjectExecutor, string | string[] | null>> {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new BadRequestException('Default executor models must be an object keyed by executor.');
-  const patch: Partial<Record<StoredProjectExecutor, string | null>> = {};
+  const patch: Partial<Record<StoredProjectExecutor, string | string[] | null>> = {};
   for (const [key, value] of Object.entries(input)) {
     if (key !== 'claude' && key !== 'codex') throw new BadRequestException('Default executor models must be keyed by claude or codex.');
     if (value === null || (typeof value === 'string' && !value.trim())) patch[key] = null;
     else if (typeof value === 'string') patch[key] = value.trim();
-    else throw new BadRequestException('A default executor model must be a Gateway public model id or null.');
+    else if (Array.isArray(value) && value.length > 0 && value.every((entry) => typeof entry === 'string' && entry.trim())) patch[key] = value.map((entry) => entry.trim());
+    else throw new BadRequestException('A default executor model must be a Gateway public model id, a non-empty array of them, or null.');
   }
   return patch;
 }
 
-function mergeExecutorModels(current: Partial<Record<StoredProjectExecutor, string>> | undefined, patch: Partial<Record<StoredProjectExecutor, string | null>>): Partial<Record<StoredProjectExecutor, string>> {
-  const merged: Partial<Record<StoredProjectExecutor, string>> = { ...(current ?? {}) };
-  for (const [executor, model] of Object.entries(patch) as Array<[StoredProjectExecutor, string | null]>) {
+function mergeExecutorModels(current: Partial<Record<StoredProjectExecutor, string | string[]>> | undefined, patch: Partial<Record<StoredProjectExecutor, string | string[] | null>>): Partial<Record<StoredProjectExecutor, string | string[]>> {
+  const merged: Partial<Record<StoredProjectExecutor, string | string[]>> = { ...(current ?? {}) };
+  for (const [executor, model] of Object.entries(patch) as Array<[StoredProjectExecutor, string | string[] | null]>) {
     if (model === null) delete merged[executor];
     else merged[executor] = model;
   }

@@ -408,7 +408,9 @@ export type StoredProjectExecutor = 'codex' | 'claude';
 export type StoredChatCapabilities = {
   revision: number;
   defaultExecutor?: StoredProjectExecutor;
-  defaultExecutorModels?: Partial<Record<StoredProjectExecutor, string>>;
+  // A declared default is one model id, or an ordered list of fallback candidates; historical
+  // snapshots only ever hold a single string.
+  defaultExecutorModels?: Partial<Record<StoredProjectExecutor, string | string[]>>;
   agent: { id: string; providerId: string | null; model: string; systemPrompt: string };
   skills: Array<{ id: string; name: string; instructions: string; files: Array<{ path: string; content: string }> }>;
   mcpServers: Array<{ id: string; name: string; endpoint: string; authSecret: string | null; allowedTools: string[] }>;
@@ -421,8 +423,10 @@ export const chatConfigurations = sqliteTable('chat_bot_configurations', {
   // Custom /summarize prompt; an empty string falls back to the built-in default at summarize time.
   summarizePrompt: text('summarize_prompt').notNull().default(''),
   defaultExecutor: text('default_executor').$type<StoredProjectExecutor>().notNull().default('claude'),
-  // Per-executor declared default Gateway public model ids; an absent key falls back to the executor's own default.
-  defaultExecutorModels: text('default_executor_models', { mode: 'json' }).$type<Partial<Record<StoredProjectExecutor, string>>>().notNull().default({}),
+  // Per-executor declared default Gateway public model ids; an absent key falls back to the executor's own
+  // default. Each value is one model id or an ordered list of fallback candidates; a historical row only
+  // ever holds a single string, which normalizePublicModelList() treats as a one-element list.
+  defaultExecutorModels: text('default_executor_models', { mode: 'json' }).$type<Partial<Record<StoredProjectExecutor, string | string[]>>>().notNull().default({}),
   // Workspace MCP servers injected into Claude Code project tasks; empty keeps the executor's launch unchanged.
   projectTaskMcpServerIds: text('project_task_mcp_server_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
   providerId: text('provider_id'), model: text('model').notNull(),

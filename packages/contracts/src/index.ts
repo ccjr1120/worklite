@@ -253,7 +253,8 @@ export type PluginTestResult = {
 };
 
 export type AgentView = {
-  chatConfiguration?: { revision: number; extensionPrompt: string; summarizePrompt: string; defaultExecutor: ProjectExecutor; defaultExecutorModels: Partial<Record<ProjectExecutor, string>>; projectTaskMcpServerIds: string[] };
+  // Each declared executor default is one model id, or an ordered list of fallback candidates.
+  chatConfiguration?: { revision: number; extensionPrompt: string; summarizePrompt: string; defaultExecutor: ProjectExecutor; defaultExecutorModels: Partial<Record<ProjectExecutor, string | string[]>>; projectTaskMcpServerIds: string[] };
   id: string;
   workspaceSlug: string;
   kind: 'system' | 'custom';
@@ -503,8 +504,9 @@ export type UpdateAgentRequest = Partial<CreateAgentRequest> & {
   // Custom prompt for /summarize; an omitted key keeps it, an empty string restores the built-in default.
   summarizePrompt?: string;
   defaultExecutor?: ProjectExecutor;
-  // Declared default Gateway public model per executor: a string sets it, null clears it, an omitted key keeps it.
-  defaultExecutorModels?: Partial<Record<ProjectExecutor, string | null>>;
+  // Declared default Gateway public model per executor: one model id or an ordered list of
+  // fallback candidates sets it, null clears it, an omitted key keeps it.
+  defaultExecutorModels?: Partial<Record<ProjectExecutor, string | string[] | null>>;
   // Workspace MCP servers injected into Claude Code project tasks; an omitted key keeps the declaration.
   projectTaskMcpServerIds?: string[];
   expectedConfigurationRevision?: number;

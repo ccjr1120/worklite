@@ -39,6 +39,16 @@ const RESTARTED_AGENT_ERROR = 'The API restarted before this Chat turn completed
 type QueuedMessage = { id: string; text: string };
 type ActiveWorkflowRun = { workflow: WorkflowView; run: RunView; input: string };
 type PendingReceipt = ChatConversationView['pendingReceipts'][number];
+// A declared executor default is one model id, an ordered fallback list, or absent; the editor
+// represents both forms as one comma-separated text field.
+function modelListToText(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value.join(', ') : value ?? '';
+}
+function textToModelList(value: string): string | string[] | null {
+  const entries = value.split(',').map((entry) => entry.trim()).filter(Boolean);
+  if (entries.length === 0) return null;
+  return entries.length === 1 ? entries[0]! : entries;
+}
 const conversationDrafts = new Map<string, { draft: string; queued: QueuedMessage[]; paused: boolean }>();
 const NO_SUBMISSIONS: ChatSubmissionView[] = [];
 const NO_RECEIPTS: PendingReceipt[] = [];
@@ -114,7 +124,8 @@ function ChatWorkspace() {
   const [settingsOpen, setSettingsOpen] = useState(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories');
   const [settingsSection, setSettingsSection] = useState<SettingsSection>(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories' ? locationSearch.view : 'configuration');
   const [configSelection, setConfigSelection] = useState('');
-  // '' means the executor's own local default; a non-empty value is a declared Gateway public model id.
+  // '' means the executor's own local default; a non-empty comma-separated list declares one model
+  // or an ordered list of fallback candidates (first entry tried first).
   const [executorModels, setExecutorModels] = useState<Record<ProjectExecutor, string>>({ claude: '', codex: '' });
   const [configSaving, setConfigSaving] = useState(false);
   const [extensionPrompt, setExtensionPrompt] = useState('');
@@ -151,7 +162,10 @@ function ChatWorkspace() {
     setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
     setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
     setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
-    setExecutorModels({ claude: agentQuery.data.chatConfiguration?.defaultExecutorModels?.claude ?? '', codex: agentQuery.data.chatConfiguration?.defaultExecutorModels?.codex ?? '' });
+    setExecutorModels({
+      claude: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.claude),
+      codex: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.codex),
+    });
   }, [agentQuery.data]);
 
   const saveConfiguration = async (selection: string, prompt = extensionPrompt, models = executorModels, summarize = summarizePrompt) => {
@@ -164,7 +178,7 @@ function ChatWorkspace() {
         providerId: separator >= 0 ? selection.slice(0, separator) : null,
         model: separator >= 0 ? selection.slice(separator + 2) : '',
         extensionPrompt: prompt, summarizePrompt: summarize, expectedConfigurationRevision: agentQuery.data?.chatConfiguration?.revision,
-        defaultExecutorModels: { claude: models.claude || null, codex: models.codex || null },
+        defaultExecutorModels: { claude: textToModelList(models.claude), codex: textToModelList(models.codex) },
       });
       queryClient.setQueryData(['agent', CHAT_AGENT_ID], saved);
     } catch (cause) {
@@ -172,7 +186,10 @@ function ChatWorkspace() {
       if (agentQuery.data) {
         setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
         setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
-        setExecutorModels({ claude: agentQuery.data.chatConfiguration?.defaultExecutorModels?.claude ?? '', codex: agentQuery.data.chatConfiguration?.defaultExecutorModels?.codex ?? '' });
+        setExecutorModels({
+          claude: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.claude),
+          codex: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.codex),
+        });
       }
     } finally { setConfigSaving(false); }
   };
@@ -943,7 +960,8 @@ function ChatWorkspace() {
               {settingsSection === 'configuration' ? (
                 <Configuration providers={providersQuery.data ?? []} selection={configSelection}
                   onSelectionChange={(value) => { setConfigSelection(value); void saveConfiguration(value); }}
-                  executorModels={executorModels} onExecutorModelChange={(executor, value) => { const next = { ...executorModels, [executor]: value }; setExecutorModels(next); void saveConfiguration(configSelection, extensionPrompt, next); }}
+                  executorModels={executorModels} onExecutorModelChange={(executor, value) => { setExecutorModels((current) => ({ ...current, [executor]: value })); }}
+                  onExecutorModelSave={(executor) => { if (executorModels[executor] !== modelListToText(agentQuery.data?.chatConfiguration?.defaultExecutorModels?.[executor])) void saveConfiguration(configSelection, extensionPrompt, executorModels); }}
                   extensionPrompt={extensionPrompt} onPromptChange={setExtensionPrompt} onPromptSave={() => { if (extensionPrompt !== (agentQuery.data?.chatConfiguration?.extensionPrompt ?? '')) void saveConfiguration(configSelection); }}
                   summarizePrompt={summarizePrompt} onSummarizePromptChange={setSummarizePrompt} onSummarizePromptSave={() => { if (summarizePrompt !== (agentQuery.data?.chatConfiguration?.summarizePrompt ?? '')) void saveConfiguration(configSelection); }}
                   saving={configSaving} error={configError} loading={agentQuery.isLoading || providersQuery.isLoading}

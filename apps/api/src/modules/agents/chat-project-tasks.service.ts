@@ -5,6 +5,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { agentExecutions, agentToolCalls, chatConfigurations, chatProjectOperations, chatProjectTasks, chatProjectTaskSubscriptions, type Database, type StoredProjectExecutor, type StoredProjectExecutorLaunch, type StoredProjectExecutorModelSource, type StoredProjectTaskSteerInstruction } from '@worklite/db';
 import type { AnswerAgentQuestionRequest, ChatProjectOperationDetailView, ChatProjectTaskView } from '@worklite/contracts';
+import { normalizePublicModelList } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { ClaudeCodeError } from './claude-code.service';
@@ -133,8 +134,10 @@ export class ChatProjectTasksService {
     if (!execution?.capabilitySnapshot) throw new ConflictException('This Chat turn has no captured capabilities; start a new turn.');
     const executor: StoredProjectExecutor = (value.executor as StoredProjectExecutor | undefined) ?? execution.capabilitySnapshot.defaultExecutor ?? 'claude';
     // Model precedence: task parameter, then the Chat configuration's declared default for this
-    // executor, then the executor's own local default. The launch records the effective model and its source.
-    const declaredModel = execution.capabilitySnapshot.defaultExecutorModels?.[executor]?.trim() || null;
+    // executor, then the executor's own local default. The launch records the effective model and its
+    // source. A project executor launches one native process with no Gateway-level fallback loop, so a
+    // declared fallback list here only ever uses its first (primary) candidate.
+    const declaredModel = normalizePublicModelList(execution.capabilitySnapshot.defaultExecutorModels?.[executor] ?? '')[0] ?? null;
     const model = requestedModel ?? declaredModel;
     const launch = await this.executors.captureLaunch(executor, model);
     if (model) await this.executors.requireModel(workspaceId, executor, model);
