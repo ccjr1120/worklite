@@ -1,5 +1,6 @@
 import type { AgentTeamRunCurrentView, AgentTeamTaskAttemptView } from '@worklite/contracts';
 import type { StoredAgentTeamVersionSnapshot } from '@worklite/db';
+import { normalizePublicModelList } from '@worklite/model-gateway';
 
 const RESERVED_DEVELOPER_ID = 'developer';
 const IN_FLIGHT_STATUSES: ReadonlySet<AgentTeamTaskAttemptView['status']> = new Set(['running', 'waiting_for_input', 'waiting_for_recovery']);
@@ -17,7 +18,8 @@ export function effectiveTaskModel(snapshot: StoredAgentTeamVersionSnapshot, tas
   const role = snapshot.roles.find((item) => item.role === task.role);
   const developerId = task.developerId ?? RESERVED_DEVELOPER_ID;
   const instance = role?.developerInstances?.find((candidate) => candidate.developerId === developerId);
-  const configured = (instance ?? role)?.publicModelId.trim();
+  // The view reports the primary (first) candidate when a fallback list is declared.
+  const configured = normalizePublicModelList((instance ?? role)?.publicModelId ?? '')[0];
   if (configured) return configured;
   const orchestrationVersion = snapshot.orchestrationVersion ?? 1;
   const executorBacked = task.role === 'developer' || (orchestrationVersion >= 7 && Boolean(role?.executor));

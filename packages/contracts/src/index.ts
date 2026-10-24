@@ -1427,7 +1427,9 @@ export type AgentTeamMode = 'plan_only' | 'validate_existing' | 'implement_and_v
 export type AgentTeamRoleConfiguration = {
   role: AgentTeamRoleId;
   displayName?: string;
-  publicModelId: string;
+  // One declared model id, or an ordered list of fallback candidates; an empty string keeps the
+  // "use the Team/executor default" meaning.
+  publicModelId: string | string[];
   instructions: string;
   entryPoints: string[];
   skillIds: string[];

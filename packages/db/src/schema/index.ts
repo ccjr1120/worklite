@@ -663,7 +663,9 @@ export type StoredAgentTeamProjectInstructionFile = {
 export type StoredAgentTeamDeveloperInstanceConfiguration = {
   developerId: string;
   label: string;
-  publicModelId: string;
+  // One declared model id, or an ordered list of fallback candidates; an empty string keeps the
+  // historical "use the Team/executor default" meaning.
+  publicModelId: string | string[];
   instructions: string;
   entryPoints: string[];
   processReferences?: string[];
@@ -676,7 +678,9 @@ export type StoredAgentTeamDeveloperInstanceConfiguration = {
 export type StoredAgentTeamRoleConfiguration = {
   role: StoredAgentTeamRole;
   displayName?: string;
-  publicModelId: string;
+  // One declared model id, or an ordered list of fallback candidates; an empty string keeps the
+  // historical "use the Team/executor default" meaning.
+  publicModelId: string | string[];
   instructions: string;
   entryPoints: string[];
   processReferences?: string[];

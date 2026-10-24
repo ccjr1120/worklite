@@ -11,6 +11,7 @@ import {
   type Database,
   type StoredAgentTeamRoleConfiguration,
 } from '@worklite/db';
+import { normalizePublicModelList } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { PROJECT_EXECUTOR_PROTOCOLS } from '../agents/project-executor.types';
@@ -113,16 +114,24 @@ export class AgentTeamConfigurationService {
 
     const normalized: Array<Omit<StoredAgentTeamRoleConfiguration, 'skills' | 'mcpServers'>> = [];
     for (const [role, value] of byRole) {
-      if (typeof value.publicModelId !== 'string') throw new BadRequestException(`A public model id for Agent Team role ${role} must be a string.`);
-      const publicModelId = value.publicModelId.trim();
+      if (typeof value.publicModelId !== 'string' && (!Array.isArray(value.publicModelId) || value.publicModelId.some((id) => typeof id !== 'string'))) {
+        throw new BadRequestException(`A public model id for Agent Team role ${role} must be a string or an array of strings.`);
+      }
+      const publicModelIds = normalizePublicModelList(value.publicModelId);
+      // A single empty string keeps the historical "use the Team/executor default" meaning; an
+      // array is always a declared fallback list, with its first candidate taking that role.
+      const publicModelId: string | string[] = Array.isArray(value.publicModelId) ? publicModelIds : (publicModelIds[0] ?? '');
       if (value.executor !== undefined && value.executor !== null && value.executor !== 'claude' && value.executor !== 'codex') throw new BadRequestException(`The executor for Agent Team role ${role} must be claude or codex.`);
       const executor = role === 'developer' ? value.executor ?? 'claude' : value.executor ?? undefined;
-      const runtime = publicModelId ? await this.resources.publicModelRuntime(workspaceId, publicModelId) : undefined;
-      // A role's publicModelId is always a Gateway public id, so it must speak a protocol its executor
-      // can reach through the Gateway (Claude Code: anthropic/messages, Codex: openai or codex responses).
+      // A role's publicModelId is always a Gateway public id, so every declared candidate must speak a
+      // protocol its executor can reach through the Gateway (Claude Code: anthropic/messages, Codex:
+      // openai or codex responses).
       const protocols = executor ? PROJECT_EXECUTOR_PROTOCOLS[executor] : undefined;
-      if (executor && runtime && protocols && !protocols.includes(runtime.protocol)) {
-        throw new BadRequestException(`The ${role} model must use ${protocols.join(' or ')} for the ${executor} executor.`);
+      for (const candidateModelId of publicModelIds) {
+        const runtime = await this.resources.publicModelRuntime(workspaceId, candidateModelId);
+        if (executor && protocols && !protocols.includes(runtime.protocol)) {
+          throw new BadRequestException(`The ${role} model must use ${protocols.join(' or ')} for the ${executor} executor.`);
+        }
       }
       if (typeof value.instructions !== 'string' || !value.instructions.trim()) throw new BadRequestException(`Instructions for Agent Team role ${role} are required.`);
       const displayName = value.displayName === undefined ? undefined : value.displayName.trim();
