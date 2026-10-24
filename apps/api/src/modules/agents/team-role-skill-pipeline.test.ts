@@ -81,7 +81,7 @@ describe('Team role Skill pipeline', () => {
       return { text: 'ok' };
     });
     const invocation = new IsolatedAgentInvocationService(
-      { publicModelRuntime: async () => ({ provider: {}, model: 'model' }) } as never,
+      { publicModelCandidates: async () => [{ provider: {}, model: 'model' }] } as never,
       {} as never,
       { discover: async () => [] } as never,
       { toolDefinitions: (names?: readonly string[]) => (names ?? []).map((name) => ({ name, description: '', inputSchema: { type: 'object' } })) } as never,

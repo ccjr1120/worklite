@@ -86,7 +86,8 @@ export type AgentInvocationOperationJournal = {
 
 type IsolatedAgentInvocationRequest = {
   workspaceId: string;
-  publicModelId: string;
+  // One declared Gateway public model id, or an ordered list of fallback candidates.
+  publicModelId: string | readonly string[];
   systemPrompt: string;
   context: unknown;
   skills: readonly AgentInvocationSkill[];
@@ -209,7 +210,7 @@ export class IsolatedAgentInvocationService {
     ].filter(Boolean).join('\n\n');
 
     const mcpTools = await this.mcpRuntime.discover(request.mcpRuntimes, request.signal);
-    const runtime = await this.resources.publicModelRuntime(request.workspaceId, request.publicModelId);
+    const candidates = await this.resources.publicModelCandidates(request.workspaceId, request.publicModelId);
     const contextText = typeof request.context === 'string' ? request.context : JSON.stringify(request.context);
     const maxRounds = Math.min(request.limits?.maxToolRounds ?? MAX_TOOL_ROUNDS, MAX_TOOL_ROUNDS);
     const skillReferenceTool: GatewayToolDefinition = {
@@ -223,8 +224,7 @@ export class IsolatedAgentInvocationService {
       },
     };
     const result = await createModelGateway().runWorkflowAgent({
-      provider: runtime.provider,
-      model: runtime.model,
+      candidates,
       systemPrompt: effectiveSystemPrompt,
       initialUserContent: contextText?.trim() ? contextText : 'No input was provided.',
       jsonOutput: request.jsonOutput,
