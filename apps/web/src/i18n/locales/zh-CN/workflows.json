@@ -143,6 +143,7 @@
     "agentNodeDescription": "配置模型、系统提示词、Skill 和 MCP 服务",
     "model": "模型",
     "selectModel": "选择模型",
+    "modelListHint": "一个 provider/model 公开模型 id，或用英文逗号分隔的多个候选模型（按顺序逐个尝试，用于自动 fallback）",
     "outputFormat": "输出格式",
     "outputFormatDescription": "JSON 模式会将 Agent 最终回答解析为工作流 JSON。无效 JSON 会导致节点失败。",
     "outputFormats": {

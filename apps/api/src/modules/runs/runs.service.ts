@@ -135,13 +135,14 @@ export class RunsService {
       execute: async (request) => {
         const config = asRecord(request.config);
         const inputs = asRecord(request.input);
-        if (!config || typeof config.model !== 'string' || typeof config.systemPrompt !== 'string') throw new Error('Agent node requires a model and system prompt.');
+        const configModel = modelOrList(config?.model);
+        if (!config || !configModel || typeof config.systemPrompt !== 'string') throw new Error('Agent node requires a model and system prompt.');
         if (!Array.isArray(config.skillIds) || config.skillIds.some((id) => typeof id !== 'string')) throw new Error('Agent node requires valid Skill identifiers.');
         if (!Array.isArray(config.mcpServerIds) || config.mcpServerIds.some((id) => typeof id !== 'string')) throw new Error('Agent node requires valid MCP server identifiers.');
         const context = inputs && Object.prototype.hasOwnProperty.call(inputs, 'context') ? inputs.context : request.context.variables.workflowInput;
         const response = await this.agentExecutions.executeWorkflowAgent(
           request.context.workspaceId,
-          config.model,
+          configModel,
           context,
           config.systemPrompt,
           config.skillIds as string[],
@@ -1021,6 +1022,14 @@ function rankSystemOneMapResults(entries: Record<string, unknown>[], rank: unkno
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+// An Agent node's model configuration is one public model id, or an ordered list of fallback
+// candidates; a historical row only ever holds a single string.
+function modelOrList(value: unknown): string | string[] | null {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value) && value.length > 0 && value.every((id) => typeof id === 'string')) return value as string[];
+  return null;
 }
 
 function describeWorkflowEdgeCondition(condition: StoredWorkflowEdge['condition']): string {

@@ -1005,7 +1005,10 @@ function WorkflowEditorPage() {
           <Field label={t('editor.errorPolicy')} htmlFor="system-one-policy"><Select value={selectedNode.data.errorPolicy} onValueChange={(value) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, errorPolicy: value as 'stop' | 'retry' } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="system-one-policy"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="stop">{t('editor.stop')}</SelectItem><SelectItem value="retry">{t('editor.retry')}</SelectItem></SelectContent></Select></Field>
         </> : null}
         {selectedNode.data.nodeType === 'agent' ? <>
-          <Field label={t('editor.model')} htmlFor="agent-model"><Select value={selectedNode.data.model} onValueChange={(value) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, model: value } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="agent-model"><SelectValue placeholder={t('editor.selectModel')} /></SelectTrigger><SelectContent>{modelOptions.map((model) => <SelectItem key={model} value={model}>{model}</SelectItem>)}</SelectContent></Select></Field>
+          <Field label={t('editor.model')} htmlFor="agent-model" hint={t('editor.modelListHint')}>
+            <Input id="agent-model" list="agent-model-options" value={selectedNode.data.model ?? ''} placeholder={t('editor.selectModel')} onChange={(event) => { const model = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, model } } : node)); setSaveState('unsaved'); }} />
+            <datalist id="agent-model-options">{modelOptions.map((model) => <option key={model} value={model} />)}</datalist>
+          </Field>
           <Field label={t('editor.systemPrompt')} htmlFor="agent-system-prompt"><Textarea id="agent-system-prompt" value={selectedNode.data.systemPrompt ?? ''} onChange={(event) => { const systemPrompt = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, systemPrompt } } : node)); setSaveState('unsaved'); }} /></Field>
           <Field label={t('editor.outputFormat')} htmlFor="agent-output-format" hint={t('editor.outputFormatDescription')}><Select value={selectedNode.data.outputFormat ?? 'text'} onValueChange={(value) => { const outputFormat = value as 'text' | 'json'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, outputFormat } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="agent-output-format"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">{t('editor.outputFormats.text')}</SelectItem><SelectItem value="json">{t('editor.outputFormats.json')}</SelectItem></SelectContent></Select></Field>
           <div><p className="text-[12px] font-medium">{t('editor.skills')}</p><div className="mt-2 space-y-2">{availableSkills.map((skill) => { const checked = (selectedNode.data.skillIds ?? []).includes(skill.id); return <label key={skill.id} className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-[13px]"><Checkbox checked={checked} onCheckedChange={(value) => { const nextIds = value === true ? [...new Set([...(selectedNode.data.skillIds ?? []), skill.id])] : (selectedNode.data.skillIds ?? []).filter((id) => id !== skill.id); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, skillIds: nextIds, skillNames: availableSkills.filter((item) => nextIds.includes(item.id)).map((item) => item.name) } } : node)); setSaveState('unsaved'); }} aria-label={skill.name} /><span>{skill.name}</span></label>; })}</div></div>
@@ -1168,7 +1171,9 @@ function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
         nodeType,
         label: identity.label,
         ...(identity.description ? { description: identity.description } : {}),
-        model: typeof config.model === 'string' ? config.model : '',
+        // An Agent node's model is one public model id or an ordered fallback list; the editor
+        // represents both forms as one comma-separated text field.
+        model: typeof config.model === 'string' ? config.model : Array.isArray(config.model) ? config.model.filter((entry): entry is string => typeof entry === 'string').join(', ') : '',
         systemPrompt: typeof config.systemPrompt === 'string' ? config.systemPrompt : '',
         outputFormat: config.outputFormat === 'json' || config.outputFormat === 'text' ? config.outputFormat : 'text',
         systemOneQuestions: config.questions && typeof config.questions === 'object' && !Array.isArray(config.questions) ? config.questions as Record<string, unknown> : {},
@@ -1342,6 +1347,13 @@ function wouldCreateCycle(source: string, target: string, edges: WorkflowCanvasE
   return false;
 }
 
+// An Agent node's model field holds one public model id, or a comma-separated ordered list of
+// fallback candidates; empty text means no model is configured yet (draft-only).
+function parseModelListField(value: string | undefined): string | string[] {
+  const entries = (value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
+  return entries.length <= 1 ? entries[0] ?? '' : entries;
+}
+
 function toDefinitionNode(node: WorkflowCanvasNode): WorkflowNodeDefinition {
   const description = node.data.description?.trim();
   // Start from the loaded config so fields the inspector does not render (output
@@ -1429,7 +1441,7 @@ function toDefinitionNode(node: WorkflowCanvasNode): WorkflowNodeDefinition {
   } else {
     config = {
       ...base,
-      model: node.data.model ?? '',
+      model: parseModelListField(node.data.model),
       systemPrompt: node.data.systemPrompt ?? '',
       outputFormat: node.data.outputFormat === 'json' ? 'json' : 'text',
       skillIds: node.data.skillIds ?? [],
