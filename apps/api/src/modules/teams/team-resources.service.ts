@@ -53,7 +53,7 @@ import {
   type Database,
   type StoredWorkflowDefinition,
 } from '@worklite/db';
-import type { ModelProviderConfig } from '@worklite/model-gateway';
+import { normalizePublicModelList, type ModelCandidate, type ModelProviderConfig } from '@worklite/model-gateway';
 import { listWorkflowNodeCapabilities } from '@worklite/workflow-engine';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from './teams.service';
@@ -517,6 +517,18 @@ export class WorkspaceResourcesService {
     const separator = publicModelId.indexOf('/');
     const model = publicModelId.slice(separator + 1).trim();
     return this.providerRuntime({} as Request, 'personal', provider.id, model);
+  }
+
+  // Resolves a declared model slot (one public model id, or an ordered list of fallback
+  // candidates) into the Gateway's ModelCandidate list, in the declared order, for
+  // withModelFallback. Every candidate is validated the same way publicModelRuntime validates one.
+  async publicModelCandidates(workspaceId: string, publicModelIdOrList: string | readonly string[]): Promise<ModelCandidate[]> {
+    const ids = normalizePublicModelList(publicModelIdOrList);
+    if (ids.length === 0) throw new BadRequestException('A public provider/model id is required.');
+    return Promise.all(ids.map(async (publicModelId) => {
+      const runtime = await this.publicModelRuntime(workspaceId, publicModelId);
+      return { provider: runtime.provider, model: runtime.model };
+    }));
   }
 
   async assertPublicAgentModel(publicModelId: string): Promise<void> {

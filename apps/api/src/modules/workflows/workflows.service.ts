@@ -651,7 +651,13 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
         if (outside.length > 0) throw new BadRequestException(`Agent node allowEmptyOutputKeys must be part of outputContract: ${outside.join(', ')}.`);
       }
     }
-    if (requireCompleteAgents && (typeof value.model !== 'string' || !/^[^/]+\/.+/.test(value.model.trim()))) throw new BadRequestException('Every Agent node must contain a public provider/model id before publication.');
+    // The generic configSchema property loop above leaves model untyped (it accepts a string or
+    // an array of fallback candidates), so its shape is checked here instead; a draft may still
+    // carry an empty string or array before a value is chosen.
+    if (value.model !== undefined && typeof value.model !== 'string' && (!Array.isArray(value.model) || value.model.some((entry) => typeof entry !== 'string'))) {
+      throw new BadRequestException('Agent node model must be a string or an array of strings.');
+    }
+    if (requireCompleteAgents && !isPublicModelIdOrList(value.model)) throw new BadRequestException('Every Agent node must contain a public provider/model id before publication.');
   }
   if (type === 'typesafe/systemone' && requireCompleteAgents && (typeof value.model !== 'string' || !/^[^/]+\/.+/.test(value.model.trim()))) {
     throw new BadRequestException('Every TypeSafe System One node must contain a public provider/model id before publication.');
@@ -947,6 +953,16 @@ function isGeneratedImageConnectionAllowed(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+// An Agent/TypeSafe System One node's model configuration is one public provider/model id, or an
+// ordered list of fallback candidates; a historical row only ever holds a single string.
+function isPublicModelId(value: unknown): value is string {
+  return typeof value === 'string' && /^[^/]+\/.+/.test(value.trim());
+}
+
+function isPublicModelIdOrList(value: unknown): value is string | string[] {
+  return isPublicModelId(value) || (Array.isArray(value) && value.length > 0 && value.every(isPublicModelId));
 }
 
 function toVersionView(row: typeof workflowVersions.$inferSelect): WorkflowVersionView {

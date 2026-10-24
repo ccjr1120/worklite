@@ -192,8 +192,7 @@ export class ChatConversationsService {
     const [configuration] = await this.db.select({ summarizePrompt: chatConfigurations.summarizePrompt }).from(chatConfigurations).where(eq(chatConfigurations.workspaceId, workspace.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
     const runtime = await this.resources.providerRuntime(request, 'personal', agent.providerId, agent.model);
     const { text } = await createModelGateway().streamText({
-      provider: runtime.provider,
-      model: runtime.model,
+      candidates: [{ provider: runtime.provider, model: runtime.model }],
       systemPrompt: configuration?.summarizePrompt.trim() || DEFAULT_SUMMARIZE_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: transcript }],
     }).result;

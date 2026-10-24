@@ -22,7 +22,10 @@ const dinoSkill = {
 };
 
 function service() {
-  const resources = { publicModelRuntime: async () => ({ provider: { id: 'provider' }, model: 'model' }) };
+  const resources = {
+    publicModelRuntime: async () => ({ provider: { id: 'provider' }, model: 'model' }),
+    publicModelCandidates: async () => [{ provider: { id: 'provider' }, model: 'model' }],
+  };
   const mcpRuntime = { discover: async () => [] };
   const builtinTools = {
     toolDefinitions: (names?: readonly string[]) => names === undefined

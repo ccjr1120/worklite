@@ -115,6 +115,7 @@ import {
   type AgentTeamWorktreeTaskResult,
 } from './agent-team-graph-v4';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
+import { normalizePublicModelList } from '@worklite/model-gateway';
 import { deriveRunCurrent, effectiveTaskModel, taskRoleName } from './agent-team-run-summary';
 import { CommandsService } from '../commands/commands.service';
 import { createAgentTeamGroupGraph, type AgentTeamGroupGraphInitial, type AgentTeamGroupGraphState } from './agent-team-graph-v6';
@@ -1159,7 +1160,11 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         return {
           ...role,
           // An empty developer model keeps the executor's own default instead of the Team default model.
-          publicModelId: role.publicModelId.trim() || (role.executor || role.role === 'developer' ? '' : this.config.get<string>('AGENT_TEAM_DEFAULT_PUBLIC_MODEL_ID')?.trim() || ''),
+          // role.publicModelId may be one model id or an ordered fallback list; the Team default
+          // (used only for a non-executor, non-Developer role) is always a single declared model.
+          publicModelId: normalizePublicModelList(role.publicModelId).length > 0
+            ? role.publicModelId
+            : (role.executor || role.role === 'developer' ? '' : this.config.get<string>('AGENT_TEAM_DEFAULT_PUBLIC_MODEL_ID')?.trim() || ''),
           processReferences,
           instructions: [role.instructions, ...entryPointContent].filter(Boolean).join('\n\n---\n\n'),
         };
@@ -1549,7 +1554,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (taskRole === 'team-manager' && (!request.groupContext || version.snapshot.orchestrationVersion !== 7)) {
       throw new Error('Team Manager is available only in captured historical v7 group Runs.');
     }
-    if (taskRole === 'team-manager' && !role.publicModelId.trim()) {
+    if (taskRole === 'team-manager' && normalizePublicModelList(role.publicModelId).length === 0) {
       throw new Error('The captured historical Team Manager role has no configured model.');
     }
     const attempt = await this.prepareTaskAttempt(run, request);
@@ -1604,7 +1609,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           throw new Error(`Developer instance ${developerId} was not captured by this Team version.`);
         }
         const developerRole = instance ?? role;
-        const model = developerRole.publicModelId.trim() || (execution.executor === 'codex' ? execution.model : null);
+        // A project executor launches one native process; it has no Gateway-level fallback loop, so a
+        // declared fallback list here only ever uses its first (primary) candidate.
+        const model = normalizePublicModelList(developerRole.publicModelId)[0] ?? (execution.executor === 'codex' ? execution.model : null);
         if (model) await this.executors.requireModel(workspaceId, execution.executor, model);
         if (!laneWorktree && orchestrationVersion !== 5 && orchestrationVersion !== 6 && orchestrationVersion !== 7 && orchestrationVersion !== 8 && orchestrationVersion !== 9 && orchestrationVersion !== 10 && orchestrationVersion !== 11) {
           if (requestLane) {

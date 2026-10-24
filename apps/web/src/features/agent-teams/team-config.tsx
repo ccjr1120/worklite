@@ -85,7 +85,7 @@ function RoleCard({ teamId, role, skills, mcpServerNames }: { teamId: string; ro
         <span className="font-mono text-xs text-muted-foreground break-all">{role.role}</span>
       </div>
       <dl className="mt-3 grid gap-4 text-[13px] md:grid-cols-2">
-        <div><dt className="text-muted-foreground">{t('config.roles.model')}</dt><dd className="mt-1 font-mono break-all">{role.publicModelId || <NotSet label={notSet} />}</dd></div>
+        <div><dt className="text-muted-foreground">{t('config.roles.model')}</dt><dd className="mt-1 font-mono break-all">{Array.isArray(role.publicModelId) ? role.publicModelId.join(', ') : role.publicModelId || <NotSet label={notSet} />}</dd></div>
         <div><dt className="text-muted-foreground">{t('config.roles.executor')}</dt><dd className="mt-1">{role.executor ?? <NotSet label={notSet} />}</dd></div>
         <div><dt className="text-muted-foreground">{t('config.roles.entryPoints')}</dt><dd className="mt-1"><StringList items={role.entryPoints} notSet={notSet} mono /></dd></div>
         <div className="md:col-span-2">

@@ -198,7 +198,8 @@ export class AgentExecutionsService implements OnModuleInit {
 
   async executeWorkflowAgent(
     workspaceId: string,
-    model: string,
+    // One declared public model id, or an ordered list of fallback candidates.
+    model: string | readonly string[],
     context: unknown,
     systemPrompt: string,
     requestedSkillIds: string[],
@@ -569,7 +570,7 @@ export class AgentExecutionsService implements OnModuleInit {
         await this.db.update(agentExecutions).set({ modelMessages: modelMessagesBeforeInference, updatedAt: new Date() }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'running')));
       }
       const inferenceMessages = diagnosticModelMessages(modelMessagesBeforeInference, diagnosticCalls);
-      const result = await createModelGateway().generateAgentStep({ provider: runtime.provider, model: runtime.model, systemPrompt, messages: inferenceMessages, skillScripts: availableSkillScripts, builtinTools: builtinToolDefinitions, mcpTools: availableMcpTools, maxToolRounds: MAX_HELPER_TOOL_ROUNDS, abortSignal: abortController.signal, onTextDelta: (delta) => this.persistEvent(executionId, { kind: 'message_delta', messageId: streamedMessageId, delta, ...messagePresentation }) });
+      const result = await createModelGateway().generateAgentStep({ candidates: [{ provider: runtime.provider, model: runtime.model }], systemPrompt, messages: inferenceMessages, skillScripts: availableSkillScripts, builtinTools: builtinToolDefinitions, mcpTools: availableMcpTools, maxToolRounds: MAX_HELPER_TOOL_ROUNDS, abortSignal: abortController.signal, onTextDelta: (delta) => this.persistEvent(executionId, { kind: 'message_delta', messageId: streamedMessageId, delta, ...messagePresentation }) });
       const responseText = normalizeAssistantMessage(result.text);
       if (!responseText && result.toolCalls.length === 0) throw new Error('Empty Agent response');
       const currentExecution = await this.loadExecution(workspace.id, execution.agentId, executionId);

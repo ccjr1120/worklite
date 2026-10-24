@@ -49,9 +49,20 @@ export type GatewayCorrelation = {
   teamOperationKey?: string;
 };
 
+// A model configuration slot may declare one model or an ordered list of fallback candidates; a plain
+// string is a one-element list. The Gateway tries each candidate in order and switches to the next only
+// on a retryable failure (network/timeout/429/5xx), never on a request-shape error.
+export type PublicModelList = string | readonly string[];
+
+export function normalizePublicModelList(value: PublicModelList): string[] {
+  const list = Array.isArray(value) ? value : [value];
+  return [...new Set(list.map((entry) => entry.trim()).filter(Boolean))];
+}
+
+export type ModelCandidate = { provider: ModelProviderConfig; model: string };
+
 export type GenerateAgentStepRequest = {
-  provider: ModelProviderConfig;
-  model: string;
+  candidates: readonly ModelCandidate[];
   systemPrompt: string;
   jsonOutput?: boolean;
   correlation?: GatewayCorrelation;
@@ -104,8 +115,7 @@ export type WorkflowAgentRound = {
 };
 
 export type RunWorkflowAgentRequest = {
-  provider: ModelProviderConfig;
-  model: string;
+  candidates: readonly ModelCandidate[];
   systemPrompt: string;
   initialUserContent: string;
   jsonOutput?: boolean;
@@ -128,8 +138,7 @@ export type WorkflowAgentLoopResult = {
 };
 
 export type StreamTextRequest = {
-  provider: ModelProviderConfig;
-  model: string;
+  candidates: readonly ModelCandidate[];
   systemPrompt?: string;
   messages: readonly GatewayMessage[];
   temperature?: number;
@@ -163,6 +172,9 @@ export interface ModelGateway {
 
 export class ModelGatewayError extends Error {
   readonly code: 'INVALID_PROVIDER' | 'INVALID_REQUEST' | 'INVALID_TOOL_REQUEST' | 'INCOMPLETE_TOOL_REQUEST' | 'PROVIDER_REQUEST_FAILED';
+  // The upstream HTTP status, when known, carried past modelFailure()'s wrapping so the
+  // candidate-fallback loop can classify retryability without re-inspecting the AI SDK error.
+  statusCode?: number;
 
   constructor(code: ModelGatewayError['code'], message: string) {
     super(message);
@@ -173,7 +185,15 @@ export class ModelGatewayError extends Error {
 
 export class AiSdkModelGateway implements ModelGateway {
   streamText(request: StreamTextRequest): ModelStream {
-    const model = resolveModel(request.provider, request.model);
+    // No fallback loop here by design, not by omission: ModelStream hands back a synchronous
+    // textStream before any provider failure can occur, so switching candidates after a failed
+    // attempt would mean buffering the whole stream before yielding the first chunk (the
+    // withWorkflowAgentStreamTransport approach), defeating the point of streaming. streamText's
+    // only caller today (Chat's /summarize) resolves exactly one model, so only the first
+    // candidate is attempted; a future caller that needs fallback here should get a buffered
+    // variant rather than bolting a loop onto this streaming path.
+    const first = request.candidates[0]!;
+    const model = resolveModel(first.provider, first.model);
     const messages = toModelMessages(request.messages);
     const result = streamText({
       model,
@@ -195,81 +215,98 @@ export class AiSdkModelGateway implements ModelGateway {
   }
 
   async generateAgentStep(request: GenerateAgentStepRequest): Promise<AgentStepResult> {
-    const model = resolveModel(request.provider, request.model, request.correlation);
-    const useResponses = isResponsesProvider(request.provider);
     const genericScripts = request.skillScripts.filter((script) => !script.tool);
     const typedScripts = new Map(request.skillScripts.flatMap((script) => script.tool ? [[script.tool.name, script] as const] : []));
-    const skillScript = tool({
-      description: 'Run one script from an assigned Skill package immediately on the WorkLite host. Select only an exact Skill id and script path from the assigned script list. arguments must be a command-line string array: use [] for a script with no input; for a JSON-input script use one serialized JSON string, never a nested object or array.',
-      strict: useResponses ? false : undefined,
-      inputSchema: jsonSchema<{ skillId: string; scriptPath: string; arguments: string[] }>({
-        type: 'object',
-        additionalProperties: false,
-        required: ['skillId', 'scriptPath', 'arguments'],
-        properties: {
-          skillId: { type: 'string', enum: [...new Set(genericScripts.map((script) => script.skillId))] },
-          scriptPath: { type: 'string', enum: genericScripts.map((script) => script.path) },
-          arguments: { type: 'array', items: { type: 'string' } },
-        },
-      }),
-    });
-    const tools: Record<string, unknown> = {
-      ...(genericScripts.length > 0 ? { skill_script: skillScript } : {}),
-    };
-    for (const definition of [...typedScripts.values()].map((script) => script.tool!)) {
-      if (tools[definition.name]) continue;
-      tools[definition.name] = tool({
-        description: definition.description,
-        strict: useResponses ? false : undefined,
-        inputSchema: jsonSchema<Record<string, unknown>>(definition.inputSchema as never),
-      });
-    }
-    for (const definition of [...(request.builtinTools ?? []), ...(request.mcpTools ?? [])]) {
-      if (!definition.name || tools[definition.name]) continue;
-      tools[definition.name] = tool({
-        description: definition.description,
-        strict: useResponses ? false : undefined,
-        inputSchema: jsonSchema<Record<string, unknown>>(definition.inputSchema as never),
-      });
-    }
+    // Trimming only depends on the conversation, not the candidate, so it runs once outside the
+    // fallback loop; everything that depends on the candidate's own adapter/protocol (tool strict
+    // mode, provider options, model resolution) is rebuilt per attempt inside withModelFallback.
     const context = trimAgentMessages(request.systemPrompt, request.messages, request.maxContextTokens);
-    const openaiProviderOptions = {
-      ...(request.provider.adapter === 'openai' ? { parallelToolCalls: false as const } : {}),
-      ...(useResponses ? { strictJsonSchema: false as const } : {}),
-      ...(request.provider.adapter === 'codex' ? { store: false as const, include: ['reasoning.encrypted_content'] } : {}),
-    };
-    const modelRequest = {
-      model,
-      system: request.systemPrompt,
-      output: request.jsonOutput ? Output.json({ name: 'response' }) : undefined,
-      messages: context.messages as ModelMessage[],
-      tools: Object.keys(tools).length > 0 ? tools as never : undefined,
-      providerOptions: Object.keys(openaiProviderOptions).length > 0 ? { openai: openaiProviderOptions } : undefined,
-      maxOutputTokens: request.maxOutputTokens ?? DEFAULT_AGENT_MAX_OUTPUT_TOKENS,
-      abortSignal: request.abortSignal,
-    };
 
-    let result: Awaited<ReturnType<typeof generateText>>;
-    try {
-      result = await generateAgentWithRetry(modelRequest, request.abortSignal, request.onTextDelta);
-    } catch (error) {
-      if (!NoOutputGeneratedError.isInstance(error) || request.abortSignal?.aborted) throw modelFailure(error, error);
-      try {
-        result = await generateText(modelRequest);
-      } catch (fallbackError) {
-        throw modelFailure(fallbackError, error.cause ?? error);
+    return withModelFallback(request.candidates, async (candidate) => {
+      const model = resolveModel(candidate.provider, candidate.model, request.correlation);
+      const useResponses = isResponsesProvider(candidate.provider);
+      const skillScript = tool({
+        description: 'Run one script from an assigned Skill package immediately on the WorkLite host. Select only an exact Skill id and script path from the assigned script list. arguments must be a command-line string array: use [] for a script with no input; for a JSON-input script use one serialized JSON string, never a nested object or array.',
+        strict: useResponses ? false : undefined,
+        inputSchema: jsonSchema<{ skillId: string; scriptPath: string; arguments: string[] }>({
+          type: 'object',
+          additionalProperties: false,
+          required: ['skillId', 'scriptPath', 'arguments'],
+          properties: {
+            skillId: { type: 'string', enum: [...new Set(genericScripts.map((script) => script.skillId))] },
+            scriptPath: { type: 'string', enum: genericScripts.map((script) => script.path) },
+            arguments: { type: 'array', items: { type: 'string' } },
+          },
+        }),
+      });
+      const tools: Record<string, unknown> = {
+        ...(genericScripts.length > 0 ? { skill_script: skillScript } : {}),
+      };
+      for (const definition of [...typedScripts.values()].map((script) => script.tool!)) {
+        if (tools[definition.name]) continue;
+        tools[definition.name] = tool({
+          description: definition.description,
+          strict: useResponses ? false : undefined,
+          inputSchema: jsonSchema<Record<string, unknown>>(definition.inputSchema as never),
+        });
       }
-    }
+      for (const definition of [...(request.builtinTools ?? []), ...(request.mcpTools ?? [])]) {
+        if (!definition.name || tools[definition.name]) continue;
+        tools[definition.name] = tool({
+          description: definition.description,
+          strict: useResponses ? false : undefined,
+          inputSchema: jsonSchema<Record<string, unknown>>(definition.inputSchema as never),
+        });
+      }
+      const openaiProviderOptions = {
+        ...(candidate.provider.adapter === 'openai' ? { parallelToolCalls: false as const } : {}),
+        ...(useResponses ? { strictJsonSchema: false as const } : {}),
+        ...(candidate.provider.adapter === 'codex' ? { store: false as const, include: ['reasoning.encrypted_content'] } : {}),
+      };
+      const modelRequest = {
+        model,
+        system: request.systemPrompt,
+        output: request.jsonOutput ? Output.json({ name: 'response' }) : undefined,
+        messages: context.messages as ModelMessage[],
+        tools: Object.keys(tools).length > 0 ? tools as never : undefined,
+        providerOptions: Object.keys(openaiProviderOptions).length > 0 ? { openai: openaiProviderOptions } : undefined,
+        maxOutputTokens: request.maxOutputTokens ?? DEFAULT_AGENT_MAX_OUTPUT_TOKENS,
+        abortSignal: request.abortSignal,
+      };
 
-    return toAgentStepResult(result, tools, typedScripts, context.dropped, request.jsonOutput === true);
+      let result: Awaited<ReturnType<typeof generateText>>;
+      try {
+        result = await generateAgentWithRetry(modelRequest, request.abortSignal, request.onTextDelta);
+      } catch (error) {
+        if (!NoOutputGeneratedError.isInstance(error) || request.abortSignal?.aborted) throw modelFailure(error, error);
+        try {
+          result = await generateText(modelRequest);
+        } catch (fallbackError) {
+          throw modelFailure(fallbackError, error.cause ?? error);
+        }
+      }
+
+      return toAgentStepResult(result, tools, typedScripts, context.dropped, request.jsonOutput === true);
+    });
   }
 
+  // Wraps the whole tool loop per candidate, exactly like generateAgentStep: a fallback-eligible
+  // failure restarts the entire attempt against the next candidate from the initial user content.
+  // A failure that happens after a tool already executed (toolCallsUsed > 0) still restarts; a
+  // restarted attempt can re-request and re-run the same tool, so a caller whose tools are not
+  // idempotent can observe a duplicated side effect on fallback. This mirrors the accepted
+  // same-candidate retry behavior in withWorkflowAgentStreamTransport and is a known, not solved,
+  // limitation of request-level model fallback for a multi-round tool loop.
   async runWorkflowAgent(request: RunWorkflowAgentRequest): Promise<WorkflowAgentLoopResult> {
+    return withModelFallback(request.candidates, (candidate) => this.runWorkflowAgentAttempt(request, candidate));
+  }
+
+  private async runWorkflowAgentAttempt(request: RunWorkflowAgentRequest, candidate: ModelCandidate): Promise<WorkflowAgentLoopResult> {
     const model = withWorkflowAgentStreamTransport(
-      resolveModel(request.provider, request.model, request.correlation),
+      resolveModel(candidate.provider, candidate.model, request.correlation),
       request.abortSignal,
     );
-    const useResponses = isResponsesProvider(request.provider);
+    const useResponses = isResponsesProvider(candidate.provider);
     const maxToolCalls = request.maxToolCalls ?? Infinity;
     const maxToolRounds = Math.max(0, Math.floor(request.maxToolRounds));
     let currentRound = 0;
@@ -352,9 +389,9 @@ export class AiSdkModelGateway implements ModelGateway {
     }
 
     const openaiProviderOptions = {
-      ...(request.provider.adapter === 'openai' ? { parallelToolCalls: false as const } : {}),
+      ...(candidate.provider.adapter === 'openai' ? { parallelToolCalls: false as const } : {}),
       ...(useResponses ? { strictJsonSchema: false as const } : {}),
-      ...(request.provider.adapter === 'codex' ? { store: false as const, include: ['reasoning.encrypted_content'] } : {}),
+      ...(candidate.provider.adapter === 'codex' ? { store: false as const, include: ['reasoning.encrypted_content'] } : {}),
     };
     const agentSettings = {
       model,
@@ -391,7 +428,7 @@ export class AiSdkModelGateway implements ModelGateway {
       onLanguageModelCallEnd: async (event: LanguageModelCallEndEvent<ToolSet>) => {
         await request.onModelRound?.({
           round: currentRound,
-          model: request.model,
+          model: candidate.model,
           finishReason: event.finishReason ?? null,
           toolCalls: event.content.filter((part) => part.type === 'tool-call').length,
           contextDropped,
@@ -641,11 +678,57 @@ function modelFailure(error: unknown, streamCause: unknown): Error {
   }
   const cause = APICallError.isInstance(streamCause) ? streamCause : APICallError.isInstance(error) ? error : undefined;
   const status = cause?.statusCode;
-  if (status) return new ModelGatewayError('PROVIDER_REQUEST_FAILED', `模型服务请求失败（HTTP ${status}），请稍后重试。`);
+  if (status) {
+    const failure = new ModelGatewayError('PROVIDER_REQUEST_FAILED', `模型服务请求失败（HTTP ${status}），请稍后重试。`);
+    failure.statusCode = status;
+    return failure;
+  }
   if (NoOutputGeneratedError.isInstance(error)) {
     return new ModelGatewayError('PROVIDER_REQUEST_FAILED', '模型服务未返回可用内容，请检查连接和模型能力后重试。');
   }
   return error instanceof Error ? error : new Error('The model request failed.');
+}
+
+const FALLBACK_ELIGIBLE_STATUS_CODES = new Set([408, 409, 429, 500, 502, 503, 504]);
+
+// Decides whether a candidate switch is worth trying after a candidate's own internal
+// same-model retry (generateAgentWithRetry, withWorkflowAgentStreamTransport) is exhausted.
+// A status-bearing failure is judged on that status, exactly like isRetryableGatewayError;
+// a provider that never returned output (NoOutputGeneratedError, wrapped with no status) is
+// treated the same way, since it is already a transient failure class in this design. A
+// request-shape error (context length, invalid/incomplete tool request) is never eligible:
+// another model would fail the same way.
+function isFallbackEligible(error: unknown): boolean {
+  if (error instanceof ModelGatewayError) {
+    if (error.code === 'INVALID_REQUEST' || error.code === 'INVALID_TOOL_REQUEST' || error.code === 'INCOMPLETE_TOOL_REQUEST') return false;
+    if (typeof error.statusCode === 'number') return FALLBACK_ELIGIBLE_STATUS_CODES.has(error.statusCode);
+    return error.code === 'PROVIDER_REQUEST_FAILED';
+  }
+  return isRetryableGatewayError(error);
+}
+
+// Tries each candidate in order, switching only on a fallback-eligible failure. The combined
+// message names every attempted model and its own failure reason so a caller's error already
+// states what was tried, without a separate inspection step.
+async function withModelFallback<T>(
+  candidates: readonly ModelCandidate[],
+  attempt: (candidate: ModelCandidate) => Promise<T>,
+): Promise<T> {
+  const failures: Array<{ model: string; reason: string }> = [];
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index]!;
+    try {
+      return await attempt(candidate);
+    } catch (error) {
+      const label = `${candidate.provider.gatewayProviderName ?? candidate.provider.id}/${candidate.model}`;
+      failures.push({ model: label, reason: error instanceof Error ? error.message : String(error) });
+      if (!isFallbackEligible(error) || index === candidates.length - 1) {
+        if (failures.length === 1) throw error;
+        throw new ModelGatewayError('PROVIDER_REQUEST_FAILED', `所有候选模型均失败：${failures.map((failure) => `${failure.model}（${failure.reason}）`).join('；')}`);
+      }
+    }
+  }
+  throw new ModelGatewayError('PROVIDER_REQUEST_FAILED', 'No model candidate was attempted.');
 }
 
 function isResponsesProvider(provider: ModelProviderConfig): boolean {
