@@ -48,6 +48,7 @@ function CapabilitiesPage() {
   const queryClient = useQueryClient();
   const folderInput = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState('');
+  const [expandedCategoryType, setExpandedCategoryType] = useState<CapabilityResource['type'] | null>(null);
   const [expandedResourceKey, setExpandedResourceKey] = useState<string | null>(null);
   const [mcpDeleteTarget, setMcpDeleteTarget] = useState<McpServerView | null>(null);
   const [skillDeleteTarget, setSkillDeleteTarget] = useState<SkillView | null>(null);
@@ -106,9 +107,6 @@ function CapabilitiesPage() {
         .map((value) => ({ type: 'plugin' as const, value }))),
     };
   }, [plugins, mcpServers, search, skills]);
-  const hasResources = plugins.some((plugin) => plugin.id !== 'feishu-bot' && plugin.id !== 'wechat-bot')
-    || mcpServers.length > 0
-    || skills.some((skill) => skill.id !== 'sk_worklite_platform');
   const filteredResourceCount = groupedResources.skills.length + groupedResources.mcpServers.length + groupedResources.plugins.length;
   const isLoading = pluginsQuery.isLoading || mcpServersQuery.isLoading || skillsQuery.isLoading;
   const isError = pluginsQuery.isError || mcpServersQuery.isError || skillsQuery.isError;
@@ -289,9 +287,9 @@ function CapabilitiesPage() {
   }
 
   const resourceGroups = [
-    { type: 'skill', title: tSkills('title'), resources: groupedResources.skills },
-    { type: 'mcp', title: tMcpServers('title'), resources: groupedResources.mcpServers },
     { type: 'plugin', title: tPlugins('title'), resources: groupedResources.plugins },
+      { type: 'mcp', title: tMcpServers('title'), resources: groupedResources.mcpServers },
+      { type: 'skill', title: tSkills('title'), resources: groupedResources.skills },
   ] as const;
 
   return (
@@ -359,9 +357,7 @@ function CapabilitiesPage() {
             description={tWorkspace('capabilityResources.loadFailed')}
             onAction={() => { void Promise.all([pluginsQuery.refetch(), mcpServersQuery.refetch(), skillsQuery.refetch()]); }}
           />
-        ) : !hasResources ? (
-          <EmptyState title={tWorkspace('capabilityResources.empty.title')} description={tWorkspace('capabilityResources.empty.description')} />
-        ) : filteredResourceCount === 0 ? (
+          ) : filteredResourceCount === 0 && search.trim() ? (
           <EmptyState
             title={tWorkspace('capabilityResources.noMatches.title')}
             description={tWorkspace('capabilityResources.noMatches.description', { search })}
@@ -369,28 +365,59 @@ function CapabilitiesPage() {
             onAction={() => setSearch('')}
           />
         ) : (
-          <div className="space-y-6">
-            {resourceGroups.map((group) => (
-              <section key={group.type} aria-labelledby={`capability-group-${group.type}`}>
-                <div className="mb-3 flex items-center gap-2">
-                  <h2 id={`capability-group-${group.type}`} className="text-sm font-semibold">{group.title}</h2>
-                  <Badge variant="neutral" aria-label={`${group.title}: ${group.resources.length}`}>{group.resources.length}</Badge>
-                </div>
-                {group.resources.length > 0 ? (
-                  <CollectionTable>
-                    <CollectionHeader
-                      className="min-w-[820px] grid-cols-[minmax(0,2fr)_minmax(0,2fr)_150px_80px]"
-                      columns={[tWorkspace('capabilityResources.columns.resource'), tWorkspace('capabilityResources.columns.details'), tWorkspace('capabilityResources.columns.updated'), tWorkspace('capabilityResources.columns.actions')]}
-                    />
-                    {group.resources.map(renderResourceRow)}
-                  </CollectionTable>
-                ) : (
-                  <p className="rounded-xl border border-border bg-surface px-5 py-4 text-[13px] text-muted-foreground">{tWorkspace('capabilityResources.emptyGroup')}</p>
-                )}
-              </section>
-            ))}
-          </div>
-        )}
+            <CollectionTable>
+              <CollectionHeader
+                className="grid-cols-[minmax(0,1fr)]"
+                columns={[tWorkspace('capabilityResources.columns.resource')]}
+              />
+              {resourceGroups.map((group) => {
+                const expanded = expandedCategoryType === group.type;
+                const Icon = group.type === 'plugin' ? Puzzle : group.type === 'mcp' ? Server : Blocks;
+                const categoryId = `capability-category-${group.type}`;
+                const resourcesId = `capability-category-resources-${group.type}`;
+
+                return (
+                  <div key={group.type}>
+                    <CollectionRow className="grid-cols-[minmax(0,1fr)]">
+                      <button
+                        id={categoryId}
+                        type="button"
+                        onClick={() => setExpandedCategoryType(expanded ? null : group.type)}
+                        aria-expanded={expanded}
+                        aria-controls={resourcesId}
+                        className="flex min-w-0 items-center gap-3 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+                      >
+                        <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                        <span className="min-w-0 truncate text-sm font-medium">{group.title}</span>
+                        <Badge variant="neutral" aria-label={`${group.title}: ${group.resources.length}`}>{group.resources.length}</Badge>
+                        <ChevronDown className={`ml-auto size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`} aria-hidden="true" />
+                      </button>
+                    </CollectionRow>
+                    {expanded ? (
+                      <div
+                        id={resourcesId}
+                        role="region"
+                        aria-labelledby={categoryId}
+                        className="border-b border-border bg-surface-subtle/50 px-3 py-3 md:px-5"
+                      >
+                        {group.resources.length > 0 ? (
+                          <CollectionTable className="rounded-lg shadow-none">
+                            <CollectionHeader
+                              className="min-w-[820px] grid-cols-[minmax(0,2fr)_minmax(0,2fr)_150px_80px]"
+                              columns={[tWorkspace('capabilityResources.columns.resource'), tWorkspace('capabilityResources.columns.details'), tWorkspace('capabilityResources.columns.updated'), tWorkspace('capabilityResources.columns.actions')]}
+                            />
+                            {group.resources.map(renderResourceRow)}
+                          </CollectionTable>
+                        ) : (
+                          <p className="rounded-xl border border-border bg-surface px-5 py-4 text-[13px] text-muted-foreground">{tWorkspace('capabilityResources.emptyGroup')}</p>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </CollectionTable>
+          )}
       </div>
       <McpServerDeleteDialog
         open={mcpDeleteTarget !== null}
