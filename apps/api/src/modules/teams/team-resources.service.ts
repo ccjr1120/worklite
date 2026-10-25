@@ -370,6 +370,7 @@ export class WorkspaceResourcesService {
   private async localSkillReferenceReason(workspaceId: string, skillId: string): Promise<string | undefined> {
     const [assignment] = await this.db.select({ agentId: agentSkills.agentId }).from(agentSkills).where(eq(agentSkills.skillId, skillId)).limit(1);
     if (assignment) return 'assigned to an Agent';
+    if (await this.currentChatSkillIsReferenced(workspaceId, skillId)) return 'selected in Chat configuration';
     if (await this.activeChatCapabilityIsReferenced(workspaceId, 'skills', skillId)) return 'captured by an active Chat turn';
     if (await this.workflowResourceIsReferenced(workspaceId, 'skillIds', skillId)) return 'referenced by a Workflow draft or published version';
     if (await this.agentTeamResourceIsReferenced(workspaceId, 'skills', skillId)) return 'referenced by an Agent Team configuration or captured version';
@@ -431,15 +432,22 @@ export class WorkspaceResourcesService {
     return rows.some(({ snapshot }) => snapshot?.[field].some((resource) => resource.id === id));
   }
 
+  private async currentChatSkillIsReferenced(workspaceId: string, skillId: string) {
+    const [configuration] = await this.db.select({ skillIds: chatConfigurations.skillIds }).from(chatConfigurations)
+      .where(eq(chatConfigurations.workspaceId, workspaceId)).orderBy(desc(chatConfigurations.revision)).limit(1);
+    return configuration?.skillIds.includes(skillId) ?? false;
+  }
+
   async deleteSkill(request: Request, workspaceSlug: string, skillId: string): Promise<void> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [existing] = await this.db.select().from(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).limit(1);
     if (!existing) throw new NotFoundException('Skill not found');
     if (existing.source === 'built-in') throw new BadRequestException('Built-in Skills cannot be deleted.');
     if (existing.source === 'local') throw new BadRequestException('Local directory Skills cannot be deleted from WorkLite. Remove the package from the configured local Skill root instead.');
-    // Legacy Chat Skill assignments are ignored and removed by the cascading foreign key.
+    // Legacy Chat Skill assignment rows are ignored; revisioned Chat selections are checked below.
     const [assignment] = await this.db.select({ agentId: agentSkills.agentId }).from(agentSkills).where(and(eq(agentSkills.skillId, skillId), ne(agentSkills.agentId, CHAT_AGENT_ID))).limit(1);
     if (assignment) throw new BadRequestException('Remove this Skill from every Agent before deleting it.');
+    if (await this.currentChatSkillIsReferenced(team.id, skillId)) throw new BadRequestException('Remove this Skill from Chat settings before deleting it.');
     if (await this.activeChatCapabilityIsReferenced(team.id, 'skills', skillId)) throw new BadRequestException('This Skill is captured by an active Chat turn.');
     if (await this.workflowResourceIsReferenced(team.id, 'skillIds', skillId)) throw new BadRequestException('Remove this Skill from every Workflow draft and published version before deleting it.');
     if (await this.agentTeamResourceIsReferenced(team.id, 'skills', skillId)) throw new BadRequestException('Remove this Skill from every Agent Team configuration and captured Team version before deleting it.');
@@ -1021,6 +1029,8 @@ export class WorkspaceResourcesService {
     snapshot.capabilities.projectExecutors.executors.codex.modelProtocols = 'Without a selected model, Codex uses its local default; a selected Gateway model requires openai/responses or codex/responses and is served through the Gateway.';
     snapshot.capabilities.projectExecutors.defaultModels = "Precedence is task model, Chat configuration default, then executor local default. A selected Codex model is a Gateway public model on openai/responses or codex/responses; without a selected model Codex uses its local default.";
     snapshot.capabilities.projectExecutors.gateway = 'Claude Code and selected Codex models use the WorkLite Gateway; an unmodeled Codex task uses its local configuration.';
+    snapshot.capabilities.troubleshooting.chatCustomSkillsAndMcp = 'Chat can select Skills from the shared workspace pool; selected instructions are captured into each Chat turn. Only explicitly allowlisted protected tools are callable; custom Skill scripts and user-assigned MCP servers remain unavailable to Chat or its project executors.';
+    snapshot.capabilities.chatCapabilities.orchestration.executorCapabilities = 'Chat receives selected Skill instructions in its turn snapshot; byted-web-search enables the protected web_search and web_fetch tools through the encrypted workspace credential. Arbitrary Skill scripts and direct user MCP calls stay unavailable. Project executors use native tools, receive no Skills from Chat, and Claude Code tasks receive the MCP servers declared in Chat configuration.';
     return snapshot;
   }
 

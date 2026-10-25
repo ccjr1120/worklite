@@ -169,6 +169,11 @@
     "description": "选择此工作区中已配置的模型。",
     "model": "提供商和模型",
     "placeholder": "选择已配置的模型",
+    "skills": "注册到 Chat 的 Skill",
+    "skillsHint": "从工作区共享 Skill 资源池选择。已选 Skill 的说明会在下一轮对话提供给 Chat；Chat 只使用 WorkLite 明确开放的受保护工具，不运行 Skill 包中的脚本。",
+    "skillsLoading": "正在加载共享 Skill…",
+    "skillsLoadFailed": "无法加载共享 Skill。",
+    "skillsEmpty": "共享资源池中暂无可用 Skill。",
     "executors": "执行器",
     "executorModel": {
       "claude": "Claude Code 项目任务默认模型",

@@ -256,7 +256,7 @@ export type PluginTestResult = {
 
 export type AgentView = {
   // Each declared executor default is one model id, or an ordered list of fallback candidates.
-  chatConfiguration?: { revision: number; extensionPrompt: string; summarizePrompt: string; defaultExecutor: ProjectExecutor; defaultExecutorModels: Partial<Record<ProjectExecutor, string | string[]>>; projectTaskMcpServerIds: string[] };
+  chatConfiguration?: { revision: number; extensionPrompt: string; summarizePrompt: string; defaultExecutor: ProjectExecutor; defaultExecutorModels: Partial<Record<ProjectExecutor, string | string[]>>; projectTaskMcpServerIds: string[]; skillIds: string[] };
   id: string;
   workspaceSlug: string;
   kind: 'system' | 'custom';

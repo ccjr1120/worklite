@@ -57,7 +57,7 @@ export class AgentsService {
     const view = this.toView(row.agent, workspaceSlug, row.agent.providerId ? gatewayNames.get(row.agent.providerId) ?? null : null, assignments, latest);
     if (agentId === CHAT_AGENT_ID) {
       const [configuration] = await this.db.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
-      if (configuration) view.chatConfiguration = { revision: configuration.revision, extensionPrompt: configuration.extensionPrompt, summarizePrompt: configuration.summarizePrompt, defaultExecutor: configuration.defaultExecutor, defaultExecutorModels: configuration.defaultExecutorModels, projectTaskMcpServerIds: configuration.projectTaskMcpServerIds };
+      if (configuration) view.chatConfiguration = { revision: configuration.revision, extensionPrompt: configuration.extensionPrompt, summarizePrompt: configuration.summarizePrompt, defaultExecutor: configuration.defaultExecutor, defaultExecutorModels: configuration.defaultExecutorModels, projectTaskMcpServerIds: configuration.projectTaskMcpServerIds, skillIds: configuration.skillIds };
     }
     return view;
   }
@@ -137,9 +137,9 @@ export class AgentsService {
     if (existing.kind === 'system') {
 
       const isChat = existing.id === CHAT_AGENT_ID;
-      // Chat configuration has no Skill/MCP selection; its legacy assignment rows are retained but never rewritten.
-      const fields = ['providerId', 'model', ...(isChat ? ['extensionPrompt', 'summarizePrompt', 'defaultExecutor', 'defaultExecutorModels', 'projectTaskMcpServerIds', 'expectedConfigurationRevision'] : ['mcpServerIds'])];
-      if (isChat && ('skillIds' in input || 'mcpServerIds' in input)) throw new BadRequestException('Chat configuration no longer accepts Skill or MCP server selections.');
+        // Chat Skills are captured from its revisioned configuration. User MCP servers remain unavailable to Chat.
+        const fields = ['providerId', 'model', ...(isChat ? ['skillIds', 'extensionPrompt', 'summarizePrompt', 'defaultExecutor', 'defaultExecutorModels', 'projectTaskMcpServerIds', 'expectedConfigurationRevision'] : ['mcpServerIds'])];
+        if (isChat && 'mcpServerIds' in input) throw new BadRequestException('Chat does not accept user MCP server selections.');
       if (Object.keys(input).some((key) => !fields.includes(key))) throw new BadRequestException('Unsupported built-in Agent configuration field.');
       const nextProviderId = input.providerId === undefined ? existing.providerId : input.providerId;
       const provider = await this.validateProvider(team.id, nextProviderId);
@@ -173,7 +173,10 @@ export class AgentsService {
           }
         }
       }
-      const selections = await this.validateAssignments(team.id, undefined, input.mcpServerIds, true);
+        const selections = await this.validateAssignments(team.id, isChat ? input.skillIds : undefined, input.mcpServerIds, true);
+        const chatSkillIds = isChat && selections.skillIds !== undefined
+          ? [...new Set([WORKLITE_PLATFORM_SKILL_ID, ...selections.skillIds])]
+          : undefined;
       // MCP servers declared for Claude Code project tasks are validated against the workspace like any selection.
       const projectTaskMcpServerIds = isChat && input.projectTaskMcpServerIds !== undefined
         ? (await this.validateAssignments(team.id, undefined, input.projectTaskMcpServerIds)).mcpServerIds
@@ -194,7 +197,7 @@ export class AgentsService {
           defaultExecutorModels: executorModelsPatch === undefined ? previous?.defaultExecutorModels ?? {} : mergeExecutorModels(previous?.defaultExecutorModels, executorModelsPatch),
           projectTaskMcpServerIds: projectTaskMcpServerIds ?? previous?.projectTaskMcpServerIds ?? [],
           providerId: nextProviderId ?? null, model,
-          skillIds: [WORKLITE_PLATFORM_SKILL_ID],
+          skillIds: chatSkillIds ?? previous?.skillIds ?? [WORKLITE_PLATFORM_SKILL_ID],
           mcpServerIds: [],
         }).run();
       });

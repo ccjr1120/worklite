@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CompositionEven
 import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentToolCallView, ChatConversationView, ChatSubmissionView, DispatchChatRequest, ProjectExecutor, RunView, WorkflowView } from '@worklite/contracts';
 import { ApiError, api, parseAgentExecutionEvent } from '@/api/client';
-import { chatConversationsQueryKey, useAgentQuery, useModelProvidersQuery, useWorkflowsQuery } from '@/api/queries';
+import { chatConversationsQueryKey, useAgentQuery, useModelProvidersQuery, useSkillsQuery, useWorkflowsQuery } from '@/api/queries';
 import { Conversation, ConversationContent } from '@/components/ai-elements/conversation';
 import { useLocale } from '@/components/locale-provider';
 import { useTheme } from '@/components/theme-provider';
@@ -35,6 +35,7 @@ const GENERIC_AGENT_ERROR = 'Chat could not complete this turn. Check its provid
 const AGENT_TURN_ERROR = 'Chat could not complete this turn.';
 const SKILL_EXECUTION_ERROR = 'The Skill script could not be completed.';
 const RESTARTED_AGENT_ERROR = 'The API restarted before this Chat turn completed.';
+const CHAT_PLATFORM_SKILL_ID = 'sk_worklite_platform';
 
 type QueuedMessage = { id: string; text: string };
 type ActiveWorkflowRun = { workflow: WorkflowView; run: RunView; input: string };
@@ -93,6 +94,7 @@ function ChatWorkspace() {
   const navigate = useNavigate();
   const agentQuery = useAgentQuery(workspaceSlug, CHAT_AGENT_ID);
   const providersQuery = useModelProvidersQuery(workspaceSlug);
+  const skillsQuery = useSkillsQuery(workspaceSlug);
   const workflowsQuery = useWorkflowsQuery(workspaceSlug);
   const { applyAppearancePreference } = useTheme();
   const { locale } = useLocale();
@@ -130,6 +132,7 @@ function ChatWorkspace() {
   const [configSaving, setConfigSaving] = useState(false);
   const [extensionPrompt, setExtensionPrompt] = useState('');
   const [summarizePrompt, setSummarizePrompt] = useState('');
+  const [chatSkillIds, setChatSkillIds] = useState<string[]>([]);
   const [configError, setConfigError] = useState('');
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [showAllTimeline, setShowAllTimeline] = useState(false);
@@ -162,13 +165,14 @@ function ChatWorkspace() {
     setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
     setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
     setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
+    setChatSkillIds((agentQuery.data.chatConfiguration?.skillIds ?? []).filter((id) => id !== CHAT_PLATFORM_SKILL_ID));
     setExecutorModels({
       claude: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.claude),
       codex: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.codex),
     });
   }, [agentQuery.data]);
 
-  const saveConfiguration = async (selection: string, prompt = extensionPrompt, models = executorModels, summarize = summarizePrompt) => {
+  const saveConfiguration = async (selection: string, prompt = extensionPrompt, models = executorModels, summarize = summarizePrompt, skillIds?: string[]) => {
     if (configSaving) return;
     const separator = selection.indexOf('::');
     setConfigSaving(true);
@@ -179,6 +183,7 @@ function ChatWorkspace() {
         model: separator >= 0 ? selection.slice(separator + 2) : '',
         extensionPrompt: prompt, summarizePrompt: summarize, expectedConfigurationRevision: agentQuery.data?.chatConfiguration?.revision,
         defaultExecutorModels: { claude: textToModelList(models.claude), codex: textToModelList(models.codex) },
+        ...(skillIds === undefined ? {} : { skillIds }),
       });
       queryClient.setQueryData(['agent', CHAT_AGENT_ID], saved);
     } catch (cause) {
@@ -186,6 +191,7 @@ function ChatWorkspace() {
       if (agentQuery.data) {
         setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
         setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
+        setChatSkillIds((agentQuery.data.chatConfiguration?.skillIds ?? []).filter((id) => id !== CHAT_PLATFORM_SKILL_ID));
         setExecutorModels({
           claude: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.claude),
           codex: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.codex),
@@ -958,7 +964,10 @@ function ChatWorkspace() {
             <div className="min-h-0 min-w-0 flex-1 overflow-y-auto border-l border-border [scrollbar-gutter:stable]">
               {settingsSection === 'channels' ? <ChannelConfiguration /> : null}
               {settingsSection === 'configuration' ? (
-                <Configuration providers={providersQuery.data ?? []} selection={configSelection}
+                <Configuration providers={providersQuery.data ?? []} skills={skillsQuery.data ?? []} selectedSkillIds={chatSkillIds}
+                  onSkillIdsChange={(ids) => { setChatSkillIds(ids); void saveConfiguration(configSelection, extensionPrompt, executorModels, summarizePrompt, ids); }}
+                  skillsLoading={skillsQuery.isLoading} skillsLoadFailed={skillsQuery.isError}
+                  selection={configSelection}
                   onSelectionChange={(value) => { setConfigSelection(value); void saveConfiguration(value); }}
                   executorModels={executorModels} onExecutorModelChange={(executor, value) => { setExecutorModels((current) => ({ ...current, [executor]: value })); }}
                   onExecutorModelSave={(executor) => { if (executorModels[executor] !== modelListToText(agentQuery.data?.chatConfiguration?.defaultExecutorModels?.[executor])) void saveConfiguration(configSelection, extensionPrompt, executorModels); }}
@@ -966,7 +975,7 @@ function ChatWorkspace() {
                   summarizePrompt={summarizePrompt} onSummarizePromptChange={setSummarizePrompt} onSummarizePromptSave={() => { if (summarizePrompt !== (agentQuery.data?.chatConfiguration?.summarizePrompt ?? '')) void saveConfiguration(configSelection); }}
                   saving={configSaving} error={configError} loading={agentQuery.isLoading || providersQuery.isLoading}
                   loadFailed={agentQuery.isError || providersQuery.isError}
-                  onReload={() => { void agentQuery.refetch(); void providersQuery.refetch(); }} />
+                  onReload={() => { void agentQuery.refetch(); void providersQuery.refetch(); void skillsQuery.refetch(); }} />
               ) : null}
               {settingsSection === 'memories' ? <Memories /> : null}
             </div>
