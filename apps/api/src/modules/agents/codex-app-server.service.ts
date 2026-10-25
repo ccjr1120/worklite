@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { homedir } from 'node:os';
+import { basename, dirname, extname, resolve } from 'node:path';
 import type { StoredProjectExecutorLaunch } from '@worklite/db';
 import { CommandsService, type CommandStdioProcess } from '../commands/commands.service';
 import { requireSafeCommandWord, isGatewayPublicModel, localGatewayBaseUrl, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
@@ -15,12 +17,10 @@ type RpcMessage = {
   error?: { code: number; message: string };
 };
 
-// Codex's configured command word (e.g. `cxo`, `cx`, `codex`) is launched through the operator's own
-// interactive zsh login shell, exactly like a manual terminal invocation: this resolves ~/.zshrc aliases,
-// functions and PATH the same way the operator's own shell would, so whatever local Codex configuration
-// (home directory, model, Provider) that resolution selects is what runs. WorkLite names no Codex config
-// file or directory here. A declared Gateway public model additionally receives a per-run
-// `model_providers.worklite` override at launch, so it does not need to exist in the operator's own catalog.
+// A native Codex default launches the `codex` command through the operator's interactive zsh login shell
+// and can point `--config-dir` at a configured directory or config.toml parent. A declared Gateway public
+// model keeps the configured command word (e.g. `cx`) and receives a per-run `model_providers.worklite`
+// override, so it does not need to exist in the operator's own catalog.
 // Protocol verified against openai/codex rust-v0.163.0.
 const LOGIN_SHELL = '/bin/zsh';
 const GATEWAY_MODEL_PROVIDER = 'worklite';
@@ -30,7 +30,11 @@ const GATEWAY_MODEL_API_KEY_ENV = 'WORKLITE_GATEWAY_API_KEY';
 export class CodexAppServerService {
   constructor(private readonly commands: CommandsService) {}
 
-  async captureLaunch(commandArguments: readonly string[], model: string | null): Promise<CodexLaunch> {
+  async captureLaunch(commandArguments: readonly string[], model: string | null, configPath?: string): Promise<CodexLaunch> {
+    if (model === null) {
+      const configDirectory = codexConfigDirectory(configPath);
+      return { executor: 'codex', commandArguments: ['codex'], model, ...(configDirectory ? { configDirectory } : {}) };
+    }
     requireSafeCommandWord(commandArguments[0]);
     return { executor: 'codex', commandArguments: [...commandArguments], model };
   }
@@ -325,8 +329,21 @@ function appServerArguments(launch: CodexLaunch, mcpServers: Record<string, unkn
     approval_policy: 'never',
     sandbox_mode: 'danger-full-access',
   };
-  const trailingArguments = [...fixedArguments, ...Object.entries(config).flatMap(([key, value]) => ['-c', `${key}=${tomlValue(value)}`]), 'app-server', '--listen', 'stdio://'];
+  const configDirectoryArguments = launch.configDirectory ? ['--config-dir', launch.configDirectory] : [];
+  const trailingArguments = [...configDirectoryArguments, ...fixedArguments, ...Object.entries(config).flatMap(([key, value]) => ['-c', `${key}=${tomlValue(value)}`]), 'app-server', '--listen', 'stdio://'];
   return [LOGIN_SHELL, '-ic', `${word} "$@"`, '--', ...trailingArguments];
+}
+
+function codexConfigDirectory(configPath: string | undefined): string | undefined {
+  const value = configPath?.trim();
+  if (!value) return undefined;
+  const expanded = value === '~' ? homedir() : value.startsWith('~/') ? `${homedir()}/${value.slice(2)}` : value;
+  const absolutePath = resolve(expanded);
+  if (extname(absolutePath).toLowerCase() === '.toml') {
+    if (basename(absolutePath) !== 'config.toml') throw new BadRequestException('Codex CLI only reads config.toml; configure its containing directory.');
+    return dirname(absolutePath);
+  }
+  return absolutePath;
 }
 
 function tomlValue(value: unknown): string {

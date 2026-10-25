@@ -21,6 +21,7 @@ export function PluginConfiguration({ pluginId, embedded = false }: { pluginId: 
   const pluginQuery = usePluginQuery(pluginId);
   const plugin = pluginQuery.data;
   const [command, setCommand] = useState('');
+  const [codexConfigPath, setCodexConfigPath] = useState('');
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'unsaved'>('saved');
   const [saving, setSaving] = useState(false);
   const [testState, setTestState] = useState<'idle' | 'pending' | 'available' | 'missing' | 'failed'>('idle');
@@ -47,6 +48,7 @@ export function PluginConfiguration({ pluginId, embedded = false }: { pluginId: 
   useEffect(() => {
     if (!plugin) return;
     setCommand(plugin.command);
+    setCodexConfigPath(plugin.codexConfigPath ?? '');
     setFeishuAppId(plugin.feishu?.appId ?? '');
     setFeishuUserId(plugin.feishu?.allowedUserId ?? '');
     setWechatUserId(plugin.wechat?.allowedUserId ?? '');
@@ -54,7 +56,7 @@ export function PluginConfiguration({ pluginId, embedded = false }: { pluginId: 
     setTestState(plugin.status);
     setSaveState('saved');
     setError('');
-  }, [plugin?.id, plugin?.command, plugin?.feishu?.appId, plugin?.feishu?.allowedUserId, plugin?.wechat?.allowedUserId]); // eslint-disable-line react-hooks/exhaustive-deps -- unrelated status changes must not erase a typed secret.
+  }, [plugin?.id, plugin?.command, plugin?.codexConfigPath, plugin?.feishu?.appId, plugin?.feishu?.allowedUserId, plugin?.wechat?.allowedUserId]); // eslint-disable-line react-hooks/exhaustive-deps -- unrelated status changes must not erase a typed secret.
 
   useEffect(() => {
     if (!registrationSavedId) return;
@@ -179,7 +181,10 @@ export function PluginConfiguration({ pluginId, embedded = false }: { pluginId: 
     setSaveState('saving');
     setError('');
     try {
-      const saved = await api.updatePlugin(pluginId, { command: command.trim() });
+      const saved = await api.updatePlugin(pluginId, {
+        command: command.trim(),
+        ...(pluginId === 'codex-cli-chat' ? { codexConfigPath: codexConfigPath.trim() } : {}),
+      });
       queryClient.setQueryData(['plugin', pluginId], saved);
       void queryClient.invalidateQueries({ queryKey: pluginsQueryKey() }).catch(() => undefined);
       setSaveState('saved');
@@ -300,6 +305,9 @@ export function PluginConfiguration({ pluginId, embedded = false }: { pluginId: 
         {error ? <p className="text-[13px] text-danger" role="alert">{error}</p> : null}
         {pluginId === 'codex-cli-chat' ? <><Field label={tPlugins('config.command')} htmlFor="plugin-command" hint={tPlugins('config.commandHint')}>
           <Input id="plugin-command" value={command} placeholder={tPlugins('config.commandPlaceholder')} onChange={(event) => { setCommand(event.target.value); setSaveState('unsaved'); setTestState('idle'); }} autoComplete="off" />
+        </Field>
+        <Field label={tPlugins('config.codexConfigPath')} htmlFor="codex-config-path" hint={tPlugins('config.codexConfigPathHint')}>
+          <Input id="codex-config-path" value={codexConfigPath} placeholder={tPlugins('config.codexConfigPathPlaceholder')} onChange={(event) => { setCodexConfigPath(event.target.value); setSaveState('unsaved'); }} autoComplete="off" />
         </Field>
         {testState === 'idle' ? null : (
           <div className="flex flex-wrap items-center gap-3">

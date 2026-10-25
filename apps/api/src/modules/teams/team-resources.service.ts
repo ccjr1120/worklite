@@ -776,7 +776,7 @@ export class WorkspaceResourcesService {
     const skillNames = new Map(skillRows.map((skill) => [skill.id, skill.name]));
     const mcpNames = new Map(mcpRows.map((server) => [server.id, server.name]));
 
-    return {
+    const snapshot = {
       workspace: { id: workspace.id, slug: workspace.slug, name: workspace.name },
       capabilities: {
         troubleshooting: {
@@ -1017,6 +1017,11 @@ export class WorkspaceResourcesService {
       }),
       settings: settingsRows[0] ? { appearance: settingsRows[0].appearance } : null,
     };
+    snapshot.projectExecutors.executors.codex.launch = 'When no model is selected, launch the codex command directly and use the operator Codex default, optionally selecting a config directory with --config-dir. When a Chat default or task model is selected, keep the configured command word and inject a per-run model_providers.worklite Responses Provider.';
+    snapshot.projectExecutors.executors.codex.modelProtocols = 'Without a selected model, Codex uses its local default; a selected Gateway model requires openai/responses or codex/responses and is served through the Gateway.';
+    snapshot.projectExecutors.defaultModels = "Precedence is task model, Chat configuration default, then executor local default. A selected Codex model is a Gateway public model on openai/responses or codex/responses; without a selected model Codex uses its local default.";
+    snapshot.projectExecutors.gateway = 'Claude Code and selected Codex models use the WorkLite Gateway; an unmodeled Codex task uses its local configuration.';
+    return snapshot;
   }
 
   async settings(request: Request, workspaceSlug: string): Promise<WorkspaceSettingsView> {

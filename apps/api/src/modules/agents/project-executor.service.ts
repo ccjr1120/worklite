@@ -21,9 +21,12 @@ export class ProjectExecutorService {
   ) {}
 
   async captureLaunch(executor: StoredProjectExecutor, model: string | null): Promise<StoredProjectExecutorLaunch> {
-    return executor === 'codex'
-      ? this.codex.captureLaunch(await this.plugins.commandArguments(CODEX_CLI_PLUGIN_ID), model)
-      : this.claude.captureLaunch(await this.plugins.commandArguments(CLAUDE_CODE_PLUGIN_ID), model);
+    if (executor === 'codex') {
+      const commandArguments = model === null ? [] : await this.plugins.commandArguments(CODEX_CLI_PLUGIN_ID);
+      const configPath = model === null ? await this.plugins.codexConfigPath() : undefined;
+      return this.codex.captureLaunch(commandArguments, model, configPath);
+    }
+    return this.claude.captureLaunch(await this.plugins.commandArguments(CLAUDE_CODE_PLUGIN_ID), model);
   }
 
   // A native Codex model designation is left to the operator's own Codex configuration; a Gateway public

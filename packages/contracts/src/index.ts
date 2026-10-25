@@ -52,6 +52,7 @@ export type PluginView = {
   name: string;
   description: string;
   command: string;
+  codexConfigPath?: string;
   enabled: boolean;
   status: 'available' | 'missing' | 'failed';
   updatedAt: string;
@@ -108,6 +109,7 @@ export type WechatConnectionView = {
 
 export type UpdatePluginRequest = {
   command?: string;
+  codexConfigPath?: string;
   feishu?: { appId: string; appSecret?: string; allowedUserId: string };
   wechat?: { allowedUserId: string };
 };
@@ -353,7 +355,7 @@ export type AgentToolCallStatus = 'running' | 'completed' | 'failed' | 'cancelle
 export type ProjectExecutor = 'codex' | 'claude';
 
 export type ProjectExecutorLaunchView =
-  | { executor: 'codex'; commandArguments: string[]; model: string | null; modelSource?: 'task' | 'configuration' | 'executor' }
+  | { executor: 'codex'; commandArguments: string[]; model: string | null; configDirectory?: string; modelSource?: 'task' | 'configuration' | 'executor' }
   | { executor: 'claude'; commandArguments: string[]; baseUrl: string; model: string | null; modelSource?: 'task' | 'configuration' | 'executor' };
 
 export type ChatAttachmentView = {

@@ -40,6 +40,12 @@ export class PluginsService {
     return parsePluginCommand(await this.command(pluginId));
   }
 
+  async codexConfigPath(): Promise<string> {
+    const [row] = await this.db.select({ codexConfigPath: plugins.codexConfigPath }).from(plugins).where(eq(plugins.id, CODEX_CLI_PLUGIN_ID)).limit(1);
+    if (!row) throw new NotFoundException('Codex CLI plugin not found.');
+    return row.codexConfigPath;
+  }
+
   async update(pluginId: string, input: UpdatePluginRequest): Promise<PluginView> {
     if (pluginId === FEISHU_PLUGIN_ID) {
       const config = input?.feishu;
@@ -63,8 +69,13 @@ export class PluginsService {
       return this.get(pluginId);
     }
     if (!EXECUTABLE_PLUGIN_IDS.includes(pluginId)) throw new BadRequestException('This plugin has no executable command configuration.');
-    const command = this.normalizeCommand(input?.command);
-    const [updated] = await this.db.update(plugins).set({ command, updatedAt: new Date() }).where(eq(plugins.id, pluginId)).returning();
+    const [current] = await this.db.select().from(plugins).where(eq(plugins.id, pluginId)).limit(1);
+    if (!current) throw new NotFoundException('Plugin not found.');
+    const command = input?.command === undefined ? current.command : this.normalizeCommand(input.command);
+    const codexConfigPath = pluginId === CODEX_CLI_PLUGIN_ID && input?.codexConfigPath !== undefined
+      ? this.normalizeCodexConfigPath(input.codexConfigPath)
+      : current.codexConfigPath;
+    const [updated] = await this.db.update(plugins).set({ command, codexConfigPath, updatedAt: new Date() }).where(eq(plugins.id, pluginId)).returning();
     if (!updated) throw new NotFoundException('Plugin not found.');
     return this.toView(updated);
   }
@@ -111,6 +122,7 @@ export class PluginsService {
       name: row.name,
       description: row.description,
       command: row.command,
+      codexConfigPath: row.id === CODEX_CLI_PLUGIN_ID ? row.codexConfigPath : undefined,
       enabled: availability.enabled,
       status: availability.status,
       updatedAt: row.updatedAt.toISOString(),
@@ -147,6 +159,15 @@ export class PluginsService {
     const command = value.trim();
     parsePluginCommand(command);
     return command;
+  }
+
+  private normalizeCodexConfigPath(value: unknown): string {
+    if (typeof value !== 'string') throw new BadRequestException('A Codex config path must be text.');
+    const path = value.trim();
+    if (path.length > 2048 || path.includes('\0') || path.includes('\n') || path.includes('\r')) {
+      throw new BadRequestException('A Codex config path must be a single line no longer than 2048 characters.');
+    }
+    return path;
   }
 
   private probe(pluginId: string, command: string): PluginTestResult {

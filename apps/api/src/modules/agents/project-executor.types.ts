@@ -66,15 +66,15 @@ export type PreparedProjectExecution = {
 };
 
 // Gateway Provider protocols each executor can speak; Provider protocols are never switched to fit an executor.
-// Codex still launches through the operator's own shell command, but a declared Gateway public model is served
-// through the Gateway's Responses endpoint instead of the operator's native Provider.
+// With no model, Codex starts using the `codex` command and its local configuration. A selected Gateway public
+// model keeps the configured command word and is served through the Gateway's Responses endpoint.
 export const PROJECT_EXECUTOR_PROTOCOLS: Partial<Record<StoredProjectExecutor, readonly string[]>> = {
   claude: ['anthropic/messages'],
   codex: ['openai/responses', 'codex/responses'],
 };
 
-// A Gateway public model id is `<providerName>/<modelId>` (Provider names cannot contain "/"). Anything else,
-// including an empty value, is the executor's own native model designation and runs through local configuration.
+// A Gateway public model id is `<providerName>/<modelId>` (Provider names cannot contain "/"). Any other model
+// value is treated as the executor's own native model designation and runs through local configuration.
 export function isGatewayPublicModel(model: string | null | undefined): boolean {
   if (typeof model !== 'string') return false;
   const separator = model.indexOf('/');
@@ -86,7 +86,7 @@ export function localGatewayBaseUrl(): string {
   return `http://127.0.0.1:${Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392)}`;
 }
 
-// Codex's configured command word is interpolated unquoted into an inline zsh script so shell alias
+// Codex's Gateway-model command word is interpolated unquoted into an inline zsh script so shell alias
 // expansion (e.g. cxo, cx) applies the same way it would in an interactive terminal; this restricts it to a
 // bare alias/executable name or path so no shell metacharacter can be injected through plugin configuration.
 const SAFE_COMMAND_WORD = /^[\w./-]+$/;

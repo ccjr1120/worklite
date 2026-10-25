@@ -19,6 +19,7 @@ export const plugins = sqliteTable('plugins', {
   name: text('name').notNull(),
   description: text('description').notNull(),
   command: text('command').notNull().default('codex'),
+  codexConfigPath: text('codex_config_path').notNull().default(''),
   feishuAppId: text('feishu_app_id').notNull().default(''),
   feishuAppSecret: text('feishu_app_secret'),
   feishuAllowedUserId: text('feishu_allowed_user_id').notNull().default(''),
@@ -494,16 +495,15 @@ export const agentToolCalls = sqliteTable('agent_tool_calls', {
   id: text('id').primaryKey(), executionId: text('execution_id').notNull().references(() => agentExecutions.id, { onDelete: 'cascade' }), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }), toolCallId: text('tool_call_id').notNull(), toolName: text('tool_name').$type<'skill_script' | 'builtin' | 'mcp'>().notNull(), workingDirectory: text('working_directory').notNull(), skillId: text('skill_id'), skillName: text('skill_name'), scriptPath: text('script_path'), mcpServerId: text('mcp_server_id'), mcpToolName: text('mcp_tool_name'), arguments: text('arguments', { mode: 'json' }).$type<string[]>().notNull().default([]), input: text('input', { mode: 'json' }).$type<unknown>(), packageFiles: text('package_files', { mode: 'json' }).$type<Array<{ path: string; content: string }>>().notNull().default([]), commandExecutionId: text('command_execution_id').references(() => commandExecutions.id, { onDelete: 'set null' }), status: text('status').$type<'running' | 'completed' | 'failed' | 'cancelled'>().notNull().default('running'), output: text('output').notNull().default(''), result: text('result', { mode: 'json' }).$type<StoredWorkliteScriptResult>(), exitCode: integer('exit_code'), resultAppended: integer('result_appended', { mode: 'boolean' }).notNull().default(false), createdAt: timestamp('created_at'), finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
 }, (table) => [index('agent_tool_calls_execution_idx').on(table.executionId)]);
 
-// Captured launch of a project executor. Codex launches its configured command word through the operator's
-// own interactive login shell, exactly like a manual terminal invocation, so it resolves whichever local
-// Codex configuration (home directory, model, Provider) the operator's shell aliases and PATH select; a null
-// model lets Codex's own resolved configuration pick the default. Claude Code uses the operator's ~/.claude
-// configuration, whose effective base URL must be the Gateway. modelSource states where the model came from:
+// Captured launch of a project executor. With no model, Codex launches the `codex` command and can use a
+// configured `--config-dir`; a declared model keeps the configured command word and per-run Gateway Provider.
+// Claude Code uses the operator's ~/.claude configuration, whose effective base URL must be the Gateway.
+// modelSource states where the model came from:
 // the task parameter, the Chat configuration's declared default for that executor, or the executor's own
 // local default.
 export type StoredProjectExecutorModelSource = 'task' | 'configuration' | 'executor';
 export type StoredProjectExecutorLaunch =
-  | { executor: 'codex'; commandArguments: string[]; model: string | null; modelSource?: StoredProjectExecutorModelSource }
+  | { executor: 'codex'; commandArguments: string[]; model: string | null; configDirectory?: string; modelSource?: StoredProjectExecutorModelSource }
   | { executor: 'claude'; commandArguments: string[]; baseUrl: string; model: string | null; modelSource?: StoredProjectExecutorModelSource };
 
 export type StoredChatProjectTaskSnapshot = {
