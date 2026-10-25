@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Blocks, FolderUp, Plus, Puzzle, RefreshCw, Server, Settings2, Trash2 } from 'lucide-react';
-import { useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { Blocks, ChevronDown, FolderUp, Plus, Puzzle, RefreshCw, Server, Settings2, Trash2 } from 'lucide-react';
+import { useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import type { LocalSkillSyncResult, McpServerView, PluginView, SkillView } from '@worklite/contracts';
@@ -48,6 +48,7 @@ function CapabilitiesPage() {
   const queryClient = useQueryClient();
   const folderInput = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState('');
+  const [expandedResourceKey, setExpandedResourceKey] = useState<string | null>(null);
   const [mcpDeleteTarget, setMcpDeleteTarget] = useState<McpServerView | null>(null);
   const [skillDeleteTarget, setSkillDeleteTarget] = useState<SkillView | null>(null);
   const [skillDeleteBusy, setSkillDeleteBusy] = useState(false);
@@ -81,29 +82,34 @@ function CapabilitiesPage() {
     onError: () => setImportError(tSkills('import.failed')),
   });
 
-  const visiblePlugins = plugins.filter((plugin) => plugin.id !== 'feishu-bot' && plugin.id !== 'wechat-bot');
-  const visibleSkills = skills.filter((skill) => skill.id !== 'sk_worklite_platform');
-  const resources = useMemo(() => {
+  const groupedResources = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
-    const candidates: CapabilityResource[] = [
-      ...visiblePlugins.map((value) => ({ type: 'plugin' as const, value })),
-      ...mcpServers.map((value) => ({ type: 'mcp' as const, value })),
-      ...visibleSkills.map((value) => ({ type: 'skill' as const, value })),
-    ];
-    return candidates
+    const filterAndSort = (resources: CapabilityResource[]) => resources
       .filter((resource) => {
         if (!normalizedSearch) return true;
         const value = resource.value;
         const searchText = resource.type === 'plugin'
-          ? `${value.name} ${value.description} ${value.command}`
+          ? `${value.name} ${value.description} ${value.command} ${value.status}`
           : resource.type === 'mcp'
-            ? `${value.name} ${value.transport} ${value.version} ${value.allowedToolNames.join(' ')}`
-            : `${value.name} ${value.description ?? ''} ${value.source} ${value.version}`;
+            ? `${value.name} ${value.endpoint} ${value.connection} ${value.connectionError ?? ''} ${value.transport} ${value.version} ${value.allowedToolNames.join(' ')}`
+            : `${value.name} ${value.description ?? ''} ${value.source} ${value.version} ${value.validation}`;
         return searchText.toLowerCase().includes(normalizedSearch);
       })
       .sort((left, right) => left.value.name.localeCompare(right.value.name));
+    return {
+      skills: filterAndSort(skills
+        .filter((skill) => skill.id !== 'sk_worklite_platform')
+        .map((value) => ({ type: 'skill' as const, value }))),
+      mcpServers: filterAndSort(mcpServers.map((value) => ({ type: 'mcp' as const, value }))),
+      plugins: filterAndSort(plugins
+        .filter((plugin) => plugin.id !== 'feishu-bot' && plugin.id !== 'wechat-bot')
+        .map((value) => ({ type: 'plugin' as const, value }))),
+    };
   }, [plugins, mcpServers, search, skills]);
-  const hasResources = visiblePlugins.length > 0 || mcpServers.length > 0 || visibleSkills.length > 0;
+  const hasResources = plugins.some((plugin) => plugin.id !== 'feishu-bot' && plugin.id !== 'wechat-bot')
+    || mcpServers.length > 0
+    || skills.some((skill) => skill.id !== 'sk_worklite_platform');
+  const filteredResourceCount = groupedResources.skills.length + groupedResources.mcpServers.length + groupedResources.plugins.length;
   const isLoading = pluginsQuery.isLoading || mcpServersQuery.isLoading || skillsQuery.isLoading;
   const isError = pluginsQuery.isError || mcpServersQuery.isError || skillsQuery.isError;
 
@@ -145,72 +151,148 @@ function CapabilitiesPage() {
     }
   }
 
-  function getTypeLabel(type: CapabilityResource['type']) {
-    if (type === 'plugin') return tWorkspace('nav.plugins');
-    if (type === 'mcp') return tWorkspace('nav.mcpServers');
-    return tWorkspace('nav.skills');
-  }
-
   function renderResourceRow(resource: CapabilityResource) {
-    const nameLink = resource.type === 'plugin'
-      ? <Link to="/capabilities/plugins/$pluginId" params={{ pluginId: resource.value.id }} className="truncate text-sm font-medium hover:underline">{resource.value.name}</Link>
-      : resource.type === 'mcp'
-        ? <Link to="/capabilities/mcp-servers/$serverId" params={{ serverId: resource.value.id }} className="truncate text-sm font-medium hover:underline">{resource.value.name}</Link>
-        : <Link to="/capabilities/skills/$skillId" params={{ skillId: resource.value.id }} className="truncate text-sm font-medium hover:underline">{resource.value.name}</Link>;
-    const icon = resource.type === 'plugin' ? Puzzle : resource.type === 'mcp' ? Server : Blocks;
-    const Icon = icon;
+    const resourceKey = `${resource.type}-${resource.value.id}`;
+    const expanded = expandedResourceKey === resourceKey;
+    const Icon = resource.type === 'plugin' ? Puzzle : resource.type === 'mcp' ? Server : Blocks;
     const subtitle = resource.type === 'plugin'
       ? resource.value.description
       : resource.type === 'mcp'
         ? resource.value.transport
         : resource.value.description;
+    const details: Array<{ label: string; value: ReactNode }> = [];
+
+    if (resource.type === 'skill') {
+      details.push(
+        { label: tSkills('columns.source'), value: tSkills(`source.${resource.value.source}`) },
+        { label: tSkills('columns.version'), value: resource.value.version },
+        { label: tSkills('columns.validation'), value: <StatusBadge status={resource.value.validation} /> },
+        { label: tWorkspace('capabilityResources.columns.updated'), value: formatDateTime(resource.value.updatedAt, locale) },
+      );
+      if (resource.value.description) details.push({ label: tWorkspace('capabilityResources.columns.details'), value: resource.value.description });
+    } else if (resource.type === 'mcp') {
+      details.push(
+        { label: tMcpServers('config.endpoint'), value: <span className="break-all font-mono">{resource.value.endpoint}</span> },
+        { label: tMcpServers('columns.connection'), value: <StatusBadge status={resource.value.connection} /> },
+      );
+      if (resource.value.connectionError) {
+        details.push({
+          label: tMcpServers('columns.connectionError'),
+          value: <span className="text-danger">{tMcpServers(`config.testErrors.${resource.value.connectionError}`)}</span>,
+        });
+      }
+      details.push(
+        { label: tMcpServers('columns.transport'), value: resource.value.transport },
+        {
+          label: tMcpServers('columns.allowedTools'),
+          value: `${resource.value.allowedTools} · ${resource.value.allowedToolNames.join(', ') || tCommon('empty.dash')}`,
+        },
+        { label: tMcpServers('columns.version'), value: resource.value.version },
+        { label: tWorkspace('capabilityResources.columns.updated'), value: formatDateTime(resource.value.updatedAt, locale) },
+      );
+    } else {
+      details.push(
+        { label: tPlugins('columns.command'), value: <code className="break-all">{resource.value.command}</code> },
+        { label: tPlugins('columns.availability'), value: <StatusBadge status={resource.value.status} /> },
+        { label: tWorkspace('capabilityResources.columns.updated'), value: formatDateTime(resource.value.updatedAt, locale) },
+      );
+      if (resource.value.description) details.push({ label: tWorkspace('capabilityResources.columns.details'), value: resource.value.description });
+    }
 
     return (
-      <CollectionRow key={`${resource.type}-${resource.value.id}`} className="min-w-[820px] whitespace-nowrap grid-cols-[minmax(0,2fr)_110px_minmax(0,2fr)_150px_40px]">
-        <span className="flex min-w-0 items-center gap-3">
-          <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <span className="min-w-0">
-            <span className="block truncate">{nameLink}</span>
-            {subtitle ? <span className="block truncate text-[13px] text-muted-foreground">{subtitle}</span> : null}
+      <div key={resourceKey}>
+        <CollectionRow className="min-w-[820px] whitespace-nowrap grid-cols-[minmax(0,2fr)_minmax(0,2fr)_150px_80px] md:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_150px_80px]">
+          <button
+            type="button"
+            onClick={() => setExpandedResourceKey(expanded ? null : resourceKey)}
+            aria-expanded={expanded}
+            className="flex min-w-0 items-center gap-3 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+          >
+            <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium">{resource.value.name}</span>
+              {subtitle ? <span className="block truncate text-[13px] text-muted-foreground">{subtitle}</span> : null}
+            </span>
+            <ChevronDown className={`ml-auto size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`} aria-hidden="true" />
+          </button>
+          <span className="flex min-w-0 items-center gap-3 text-[13px] text-muted-foreground">
+            {resource.type === 'plugin' ? (
+              <>
+                <code className="truncate">{resource.value.command}</code>
+                <StatusBadge status={resource.value.status} />
+              </>
+            ) : resource.type === 'mcp' ? (
+              <>
+                <span className="truncate">{tMcpServers('columns.allowedTools')}: {resource.value.allowedTools} · {resource.value.version}</span>
+                <StatusBadge status={resource.value.connection} />
+              </>
+            ) : (
+              <>
+                <span className="truncate">{tSkills(`source.${resource.value.source}`)} · {resource.value.version}</span>
+                <StatusBadge status={resource.value.validation} />
+              </>
+            )}
           </span>
-        </span>
-        <Badge variant="neutral" className="w-fit">{getTypeLabel(resource.type)}</Badge>
-        <span className="flex min-w-0 items-center gap-3 text-[13px] text-muted-foreground">
-          {resource.type === 'plugin' ? (
-            <>
-              <code className="truncate">{resource.value.command}</code>
-              <StatusBadge status={resource.value.status} />
-            </>
-          ) : resource.type === 'mcp' ? (
-            <>
-              <span className="truncate">{tMcpServers('columns.allowedTools')}: {resource.value.allowedTools} · {resource.value.version}</span>
-              <StatusBadge status={resource.value.connection} />
-            </>
-          ) : (
-            <span className="truncate">{tSkills(`source.${resource.value.source}`)} · {resource.value.version}</span>
-          )}
-        </span>
-        <span className="tabular-nums text-[13px] text-muted-foreground">{formatDateTime(resource.value.updatedAt, locale)}</span>
-        <span className="flex items-center justify-end">
-          {resource.type === 'plugin' ? (
-            <Button asChild variant="ghost" size="icon-compact">
-              <Link to="/capabilities/plugins/$pluginId" params={{ pluginId: resource.value.id }} aria-label={tWorkspace('capabilityResources.configure', { name: resource.value.name })} title={tWorkspace('capabilityResources.configure', { name: resource.value.name })}>
-                <Settings2 className="size-4" />
-              </Link>
-            </Button>
-          ) : resource.type === 'mcp' ? (
-            <Button type="button" variant="ghost" size="icon-compact" className="text-danger hover:text-danger" aria-label={tMcpServers('delete.action', { name: resource.value.name })} onClick={() => setMcpDeleteTarget(resource.value)}>
-              <Trash2 className="size-4" />
-            </Button>
-          ) : (
-            <Button type="button" variant="ghost" size="icon-compact" className="text-danger hover:text-danger" aria-label={tSkills('delete.action', { name: resource.value.name })} onClick={() => { setSkillDeleteError(''); setSkillDeleteTarget(resource.value); }}>
-              <Trash2 className="size-4" />
-            </Button>
-          )}
-        </span>
-      </CollectionRow>
+          <span className="tabular-nums text-[13px] text-muted-foreground">{formatDateTime(resource.value.updatedAt, locale)}</span>
+          <span className="flex items-center justify-end gap-1">
+            {resource.type === 'plugin' ? (
+              <Button asChild variant="ghost" size="icon-compact" data-row-action>
+                <Link to="/capabilities/plugins/$pluginId" params={{ pluginId: resource.value.id }} aria-label={tWorkspace('capabilityResources.configure', { name: resource.value.name })} title={tWorkspace('capabilityResources.configure', { name: resource.value.name })}>
+                  <Settings2 className="size-4" />
+                </Link>
+              </Button>
+            ) : resource.type === 'mcp' ? (
+              <>
+                <Button asChild variant="ghost" size="icon-compact" data-row-action>
+                  <Link to="/capabilities/mcp-servers/$serverId" params={{ serverId: resource.value.id }} aria-label={tWorkspace('capabilityResources.configure', { name: resource.value.name })} title={tWorkspace('capabilityResources.configure', { name: resource.value.name })}>
+                    <Settings2 className="size-4" />
+                  </Link>
+                </Button>
+                <Button type="button" variant="ghost" size="icon-compact" className="text-danger hover:text-danger" data-row-action aria-label={tMcpServers('delete.action', { name: resource.value.name })} onClick={() => setMcpDeleteTarget(resource.value)}>
+                  <Trash2 className="size-4" />
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button asChild variant="ghost" size="icon-compact" data-row-action>
+                  <Link to="/capabilities/skills/$skillId" params={{ skillId: resource.value.id }} aria-label={tWorkspace('capabilityResources.configure', { name: resource.value.name })} title={tWorkspace('capabilityResources.configure', { name: resource.value.name })}>
+                    <Settings2 className="size-4" />
+                  </Link>
+                </Button>
+                <Button type="button" variant="ghost" size="icon-compact" className="text-danger hover:text-danger" data-row-action aria-label={tSkills('delete.action', { name: resource.value.name })} onClick={() => { setSkillDeleteError(''); setSkillDeleteTarget(resource.value); }}>
+                  <Trash2 className="size-4" />
+                </Button>
+              </>
+            )}
+          </span>
+        </CollectionRow>
+        {expanded ? (
+          <div className="border-b border-border bg-surface-subtle/50 px-5 py-4">
+            <div className="grid gap-4 text-[13px] sm:grid-cols-2 lg:grid-cols-4">
+              {details.map((detail) => <CapabilityDetail key={detail.label} label={detail.label} value={detail.value} />)}
+            </div>
+            {resource.type === 'mcp' && resource.value.connection !== 'connected' ? (
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-warning/30 bg-warning/5 px-3 py-2.5">
+                <p className="text-[13px] text-muted-foreground">{tMcpServers('config.needsConnection')}</p>
+                <Button asChild variant="secondary" size="compact">
+                  <Link to="/capabilities/mcp-servers/$serverId" params={{ serverId: resource.value.id }}>
+                    <Settings2 className="size-4" aria-hidden="true" />
+                    {tWorkspace('capabilityResources.configure', { name: resource.value.name })}
+                  </Link>
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     );
   }
+
+  const resourceGroups = [
+    { type: 'skill', title: tSkills('title'), resources: groupedResources.skills },
+    { type: 'mcp', title: tMcpServers('title'), resources: groupedResources.mcpServers },
+    { type: 'plugin', title: tPlugins('title'), resources: groupedResources.plugins },
+  ] as const;
 
   return (
     <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
@@ -267,9 +349,9 @@ function CapabilitiesPage() {
         {isLoading ? (
           <CollectionLoading
             label={tWorkspace('capabilityResources.loading')}
-            columns={[tWorkspace('capabilityResources.columns.resource'), tWorkspace('capabilityResources.columns.type'), tWorkspace('capabilityResources.columns.details'), tWorkspace('capabilityResources.columns.updated'), tWorkspace('capabilityResources.columns.actions')]}
-            headerClassName="min-w-[820px] grid-cols-[minmax(0,2fr)_110px_minmax(0,2fr)_150px_40px]"
-            rowClassName="min-w-[820px] whitespace-nowrap grid-cols-[minmax(0,2fr)_110px_minmax(0,2fr)_150px_40px]"
+            columns={[tWorkspace('capabilityResources.columns.resource'), tWorkspace('capabilityResources.columns.details'), tWorkspace('capabilityResources.columns.updated'), tWorkspace('capabilityResources.columns.actions')]}
+            headerClassName="min-w-[820px] grid-cols-[minmax(0,2fr)_minmax(0,2fr)_150px_80px]"
+            rowClassName="min-w-[820px] whitespace-nowrap grid-cols-[minmax(0,2fr)_minmax(0,2fr)_150px_80px] md:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_150px_80px]"
           />
         ) : isError ? (
           <ErrorState
@@ -279,7 +361,7 @@ function CapabilitiesPage() {
           />
         ) : !hasResources ? (
           <EmptyState title={tWorkspace('capabilityResources.empty.title')} description={tWorkspace('capabilityResources.empty.description')} />
-        ) : resources.length === 0 ? (
+        ) : filteredResourceCount === 0 ? (
           <EmptyState
             title={tWorkspace('capabilityResources.noMatches.title')}
             description={tWorkspace('capabilityResources.noMatches.description', { search })}
@@ -287,13 +369,27 @@ function CapabilitiesPage() {
             onAction={() => setSearch('')}
           />
         ) : (
-          <CollectionTable>
-            <CollectionHeader
-              className="min-w-[820px] grid-cols-[minmax(0,2fr)_110px_minmax(0,2fr)_150px_40px]"
-              columns={[tWorkspace('capabilityResources.columns.resource'), tWorkspace('capabilityResources.columns.type'), tWorkspace('capabilityResources.columns.details'), tWorkspace('capabilityResources.columns.updated'), tWorkspace('capabilityResources.columns.actions')]}
-            />
-            {resources.map(renderResourceRow)}
-          </CollectionTable>
+          <div className="space-y-6">
+            {resourceGroups.map((group) => (
+              <section key={group.type} aria-labelledby={`capability-group-${group.type}`}>
+                <div className="mb-3 flex items-center gap-2">
+                  <h2 id={`capability-group-${group.type}`} className="text-sm font-semibold">{group.title}</h2>
+                  <Badge variant="neutral" aria-label={`${group.title}: ${group.resources.length}`}>{group.resources.length}</Badge>
+                </div>
+                {group.resources.length > 0 ? (
+                  <CollectionTable>
+                    <CollectionHeader
+                      className="min-w-[820px] grid-cols-[minmax(0,2fr)_minmax(0,2fr)_150px_80px]"
+                      columns={[tWorkspace('capabilityResources.columns.resource'), tWorkspace('capabilityResources.columns.details'), tWorkspace('capabilityResources.columns.updated'), tWorkspace('capabilityResources.columns.actions')]}
+                    />
+                    {group.resources.map(renderResourceRow)}
+                  </CollectionTable>
+                ) : (
+                  <p className="rounded-xl border border-border bg-surface px-5 py-4 text-[13px] text-muted-foreground">{tWorkspace('capabilityResources.emptyGroup')}</p>
+                )}
+              </section>
+            ))}
+          </div>
         )}
       </div>
       <McpServerDeleteDialog
@@ -315,6 +411,15 @@ function CapabilitiesPage() {
         busy={skillDeleteBusy}
         onConfirm={() => void deleteSkill()}
       />
+    </div>
+  );
+}
+
+function CapabilityDetail({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <div className="mt-1 break-words">{value}</div>
     </div>
   );
 }

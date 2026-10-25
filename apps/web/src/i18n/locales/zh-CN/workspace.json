@@ -25,6 +25,7 @@
     "loading": "正在加载能力资源…",
     "loadFailed": "加载能力资源失败，请重试。",
     "configure": "配置 {{name}}",
+    "emptyGroup": "暂无此类资源",
     "empty": {
       "title": "还没有能力资源",
       "description": "插件、MCP 服务器和 Skill 会统一显示在这里。"

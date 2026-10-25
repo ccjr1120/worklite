@@ -13,6 +13,7 @@
   "columns": {
     "server": "服务器",
     "connection": "连接",
+    "connectionError": "连接错误",
     "transport": "传输",
     "allowedTools": "允许的工具",
     "version": "版本",
@@ -23,6 +24,7 @@
     "fallback": "服务器",
     "title": "连接 MCP 服务器",
     "description": "仅支持远程 Streamable HTTP。凭据仅可写入，且不会出现在日志中。",
+    "needsConnection": "此服务器尚未连接。请前往配置页检查端点和认证信息，保存后会自动测试连接。",
     "name": "名称",
     "endpoint": "端点",
     "authentication": "认证",
