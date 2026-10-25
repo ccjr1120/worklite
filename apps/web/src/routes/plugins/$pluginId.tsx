@@ -1,12 +1,5 @@
-import { createFileRoute, notFound } from '@tanstack/react-router';
-import { PluginConfiguration } from '@/features/plugins/plugin-configuration';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/plugins/$pluginId')({
-  beforeLoad: ({ params }) => { if (params.pluginId === 'feishu-bot' || params.pluginId === 'wechat-bot') throw notFound(); },
-  component: PluginConfigPage,
+  beforeLoad: ({ params }) => { throw redirect({ to: '/capabilities/plugins/$pluginId', params }); },
 });
-
-function PluginConfigPage() {
-  const { pluginId } = Route.useParams();
-  return <PluginConfiguration pluginId={pluginId} />;
-}

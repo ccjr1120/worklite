@@ -35,8 +35,8 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/artifacts' }))}>
             <FileText className="size-4" /> {t('nav.artifacts')}
           </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/plugins' }))}>
-            <Puzzle className="size-4" /> {t('nav.plugins')}
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/capabilities' }))}>
+            <Puzzle className="size-4" /> {t('nav.resourceManagement')}
           </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/agent-teams' }))}>
             <UsersRound className="size-4" /> {t('nav.agentTeam')}

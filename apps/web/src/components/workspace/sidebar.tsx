@@ -26,7 +26,7 @@ const navigationGroups = [
     id: 'capabilities',
     labelKey: 'nav.capabilities',
     items: [
-      { id: 'plugins', labelKey: 'nav.plugins', to: '/plugins', icon: Puzzle },
+      { id: 'capabilities', labelKey: 'nav.resourceManagement', to: '/capabilities', icon: Puzzle },
     ],
   },
   {
@@ -60,7 +60,7 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
     if (id === 'settings') return pathname.startsWith('/settings');
     if (id === 'workflows') return ['/workflows', '/runs'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
     if (id === 'agentTeam') return ['/agent-teams', '/agent-team-runs', '/agent-team-groups'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
-    if (id === 'plugins') return ['/plugins', '/skills', '/mcp-servers'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+    if (id === 'capabilities') return pathname === '/capabilities' || pathname.startsWith('/capabilities/');
     return pathname === to || pathname.startsWith(`${to}/`);
   }
 

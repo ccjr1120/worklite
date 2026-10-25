@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AgentTeamConfigRouteImport } from './routes/agent-team-config'
 import { Route as ArtifactsRouteImport } from './routes/artifacts'
+import { Route as CapabilitiesRouteImport } from './routes/capabilities'
 import { Route as ChatRouteImport } from './routes/chat'
 import { Route as HomeRouteImport } from './routes/home'
 import { Route as LogsRouteImport } from './routes/logs'
@@ -23,6 +24,10 @@ import { Route as AgentTeamsIndexRouteImport } from './routes/agent-teams/index'
 import { Route as AgentTeamsTeamIdRouteImport } from './routes/agent-teams/$teamId'
 import { Route as ArtifactsIndexRouteImport } from './routes/artifacts/index'
 import { Route as ArtifactsArtifactIdRouteImport } from './routes/artifacts/$artifactId'
+import { Route as CapabilitiesIndexRouteImport } from './routes/capabilities/index'
+import { Route as CapabilitiesMcpServersServerIdRouteImport } from './routes/capabilities/mcp-servers/$serverId'
+import { Route as CapabilitiesPluginsPluginIdRouteImport } from './routes/capabilities/plugins/$pluginId'
+import { Route as CapabilitiesSkillsSkillIdRouteImport } from './routes/capabilities/skills/$skillId'
 import { Route as McpServersIndexRouteImport } from './routes/mcp-servers/index'
 import { Route as McpServersServerIdRouteImport } from './routes/mcp-servers/$serverId'
 import { Route as PluginsIndexRouteImport } from './routes/plugins/index'
@@ -53,6 +58,11 @@ const AgentTeamConfigRoute = AgentTeamConfigRouteImport.update({
 const ArtifactsRoute = ArtifactsRouteImport.update({
   id: '/artifacts',
   path: '/artifacts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CapabilitiesRoute = CapabilitiesRouteImport.update({
+  id: '/capabilities',
+  path: '/capabilities',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChatRoute = ChatRouteImport.update({
@@ -109,6 +119,26 @@ const ArtifactsArtifactIdRoute = ArtifactsArtifactIdRouteImport.update({
   id: '/$artifactId',
   path: '/$artifactId',
   getParentRoute: () => ArtifactsRoute,
+} as any)
+const CapabilitiesIndexRoute = CapabilitiesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => CapabilitiesRoute,
+} as any)
+const CapabilitiesMcpServersServerIdRoute = CapabilitiesMcpServersServerIdRouteImport.update({
+  id: '/mcp-servers/$serverId',
+  path: '/mcp-servers/$serverId',
+  getParentRoute: () => CapabilitiesRoute,
+} as any)
+const CapabilitiesPluginsPluginIdRoute = CapabilitiesPluginsPluginIdRouteImport.update({
+  id: '/plugins/$pluginId',
+  path: '/plugins/$pluginId',
+  getParentRoute: () => CapabilitiesRoute,
+} as any)
+const CapabilitiesSkillsSkillIdRoute = CapabilitiesSkillsSkillIdRouteImport.update({
+  id: '/skills/$skillId',
+  path: '/skills/$skillId',
+  getParentRoute: () => CapabilitiesRoute,
 } as any)
 const McpServersIndexRoute = McpServersIndexRouteImport.update({
   id: '/mcp-servers/',
@@ -197,6 +227,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRouteRouteWithChildren
   '/agent-team-config': typeof AgentTeamConfigRoute
   '/artifacts': typeof ArtifactsRouteWithChildren
+  '/capabilities': typeof CapabilitiesRouteWithChildren
   '/chat': typeof ChatRoute
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
@@ -205,6 +236,9 @@ export interface FileRoutesByFullPath {
   '/agent-team-runs/$runId': typeof AgentTeamRunsRunIdRoute
   '/agent-teams/$teamId': typeof AgentTeamsTeamIdRouteWithChildren
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
+  '/capabilities/mcp-servers/$serverId': typeof CapabilitiesMcpServersServerIdRoute
+  '/capabilities/plugins/$pluginId': typeof CapabilitiesPluginsPluginIdRoute
+  '/capabilities/skills/$skillId': typeof CapabilitiesSkillsSkillIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -215,6 +249,7 @@ export interface FileRoutesByFullPath {
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
   '/agent-teams/': typeof AgentTeamsIndexRoute
   '/artifacts/': typeof ArtifactsIndexRoute
+  '/capabilities/': typeof CapabilitiesIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/plugins/': typeof PluginsIndexRoute
   '/settings/': typeof SettingsIndexRoute
@@ -234,6 +269,9 @@ export interface FileRoutesByTo {
   '/agent-team-groups/$groupId': typeof AgentTeamGroupsGroupIdRoute
   '/agent-team-runs/$runId': typeof AgentTeamRunsRunIdRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
+  '/capabilities/mcp-servers/$serverId': typeof CapabilitiesMcpServersServerIdRoute
+  '/capabilities/plugins/$pluginId': typeof CapabilitiesPluginsPluginIdRoute
+  '/capabilities/skills/$skillId': typeof CapabilitiesSkillsSkillIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -244,6 +282,7 @@ export interface FileRoutesByTo {
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
   '/agent-teams': typeof AgentTeamsIndexRoute
   '/artifacts': typeof ArtifactsIndexRoute
+  '/capabilities': typeof CapabilitiesIndexRoute
   '/mcp-servers': typeof McpServersIndexRoute
   '/plugins': typeof PluginsIndexRoute
   '/settings': typeof SettingsIndexRoute
@@ -259,6 +298,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRouteRouteWithChildren
   '/agent-team-config': typeof AgentTeamConfigRoute
   '/artifacts': typeof ArtifactsRouteWithChildren
+  '/capabilities': typeof CapabilitiesRouteWithChildren
   '/chat': typeof ChatRoute
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
@@ -267,6 +307,9 @@ export interface FileRoutesById {
   '/agent-team-runs/$runId': typeof AgentTeamRunsRunIdRoute
   '/agent-teams/$teamId': typeof AgentTeamsTeamIdRouteWithChildren
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
+  '/capabilities/mcp-servers/$serverId': typeof CapabilitiesMcpServersServerIdRoute
+  '/capabilities/plugins/$pluginId': typeof CapabilitiesPluginsPluginIdRoute
+  '/capabilities/skills/$skillId': typeof CapabilitiesSkillsSkillIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -277,6 +320,7 @@ export interface FileRoutesById {
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
   '/agent-teams/': typeof AgentTeamsIndexRoute
   '/artifacts/': typeof ArtifactsIndexRoute
+  '/capabilities/': typeof CapabilitiesIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/plugins/': typeof PluginsIndexRoute
   '/settings/': typeof SettingsIndexRoute
@@ -293,6 +337,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/agent-team-config'
     | '/artifacts'
+    | '/capabilities'
     | '/chat'
     | '/home'
     | '/logs'
@@ -301,6 +346,9 @@ export interface FileRouteTypes {
     | '/agent-team-runs/$runId'
     | '/agent-teams/$teamId'
     | '/artifacts/$artifactId'
+    | '/capabilities/mcp-servers/$serverId'
+    | '/capabilities/plugins/$pluginId'
+    | '/capabilities/skills/$skillId'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
     | '/runs/$runId'
@@ -311,6 +359,7 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId'
     | '/agent-teams/'
     | '/artifacts/'
+    | '/capabilities/'
     | '/mcp-servers/'
     | '/plugins/'
     | '/settings/'
@@ -330,6 +379,9 @@ export interface FileRouteTypes {
     | '/agent-team-groups/$groupId'
     | '/agent-team-runs/$runId'
     | '/artifacts/$artifactId'
+    | '/capabilities/mcp-servers/$serverId'
+    | '/capabilities/plugins/$pluginId'
+    | '/capabilities/skills/$skillId'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
     | '/runs/$runId'
@@ -340,6 +392,7 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId'
     | '/agent-teams'
     | '/artifacts'
+    | '/capabilities'
     | '/mcp-servers'
     | '/plugins'
     | '/settings'
@@ -354,6 +407,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/agent-team-config'
     | '/artifacts'
+    | '/capabilities'
     | '/chat'
     | '/home'
     | '/logs'
@@ -362,6 +416,9 @@ export interface FileRouteTypes {
     | '/agent-team-runs/$runId'
     | '/agent-teams/$teamId'
     | '/artifacts/$artifactId'
+    | '/capabilities/mcp-servers/$serverId'
+    | '/capabilities/plugins/$pluginId'
+    | '/capabilities/skills/$skillId'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
     | '/runs/$runId'
@@ -372,6 +429,7 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId'
     | '/agent-teams/'
     | '/artifacts/'
+    | '/capabilities/'
     | '/mcp-servers/'
     | '/plugins/'
     | '/settings/'
@@ -387,6 +445,7 @@ export interface RootRouteChildren {
   SettingsRouteRoute: typeof SettingsRouteRouteWithChildren
   AgentTeamConfigRoute: typeof AgentTeamConfigRoute
   ArtifactsRoute: typeof ArtifactsRouteWithChildren
+  CapabilitiesRoute: typeof CapabilitiesRouteWithChildren
   ChatRoute: typeof ChatRoute
   HomeRoute: typeof HomeRoute
   LogsRoute: typeof LogsRoute
@@ -427,6 +486,13 @@ declare module '@tanstack/react-router' {
       path: '/artifacts'
       fullPath: '/artifacts'
       preLoaderRoute: typeof ArtifactsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/capabilities': {
+      id: '/capabilities'
+      path: '/capabilities'
+      fullPath: '/capabilities'
+      preLoaderRoute: typeof CapabilitiesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/chat': {
@@ -505,6 +571,34 @@ declare module '@tanstack/react-router' {
       fullPath: '/artifacts/$artifactId'
       preLoaderRoute: typeof ArtifactsArtifactIdRouteImport
       parentRoute: typeof ArtifactsRoute
+    }
+    '/capabilities/': {
+      id: '/capabilities/'
+      path: '/'
+      fullPath: '/capabilities/'
+      preLoaderRoute: typeof CapabilitiesIndexRouteImport
+      parentRoute: typeof CapabilitiesRoute
+    }
+    '/capabilities/mcp-servers/$serverId': {
+      id: '/capabilities/mcp-servers/$serverId'
+      path: '/mcp-servers/$serverId'
+      fullPath: '/capabilities/mcp-servers/$serverId'
+      preLoaderRoute: typeof CapabilitiesMcpServersServerIdRouteImport
+      parentRoute: typeof CapabilitiesRoute
+    }
+    '/capabilities/plugins/$pluginId': {
+      id: '/capabilities/plugins/$pluginId'
+      path: '/plugins/$pluginId'
+      fullPath: '/capabilities/plugins/$pluginId'
+      preLoaderRoute: typeof CapabilitiesPluginsPluginIdRouteImport
+      parentRoute: typeof CapabilitiesRoute
+    }
+    '/capabilities/skills/$skillId': {
+      id: '/capabilities/skills/$skillId'
+      path: '/skills/$skillId'
+      fullPath: '/capabilities/skills/$skillId'
+      preLoaderRoute: typeof CapabilitiesSkillsSkillIdRouteImport
+      parentRoute: typeof CapabilitiesRoute
     }
     '/mcp-servers/': {
       id: '/mcp-servers/'
@@ -653,6 +747,24 @@ const ArtifactsRouteWithChildren = ArtifactsRoute._addFileChildren(
   ArtifactsRouteChildren,
 )
 
+interface CapabilitiesRouteChildren {
+  CapabilitiesIndexRoute: typeof CapabilitiesIndexRoute
+  CapabilitiesMcpServersServerIdRoute: typeof CapabilitiesMcpServersServerIdRoute
+  CapabilitiesPluginsPluginIdRoute: typeof CapabilitiesPluginsPluginIdRoute
+  CapabilitiesSkillsSkillIdRoute: typeof CapabilitiesSkillsSkillIdRoute
+}
+
+const CapabilitiesRouteChildren: CapabilitiesRouteChildren = {
+  CapabilitiesIndexRoute: CapabilitiesIndexRoute,
+  CapabilitiesMcpServersServerIdRoute: CapabilitiesMcpServersServerIdRoute,
+  CapabilitiesPluginsPluginIdRoute: CapabilitiesPluginsPluginIdRoute,
+  CapabilitiesSkillsSkillIdRoute: CapabilitiesSkillsSkillIdRoute,
+}
+
+const CapabilitiesRouteWithChildren = CapabilitiesRoute._addFileChildren(
+  CapabilitiesRouteChildren,
+)
+
 interface AgentTeamsTeamIdRouteChildren {
   AgentTeamsTeamIdConfigRoute: typeof AgentTeamsTeamIdConfigRoute
   AgentTeamsTeamIdIndexRoute: typeof AgentTeamsTeamIdIndexRoute
@@ -682,6 +794,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRouteRoute: SettingsRouteRouteWithChildren,
   AgentTeamConfigRoute: AgentTeamConfigRoute,
   ArtifactsRoute: ArtifactsRouteWithChildren,
+  CapabilitiesRoute: CapabilitiesRouteWithChildren,
   ChatRoute: ChatRoute,
   HomeRoute: HomeRoute,
   LogsRoute: LogsRoute,
