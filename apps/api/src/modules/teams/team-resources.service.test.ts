@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Request } from 'express';
 import {
   agentMcpServers,
@@ -123,6 +123,25 @@ function badRequestReferences(error: unknown): McpServerReferenceReport {
   expect(typeof response.message).toBe('string');
   return response.references;
 }
+
+describe('WorkspaceResourcesService.platformSnapshot', () => {
+  it('advertises the general Chat terminal without a command allow-list', async () => {
+    const { resources } = await setup();
+    vi.spyOn(resources, 'providers').mockResolvedValue([]);
+
+    const snapshot = await resources.platformSnapshot(request, 'personal');
+
+    expect(snapshot.capabilities.troubleshooting.chatHostTools).toEqual(['run_host_command']);
+    expect(snapshot.capabilities.chatShell).toMatchObject({
+      available: true,
+      tool: 'run_host_command',
+      runtime: '/bin/zsh -lc',
+      commandPolicy: 'arbitrary local shell commands; no command allow-list',
+      automaticReplay: false,
+    });
+    expect(snapshot.capabilities.chatCapabilities.orchestration.localCommandTarget).toContain('run_host_command');
+  });
+});
 
 describe('WorkspaceResourcesService.deleteMcpServer', () => {
   it('rejects an unknown server with 404', async () => {

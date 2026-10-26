@@ -1,9 +1,10 @@
 import { BadRequestException, ConflictException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
-import { projectTaskCaptureFailureMessage, projectTaskSteerOutput, toolCallRejection, type ToolCallAdmission } from './agent-executions.service';
+import { hostCommandToolCallUpdate, platformRuntimeTool, projectTaskCaptureFailureMessage, projectTaskSteerOutput, toolCallRejection, type ToolCallAdmission } from './agent-executions.service';
 import { CHAT_PROJECT_TASK_STEER_TOOL, CHAT_PROJECT_TASK_TOOL } from './chat-project-tasks.service';
 import { ClaudeCodeError } from './claude-code.service';
 import { CodexAppServerError } from './codex-app-server.service';
+import type { ChatHostCommandResult } from './chat-host-command.service';
 
 const admission = (overrides: Partial<ToolCallAdmission> = {}): ToolCallAdmission => ({
   index: 0,
@@ -37,6 +38,12 @@ describe('toolCallRejection', () => {
     expect(toolCallRejection(admission({ toolName: 'mcp_x', chatOnly: false, total: 2, hasMcpTool: false }))).toBe('The model requested an MCP tool that is not assigned or available.');
     expect(toolCallRejection(admission({ toolName: 'ask_user', hasBuiltinTool: true, total: 2 }))).toBe('The clarification tool must be requested in its own model step.');
     expect(toolCallRejection(admission({ toolName: 'ask_user', hasBuiltinTool: true, total: 1 }))).toBeNull();
+  });
+
+  it('admits run_host_command only when the protected runtime tool is exposed', () => {
+    expect(toolCallRejection(admission({ toolName: 'run_host_command', hasBuiltinTool: true }))).toBeNull();
+    expect(toolCallRejection(admission({ toolName: 'run_host_command', hasBuiltinTool: false })))
+      .toBe('Chat may only dispatch tasks and use protected platform operations.');
   });
 
   it('still allows one project task accompanied by a plan update', () => {
@@ -102,5 +109,49 @@ describe('steer_project_task', () => {
     expect(CHAT_PROJECT_TASK_STEER_TOOL.inputSchema.required).toEqual(['taskId', 'text']);
     expect(CHAT_PROJECT_TASK_TOOL.description).toContain('steer_project_task');
     expect(CHAT_PROJECT_TASK_TOOL.description).not.toContain('never steers');
+  });
+});
+
+describe('run_host_command runtime tool', () => {
+  it('resolves only a non-script runtime declaration from the protected manifest', () => {
+    const files = [{
+      path: 'scripts/tools.json',
+      content: JSON.stringify({
+        '__runtime__/run-host-command': { name: 'run_host_command', description: 'runtime terminal', inputSchema: { type: 'object', required: ['command'] } },
+        'scripts/run-host-command.mjs': { name: 'run_host_command', description: 'executable script', inputSchema: { type: 'object' } },
+      }),
+    }];
+
+    expect(platformRuntimeTool(files, 'run_host_command')?.description).toBe('runtime terminal');
+    expect(platformRuntimeTool(files, 'missing')).toBeUndefined();
+  });
+
+  it('maps the complete command and bounded result into existing tool-call evidence', () => {
+    const result: ChatHostCommandResult = {
+      status: 'failed',
+      command: 'sleep 30',
+      cwd: '/Users/example/project',
+      shell: '/bin/zsh',
+      argv: ['/bin/zsh', '-lc', 'sleep 30'],
+      exitCode: 137,
+      stdout: 'stdout tail',
+      stderr: 'stderr tail',
+      output: 'command: sleep 30\ncwd: /Users/example/project\nexitCode: 137\ndurationMs: 150\ntimedOut: true',
+      durationMs: 150,
+      timedOut: true,
+      cancelled: false,
+      rejected: false,
+      stdoutTruncated: false,
+      stderrTruncated: false,
+      outputTruncated: false,
+    };
+
+    expect(hostCommandToolCallUpdate(result)).toEqual({
+      workingDirectory: '/Users/example/project',
+      arguments: ['/bin/zsh', '-lc', 'sleep 30'],
+      status: 'failed',
+      output: result.output,
+      exitCode: 137,
+    });
   });
 });

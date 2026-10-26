@@ -235,4 +235,40 @@ describe('initializeDatabase restart recovery', () => {
     expect(content.get('SKILL.md')).toContain('query_platform');
     expect(chat.systemPrompt).toContain('query_platform');
   });
+
+  it('publishes the general Chat terminal tool and its split from project tasks', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+
+    const files = await db.select().from(schema.skillFiles).where(eq(schema.skillFiles.skillId, 'sk_worklite_platform'));
+    const content = new Map(files.map((file) => [file.path, file.content]));
+    const tools = JSON.parse(content.get('scripts/tools.json')!) as Record<string, {
+      name: string;
+      description: string;
+      inputSchema: { required?: string[]; additionalProperties?: boolean; properties: Record<string, { type?: string; minLength?: number; maxLength?: number; minimum?: number; maximum?: number }> };
+    }>;
+    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
+    const skill = content.get('SKILL.md')!;
+    const terminal = tools['__runtime__/run-host-command'];
+
+    expect(terminal.name).toBe('run_host_command');
+    expect(terminal.inputSchema.required).toEqual(['command']);
+    expect(terminal.inputSchema.additionalProperties).toBe(false);
+    expect(terminal.inputSchema.properties.command).toMatchObject({ type: 'string', minLength: 1, maxLength: 20_000 });
+    expect(terminal.inputSchema.properties.cwd).toMatchObject({ type: 'string', maxLength: 4_096 });
+    expect(terminal.inputSchema.properties.timeoutMs).toMatchObject({ type: 'integer', minimum: 100, maximum: 900_000 });
+    expect(terminal.description).toContain('no command allow-list');
+    expect(terminal.description).toContain('project_task');
+    expect(tools['scripts/run-host-command.mjs']).toBeUndefined();
+    expect(skill).toContain('Use run_host_command directly');
+    expect(skill).toContain('no command allow-list');
+    expect(skill).toContain('project_task');
+    expect(skill).toContain('ordinary standalone file operations may use run_host_command');
+    expect(skill).not.toContain('batch file changes and directory removal belong to a project executor');
+    expect(skill).not.toMatch(/whitelist|restricted Chat|no new Shell execution|no direct read|no bash/i);
+    expect(chat.systemPrompt).toContain('run_host_command');
+    expect(chat.systemPrompt).toContain('Do not dispatch project_task for these operations');
+    expect(chat.systemPrompt).toContain('delegate writing or changing code, repository-wide investigation, cross-file changes and validation/build/test work');
+    expect(chat.systemPrompt).not.toMatch(/whitelist|restricted run_host_command|General read, glob, grep and bash|no bash|no direct read/i);
+  });
 });
