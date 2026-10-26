@@ -894,7 +894,7 @@ function WorkflowEditorPage() {
         </> : null}
         {selectedNode.data.nodeType === 'artifact' ? <>
           <Field label={t('editor.artifactName')} htmlFor="artifact-name"><Input id="artifact-name" value={selectedNode.data.artifactName ?? ''} onChange={(event) => { const artifactName = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, artifactName } } : node)); setSaveState('unsaved'); }} /></Field>
-          <Field label={t('editor.artifactType')} htmlFor="artifact-type"><Select value={selectedNode.data.artifactType ?? 'text'} onValueChange={(value) => { const artifactType = value as 'text' | 'markdown' | 'json'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, artifactType } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="artifact-type"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">{t('editor.artifactTypes.text')}</SelectItem><SelectItem value="markdown">{t('editor.artifactTypes.markdown')}</SelectItem><SelectItem value="json">{t('editor.artifactTypes.json')}</SelectItem></SelectContent></Select></Field>
+          <Field label={t('editor.artifactType')} htmlFor="artifact-type"><Select value={selectedNode.data.artifactType ?? 'text'} onValueChange={(value) => { const artifactType = value as 'text' | 'markdown' | 'json' | 'image'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, artifactType } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="artifact-type"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">{t('editor.artifactTypes.text')}</SelectItem><SelectItem value="markdown">{t('editor.artifactTypes.markdown')}</SelectItem><SelectItem value="json">{t('editor.artifactTypes.json')}</SelectItem><SelectItem value="image">{t('editor.artifactTypes.image')}</SelectItem></SelectContent></Select></Field>
           <p className="text-[12px] text-muted-foreground">{t('editor.artifactCreationDescription')}</p>
         </> : null}
         {selectedNode.data.nodeType === 'artifactQuery' ? <>
@@ -1212,7 +1212,7 @@ function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
         skillNames: Array.isArray(config.skillNames) ? config.skillNames.filter((value): value is string => typeof value === 'string') : [],
         dashboardLayout: readDashboardLayout(config.layout),
         artifactName: typeof config.name === 'string' ? config.name : undefined,
-        artifactType: config.type === 'json' || config.type === 'text' || config.type === 'markdown' ? config.type : undefined,
+        artifactType: config.type === 'json' || config.type === 'text' || config.type === 'markdown' || config.type === 'image' ? config.type : undefined,
         queryName: typeof config.name === 'string' ? config.name : undefined,
         queryTitleField: typeof config.titleField === 'string' ? config.titleField : undefined,
         queryDescriptionFields: Array.isArray(config.descriptionFields) ? config.descriptionFields.filter((value): value is string => typeof value === 'string') : undefined,

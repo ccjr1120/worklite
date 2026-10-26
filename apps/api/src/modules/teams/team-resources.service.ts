@@ -80,6 +80,7 @@ import {
 } from '../skills/local-skill-source';
 import { McpClientService } from '../mcp-servers/mcp-client.service';
 import { getArtifactDetail, listArtifacts } from '../artifacts/artifacts-query';
+import { ArtifactStorageService } from '../artifacts/artifact-storage.service';
 import { AGENT_TEAM_ROLES, BUILT_IN_AGENT_TEAM_ID } from '../agent-teams/agent-team-configuration';
 import { isWorkliteNavigationTarget, resolveWorkliteNavigationRoute } from './worklite-navigation';
 
@@ -439,6 +440,7 @@ export class WorkspaceResourcesService {
     private readonly workspaces: WorkspaceService,
     private readonly skillScripts: SkillScriptRunnerService,
     private readonly mcpClient: McpClientService,
+    private readonly artifactStorage: ArtifactStorageService,
   ) {}
 
   /** Reconcile the two local roots for callers that only have a workspace id. */
@@ -1782,10 +1784,27 @@ export class WorkspaceResourcesService {
     return artifact;
   }
 
+  async artifactContent(request: Request, workspaceSlug: string, artifactId: string): Promise<{ content: Buffer; mimeType: string; sizeBytes: number; fileName: string }> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const [artifact] = await this.db.select({ id: artifacts.id, type: artifacts.type, objectKey: artifacts.objectKey, mimeType: artifacts.mimeType, sizeBytes: artifacts.sizeBytes, name: artifacts.name })
+      .from(artifacts)
+      .where(and(eq(artifacts.id, artifactId), eq(artifacts.workspaceId, team.id)))
+      .limit(1);
+    if (!artifact || artifact.type !== 'image' || !artifact.objectKey) throw new NotFoundException('Artifact image not found');
+    const content = await this.artifactStorage.read(artifact.objectKey);
+    return {
+      content,
+      mimeType: artifact.mimeType ?? 'image/png',
+      sizeBytes: artifact.sizeBytes ?? content.byteLength,
+      fileName: `${artifact.id}.png`,
+    };
+  }
+
   async deleteArtifact(request: Request, workspaceSlug: string, artifactId: string): Promise<void> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [deleted] = await this.db.delete(artifacts).where(and(eq(artifacts.id, artifactId), eq(artifacts.workspaceId, team.id))).returning({ id: artifacts.id });
+    const [deleted] = await this.db.delete(artifacts).where(and(eq(artifacts.id, artifactId), eq(artifacts.workspaceId, team.id))).returning({ id: artifacts.id, type: artifacts.type, objectKey: artifacts.objectKey });
     if (!deleted) throw new NotFoundException('Artifact not found');
+    if (deleted.type === 'image' && deleted.objectKey) await this.artifactStorage.remove(deleted.objectKey);
   }
 
   private async workflowResourceIsReferenced(workspaceId: string, field: 'skillIds' | 'mcpServerIds', resourceId: string): Promise<boolean> {

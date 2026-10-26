@@ -163,7 +163,7 @@
     "queryDescriptionFields": "Description fields",
     "queryDescription": "Read matching workspace history, including detached Artifacts and intermediate drafts. No matches return an empty candidate list.",
     "artifactNode": "产物",
-    "artifactNodeDescription": "将运行数据保存为具名产物",
+    "artifactNodeDescription": "将运行数据或 PNG 图片保存为具名产物",
     "artifactName": "产物名称",
     "artifactType": "产物类型",
     "artifactCreationDescription": "运行成功后创建产物，节点输出携带产物引用。",
@@ -171,7 +171,8 @@
     "artifactTypes": {
       "text": "文本",
       "markdown": "Markdown",
-      "json": "JSON"
+      "json": "JSON",
+      "image": "图片"
     },
     "imageNode": "图片生成",
     "imageNodeDescription": "根据文本提示词生成 PNG 图片",

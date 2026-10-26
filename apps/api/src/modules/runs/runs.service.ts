@@ -27,13 +27,14 @@ import { WechatOfficialAccountService } from '../plugins/wechat-official-account
 import { PortkeyGatewayService } from '../model-providers/portkey-gateway.service';
 import { renderCanvasSticker, validateCanvasStickerConfig } from './canvas-sticker';
 import { renderCanvasScript, validateCanvasRenderCode, validateCanvasRenderConfig } from './canvas-render';
+import { ArtifactStorageService } from '../artifacts/artifact-storage.service';
 
 type RunListener = (event: RunProgressEvent) => void;
+type PreparedArtifactItem = { id: string; name: string; type: 'text' | 'markdown' | 'json' | 'image' };
 type PreparedArtifactNode = {
-  record: typeof artifacts.$inferInsert;
-  id: string;
-  name: string;
-  type: 'text' | 'markdown' | 'json';
+  records: Array<typeof artifacts.$inferInsert>;
+  items: PreparedArtifactItem[];
+  storageKeys: string[];
   output: unknown;
 };
 
@@ -70,6 +71,7 @@ export class RunsService {
     @Inject(forwardRef(() => AgentExecutionsService)) private readonly agentExecutions: AgentExecutionsService,
     private readonly wechatOfficialAccount: WechatOfficialAccountService,
     private readonly gateway: PortkeyGatewayService,
+    private readonly artifactStorage: ArtifactStorageService,
   ) {
     const capability = (id: string, version = '1') => {
       const value = resolveWorkflowNodeCapability(id, version);
@@ -616,7 +618,7 @@ export class RunsService {
       while (true) {
         await this.assertActive(runId, abortController.signal);
         const active = state.active;
-        const invocation = active ?? takeNextWorkflowInvocation(state);
+        const invocation = active ?? takeReadyArtifactInvocation(state, definition) ?? takeNextWorkflowInvocation(state);
         if (!invocation) break;
         const node = definition.nodes.find((candidate) => candidate.id === invocation.nodeId);
         if (!node) throw new Error('Workflow scheduler references an unavailable node.');
@@ -683,9 +685,9 @@ export class RunsService {
               return;
             }
             await this.assertActive(runId, abortController.signal);
-            artifactToPersist = this.prepareArtifactNode(run, node, result.output);
+            artifactToPersist = await this.prepareArtifactNode(run, node, result.output);
             output = artifactToPersist ? artifactToPersist.output : result.output;
-            artifactIds = artifactToPersist ? [artifactToPersist.id] : [];
+            artifactIds = artifactToPersist ? artifactToPersist.items.map((artifact) => artifact.id) : [];
             failure = null;
             break;
           } catch (error) {
@@ -721,13 +723,20 @@ export class RunsService {
         }
         delete state.active;
         const finishedAt = new Date();
-        await this.db.transaction((transaction) => {
-          if (artifactToPersist) transaction.insert(artifacts).values(artifactToPersist.record).run();
-          const [updatedNodeRun] = transaction.update(workflowNodeRuns).set({ status: 'succeeded', output: sanitizeWorkflowImages(output), artifactIds, finishedAt }).where(and(eq(workflowNodeRuns.id, nodeRunId), eq(workflowNodeRuns.status, 'running'))).returning().all();
-          const [updatedRun] = transaction.update(workflowRuns).set({ executionState: state as StoredWorkflowExecutionState, updatedAt: finishedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.status, 'running'))).returning().all();
-          if (!updatedNodeRun || !updatedRun) throw new RunCancelledError();
-        });
-        if (artifactToPersist) await this.publish(runId, 'artifact.created', { artifactId: artifactToPersist.id, nodeId: node.id, name: artifactToPersist.name, type: artifactToPersist.type });
+        try {
+          await this.db.transaction((transaction) => {
+            if (artifactToPersist?.records.length) transaction.insert(artifacts).values(artifactToPersist.records).run();
+            const [updatedNodeRun] = transaction.update(workflowNodeRuns).set({ status: 'succeeded', output: sanitizeWorkflowImages(output), artifactIds, finishedAt }).where(and(eq(workflowNodeRuns.id, nodeRunId), eq(workflowNodeRuns.status, 'running'))).returning().all();
+            const [updatedRun] = transaction.update(workflowRuns).set({ executionState: state as StoredWorkflowExecutionState, updatedAt: finishedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.status, 'running'))).returning().all();
+            if (!updatedNodeRun || !updatedRun) throw new RunCancelledError();
+          });
+        } catch (error) {
+          if (artifactToPersist?.storageKeys.length) await Promise.allSettled(artifactToPersist.storageKeys.map((key) => this.artifactStorage.remove(key)));
+          throw error;
+        }
+        for (const artifact of artifactToPersist?.items ?? []) {
+          await this.publish(runId, 'artifact.created', { artifactId: artifact.id, nodeId: node.id, name: artifact.name, type: artifact.type });
+        }
         await this.publish(runId, 'node.completed', { nodeId: node.id, nodeRunId, output: sanitizeWorkflowImages(output), artifactIds });
       }
 
@@ -834,17 +843,71 @@ export class RunsService {
     return true;
   }
 
-  private prepareArtifactNode(run: typeof workflowRuns.$inferSelect, node: StoredWorkflowNode, output: unknown): PreparedArtifactNode | null {
+  private async prepareArtifactNode(run: typeof workflowRuns.$inferSelect, node: StoredWorkflowNode, output: unknown): Promise<PreparedArtifactNode | null> {
     if (node.type !== 'worklite/artifact') return null;
     const config = asRecord(node.config);
     if (!config || typeof config.name !== 'string' || !config.name.trim()) throw new Error('Artifact node requires a name and supported artifact type.');
     const type = config.type;
-    if (type !== 'text' && type !== 'markdown' && type !== 'json') throw new Error('Artifact node requires a name and supported artifact type.');
-    const content = typeof output === 'string' ? output : JSON.stringify(output ?? '');
+    if (type !== 'text' && type !== 'markdown' && type !== 'json' && type !== 'image') throw new Error('Artifact node requires a name and supported artifact type.');
     const name = config.name.trim();
-    const id = `art_${randomUUID()}`;
-    const record: typeof artifacts.$inferInsert = { id, workspaceId: run.workspaceId, workflowId: run.workflowId, runId: run.id, name, type, size: `${Buffer.byteLength(content, 'utf8')} B`, content };
-    return { record, id, name, type, output: { type: 'artifact', artifactId: id, name, artifactType: type } };
+    const images = collectGeneratedWorkflowImages(output);
+    if (type !== 'image') {
+      if (images.length > 0) throw new Error('Generated PNG input requires the Artifact node type to be image.');
+      const content = typeof output === 'string' ? output : JSON.stringify(output ?? '');
+      const id = `art_${randomUUID()}`;
+      const record: typeof artifacts.$inferInsert = { id, workspaceId: run.workspaceId, workflowId: run.workflowId, runId: run.id, name, type, size: `${Buffer.byteLength(content, 'utf8')} B`, content };
+      return { records: [record], items: [{ id, name, type }], storageKeys: [], output: { type: 'artifact', artifactId: id, name, artifactType: type } };
+    }
+
+    if (images.length === 0) throw new Error('Image Artifact requires at least one generated PNG image as input.');
+    const records: Array<typeof artifacts.$inferInsert> = [];
+    const items: PreparedArtifactItem[] = [];
+    const storageKeys: string[] = [];
+    try {
+      for (const image of images) {
+        for (const imageData of image.data) {
+          const encoded = imageData.b64Json;
+          if (encoded.length > 45_000_000) throw new Error('Image Artifact input must be a valid PNG no larger than 32 MB.');
+          if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) throw new Error('Image Artifact input contains invalid base64 data.');
+          const content = Buffer.from(encoded, 'base64');
+          if (content.byteLength === 0 || content.byteLength > 32 * 1024 * 1024 || content.toString('base64').replace(/=+$/, '') !== encoded.replace(/=+$/, '')) {
+            throw new Error('Image Artifact input must be a valid PNG no larger than 32 MB.');
+          }
+          const dimensions = pngDimensions(content);
+          const id = `art_${randomUUID()}`;
+          const objectKey = await this.artifactStorage.writePng(id, content);
+          storageKeys.push(objectKey);
+          const itemName = images.length === 1 && image.data.length === 1 ? name : `${name} ${items.length + 1}`;
+          records.push({
+            id,
+            workspaceId: run.workspaceId,
+            workflowId: run.workflowId,
+            runId: run.id,
+            name: itemName,
+            type: 'image',
+            size: `${content.byteLength} B`,
+            content: '',
+            objectKey,
+            mimeType: image.mediaType,
+            width: dimensions.width,
+            height: dimensions.height,
+            sizeBytes: content.byteLength,
+          });
+          items.push({ id, name: itemName, type: 'image' });
+        }
+      }
+    } catch (error) {
+      await Promise.allSettled(storageKeys.map((key) => this.artifactStorage.remove(key)));
+      throw error;
+    }
+
+    const artifactIds = items.map((artifact) => artifact.id);
+    return {
+      records,
+      items,
+      storageKeys,
+      output: { type: 'artifact', artifactId: artifactIds[0], artifactIds, name, artifactType: 'image', imageCount: artifactIds.length },
+    };
   }
 
   private async toView(run: typeof workflowRuns.$inferSelect, workflow: typeof workflows.$inferSelect, version: typeof workflowVersions.$inferSelect, workspaceSlug: string, initiator: string, details: boolean): Promise<RunView> {
@@ -1050,6 +1113,12 @@ type GeneratedWorkflowImage = {
   data: Array<{ b64Json: string }>;
 };
 
+function takeReadyArtifactInvocation(state: WorkflowSchedulerState, definition: StoredWorkflowDefinition) {
+  const artifactNodeIds = new Set(definition.nodes.filter((node) => node.type === 'worklite/artifact').map((node) => node.id));
+  const index = state.ready.findIndex((invocation) => artifactNodeIds.has(invocation.nodeId));
+  return index < 0 ? undefined : state.ready.splice(index, 1)[0];
+}
+
 function isGeneratedWorkflowImage(value: unknown): value is GeneratedWorkflowImage {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
@@ -1062,6 +1131,33 @@ function isGeneratedWorkflowImage(value: unknown): value is GeneratedWorkflowIma
       && typeof item === 'object'
       && !Array.isArray(item)
       && typeof (item as Record<string, unknown>).b64Json === 'string');
+}
+
+function collectGeneratedWorkflowImages(value: unknown): GeneratedWorkflowImage[] {
+  const images: GeneratedWorkflowImage[] = [];
+  const visit = (current: unknown): void => {
+    if (isGeneratedWorkflowImage(current)) {
+      images.push(current);
+      return;
+    }
+    if (Array.isArray(current)) {
+      current.forEach(visit);
+      return;
+    }
+    const record = asRecord(current);
+    if (record) Object.values(record).forEach(visit);
+  };
+  visit(value);
+  return images;
+}
+
+function pngDimensions(content: Buffer): { width: number; height: number } {
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  if (content.byteLength < 24 || !content.subarray(0, 8).equals(signature)) throw new Error('Image Artifact input must contain a PNG image.');
+  const width = content.readUInt32BE(16);
+  const height = content.readUInt32BE(20);
+  if (width < 1 || height < 1) throw new Error('Image Artifact input has invalid PNG dimensions.');
+  return { width, height };
 }
 
 function sanitizeWorkflowImages<T>(value: T): T {
@@ -1094,7 +1190,23 @@ function runResumable(run: typeof workflowRuns.$inferSelect): boolean {
 }
 
 function toArtifactView(row: typeof artifacts.$inferSelect, workspaceSlug: string, workflowName: string): ArtifactView {
-  return { id: row.id, workspaceSlug, name: row.name, type: row.type, workflowId: row.workflowId ?? null, workflowName, runId: row.runId ?? '', size: row.size, createdAt: row.createdAt?.toISOString() ?? '', content: row.content };
+  return {
+    id: row.id,
+    workspaceSlug,
+    name: row.name,
+    type: row.type,
+    workflowId: row.workflowId ?? null,
+    workflowName,
+    runId: row.runId ?? '',
+    size: row.size,
+    mimeType: row.mimeType,
+    width: row.width,
+    height: row.height,
+    sizeBytes: row.sizeBytes,
+    contentUrl: row.type === 'image' && row.objectKey ? `/api/artifacts/${encodeURIComponent(row.id)}/content` : null,
+    createdAt: row.createdAt?.toISOString() ?? '',
+    content: row.content,
+  };
 }
 
 function toPendingActionView(row: typeof workflowPendingActions.$inferSelect): WorkflowPendingActionView {

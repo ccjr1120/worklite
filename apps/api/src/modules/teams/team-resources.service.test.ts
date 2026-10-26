@@ -76,7 +76,7 @@ async function setup() {
   db = createDb(':memory:');
   await initializeDatabase(db);
   const workspaces = { getWorkspace: async () => ({ id: WORKSPACE_ID, slug: 'personal', name: 'Personal' }) } as unknown as WorkspaceService;
-  const resources = new WorkspaceResourcesService(db, workspaces, {} as SkillScriptRunnerService, {} as McpClientService);
+  const resources = new WorkspaceResourcesService(db, workspaces, {} as SkillScriptRunnerService, {} as McpClientService, {} as never);
   db.insert(mcpServers).values({ id: SERVER_ID, workspaceId: WORKSPACE_ID, name: 'Project info', endpoint: 'https://mcp.example.com/mcp' }).run();
   return { resources };
 }

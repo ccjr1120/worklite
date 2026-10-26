@@ -34,7 +34,7 @@ export type WorkflowCanvasNodeData = {
   skillNames?: string[];
   dashboardLayout?: WorkflowDashboardLayout;
   artifactName?: string;
-  artifactType?: 'text' | 'markdown' | 'json';
+  artifactType?: 'text' | 'markdown' | 'json' | 'image';
   queryName?: string;
   queryTitleField?: string;
   queryDescriptionFields?: string[];

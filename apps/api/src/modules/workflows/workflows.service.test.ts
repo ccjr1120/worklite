@@ -472,7 +472,7 @@ describe('WorkspaceResourcesService public Agent model validation', () => {
   });
 
   function resources() {
-    return new WorkspaceResourcesService({} as Database, {} as WorkspaceService, {} as SkillScriptRunnerService, {} as McpClientService);
+    return new WorkspaceResourcesService({} as Database, {} as WorkspaceService, {} as SkillScriptRunnerService, {} as McpClientService, {} as never);
   }
 
   function catalog(providers: Array<{ id: string; name: string; protocol: string; models: string[] }>) {

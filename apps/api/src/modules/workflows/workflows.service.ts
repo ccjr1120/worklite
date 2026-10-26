@@ -704,7 +704,7 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
   }
   if (type === 'worklite/artifact') {
     if (typeof value.name !== 'string' || !value.name.trim()) throw new BadRequestException('Artifact node name must be a non-empty string.');
-    if (value.type !== 'text' && value.type !== 'markdown' && value.type !== 'json') throw new BadRequestException('Artifact node type must be text, markdown, or json.');
+    if (value.type !== 'text' && value.type !== 'markdown' && value.type !== 'json' && value.type !== 'image') throw new BadRequestException('Artifact node type must be text, markdown, json, or image.');
   }
   if (type === 'worklite/artifact-query') {
     if (typeof value.name !== 'string' || !value.name.trim()) throw new BadRequestException('Artifact Query name must be a non-empty string.');
@@ -964,13 +964,14 @@ function isGeneratedImageConnectionAllowed(
   const isAggregateImageOutput = (source.type === 'worklite/map' || source.type === 'worklite/join') && sourcePort === 'output' && producesGeneratedImages(source, definition);
   const isWeChatImageInput = target.type === 'wechat-official-account/publish' && target.typeVersion === '2' && (targetPort === 'coverImage' || targetPort === 'images');
   const isArtifactDataTarget = target.type === 'worklite/artifact' && targetPort === 'data';
+  const targetConfig = target.config && typeof target.config === 'object' && !Array.isArray(target.config) ? target.config as Record<string, unknown> : null;
+  const isImageArtifactTarget = isArtifactDataTarget && targetConfig?.type === 'image';
   const isComposeImageInput = target.type === 'worklite/compose-article' && targetPort === 'images';
   const isComposeCoverInput = target.type === 'worklite/compose-article' && targetPort === 'coverImage';
   const isJoinInput = target.type === 'worklite/join' && targetPort === 'input';
-  // Only generated images may feed WeChat's cover/illustration inputs, and a
-  // generated image may not be consumed as ordinary text/JSON. Compose and Join
-  // need the image objects intact, so they join Artifact as explicit sinks.
-  if (isImageOutput || isAggregateImageOutput) return isWeChatImageInput || isArtifactDataTarget || isComposeImageInput || isComposeCoverInput || isJoinInput;
+  // Generated images can feed WeChat's image inputs, image Artifacts, Compose,
+  // and Join. Other Artifact types remain textual/JSON sinks.
+  if (isImageOutput || isAggregateImageOutput) return isWeChatImageInput || isImageArtifactTarget || isComposeImageInput || isComposeCoverInput || isJoinInput;
   return !isWeChatImageInput;
 }
 

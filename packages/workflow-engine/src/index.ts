@@ -172,7 +172,7 @@ const WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     id: 'worklite/artifact',
     version: '1',
     name: 'Artifact',
-    purpose: 'Persist successful run data as a textual Artifact and expose its reference.',
+    purpose: 'Persist successful run data or generated PNG images as Artifacts and expose their references.',
     inputs: [{ name: 'data', required: true, dataType: 'json', multiple: false }],
     outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
     inputSchema: {},
@@ -182,7 +182,7 @@ const WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
       required: ['name', 'type'],
       properties: {
         name: { type: 'string', minLength: 1 },
-        type: { type: 'string', enum: ['text', 'markdown', 'json'] },
+        type: { type: 'string', enum: ['text', 'markdown', 'json', 'image'] },
       },
     },
   },

@@ -71,6 +71,16 @@ function ArtifactDetailsPage() {
 
   function downloadArtifact() {
     if (!artifact || artifact.type === 'unsupported') return;
+    if (artifact.type === 'image') {
+      if (!artifact.contentUrl) return;
+      const link = document.createElement('a');
+      link.href = `${artifact.contentUrl}?download=true`;
+      link.download = `${artifact.name}.png`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      return;
+    }
     const mediaType = DOWNLOAD_MEDIA_TYPES[artifact.type] ?? 'text/plain';
     const url = URL.createObjectURL(new Blob([artifact.content], { type: `${mediaType};charset=utf-8` }));
     const link = document.createElement('a');
@@ -84,7 +94,7 @@ function ArtifactDetailsPage() {
   }
 
   async function copyArtifact() {
-    if (!artifact) return;
+    if (!artifact || artifact.type === 'image') return;
     try {
       await navigator.clipboard.writeText(artifact.content);
       toast.success(t('reader.copied'));
@@ -146,10 +156,12 @@ function ArtifactDetailsPage() {
         back={backButton}
         actions={
           <div className="flex items-center gap-1.5">
-            <Button type="button" variant="ghost" size="compact" onClick={() => void copyArtifact()}>
-              <Copy className="size-4" />
-              {t('reader.copy')}
-            </Button>
+            {artifact.type === 'image' ? null : (
+              <Button type="button" variant="ghost" size="compact" onClick={() => void copyArtifact()}>
+                <Copy className="size-4" />
+                {t('reader.copy')}
+              </Button>
+            )}
             {artifact.type === 'unsupported' ? null : (
               <Button type="button" variant="ghost" size="icon-compact" aria-label={t('common:actions.download')} onClick={downloadArtifact}>
                 <Download className="size-4" />
@@ -172,7 +184,7 @@ function ArtifactDetailsPage() {
       {artifact.type === 'markdown' ? null : <PageHeading className="mt-5" title={artifact.name} />}
 
       <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-muted-foreground">
-        <Badge variant="brand">{artifact.type}</Badge>
+        <Badge variant="brand">{artifact.type === 'image' ? t('list.imageType') : artifact.type}</Badge>
         {artifact.workflowId ? (
           <Link to="/workflows/$workflowId" params={{ workflowId: artifact.workflowId }} className="truncate font-medium text-brand-text underline-offset-2 hover:underline">
             {artifact.workflowName}
@@ -189,7 +201,9 @@ function ArtifactDetailsPage() {
         )}
         <span className="tabular-nums">{formatDateTime(artifact.createdAt, locale)}</span>
         <span className="tabular-nums">{artifact.size}</span>
-        <span className="tabular-nums">{t('list.length', { count: artifact.contentLength })}</span>
+        {artifact.type === 'image'
+          ? <span className="tabular-nums">{t('list.dimensions', { width: artifact.width ?? '—', height: artifact.height ?? '—' })}</span>
+          : <span className="tabular-nums">{t('list.length', { count: artifact.contentLength })}</span>}
       </div>
 
       <div className="mt-5">

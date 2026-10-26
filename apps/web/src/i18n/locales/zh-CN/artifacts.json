@@ -24,6 +24,8 @@
     "allWorkflows": "全部工作流",
     "count": "共 {{count}} 个",
     "length": "{{count}} 字符",
+    "dimensions": "{{width}} × {{height}}",
+    "imageType": "图片",
     "page": "第 {{page}} / {{pages}} 页",
     "previous": "上一页",
     "next": "下一页",
@@ -50,6 +52,8 @@
     "unavailableTitle": "产物不可用",
     "unavailableDescription": "此产物缺失、已过期，或你没有访问权限。",
     "emptyContent": "本次运行没有为该产物生成内容。",
+    "imagePreview": "图片预览",
+    "openImage": "查看原图",
     "noRun": "未关联运行",
     "unsupported": "此内容无法在页面中预览。",
     "run": "运行记录 {{value}}"

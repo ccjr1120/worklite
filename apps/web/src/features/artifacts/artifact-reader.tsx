@@ -34,6 +34,17 @@ function ArtifactReader({ artifact }: { artifact: ArtifactDetailView }) {
     return <p className="text-[13px] text-muted-foreground">{t('details.unsupported')}</p>;
   }
 
+  if (artifact.type === 'image') {
+    if (!artifact.contentUrl) return <p className="text-[13px] text-muted-foreground">{t('details.unavailableDescription')}</p>;
+    return (
+      <div role="group" aria-label={t('details.imagePreview')} className="overflow-hidden rounded-xl border border-border bg-surface p-2 shadow-xs md:p-4">
+        <a href={artifact.contentUrl} target="_blank" rel="noreferrer" aria-label={t('details.openImage')}>
+          <img src={artifact.contentUrl} alt={artifact.name} className="mx-auto max-h-[78vh] max-w-full object-contain" />
+        </a>
+      </div>
+    );
+  }
+
   if (artifact.content === '') {
     return <p className="text-[13px] text-muted-foreground">{t('details.emptyContent')}</p>;
   }

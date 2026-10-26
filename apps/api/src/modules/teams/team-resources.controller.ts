@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, StreamableFile } from '@nestjs/common';
 import type { Request } from 'express';
 import type { CreateMcpServerRequest, CreateSkillRequest, ExecuteSkillScriptRequest, ImportSkillRequest, UpdateMcpServerRequest, UpdateWorkspaceSettingsRequest } from '@worklite/contracts';
 import { WorkspaceResourcesService } from './team-resources.service';
@@ -73,6 +73,17 @@ export class WorkspaceResourcesController {
 
   @Get('artifacts/:artifactId')
   artifact(@Req() request: Request, @Param('artifactId') artifactId: string) { return this.resources.artifact(request, 'personal', artifactId); }
+
+  @Get('artifacts/:artifactId/content')
+  async artifactContent(@Req() request: Request, @Param('artifactId') artifactId: string, @Query('download') download?: string) {
+    const image = await this.resources.artifactContent(request, 'personal', artifactId);
+    const disposition = download === 'true' ? 'attachment' : 'inline';
+    return new StreamableFile(image.content, {
+      type: image.mimeType,
+      disposition: `${disposition}; filename="${image.fileName}"`,
+      length: image.sizeBytes,
+    });
+  }
 
   @Delete('artifacts/:artifactId')
   deleteArtifact(@Req() request: Request, @Param('artifactId') artifactId: string) { return this.resources.deleteArtifact(request, 'personal', artifactId); }

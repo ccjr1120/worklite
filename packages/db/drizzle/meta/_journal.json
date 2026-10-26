@@ -358,6 +358,13 @@
       "when": 1793000000000,
       "tag": "0051_skill_local_roots",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "6",
+      "when": 1793000000001,
+      "tag": "0052_image_artifacts",
+      "breakpoints": true
     }
   ]
 }

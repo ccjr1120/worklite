@@ -34,7 +34,7 @@ async function setup() {
     roles: [],
   }).run();
   const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) };
-  const resources = new WorkspaceResourcesService(database, workspaces as never, {} as never, {} as never);
+  const resources = new WorkspaceResourcesService(database, workspaces as never, {} as never, {} as never, {} as never);
   const configuration = new AgentTeamConfigurationService(database, { publicModelRuntime: async () => ({ protocol: 'anthropic/messages' }) } as never);
   return { resources, configuration };
 }
