@@ -25,7 +25,7 @@ export const Route = createFileRoute('/skills/')({
   component: SkillListPage,
 });
 
-const tableClassName = 'min-w-[860px] md:grid-cols-[minmax(0,2fr)_100px_90px_110px_150px_minmax(80px,max-content)]';
+const tableClassName = 'min-w-[860px] md:grid-cols-[minmax(200px,1fr)_minmax(120px,1fr)_90px_110px_150px_minmax(80px,max-content)]';
 
 function SkillListPage() {
   const { t } = useTranslation(['skills', 'common']);
@@ -139,16 +139,16 @@ function SkillListPage() {
               <CollectionRow key={skill.id} className={tableClassName}>
                 <Link to="/skills/$skillId" params={{ skillId: skill.id }} className="flex min-w-0 items-center gap-3">
                   <Blocks className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="min-w-0">
+                  <span className="min-w-0 flex-1">
                     <span className="flex min-w-0 items-center gap-2">
-                      <span className="block truncate text-sm font-medium">{skill.name}</span>
+                      <span className="block min-w-0 flex-1 truncate text-sm font-medium" title={skill.name}>{skill.name}</span>
                       {skill.conflict ? <Badge variant="warning" title={`${skill.conflict.reason} ${skill.conflict.ignoredPath}`}>{t('conflict.title')}</Badge> : null}
                       {skill.validation === 'invalid' && skill.validationReason ? <Badge variant="warning" title={skill.validationReason}>{t('invalid.title')}</Badge> : null}
                     </span>
-                    {skill.description ? <span className="block truncate text-[13px] text-muted-foreground">{skill.description}</span> : null}
+                    {skill.description ? <span className="block truncate text-[13px] text-muted-foreground" title={skill.description}>{skill.description}</span> : null}
                   </span>
                 </Link>
-                <span className="text-[13px] text-muted-foreground" title={skill.directory}>{skill.rootPath}</span>
+                <span className="min-w-0 truncate text-[13px] text-muted-foreground" title={skill.rootPath}>{skill.rootPath}</span>
                 <span className="font-mono text-[13px]">{skill.version}</span>
                 <StatusBadge status={skill.validation} />
                 <span className="tabular-nums text-[13px] text-muted-foreground">{formatDateTime(skill.updatedAt, locale)}</span>
