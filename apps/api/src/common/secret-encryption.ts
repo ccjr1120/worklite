@@ -2,8 +2,12 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 
 // AES-256-GCM with the workspace secret encryption key. Stored values are
 // "<iv>.<authTag>.<ciphertext>" and are only ever decrypted inside the API.
+// Fail closed when the deployment key is missing; a public development fallback
+// would make encrypted credentials recoverable from the database alone.
 function encryptionKey(): Buffer {
-  return createHash('sha256').update(process.env.SECRET_ENCRYPTION_KEY ?? 'worklite-development-secret').digest();
+  const secret = process.env.SECRET_ENCRYPTION_KEY?.trim();
+  if (!secret) throw new Error('SECRET_ENCRYPTION_KEY must be configured before storing secrets.');
+  return createHash('sha256').update(secret).digest();
 }
 
 export function encryptSecret(value: string): string {

@@ -192,6 +192,7 @@ export const api = {
   webSearchSettings: () => apiGet<WebSearchSettingsView>('/api/web-search/settings'),
   saveWebSearchKey: (input: UpdateWebSearchSettingsRequest) => apiPut<WebSearchSettingsView>('/api/web-search/settings', input),
   clearWebSearchKey: () => apiDelete<WebSearchSettingsView>('/api/web-search/settings'),
+  testWebSearch: (input: { query: string }) => apiPost<{ configured: true; resultCount: number }>('/api/web-search/settings/test', input),
   portkeyGateway: () => apiGet<PortkeyGatewayView>('/api/portkey-gateway'),
   codexAuthStatus: () => apiGet<CodexAuthStatus>('/api/portkey-gateway/codex/auth/status'),
   codexAccountUsages: () => apiGet<CodexAccountUsageSnapshot>('/api/portkey-gateway/codex/accounts/usage'),

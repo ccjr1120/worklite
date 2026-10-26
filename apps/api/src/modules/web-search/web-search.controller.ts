@@ -3,9 +3,9 @@ import { WebSearchCredentialService, type WebSearchCredentialStatus } from './we
 import { VolcengineSearchService, type WebSearchResponse } from './volcengine-search.service';
 import { WebFetchService, type WebFetchResponse } from './web-fetch.service';
 
-// Internal, side-effect-free endpoints. Chat's protected platform scripts call
-// them over the existing local API URL; they never read the database or a key
-// themselves, and never return the key.
+// WorkLite's loopback API endpoints for Chat and the workspace UI. The
+// credential service encrypts keys before storage; these routes never return a
+// key, and the settings test returns only a result count.
 @Controller('web-search')
 export class WebSearchController {
   constructor(
@@ -22,6 +22,13 @@ export class WebSearchController {
   @Put('settings')
   saveSettings(@Body() body: { apiKey?: unknown }): Promise<WebSearchCredentialStatus> {
     return this.credentials.save(body?.apiKey);
+  }
+
+  @Post('settings/test')
+  @HttpCode(200)
+  async testSettings(@Body() body: { query?: unknown }): Promise<{ configured: true; resultCount: number }> {
+    const result = await this.searches.search({ query: body?.query, count: 1 }, await this.credentials.read());
+    return { configured: true, resultCount: result.resultCount ?? result.results.length };
   }
 
   @Delete('settings')

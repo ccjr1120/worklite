@@ -1349,7 +1349,7 @@ export class WorkspaceResourcesService {
             customSkillExecution: false,
             directMcpCalls: false,
             platformTools: 'typed protected worklite-platform tools plus the runtime run_host_command terminal tool',
-            executorCapabilities: 'Chat receives selected Skill instructions in its turn snapshot; byted-web-search enables the protected web_search and web_fetch tools through the encrypted workspace credential, and worklite-platform enables run_host_command. Arbitrary Skill scripts and direct user MCP calls stay unavailable. Project executors use native tools, receive no Skills from Chat, and Claude Code tasks receive the MCP servers declared in Chat configuration.',
+            executorCapabilities: 'Chat receives selected Skill instructions and files in its turn snapshot; worklite-platform enables run_host_command. Arbitrary Skill scripts and direct user MCP calls stay unavailable. Project executors use native tools, receive no Skills from Chat, and Claude Code tasks receive the MCP servers declared in Chat configuration.',
             codingTarget: 'project_task',
             localCommandTarget: 'run_host_command for everyday installs, system/version/CLI queries, ordinary file management and short local scripts; project_task for writing or changing code, repository-wide investigation, cross-file changes, validation/build/test and deployment',
             collaborationTarget: 'Chat-dispatched Agent Team Run operated from its Chat task card',

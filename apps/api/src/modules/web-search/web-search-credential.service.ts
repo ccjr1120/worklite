@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { workspaceCredentials, workspaces, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
@@ -53,6 +53,9 @@ export class WebSearchCredentialService {
 
   async save(apiKey: unknown, slug = PERSONAL_WORKSPACE_SLUG): Promise<WebSearchCredentialStatus> {
     const value = validateApiKey(apiKey);
+    if (!process.env.SECRET_ENCRYPTION_KEY?.trim()) {
+      throw new ServiceUnavailableException('Web search credential encryption is not configured on this WorkLite instance.');
+    }
     const workspaceId = await this.workspaceId(slug);
     const encryptedValue = encryptSecret(value);
     const now = new Date();
