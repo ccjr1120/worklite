@@ -538,9 +538,8 @@ export class AgentExecutionsService implements OnModuleInit {
     const assignedSkills = capturedSkills;
     const clarificationPass = agent.id === CHAT_AGENT_ID && clarificationAllowed;
     const protectedPlatformSkill = agent.id === CHAT_AGENT_ID ? assignedSkills.find((skill) => isProtectedPlatformSkillId(workspace.id, skill.id)) : undefined;
-    const hasProtectedPlatformSkill = Boolean(protectedPlatformSkill);
     const protectedPlatformManifest = protectedPlatformSkill ? platformToolManifest(protectedPlatformSkill.files) : {};
-    const hostCommandTool = hasProtectedPlatformSkill ? platformRuntimeTool(protectedPlatformSkill.files, 'run_host_command') : undefined;
+    const hostCommandTool = protectedPlatformSkill ? platformRuntimeTool(protectedPlatformSkill.files, 'run_host_command') : undefined;
     const skillScripts = assignedSkills.flatMap((skill) => {
       const isProtectedPlatformSkill = isProtectedPlatformSkillId(workspace.id, skill.id);
       if (agent.id === CHAT_AGENT_ID && !isProtectedPlatformSkill) return [];

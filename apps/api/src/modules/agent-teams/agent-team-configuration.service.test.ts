@@ -34,7 +34,7 @@ async function setup() {
     id: 'sk_dino',
     workspaceId: 'workspace_personal',
     name: 'dino-cli',
-    source: 'archive',
+    source: 'local',
     instructions: '# Dino CLI\nUse dino-cli account current.',
   }).run();
   database.insert(skillFiles).values([
