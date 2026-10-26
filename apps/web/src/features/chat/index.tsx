@@ -1,5 +1,5 @@
 import { useNavigate, useRouterState } from '@tanstack/react-router';
-import { Brain, ChevronRight, List, Plus, Radio, ScrollText, Settings, ShieldAlert, SlidersHorizontal } from 'lucide-react';
+import { Brain, ChevronRight, Cpu, List, Plus, Radio, ScrollText, Settings, ShieldAlert, SlidersHorizontal } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type CompositionEvent as ReactCompositionEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentToolCallView, ChatConversationView, ChatSubmissionView, DispatchChatRequest, ProjectExecutor, RunView, WorkflowView } from '@worklite/contracts';
@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import { Composer, SLASH_COMMANDS, type SlashCommand } from './composer';
 import { clearNewConversationDraft, readChatDraft, writeChatDraft } from './draft-storage';
 import { Configuration } from './configuration';
+import { ExecutorsConfiguration } from './executors-configuration';
 import { Memories } from './memories';
 import { downloadExecutionLog } from './execution-log';
 import { ConversationList } from './conversation-list';
@@ -56,11 +57,12 @@ const NO_RECEIPTS: PendingReceipt[] = [];
 // long conversation does not mount its whole history at once.
 const RECENT_TIMELINE_COUNT = 30;
 
-type SettingsSection = 'channels' | 'configuration' | 'memories';
+type SettingsSection = 'channels' | 'configuration' | 'executors' | 'memories';
 // The settings Dialog switches sections through a slim left rail rather than top tabs;
 // each entry keeps its validated `view=` deep link of the same name.
 const SETTINGS_SECTIONS: { value: SettingsSection; icon: typeof SlidersHorizontal }[] = [
   { value: 'configuration', icon: SlidersHorizontal },
+  { value: 'executors', icon: Cpu },
   { value: 'channels', icon: Radio },
   { value: 'memories', icon: Brain },
 ];
@@ -122,8 +124,8 @@ function ChatWorkspace() {
   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowView | null>(null);
   const [workflowRun, setWorkflowRun] = useState<ActiveWorkflowRun | null>(null);
   const [draft, setDraft] = useState(() => readChatDraft(selectedConversationId) ?? conversationDrafts.get(selectedConversationId ?? 'new')?.draft ?? '');
-  const [settingsOpen, setSettingsOpen] = useState(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories');
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories' ? locationSearch.view : 'configuration');
+  const [settingsOpen, setSettingsOpen] = useState(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'executors' || locationSearch.view === 'memories');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'executors' || locationSearch.view === 'memories' ? locationSearch.view : 'configuration');
   const [configSelection, setConfigSelection] = useState('');
   const [defaultExecutor, setDefaultExecutor] = useState<ProjectExecutor>('claude');
   // '' means the executor's own local default; a non-empty comma-separated list declares one model
@@ -132,6 +134,7 @@ function ChatWorkspace() {
   const [configSaving, setConfigSaving] = useState(false);
   const [extensionPrompt, setExtensionPrompt] = useState('');
   const [executorContext, setExecutorContext] = useState('');
+  const [projectTaskMcpServerIds, setProjectTaskMcpServerIds] = useState<string[]>([]);
   const [summarizePrompt, setSummarizePrompt] = useState('');
   const [chatSkillIds, setChatSkillIds] = useState<string[]>([]);
   const [configError, setConfigError] = useState('');
@@ -167,6 +170,7 @@ function ChatWorkspace() {
     setDefaultExecutor(agentQuery.data.chatConfiguration?.defaultExecutor ?? 'claude');
     setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
     setExecutorContext(agentQuery.data.chatConfiguration?.executorContext ?? '');
+    setProjectTaskMcpServerIds(agentQuery.data.chatConfiguration?.projectTaskMcpServerIds ?? []);
     setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
     setChatSkillIds(agentQuery.data.chatConfiguration?.skillIds ?? []);
     setExecutorModels({
@@ -175,7 +179,7 @@ function ChatWorkspace() {
     });
   }, [agentQuery.data]);
 
-  const saveConfiguration = async (selection: string, prompt = extensionPrompt, models = executorModels, summarize = summarizePrompt, skillIds?: string[], sharedExecutorContext = executorContext, executor = defaultExecutor) => {
+  const saveConfiguration = async (selection: string, prompt = extensionPrompt, models = executorModels, summarize = summarizePrompt, skillIds?: string[], sharedExecutorContext = executorContext, executor = defaultExecutor, mcpServerIds?: string[]) => {
     if (configSaving) return;
     const separator = selection.indexOf('::');
     setConfigSaving(true);
@@ -187,6 +191,7 @@ function ChatWorkspace() {
         extensionPrompt: prompt, executorContext: sharedExecutorContext, summarizePrompt: summarize, defaultExecutor: executor, expectedConfigurationRevision: agentQuery.data?.chatConfiguration?.revision,
         // Both declarations are current state; selecting the default only turns the chosen one into null.
         defaultExecutorModels: { claude: textToModelList(models.claude), codex: textToModelList(models.codex) },
+        ...(mcpServerIds === undefined ? {} : { projectTaskMcpServerIds: mcpServerIds }),
         ...(skillIds === undefined ? {} : { skillIds }),
       });
       queryClient.setQueryData(['agent', CHAT_AGENT_ID], saved);
@@ -197,6 +202,7 @@ function ChatWorkspace() {
         setDefaultExecutor(agentQuery.data.chatConfiguration?.defaultExecutor ?? 'claude');
         setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
         setExecutorContext(agentQuery.data.chatConfiguration?.executorContext ?? '');
+        setProjectTaskMcpServerIds(agentQuery.data.chatConfiguration?.projectTaskMcpServerIds ?? []);
         setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
         setChatSkillIds(agentQuery.data.chatConfiguration?.skillIds ?? []);
         setExecutorModels({
@@ -220,6 +226,11 @@ function ChatWorkspace() {
     if (executor !== (agentQuery.data?.chatConfiguration?.defaultExecutor ?? 'claude')) {
       void saveConfiguration(configSelection, extensionPrompt, executorModels, summarizePrompt, undefined, executorContext, executor);
     }
+  }
+
+  function changeProjectTaskMcpServerIds(ids: string[]) {
+    setProjectTaskMcpServerIds(ids);
+    void saveConfiguration(configSelection, extensionPrompt, executorModels, summarizePrompt, undefined, executorContext, defaultExecutor, ids);
   }
 
   function openSettings(section: SettingsSection) {
@@ -300,7 +311,7 @@ function ChatWorkspace() {
   useEffect(() => {
     const id = typeof locationSearch.conversation === 'string' ? locationSearch.conversation : null;
     if (id && id !== selectedConversationId) selectConversation(id);
-    if (locationSearch.view === 'configuration' || locationSearch.view === 'channels' || locationSearch.view === 'memories') {
+    if (locationSearch.view === 'configuration' || locationSearch.view === 'executors' || locationSearch.view === 'channels' || locationSearch.view === 'memories') {
       setSettingsSection(locationSearch.view);
       setSettingsOpen(true);
     } else setSettingsOpen(false);
@@ -991,14 +1002,21 @@ function ChatWorkspace() {
                   skillsLoading={skillsQuery.isLoading} skillsLoadFailed={skillsQuery.isError}
                   selection={configSelection}
                   onSelectionChange={(value) => { setConfigSelection(value); void saveConfiguration(value); }}
-                  defaultExecutor={defaultExecutor} onDefaultExecutorChange={changeDefaultExecutor}
-                  executorModels={executorModels} onExecutorModelChange={changeExecutorModel}
                   extensionPrompt={extensionPrompt} onPromptChange={setExtensionPrompt} onPromptSave={() => { if (extensionPrompt !== (agentQuery.data?.chatConfiguration?.extensionPrompt ?? '')) void saveConfiguration(configSelection); }}
-                  executorContext={executorContext} onExecutorContextChange={setExecutorContext} onExecutorContextSave={() => { if (executorContext !== (agentQuery.data?.chatConfiguration?.executorContext ?? '')) void saveConfiguration(configSelection, extensionPrompt, executorModels, summarizePrompt, undefined, executorContext); }}
                   summarizePrompt={summarizePrompt} onSummarizePromptChange={setSummarizePrompt} onSummarizePromptSave={() => { if (summarizePrompt !== (agentQuery.data?.chatConfiguration?.summarizePrompt ?? '')) void saveConfiguration(configSelection); }}
                   saving={configSaving} error={configError} loading={agentQuery.isLoading}
                   loadFailed={agentQuery.isError} providersLoading={providersQuery.isLoading} providersLoadFailed={providersQuery.isError}
                   onReload={() => { void agentQuery.refetch(); void providersQuery.refetch(); void skillsQuery.refetch(); }} />
+              ) : null}
+              {settingsSection === 'executors' ? (
+                <ExecutorsConfiguration providers={providersQuery.data ?? []}
+                  defaultExecutor={defaultExecutor} onDefaultExecutorChange={changeDefaultExecutor}
+                  executorModels={executorModels} onExecutorModelChange={changeExecutorModel}
+                  executorContext={executorContext} onExecutorContextChange={setExecutorContext} onExecutorContextSave={() => { if (executorContext !== (agentQuery.data?.chatConfiguration?.executorContext ?? '')) void saveConfiguration(configSelection, extensionPrompt, executorModels, summarizePrompt, undefined, executorContext); }}
+                  projectTaskMcpServerIds={projectTaskMcpServerIds} onProjectTaskMcpServerIdsChange={changeProjectTaskMcpServerIds}
+                  saving={configSaving} error={configError} loading={agentQuery.isLoading}
+                  loadFailed={agentQuery.isError} providersLoading={providersQuery.isLoading} providersLoadFailed={providersQuery.isError}
+                  onReload={() => { void agentQuery.refetch(); void providersQuery.refetch(); }} />
               ) : null}
               {settingsSection === 'memories' ? <Memories /> : null}
             </div>
