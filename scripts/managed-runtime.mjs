@@ -2,8 +2,8 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 
-const root = process.env.WORKLITE_RELEASE_ROOT;
-if (!root) throw new Error('A managed release root is required.');
+const root = process.env.WORKLITE_PROJECT_ROOT ?? process.env.WORKLITE_RELEASE_ROOT;
+if (!root) throw new Error('A managed project root is required.');
 const children = [];
 let stopping = false;
 const environment = { ...process.env, WORKLITE_RUNTIME_PID: String(process.pid) };

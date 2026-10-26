@@ -340,7 +340,7 @@ function atomicWrite(path: string, value: unknown) { const temporary = `${path}.
 @Controller('upgrades')
 export class UpgradesController {
   constructor(private readonly upgrades: UpgradesService) {}
-  @Get('runtime') runtime() { return { releaseHash: process.env.WORKLITE_RELEASE_HASH ?? null, wrapperPid: Number(process.env.WORKLITE_RUNTIME_PID ?? 0), preflight: process.env.WORKLITE_PREFLIGHT === '1' }; }
+  @Get('runtime') runtime() { return { releaseHash: process.env.WORKLITE_RELEASE_HASH ?? null, version: process.env.WORKLITE_VERSION ?? null, wrapperPid: Number(process.env.WORKLITE_RUNTIME_PID ?? 0), preflight: process.env.WORKLITE_PREFLIGHT === '1' }; }
   @Post() propose(@Body() body: { summary: string; executionId: string; submissionId: string }) { return this.upgrades.propose(body); }
   @Post('redeploy') redeploy(@Body() body: { summary: string; executionId: string; submissionId: string; userMessageId: string }) { return this.upgrades.redeploy(body); }
   @Get(':id') inspect(@Param('id') id: string) { return this.upgrades.view(id); }
