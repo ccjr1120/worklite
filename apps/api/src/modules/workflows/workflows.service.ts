@@ -95,10 +95,14 @@ export class WorkflowsService {
     const skillIds = collectWorkflowResourceIds(draft.definition, 'skillIds');
     const mcpServerIds = collectWorkflowResourceIds(draft.definition, 'mcpServerIds');
     const [skillRows, mcpRows] = await Promise.all([
-      skillIds.length === 0 ? [] : this.db.select({ id: skills.id, name: skills.name }).from(skills).where(and(eq(skills.workspaceId, workspace.id), inArray(skills.id, skillIds))),
+      skillIds.length === 0 ? [] : this.db.select({ id: skills.id, name: skills.name, root: skills.root, validation: skills.validation, validationReason: skills.validationReason }).from(skills).where(and(eq(skills.workspaceId, workspace.id), inArray(skills.id, skillIds))),
       mcpServerIds.length === 0 ? [] : this.db.select({ id: mcpServers.id, name: mcpServers.name }).from(mcpServers).where(and(eq(mcpServers.workspaceId, workspace.id), inArray(mcpServers.id, mcpServerIds))),
     ]);
     if (skillRows.length !== skillIds.length) throw new BadRequestException('Every Workflow Agent Skill must belong to this workspace before export.');
+    const nonPlatformSkill = skillRows.find((skill) => skill.root !== 'platform');
+    if (nonPlatformSkill) throw new BadRequestException(`Workflow Agent Skill ${nonPlatformSkill.name} is not a WorkLite platform Skill and cannot be exported.`);
+    const invalidSkill = skillRows.find((skill) => skill.validation !== 'valid');
+    if (invalidSkill) throw new BadRequestException(invalidSkill.validationReason ?? `Workflow Agent Skill ${invalidSkill.name} is invalid and cannot be exported.`);
     if (mcpRows.length !== mcpServerIds.length) throw new BadRequestException('Every Workflow Agent MCP server must belong to this workspace before export.');
     const skillsById = new Map(skillRows.map((row) => [row.id, row.name]));
     const mcpById = new Map(mcpRows.map((row) => [row.id, row.name]));
@@ -129,7 +133,7 @@ export class WorkflowsService {
         const skillNames = readPortableNames(config.skills, 'Skill');
         const mcpNames = readPortableNames(config.mcpServers, 'MCP server');
         const [skillRows, mcpRows] = await Promise.all([
-          skillNames.length === 0 ? [] : this.db.select({ id: skills.id, name: skills.name, root: skills.root }).from(skills).where(eq(skills.workspaceId, workspace.id)),
+          skillNames.length === 0 ? [] : this.db.select({ id: skills.id, name: skills.name, root: skills.root, validation: skills.validation }).from(skills).where(eq(skills.workspaceId, workspace.id)),
           mcpNames.length === 0 ? [] : this.db.select({ id: mcpServers.id, name: mcpServers.name }).from(mcpServers).where(and(eq(mcpServers.workspaceId, workspace.id), inArray(mcpServers.name, mcpNames))),
         ]);
         config.skillIds = resolvePortableSkillNames(skillNames, skillRows);
@@ -269,10 +273,12 @@ export class WorkflowsService {
     const skillIds = collectWorkflowResourceIds(draft.definition, 'skillIds');
     const mcpServerIds = collectWorkflowResourceIds(draft.definition, 'mcpServerIds');
     const [availableSkills, availableMcpServers] = await Promise.all([
-      skillIds.length === 0 ? [] : this.db.select({ id: skills.id, name: skills.name, validation: skills.validation, validationReason: skills.validationReason }).from(skills).where(and(eq(skills.workspaceId, workspace.id), inArray(skills.id, skillIds))),
+      skillIds.length === 0 ? [] : this.db.select({ id: skills.id, name: skills.name, root: skills.root, validation: skills.validation, validationReason: skills.validationReason }).from(skills).where(and(eq(skills.workspaceId, workspace.id), inArray(skills.id, skillIds))),
       mcpServerIds.length === 0 ? [] : this.db.select({ id: mcpServers.id }).from(mcpServers).where(and(eq(mcpServers.workspaceId, workspace.id), inArray(mcpServers.id, mcpServerIds))),
     ]);
     if (availableSkills.length !== skillIds.length) throw new BadRequestException('Every Workflow Agent Skill must belong to this workspace.');
+    const nonPlatformSkill = availableSkills.find((skill) => skill.root !== 'platform');
+    if (nonPlatformSkill) throw new BadRequestException(`Workflow Agent Skill ${nonPlatformSkill.name} is not a WorkLite platform Skill.`);
     const invalidSkill = availableSkills.find((skill) => skill.validation !== 'valid');
     if (invalidSkill) throw new BadRequestException(invalidSkill.validationReason ?? `Workflow Agent Skill ${invalidSkill.name} is invalid.`);
     if (availableMcpServers.length !== mcpServerIds.length) throw new BadRequestException('Every Workflow Agent MCP server must belong to this workspace.');
@@ -328,11 +334,13 @@ export class WorkflowsService {
     const mcpServerIds = collectWorkflowResourceIds(definition, 'mcpServerIds');
     const accountIds = definition.nodes.filter((node) => node.type === 'wechat-official-account/publish').map((node) => isRecord(node.config) && typeof node.config.accountId === 'string' ? node.config.accountId : '').filter(Boolean);
     const [availableSkills, availableMcpServers, availableAccounts] = await Promise.all([
-      skillIds.length === 0 ? [] : this.db.select({ id: skills.id, name: skills.name, validation: skills.validation, validationReason: skills.validationReason }).from(skills).where(and(eq(skills.workspaceId, workspaceId), inArray(skills.id, skillIds))),
+      skillIds.length === 0 ? [] : this.db.select({ id: skills.id, name: skills.name, root: skills.root, validation: skills.validation, validationReason: skills.validationReason }).from(skills).where(and(eq(skills.workspaceId, workspaceId), inArray(skills.id, skillIds))),
       mcpServerIds.length === 0 ? [] : this.db.select({ id: mcpServers.id }).from(mcpServers).where(and(eq(mcpServers.workspaceId, workspaceId), inArray(mcpServers.id, mcpServerIds))),
       accountIds.length === 0 ? [] : this.db.select({ id: wechatOfficialAccounts.id }).from(wechatOfficialAccounts).where(and(eq(wechatOfficialAccounts.workspaceId, workspaceId), inArray(wechatOfficialAccounts.id, accountIds))),
     ]);
     if (availableSkills.length !== skillIds.length) throw new BadRequestException('Every Workflow Skill must belong to this workspace.');
+    const nonPlatformSkill = availableSkills.find((skill) => skill.root !== 'platform');
+    if (nonPlatformSkill) throw new BadRequestException(`Workflow Skill ${nonPlatformSkill.name} is not a WorkLite platform Skill.`);
     const invalidSkill = availableSkills.find((skill) => skill.validation !== 'valid');
     if (invalidSkill) throw new BadRequestException(invalidSkill.validationReason ?? `Workflow Skill ${invalidSkill.name} is invalid.`);
     if (availableMcpServers.length !== mcpServerIds.length) throw new BadRequestException('Every Workflow MCP server must belong to this workspace.');
@@ -1044,13 +1052,11 @@ function resolvePortableNames(names: string[], rows: { id: string; name: string 
   });
 }
 
-function resolvePortableSkillNames(names: string[], rows: { id: string; name: string; root: 'agents' | 'platform' }[]): string[] {
+function resolvePortableSkillNames(names: string[], rows: { id: string; name: string; root: 'agents' | 'platform'; validation: 'valid' | 'invalid' | 'pending' }[]): string[] {
   return names.map((name) => {
     const key = name.trim().toLocaleLowerCase('en-US');
-    const matches = rows.filter((row) => row.name.trim().toLocaleLowerCase('en-US') === key);
-    const agentsMatches = matches.filter((row) => row.root === 'agents');
-    const preferred = agentsMatches.length > 0 ? agentsMatches : matches;
-    if (preferred.length !== 1) throw new BadRequestException(`Skill ${name} is missing or ambiguous in this workspace.`);
-    return preferred[0].id;
+    const matches = rows.filter((row) => row.root === 'platform' && row.validation === 'valid' && row.name.trim().toLocaleLowerCase('en-US') === key);
+    if (matches.length !== 1) throw new BadRequestException(`Valid WorkLite platform Skill ${name} is missing or ambiguous in this workspace.`);
+    return matches[0].id;
   });
 }
