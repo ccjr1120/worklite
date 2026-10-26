@@ -2,9 +2,9 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 
-const root = process.env.WORKLITE_RELEASE_ROOT;
+const root = process.env.WORKLITE_PROJECT_ROOT ?? process.env.WORKLITE_RELEASE_ROOT;
 const port = Number(process.env.PORTKEY_GATEWAY_PORT);
-if (!root || !Number.isInteger(port) || port < 1) throw new Error('A managed release root and Gateway port are required.');
+if (!root || !Number.isInteger(port) || port < 1) throw new Error('A managed project root and Gateway port are required.');
 
 const gatewayDirectory = join(root, 'apps/portkey-gateway');
 const entry = join(gatewayDirectory, 'build/start-server.js');

@@ -102,6 +102,7 @@ if (runtime === 'node') {
 app.get('/', (c) => c.text('AI Gateway says hey!'));
 app.get('/worklite/runtime', (c) => c.json({
   releaseHash: process.env.WORKLITE_RELEASE_HASH ?? null,
+  version: process.env.WORKLITE_VERSION ?? null,
   gatewayHash: process.env.WORKLITE_GATEWAY_HASH ?? null,
   wrapperPid: process.env.WORKLITE_GATEWAY_PID ? Number(process.env.WORKLITE_GATEWAY_PID) : null,
 }));
