@@ -15,3 +15,4 @@ apps/api/data/
 .vscode/*
 !.vscode/extensions.json
 codex-session-*.md
+.wt/

@@ -126,6 +126,7 @@ function ChatWorkspace() {
   const [settingsOpen, setSettingsOpen] = useState(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories');
   const [settingsSection, setSettingsSection] = useState<SettingsSection>(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories' ? locationSearch.view : 'configuration');
   const [configSelection, setConfigSelection] = useState('');
+  const [defaultExecutor, setDefaultExecutor] = useState<ProjectExecutor>('claude');
   // '' means the executor's own local default; a non-empty comma-separated list declares one model
   // or an ordered list of fallback candidates (first entry tried first).
   const [executorModels, setExecutorModels] = useState<Record<ProjectExecutor, string>>({ claude: '', codex: '' });
@@ -164,6 +165,7 @@ function ChatWorkspace() {
   useEffect(() => {
     if (!agentQuery.data) return;
     setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
+    setDefaultExecutor(agentQuery.data.chatConfiguration?.defaultExecutor ?? 'claude');
     setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
     setExecutorContext(agentQuery.data.chatConfiguration?.executorContext ?? '');
     setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
@@ -174,7 +176,7 @@ function ChatWorkspace() {
     });
   }, [agentQuery.data]);
 
-  const saveConfiguration = async (selection: string, prompt = extensionPrompt, models = executorModels, summarize = summarizePrompt, skillIds?: string[], sharedExecutorContext = executorContext) => {
+  const saveConfiguration = async (selection: string, prompt = extensionPrompt, models = executorModels, summarize = summarizePrompt, skillIds?: string[], sharedExecutorContext = executorContext, executor = defaultExecutor) => {
     if (configSaving) return;
     const separator = selection.indexOf('::');
     setConfigSaving(true);
@@ -183,7 +185,7 @@ function ChatWorkspace() {
       const saved = await api.updateAgent(workspaceSlug, CHAT_AGENT_ID, {
         providerId: separator >= 0 ? selection.slice(0, separator) : null,
         model: separator >= 0 ? selection.slice(separator + 2) : '',
-        extensionPrompt: prompt, executorContext: sharedExecutorContext, summarizePrompt: summarize, expectedConfigurationRevision: agentQuery.data?.chatConfiguration?.revision,
+        extensionPrompt: prompt, executorContext: sharedExecutorContext, summarizePrompt: summarize, defaultExecutor: executor, expectedConfigurationRevision: agentQuery.data?.chatConfiguration?.revision,
         // Both declarations are current state; selecting the default only turns the chosen one into null.
         defaultExecutorModels: { claude: textToModelList(models.claude), codex: textToModelList(models.codex) },
         ...(skillIds === undefined ? {} : { skillIds }),
@@ -193,6 +195,7 @@ function ChatWorkspace() {
       setConfigError(apiErrorMessage(cause, t('assistant:configuration.saveFailed')));
       if (agentQuery.data) {
         setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
+        setDefaultExecutor(agentQuery.data.chatConfiguration?.defaultExecutor ?? 'claude');
         setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
         setExecutorContext(agentQuery.data.chatConfiguration?.executorContext ?? '');
         setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
@@ -210,6 +213,13 @@ function ChatWorkspace() {
     setExecutorModels(nextModels);
     if (value !== modelListToText(agentQuery.data?.chatConfiguration?.defaultExecutorModels?.[executor])) {
       void saveConfiguration(configSelection, extensionPrompt, nextModels);
+    }
+  }
+
+  function changeDefaultExecutor(executor: ProjectExecutor) {
+    setDefaultExecutor(executor);
+    if (executor !== (agentQuery.data?.chatConfiguration?.defaultExecutor ?? 'claude')) {
+      void saveConfiguration(configSelection, extensionPrompt, executorModels, summarizePrompt, undefined, executorContext, executor);
     }
   }
 
@@ -982,6 +992,7 @@ function ChatWorkspace() {
                   skillsLoading={skillsQuery.isLoading} skillsLoadFailed={skillsQuery.isError}
                   selection={configSelection}
                   onSelectionChange={(value) => { setConfigSelection(value); void saveConfiguration(value); }}
+                  defaultExecutor={defaultExecutor} onDefaultExecutorChange={changeDefaultExecutor}
                   executorModels={executorModels} onExecutorModelChange={changeExecutorModel}
                   extensionPrompt={extensionPrompt} onPromptChange={setExtensionPrompt} onPromptSave={() => { if (extensionPrompt !== (agentQuery.data?.chatConfiguration?.extensionPrompt ?? '')) void saveConfiguration(configSelection); }}
                   executorContext={executorContext} onExecutorContextChange={setExecutorContext} onExecutorContextSave={() => { if (executorContext !== (agentQuery.data?.chatConfiguration?.executorContext ?? '')) void saveConfiguration(configSelection, extensionPrompt, executorModels, summarizePrompt, undefined, executorContext); }}
