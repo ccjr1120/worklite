@@ -129,6 +129,21 @@ describe('scanLocalSkillRoot', () => {
     ]);
   });
 
+  it('accepts a valid skill when the package root has extra files', async () => {
+    const root = await temporaryRoot();
+    await writeSkill(root, 'with-extra-files', {
+      'SKILL.md': dinoSkill,
+      'LICENSE': 'MIT',
+      'README.md': '# Additional package notes',
+    });
+
+    const result = await scanLocalSkillRoot(root);
+
+    expect(result.skipped).toEqual([]);
+    expect(result.packages).toHaveLength(1);
+    expect(result.packages[0]?.instructions).toBe(dinoSkill);
+  });
+
   it('reports a directory without SKILL.md instead of ignoring it', async () => {
     const root = await temporaryRoot();
     await writeSkill(root, 'not-a-skill', { 'README.md': 'no skill here' });

@@ -335,10 +335,11 @@ async function scanPackage(rootReal: string, root: SkillRootKind, rootPath: stri
       files.push({ path: 'SKILL.md', content });
       continue;
     }
+    if (entry.isSymbolicLink()) throw new Error(`Skill package path "${entry.name}" must not be a symbolic link.`);
     if (!ALLOWED_PACKAGE_ROOTS.has(entry.name)) {
+      if (entry.isFile()) continue;
       throw new Error(`Unsupported Skill package path "${entry.name}". Only SKILL.md, scripts/ and references/ are supported.`);
     }
-    if (entry.isSymbolicLink()) throw new Error(`Skill package path "${entry.name}" must not be a symbolic link.`);
     if (!entry.isDirectory()) throw new Error(`Unsupported Skill package path "${entry.name}". Only directories named scripts/ and references/ are supported.`);
     await collectPackageFiles(rootReal, packageDirectory, entry.name, files, { packageBytes });
   }
