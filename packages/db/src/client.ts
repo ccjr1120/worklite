@@ -304,10 +304,11 @@ const WORKLITE_PLATFORM_TOOL_SPECS: Array<[path: string, description: string, in
   ['scripts/remove-local-project-alias.mjs', 'Remove one saved project alias when the user says the mapping is wrong or obsolete. This only deletes the dictionary entry; the target directory and any project files or Git state remain untouched.', toolInput({
     alias: toolString('The saved alias to remove, matched case-insensitively.'),
   }, ['alias'])],
-  ['scripts/inspect-chat.mjs', 'Read the protected Chat configuration: revision, extension prompt, default project executor, per-executor declared default models, project-task MCP server declaration and Provider/model. Chat has no Skill or Chat-facing MCP selection. Its revision is the expectedConfigurationRevision for update_chat.', toolInput()],
-  ['scripts/update-chat.mjs', 'Save a new Chat configuration revision; it applies from the next user turn. Omitted fields keep their current value. Skill and Chat-facing MCP selections are not accepted.', toolInput({
+  ['scripts/inspect-chat.mjs', 'Read the protected Chat configuration: revision, Chat extension prompt, WorkLite-managed shared executor context, default project executor, per-executor declared default models, project-task MCP server declaration and Provider/model. Chat has no Skill or Chat-facing MCP selection. Its revision is the expectedConfigurationRevision for update_chat.', toolInput()],
+  ['scripts/update-chat.mjs', 'Save a new Chat configuration revision; it applies from the next user turn. Omitted fields keep their current value. executorContext is WorkLite-managed and shared by Codex and Claude Code. Skill and Chat-facing MCP selections are not accepted.', toolInput({
     expectedConfigurationRevision: { type: 'integer', minimum: 1, description: 'The revision returned by inspect_chat.' },
     extensionPrompt: toolString('User extension appended to the product prompt.'),
+    executorContext: toolString('WorkLite-managed persistent executor context injected into both Codex and Claude Code project tasks.'),
     defaultExecutor: { type: 'string', enum: ['claude', 'codex'], description: 'Executor for project tasks that do not name one.' },
     defaultExecutorModels: { type: 'object', additionalProperties: false, properties: { claude: { type: ['string', 'null'] }, codex: { type: ['string', 'null'] } }, description: 'Declared default Gateway public model id per executor: a string sets it, null clears it, an omitted executor keeps its declaration. claude requires an anthropic/messages model; codex requires openai/responses or codex/responses. Saving rejects an incompatible protocol.' },
     projectTaskMcpServerIds: toolStrings('Workspace MCP server ids injected into Claude Code project tasks; an empty list injects none. Codex tasks never receive injected servers.'),
@@ -876,7 +877,7 @@ print({ worklite: { type: 'snapshot' }, data: { conversationId: id, delivered: q
   ['scripts/update-chat.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print } from './lib.mjs';
 const body = input();
-exactKeys(body, ['expectedConfigurationRevision', 'extensionPrompt', 'defaultExecutor', 'defaultExecutorModels', 'projectTaskMcpServerIds', 'providerId', 'model']);
+exactKeys(body, ['expectedConfigurationRevision', 'extensionPrompt', 'executorContext', 'defaultExecutor', 'defaultExecutorModels', 'projectTaskMcpServerIds', 'providerId', 'model']);
 if (!Number.isSafeInteger(body.expectedConfigurationRevision) || body.expectedConfigurationRevision < 1) throw new Error('expectedConfigurationRevision is required and must be an integer of at least 1; inspect the current Chat configuration revision before updating.');
 const data = await call('/agents/agt_system_helper_chat', { method: 'PATCH', body });
 print({ worklite: { type: 'snapshot' }, data });

@@ -1180,11 +1180,16 @@ export class AgentExecutionsService implements OnModuleInit {
     if (selected.length !== selectedSkillIds.length) throw new ConflictException('A selected Chat Skill is no longer available in this workspace.');
     const memories = transaction.select({ id: chatMemories.id, content: chatMemories.content, category: chatMemories.category }).from(chatMemories).where(eq(chatMemories.workspaceId, workspaceId)).orderBy(desc(chatMemories.updatedAt)).all();
     const memoriesPrompt = buildChatMemoriesPrompt(memories);
+    const executorContextManagementPrompt = 'Persistent guidance for future Codex and Claude Code project tasks belongs in the WorkLite-managed Chat configuration field executorContext. When asked to maintain shared executor rules, use inspect_chat and update_chat to update that field instead of directing the user to executor-owned memory files. If the user explicitly asks to edit a local memory file, treat that as normal project-task scope.';
     return {
       revision: configuration.revision,
       defaultExecutor: configuration.defaultExecutor,
       defaultExecutorModels: configuration.defaultExecutorModels,
-      agent: { id: agent.id, providerId: agent.providerId, model: agent.model, systemPrompt: [agent.systemPrompt, configuration.extensionPrompt].filter(Boolean).join('\n\nUser capability extensions:\n') + (memoriesPrompt ? `\n\n${memoriesPrompt}` : '') },
+      agent: { id: agent.id, providerId: agent.providerId, model: agent.model, systemPrompt: [
+        [agent.systemPrompt, configuration.extensionPrompt].filter(Boolean).join('\n\nUser capability extensions:\n'),
+        memoriesPrompt,
+        executorContextManagementPrompt,
+      ].filter(Boolean).join('\n\n') },
       skills: selected.map((skill) => ({ ...skill, files: transaction.select({ path: skillFiles.path, content: skillFiles.content }).from(skillFiles).where(eq(skillFiles.skillId, skill.id)).all() })),
       mcpServers: [],
     };

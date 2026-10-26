@@ -256,7 +256,7 @@ export type PluginTestResult = {
 
 export type AgentView = {
   // Each declared executor default is one model id, or an ordered list of fallback candidates.
-  chatConfiguration?: { revision: number; extensionPrompt: string; summarizePrompt: string; defaultExecutor: ProjectExecutor; defaultExecutorModels: Partial<Record<ProjectExecutor, string | string[]>>; projectTaskMcpServerIds: string[]; skillIds: string[] };
+  chatConfiguration?: { revision: number; extensionPrompt: string; executorContext: string; summarizePrompt: string; defaultExecutor: ProjectExecutor; defaultExecutorModels: Partial<Record<ProjectExecutor, string | string[]>>; projectTaskMcpServerIds: string[]; skillIds: string[] };
   id: string;
   workspaceSlug: string;
   kind: 'system' | 'custom';
@@ -503,6 +503,8 @@ export type CreateAgentVersionRequest = Record<string, never>;
 export type UpdateAgentRequest = Partial<CreateAgentRequest> & {
   providerId?: string | null;
   extensionPrompt?: string;
+  // WorkLite-managed persistent context injected into both Codex and Claude Code project tasks.
+  executorContext?: string;
   // Custom prompt for /summarize; an omitted key keeps it, an empty string restores the built-in default.
   summarizePrompt?: string;
   defaultExecutor?: ProjectExecutor;

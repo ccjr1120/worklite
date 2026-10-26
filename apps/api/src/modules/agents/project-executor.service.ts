@@ -10,7 +10,7 @@ import { CodexAppServerService } from './codex-app-server.service';
 import { PROJECT_EXECUTOR_PROTOCOLS, isGatewayPublicModel, type PreparedProjectExecution, type ProjectExecutorRequest, type ProjectExecutorSkill } from './project-executor.types';
 
 // Chat project tasks and the Team developer role share this boundary. Executors run natively in the project
-// directory; WorkLite only hands over selected Skills, MCP servers and reference files in each executor's own form.
+// directory; Codex App Server and Claude Code receive the same prepared prompt plus selected resources.
 @Injectable()
 export class ProjectExecutorService {
   constructor(
@@ -83,6 +83,9 @@ async function prepare(directory: string, request: ProjectExecutorRequest): Prom
     pluginDirectory,
     systemPrompt: [
       request.systemPrompt.trim(),
+      request.executorContext?.trim()
+        ? `WorkLite-managed shared executor context (applies equally to Codex and Claude Code):\n${request.executorContext.trim()}\n\nUse it as persistent supplemental guidance; follow the explicit requirements of the current task when they conflict.`
+        : '',
       references.length ? `Pinned read-only process reference files:\n${references.join('\n')}` : '',
     ].filter(Boolean).join('\n\n'),
     mcpServers: request.mcpServers

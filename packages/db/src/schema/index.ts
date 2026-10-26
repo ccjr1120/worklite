@@ -421,6 +421,7 @@ export const chatConfigurations = sqliteTable('chat_bot_configurations', {
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   revision: integer('revision').notNull(),
   extensionPrompt: text('extension_prompt').notNull().default(''),
+  executorContext: text('executor_context').notNull().default(''),
   // Custom /summarize prompt; an empty string falls back to the built-in default at summarize time.
   summarizePrompt: text('summarize_prompt').notNull().default(''),
   defaultExecutor: text('default_executor').$type<StoredProjectExecutor>().notNull().default('claude'),

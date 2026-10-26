@@ -131,6 +131,7 @@ function ChatWorkspace() {
   const [executorModels, setExecutorModels] = useState<Record<ProjectExecutor, string>>({ claude: '', codex: '' });
   const [configSaving, setConfigSaving] = useState(false);
   const [extensionPrompt, setExtensionPrompt] = useState('');
+  const [executorContext, setExecutorContext] = useState('');
   const [summarizePrompt, setSummarizePrompt] = useState('');
   const [chatSkillIds, setChatSkillIds] = useState<string[]>([]);
   const [configError, setConfigError] = useState('');
@@ -164,6 +165,7 @@ function ChatWorkspace() {
     if (!agentQuery.data) return;
     setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
     setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
+    setExecutorContext(agentQuery.data.chatConfiguration?.executorContext ?? '');
     setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
     setChatSkillIds((agentQuery.data.chatConfiguration?.skillIds ?? []).filter((id) => id !== CHAT_PLATFORM_SKILL_ID));
     setExecutorModels({
@@ -172,7 +174,7 @@ function ChatWorkspace() {
     });
   }, [agentQuery.data]);
 
-  const saveConfiguration = async (selection: string, prompt = extensionPrompt, models = executorModels, summarize = summarizePrompt, skillIds?: string[]) => {
+  const saveConfiguration = async (selection: string, prompt = extensionPrompt, models = executorModels, summarize = summarizePrompt, skillIds?: string[], sharedExecutorContext = executorContext) => {
     if (configSaving) return;
     const separator = selection.indexOf('::');
     setConfigSaving(true);
@@ -181,7 +183,7 @@ function ChatWorkspace() {
       const saved = await api.updateAgent(workspaceSlug, CHAT_AGENT_ID, {
         providerId: separator >= 0 ? selection.slice(0, separator) : null,
         model: separator >= 0 ? selection.slice(separator + 2) : '',
-        extensionPrompt: prompt, summarizePrompt: summarize, expectedConfigurationRevision: agentQuery.data?.chatConfiguration?.revision,
+        extensionPrompt: prompt, executorContext: sharedExecutorContext, summarizePrompt: summarize, expectedConfigurationRevision: agentQuery.data?.chatConfiguration?.revision,
         defaultExecutorModels: { claude: textToModelList(models.claude), codex: textToModelList(models.codex) },
         ...(skillIds === undefined ? {} : { skillIds }),
       });
@@ -190,6 +192,8 @@ function ChatWorkspace() {
       setConfigError(apiErrorMessage(cause, t('assistant:configuration.saveFailed')));
       if (agentQuery.data) {
         setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
+        setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
+        setExecutorContext(agentQuery.data.chatConfiguration?.executorContext ?? '');
         setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
         setChatSkillIds((agentQuery.data.chatConfiguration?.skillIds ?? []).filter((id) => id !== CHAT_PLATFORM_SKILL_ID));
         setExecutorModels({
@@ -972,6 +976,7 @@ function ChatWorkspace() {
                   executorModels={executorModels} onExecutorModelChange={(executor, value) => { setExecutorModels((current) => ({ ...current, [executor]: value })); }}
                   onExecutorModelSave={(executor) => { if (executorModels[executor] !== modelListToText(agentQuery.data?.chatConfiguration?.defaultExecutorModels?.[executor])) void saveConfiguration(configSelection, extensionPrompt, executorModels); }}
                   extensionPrompt={extensionPrompt} onPromptChange={setExtensionPrompt} onPromptSave={() => { if (extensionPrompt !== (agentQuery.data?.chatConfiguration?.extensionPrompt ?? '')) void saveConfiguration(configSelection); }}
+                  executorContext={executorContext} onExecutorContextChange={setExecutorContext} onExecutorContextSave={() => { if (executorContext !== (agentQuery.data?.chatConfiguration?.executorContext ?? '')) void saveConfiguration(configSelection, extensionPrompt, executorModels, summarizePrompt, undefined, executorContext); }}
                   summarizePrompt={summarizePrompt} onSummarizePromptChange={setSummarizePrompt} onSummarizePromptSave={() => { if (summarizePrompt !== (agentQuery.data?.chatConfiguration?.summarizePrompt ?? '')) void saveConfiguration(configSelection); }}
                   saving={configSaving} error={configError} loading={agentQuery.isLoading || providersQuery.isLoading}
                   loadFailed={agentQuery.isError || providersQuery.isError}

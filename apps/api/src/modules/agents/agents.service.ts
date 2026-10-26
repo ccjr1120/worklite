@@ -57,7 +57,7 @@ export class AgentsService {
     const view = this.toView(row.agent, workspaceSlug, row.agent.providerId ? gatewayNames.get(row.agent.providerId) ?? null : null, assignments, latest);
     if (agentId === CHAT_AGENT_ID) {
       const [configuration] = await this.db.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
-      if (configuration) view.chatConfiguration = { revision: configuration.revision, extensionPrompt: configuration.extensionPrompt, summarizePrompt: configuration.summarizePrompt, defaultExecutor: configuration.defaultExecutor, defaultExecutorModels: configuration.defaultExecutorModels, projectTaskMcpServerIds: configuration.projectTaskMcpServerIds, skillIds: configuration.skillIds };
+      if (configuration) view.chatConfiguration = { revision: configuration.revision, extensionPrompt: configuration.extensionPrompt, executorContext: configuration.executorContext, summarizePrompt: configuration.summarizePrompt, defaultExecutor: configuration.defaultExecutor, defaultExecutorModels: configuration.defaultExecutorModels, projectTaskMcpServerIds: configuration.projectTaskMcpServerIds, skillIds: configuration.skillIds };
     }
     return view;
   }
@@ -138,7 +138,7 @@ export class AgentsService {
 
       const isChat = existing.id === CHAT_AGENT_ID;
         // Chat Skills are captured from its revisioned configuration. User MCP servers remain unavailable to Chat.
-        const fields = ['providerId', 'model', ...(isChat ? ['skillIds', 'extensionPrompt', 'summarizePrompt', 'defaultExecutor', 'defaultExecutorModels', 'projectTaskMcpServerIds', 'expectedConfigurationRevision'] : ['mcpServerIds'])];
+        const fields = ['providerId', 'model', ...(isChat ? ['skillIds', 'extensionPrompt', 'executorContext', 'summarizePrompt', 'defaultExecutor', 'defaultExecutorModels', 'projectTaskMcpServerIds', 'expectedConfigurationRevision'] : ['mcpServerIds'])];
         if (isChat && 'mcpServerIds' in input) throw new BadRequestException('Chat does not accept user MCP server selections.');
       if (Object.keys(input).some((key) => !fields.includes(key))) throw new BadRequestException('Unsupported built-in Agent configuration field.');
       const nextProviderId = input.providerId === undefined ? existing.providerId : input.providerId;
@@ -147,6 +147,7 @@ export class AgentsService {
       if (provider && requestedModel && !provider.models.includes(requestedModel)) throw new BadRequestException('The selected model is not configured for this provider.');
       const model = provider ? requestedModel || provider.models[0] || '' : '';
       if (input.extensionPrompt !== undefined && typeof input.extensionPrompt !== 'string') throw new BadRequestException('An extension prompt must be text.');
+      if (input.executorContext !== undefined && typeof input.executorContext !== 'string') throw new BadRequestException('The executor context must be text.');
       if (input.summarizePrompt !== undefined && typeof input.summarizePrompt !== 'string') throw new BadRequestException('A summarize prompt must be text.');
       if (input.defaultExecutor !== undefined && input.defaultExecutor !== 'claude' && input.defaultExecutor !== 'codex') throw new BadRequestException('The default executor must be claude or codex.');
       // Declared per-executor default models merge into the stored declarations; every declared model must
@@ -192,6 +193,7 @@ export class AgentsService {
         if (isChat) transaction.insert(chatConfigurations).values({
           workspaceId: team.id, revision: (previous?.revision ?? 0) + 1,
           extensionPrompt: input.extensionPrompt === undefined ? previous?.extensionPrompt ?? '' : input.extensionPrompt,
+          executorContext: input.executorContext === undefined ? previous?.executorContext ?? '' : input.executorContext,
           summarizePrompt: input.summarizePrompt === undefined ? previous?.summarizePrompt ?? '' : input.summarizePrompt,
           defaultExecutor: input.defaultExecutor ?? previous?.defaultExecutor ?? 'claude',
           defaultExecutorModels: executorModelsPatch === undefined ? previous?.defaultExecutorModels ?? {} : mergeExecutorModels(previous?.defaultExecutorModels, executorModelsPatch),
