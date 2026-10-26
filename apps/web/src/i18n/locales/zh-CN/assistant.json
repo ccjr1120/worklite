@@ -185,6 +185,10 @@
     },
     "executorModels": "执行器模型设置",
     "executorModelsHint": "分别设置两种执行器的默认 Gateway 公共模型，仅显示协议兼容的选项；留空则使用执行器本地默认。",
+    "projectTaskMcpServers": "Claude Code 项目任务 MCP 服务器",
+    "projectTaskMcpServersHint": "所选服务器只注入 Claude Code 项目任务，Codex 项目任务不会接收；留空则不注入。更改从下一次项目任务生效。",
+    "projectTaskMcpServersLoadFailed": "无法加载 MCP 服务器，当前声明保持不变。",
+    "projectTaskMcpServersEmpty": "当前工作区没有可用的 MCP 服务器。",
     "executorModel": {
       "claude": "Claude Code 项目任务默认模型",
       "codex": "Codex 项目任务默认模型"
@@ -196,6 +200,7 @@
     "executorModelUnavailable": "当前值：{{model}}（不在可用目录中）",
     "executorModelUnavailableHint": "此值仍会保留，除非你重新选择。",
     "modelDirectoryUnavailable": "模型目录不可用",
+    "modelDirectoryLoadFailed": "无法加载模型目录，当前 Chat 模型选择保持不变。",
     "saving": "保存中...",
     "prompt": "Chat 补充提示词",
     "promptHint": "仅影响 Chat 模型。离开输入框后保存，从下一轮对话生效。",
@@ -207,9 +212,10 @@
   "settings": {
     "open": "打开 Chat 设置",
     "title": "Chat 设置",
-    "description": "管理通信渠道、模型执行配置和长期记忆。",
+    "description": "管理通信渠道、Chat 模型与提示词、执行器和长期记忆。",
     "channels": "Channels",
     "configuration": "配置",
+    "executors": "执行器",
     "memories": "记忆"
   },
   "memories": {
