@@ -27,14 +27,13 @@ function SkillEditorPage() {
   const { skillId } = Route.useParams();
   const navigate = useNavigate();
   const workspaceSlug = 'personal';
-  const isNew = skillId === 'new';
   const { data: skill, isLoading, isError } = useSkillQuery(workspaceSlug, skillId);
   const [name, setName] = useState('');
   const [files, setFiles] = useState<PackageFile[]>([{ path: 'SKILL.md', content: '' }]);
   const [selectedPath, setSelectedPath] = useState('SKILL.md');
   const [addingFile, setAddingFile] = useState(false);
   const [newFilePath, setNewFilePath] = useState('scripts/');
-  const [saveState, setSaveState] = useState<'saved' | 'saving' | 'unsaved'>(isNew ? 'unsaved' : 'saved');
+  const [saveState, setSaveState] = useState<'saved' | 'saving' | 'unsaved'>('saved');
   const [nameError, setNameError] = useState('');
   const [pathError, setPathError] = useState('');
   const [saveError, setSaveError] = useState('');
@@ -58,7 +57,7 @@ function SkillEditorPage() {
   const isLocal = skill?.source === 'local';
   const readOnlySource = isBuiltIn || isLocal;
   const isTerminalCommand = skill?.id === 'sk_terminal_command';
-  const editable = isNew || Boolean(skill && !readOnlySource);
+  const editable = Boolean(skill && !readOnlySource);
   const packageGroups = useMemo(() => groupPackageFiles(files), [files]);
 
   useEffect(() => {
@@ -137,14 +136,11 @@ function SkillEditorPage() {
     setSaveError('');
     setSaveState('saving');
     try {
-      const saved = isNew
-        ? await api.createSkill(workspaceSlug, { name: normalizedName, source: 'online', files })
-        : await api.updateSkill(workspaceSlug, skillId, { name: normalizedName, files });
+      const saved = await api.updateSkill(workspaceSlug, skillId, { name: normalizedName, files });
       queryClient.setQueryData(['skill', saved.id], saved);
       await queryClient.invalidateQueries({ queryKey: ['skills'] });
       setFiles(saved.files);
       setSaveState('saved');
-      if (isNew) void navigate({ to: '/capabilities/skills/$skillId', params: { skillId: saved.id }, replace: true });
     } catch (error: unknown) {
       setSaveState('unsaved');
       setSaveError(error instanceof Error ? error.message : t('editor.saveFailed'));
@@ -223,7 +219,7 @@ function SkillEditorPage() {
   }
 
   async function deleteSkill() {
-    if (isNew || readOnlySource || deleteBusy) return;
+    if (readOnlySource || deleteBusy) return;
     setDeleteBusy(true);
     setDeleteError('');
     try {
@@ -231,7 +227,7 @@ function SkillEditorPage() {
       setDeleteOpen(false);
       toast.success(t('delete.success'));
       await queryClient.invalidateQueries({ queryKey: skillsQueryKey() });
-        void navigate({ to: '/capabilities' });
+      void navigate({ to: '/capabilities' });
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : t('delete.failed'));
     } finally {
@@ -239,8 +235,8 @@ function SkillEditorPage() {
     }
   }
 
-  if (!isNew && isLoading) return <ResourceState icon={LoaderCircle} message={t('editor.loading')} animated />;
-  if (!isNew && isError) return <ResourceState icon={AlertCircle} message={t('editor.loadFailed')} error />;
+  if (isLoading) return <ResourceState icon={LoaderCircle} message={t('editor.loading')} animated />;
+  if (isError) return <ResourceState icon={AlertCircle} message={t('editor.loadFailed')} error />;
 
   const CapabilityIcon = FileCode2;
   const selectedIsScript = selectedFile?.path.startsWith('scripts/');
@@ -251,9 +247,9 @@ function SkillEditorPage() {
   return (
     <div className="flex h-full min-h-0 flex-col md:flex-row">
       <WorkspaceChrome
-          crumbs={[{ label: tWorkspace('nav.capabilities'), to: '/capabilities' }, { label: isNew ? t('editor.new') : skill?.name ?? t('editor.fallback') }]}
+        crumbs={[{ label: tWorkspace('nav.resourceManagement'), to: '/capabilities' }, { label: skill?.name ?? t('editor.fallback') }]}
         status={editable ? <SaveIndicator state={saveState} /> : <span className="inline-flex items-center gap-1.5 text-[13px] text-muted-foreground"><LockKeyhole className="size-3.5" aria-hidden="true" />{t('editor.readOnly')}</span>}
-        actions={editable ? <div className="flex items-center gap-2">{!isNew ? <Button type="button" variant="ghost" size="icon-compact" aria-label={t('delete.action', { name: skill?.name ?? name })} title={t('delete.action', { name: skill?.name ?? name })} onClick={() => { setDeleteError(''); setDeleteOpen(true); }}><Trash2 className="size-4" /></Button> : null}<Button size="compact" onClick={() => void save()} disabled={saveState === 'saving'}>{saveState === 'saving' ? <LoaderCircle className="size-4 motion-safe:animate-spin" /> : <Save className="size-4" />}{isNew ? t('editor.create') : t('common:actions.save')}</Button></div> : null}
+        actions={editable ? <div className="flex items-center gap-2"><Button type="button" variant="ghost" size="icon-compact" aria-label={t('delete.action', { name: skill?.name ?? name })} title={t('delete.action', { name: skill?.name ?? name })} onClick={() => { setDeleteError(''); setDeleteOpen(true); }}><Trash2 className="size-4" /></Button><Button size="compact" onClick={() => void save()} disabled={saveState === 'saving'}>{saveState === 'saving' ? <LoaderCircle className="size-4 motion-safe:animate-spin" /> : <Save className="size-4" />}{t('common:actions.save')}</Button></div> : null}
       />
 
       <aside className="max-h-72 w-full shrink-0 overflow-auto border-b border-border bg-surface p-4 md:max-h-none md:w-72 md:border-b-0 md:border-r">
@@ -318,7 +314,7 @@ function SkillEditorPage() {
           <span className="truncate font-mono text-xs text-muted-foreground">{selectedFile?.path ?? 'SKILL.md'}</span>
           <span className="flex items-center gap-2">
             {selectedIsScript ? <Badge variant={selectedFile.content.startsWith('#!') ? 'success' : 'warning'}>{selectedFile.content.startsWith('#!') ? t('editor.executable') : t('editor.missingShebang')}</Badge> : null}
-            {selectedIsScript && !isNew ? (
+            {selectedIsScript ? (
               <Button type="button" size="compact" disabled={!canRun} onClick={() => void runSelectedScript()} title={saveState !== 'saved' ? t('editor.run.saveFirst') : undefined}>
                 {launching ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <Play aria-hidden="true" />}
                 {t('editor.run.action')}
@@ -331,23 +327,20 @@ function SkillEditorPage() {
         {selectedIsScript ? (
           <div className="shrink-0 border-b border-warning/30 bg-warning/5 px-4 py-2.5">
             <p className="text-xs text-warning">{t('editor.scriptWarning')}</p>
-            {!isNew ? (
-              <div className="mt-2 flex flex-wrap items-start gap-2">
-                <div className="min-w-[16rem] flex-1">
-                  <label htmlFor="skill-script-arguments" className="text-xs font-medium text-foreground">{t('editor.run.arguments')}</label>
-                  <Input
-                    id="skill-script-arguments"
-                    className="mt-1 h-8 font-mono text-xs"
-                    value={argumentsInput}
-                    onChange={(event) => { setArgumentsInput(event.target.value); setArgumentError(''); }}
-                    placeholder='["value"]'
-                    aria-invalid={Boolean(argumentError)}
-                  />
-                  {argumentError ? <p className="mt-1 text-xs text-danger" role="alert">{argumentError}</p> : <p className="mt-1 text-xs text-muted-foreground">{t('editor.run.argumentsHint')}</p>}
-                </div>
-                {saveState !== 'saved' ? <p className="pt-6 text-xs text-warning">{t('editor.run.saveFirst')}</p> : null}
-              </div>
-            ) : null}
+            <div className="mt-2 flex flex-wrap items-start gap-2">
+              <div className="min-w-[16rem] flex-1">
+                <label htmlFor="skill-script-arguments" className="text-xs font-medium text-foreground">{t('editor.run.arguments')}</label>
+                <Input
+                  id="skill-script-arguments"
+                  className="mt-1 h-8 font-mono text-xs"
+                  value={argumentsInput}
+                  onChange={(event) => { setArgumentsInput(event.target.value); setArgumentError(''); }}
+                  placeholder='["value"]'
+                  aria-invalid={Boolean(argumentError)}
+                />
+                {argumentError ? <p className="mt-1 text-xs text-danger" role="alert">{argumentError}</p> : <p className="mt-1 text-xs text-muted-foreground">{t('editor.run.argumentsHint')}</p>}
+            </div>
+              {saveState !== 'saved' ? <p className="pt-6 text-xs text-warning">{t('editor.run.saveFirst')}</p> : null}
           </div>
         ) : null}
         <textarea

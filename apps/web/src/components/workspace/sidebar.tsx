@@ -18,15 +18,15 @@ const navigationGroups = [
     items: [
       { id: 'chat', labelKey: 'nav.chat', to: '/chat', icon: MessageSquareText },
       { id: 'workflows', labelKey: 'nav.workflows', to: '/workflows', icon: Workflow },
-      { id: 'artifacts', labelKey: 'nav.artifacts', to: '/artifacts', icon: FileText },
       { id: 'agentTeam', labelKey: 'nav.agentTeam', to: '/agent-teams', icon: UsersRound },
     ],
   },
   {
-    id: 'capabilities',
-    labelKey: 'nav.capabilities',
+    id: 'resources',
+    labelKey: 'nav.resourceManagement',
     items: [
-      { id: 'capabilities', labelKey: 'nav.resourceManagement', to: '/capabilities', icon: Puzzle },
+      { id: 'resources', labelKey: 'nav.allResources', to: '/capabilities', icon: Puzzle },
+      { id: 'artifacts', labelKey: 'nav.artifacts', to: '/artifacts', icon: FileText },
     ],
   },
   {
@@ -60,7 +60,6 @@ function Sidebar({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
     if (id === 'settings') return pathname.startsWith('/settings');
     if (id === 'workflows') return ['/workflows', '/runs'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
     if (id === 'agentTeam') return ['/agent-teams', '/agent-team-runs', '/agent-team-groups'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
-    if (id === 'capabilities') return pathname === '/capabilities' || pathname.startsWith('/capabilities/');
     return pathname === to || pathname.startsWith(`${to}/`);
   }
 

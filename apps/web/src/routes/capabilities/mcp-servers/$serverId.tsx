@@ -112,7 +112,7 @@ function McpConfigPage() {
   if (editorLoading) {
     return (
       <div className="mx-auto w-full max-w-[840px] px-4 py-6 md:px-6 md:py-8">
-          <WorkspaceChrome crumbs={[{ label: tWorkspace('nav.capabilities'), to: '/capabilities' }]} />
+          <WorkspaceChrome crumbs={[{ label: tWorkspace('nav.resourceManagement'), to: '/capabilities' }]} />
         <div className="flex flex-col gap-4" role="status" aria-busy="true" aria-live="polite">
           <span className="sr-only">{t('config.loading')}</span>
           <Skeleton className="h-8 w-56" />
@@ -132,7 +132,7 @@ function McpConfigPage() {
   if (!isNew && serverError) {
     return (
       <div className="mx-auto w-full max-w-[840px] px-4 py-6 md:px-6 md:py-8">
-          <WorkspaceChrome crumbs={[{ label: tWorkspace('nav.capabilities'), to: '/capabilities' }]} />
+          <WorkspaceChrome crumbs={[{ label: tWorkspace('nav.resourceManagement'), to: '/capabilities' }]} />
         <ErrorState title={t('config.fallback')} description={t('config.loadFailed')} onAction={() => void refetchServer()} />
       </div>
     );
@@ -142,7 +142,7 @@ function McpConfigPage() {
     <div className="mx-auto w-full max-w-[840px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome
         crumbs={[
-            { label: tWorkspace('nav.capabilities'), to: '/capabilities' },
+            { label: tWorkspace('nav.resourceManagement'), to: '/capabilities' },
           { label: isNew ? t('config.new') : server?.name ?? t('config.fallback') },
         ]}
         status={<SaveIndicator state={saveState} />}

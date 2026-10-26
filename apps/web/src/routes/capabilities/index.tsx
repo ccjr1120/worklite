@@ -282,8 +282,8 @@ function CapabilitiesPage() {
 
   return (
     <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
-      <WorkspaceChrome crumbs={[{ label: tWorkspace('nav.capabilities') }]} />
-      <PageHeading title={tWorkspace('nav.capabilities')} />
+      <WorkspaceChrome crumbs={[{ label: tWorkspace('nav.resourceManagement') }]} />
+      <PageHeading title={tWorkspace('nav.resourceManagement')} />
       <CollectionToolbar
         className="mt-6"
         search={search}
@@ -301,7 +301,7 @@ function CapabilitiesPage() {
           />
         ) : isError ? (
           <ErrorState
-            title={tWorkspace('nav.capabilities')}
+            title={tWorkspace('nav.resourceManagement')}
             description={tWorkspace('capabilityResources.loadFailed')}
             onAction={() => { void Promise.all([pluginsQuery.refetch(), mcpServersQuery.refetch(), skillsQuery.refetch()]); }}
           />
@@ -355,12 +355,6 @@ function CapabilitiesPage() {
                             <Button type="button" variant="secondary" size="compact" onClick={() => folderInput.current?.click()} disabled={importSkill.isPending}>
                               <FolderUp className="size-4" aria-hidden="true" />
                               {importSkill.isPending ? tSkills('import.importing') : tSkills('import.action')}
-                            </Button>
-                            <Button asChild size="compact">
-                              <Link to="/capabilities/skills/$skillId" params={{ skillId: 'new' }}>
-                                <Plus className="size-4" aria-hidden="true" />
-                                {tSkills('create')}
-                              </Link>
                             </Button>
                           </>
                         ) : null}

@@ -2,7 +2,6 @@
   "nav": {
     "home": "首页",
     "workspace": "工作区",
-    "capabilities": "能力",
     "configuration": "配置",
     "manage": "管理",
     "workflows": "工作流",
@@ -12,6 +11,7 @@
     "mcpServers": "MCP 服务器",
     "plugins": "插件",
     "resourceManagement": "资源管理",
+    "allResources": "全部资源",
     "modelProviders": "模型提供商",
     "logs": "日志",
     "usage": "用量",
@@ -22,12 +22,12 @@
   },
   "capabilityResources": {
     "search": "搜索插件、MCP 服务器或 Skill…",
-    "loading": "正在加载能力资源…",
-    "loadFailed": "加载能力资源失败，请重试。",
+    "loading": "正在加载资源…",
+    "loadFailed": "加载资源失败，请重试。",
     "configure": "配置 {{name}}",
     "emptyGroup": "暂无此类资源",
     "empty": {
-      "title": "还没有能力资源",
+      "title": "还没有资源",
       "description": "插件、MCP 服务器和 Skill 会统一显示在这里。"
     },
     "noMatches": {

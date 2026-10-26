@@ -29,6 +29,7 @@ export type LocalSkillSkippedPackage = {
 export type LocalSkillScanResult = {
   root: string;
   available: boolean;
+  rootMissing?: boolean;
   unavailableReason?: string;
   packages: LocalSkillPackage[];
   skipped: LocalSkillSkippedPackage[];
@@ -48,9 +49,13 @@ const MAX_SKILL_PATH_LENGTH = 240;
 const MAX_SKILL_DIRECTORY_DEPTH = 8;
 const ALLOWED_PACKAGE_ROOTS = new Set(['SKILL.md', 'scripts', 'references']);
 
+export function defaultLocalSkillRootDirectory(): string {
+  return resolve(join(homedir(), '.agents', 'skills'));
+}
+
 export function localSkillRootDirectory(): string {
   const configured = process.env.WORKLITE_LOCAL_SKILLS_DIR?.trim();
-  const value = configured || join(homedir(), '.agents', 'skills');
+  const value = configured || defaultLocalSkillRootDirectory();
   if (value === '~') return homedir();
   if (value.startsWith('~/')) return join(homedir(), value.slice(2));
   return resolve(value);
@@ -209,7 +214,7 @@ export async function scanLocalSkillRoot(rootDirectory = localSkillRootDirectory
     }
   } catch (error) {
     if (isMissing(error)) {
-      return unavailable(root, `The local Skill directory ${root} does not exist. Create it and add Skill packages that contain SKILL.md.`);
+      return unavailable(root, `The local Skill directory ${root} does not exist. Create it and add Skill packages that contain SKILL.md.`, true);
     }
     return unavailable(root, `The local Skill directory ${root} cannot be read: ${errorMessage(error)}`);
   }
@@ -349,8 +354,8 @@ function isInside(root: string, candidate: string): boolean {
   return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !path.startsWith(sep));
 }
 
-function unavailable(root: string, reason: string): LocalSkillScanResult {
-  return { root, available: false, unavailableReason: reason, packages: [], skipped: [] };
+function unavailable(root: string, reason: string, rootMissing = false): LocalSkillScanResult {
+  return { root, available: false, ...(rootMissing ? { rootMissing: true } : {}), unavailableReason: reason, packages: [], skipped: [] };
 }
 
 function isMissing(error: unknown): boolean {

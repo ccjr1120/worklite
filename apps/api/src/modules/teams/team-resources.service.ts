@@ -57,7 +57,7 @@ import { listWorkflowNodeCapabilities } from '@worklite/workflow-engine';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from './teams.service';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
-import { localSkillId, localSkillRootDirectory, parseSkillFrontmatter, scanLocalSkillRoot } from '../skills/local-skill-source';
+import { defaultLocalSkillRootDirectory, localSkillId, localSkillRootDirectory, parseSkillFrontmatter, scanLocalSkillRoot } from '../skills/local-skill-source';
 import { McpClientService } from '../mcp-servers/mcp-client.service';
 import { getArtifactDetail, listArtifacts } from '../artifacts/artifacts-query';
 import { AGENT_TEAM_ROLES, BUILT_IN_AGENT_TEAM_ID } from '../agent-teams/agent-team-configuration';
@@ -277,7 +277,8 @@ export class WorkspaceResourcesService {
   private async performLocalSkillSync(request: Request, workspaceSlug: string, rootDirectory: string): Promise<void> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const scan = await scanLocalSkillRoot(rootDirectory);
-    if (!scan.available) return;
+    const missingDefaultRoot = scan.rootMissing && rootDirectory === defaultLocalSkillRootDirectory();
+    if (!scan.available && !missingDefaultRoot) return;
     const existingRows = await this.db.select().from(skills).where(and(eq(skills.workspaceId, team.id), eq(skills.source, 'local')));
     const existingFiles = existingRows.length === 0
       ? []
@@ -287,6 +288,7 @@ export class WorkspaceResourcesService {
     const existingById = new Map(existingRows.map((row) => [row.id, row]));
 
     const scannedIds = new Set<string>();
+    const invalidIds = new Set(scan.skipped.map((packageInfo) => localSkillId(team.id, packageInfo.directory)));
     for (const skillPackage of scan.packages) {
       const id = localSkillId(team.id, skillPackage.directory);
       scannedIds.add(id);
@@ -330,8 +332,19 @@ export class WorkspaceResourcesService {
 
     for (const row of existingRows) {
       if (scannedIds.has(row.id)) continue;
+      if (invalidIds.has(row.id)) {
+        if (row.validation !== 'invalid') {
+          await this.db.update(skills).set({ validation: 'invalid' }).where(and(eq(skills.id, row.id), eq(skills.workspaceId, team.id)));
+        }
+        continue;
+      }
       const reason = await this.localSkillReferenceReason(team.id, row.id);
-      if (reason) continue;
+      if (reason) {
+        if (row.validation !== 'missing') {
+          await this.db.update(skills).set({ validation: 'missing' }).where(and(eq(skills.id, row.id), eq(skills.workspaceId, team.id)));
+        }
+        continue;
+      }
       await this.db.delete(skills).where(and(eq(skills.id, row.id), eq(skills.workspaceId, team.id)));
     }
   }

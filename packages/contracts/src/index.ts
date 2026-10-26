@@ -271,7 +271,7 @@ export type AgentView = {
     id: string;
     name: string;
     version: string;
-    validation: 'valid' | 'invalid' | 'pending';
+    validation: 'valid' | 'invalid' | 'pending' | 'missing';
   }>;
   mcpServers: Array<{
     id: string;
@@ -1051,7 +1051,7 @@ export type SkillView = {
   name: string;
   source: 'online' | 'archive' | 'built-in' | 'local';
   version: string;
-  validation: 'valid' | 'invalid' | 'pending';
+  validation: 'valid' | 'invalid' | 'pending' | 'missing';
   description?: string;
   metadata?: Record<string, unknown>;
   files: Array<{

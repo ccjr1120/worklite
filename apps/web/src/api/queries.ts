@@ -155,11 +155,11 @@ export function useRunQuery(workspace: string | undefined, runId: string, enable
 export const skillsQueryKey = (_workspace?: string) => ['skills'] as const;
 
 export function useSkillsQuery(workspace?: string) {
-  return useQuery({ queryKey: skillsQueryKey(workspace), queryFn: () => api.skills(workspace) });
+  return useQuery({ queryKey: skillsQueryKey(workspace), queryFn: () => api.skills(workspace), staleTime: 0 });
 }
 
 export function useSkillQuery(workspace: string | undefined, skillId: string) {
-  return useQuery({ queryKey: ['skill', skillId] as const, queryFn: () => api.skill(workspace, skillId), enabled: Boolean(skillId && skillId !== 'new') });
+  return useQuery({ queryKey: ['skill', skillId] as const, queryFn: () => api.skill(workspace, skillId), enabled: Boolean(skillId) });
 }
 
 export function useAgentTeamsQuery() {

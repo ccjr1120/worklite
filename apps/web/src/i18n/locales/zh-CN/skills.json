@@ -1,10 +1,9 @@
 {
   "title": "技能",
-  "create": "创建技能",
   "search": "搜索技能",
   "empty": {
     "title": "还没有技能",
-    "description": "创建包含指令、脚本和参考资料的技能包。"
+    "description": "导入包含指令、脚本和参考资料的技能包。"
   },
   "noMatches": {
     "title": "没有匹配的技能",
@@ -31,10 +30,8 @@
     "boundary": "平台操作使用固定工具注册表。资源和偏好变更需要确认，敏感凭据仍只能通过专用安全表单提交。"
   },
   "editor": {
-    "new": "新建技能",
     "fallback": "技能",
     "name": "技能名称",
-    "create": "创建技能",
     "package": "包内容",
     "addFile": "添加包文件",
     "deleteFile": "删除所选文件",
@@ -66,9 +63,9 @@
     },
     "readOnly": "只读",
     "builtInReadOnly": "平台内置包",
-    "localReadOnly": "本地目录包，只读；读取技能列表时会从 ~/.agents/skills 单向同步到 WorkLite，不会回写本地目录。",
+    "localReadOnly": "本地目录包只读；刷新技能列表时会从 ~/.agents/skills 同步内容。已注册技能被删除后如仍被引用会标记为不可用，源目录中的无效包会标记为无效；不会回写本地目录。",
     "localBins": "命令行依赖：{{bins}}",
-    "nameRequired": "请先输入技能名称再保存。",
+    "nameRequired": "技能名称不能为空。",
     "saveFailed": "无法保存技能。请检查包内容后重试。",
     "loading": "正在加载技能...",
     "loadFailed": "无法加载此技能。"

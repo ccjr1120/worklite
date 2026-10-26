@@ -32,12 +32,6 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/workflows' }))}>
             <Workflow className="size-4" /> {t('nav.workflows')}
           </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/artifacts' }))}>
-            <FileText className="size-4" /> {t('nav.artifacts')}
-          </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/capabilities' }))}>
-            <Puzzle className="size-4" /> {t('nav.resourceManagement')}
-          </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/agent-teams' }))}>
             <UsersRound className="size-4" /> {t('nav.agentTeam')}
           </CommandItem>
@@ -46,6 +40,14 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
           </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/logs', search: { tab: 'statistics', range: '24h' } }))}>
             <ScrollText className="size-4" /> {t('nav.logs')}
+          </CommandItem>
+        </CommandGroup>
+        <CommandGroup heading={t('nav.resourceManagement')}>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/capabilities' }))}>
+            <Puzzle className="size-4" /> {t('nav.allResources')}
+          </CommandItem>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/artifacts' }))}>
+            <FileText className="size-4" /> {t('nav.artifacts')}
           </CommandItem>
         </CommandGroup>
         <CommandSeparator />
