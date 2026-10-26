@@ -267,12 +267,20 @@ export class AgentExecutionsService implements OnModuleInit {
     const selectedSkillIds = await this.resources.resolveSkillIds(workspaceId, requestedSkillIds);
     const skillRows = selectedSkillIds.length === 0
       ? []
-      : await this.db.select({ id: skills.id, name: skills.name, instructions: skills.instructions, validation: skills.validation, validationReason: skills.validationReason }).from(skills).where(and(eq(skills.workspaceId, workspaceId), inArray(skills.id, selectedSkillIds)));
+      : await this.db.select({ id: skills.id, name: skills.name, root: skills.root, instructions: skills.instructions, validation: skills.validation, validationReason: skills.validationReason }).from(skills).where(and(eq(skills.workspaceId, workspaceId), inArray(skills.id, selectedSkillIds)));
     if (skillRows.length !== selectedSkillIds.length) throw new NotFoundException('A Workflow Agent Skill is no longer available.');
+    const nonPlatformSkill = skillRows.find((skill) => skill.root !== 'platform');
+    if (nonPlatformSkill) throw new BadRequestException(`Workflow Agent Skill ${nonPlatformSkill.name} is not a WorkLite platform Skill.`);
     const invalidSkill = skillRows.find((skill) => skill.validation !== 'valid');
     if (invalidSkill) throw new BadRequestException(invalidSkill.validationReason ?? `Workflow Agent Skill ${invalidSkill.name} is invalid.`);
     const files = selectedSkillIds.length === 0 ? [] : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, selectedSkillIds));
-    const assignedSkills = skillRows.map((skill) => ({ id: skill.id, name: skill.name, instructions: skill.instructions, files: files.filter((file) => file.skillId === skill.id).map(({ path, content }) => ({ path, content })) }));
+    const usesWebSearch = skillRows.some(isBytedWebSearchSkill);
+    const assignedSkills = skillRows.map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      instructions: workflowSkillInstructions(skill),
+      files: files.filter((file) => file.skillId === skill.id && (!isBytedWebSearchSkill(skill) || !file.path.startsWith('scripts/'))).map(({ path, content }) => ({ path, content })),
+    }));
     const mcpRuntimes = await this.resources.workflowMcpRuntimes(workspaceId, requestedMcpServerIds);
     return this.invocations.execute({
       workspaceId,
@@ -282,6 +290,12 @@ export class AgentExecutionsService implements OnModuleInit {
       skills: assignedSkills,
       mcpRuntimes,
       builtinToolNames: [],
+      managedTools: usesWebSearch ? CHAT_WEB_SEARCH_TOOLS : [],
+      executeManagedTool: usesWebSearch ? async (call) => {
+        if (call.toolName === 'web_search') return JSON.stringify(await this.webSearch.search(call.input, await this.webSearchCredentials.readForWorkspace(workspaceId)));
+        if (call.toolName === 'web_fetch') return JSON.stringify(await this.webFetch.fetchPage(call.input));
+        throw new BadRequestException('This WorkLite platform Skill does not authorize the requested Workflow tool.');
+      } : undefined,
       signal,
       onTextDelta,
       onModelRound: activity ? async (round) => activity({ phase: 'model.round', ...round }) : undefined,
@@ -1592,6 +1606,13 @@ function chatSkillInstructions(skill: { id: string; name: string; instructions: 
     if (!omitSection) safeSections.push(line);
   }
   return safeSections.join('\n').trim();
+}
+
+function workflowSkillInstructions(skill: { id: string; name: string; instructions: string }): string {
+  const instructions = chatSkillInstructions(skill);
+  if (!isBytedWebSearchSkill(skill)) return instructions;
+  const runtimeInstructions = BYTED_WEB_SEARCH_RUNTIME_INSTRUCTIONS.replace('in Chat.', 'in this Workflow.');
+  return [instructions, runtimeInstructions].filter(Boolean).join('\n\n');
 }
 
 function shellRecoveryQuestion(call: typeof agentToolCalls.$inferSelect): AgentPendingQuestion {

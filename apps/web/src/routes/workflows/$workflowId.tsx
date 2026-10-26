@@ -46,7 +46,9 @@ function WorkflowEditorPage() {
   const isNew = workflowId === 'new';
   const { data: existing } = useWorkflowQuery(workspaceSlug, workflowId);
   const scheduleQuery = useWorkflowScheduleQuery(workspaceSlug, workflowId);
-  const { data: availableSkills = [] } = useSkillsQuery(workspaceSlug);
+  const skillsQuery = useSkillsQuery(workspaceSlug);
+  const { data: availableSkills = [] } = skillsQuery;
+  const workflowSkills = useMemo(() => availableSkills.filter((skill) => skill.root === 'platform' && skill.validation === 'valid'), [availableSkills]);
   const { data: availableMcpServers = [] } = useMcpServersQuery(workspaceSlug);
   const { data: availableProviders = [] } = useModelProvidersQuery(workspaceSlug);
   const [nodes, setNodes] = useState<WorkflowCanvasNode[]>([]);
@@ -1011,7 +1013,28 @@ function WorkflowEditorPage() {
           </Field>
           <Field label={t('editor.systemPrompt')} htmlFor="agent-system-prompt"><Textarea id="agent-system-prompt" value={selectedNode.data.systemPrompt ?? ''} onChange={(event) => { const systemPrompt = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, systemPrompt } } : node)); setSaveState('unsaved'); }} /></Field>
           <Field label={t('editor.outputFormat')} htmlFor="agent-output-format" hint={t('editor.outputFormatDescription')}><Select value={selectedNode.data.outputFormat ?? 'text'} onValueChange={(value) => { const outputFormat = value as 'text' | 'json'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, outputFormat } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="agent-output-format"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">{t('editor.outputFormats.text')}</SelectItem><SelectItem value="json">{t('editor.outputFormats.json')}</SelectItem></SelectContent></Select></Field>
-          <div><p className="text-[12px] font-medium">{t('editor.skills')}</p><div className="mt-2 space-y-2">{availableSkills.map((skill) => { const checked = (selectedNode.data.skillIds ?? []).includes(skill.id); return <label key={skill.id} className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-[13px]"><Checkbox checked={checked} onCheckedChange={(value) => { const nextIds = value === true ? [...new Set([...(selectedNode.data.skillIds ?? []), skill.id])] : (selectedNode.data.skillIds ?? []).filter((id) => id !== skill.id); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, skillIds: nextIds, skillNames: availableSkills.filter((item) => nextIds.includes(item.id)).map((item) => item.name) } } : node)); setSaveState('unsaved'); }} aria-label={skill.name} /><span>{skill.name}</span></label>; })}</div></div>
+          <div>
+            <p className="text-[12px] font-medium">{t('editor.skills')}</p>
+            <p className="mt-1 text-[12px] text-muted-foreground">{t('editor.platformSkillsOnly')}</p>
+            <div className="mt-2 space-y-2">{workflowSkills.map((skill) => { const checked = (selectedNode.data.skillIds ?? []).includes(skill.id); return <label key={skill.id} className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-[13px]"><Checkbox checked={checked} onCheckedChange={(value) => { const nextIds = value === true ? [...new Set([...(selectedNode.data.skillIds ?? []), skill.id])] : (selectedNode.data.skillIds ?? []).filter((id) => id !== skill.id); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, skillIds: nextIds, skillNames: workflowSkills.filter((item) => nextIds.includes(item.id)).map((item) => item.name) } } : node)); setSaveState('unsaved'); }} aria-label={skill.name} /><span>{skill.name}</span></label>; })}</div>
+            {skillsQuery.isSuccess ? (() => {
+              const unavailableSkillIds = [...new Set((selectedNode.data.skillIds ?? []).filter((id) => !workflowSkills.some((skill) => skill.id === id)))];
+              return unavailableSkillIds.length ? <div className="mt-3 rounded-md border border-warning/40 bg-surface-subtle p-3 text-[12px] text-warning">
+                <p>{t('editor.unavailableSkillReferences')}</p>
+                <ul className="mt-2 space-y-2">{unavailableSkillIds.map((id) => {
+                  const skill = availableSkills.find((item) => item.id === id);
+                  return <li key={id} className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 break-all">{skill ? `${skill.name} · ${skill.root} · ${skill.validation}` : id}</span>
+                    <Button type="button" size="compact" variant="ghost" onClick={() => {
+                      const nextIds = (selectedNode.data.skillIds ?? []).filter((selectedId) => selectedId !== id);
+                      setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, skillIds: nextIds, skillNames: workflowSkills.filter((item) => nextIds.includes(item.id)).map((item) => item.name) } } : node));
+                      setSaveState('unsaved');
+                    }}>{t('editor.removeUnavailableSkill')}</Button>
+                  </li>;
+                })}</ul>
+              </div> : null;
+            })() : null}
+          </div>
           <div><p className="text-[12px] font-medium">{t('editor.mcpServers')}</p><div className="mt-2 space-y-2">{availableMcpServers.map((server) => { const checked = (selectedNode.data.mcpServerIds ?? []).includes(server.id); return <label key={server.id} className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-[13px]"><Checkbox checked={checked} onCheckedChange={(value) => { const nextIds = value === true ? [...new Set([...(selectedNode.data.mcpServerIds ?? []), server.id])] : (selectedNode.data.mcpServerIds ?? []).filter((id) => id !== server.id); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, mcpServerIds: nextIds, mcpServerNames: availableMcpServers.filter((item) => nextIds.includes(item.id)).map((item) => item.name) } } : node)); setSaveState('unsaved'); }} aria-label={server.name} /><span>{server.name}</span></label>; })}</div></div>
           <Field label={t('editor.errorPolicy')} htmlFor="policy"><Select value={selectedNode.data.errorPolicy} onValueChange={(value) => { setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, errorPolicy: value as 'stop' | 'retry' } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="policy"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="stop">{t('editor.stop')}</SelectItem><SelectItem value="retry">{t('editor.retry')}</SelectItem></SelectContent></Select></Field>
         </> : null}

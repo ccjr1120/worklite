@@ -39,6 +39,10 @@ export class WebSearchCredentialService {
   // row this process cannot read; treat that as unconfigured instead of failing.
   async read(slug = PERSONAL_WORKSPACE_SLUG): Promise<string | null> {
     const workspaceId = await this.workspaceId(slug);
+    return this.readForWorkspace(workspaceId);
+  }
+
+  async readForWorkspace(workspaceId: string): Promise<string | null> {
     const [row] = await this.db.select({ encryptedValue: workspaceCredentials.encryptedValue })
       .from(workspaceCredentials)
       .where(and(eq(workspaceCredentials.workspaceId, workspaceId), eq(workspaceCredentials.credentialKey, VOLCENGINE_SEARCH_CREDENTIAL_KEY)))
