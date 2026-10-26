@@ -25,7 +25,7 @@ export const Route = createFileRoute('/skills/')({
   component: SkillListPage,
 });
 
-const tableClassName = 'min-w-[860px] grid-cols-[minmax(0,2fr)_100px_90px_110px_150px_80px]';
+const tableClassName = 'min-w-[860px] md:grid-cols-[minmax(0,2fr)_100px_90px_110px_150px_minmax(80px,max-content)]';
 
 function SkillListPage() {
   const { t } = useTranslation(['skills', 'common']);
@@ -152,7 +152,7 @@ function SkillListPage() {
                 <span className="font-mono text-[13px]">{skill.version}</span>
                 <StatusBadge status={skill.validation} />
                 <span className="tabular-nums text-[13px] text-muted-foreground">{formatDateTime(skill.updatedAt, locale)}</span>
-                <span className="flex items-center justify-end gap-1">
+                <span className="flex flex-nowrap items-center justify-end gap-1 whitespace-nowrap">
                   <Button asChild variant="ghost" size="icon-compact" data-row-action>
                     <Link to="/skills/$skillId" params={{ skillId: skill.id }} aria-label={t('common:actions.open')} title={t('common:actions.open')}>
                       <Settings2 className="size-4" />
