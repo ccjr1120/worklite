@@ -1,10 +1,10 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Blocks, ChevronDown, FolderUp, Plus, Puzzle, RefreshCw, Server, Settings2, Trash2 } from 'lucide-react';
+import { Blocks, ChevronDown, FolderUp, Plus, Puzzle, Server, Settings2, Trash2 } from 'lucide-react';
 import { useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import type { LocalSkillSyncResult, McpServerView, PluginView, SkillView } from '@worklite/contracts';
+import type { McpServerView, PluginView, SkillView } from '@worklite/contracts';
 import { api } from '@/api/client';
 import {
   skillsQueryKey,
@@ -55,7 +55,6 @@ function CapabilitiesPage() {
   const [skillDeleteBusy, setSkillDeleteBusy] = useState(false);
   const [skillDeleteError, setSkillDeleteError] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
-  const [syncReport, setSyncReport] = useState<LocalSkillSyncResult | null>(null);
   const pluginsQuery = usePluginsQuery();
   const mcpServersQuery = useMcpServersQuery(workspaceSlug);
   const skillsQuery = useSkillsQuery(workspaceSlug);
@@ -63,17 +62,6 @@ function CapabilitiesPage() {
   const mcpServers = mcpServersQuery.data ?? [];
   const skills = skillsQuery.data ?? [];
 
-  const syncLocalSkills = useMutation({
-    mutationFn: () => api.syncLocalSkills(workspaceSlug),
-    onMutate: () => setSyncReport(null),
-    onSuccess: async (result) => {
-      setSyncReport(result);
-      await queryClient.invalidateQueries({ queryKey: skillsQueryKey(workspaceSlug) });
-      if (!result.available) toast.error(result.unavailableReason ?? tSkills('localSync.failed'));
-      else toast.success(tSkills('localSync.success', { created: result.created, updated: result.updated, unchanged: result.unchanged }));
-    },
-    onError: (error) => toast.error(error instanceof Error ? error.message : tSkills('localSync.failed')),
-  });
   const importSkill = useMutation({
     mutationFn: (input: { name: string; files: Array<{ path: string; content: string }> }) => api.importSkill(workspaceSlug, input),
     onSuccess: async (skill) => {
@@ -301,48 +289,8 @@ function CapabilitiesPage() {
         search={search}
         onSearchChange={setSearch}
         placeholder={tWorkspace('capabilityResources.search')}
-        actions={
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={() => syncLocalSkills.mutate()} disabled={syncLocalSkills.isPending}>
-              <RefreshCw className={syncLocalSkills.isPending ? 'size-4 motion-safe:animate-spin' : 'size-4'} />
-              {syncLocalSkills.isPending ? tSkills('localSync.syncing') : tSkills('localSync.action')}
-            </Button>
-            <input ref={folderInput} type="file" multiple className="sr-only" onChange={(event) => void handleFolderChange(event)} {...({ webkitdirectory: '' } as Record<string, string>)} />
-            <Button type="button" variant="secondary" onClick={() => folderInput.current?.click()} disabled={importSkill.isPending}>
-              <FolderUp className="size-4" />
-              {importSkill.isPending ? tSkills('import.importing') : tSkills('import.action')}
-            </Button>
-            <Button asChild variant="secondary">
-              <Link to="/capabilities/mcp-servers/$serverId" params={{ serverId: 'new' }}>
-                <Plus className="size-4" />
-                {tMcpServers('create')}
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link to="/capabilities/skills/$skillId" params={{ skillId: 'new' }}>
-                <Plus className="size-4" />
-                {tSkills('create')}
-              </Link>
-            </Button>
-          </div>
-        }
       />
       {importError ? <p role="alert" className="mt-3 text-sm text-danger">{importError}</p> : null}
-      {syncReport && (!syncReport.available || syncReport.skipped.length > 0 || syncReport.removed.length > 0) ? (
-        <div className="mt-3 rounded-md border border-border bg-surface-subtle px-3 py-2 text-[13px]">
-          <p className="text-muted-foreground">{tSkills('localSync.root', { root: syncReport.root })}</p>
-          {!syncReport.available ? <p role="alert" className="mt-1 text-danger">{syncReport.unavailableReason}</p> : null}
-          {syncReport.skipped.length > 0 ? (
-            <>
-              <p className="mt-2 font-medium">{tSkills('localSync.skipped')}</p>
-              <ul className="mt-1 space-y-1 text-muted-foreground">
-                {syncReport.skipped.map((item) => <li key={item.directory}><span className="font-mono">{item.directory}</span>: {item.reason}</li>)}
-              </ul>
-            </>
-          ) : null}
-          {syncReport.removed.length > 0 ? <p className="mt-2 text-muted-foreground">{tSkills('localSync.removed', { count: syncReport.removed.length })}</p> : null}
-        </div>
-      ) : null}
       <div className="mt-4">
         {isLoading ? (
           <CollectionLoading
@@ -378,20 +326,45 @@ function CapabilitiesPage() {
 
                 return (
                   <div key={group.type}>
-                    <CollectionRow className="grid-cols-[minmax(0,1fr)]">
+                    <CollectionRow className="grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
                       <button
                         id={categoryId}
                         type="button"
                         onClick={() => setExpandedCategoryType(expanded ? null : group.type)}
                         aria-expanded={expanded}
                         aria-controls={resourcesId}
-                        className="flex min-w-0 items-center gap-3 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+                        className="flex w-full min-w-0 items-center gap-3 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
                       >
                         <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                         <span className="min-w-0 truncate text-sm font-medium">{group.title}</span>
                         <Badge variant="neutral" aria-label={`${group.title}: ${group.resources.length}`}>{group.resources.length}</Badge>
                         <ChevronDown className={`ml-auto size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`} aria-hidden="true" />
                       </button>
+                      <div className="flex flex-wrap items-center justify-end gap-2 md:pl-3">
+                        {group.type === 'mcp' ? (
+                          <Button asChild variant="secondary" size="compact">
+                            <Link to="/capabilities/mcp-servers/$serverId" params={{ serverId: 'new' }}>
+                              <Plus className="size-4" aria-hidden="true" />
+                              {tMcpServers('create')}
+                            </Link>
+                          </Button>
+                        ) : null}
+                        {group.type === 'skill' ? (
+                          <>
+                            <input ref={folderInput} type="file" multiple className="sr-only" onChange={(event) => void handleFolderChange(event)} {...({ webkitdirectory: '' } as Record<string, string>)} />
+                            <Button type="button" variant="secondary" size="compact" onClick={() => folderInput.current?.click()} disabled={importSkill.isPending}>
+                              <FolderUp className="size-4" aria-hidden="true" />
+                              {importSkill.isPending ? tSkills('import.importing') : tSkills('import.action')}
+                            </Button>
+                            <Button asChild size="compact">
+                              <Link to="/capabilities/skills/$skillId" params={{ skillId: 'new' }}>
+                                <Plus className="size-4" aria-hidden="true" />
+                                {tSkills('create')}
+                              </Link>
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
                     </CollectionRow>
                     {expanded ? (
                       <div

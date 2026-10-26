@@ -1378,24 +1378,6 @@ export type ExecuteSkillScriptRequest = {
   arguments: string[];
 };
 
-export type LocalSkillSkippedPackageView = {
-  directory: string;
-  reason: string;
-};
-
-export type LocalSkillSyncResult = {
-  root: string;
-  available: boolean;
-  unavailableReason?: string;
-  created: number;
-  updated: number;
-  unchanged: number;
-  removed: string[];
-  retained: Array<{ id: string; reason: string }>;
-  synced: Array<{ id: string; name: string; directory: string }>;
-  skipped: LocalSkillSkippedPackageView[];
-};
-
 export type WorkflowScheduleView = {
   id: string;
   workflowId: string;

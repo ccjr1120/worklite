@@ -15,7 +15,6 @@ import type {
   DeleteMcpServerResult,
   ExecuteSkillScriptRequest,
   ImportSkillRequest,
-  LocalSkillSyncResult,
   McpServerReferenceReport,
   McpServerTestResult,
   McpServerView,
@@ -251,7 +250,7 @@ const CHAT_AGENT_ID = 'agt_system_helper_chat';
 
 @Injectable()
 export class WorkspaceResourcesService {
-  private readonly localSkillSyncs = new Map<string, Promise<LocalSkillSyncResult>>();
+  private readonly localSkillSyncs = new Map<string, Promise<void>>();
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
@@ -260,16 +259,13 @@ export class WorkspaceResourcesService {
     private readonly mcpClient: McpClientService,
   ) {}
 
-  async localSkills(request: Request, workspaceSlug: string, rootDirectory?: string): Promise<LocalSkillSyncResult> {
-    return this.syncLocalSkills(request, workspaceSlug, rootDirectory);
-  }
-
   /**
    * Reconcile the operator's shared Skill directory into the existing
    * skills/skill_files model. The directory stays authoritative for the copied
    * content, so a role captures a normal Skill snapshot on its next save.
    */
-  async syncLocalSkills(request: Request, workspaceSlug: string, rootDirectory = localSkillRootDirectory()): Promise<LocalSkillSyncResult> {
+  private async syncLocalSkillsFromDirectory(request: Request, workspaceSlug: string): Promise<void> {
+    const rootDirectory = localSkillRootDirectory();
     const key = `${workspaceSlug}\0${rootDirectory}`;
     const inFlight = this.localSkillSyncs.get(key);
     if (inFlight) return inFlight;
@@ -278,9 +274,10 @@ export class WorkspaceResourcesService {
     return promise;
   }
 
-  private async performLocalSkillSync(request: Request, workspaceSlug: string, rootDirectory: string): Promise<LocalSkillSyncResult> {
+  private async performLocalSkillSync(request: Request, workspaceSlug: string, rootDirectory: string): Promise<void> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const scan = await scanLocalSkillRoot(rootDirectory);
+    if (!scan.available) return;
     const existingRows = await this.db.select().from(skills).where(and(eq(skills.workspaceId, team.id), eq(skills.source, 'local')));
     const existingFiles = existingRows.length === 0
       ? []
@@ -289,15 +286,10 @@ export class WorkspaceResourcesService {
     for (const file of existingFiles) filesBySkill.set(file.skillId, [...(filesBySkill.get(file.skillId) ?? []), { path: file.path, content: file.content }]);
     const existingById = new Map(existingRows.map((row) => [row.id, row]));
 
-    let created = 0;
-    let updated = 0;
-    let unchanged = 0;
-    const synced: LocalSkillSyncResult['synced'] = [];
     const scannedIds = new Set<string>();
     for (const skillPackage of scan.packages) {
       const id = localSkillId(team.id, skillPackage.directory);
       scannedIds.add(id);
-      synced.push({ id, name: skillPackage.name, directory: skillPackage.directory });
       const existing = existingById.get(id);
       const existingPackage = filesBySkill.get(id) ?? [];
       const changed = !existing
@@ -320,7 +312,6 @@ export class WorkspaceResourcesService {
           }).run();
           transaction.insert(skillFiles).values(skillPackage.files.map((file) => ({ skillId: id, ...file }))).run();
         });
-        created += 1;
       } else if (changed) {
         await this.db.transaction((transaction) => {
           transaction.update(skills).set({
@@ -334,37 +325,15 @@ export class WorkspaceResourcesService {
           transaction.delete(skillFiles).where(eq(skillFiles.skillId, id)).run();
           transaction.insert(skillFiles).values(skillPackage.files.map((file) => ({ skillId: id, ...file }))).run();
         });
-        updated += 1;
-      } else {
-        unchanged += 1;
       }
     }
 
-    const removed: string[] = [];
-    const retained: Array<{ id: string; reason: string }> = [];
     for (const row of existingRows) {
       if (scannedIds.has(row.id)) continue;
       const reason = await this.localSkillReferenceReason(team.id, row.id);
-      if (reason) {
-        retained.push({ id: row.id, reason });
-        continue;
-      }
+      if (reason) continue;
       await this.db.delete(skills).where(and(eq(skills.id, row.id), eq(skills.workspaceId, team.id)));
-      removed.push(row.id);
     }
-
-    return {
-      root: scan.root,
-      available: scan.available,
-      ...(scan.unavailableReason ? { unavailableReason: scan.unavailableReason } : {}),
-      created,
-      updated,
-      unchanged,
-      removed,
-      retained,
-      synced,
-      skipped: scan.skipped,
-    };
   }
 
   private async localSkillReferenceReason(workspaceId: string, skillId: string): Promise<string | undefined> {
@@ -378,7 +347,7 @@ export class WorkspaceResourcesService {
   }
 
   async skills(request: Request, workspaceSlug: string): Promise<SkillView[]> {
-    await this.syncLocalSkills(request, workspaceSlug);
+    await this.syncLocalSkillsFromDirectory(request, workspaceSlug);
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const rows = (await this.db.select().from(skills).where(eq(skills.workspaceId, team.id)).orderBy(desc(skills.updatedAt))).filter((row) => row.id !== CHAT_PLATFORM_SKILL_ID);
     const files = rows.length === 0 ? [] : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, rows.map((row) => row.id))).orderBy(asc(skillFiles.path));

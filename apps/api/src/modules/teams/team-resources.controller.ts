@@ -13,9 +13,6 @@ export class WorkspaceResourcesController {
   @Post('skills/import')
   importSkill(@Req() request: Request, @Body() body: ImportSkillRequest) { return this.resources.importSkill(request, 'personal', body); }
 
-  @Post('skills/local/sync')
-  syncLocalSkills(@Req() request: Request) { return this.resources.localSkills(request, 'personal'); }
-
   @Get('skills/:skillId')
   skill(@Req() request: Request, @Param('skillId') skillId: string) { return this.resources.skill(request, 'personal', skillId); }
 

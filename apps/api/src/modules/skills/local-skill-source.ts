@@ -34,19 +34,6 @@ export type LocalSkillScanResult = {
   skipped: LocalSkillSkippedPackage[];
 };
 
-export type LocalSkillSyncResult = {
-  root: string;
-  available: boolean;
-  unavailableReason?: string;
-  created: number;
-  updated: number;
-  unchanged: number;
-  removed: string[];
-  retained: Array<{ id: string; reason: string }>;
-  synced: Array<{ id: string; name: string; directory: string }>;
-  skipped: LocalSkillSkippedPackage[];
-};
-
 export type SkillFrontmatter = {
   name?: string;
   description?: string;

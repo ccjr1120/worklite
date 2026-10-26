@@ -89,16 +89,8 @@ function role(roleId: string, skillIds: string[]) {
 
 describe('Local directory Skill pipeline', () => {
   it('scans into the Skill list, captures a role snapshot and reaches the runtime prompt', async () => {
-    const { resources, configuration, root } = await setup();
-
-    const sync = await resources.localSkills({} as Request, 'personal', root);
-    expect(sync.available).toBe(true);
-    expect(sync.created).toBe(1);
-    expect(sync.skipped.map((item) => item.directory)).toEqual(['unsupported']);
-    expect(sync.skipped[0]?.reason).toContain('Unsupported Skill package path "assets"');
+    const { resources, configuration } = await setup();
     const skillId = localSkillId('workspace_personal', 'dino-account');
-    expect(sync.synced).toEqual([{ id: skillId, name: 'dino-account', directory: 'dino-account' }]);
-
     const list = await resources.skills({} as Request, 'personal');
     const local = list.find((skill) => skill.id === skillId);
     expect(local).toMatchObject({
@@ -111,9 +103,9 @@ describe('Local directory Skill pipeline', () => {
     });
     expect(local?.files.map((file) => file.path)).toEqual(['SKILL.md', 'references/commands.md']);
 
-    // A second scan is idempotent.
-    const repeated = await resources.localSkills({} as Request, 'personal', root);
-    expect(repeated).toMatchObject({ created: 0, updated: 0, unchanged: 1, removed: [] });
+    // Loading the list again reconciles the same directory without creating duplicates.
+    const repeated = await resources.skills({} as Request, 'personal');
+    expect(repeated.filter((skill) => skill.id === skillId)).toHaveLength(1);
 
     const team = await configuration.update('workspace_personal', 'agent_team_bmad_tea', {
       roles: [
@@ -162,16 +154,11 @@ describe('Local directory Skill pipeline', () => {
     expect(referenceResult).toEqual({ type: 'text', value: expect.stringContaining('account login -e <email>') });
   });
 
-  it('reports an unavailable root and keeps the existing Skill list usable', async () => {
-    const { resources } = await setup();
-    const missing = join(root!, 'does-not-exist');
+  it('keeps existing local Skills when the configured source directory is unavailable', async () => {
+    const { resources, root } = await setup();
+    expect((await resources.skills({} as Request, 'personal')).map((skill) => skill.name)).toContain('dino-account');
 
-    const sync = await resources.localSkills({} as Request, 'personal', missing);
-
-    expect(sync.available).toBe(false);
-    expect(sync.skipped).toEqual([]);
-    expect(sync.unavailableReason).toContain('does not exist');
-    // Listing still works through the configured root instead of failing.
+    process.env.WORKLITE_LOCAL_SKILLS_DIR = join(root!, 'does-not-exist');
     expect((await resources.skills({} as Request, 'personal')).map((skill) => skill.name)).toContain('dino-account');
   });
 });
