@@ -26,7 +26,7 @@ async function setup() {
   // on the synchronous settlement-transaction side effect, so a rejecting getWorkspace is fine as
   // long as it is observed (avoids an unhandled-rejection warning from the untested background path).
   const workspaces = { getWorkspace: async () => { throw new Error('not exercised by this test'); } };
-  const service = new AgentExecutionsService(db, workspaces as never, unused, unused, unused, unused, unused, unused, unused, projectTasks);
+  const service = new AgentExecutionsService(db, workspaces as never, unused, unused, unused, unused, unused, unused, unused, projectTasks, unused, unused, unused);
   return { db, service };
 }
 
