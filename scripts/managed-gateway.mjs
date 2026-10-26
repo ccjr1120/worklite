@@ -2,13 +2,13 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 
-const root = process.env.WORKLITE_PROJECT_ROOT ?? process.env.WORKLITE_RELEASE_ROOT;
+const releaseRoot = process.env.WORKLITE_RELEASE_ROOT;
 const port = Number(process.env.PORTKEY_GATEWAY_PORT);
-if (!root || !Number.isInteger(port) || port < 1) throw new Error('A managed project root and Gateway port are required.');
+if (!releaseRoot || !Number.isInteger(port) || port < 1) throw new Error('A managed release root and Gateway port are required.');
 
-const gatewayDirectory = join(root, 'apps/portkey-gateway');
+const gatewayDirectory = join(releaseRoot, 'apps/portkey-gateway');
 const entry = join(gatewayDirectory, 'build/start-server.js');
-const preload = join(root, 'apps/api/portkey-local-bind.cjs');
+const preload = join(releaseRoot, 'apps/api/portkey-local-bind.cjs');
 const dataDirectory = process.env.WORKLITE_DATA_DIRECTORY;
 if (!dataDirectory) throw new Error('A managed data directory is required.');
 

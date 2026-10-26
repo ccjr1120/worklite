@@ -2,14 +2,14 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 
-const root = process.env.WORKLITE_PROJECT_ROOT ?? process.env.WORKLITE_RELEASE_ROOT;
-if (!root) throw new Error('A managed project root is required.');
+const releaseRoot = process.env.WORKLITE_RELEASE_ROOT;
+if (!releaseRoot) throw new Error('A managed release root is required.');
 const children = [];
 let stopping = false;
 const environment = { ...process.env, WORKLITE_RUNTIME_PID: String(process.pid) };
 const commands = [
-  [process.execPath, [join(root, 'apps/api/dist/main.js')], join(root, 'apps/api')],
-  ['pnpm', ['exec', 'vite', 'preview', '--host', '127.0.0.1', '--strictPort', '--port', environment.WEB_PORT], join(root, 'apps/web')],
+  [process.execPath, [join(releaseRoot, 'apps/api/dist/main.js')], join(releaseRoot, 'apps/api')],
+  ['pnpm', ['exec', 'vite', 'preview', '--host', '127.0.0.1', '--strictPort', '--port', environment.WEB_PORT], join(releaseRoot, 'apps/web')],
 ];
 environment.WORKLITE_MANAGED_GATEWAY = '1';
 for (const [executable, args, cwd] of commands) {
