@@ -95,12 +95,13 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
   const failedNode = nodeRuns.find((nodeRun) => nodeRun.status === 'failed');
   const failureReason = failedNode?.error ?? getRunFailureReason(runDetail);
   const duration = run.durationSeconds == null ? null : durationParts(run.durationSeconds);
+  const [qrVisible, setQrVisible] = useState(false);
   const [qrReplacing, setQrReplacing] = useState(false);
   const [qrRefreshError, setQrRefreshError] = useState<string | null>(null);
   const [qrRefreshed, setQrRefreshed] = useState(false);
   const [qrCacheBust, setQrCacheBust] = useState(0);
   const [cancelBusy, setCancelBusy] = useState(false);
-  const [expiryTick, setExpiryTick] = useState(0);
+  const [, setExpiryTick] = useState(0);
   const qrRefreshingRef = useRef(false);
   const qrRefreshedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -125,17 +126,21 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
   }, [expanded, run.id]);
 
   const pendingAction = runDetail?.pendingAction ?? null;
-  const hasPendingAction = pendingAction !== null;
   const pendingStatus = pendingAction?.status ?? null;
   const pendingExpiresAt = pendingAction?.expiresAt ?? null;
+  const expiryTime = pendingExpiresAt ? Date.parse(pendingExpiresAt) : null;
+  const qrExpired = pendingStatus === 'expired' || Boolean(expiryTime !== null && (!Number.isFinite(expiryTime) || expiryTime <= Date.now()));
+  const currentQrCode = pendingAction?.qrCode ?? null;
+  const showQr = qrVisible && Boolean(currentQrCode) && !qrExpired;
 
-  // A single entry point for both automatic expiry replacement and a manual
-  // click on the code. The in-flight ref is authoritative so a double click or
-  // a click racing the expiry timer still produces exactly one refresh.
+  // Getting or refreshing the QR is always an explicit user action. Keep the
+  // current code hidden until the user asks, and replace expired codes only
+  // after that request reaches the run-level refresh endpoint.
   const refreshQrCode = useCallback(async () => {
     if (qrRefreshingRef.current) return;
     qrRefreshingRef.current = true;
     setQrReplacing(true);
+    setQrVisible(false);
     setQrRefreshError(null);
     setQrRefreshed(false);
     if (qrRefreshedTimerRef.current) {
@@ -144,16 +149,20 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
     }
     try {
       const next = await api.refreshRunPendingAction('personal', run.id);
+      const nextAction = next.pendingAction;
+      const nextExpiry = nextAction?.expiresAt ? Date.parse(nextAction.expiresAt) : Number.NaN;
+      if (!nextAction?.qrCode || nextAction.status !== 'pending' || !Number.isFinite(nextExpiry) || nextExpiry <= Date.now()) {
+        throw new Error(t('runs:pendingAction.qrUnavailable'));
+      }
       queryClient.setQueryData(['run', run.id], next);
       setQrCacheBust((value) => value + 1);
+      setQrVisible(true);
       setQrRefreshed(true);
       qrRefreshedTimerRef.current = setTimeout(() => {
         setQrRefreshed(false);
         qrRefreshedTimerRef.current = null;
       }, 2_500);
     } catch (cause) {
-      // Keep the previous code visible so the user can still try to scan it,
-      // and surface the server's reason instead of failing silently.
       setQrRefreshError(cause instanceof Error && cause.message ? cause.message : t('runs:pendingAction.refreshFailed'));
     } finally {
       qrRefreshingRef.current = false;
@@ -161,25 +170,13 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
     }
   }, [run.id, t]);
 
-  // An expired code is also replaced automatically, so the user does not have
-  // to intervene; a manual click on the code goes through the same path. Each
-  // distinct expiry marker is attempted once, so a server that returns an
-  // equally stale code cannot spin.
-  const replacedExpiryRef = useRef('');
-
-  useEffect(() => {
-    if (!expanded || !hasPendingAction) return;
-    const expired = pendingStatus === 'expired' || (pendingExpiresAt !== null && Date.parse(pendingExpiresAt) <= Date.now());
-    const marker = `${pendingStatus ?? ''}:${pendingExpiresAt ?? ''}`;
-    if (!expired || replacedExpiryRef.current === marker) return;
-    replacedExpiryRef.current = marker;
-    void refreshQrCode();
-  }, [expanded, hasPendingAction, pendingStatus, pendingExpiresAt, expiryTick, refreshQrCode]);
-
   useEffect(() => {
     if (!expanded || pendingExpiresAt === null) return;
     const remaining = Date.parse(pendingExpiresAt) - Date.now();
-    if (remaining <= 0) return;
+    if (remaining <= 0) {
+      setExpiryTick((value) => value + 1);
+      return;
+    }
     const timer = setTimeout(() => setExpiryTick((value) => value + 1), remaining + 250);
     return () => clearTimeout(timer);
   }, [expanded, pendingExpiresAt]);
@@ -227,33 +224,24 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
                     </div>
                     <StatusBadge status="waiting_for_input" />
                   </div>
-                  {pendingAction.qrCode ? (
+                  {showQr && currentQrCode ? (
                     <div className="mt-4">
-                      <button
-                        type="button"
-                        onClick={() => void refreshQrCode()}
-                        disabled={qrReplacing}
-                        title={t('runs:pendingAction.refreshHint')}
-                        aria-label={t('runs:pendingAction.refreshHint')}
-                        aria-busy={qrReplacing}
-                        className="group block w-fit cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 focus-visible:ring-offset-2 disabled:cursor-wait"
-                      >
-                        <img
-                          key={qrCacheBust}
-                          src={withQrCacheBust(pendingAction.qrCode, qrCacheBust)}
-                          alt={t('runs:pendingAction.qrAlt')}
-                          className={cn('size-48 rounded-md border border-border bg-white object-contain p-2 transition-[opacity,border-color] group-hover:border-brand/50', qrReplacing && 'opacity-40')}
-                        />
-                      </button>
-                      <p className="mt-1.5 text-[13px] text-muted-foreground">{t('runs:pendingAction.refreshHint')}</p>
+                      <img
+                        key={qrCacheBust}
+                        src={currentQrCode}
+                        alt={t('runs:pendingAction.qrAlt')}
+                        className="size-48 rounded-md border border-border bg-white object-contain p-2"
+                      />
                     </div>
                   ) : null}
-                  {qrReplacing ? (
-                    <p className="mt-2 flex items-center gap-1.5 text-[13px] text-muted-foreground" role="status">
-                      <LoaderCircle className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
-                      {t('runs:pendingAction.replacing')}
-                    </p>
-                  ) : qrRefreshed ? (
+                  {qrExpired ? <p className="mt-3 text-[13px] text-muted-foreground" role="status">{t('runs:pendingAction.expired')}</p> : null}
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button type="button" size="compact" onClick={() => void refreshQrCode()} disabled={qrReplacing} aria-busy={qrReplacing}>
+                      {qrReplacing ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <QrCode aria-hidden="true" />}
+                      {qrReplacing ? t('runs:pendingAction.replacing') : showQr ? t('runs:pendingAction.refresh') : qrExpired ? t('runs:pendingAction.getAgain') : t('runs:pendingAction.get')}
+                    </Button>
+                  </div>
+                  {qrRefreshed ? (
                     <p className="mt-2 flex items-center gap-1.5 text-[13px] text-success" role="status">
                       <Check className="size-3.5" aria-hidden="true" />
                       {t('runs:pendingAction.refreshed')}
@@ -308,13 +296,6 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
       </article>
     </li>
   );
-}
-
-function withQrCacheBust(source: string, version: number): string {
-  if (version === 0) return source;
-  // The backend returns a fresh data URI on every capture, but a hash keeps the
-  // element's URL distinct even if two captures happen to serialize identically.
-  return source.startsWith('data:') ? `${source}#refresh=${version}` : `${source}${source.includes('?') ? '&' : '?'}refresh=${version}`;
 }
 
 function getRunFailureReason(run: RunView | undefined): string | null {

@@ -30,9 +30,13 @@
   "pendingAction": {
     "qrAlt": "微信确认二维码",
     "cancel": "取消运行",
-    "refreshHint": "点击二维码刷新",
-    "refreshed": "二维码已刷新。",
-    "refreshFailed": "无法刷新二维码。",
+    "get": "获取二维码",
+    "getAgain": "重新获取二维码",
+    "refresh": "刷新二维码",
+    "expired": "已过期，请重新获取二维码。",
+    "refreshed": "二维码已更新。",
+    "refreshFailed": "无法获取二维码。",
+    "qrUnavailable": "没有返回当前有效的二维码，请重试。",
     "replacing": "正在获取新的二维码。"
   },
   "detail": {

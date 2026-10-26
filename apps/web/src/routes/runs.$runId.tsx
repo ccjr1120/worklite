@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { Ban, FileStack, LoaderCircle, Pause, Play } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Ban, Check, FileStack, LoaderCircle, Pause, Play, QrCode } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RunProgressEvent } from '@worklite/contracts';
 import { EmptyState } from '@/components/empty-state';
@@ -36,7 +36,29 @@ function RunDetailPage() {
   const [cancelling, setCancelling] = useState(false);
   const [lifecycleAction, setLifecycleAction] = useState<'pause' | 'resume' | null>(null);
   const [lifecycleError, setLifecycleError] = useState<string | null>(null);
+  const [qrVisible, setQrVisible] = useState(false);
+  const [qrLoading, setQrLoading] = useState(false);
+  const [qrError, setQrError] = useState<string | null>(null);
+  const [qrUpdated, setQrUpdated] = useState(false);
+  const [, setQrExpiryTick] = useState(0);
+  const qrLoadingRef = useRef(false);
   const terminal = run?.status === 'succeeded' || run?.status === 'failed' || run?.status === 'cancelled' || run?.status === 'timed_out';
+  const pendingAction = run?.pendingAction ?? null;
+  const currentQrCode = pendingAction?.qrCode ?? null;
+  const pendingExpiry = pendingAction?.expiresAt ? Date.parse(pendingAction.expiresAt) : null;
+  const pendingQrExpired = pendingAction?.status === 'expired' || Boolean(pendingExpiry !== null && (!Number.isFinite(pendingExpiry) || pendingExpiry <= Date.now()));
+  const showQr = qrVisible && Boolean(currentQrCode) && !pendingQrExpired;
+
+  useEffect(() => {
+    if (!pendingAction?.expiresAt) return;
+    const remaining = Date.parse(pendingAction.expiresAt) - Date.now();
+    if (remaining <= 0) {
+      setQrExpiryTick((value) => value + 1);
+      return;
+    }
+    const timer = setTimeout(() => setQrExpiryTick((value) => value + 1), remaining + 250);
+    return () => clearTimeout(timer);
+  }, [pendingAction?.expiresAt]);
 
   useEffect(() => {
     if (!run || terminal) return;
@@ -126,6 +148,31 @@ function RunDetailPage() {
     }
   };
 
+  const refreshPendingActionQr = async () => {
+    if (qrLoadingRef.current) return;
+    qrLoadingRef.current = true;
+    setQrLoading(true);
+    setQrVisible(false);
+    setQrError(null);
+    setQrUpdated(false);
+    try {
+      const next = await api.refreshRunPendingAction('personal', runId);
+      const action = next.pendingAction;
+      const expiresAt = action?.expiresAt ? Date.parse(action.expiresAt) : Number.NaN;
+      if (!action?.qrCode || action.status !== 'pending' || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+        throw new Error(t('runs:pendingAction.qrUnavailable'));
+      }
+      queryClient.setQueryData(['run', runId], next);
+      setQrVisible(true);
+      setQrUpdated(true);
+    } catch (failure) {
+      setQrError(failure instanceof Error && failure.message ? failure.message : t('runs:pendingAction.refreshFailed'));
+    } finally {
+      qrLoadingRef.current = false;
+      setQrLoading(false);
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome crumbs={[{ label: run.workflowName, to: '/workflows' }, { label: t('runs:detail.title') }]} />
@@ -200,6 +247,27 @@ function RunDetailPage() {
         <p className="mt-4 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[13px] text-danger" role="alert">
           <span className="font-medium">{t('runs:failureReason')}:</span> {failureReason}
         </p>
+      ) : null}
+
+      {pendingAction ? (
+        <section className="mt-6 rounded-lg border border-border bg-surface-subtle p-4" aria-labelledby="run-detail-pending-action-title">
+          <h2 id="run-detail-pending-action-title" className="flex items-center gap-2 text-sm font-semibold"><QrCode className="size-4 text-muted-foreground" aria-hidden="true" />{pendingAction.title}</h2>
+          <p className="mt-1 text-[13px] text-muted-foreground">{pendingAction.description}</p>
+          {showQr && currentQrCode ? (
+            <div className="mt-4">
+              <img src={currentQrCode} alt={t('runs:pendingAction.qrAlt')} className="size-48 rounded-md border border-border bg-white object-contain p-2" />
+            </div>
+          ) : null}
+          {pendingQrExpired ? <p className="mt-3 text-[13px] text-muted-foreground" role="status">{t('runs:pendingAction.expired')}</p> : null}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button type="button" size="compact" onClick={() => void refreshPendingActionQr()} disabled={qrLoading} aria-busy={qrLoading}>
+              {qrLoading ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <QrCode aria-hidden="true" />}
+              {qrLoading ? t('runs:pendingAction.replacing') : showQr ? t('runs:pendingAction.refresh') : pendingQrExpired ? t('runs:pendingAction.getAgain') : t('runs:pendingAction.get')}
+            </Button>
+          </div>
+          {qrUpdated ? <p className="mt-2 flex items-center gap-1.5 text-[13px] text-success" role="status"><Check className="size-3.5" aria-hidden="true" />{t('runs:pendingAction.refreshed')}</p> : null}
+          {qrError ? <p className="mt-2 text-[13px] text-danger" role="alert">{qrError}</p> : null}
+        </section>
       ) : null}
 
       <section className="mt-6" aria-labelledby="run-detail-logs-title">

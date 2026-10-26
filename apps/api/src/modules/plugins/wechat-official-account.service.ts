@@ -221,7 +221,7 @@ export class WechatOfficialAccountService {
   }
 
   private async monitorLogin(actionId: string, accountId: string, session: BrowserSession, expiresAt: Date, waitForPendingAction: boolean): Promise<void> {
-    let lastQrSource = await loginQrCode(session.page).getAttribute('src', { timeout: 1_000 }).catch(() => null);
+    let lastQrSource = waitForPendingAction ? null : await loginQrCode(session.page).getAttribute('src', { timeout: 1_000 }).catch(() => null);
     let lastDiagnostics = '';
     while (this.sessions.get(actionId) === session) {
       await delay(1_000);
@@ -243,13 +243,14 @@ export class WechatOfficialAccountService {
         lastDiagnostics = diagnostics;
         this.logger.debug(`WeChat login ${actionId}: ${diagnostics}`);
       }
-      const currentQrSource = await loginQrCode(session.page).getAttribute('src', { timeout: 1_000 }).catch(() => null);
-      if (currentQrSource && currentQrSource !== lastQrSource) {
-        lastQrSource = currentQrSource;
-        const refreshedQrCode = await captureLoginQrCode(session.page).catch(() => null);
-        if (refreshedQrCode) {
-          await this.db.update(wechatOfficialAccounts).set({ qrCode: refreshedQrCode, updatedAt: new Date() }).where(eq(wechatOfficialAccounts.id, accountId));
-          await this.db.update(workflowPendingActions).set({ qrCode: refreshedQrCode, updatedAt: new Date() }).where(and(eq(workflowPendingActions.id, actionId), eq(workflowPendingActions.status, 'pending')));
+      if (!waitForPendingAction) {
+        const currentQrSource = await loginQrCode(session.page).getAttribute('src', { timeout: 1_000 }).catch(() => null);
+        if (currentQrSource && currentQrSource !== lastQrSource) {
+          lastQrSource = currentQrSource;
+          const refreshedQrCode = await captureLoginQrCode(session.page).catch(() => null);
+          if (refreshedQrCode) {
+            await this.db.update(wechatOfficialAccounts).set({ qrCode: refreshedQrCode, updatedAt: new Date() }).where(eq(wechatOfficialAccounts.id, accountId));
+          }
         }
       }
     }
@@ -328,27 +329,75 @@ export class WechatOfficialAccountService {
 }
 
 async function captureQrCode(page: Page): Promise<string> {
-  const qr = page.locator(
-    'img[src*="qrcode"]:not([src*="pic_kf_qrcode"]):visible, img[src*="scan"]:not([src*="pic_kf_qrcode"]):visible, canvas:visible',
-  ).last();
+  const selector = 'img[src*="qrcode"]:not([src*="pic_kf_qrcode"]), img[src*="scan"]:not([src*="pic_kf_qrcode"]), canvas';
+  const qr = page.locator('img[src*="qrcode"]:not([src*="pic_kf_qrcode"]):visible, img[src*="scan"]:not([src*="pic_kf_qrcode"]):visible, canvas:visible').last();
   try {
     await qr.waitFor({ state: 'visible', timeout: 20_000 });
+    await waitForScannableQrCode(page, selector);
   } catch (error) {
     await page.screenshot({ path: '/tmp/worklite-publish-qr-timeout.png', fullPage: true });
-    throw error;
+    throw new Error(`WeChat publication QR code did not load as a scannable image: ${errorMessage(error)}`);
   }
   return `data:image/png;base64,${(await qr.screenshot()).toString('base64')}`;
 }
 
 async function captureLoginQrCode(page: Page): Promise<string> {
-  const qr = loginQrCode(page);
+  const selector = 'img.login__type__container__scan__qrcode';
+  const qr = page.locator(selector);
   try {
     await qr.waitFor({ state: 'visible', timeout: 20_000 });
+    await waitForScannableQrCode(page, selector);
   } catch (error) {
     await page.screenshot({ path: '/tmp/worklite-login-qr-timeout.png', fullPage: true }).catch(() => undefined);
-    throw error;
+    throw new Error(`WeChat login QR code did not load as a scannable image: ${errorMessage(error)}`);
   }
   return `data:image/png;base64,${(await qr.screenshot()).toString('base64')}`;
+}
+
+async function waitForScannableQrCode(page: Page, selector: string): Promise<void> {
+  await page.waitForFunction((qrSelector) => {
+    const visible = (element: Element): boolean => {
+      const bounds = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return element.isConnected && bounds.width > 0 && bounds.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    const candidates = Array.from(document.querySelectorAll(qrSelector)).filter(visible);
+    const element = candidates[candidates.length - 1];
+    if (!element) return false;
+
+    let source: HTMLCanvasElement;
+    if (element instanceof HTMLImageElement) {
+      if (!element.complete || element.naturalWidth < 64 || element.naturalHeight < 64) return false;
+      source = document.createElement('canvas');
+      source.width = element.naturalWidth;
+      source.height = element.naturalHeight;
+      const context = source.getContext('2d', { willReadFrequently: true });
+      if (!context) return false;
+      try {
+        context.drawImage(element, 0, 0);
+      } catch {
+        return false;
+      }
+    } else if (element instanceof HTMLCanvasElement && element.width >= 64 && element.height >= 64) {
+      source = element;
+    } else {
+      return false;
+    }
+
+    const context = source.getContext('2d', { willReadFrequently: true });
+    if (!context) return false;
+    try {
+      const pixels = context.getImageData(0, 0, source.width, source.height).data;
+      let darkPixels = 0;
+      for (let index = 0; index < pixels.length; index += 4) {
+        if (pixels[index] < 140 && pixels[index + 1] < 140 && pixels[index + 2] < 140 && pixels[index + 3] > 0) darkPixels += 1;
+      }
+      const totalPixels = pixels.length / 4;
+      return darkPixels >= Math.max(64, Math.ceil(totalPixels * 0.01)) && darkPixels <= totalPixels * 0.85;
+    } catch {
+      return false;
+    }
+  }, selector, { timeout: 20_000, polling: 100 });
 }
 
 async function showScanLogin(page: Page): Promise<void> {

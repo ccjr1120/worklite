@@ -553,6 +553,10 @@ export class RunsService {
     const [action] = await this.db.select().from(workflowPendingActions).where(and(eq(workflowPendingActions.runId, runId), inArray(workflowPendingActions.status, ['pending', 'expired']))).orderBy(desc(workflowPendingActions.createdAt)).limit(1);
     if (!action) throw new NotFoundException('Pending action not found.');
     const refreshed = await this.wechatOfficialAccount.refresh(action.id);
+    if (!refreshed.qrCode || !refreshed.expiresAt || !Number.isFinite(refreshed.expiresAt.getTime()) || refreshed.expiresAt.getTime() <= Date.now()) {
+      await this.wechatOfficialAccount.cancel(action.id);
+      throw new BadRequestException('WeChat did not return a current scannable QR code.');
+    }
     const [updatedAction] = await this.db.update(workflowPendingActions).set({ status: 'pending', type: refreshed.type, title: refreshed.title, description: refreshed.description, qrCode: refreshed.qrCode, expiresAt: refreshed.expiresAt, externalOperationId: refreshed.externalOperationId ?? null, updatedAt: new Date() }).where(and(eq(workflowPendingActions.id, action.id), inArray(workflowPendingActions.status, ['pending', 'expired']))).returning();
     if (!updatedAction) {
       await this.wechatOfficialAccount.cancel(action.id);
@@ -1210,5 +1214,6 @@ function toArtifactView(row: typeof artifacts.$inferSelect, workspaceSlug: strin
 }
 
 function toPendingActionView(row: typeof workflowPendingActions.$inferSelect): WorkflowPendingActionView {
-  return { id: row.id, runId: row.runId, nodeRunId: row.nodeRunId, type: row.type, status: row.status, title: row.title, description: row.description, qrCode: row.qrCode, expiresAt: row.expiresAt?.toISOString() ?? null, createdAt: row.createdAt?.toISOString() ?? null, updatedAt: row.updatedAt.toISOString() };
+  const expired = row.status === 'expired' || (row.status === 'pending' && Boolean(row.expiresAt && row.expiresAt.getTime() <= Date.now()));
+  return { id: row.id, runId: row.runId, nodeRunId: row.nodeRunId, type: row.type, status: expired ? 'expired' : row.status, title: row.title, description: row.description, qrCode: expired ? null : row.qrCode, expiresAt: row.expiresAt?.toISOString() ?? null, createdAt: row.createdAt?.toISOString() ?? null, updatedAt: row.updatedAt.toISOString() };
 }

@@ -461,8 +461,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
         } catch { state.content += `\n\n文档「${document.title}」尚未完成文件交付，可重试交付。`; state.buttons.push({ label: '重试文件交付', action: { kind: 'delivery' } }); }
       }
     } else if (reference?.kind === 'workflow') {
-      let run = await this.runs.get(request, 'personal', reference.runId);
-      if (run.pendingAction && (run.pendingAction.status === 'expired' || run.pendingAction.expiresAt && Date.parse(run.pendingAction.expiresAt) <= Date.now())) run = await this.runs.refreshPendingAction(request, 'personal', run.id);
+      const run = await this.runs.get(request, 'personal', reference.runId);
       state.title = `Chat · ${run.workflowName}`;
       state.status = statusText[run.status] ?? run.status;
       state.details = run.nodeRuns?.map((node) => `- 步骤 ${node.position + 1} · ${statusText[node.status] ?? node.status}`).join('\n');
@@ -471,6 +470,9 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       if (run.status === 'failed' && failed?.error) state.content += `\n\n${failed.error}`;
       if (run.pendingAction) {
         state.content += `\n\n${run.pendingAction.title}\n${run.pendingAction.description}`;
+        if (run.pendingAction.status === 'expired' || run.pendingAction.expiresAt && Date.parse(run.pendingAction.expiresAt) <= Date.now()) {
+          state.content += '\n\n二维码已过期，请在 WorkLite 运行详情中点击「重新获取二维码」。';
+        }
         if (run.pendingAction.qrCode) state.imageKey = await this.image(chatId, run.pendingAction.qrCode);
       }
       this.controls(state.buttons, 'workflow', run.id, run.status, run.nodeRuns?.find((node) => node.retryable)?.id);
