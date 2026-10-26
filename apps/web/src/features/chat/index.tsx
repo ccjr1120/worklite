@@ -184,6 +184,7 @@ function ChatWorkspace() {
         providerId: separator >= 0 ? selection.slice(0, separator) : null,
         model: separator >= 0 ? selection.slice(separator + 2) : '',
         extensionPrompt: prompt, executorContext: sharedExecutorContext, summarizePrompt: summarize, expectedConfigurationRevision: agentQuery.data?.chatConfiguration?.revision,
+        // Both declarations are current state; selecting the default only turns the chosen one into null.
         defaultExecutorModels: { claude: textToModelList(models.claude), codex: textToModelList(models.codex) },
         ...(skillIds === undefined ? {} : { skillIds }),
       });
@@ -203,6 +204,14 @@ function ChatWorkspace() {
       }
     } finally { setConfigSaving(false); }
   };
+
+  function changeExecutorModel(executor: ProjectExecutor, value: string) {
+    const nextModels = { ...executorModels, [executor]: value };
+    setExecutorModels(nextModels);
+    if (value !== modelListToText(agentQuery.data?.chatConfiguration?.defaultExecutorModels?.[executor])) {
+      void saveConfiguration(configSelection, extensionPrompt, nextModels);
+    }
+  }
 
   function openSettings(section: SettingsSection) {
     setSettingsSection(section);
@@ -973,13 +982,12 @@ function ChatWorkspace() {
                   skillsLoading={skillsQuery.isLoading} skillsLoadFailed={skillsQuery.isError}
                   selection={configSelection}
                   onSelectionChange={(value) => { setConfigSelection(value); void saveConfiguration(value); }}
-                  executorModels={executorModels} onExecutorModelChange={(executor, value) => { setExecutorModels((current) => ({ ...current, [executor]: value })); }}
-                  onExecutorModelSave={(executor) => { if (executorModels[executor] !== modelListToText(agentQuery.data?.chatConfiguration?.defaultExecutorModels?.[executor])) void saveConfiguration(configSelection, extensionPrompt, executorModels); }}
+                  executorModels={executorModels} onExecutorModelChange={changeExecutorModel}
                   extensionPrompt={extensionPrompt} onPromptChange={setExtensionPrompt} onPromptSave={() => { if (extensionPrompt !== (agentQuery.data?.chatConfiguration?.extensionPrompt ?? '')) void saveConfiguration(configSelection); }}
                   executorContext={executorContext} onExecutorContextChange={setExecutorContext} onExecutorContextSave={() => { if (executorContext !== (agentQuery.data?.chatConfiguration?.executorContext ?? '')) void saveConfiguration(configSelection, extensionPrompt, executorModels, summarizePrompt, undefined, executorContext); }}
                   summarizePrompt={summarizePrompt} onSummarizePromptChange={setSummarizePrompt} onSummarizePromptSave={() => { if (summarizePrompt !== (agentQuery.data?.chatConfiguration?.summarizePrompt ?? '')) void saveConfiguration(configSelection); }}
-                  saving={configSaving} error={configError} loading={agentQuery.isLoading || providersQuery.isLoading}
-                  loadFailed={agentQuery.isError || providersQuery.isError}
+                  saving={configSaving} error={configError} loading={agentQuery.isLoading}
+                  loadFailed={agentQuery.isError} providersLoading={providersQuery.isLoading} providersLoadFailed={providersQuery.isError}
                   onReload={() => { void agentQuery.refetch(); void providersQuery.refetch(); void skillsQuery.refetch(); }} />
               ) : null}
               {settingsSection === 'memories' ? <Memories /> : null}
