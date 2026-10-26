@@ -354,50 +354,54 @@ async function captureLoginQrCode(page: Page): Promise<string> {
   return `data:image/png;base64,${(await qr.screenshot()).toString('base64')}`;
 }
 
-async function waitForScannableQrCode(page: Page, selector: string): Promise<void> {
-  await page.waitForFunction((qrSelector) => {
-    const visible = (element: Element): boolean => {
-      const bounds = element.getBoundingClientRect();
-      const style = getComputedStyle(element);
-      return element.isConnected && bounds.width > 0 && bounds.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
-    };
-    const candidates = Array.from(document.querySelectorAll(qrSelector)).filter(visible);
-    const element = candidates[candidates.length - 1];
-    if (!element) return false;
+// Playwright evaluates this expression inside the page. Keep it as a string so
+// the Node TypeScript build does not try to resolve browser-only DOM globals.
+const SCANNABLE_QR_PREDICATE = `(qrSelector) => {
+  const visible = (element) => {
+    const bounds = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return element.isConnected && bounds.width > 0 && bounds.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+  };
+  const candidates = Array.from(document.querySelectorAll(qrSelector)).filter(visible);
+  const element = candidates[candidates.length - 1];
+  if (!element) return false;
 
-    let source: HTMLCanvasElement;
-    if (element instanceof HTMLImageElement) {
-      if (!element.complete || element.naturalWidth < 64 || element.naturalHeight < 64) return false;
-      source = document.createElement('canvas');
-      source.width = element.naturalWidth;
-      source.height = element.naturalHeight;
-      const context = source.getContext('2d', { willReadFrequently: true });
-      if (!context) return false;
-      try {
-        context.drawImage(element, 0, 0);
-      } catch {
-        return false;
-      }
-    } else if (element instanceof HTMLCanvasElement && element.width >= 64 && element.height >= 64) {
-      source = element;
-    } else {
-      return false;
-    }
-
+  let source;
+  if (element instanceof HTMLImageElement) {
+    if (!element.complete || element.naturalWidth < 64 || element.naturalHeight < 64) return false;
+    source = document.createElement('canvas');
+    source.width = element.naturalWidth;
+    source.height = element.naturalHeight;
     const context = source.getContext('2d', { willReadFrequently: true });
     if (!context) return false;
     try {
-      const pixels = context.getImageData(0, 0, source.width, source.height).data;
-      let darkPixels = 0;
-      for (let index = 0; index < pixels.length; index += 4) {
-        if (pixels[index] < 140 && pixels[index + 1] < 140 && pixels[index + 2] < 140 && pixels[index + 3] > 0) darkPixels += 1;
-      }
-      const totalPixels = pixels.length / 4;
-      return darkPixels >= Math.max(64, Math.ceil(totalPixels * 0.01)) && darkPixels <= totalPixels * 0.85;
+      context.drawImage(element, 0, 0);
     } catch {
       return false;
     }
-  }, selector, { timeout: 20_000, polling: 100 });
+  } else if (element instanceof HTMLCanvasElement && element.width >= 64 && element.height >= 64) {
+    source = element;
+  } else {
+    return false;
+  }
+
+  const context = source.getContext('2d', { willReadFrequently: true });
+  if (!context) return false;
+  try {
+    const pixels = context.getImageData(0, 0, source.width, source.height).data;
+    let darkPixels = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+      if (pixels[index] < 140 && pixels[index + 1] < 140 && pixels[index + 2] < 140 && pixels[index + 3] > 0) darkPixels += 1;
+    }
+    const totalPixels = pixels.length / 4;
+    return darkPixels >= Math.max(64, Math.ceil(totalPixels * 0.01)) && darkPixels <= totalPixels * 0.85;
+  } catch {
+    return false;
+  }
+}`;
+
+async function waitForScannableQrCode(page: Page, selector: string): Promise<void> {
+  await page.waitForFunction(SCANNABLE_QR_PREDICATE, selector, { timeout: 20_000, polling: 100 });
 }
 
 async function showScanLogin(page: Page): Promise<void> {
