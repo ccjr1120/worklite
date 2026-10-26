@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { AgentVersionView, AgentView, CreateAgentRequest, ModelProviderView, UpdateAgentRequest } from '@worklite/contracts';
+import { WORKLITE_PLATFORM_SKILL_NAME } from '@worklite/contracts';
 import { agentExecutions, chatConfigurations, agentMcpServers, agentVersions, agents, agentSkills, mcpServers, scheduledAgentTasks, skills, type Database, type StoredProjectExecutor } from '@worklite/db';
 import { normalizePublicModelList } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
@@ -10,7 +11,6 @@ import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { WorkspaceService } from '../teams/teams.service';
 import { PROJECT_EXECUTOR_PROTOCOLS, isGatewayPublicModel } from './project-executor.types';
 
-const WORKLITE_PLATFORM_SKILL_ID = 'sk_worklite_platform';
 const CHAT_AGENT_ID = 'agt_system_helper_chat';
 const CODEX_CLI_AGENT_ID = 'agt_codex_cli_chat';
 const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392);
@@ -35,6 +35,7 @@ export class AgentsService {
 
   async list(request: Request, workspaceSlug: string): Promise<AgentView[]> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.resources.reconcileWorkspaceSkills(team.id);
     const rows = await this.db.select({ agent: agents }).from(agents).where(and(eq(agents.workspaceId, team.id), ne(agents.id, CODEX_CLI_AGENT_ID)));
     const gatewayNames = await this.gatewayProviderNames();
     const assignments = await this.loadAssignments(team.id, rows.map(({ agent }) => agent.id));
@@ -49,6 +50,7 @@ export class AgentsService {
   async get(request: Request, workspaceSlug: string, agentId: string): Promise<AgentView> {
     if (agentId === CODEX_CLI_AGENT_ID) throw new NotFoundException('Agent not found');
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.resources.reconcileWorkspaceSkills(team.id);
     const [row] = await this.db.select({ agent: agents }).from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
     if (!row) throw new NotFoundException('Agent not found');
     const gatewayNames = await this.gatewayProviderNames();
@@ -64,6 +66,7 @@ export class AgentsService {
 
   async create(request: Request, workspaceSlug: string, input: CreateAgentRequest): Promise<AgentView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.resources.reconcileWorkspaceSkills(team.id);
     const name = input.name?.trim();
     if (!name) throw new BadRequestException('Agent name is required.');
     const responsibility = input.responsibility?.trim() ?? '';
@@ -94,6 +97,7 @@ export class AgentsService {
 
   async createVersion(request: Request, workspaceSlug: string, agentId: string): Promise<AgentVersionView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.resources.reconcileWorkspaceSkills(team.id);
     const [agent] = await this.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
     if (!agent) throw new NotFoundException('Agent not found');
     if (!agent.providerId || !agent.model) throw new BadRequestException('Configure a model provider and model before publishing an Agent version.');
@@ -131,6 +135,7 @@ export class AgentsService {
 
   async update(request: Request, workspaceSlug: string, agentId: string, input: UpdateAgentRequest): Promise<AgentView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.resources.reconcileWorkspaceSkills(team.id);
     const [existing] = await this.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
     if (!existing) throw new NotFoundException('Agent not found');
 
@@ -175,9 +180,7 @@ export class AgentsService {
         }
       }
         const selections = await this.validateAssignments(team.id, isChat ? input.skillIds : undefined, input.mcpServerIds, true);
-        const chatSkillIds = isChat && selections.skillIds !== undefined
-          ? [...new Set([WORKLITE_PLATFORM_SKILL_ID, ...selections.skillIds])]
-          : undefined;
+        const chatSkillIds = isChat ? selections.skillIds : undefined;
       // MCP servers declared for Claude Code project tasks are validated against the workspace like any selection.
       const projectTaskMcpServerIds = isChat && input.projectTaskMcpServerIds !== undefined
         ? (await this.validateAssignments(team.id, undefined, input.projectTaskMcpServerIds)).mcpServerIds
@@ -199,7 +202,7 @@ export class AgentsService {
           defaultExecutorModels: executorModelsPatch === undefined ? previous?.defaultExecutorModels ?? {} : mergeExecutorModels(previous?.defaultExecutorModels, executorModelsPatch),
           projectTaskMcpServerIds: projectTaskMcpServerIds ?? previous?.projectTaskMcpServerIds ?? [],
           providerId: nextProviderId ?? null, model,
-          skillIds: chatSkillIds ?? previous?.skillIds ?? [WORKLITE_PLATFORM_SKILL_ID],
+          skillIds: chatSkillIds ?? previous?.skillIds ?? [],
           mcpServerIds: [],
         }).run();
       });
@@ -295,14 +298,16 @@ export class AgentsService {
     const mcpServerIds = requestedMcpServerIds === undefined && preserveMissing ? undefined : normalizeResourceIds(requestedMcpServerIds, 'MCP server');
     const [skillRows, mcpRows] = await Promise.all([
       skillIds && skillIds.length > 0
-        ? this.db.select({ id: skills.id }).from(skills).where(and(eq(skills.workspaceId, workspaceId), inArray(skills.id, skillIds)))
+        ? this.db.select({ id: skills.id, name: skills.name, validation: skills.validation, validationReason: skills.validationReason }).from(skills).where(and(eq(skills.workspaceId, workspaceId), inArray(skills.id, skillIds)))
         : Promise.resolve([]),
       mcpServerIds && mcpServerIds.length > 0
         ? this.db.select({ id: mcpServers.id }).from(mcpServers).where(and(eq(mcpServers.workspaceId, workspaceId), inArray(mcpServers.id, mcpServerIds)))
         : Promise.resolve([]),
     ]);
     if (skillIds && skillRows.length !== skillIds.length) throw new BadRequestException('One or more selected Skills are not available in this workspace.');
-    if (skillRows.some((skill) => skill.id === WORKLITE_PLATFORM_SKILL_ID)) throw new BadRequestException('The worklite-platform Skill is reserved for Chat.');
+    if (skillRows.some((skill) => skill.name === WORKLITE_PLATFORM_SKILL_NAME)) throw new BadRequestException('The worklite-platform Skill is reserved for Chat.');
+    const invalidSkill = skillRows.find((skill) => skill.validation !== 'valid');
+    if (invalidSkill) throw new BadRequestException(invalidSkill.validationReason ?? `Skill ${invalidSkill.name} is invalid.`);
     if (mcpServerIds && mcpRows.length !== mcpServerIds.length) throw new BadRequestException('One or more selected MCP servers are not available in this workspace.');
     return { skillIds, mcpServerIds };
   }
@@ -339,7 +344,7 @@ export class AgentsService {
       providerId: row.providerId,
       providerName,
       // Chat exposes only its protected platform Skill; legacy Chat Skill/MCP assignment rows are not shown.
-      skills: (assignments.skillsByAgent.get(row.id) ?? []).filter((skill) => row.id !== CHAT_AGENT_ID || skill.id === WORKLITE_PLATFORM_SKILL_ID),
+      skills: (assignments.skillsByAgent.get(row.id) ?? []).filter((skill) => row.id !== CHAT_AGENT_ID || skill.name === WORKLITE_PLATFORM_SKILL_NAME),
       mcpServers: row.id === CHAT_AGENT_ID ? [] : assignments.mcpServersByAgent.get(row.id) ?? [],
       version: 'draft',
       latestVersionId: latestVersion?.id ?? null,

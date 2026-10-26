@@ -153,6 +153,7 @@ export type WorkliteUpgradeView = {
 };
 
 export const CHAT_AGENT_ID = 'agt_system_helper_chat';
+export const WORKLITE_PLATFORM_SKILL_NAME = 'worklite-platform';
 
 export type ChatChannelView = {
   id: string;
@@ -271,7 +272,7 @@ export type AgentView = {
     id: string;
     name: string;
     version: string;
-    validation: 'valid' | 'invalid' | 'pending' | 'missing';
+    validation: 'valid' | 'invalid' | 'pending';
   }>;
   mcpServers: Array<{
     id: string;
@@ -1045,13 +1046,26 @@ export type WorkflowNodeActivityView = WorkflowNodeActivityEventPayload & {
   occurredAt: string;
 };
 
+export type SkillRoot = 'agents' | 'platform';
+
+export type SkillConflictView = {
+  ignoredRoot: 'platform';
+  ignoredPath: string;
+  reason: string;
+};
+
 export type SkillView = {
   id: string;
   workspaceSlug: string;
   name: string;
-  source: 'online' | 'archive' | 'built-in' | 'local';
+  source: 'local';
+  root: SkillRoot;
+  rootPath: string;
+  directory: string;
   version: string;
-  validation: 'valid' | 'invalid' | 'pending' | 'missing';
+  validation: 'valid' | 'invalid' | 'pending';
+  validationReason?: string;
+  conflict?: SkillConflictView;
   description?: string;
   metadata?: Record<string, unknown>;
   files: Array<{
@@ -1059,6 +1073,22 @@ export type SkillView = {
     content: string;
   }>;
   updatedAt: string;
+};
+
+export type SkillReferenceCleanup = {
+  agentIds: string[];
+  chatConfigurationRevisions: number[];
+  workflowDrafts: Array<{ workflowId: string; nodeIds: string[] }>;
+  agentTeamRoles: Array<{ teamId: string; role: string }>;
+  agentTeamDeveloperInstances: Array<{ teamId: string; role: string; developerId: string }>;
+};
+
+export type DeleteSkillResult = {
+  deleted: string;
+  directory: string;
+  root: SkillRoot;
+  directoryPath: string;
+  cleaned: SkillReferenceCleanup;
 };
 
 export type McpServerView = {
@@ -1352,7 +1382,6 @@ export type McpServerTestResult = {
 
 export type CreateSkillRequest = {
   name: string;
-  source?: 'online';
   files: Array<{
     path: string;
     content: string;
@@ -1362,14 +1391,6 @@ export type CreateSkillRequest = {
 export type ImportSkillRequest = {
   name: string;
   files: Array<{
-    path: string;
-    content: string;
-  }>;
-};
-
-export type UpdateSkillRequest = {
-  name?: string;
-  files?: Array<{
     path: string;
     content: string;
   }>;

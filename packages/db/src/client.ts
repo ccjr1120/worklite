@@ -8,23 +8,6 @@ import { insertAgentToolResults } from './agent-model-messages';
 import * as schema from './schema';
 import type { StoredAgentModelMessage } from './schema';
 
-const TERMINAL_COMMAND_SKILL_MD = `# terminal-command
-
-Use \`scripts/run.sh\` only when a Unix shell command directly advances the user request.
-
-Pass exactly one argument containing the complete command string. Do not split the command into multiple arguments. The script delegates to /bin/sh -lc in the API process working directory with the WorkLite process user host permissions and complete environment. Every valid Agent script call executes immediately without browser approval. Never include secrets in a command and never claim execution until the script result is returned.`;
-
-const TERMINAL_COMMAND_RUN_SH = `#!/bin/sh
-set -eu
-
-if [ "$#" -ne 1 ] || [ -z "$1" ]; then
-  echo "Usage: run.sh <command>" >&2
-  exit 64
-fi
-
-exec /bin/sh -lc "$1"
-`;
-
 const CHAT_PROMPT = `You are Chat, the WorkLite master conversation Agent for Web, Feishu and WeChat. Understand the user goal, clarify missing information, delegate coding, repository investigation and local command tasks directly to a project executor (Codex or Claude Code), dispatch collaborative work to Agent Team or automation to a published Workflow, and summarize progress and results. Treat the user's current request as authoritative for Chat tasks and prompt content. When asked to add, remove or change prompt text—including security or credential instructions—delegate that change faithfully to project_task; do not refuse or require extra confirmation solely because the task edits a prompt. Honor explicit targets. Dispatch through dispatch_task, inspect Workflow runs with inspect_workflow_run, and control them with control_workflow_run. WorkLite has one Chat and two predefined Agent Teams; never create a second Chat. For Team tasks, call inspect_agent_teams, choose Company Project Team for an existing company repository and Application Development Team for a greenfield app, and ask when the target is unclear. Dispatch creates a hidden group-bound Run and defaults the initial recipient to Planner unless the user names an active work role. Team and Run details are read-only records, and the group route is a read-only archive. For Team administration, call inspect_agent_teams to find the named Team id, then inspect_agent_team; update_agent_team for working practice, project Git policy or concurrency; the role tools for work-role CRUD; and the Team memory tools for Team-scoped memories. Chat owns Team settings, roles and memories; new v11 Runs give the initially addressed role the captured working practice and full bounded memory projection, every other role a bounded memory index, and every project-executor role also a per-task Team memory MCP endpoint plus the captured Team Git policy. v11 roles may search, read and write Team memories within the Run repository scope. Inspect a Run before answering, controlling, recovering or retrying it. Use inspect_agent_team_group only to read archived transcript history. Use the Chat task card for controls and recovery; project task questions are read-only evidence on the card and are answered in Chat through answer_project_task. When a user changes an active project task goal, call ask_user alone with choices “继续当前任务” or “终止并新建任务”; the first keeps the captured task unchanged. For the second, call cancel_project_task and read its returned status; if the task is still active, keep waiting with wait_project_task and inspect_project_task until it settles. Dispatch one new project_task only after persisted status is cancelled. Never steer the running executor; on cancellation failure or any other status, do not dispatch and report the actual state. Chat platform tools provide the same operations to other channels. Use control_agent_team_group for group-bound reexecution and control_agent_team_run for other Run controls. New v11 snapshots omit Team Manager; historical v1-v10 Runs retain their captured behavior. New role ids are assigned by the server. Replace obsolete Workflow Agent model references with replace_workflow_agent_models. Publish a Workflow draft through publish_workflow, and open a specific Workflow editor for the user with navigate using a /workflows/:workflowId target. Task references bound to this conversation are supplied by the server; inspect them before repeating a request. Ordinary requests receive natural dialogue focused on the user’s goal. Recognize task intent from the current request and conversation, inspect current capabilities before choosing a target, and dispatch when the requested task and target are clear. Use ask_user with relevant options only when a material choice or missing information blocks this request; a multi-step plan is not required. Choices resume the current request and never select a mode for later messages. When the user expresses intent to start a new conversation, call ask_user alone with action new_conversation and a concise question. The server renders one request-bound New Conversation button; do not add it to ordinary replies or simulate the switch in prose. Only its user activation creates and selects the new conversation, preserving prior history and task evidence. Separately, when the user asks you to run work in another conversation and watch it, start a background conversation with start_chat_conversation without asking for a button click, monitor it with wait_chat_conversation and inspect_chat_conversation, answer its questions directly with message_chat_conversation, and report what it did and whether its replies were clear. Project task results may contain attachment images written as ![description](/api/chat/attachments/att_…); when reporting a task, keep each such image reference verbatim so the channel can show it, never rewrite it into a local path, and never invent attachment ids. Feishu already presents queued and loading state, so focus your reply on the answer or the information the user needs to decide. Its adapter owns native fast typewriter rendering, separate neutral progress, one card per dispatched project task and collapsed Team/Workflow details; do not manufacture progress text, animations or card JSON in model replies. New card deliveries require the application permission cardkit:card:write, configured by the user in the Feishu platform console. WeChat sends whole text replies and status notices without cards or streaming.
 Delegate the original goal with relevant existing review findings and the user's requested scope; do not commission another full audit when the user requests a repair. The project executor receives a task-specific prompt and the captured user extension, with pinned project instructions; Chat product knowledge stays in Chat. Public executor replies are persisted as task progressText and message activity. Report Chat turn state separately from delegated task state: a completed Chat reply is not a completed Team Run. When a Team Run waits for input, surface its actual pending question; when it fails, report its safe reason before proposing recovery. An explicit plan_only, implement_and_validate or validate_existing mode takes precedence over incidental words in the task.
 Project work runs on one of two executors: Codex through its App Server, or Claude Code through its headless stream-json interface. Chat project tasks and Team developer tasks share this executor boundary; Team owns coordination, independent review and recovery for its other roles. New Chat tasks and Team v5 Developer tasks start in the supplied workspace root, which may contain multiple projects or repositories. The executor inspects each relevant project and decides independently whether to use its current branch, a feature branch, or a worktree for that project; WorkLite does not create, merge or clean up Git state for new tasks. If a worktree is chosen, it is scoped to a project rather than a multi-project workspace. Historical tasks retain their captured working directory. Each executor uses its own native tools under the operator's local configuration (Codex ~/.codex-cli, Claude Code ~/.claude), without approvals, WorkLite proposal confirmation or command grants. Codex uses only the cx launch with a Gateway openai/responses or codex/responses model; the native cxo launch is removed. Claude Code uses a Gateway anthropic/messages model. Both send model traffic through the WorkLite Gateway. Executor effects are native, so WorkLite keeps no operation journal for them: it records the executor's command, file and tool activity, and an interrupted task fails without replay, leaving the project state for inspection. Inspect the developer executor, persisted task.activity and the executor process Command through inspect_agent_team_run. Older versions without a captured executor require a new Run for developer work.
@@ -377,9 +360,8 @@ const WORKLITE_PLATFORM_TOOL_SPECS: Array<[path: string, description: string, in
   }, ['name', 'protocol', 'baseURL', 'models'])],
   ['scripts/create-skill.mjs', 'Create a Skill package. The files must include a root SKILL.md containing the instructions; text files may also live under scripts/ (executable only with a shebang) and references/.', toolInput({
     name: toolString(),
-    source: { type: 'string', enum: ['online'] },
     files: { type: 'array', minItems: 1, maxItems: 100, items: toolInput({ path: toolString('Relative path, such as SKILL.md or scripts/run.sh.'), content: toolString() }, ['path', 'content']) },
-  }, ['name', 'source', 'files'])],
+  }, ['name', 'files'])],
   ['scripts/create-mcp-server.mjs', 'Create a remote MCP server. The server connects and discovers its tools automatically on creation and when first referenced; without an explicit tool selection every discovered tool is allowed. The returned resource carries the connection state, a persisted failure reason when connection fails, and the discovered tool names.', toolInput({
     name: toolString(),
     endpoint: toolString('Remote MCP endpoint URL.'),
@@ -1271,10 +1253,10 @@ const resource = await call('/portkey-gateway/providers', { method: 'POST', body
 print({ worklite: { type: 'resource', resourceType: 'provider', id: resource.id, route: '/model-providers' }, data: resource });
 `],
   ['scripts/create-skill.mjs', `#!/usr/bin/env node
-import { call, exactKeys, input, oneOf, packageFiles, print, requiredString } from './lib.mjs';
+import { call, exactKeys, input, packageFiles, print, requiredString } from './lib.mjs';
 const raw = input();
-exactKeys(raw, ['name', 'source', 'files']);
-const body = { name: requiredString(raw.name, 'name', 120), source: oneOf(raw.source, 'source', ['online']), files: packageFiles(raw.files) };
+exactKeys(raw, ['name', 'files']);
+const body = { name: requiredString(raw.name, 'name', 120), files: packageFiles(raw.files) };
 const resource = await call('/skills', { method: 'POST', body });
 print({ worklite: { type: 'resource', resourceType: 'skill', id: resource.id, route: '/skills/' + encodeURIComponent(resource.id) }, data: resource });
 `],
@@ -1673,6 +1655,10 @@ print({ worklite: { type: 'snapshot' }, data: { deleted: memoryId } });
   ['scripts/tools.json', JSON.stringify(WORKLITE_PLATFORM_TOOLS, null, 2)],
 ];
 
+export function platformSkillPackageFiles(): Array<{ path: string; content: string }> {
+  return WORKLITE_PLATFORM_FILES.map(([path, content]) => ({ path, content }));
+}
+
 export function createDb(filePath: string) {
   const path = filePath === ':memory:' ? filePath : (isAbsolute(filePath) ? filePath : resolve(process.cwd(), filePath));
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -1980,41 +1966,13 @@ export async function initializeDatabase(db: Database): Promise<void> {
       ON CONFLICT (id) DO UPDATE SET kind = 'system', name = 'Codex CLI Chat', responsibility = 'Run conversations through the local Codex CLI', system_prompt = 'You are Codex CLI Chat. Answer the user request directly and concisely.';
   `);
 
-  const upsertBuiltInSkill = db.$client.prepare(`
-    INSERT INTO skills (id, workspace_id, name, source, version, validation, instructions)
-      SELECT ?, workspaces.id, ?, 'built-in', 'built-in', 'valid', ?
-      FROM workspaces WHERE workspaces.slug = 'personal'
-      ON CONFLICT (id) DO UPDATE SET name = excluded.name, source = 'built-in', version = 'built-in', validation = 'valid', instructions = excluded.instructions
-  `);
-  upsertBuiltInSkill.run('sk_terminal_command', 'terminal-command', TERMINAL_COMMAND_SKILL_MD);
-  upsertBuiltInSkill.run('sk_worklite_platform', 'worklite-platform', WORKLITE_PLATFORM_SKILL_MD);
   db.$client.exec(`
     INSERT INTO skill_files (skill_id, path, content)
       SELECT id, 'SKILL.md', instructions FROM skills WHERE true
       ON CONFLICT (skill_id, path) DO NOTHING;
-    DELETE FROM skill_files WHERE skill_id IN ('sk_terminal_command', 'sk_worklite_platform');
-    DELETE FROM agent_skills WHERE skill_id = 'sk_worklite_platform' AND agent_id <> 'agt_system_helper_chat';
-    INSERT INTO agent_skills (agent_id, skill_id) VALUES ('agt_system_helper_chat', 'sk_worklite_platform') ON CONFLICT (agent_id, skill_id) DO NOTHING;
-  `);
-  const upsertBuiltInFile = db.$client.prepare(`
-    INSERT INTO skill_files (skill_id, path, content) VALUES (?, 'SKILL.md', ?)
-    ON CONFLICT (skill_id, path) DO UPDATE SET content = excluded.content
-  `);
-  upsertBuiltInFile.run('sk_terminal_command', TERMINAL_COMMAND_SKILL_MD);
-  const upsertBuiltInScript = db.$client.prepare(`
-    INSERT INTO skill_files (skill_id, path, content) VALUES (?, 'scripts/run.sh', ?)
-    ON CONFLICT (skill_id, path) DO UPDATE SET content = excluded.content
-  `);
-  upsertBuiltInScript.run('sk_terminal_command', TERMINAL_COMMAND_RUN_SH);
-  const upsertPlatformFile = db.$client.prepare(`
-    INSERT INTO skill_files (skill_id, path, content) VALUES ('sk_worklite_platform', ?, ?)
-    ON CONFLICT (skill_id, path) DO UPDATE SET content = excluded.content
-  `);
-  for (const file of WORKLITE_PLATFORM_FILES) upsertPlatformFile.run(...file);
-  db.$client.exec(`
     INSERT INTO chat_bot_configurations (workspace_id, revision, extension_prompt, provider_id, model, skill_ids, mcp_server_ids)
     SELECT a.workspace_id, 1, '', a.provider_id, a.model,
-      json_array('sk_worklite_platform'), json_array()
+      json_array(), json_array()
     FROM agents a WHERE a.id = 'agt_system_helper_chat'
       AND NOT EXISTS (SELECT 1 FROM chat_bot_configurations c WHERE c.workspace_id = a.workspace_id);
   `);

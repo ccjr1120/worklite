@@ -4,13 +4,21 @@ import { join, relative, resolve, sep } from 'node:path';
 import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
 
 /**
- * A Skill package discovered under the operator's shared Skill directory.
+ * A Skill package discovered under one of the two supported local roots.
  *
- * The default root is ~/.agents/skills because that is the directory the local
- * agent tooling already uses. Scanning is read-only: WorkLite only copies the
- * package content into its own store and never writes to the source directory.
+ * Scanning is read-only. WorkLite copies package content into its database, and
+ * only writes to the platform-managed root when a Skill is created or imported.
  */
+export type SkillRootKind = 'agents' | 'platform';
+
+export type LocalSkillRoot = {
+  kind: SkillRootKind;
+  path: string;
+};
+
 export type LocalSkillPackage = {
+  root: SkillRootKind;
+  rootPath: string;
   directory: string;
   name: string;
   description: string;
@@ -22,17 +30,38 @@ export type LocalSkillPackage = {
 };
 
 export type LocalSkillSkippedPackage = {
+  root: SkillRootKind;
+  rootPath: string;
   directory: string;
   reason: string;
 };
 
 export type LocalSkillScanResult = {
+  kind: SkillRootKind;
   root: string;
   available: boolean;
   rootMissing?: boolean;
   unavailableReason?: string;
   packages: LocalSkillPackage[];
   skipped: LocalSkillSkippedPackage[];
+};
+
+export type LocalSkillConflict = {
+  name: string;
+  winningDirectory: string;
+  winningRoot: 'agents';
+  winningPath: string;
+  ignoredDirectory: string;
+  ignoredRoot: 'platform';
+  ignoredPath: string;
+  reason: string;
+};
+
+export type LocalSkillRootsScanResult = {
+  roots: LocalSkillScanResult[];
+  packages: LocalSkillPackage[];
+  skipped: LocalSkillSkippedPackage[];
+  conflicts: LocalSkillConflict[];
 };
 
 export type SkillFrontmatter = {
@@ -53,9 +82,32 @@ export function defaultLocalSkillRootDirectory(): string {
   return resolve(join(homedir(), '.agents', 'skills'));
 }
 
+export function defaultPlatformSkillRootDirectory(): string {
+  return resolve(join(homedir(), '.worklite', 'skills'));
+}
+
 export function localSkillRootDirectory(): string {
   const configured = process.env.WORKLITE_LOCAL_SKILLS_DIR?.trim();
-  const value = configured || defaultLocalSkillRootDirectory();
+  return resolveConfiguredDirectory(configured || defaultLocalSkillRootDirectory());
+}
+
+export function platformSkillRootDirectory(): string {
+  const configured = process.env.WORKLITE_PLATFORM_SKILLS_DIR?.trim();
+  return resolveConfiguredDirectory(configured || defaultPlatformSkillRootDirectory());
+}
+
+export function localSkillRoots(): LocalSkillRoot[] {
+  return [
+    { kind: 'agents', path: localSkillRootDirectory() },
+    { kind: 'platform', path: platformSkillRootDirectory() },
+  ];
+}
+
+export function skillRootDirectory(kind: SkillRootKind): string {
+  return kind === 'agents' ? localSkillRootDirectory() : platformSkillRootDirectory();
+}
+
+function resolveConfiguredDirectory(value: string): string {
   if (value === '~') return homedir();
   if (value.startsWith('~/')) return join(homedir(), value.slice(2));
   return resolve(value);
@@ -66,8 +118,8 @@ export function localSkillRootDirectory(): string {
  * natural package key inside the configured root, so a re-scan finds and
  * updates the same Skill row instead of duplicating it.
  */
-export function localSkillId(workspaceId: string, directory: string): string {
-  const digest = createHash('sha256').update(workspaceId).update('\0').update(directory).digest('hex');
+export function localSkillId(workspaceId: string, directory: string, root: SkillRootKind = 'agents'): string {
+  const digest = createHash('sha256').update(workspaceId).update('\0').update(root).update('\0').update(directory).digest('hex');
   return `sk_local_${digest.slice(0, 24)}`;
 }
 
@@ -141,6 +193,18 @@ export function parseSkillFrontmatter(content: string): SkillFrontmatter {
   };
 }
 
+/**
+ * A package directory is the stable identity for a local Skill. Keep ordinary
+ * names (including non-ASCII names) intact, but never allow a name to escape
+ * the configured root or create a hidden package.
+ */
+export function skillDirectoryName(value: string): string {
+  const normalized = value.trim().replace(/[/\\\0]/g, '-').replace(/^\.+/, '_');
+  if (!normalized) throw new Error('A Skill directory name is required.');
+  if (normalized.length > 240) throw new Error('A Skill directory name cannot exceed 240 characters.');
+  return normalized;
+}
+
 function foldBlockLines(lines: string[]): string {
   return lines.reduce((result, line) => {
     if (!line) return result ? `${result}\n` : result;
@@ -200,7 +264,7 @@ function unquote(value: string): string {
   return inner.replaceAll('\\"', '"').replaceAll('\\\\', '\\');
 }
 
-export async function scanLocalSkillRoot(rootDirectory = localSkillRootDirectory()): Promise<LocalSkillScanResult> {
+export async function scanLocalSkillRoot(rootDirectory = localSkillRootDirectory(), kind: SkillRootKind = 'agents'): Promise<LocalSkillScanResult> {
   const root = resolve(rootDirectory);
   let rootReal: string;
   try {
@@ -208,22 +272,22 @@ export async function scanLocalSkillRoot(rootDirectory = localSkillRootDirectory
     if (stat.isSymbolicLink()) {
       rootReal = await realpath(root);
     } else if (!stat.isDirectory()) {
-      return unavailable(root, 'The configured local Skill root is not a directory.');
+      return unavailable(root, kind, 'The configured local Skill root is not a directory.');
     } else {
       rootReal = await realpath(root);
     }
   } catch (error) {
     if (isMissing(error)) {
-      return unavailable(root, `The local Skill directory ${root} does not exist. Create it and add Skill packages that contain SKILL.md.`, true);
+      return unavailable(root, kind, `The local Skill directory ${root} does not exist. Create it and add Skill packages that contain SKILL.md.`, true);
     }
-    return unavailable(root, `The local Skill directory ${root} cannot be read: ${errorMessage(error)}`);
+    return unavailable(root, kind, `The local Skill directory ${root} cannot be read: ${errorMessage(error)}`);
   }
 
   let entries;
   try {
     entries = await readdir(rootReal, { withFileTypes: true });
   } catch (error) {
-    return unavailable(root, `The local Skill directory ${root} cannot be read: ${errorMessage(error)}`);
+    return unavailable(root, kind, `The local Skill directory ${root} cannot be read: ${errorMessage(error)}`);
   }
 
   const packages: LocalSkillPackage[] = [];
@@ -231,20 +295,20 @@ export async function scanLocalSkillRoot(rootDirectory = localSkillRootDirectory
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
     if (entry.name === '.DS_Store' || entry.name.startsWith('.')) continue;
     if (entry.isSymbolicLink()) {
-      skipped.push({ directory: entry.name, reason: 'Symbolic links are not supported as Skill packages.' });
+      skipped.push({ root: kind, rootPath: root, directory: entry.name, reason: 'Symbolic links are not supported as Skill packages.' });
       continue;
     }
     if (!entry.isDirectory()) continue;
     try {
-      packages.push(await scanPackage(rootReal, entry.name));
+      packages.push(await scanPackage(rootReal, kind, root, entry.name));
     } catch (error) {
-      skipped.push({ directory: entry.name, reason: errorMessage(error) });
+      skipped.push({ root: kind, rootPath: root, directory: entry.name, reason: errorMessage(error) });
     }
   }
-  return { root, available: true, packages, skipped };
+  return { kind, root, available: true, packages, skipped };
 }
 
-async function scanPackage(rootReal: string, directory: string): Promise<LocalSkillPackage> {
+async function scanPackage(rootReal: string, root: SkillRootKind, rootPath: string, directory: string): Promise<LocalSkillPackage> {
   const packageDirectory = join(rootReal, directory);
   const packageReal = await realpath(packageDirectory);
   if (!isInside(rootReal, packageReal)) {
@@ -286,6 +350,8 @@ async function scanPackage(rootReal: string, directory: string): Promise<LocalSk
   if (!name) throw new Error('The Skill package has no name.');
 
   return {
+    root,
+    rootPath,
     directory,
     name,
     description: frontmatter.description?.trim() ?? '',
@@ -354,8 +420,55 @@ function isInside(root: string, candidate: string): boolean {
   return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !path.startsWith(sep));
 }
 
-function unavailable(root: string, reason: string, rootMissing = false): LocalSkillScanResult {
-  return { root, available: false, ...(rootMissing ? { rootMissing: true } : {}), unavailableReason: reason, packages: [], skipped: [] };
+function unavailable(root: string, kind: SkillRootKind, reason: string, rootMissing = false): LocalSkillScanResult {
+  return { kind, root, available: false, ...(rootMissing ? { rootMissing: true } : {}), unavailableReason: reason, packages: [], skipped: [] };
+}
+
+export async function scanLocalSkillRoots(roots: readonly LocalSkillRoot[] = localSkillRoots()): Promise<LocalSkillRootsScanResult> {
+  const scans = await Promise.all(roots.map((root) => scanLocalSkillRoot(root.path, root.kind)));
+  const byKind = new Map(scans.map((scan) => [scan.kind, scan]));
+  const agents = byKind.get('agents');
+  const platform = byKind.get('platform');
+  const agentsByName = new Map((agents?.packages ?? []).map((item) => [item.name.trim().toLocaleLowerCase('en-US'), item]));
+  const agentsByDirectory = new Map((agents?.packages ?? []).map((item) => [item.directory, item]));
+  const agentsSkippedDirectories = new Set(agents?.skipped.map((item) => item.directory) ?? []);
+  const conflicts: LocalSkillConflict[] = [];
+  const ignoredPlatformDirectories = new Set<string>();
+  if (agents && platform) {
+    const platformPackages = platform.packages.map((item) => ({ directory: item.directory, name: item.name }));
+    const platformSkipped = platform.skipped.map((item) => ({ directory: item.directory, name: item.directory }));
+    for (const item of [...platformPackages, ...platformSkipped].sort((left, right) => left.directory.localeCompare(right.directory))) {
+      const winner = agentsByName.get(item.name.trim().toLocaleLowerCase('en-US')) ?? agentsByDirectory.get(item.directory);
+      const directoryCollisionWithInvalidAgent = agentsSkippedDirectories.has(item.directory);
+      if (!winner && !directoryCollisionWithInvalidAgent) continue;
+      const winningDirectory = winner?.directory ?? item.directory;
+      const winningPath = join(agents.root, winningDirectory);
+      ignoredPlatformDirectories.add(item.directory);
+      conflicts.push({
+        name: winner?.name ?? item.name,
+        winningDirectory,
+        winningRoot: 'agents',
+        winningPath,
+        ignoredDirectory: item.directory,
+        ignoredRoot: 'platform',
+        ignoredPath: join(platform.root, item.directory),
+        reason: `A Skill named "${winner?.name ?? item.name}" exists in the user Agent root; the platform copy is ignored.`,
+      });
+    }
+  }
+
+  return {
+    roots: scans,
+    packages: [
+      ...(agents?.packages ?? []),
+      ...(platform?.packages.filter((item) => !ignoredPlatformDirectories.has(item.directory)) ?? []),
+    ],
+    skipped: [
+      ...(agents?.skipped ?? []),
+      ...(platform?.skipped.filter((item) => !ignoredPlatformDirectories.has(item.directory)) ?? []),
+    ],
+    conflicts,
+  };
 }
 
 function isMissing(error: unknown): boolean {

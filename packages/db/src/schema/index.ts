@@ -354,7 +354,7 @@ export const commandExecutionEvents = sqliteTable('command_execution_events', {
 }, (table) => [index('command_execution_events_command_sequence_idx').on(table.commandId, table.sequence)]);
 
 export const skills = sqliteTable('skills', {
-  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), source: text('source').$type<'online' | 'archive' | 'built-in' | 'local'>().notNull(), version: text('version').notNull().default('draft'), validation: text('validation').$type<'valid' | 'invalid' | 'pending' | 'missing'>().notNull().default('pending'), instructions: text('instructions').notNull().default(''), updatedAt: timestamp('updated_at'),
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), source: text('source').$type<'local'>().notNull().default('local'), root: text('root').$type<'agents' | 'platform'>().notNull().default('agents'), directory: text('directory').notNull().default(''), version: text('version').notNull().default('draft'), validation: text('validation').$type<'valid' | 'invalid' | 'pending'>().notNull().default('pending'), validationReason: text('validation_reason'), instructions: text('instructions').notNull().default(''), updatedAt: timestamp('updated_at'),
 });
 
 export const skillFiles = sqliteTable('skill_files', {
@@ -362,6 +362,15 @@ export const skillFiles = sqliteTable('skill_files', {
   path: text('path').notNull(),
   content: text('content').notNull().default(''),
 }, (table) => [primaryKey({ columns: [table.skillId, table.path] })]);
+
+// Old published Workflow versions keep their original Skill ids. This table
+// resolves those immutable references after their Skills move into local roots.
+export const skillIdAliases = sqliteTable('skill_id_aliases', {
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  oldSkillId: text('old_skill_id').notNull(),
+  currentSkillId: text('current_skill_id').notNull(),
+  skillName: text('skill_name').notNull(),
+}, (table) => [primaryKey({ columns: [table.workspaceId, table.oldSkillId] })]);
 
 export type StoredAgentModelMessage =
   | { role: 'user'; content: string }

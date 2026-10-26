@@ -35,10 +35,15 @@ export class AgentTeamConfigurationService {
   ) {}
 
   async getTeam(workspaceId: string, teamId: string): Promise<AgentTeam> {
+    await this.resources.reconcileWorkspaceSkills(workspaceId);
     const [team] = await this.db.select().from(agentTeams)
       .where(and(eq(agentTeams.id, teamId), eq(agentTeams.workspaceId, workspaceId))).limit(1);
     if (!team) throw new NotFoundException('Agent Team not found.');
     return team;
+  }
+
+  async reconcileSkills(workspaceId: string): Promise<void> {
+    await this.resources.reconcileWorkspaceSkills(workspaceId);
   }
 
   async update(workspaceId: string, teamId: string, input: UpdateAgentTeamRequest): Promise<AgentTeam> {
@@ -163,6 +168,8 @@ export class AgentTeamConfigurationService {
   private async resolveSkills(workspaceId: string, skillIds: ReadonlySet<string>) {
     const rows = skillIds.size === 0 ? [] : await this.db.select().from(skills).where(and(eq(skills.workspaceId, workspaceId), inArray(skills.id, [...skillIds])));
     if (rows.length !== skillIds.size) throw new NotFoundException('A selected Skill was not found in this workspace.');
+    const invalidSkill = rows.find((row) => row.validation !== 'valid');
+    if (invalidSkill) throw new BadRequestException(invalidSkill.validationReason ?? `Skill ${invalidSkill.name} is invalid.`);
     const files = rows.length === 0 ? [] : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, rows.map((row) => row.id))).orderBy(asc(skillFiles.path));
     // Carry the stored instruction text alongside the package files, matching the
     // Workflow Agent node path, so a Skill whose instructions are not only in

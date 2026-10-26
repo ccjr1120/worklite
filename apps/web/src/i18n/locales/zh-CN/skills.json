@@ -11,34 +11,29 @@
   },
   "columns": {
     "skill": "技能",
-    "source": "来源",
+    "root": "目录根",
     "version": "版本",
     "validation": "校验状态",
     "updated": "更新时间",
     "actions": "操作"
   },
   "source": {
-    "online": "在线",
-    "archive": "压缩包",
-    "built-in": "内置",
     "local": "本地目录"
   },
-  "terminal": {
-    "warning": "产品内置的 scripts/run.sh 会把唯一的命令参数交给 /bin/sh -lc 执行。它没有沙箱，并拥有 WorkLite 进程用户的宿主权限，包括访问可用文件和网络。"
+  "root": {
+    "agents": "~/.agents/skills",
+    "platform": "~/.worklite/skills"
   },
-  "platform": {
-    "boundary": "平台操作使用固定工具注册表。资源和偏好变更需要确认，敏感凭据仍只能通过专用安全表单提交。"
+  "rootPath": "{{root}}/{{directory}}",
+  "conflict": {
+    "title": "同名冲突"
+  },
+  "invalid": {
+    "title": "包无效"
   },
   "editor": {
     "fallback": "技能",
-    "name": "技能名称",
     "package": "包内容",
-    "addFile": "添加包文件",
-    "deleteFile": "删除所选文件",
-    "filePath": "相对文件路径",
-    "filePathHint": "可执行文件使用 scripts/...，辅助文本使用 references/...。",
-    "pathInvalid": "请输入 scripts/ 或 references/ 下的相对路径。",
-    "pathDuplicate": "已有包文件使用了这个路径。",
     "executable": "可执行脚本",
     "missingShebang": "需要 Shebang",
     "scriptWarning": "已保存且包含 Unix shebang 的脚本可直接使用 API 进程的宿主权限、工作目录和完整环境变量运行；没有沙箱、超时或输出上限。",
@@ -47,7 +42,6 @@
       "arguments": "参数（JSON 字符串数组）",
       "argumentsHint": "数组中的每一项都会作为一个完整脚本参数传入。",
       "invalidArguments": "请输入仅包含字符串的有效 JSON 数组。",
-      "saveFirst": "请先保存技能，再运行此脚本。",
       "output": "脚本输出",
       "emptyOutput": "脚本启动后，输出会显示在这里。",
       "stdout": "标准输出",
@@ -62,11 +56,8 @@
       "cancelFailed": "无法取消脚本执行。"
     },
     "readOnly": "只读",
-    "builtInReadOnly": "平台内置包",
-    "localReadOnly": "本地目录包只读；刷新技能列表时会从 ~/.agents/skills 同步内容。已注册技能被删除后如仍被引用会标记为不可用，源目录中的无效包会标记为无效；不会回写本地目录。",
+    "localReadOnly": "技能包以本地目录为准，WorkLite 中只读。列表和详情会扫描两个目录根；无效包仍会显示原因。新建和导入写入 ~/.worklite/skills；删除会移除所示目录并清理当前配置引用。",
     "localBins": "命令行依赖：{{bins}}",
-    "nameRequired": "技能名称不能为空。",
-    "saveFailed": "无法保存技能。请检查包内容后重试。",
     "loading": "正在加载技能...",
     "loadFailed": "无法加载此技能。"
   },
@@ -80,7 +71,7 @@
   },
   "delete": {
     "title": "删除 {{name}}？",
-    "description": "这会永久删除该技能包。此操作无法撤销。",
+    "description": "这会从 {{root}}/{{directory}} 永久删除技能目录，并清理当前 Agent、Chat、Workflow 草稿和 Agent Team 配置中的引用。历史版本快照不会改写。",
     "action": "删除 {{name}}",
     "deleting": "正在删除...",
     "success": "技能已删除",

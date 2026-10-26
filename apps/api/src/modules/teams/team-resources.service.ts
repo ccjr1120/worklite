@@ -1,5 +1,7 @@
-import { BadRequestException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import { mkdir, mkdtemp, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type {
@@ -13,6 +15,7 @@ import type {
   CreateSkillRequest,
   CommandExecutionView,
   DeleteMcpServerResult,
+  DeleteSkillResult,
   ExecuteSkillScriptRequest,
   ImportSkillRequest,
   McpServerReferenceReport,
@@ -21,12 +24,14 @@ import type {
   ModelProviderView,
   ModelProviderProtocol,
   SkillView,
+  SkillConflictView,
+  SkillReferenceCleanup,
   UpdateModelProviderRequest,
   UpdateWorkspaceSettingsRequest,
-  UpdateSkillRequest,
   UsageRow,
   WorkspaceSettingsView,
 } from '@worklite/contracts';
+import { WORKLITE_PLATFORM_SKILL_NAME } from '@worklite/contracts';
 import {
   agentExecutions,
   agentMcpServers,
@@ -39,8 +44,10 @@ import {
   chatConfigurations,
   mcpServers,
   modelProviders,
+  platformSkillPackageFiles,
   skillFiles,
   skills,
+  skillIdAliases,
   workflowDrafts,
   workflowEditRevisions,
   workflowRuns,
@@ -50,6 +57,8 @@ import {
   workflows,
   workspaceSettings,
   type Database,
+  type StoredAgentTeamRoleConfiguration,
+  type StoredAgentTeamSkillSnapshot,
   type StoredWorkflowDefinition,
 } from '@worklite/db';
 import { normalizePublicModelList, type ModelCandidate, type ModelProviderConfig } from '@worklite/model-gateway';
@@ -57,7 +66,18 @@ import { listWorkflowNodeCapabilities } from '@worklite/workflow-engine';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from './teams.service';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
-import { defaultLocalSkillRootDirectory, localSkillId, localSkillRootDirectory, parseSkillFrontmatter, scanLocalSkillRoot } from '../skills/local-skill-source';
+import {
+  localSkillId,
+  localSkillRootDirectory,
+  parseSkillFrontmatter,
+  platformSkillRootDirectory,
+  scanLocalSkillRoot,
+  scanLocalSkillRoots,
+  skillDirectoryName,
+  skillRootDirectory,
+  type LocalSkillPackage,
+  type SkillRootKind,
+} from '../skills/local-skill-source';
 import { McpClientService } from '../mcp-servers/mcp-client.service';
 import { getArtifactDetail, listArtifacts } from '../artifacts/artifacts-query';
 import { AGENT_TEAM_ROLES, BUILT_IN_AGENT_TEAM_ID } from '../agent-teams/agent-team-configuration';
@@ -196,15 +216,20 @@ function validatePackageFiles(input: unknown): PackageFile[] {
   return files;
 }
 
-function skillView(row: typeof skills.$inferSelect, workspaceSlug: string, files: PackageFile[]): SkillView {
+function skillView(row: typeof skills.$inferSelect, workspaceSlug: string, files: PackageFile[], conflict?: SkillConflictView): SkillView {
   const frontmatter = skillFrontmatter(files);
   return {
     id: row.id,
     workspaceSlug,
     name: row.name,
-    source: row.source,
+    source: 'local',
+    root: row.root,
+    rootPath: skillRootDirectory(row.root),
+    directory: row.directory,
     version: row.version,
     validation: row.validation,
+    ...(row.validationReason ? { validationReason: row.validationReason } : {}),
+    ...(conflict ? { conflict } : {}),
     ...(frontmatter.description ? { description: frontmatter.description } : {}),
     ...(frontmatter.metadata ? { metadata: frontmatter.metadata } : {}),
     files,
@@ -227,6 +252,159 @@ function samePackageFiles(left: PackageFile[], right: PackageFile[]): boolean {
   return left.length === right.length && left.every((file, index) => file.path === right[index]?.path && file.content === right[index]?.content);
 }
 
+function isSafePackagePath(path: string): boolean {
+  const allowedRoot = path === 'SKILL.md' || path.startsWith('scripts/') || path.startsWith('references/');
+  const segments = path.split('/');
+  return Boolean(path) && path.length <= 240 && !path.startsWith('/') && !path.includes('\\') && !path.includes('\0')
+    && segments.every((segment) => Boolean(segment) && segment !== '.' && segment !== '..') && allowedRoot;
+}
+
+function storedPackageFiles(files: PackageFile[], row: typeof skills.$inferSelect): PackageFile[] {
+  const byPath = new Map<string, PackageFile>();
+  for (const file of files) {
+    if (!isSafePackagePath(file.path)) throw new Error(`Legacy Skill ${row.name} contains unsupported path ${file.path}.`);
+    byPath.set(file.path, { path: file.path, content: file.content });
+  }
+  if (!byPath.has('SKILL.md')) byPath.set('SKILL.md', { path: 'SKILL.md', content: row.instructions || `# ${row.name}\n` });
+  const result = [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path));
+  const bytes = result.reduce((total, file) => total + Buffer.byteLength(file.content, 'utf8'), 0);
+  if (result.length > MAX_SKILL_FILES || bytes > MAX_SKILL_PACKAGE_BYTES) throw new Error(`Legacy Skill ${row.name} exceeds the Skill package limits.`);
+  return result;
+}
+
+function suffixDirectory(base: string, index: number): string {
+  if (index === 1) return base;
+  const suffix = `-${index}`;
+  return `${base.slice(0, Math.max(1, 240 - suffix.length))}${suffix}`;
+}
+
+function skillDirectoryPath(root: SkillRootKind, directory: string): string {
+  if (!directory || directory === '.' || directory === '..' || directory.includes('/') || directory.includes('\\') || directory.includes('\0')) {
+    throw new Error('The stored Skill directory is not a single package directory name.');
+  }
+  const rootDirectory = resolve(skillRootDirectory(root));
+  const target = resolve(rootDirectory, directory);
+  const path = relative(rootDirectory, target);
+  if (path !== directory || path.startsWith(`..${sep}`) || path === '..') throw new Error('The stored Skill directory escapes its configured root.');
+  return target;
+}
+
+function isMissingFile(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 'ENOENT';
+}
+
+function emptySkillCleanup(): SkillReferenceCleanup {
+  return { agentIds: [], chatConfigurationRevisions: [], workflowDrafts: [], agentTeamRoles: [], agentTeamDeveloperInstances: [] };
+}
+
+function mapSkillIds(ids: readonly string[], mapping: ReadonlyMap<string, string>, remove = false): string[] {
+  return [...new Set(ids.flatMap((id) => {
+    const mapped = mapping.get(id);
+    if (remove) return mapped ? [] : [id];
+    return [mapped ?? id];
+  }))];
+}
+
+function workflowSkillNodeIds(definition: StoredWorkflowDefinition, ids: ReadonlySet<string>): string[] {
+  return definition.nodes.flatMap((node) => {
+    if (node.type !== 'worklite/agent' || !node.config || typeof node.config !== 'object' || Array.isArray(node.config)) return [];
+    const skillIds = (node.config as Record<string, unknown>).skillIds;
+    return Array.isArray(skillIds) && skillIds.some((id) => typeof id === 'string' && ids.has(id)) ? [node.id] : [];
+  });
+}
+
+function rewriteWorkflowSkillIds(definition: StoredWorkflowDefinition, mapping: ReadonlyMap<string, string>, remove = false): StoredWorkflowDefinition | null {
+  let changed = false;
+  const nodes = definition.nodes.map((node) => {
+    if (node.type !== 'worklite/agent' || !node.config || typeof node.config !== 'object' || Array.isArray(node.config)) return node;
+    const config = node.config as Record<string, unknown>;
+    if (!Array.isArray(config.skillIds) || config.skillIds.some((id) => typeof id !== 'string')) return node;
+    const nextIds = mapSkillIds(config.skillIds, mapping, remove);
+    if (sameStringList(config.skillIds, nextIds)) return node;
+    changed = true;
+    return { ...node, config: { ...config, skillIds: nextIds } };
+  });
+  return changed ? { ...definition, nodes } : null;
+}
+
+function sameStringList(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function skillNameKey(name: string): string {
+  return name.trim().toLocaleLowerCase('en-US');
+}
+
+function previousLocalSkillId(workspaceId: string, directory: string): string {
+  const digest = createHash('sha256').update(workspaceId).update('\0').update(directory).digest('hex');
+  return `sk_local_${digest.slice(0, 24)}`;
+}
+
+function rewriteRoleSkillIds(
+  role: StoredAgentTeamRoleConfiguration,
+  mapping: ReadonlyMap<string, string>,
+  remove = false,
+  currentSnapshots: ReadonlyMap<string, StoredAgentTeamSkillSnapshot> = new Map(),
+): StoredAgentTeamRoleConfiguration | null {
+  let changed = false;
+  const rewrite = (skill: StoredAgentTeamSkillSnapshot): StoredAgentTeamSkillSnapshot[] => {
+    if (remove && mapping.has(skill.id)) {
+      changed = true;
+      return [];
+    }
+    const id = mapping.get(skill.id) ?? skill.id;
+    const mapped = id === skill.id ? skill : { ...skill, id };
+    if (id !== skill.id) changed = true;
+    const current = currentSnapshots.get(id);
+    if (!current) {
+      if (mapped !== skill) changed = true;
+      return [mapped];
+    }
+    if (JSON.stringify(mapped) === JSON.stringify(current)) return [mapped];
+    changed = true;
+    return [{ ...current }];
+  };
+  const skills = role.skills.flatMap(rewrite);
+  const developerInstances = role.developerInstances?.map((instance) => {
+    let instanceChanged = false;
+    const instanceSkills = instance.skills.flatMap((skill) => {
+      const rewritten = rewrite(skill);
+      if (rewritten.length !== 1 || JSON.stringify(rewritten[0]) !== JSON.stringify(skill)) instanceChanged = true;
+      return rewritten;
+    });
+    if (!instanceChanged) return instance;
+    changed = true;
+    return { ...instance, skills: instanceSkills };
+  });
+  if (!changed) return null;
+  return { ...role, skills, ...(developerInstances ? { developerInstances } : {}) };
+}
+
+async function writeSkillDirectory(rootDirectory: string, directory: string, files: PackageFile[]): Promise<'created' | 'exists'> {
+  await mkdir(rootDirectory, { recursive: true });
+  const target = join(rootDirectory, directory);
+  try {
+    await stat(target);
+    return 'exists';
+  } catch (error) {
+    if (!isMissingFile(error)) throw error;
+  }
+  const temporary = await mkdtemp(join(rootDirectory, '.skill-write-'));
+  try {
+    for (const file of files) {
+      const path = join(temporary, ...file.path.split('/'));
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, file.content, 'utf8');
+    }
+    await rename(temporary, target);
+    return 'created';
+  } catch (error) {
+    await rm(temporary, { recursive: true, force: true });
+    if (typeof error === 'object' && error !== null && 'code' in error && ['EEXIST', 'ENOTEMPTY'].includes(String((error as { code?: unknown }).code))) return 'exists';
+    throw error;
+  }
+}
+
 function providerHeaders(value: string | null): Record<string, string> | undefined {
   if (!value) return undefined;
   const parsed = JSON.parse(decryptSecret(value)) as unknown;
@@ -245,12 +423,16 @@ function providerConfig(row: typeof modelProviders.$inferSelect, apiKey: string)
   throw new BadRequestException('Unsupported model provider protocol.');
 }
 
-const CHAT_PLATFORM_SKILL_ID = 'sk_worklite_platform';
 const CHAT_AGENT_ID = 'agt_system_helper_chat';
+
+type SkillSyncResult = {
+  conflicts: Map<string, SkillConflictView>;
+};
 
 @Injectable()
 export class WorkspaceResourcesService {
-  private readonly localSkillSyncs = new Map<string, Promise<void>>();
+  private readonly logger = new Logger(WorkspaceResourcesService.name);
+  private readonly localSkillSyncs = new Map<string, Promise<SkillSyncResult>>();
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
@@ -259,27 +441,49 @@ export class WorkspaceResourcesService {
     private readonly mcpClient: McpClientService,
   ) {}
 
-  /**
-   * Reconcile the operator's shared Skill directory into the existing
-   * skills/skill_files model. The directory stays authoritative for the copied
-   * content, so a role captures a normal Skill snapshot on its next save.
-   */
-  private async syncLocalSkillsFromDirectory(request: Request, workspaceSlug: string): Promise<void> {
-    const rootDirectory = localSkillRootDirectory();
-    const key = `${workspaceSlug}\0${rootDirectory}`;
-    const inFlight = this.localSkillSyncs.get(key);
+  /** Reconcile the two local roots for callers that only have a workspace id. */
+  async reconcileWorkspaceSkills(workspaceId: string): Promise<void> {
+    await this.syncLocalSkills(workspaceId);
+  }
+
+  async resolveSkillIds(workspaceId: string, skillIds: readonly string[]): Promise<string[]> {
+    await this.syncLocalSkills(workspaceId);
+    if (skillIds.length === 0) return [];
+    const aliases = await this.db.select({ oldSkillId: skillIdAliases.oldSkillId, currentSkillId: skillIdAliases.currentSkillId })
+      .from(skillIdAliases).where(eq(skillIdAliases.workspaceId, workspaceId));
+    const mapping = new Map(aliases.map((alias) => [alias.oldSkillId, alias.currentSkillId]));
+    return [...new Set(skillIds.map((skillId) => {
+      let current = skillId;
+      const visited = new Set<string>();
+      while (mapping.has(current) && !visited.has(current)) {
+        visited.add(current);
+        const next = mapping.get(current)!;
+        if (next === current) break;
+        current = next;
+      }
+      return current;
+    }))];
+  }
+
+  private async syncLocalSkills(workspaceId: string): Promise<SkillSyncResult> {
+    const inFlight = this.localSkillSyncs.get(workspaceId);
     if (inFlight) return inFlight;
-    const promise = this.performLocalSkillSync(request, workspaceSlug, rootDirectory).finally(() => this.localSkillSyncs.delete(key));
-    this.localSkillSyncs.set(key, promise);
+    const promise = this.performLocalSkillSync(workspaceId).finally(() => this.localSkillSyncs.delete(workspaceId));
+    this.localSkillSyncs.set(workspaceId, promise);
     return promise;
   }
 
-  private async performLocalSkillSync(request: Request, workspaceSlug: string, rootDirectory: string): Promise<void> {
-    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const scan = await scanLocalSkillRoot(rootDirectory);
-    const missingDefaultRoot = scan.rootMissing && rootDirectory === defaultLocalSkillRootDirectory();
-    if (!scan.available && !missingDefaultRoot) return;
-    const existingRows = await this.db.select().from(skills).where(and(eq(skills.workspaceId, team.id), eq(skills.source, 'local')));
+  private async performLocalSkillSync(workspaceId: string): Promise<SkillSyncResult> {
+    const initialScan = await scanLocalSkillRoots();
+    const unavailable = initialScan.roots.find((root) => !root.available && !root.rootMissing);
+    if (unavailable) throw new ServiceUnavailableException(unavailable.unavailableReason ?? `Skill root ${unavailable.root} is unavailable.`);
+    await this.ensurePlatformSkillPackage(workspaceId);
+    const legacyMigrations = await this.migrateLegacySkills(workspaceId);
+    const scan = await scanLocalSkillRoots();
+    const unavailableAfterMigration = scan.roots.find((root) => !root.available && !root.rootMissing);
+    if (unavailableAfterMigration) throw new ServiceUnavailableException(unavailableAfterMigration.unavailableReason ?? `Skill root ${unavailableAfterMigration.root} is unavailable.`);
+
+    const existingRows = await this.db.select().from(skills).where(eq(skills.workspaceId, workspaceId));
     const existingFiles = existingRows.length === 0
       ? []
       : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, existingRows.map((row) => row.id))).orderBy(asc(skillFiles.path));
@@ -287,126 +491,380 @@ export class WorkspaceResourcesService {
     for (const file of existingFiles) filesBySkill.set(file.skillId, [...(filesBySkill.get(file.skillId) ?? []), { path: file.path, content: file.content }]);
     const existingById = new Map(existingRows.map((row) => [row.id, row]));
 
-    const scannedIds = new Set<string>();
-    const invalidIds = new Set(scan.skipped.map((packageInfo) => localSkillId(team.id, packageInfo.directory)));
-    for (const skillPackage of scan.packages) {
-      const id = localSkillId(team.id, skillPackage.directory);
-      scannedIds.add(id);
+    const desired = new Map<string, { directory: string; root: SkillRootKind; package?: LocalSkillPackage; invalidReason?: string }>();
+    for (const skillPackage of scan.packages) desired.set(`${skillPackage.root}\0${skillPackage.directory}`, { directory: skillPackage.directory, root: skillPackage.root, package: skillPackage });
+    for (const skipped of scan.skipped) {
+      const key = `${skipped.root}\0${skipped.directory}`;
+      if (!desired.has(key)) desired.set(key, { directory: skipped.directory, root: skipped.root, invalidReason: skipped.reason });
+    }
+    const platformCoreDirectory = skillDirectoryName(WORKLITE_PLATFORM_SKILL_NAME);
+    const platformRootScan = scan.roots.find((root) => root.kind === 'platform');
+    const platformCorePackage = platformRootScan?.packages.find((skillPackage) => skillPackage.directory === platformCoreDirectory);
+    const platformCoreSkipped = platformRootScan?.skipped.find((item) => item.directory === platformCoreDirectory);
+    if (platformCorePackage) desired.set(`platform\0${platformCoreDirectory}`, { directory: platformCoreDirectory, root: 'platform', package: platformCorePackage });
+    else if (platformCoreSkipped) desired.set(`platform\0${platformCoreDirectory}`, { directory: platformCoreDirectory, root: 'platform', invalidReason: platformCoreSkipped.reason });
+
+    for (const item of desired.values()) {
+      const id = localSkillId(workspaceId, item.directory, item.root);
       const existing = existingById.get(id);
       const existingPackage = filesBySkill.get(id) ?? [];
-      const changed = !existing
-        || existing.name !== skillPackage.name
-        || existing.instructions !== skillPackage.instructions
-        || existing.version !== skillPackage.version
-        || existing.validation !== 'valid'
-        || !samePackageFiles(existingPackage, skillPackage.files);
-      if (!existing) {
-        await this.db.transaction((transaction) => {
-          transaction.insert(skills).values({
+      if (item.package) {
+        const skillPackage = item.package;
+        const changed = !existing
+          || existing.name !== skillPackage.name
+          || existing.root !== skillPackage.root
+          || existing.directory !== skillPackage.directory
+          || existing.instructions !== skillPackage.instructions
+          || existing.version !== skillPackage.version
+          || existing.validation !== 'valid'
+          || existing.validationReason !== null
+          || !samePackageFiles(existingPackage, skillPackage.files);
+        if (!existing) {
+          await this.db.transaction((transaction) => {
+            transaction.insert(skills).values({
+              id,
+              workspaceId,
+              name: skillPackage.name,
+              source: 'local',
+              root: skillPackage.root,
+              directory: skillPackage.directory,
+              version: skillPackage.version,
+              validation: 'valid',
+              validationReason: null,
+              instructions: skillPackage.instructions,
+              updatedAt: skillPackage.updatedAt,
+            }).run();
+            transaction.insert(skillFiles).values(skillPackage.files.map((file) => ({ skillId: id, ...file }))).run();
+          });
+        } else if (changed) {
+          await this.db.transaction((transaction) => {
+            transaction.update(skills).set({
+              name: skillPackage.name,
+              source: 'local',
+              root: skillPackage.root,
+              directory: skillPackage.directory,
+              version: skillPackage.version,
+              validation: 'valid',
+              validationReason: null,
+              instructions: skillPackage.instructions,
+              updatedAt: new Date(),
+            }).where(and(eq(skills.id, id), eq(skills.workspaceId, workspaceId))).run();
+            transaction.delete(skillFiles).where(eq(skillFiles.skillId, id)).run();
+            transaction.insert(skillFiles).values(skillPackage.files.map((file) => ({ skillId: id, ...file }))).run();
+          });
+        }
+      } else {
+        const reason = item.invalidReason ?? 'The Skill package is invalid.';
+        const changed = !existing
+          || existing.root !== item.root
+          || existing.directory !== item.directory
+          || existing.validation !== 'invalid'
+          || existing.validationReason !== reason
+          || existingPackage.length > 0;
+        if (!existing) {
+          await this.db.insert(skills).values({
             id,
-            workspaceId: team.id,
-            name: skillPackage.name,
+            workspaceId,
+            name: item.directory,
             source: 'local',
-            version: skillPackage.version,
-            validation: 'valid',
-            instructions: skillPackage.instructions,
-            updatedAt: skillPackage.updatedAt,
-          }).run();
-          transaction.insert(skillFiles).values(skillPackage.files.map((file) => ({ skillId: id, ...file }))).run();
-        });
-      } else if (changed) {
-        await this.db.transaction((transaction) => {
-          transaction.update(skills).set({
-            name: skillPackage.name,
-            source: 'local',
-            version: skillPackage.version,
-            validation: 'valid',
-            instructions: skillPackage.instructions,
+            root: item.root,
+            directory: item.directory,
+            version: 'invalid',
+            validation: 'invalid',
+            validationReason: reason,
+            instructions: '',
             updatedAt: new Date(),
-          }).where(and(eq(skills.id, id), eq(skills.workspaceId, team.id))).run();
-          transaction.delete(skillFiles).where(eq(skillFiles.skillId, id)).run();
-          transaction.insert(skillFiles).values(skillPackage.files.map((file) => ({ skillId: id, ...file }))).run();
-        });
+          }).run();
+        } else if (changed) {
+          await this.db.transaction((transaction) => {
+            transaction.update(skills).set({
+              name: existing.name,
+              source: 'local',
+              root: item.root,
+              directory: item.directory,
+              validation: 'invalid',
+              validationReason: reason,
+              instructions: '',
+              updatedAt: new Date(),
+            }).where(and(eq(skills.id, id), eq(skills.workspaceId, workspaceId))).run();
+            transaction.delete(skillFiles).where(eq(skillFiles.skillId, id)).run();
+          });
+        }
       }
     }
 
+    const desiredIds = new Set([...desired.values()].map((item) => localSkillId(workspaceId, item.directory, item.root)));
+    const idByName = new Map<string, string>();
+    for (const skillPackage of scan.packages) {
+      const key = skillNameKey(skillPackage.name);
+      if (key && !idByName.has(key)) idByName.set(key, localSkillId(workspaceId, skillPackage.directory, skillPackage.root));
+    }
+
+    const mapping = new Map<string, string>();
+    const aliasNames = new Map<string, string>();
+    const deleteIds = new Set<string>();
+    for (const [oldId, migration] of legacyMigrations) {
+      const currentId = oldId === 'sk_worklite_platform'
+        ? localSkillId(workspaceId, skillDirectoryName(WORKLITE_PLATFORM_SKILL_NAME), 'platform')
+        : idByName.get(skillNameKey(migration.name)) ?? migration.currentId;
+      mapping.set(oldId, currentId);
+      aliasNames.set(oldId, migration.name);
+      deleteIds.add(oldId);
+    }
     for (const row of existingRows) {
-      if (scannedIds.has(row.id)) continue;
-      if (invalidIds.has(row.id)) {
-        if (row.validation !== 'invalid') {
-          await this.db.update(skills).set({ validation: 'invalid' }).where(and(eq(skills.id, row.id), eq(skills.workspaceId, team.id)));
-        }
-        continue;
-      }
-      const reason = await this.localSkillReferenceReason(team.id, row.id);
-      if (reason) {
-        if (row.validation !== 'missing') {
-          await this.db.update(skills).set({ validation: 'missing' }).where(and(eq(skills.id, row.id), eq(skills.workspaceId, team.id)));
-        }
-        continue;
-      }
-      await this.db.delete(skills).where(and(eq(skills.id, row.id), eq(skills.workspaceId, team.id)));
+      if (row.source !== 'local' || desiredIds.has(row.id)) continue;
+      const sameDirectoryId = localSkillId(workspaceId, row.directory, row.root);
+      const currentId = row.root === 'platform' && row.directory === skillDirectoryName(WORKLITE_PLATFORM_SKILL_NAME)
+        ? localSkillId(workspaceId, skillDirectoryName(WORKLITE_PLATFORM_SKILL_NAME), 'platform')
+        : row.id === previousLocalSkillId(workspaceId, row.directory) && desiredIds.has(sameDirectoryId)
+          ? sameDirectoryId
+          : idByName.get(skillNameKey(row.name));
+      if (!currentId || currentId === row.id) continue;
+      mapping.set(row.id, currentId);
+      aliasNames.set(row.id, row.name);
+      deleteIds.add(row.id);
     }
+
+    const previousAliases = await this.db.select().from(skillIdAliases).where(eq(skillIdAliases.workspaceId, workspaceId));
+    const previousAliasById = new Map(previousAliases.map((alias) => [alias.oldSkillId, alias]));
+    const aliasUpdates = new Map<string, { currentSkillId: string; skillName: string }>();
+    for (const alias of previousAliases) {
+      const isPlatformCore = skillNameKey(alias.skillName) === skillNameKey(WORKLITE_PLATFORM_SKILL_NAME);
+      const platformCoreId = localSkillId(workspaceId, skillDirectoryName(WORKLITE_PLATFORM_SKILL_NAME), 'platform');
+      const currentId = (isPlatformCore && desiredIds.has(platformCoreId) ? platformCoreId : undefined)
+        ?? idByName.get(skillNameKey(alias.skillName))
+        ?? (desiredIds.has(alias.currentSkillId) ? alias.currentSkillId : undefined);
+      if (!currentId) continue;
+      if (currentId === alias.oldSkillId) continue;
+      mapping.set(alias.oldSkillId, currentId);
+      aliasNames.set(alias.oldSkillId, alias.skillName);
+      if (currentId !== alias.currentSkillId) aliasUpdates.set(alias.oldSkillId, { currentSkillId: currentId, skillName: alias.skillName });
+      if (existingById.has(alias.oldSkillId) && !desiredIds.has(alias.oldSkillId)) deleteIds.add(alias.oldSkillId);
+    }
+    for (const [oldId, currentId] of mapping) {
+      const skillName = aliasNames.get(oldId);
+      if (!skillName || oldId === currentId || previousAliasById.get(oldId)?.currentSkillId === currentId) continue;
+      aliasUpdates.set(oldId, { currentSkillId: currentId, skillName });
+    }
+
+    await this.applySkillIdMigrations(workspaceId, mapping, aliasUpdates, deleteIds);
+
+    const obsolete = existingRows.filter((row) => !desiredIds.has(row.id) && !deleteIds.has(row.id));
+    if (obsolete.length > 0) {
+      const cleanup = await this.removeSkillReferences(workspaceId, new Set(obsolete.map((row) => row.id)), 'disk_removed');
+      await this.db.delete(skills).where(and(eq(skills.workspaceId, workspaceId), inArray(skills.id, obsolete.map((row) => row.id))));
+      this.logger.log(`Removed ${obsolete.length} Skill(s) whose disk directories disappeared; cleaned references ${JSON.stringify(cleanup)}.`);
+    }
+
+    const conflicts = new Map<string, SkillConflictView>();
+    for (const conflict of scan.conflicts) {
+      conflicts.set(localSkillId(workspaceId, conflict.winningDirectory, conflict.winningRoot), {
+        ignoredRoot: conflict.ignoredRoot,
+        ignoredPath: conflict.ignoredPath,
+        reason: conflict.reason,
+      });
+    }
+    return { conflicts };
   }
 
-  private async localSkillReferenceReason(workspaceId: string, skillId: string): Promise<string | undefined> {
-    const [assignment] = await this.db.select({ agentId: agentSkills.agentId }).from(agentSkills).where(eq(agentSkills.skillId, skillId)).limit(1);
-    if (assignment) return 'assigned to an Agent';
-    if (await this.currentChatSkillIsReferenced(workspaceId, skillId)) return 'selected in Chat configuration';
-    if (await this.activeChatCapabilityIsReferenced(workspaceId, 'skills', skillId)) return 'captured by an active Chat turn';
-    if (await this.workflowResourceIsReferenced(workspaceId, 'skillIds', skillId)) return 'referenced by a Workflow draft or published version';
-    if (await this.agentTeamResourceIsReferenced(workspaceId, 'skills', skillId)) return 'referenced by an Agent Team configuration or captured version';
-    return undefined;
+  private async ensurePlatformSkillPackage(workspaceId: string): Promise<void> {
+    const coreSkillId = localSkillId(workspaceId, skillDirectoryName(WORKLITE_PLATFORM_SKILL_NAME), 'platform');
+    const [deleted] = await this.db.select({ id: auditLogs.id }).from(auditLogs)
+      .where(and(eq(auditLogs.workspaceId, workspaceId), eq(auditLogs.action, 'skill.deleted'), eq(auditLogs.resource, coreSkillId))).limit(1);
+    if (deleted) return;
+    await writeSkillDirectory(platformSkillRootDirectory(), skillDirectoryName(WORKLITE_PLATFORM_SKILL_NAME), platformSkillPackageFiles());
   }
 
-  async skills(request: Request, workspaceSlug: string): Promise<SkillView[]> {
-    await this.syncLocalSkillsFromDirectory(request, workspaceSlug);
-    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const rows = (await this.db.select().from(skills).where(eq(skills.workspaceId, team.id)).orderBy(desc(skills.updatedAt))).filter((row) => row.id !== CHAT_PLATFORM_SKILL_ID);
-    const files = rows.length === 0 ? [] : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, rows.map((row) => row.id))).orderBy(asc(skillFiles.path));
-    const bySkill = new Map<string, PackageFile[]>();
-    for (const file of files) bySkill.set(file.skillId, [...(bySkill.get(file.skillId) ?? []), { path: file.path, content: file.content }]);
-    return rows.map((row) => skillView(row, workspaceSlug, bySkill.get(row.id) ?? []));
+  private async migrateLegacySkills(workspaceId: string): Promise<Map<string, { currentId: string; name: string }>> {
+    const existingRows = await this.db.select().from(skills)
+      .where(and(eq(skills.workspaceId, workspaceId), sql`${skills.source} <> 'local'`))
+      .orderBy(asc(skills.name), asc(skills.id));
+    const rows = existingRows;
+    const coreSeeds = rows.filter((row) => row.id === 'sk_worklite_platform');
+    const coreDirectory = skillDirectoryName(WORKLITE_PLATFORM_SKILL_NAME);
+    const coreSkillId = localSkillId(workspaceId, coreDirectory, 'platform');
+    const [coreWasDeleted] = await this.db.select({ id: auditLogs.id }).from(auditLogs)
+      .where(and(eq(auditLogs.workspaceId, workspaceId), eq(auditLogs.action, 'skill.deleted'), eq(auditLogs.resource, coreSkillId))).limit(1);
+    const mapping = new Map<string, { currentId: string; name: string }>();
+    for (const row of coreSeeds) {
+      if (coreWasDeleted) {
+        await this.removeSkillReferences(workspaceId, new Set([row.id]), 'user_deleted');
+        await this.db.delete(skills).where(and(eq(skills.workspaceId, workspaceId), eq(skills.id, row.id)));
+      } else {
+        mapping.set(row.id, { currentId: coreSkillId, name: WORKLITE_PLATFORM_SKILL_NAME });
+      }
+    }
+    if (coreSeeds.length === 0 && !coreWasDeleted) {
+      mapping.set('sk_worklite_platform', { currentId: coreSkillId, name: WORKLITE_PLATFORM_SKILL_NAME });
+    }
+    const legacyRows = rows.filter((row) => row.id !== 'sk_worklite_platform');
+    if (legacyRows.length === 0) return mapping;
+    const files = await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, legacyRows.map((row) => row.id))).orderBy(asc(skillFiles.path));
+    const platformRoot = platformSkillRootDirectory();
+    await mkdir(platformRoot, { recursive: true });
+    const platformScan = await scanLocalSkillRoot(platformRoot, 'platform');
+    const agentsScan = await scanLocalSkillRoot(localSkillRootDirectory(), 'agents');
+    const packages = new Map(platformScan.packages.map((skillPackage) => [skillPackage.directory, skillPackage]));
+    const takenDirectories = new Set([
+      ...platformScan.packages.map((skillPackage) => skillPackage.directory),
+      ...platformScan.skipped.map((skillPackage) => skillPackage.directory),
+      ...agentsScan.packages.map((skillPackage) => skillPackage.directory),
+      ...agentsScan.skipped.map((skillPackage) => skillPackage.directory),
+    ]);
+    for (const row of legacyRows) {
+      const packageFiles = storedPackageFiles(files.filter((file) => file.skillId === row.id).map(({ path, content }) => ({ path, content })), row);
+      const base = skillDirectoryName(row.name || row.id);
+      let directory: string | undefined;
+      for (let index = 1; index <= 1000; index += 1) {
+        const candidate = suffixDirectory(base, index);
+        const existingPackage = packages.get(candidate);
+        if (existingPackage && samePackageFiles(existingPackage.files, packageFiles)) {
+          directory = candidate;
+          break;
+        }
+        if (takenDirectories.has(candidate)) continue;
+        const written = await writeSkillDirectory(platformRoot, candidate, packageFiles);
+        takenDirectories.add(candidate);
+        if (written === 'created') {
+          packages.set(candidate, {
+            root: 'platform', rootPath: platformRoot, directory: candidate, name: row.name,
+            description: '', metadata: {}, version: row.version, instructions: packageFiles.find((file) => file.path === 'SKILL.md')?.content ?? '',
+            files: packageFiles, updatedAt: new Date(),
+          });
+          directory = candidate;
+          break;
+        }
+      }
+      if (!directory) throw new Error(`Could not allocate a platform Skill directory for ${row.name}.`);
+      mapping.set(row.id, { currentId: localSkillId(workspaceId, directory, 'platform'), name: row.name });
+    }
+    if (mapping.size > 0) this.logger.log(`Migrated ${mapping.size} legacy Skill(s) into ${platformRoot}.`);
+    return mapping;
   }
 
-  async skill(request: Request, workspaceSlug: string, skillId: string): Promise<SkillView> {
-    if (skillId === CHAT_PLATFORM_SKILL_ID) throw new NotFoundException('Skill not found');
-    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [row] = await this.db.select().from(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).limit(1);
-    if (!row) throw new NotFoundException('Skill not found');
-    const files = await this.db.select({ path: skillFiles.path, content: skillFiles.content }).from(skillFiles).where(eq(skillFiles.skillId, row.id)).orderBy(asc(skillFiles.path));
-    return skillView(row, workspaceSlug, files);
-  }
+  private async applySkillIdMigrations(
+    workspaceId: string,
+    mapping: ReadonlyMap<string, string>,
+    aliases: ReadonlyMap<string, { currentSkillId: string; skillName: string }>,
+    deleteIds: ReadonlySet<string>,
+  ): Promise<void> {
+    await this.db.transaction((transaction) => {
+      const oldIds = [...mapping.keys()];
+      const assignments = oldIds.length > 0
+        ? transaction.select().from(agentSkills).where(inArray(agentSkills.skillId, oldIds)).all()
+        : [];
+      for (const assignment of assignments) {
+        const nextId = mapping.get(assignment.skillId);
+        if (!nextId || nextId === assignment.skillId) continue;
+        transaction.delete(agentSkills).where(and(eq(agentSkills.agentId, assignment.agentId), eq(agentSkills.skillId, assignment.skillId))).run();
+        transaction.insert(agentSkills).values({ agentId: assignment.agentId, skillId: nextId }).onConflictDoNothing().run();
+      }
 
-  async createSkill(request: Request, workspaceSlug: string, input: CreateSkillRequest): Promise<SkillView> {
-    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const name = input.name?.trim();
-    if (!name) throw new BadRequestException('Skill name is required.');
-    if (input.source !== undefined && input.source !== 'online') throw new BadRequestException('Archive Skill creation is not available yet.');
-    const files = validatePackageFiles(input.files);
-    const id = `sk_${randomUUID()}`;
-    const [row] = await this.db.transaction((transaction) => {
-      const inserted = transaction.insert(skills).values({ id, workspaceId: team.id, name, source: 'online', version: 'draft', validation: 'pending', instructions: files.find((file) => file.path === 'SKILL.md')?.content ?? '' }).returning().all();
-      transaction.insert(skillFiles).values(files.map((file) => ({ skillId: id, ...file }))).run();
-      return inserted;
+      const [configuration] = transaction.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, workspaceId)).orderBy(desc(chatConfigurations.revision)).limit(1).all();
+      const currentSkills = transaction.select({ id: skills.id, name: skills.name, instructions: skills.instructions, root: skills.root, directory: skills.directory }).from(skills).where(eq(skills.workspaceId, workspaceId)).all();
+      const platformIds = new Set(currentSkills.filter((skill) => skill.root === 'platform' && skill.directory === skillDirectoryName(WORKLITE_PLATFORM_SKILL_NAME)).map((skill) => skill.id));
+      if (configuration) {
+        const skillIds = mapSkillIds(configuration.skillIds, mapping).filter((id) => id !== 'sk_worklite_platform' && !platformIds.has(id));
+        if (!sameStringList(skillIds, configuration.skillIds)) transaction.update(chatConfigurations).set({ skillIds }).where(and(eq(chatConfigurations.workspaceId, workspaceId), eq(chatConfigurations.revision, configuration.revision))).run();
+      }
+
+      const drafts = transaction.select().from(workflowDrafts).where(eq(workflowDrafts.workspaceId, workspaceId)).all();
+      for (const draft of drafts) {
+        const definition = rewriteWorkflowSkillIds(draft.definition, mapping);
+        if (definition) transaction.update(workflowDrafts).set({ definition, updatedAt: new Date() }).where(eq(workflowDrafts.id, draft.id)).run();
+      }
+
+      const currentFiles = currentSkills.length === 0 ? [] : transaction.select().from(skillFiles).where(inArray(skillFiles.skillId, currentSkills.map((skill) => skill.id))).orderBy(asc(skillFiles.path)).all();
+      const currentSnapshots = new Map<string, StoredAgentTeamSkillSnapshot>();
+      for (const skill of currentSkills) currentSnapshots.set(skill.id, {
+        id: skill.id,
+        name: skill.name,
+        instructions: skill.instructions,
+        files: currentFiles.filter((file) => file.skillId === skill.id).map(({ path, content }) => ({ path, content })),
+      });
+      const teams = transaction.select().from(agentTeams).where(eq(agentTeams.workspaceId, workspaceId)).all();
+      for (const team of teams) {
+        let changed = false;
+        const roles = team.roles.map((role) => {
+          const next = rewriteRoleSkillIds(role, mapping, false, currentSnapshots);
+          if (next) changed = true;
+          return next ?? role;
+        });
+        if (changed) transaction.update(agentTeams).set({ roles, updatedAt: new Date() }).where(eq(agentTeams.id, team.id)).run();
+      }
+
+      for (const [oldSkillId, alias] of aliases) {
+        transaction.insert(skillIdAliases).values({ workspaceId, oldSkillId, currentSkillId: alias.currentSkillId, skillName: alias.skillName })
+          .onConflictDoUpdate({ target: [skillIdAliases.workspaceId, skillIdAliases.oldSkillId], set: { currentSkillId: alias.currentSkillId, skillName: alias.skillName } }).run();
+        transaction.insert(auditLogs).values({
+          id: `audit_${randomUUID()}`,
+          workspaceId,
+          action: 'skill.migrated',
+          resource: oldSkillId,
+          metadata: { oldSkillId, currentSkillId: alias.currentSkillId, skillName: alias.skillName },
+        }).run();
+      }
+      if (deleteIds.size > 0) transaction.delete(skills).where(and(eq(skills.workspaceId, workspaceId), inArray(skills.id, [...deleteIds]))).run();
     });
-    if (!row) throw new NotFoundException('Skill could not be created');
-    return skillView(row, workspaceSlug, files);
   }
 
-  async importSkill(request: Request, workspaceSlug: string, input: ImportSkillRequest): Promise<SkillView> {
-    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const name = input.name?.trim();
-    if (!name) throw new BadRequestException('Skill name is required.');
-    const files = validatePackageFiles(input.files);
-    const id = `sk_${randomUUID()}`;
-    const [row] = await this.db.transaction((transaction) => {
-      const inserted = transaction.insert(skills).values({ id, workspaceId: team.id, name, source: 'archive', version: 'draft', validation: 'pending', instructions: files.find((file) => file.path === 'SKILL.md')?.content ?? '' }).returning().all();
-      transaction.insert(skillFiles).values(files.map((file) => ({ skillId: id, ...file }))).run();
-      return inserted;
+  private async removeSkillReferences(workspaceId: string, skillIds: ReadonlySet<string>, reason: 'disk_removed' | 'user_deleted'): Promise<SkillReferenceCleanup> {
+    const cleanup = emptySkillCleanup();
+    if (skillIds.size === 0) return cleanup;
+    const ids = [...skillIds];
+    const removeMapping = new Map(ids.map((id) => [id, id]));
+    await this.db.transaction((transaction) => {
+      const assignments = transaction.select().from(agentSkills).where(inArray(agentSkills.skillId, ids)).all();
+      if (assignments.length > 0) {
+        transaction.delete(agentSkills).where(inArray(agentSkills.skillId, ids)).run();
+        cleanup.agentIds = [...new Set(assignments.map((assignment) => assignment.agentId))];
+      }
+
+      const [configuration] = transaction.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, workspaceId)).orderBy(desc(chatConfigurations.revision)).limit(1).all();
+      if (configuration) {
+        const nextIds = mapSkillIds(configuration.skillIds, removeMapping, true);
+        if (!sameStringList(nextIds, configuration.skillIds)) {
+          transaction.update(chatConfigurations).set({ skillIds: nextIds }).where(and(eq(chatConfigurations.workspaceId, workspaceId), eq(chatConfigurations.revision, configuration.revision))).run();
+          cleanup.chatConfigurationRevisions.push(configuration.revision);
+        }
+      }
+
+      const drafts = transaction.select().from(workflowDrafts).where(eq(workflowDrafts.workspaceId, workspaceId)).all();
+      for (const draft of drafts) {
+        const nodeIds = workflowSkillNodeIds(draft.definition, skillIds);
+        if (nodeIds.length === 0) continue;
+        const definition = rewriteWorkflowSkillIds(draft.definition, removeMapping, true);
+        if (!definition) continue;
+        transaction.update(workflowDrafts).set({ definition, updatedAt: new Date() }).where(eq(workflowDrafts.id, draft.id)).run();
+        cleanup.workflowDrafts.push({ workflowId: draft.workflowId, nodeIds });
+      }
+
+      const teams = transaction.select().from(agentTeams).where(eq(agentTeams.workspaceId, workspaceId)).all();
+      for (const team of teams) {
+        let changed = false;
+        const roles = team.roles.map((role) => {
+          const next = rewriteRoleSkillIds(role, removeMapping, true);
+          if (!next) return role;
+          changed = true;
+          cleanup.agentTeamRoles.push({ teamId: team.id, role: role.role });
+          for (const instance of next.developerInstances ?? []) {
+            const previous = role.developerInstances?.find((candidate) => candidate.developerId === instance.developerId);
+            if (previous && previous.skills.length !== instance.skills.length) cleanup.agentTeamDeveloperInstances.push({ teamId: team.id, role: role.role, developerId: instance.developerId });
+          }
+          return next;
+        });
+        if (changed) transaction.update(agentTeams).set({ roles, updatedAt: new Date() }).where(eq(agentTeams.id, team.id)).run();
+      }
+
+      for (const skillId of ids) transaction.insert(auditLogs).values({
+        id: `audit_${randomUUID()}`,
+        workspaceId,
+        action: 'skill.references_cleaned',
+        resource: skillId,
+        metadata: { skillId, reason, cleaned: cleanup },
+      }).run();
     });
-    if (!row) throw new NotFoundException('Skill could not be imported');
-    return skillView(row, workspaceSlug, files);
+    return cleanup;
   }
 
   private async activeChatCapabilityIsReferenced(workspaceId: string, field: 'skills' | 'mcpServers', id: string) {
@@ -414,56 +872,122 @@ export class WorkspaceResourcesService {
     return rows.some(({ snapshot }) => snapshot?.[field].some((resource) => resource.id === id));
   }
 
-  private async currentChatSkillIsReferenced(workspaceId: string, skillId: string) {
-    const [configuration] = await this.db.select({ skillIds: chatConfigurations.skillIds }).from(chatConfigurations)
-      .where(eq(chatConfigurations.workspaceId, workspaceId)).orderBy(desc(chatConfigurations.revision)).limit(1);
-    return configuration?.skillIds.includes(skillId) ?? false;
+  async skills(request: Request, workspaceSlug: string): Promise<SkillView[]> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const sync = await this.syncLocalSkills(team.id);
+    const coreDirectory = skillDirectoryName(WORKLITE_PLATFORM_SKILL_NAME);
+    const rows = (await this.db.select().from(skills).where(eq(skills.workspaceId, team.id)).orderBy(desc(skills.updatedAt)))
+      .filter((row) => row.root !== 'platform' || row.directory !== coreDirectory);
+    const files = rows.length === 0 ? [] : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, rows.map((row) => row.id))).orderBy(asc(skillFiles.path));
+    const bySkill = new Map<string, PackageFile[]>();
+    for (const file of files) bySkill.set(file.skillId, [...(bySkill.get(file.skillId) ?? []), { path: file.path, content: file.content }]);
+    return rows.map((row) => skillView(row, workspaceSlug, bySkill.get(row.id) ?? [], sync.conflicts.get(row.id)));
   }
 
-  async deleteSkill(request: Request, workspaceSlug: string, skillId: string): Promise<void> {
+  async skill(request: Request, workspaceSlug: string, skillId: string): Promise<SkillView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [existing] = await this.db.select().from(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).limit(1);
-    if (!existing) throw new NotFoundException('Skill not found');
-    if (existing.source === 'built-in') throw new BadRequestException('Built-in Skills cannot be deleted.');
-    if (existing.source === 'local') throw new BadRequestException('Local directory Skills cannot be deleted from WorkLite. Remove the package from the configured local Skill root instead.');
-    // Legacy Chat Skill assignment rows are ignored; revisioned Chat selections are checked below.
-    const [assignment] = await this.db.select({ agentId: agentSkills.agentId }).from(agentSkills).where(and(eq(agentSkills.skillId, skillId), ne(agentSkills.agentId, CHAT_AGENT_ID))).limit(1);
-    if (assignment) throw new BadRequestException('Remove this Skill from every Agent before deleting it.');
-    if (await this.currentChatSkillIsReferenced(team.id, skillId)) throw new BadRequestException('Remove this Skill from Chat settings before deleting it.');
-    if (await this.activeChatCapabilityIsReferenced(team.id, 'skills', skillId)) throw new BadRequestException('This Skill is captured by an active Chat turn.');
-    if (await this.workflowResourceIsReferenced(team.id, 'skillIds', skillId)) throw new BadRequestException('Remove this Skill from every Workflow draft and published version before deleting it.');
-    if (await this.agentTeamResourceIsReferenced(team.id, 'skills', skillId)) throw new BadRequestException('Remove this Skill from every Agent Team configuration and captured Team version before deleting it.');
-    await this.db.delete(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id)));
-  }
-
-  async updateSkill(request: Request, workspaceSlug: string, skillId: string, input: UpdateSkillRequest): Promise<SkillView> {
-    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [existing] = await this.db.select().from(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).limit(1);
-    if (!existing) throw new NotFoundException('Skill not found');
-    if (existing.source === 'built-in') throw new BadRequestException('Built-in Skills cannot be changed.');
-    if (existing.source === 'local') throw new BadRequestException('Local directory Skills are read-only in WorkLite. Change the package in the configured local Skill root and scan again.');
-    if (Object.keys(input).some((key) => key !== 'name' && key !== 'files')) throw new BadRequestException('Only the Skill name and package files can be changed.');
-    const name = input.name === undefined ? existing.name : input.name.trim();
-    if (!name) throw new BadRequestException('Skill name is required.');
-    const files = input.files === undefined
-      ? await this.db.select({ path: skillFiles.path, content: skillFiles.content }).from(skillFiles).where(eq(skillFiles.skillId, skillId)).orderBy(asc(skillFiles.path))
-      : validatePackageFiles(input.files);
-    const [row] = await this.db.transaction((transaction) => {
-      const updated = transaction.update(skills).set({ name, instructions: files.find((file) => file.path === 'SKILL.md')?.content ?? '', updatedAt: new Date() }).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).returning().all();
-      if (input.files !== undefined) {
-        transaction.delete(skillFiles).where(eq(skillFiles.skillId, skillId)).run();
-        transaction.insert(skillFiles).values(files.map((file) => ({ skillId, ...file }))).run();
-      }
-      return updated;
-    });
+    const sync = await this.syncLocalSkills(team.id);
+    const [row] = await this.db.select().from(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).limit(1);
     if (!row) throw new NotFoundException('Skill not found');
-    return skillView(row, workspaceSlug, files);
+    const files = await this.db.select({ path: skillFiles.path, content: skillFiles.content }).from(skillFiles).where(eq(skillFiles.skillId, row.id)).orderBy(asc(skillFiles.path));
+    return skillView(row, workspaceSlug, files, sync.conflicts.get(row.id));
+  }
+
+  async createSkill(request: Request, workspaceSlug: string, input: CreateSkillRequest): Promise<SkillView> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    return this.createPlatformSkill(team.id, workspaceSlug, input, 'created');
+  }
+
+  async importSkill(request: Request, workspaceSlug: string, input: ImportSkillRequest): Promise<SkillView> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    return this.createPlatformSkill(team.id, workspaceSlug, input, 'imported');
+  }
+
+  private async createPlatformSkill(workspaceId: string, workspaceSlug: string, input: CreateSkillRequest, operation: 'created' | 'imported'): Promise<SkillView> {
+    const name = input.name?.trim();
+    if (!name) throw new BadRequestException('Skill name is required.');
+    const files = validatePackageFiles(input.files);
+    const packageName = skillFrontmatter(files).name?.trim() || name;
+    if (skillNameKey(packageName) === skillNameKey(WORKLITE_PLATFORM_SKILL_NAME)) {
+      throw new ConflictException(`The Skill name "${WORKLITE_PLATFORM_SKILL_NAME}" is reserved for WorkLite.`);
+    }
+    const base = skillDirectoryName(name);
+    await this.syncLocalSkills(workspaceId);
+    const roots = await scanLocalSkillRoots();
+    const unavailable = roots.roots.find((root) => !root.available && !root.rootMissing);
+    if (unavailable) throw new ServiceUnavailableException(unavailable.unavailableReason ?? `Skill root ${unavailable.root} is unavailable.`);
+    const agentsRoot = roots.roots.find((root) => root.kind === 'agents');
+    const userCopy = agentsRoot?.packages.find((skillPackage) => skillNameKey(skillPackage.name) === skillNameKey(packageName));
+    if (userCopy) throw new ConflictException(`A Skill named "${userCopy.name}" already exists in the user Agent root and takes priority.`);
+    const takenDirectories = new Set([
+      ...roots.packages.map((skillPackage) => skillPackage.directory),
+      ...roots.skipped.map((skillPackage) => skillPackage.directory),
+      ...roots.conflicts.map((conflict) => conflict.ignoredDirectory),
+    ]);
+    const platformRoot = platformSkillRootDirectory();
+    let directory: string | undefined;
+    for (let index = 1; index <= 1000; index += 1) {
+      const candidate = suffixDirectory(base, index);
+      if (takenDirectories.has(candidate)) continue;
+      const written = await writeSkillDirectory(platformRoot, candidate, files);
+      takenDirectories.add(candidate);
+      if (written === 'created') {
+        directory = candidate;
+        break;
+      }
+    }
+    if (!directory) throw new ServiceUnavailableException('Could not allocate a Skill directory in the platform root.');
+    const sync = await this.syncLocalSkills(workspaceId);
+    const id = localSkillId(workspaceId, directory, 'platform');
+    const [row] = await this.db.select().from(skills).where(and(eq(skills.id, id), eq(skills.workspaceId, workspaceId))).limit(1);
+    if (!row) throw new NotFoundException(`Skill could not be ${operation}`);
+    const storedFiles = await this.db.select({ path: skillFiles.path, content: skillFiles.content }).from(skillFiles).where(eq(skillFiles.skillId, id)).orderBy(asc(skillFiles.path));
+    return skillView(row, workspaceSlug, storedFiles, sync.conflicts.get(id));
+  }
+
+  async deleteSkill(request: Request, workspaceSlug: string, skillId: string): Promise<DeleteSkillResult> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.syncLocalSkills(team.id);
+    const [existing] = await this.db.select().from(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).limit(1);
+    if (!existing) throw new NotFoundException('Skill not found');
+    const directoryPath = skillDirectoryPath(existing.root, existing.directory);
+    const roots = await scanLocalSkillRoots();
+    const fallback = roots.roots.flatMap((root) => root.kind === existing.root ? [] : root.packages)
+      .find((skillPackage) => skillNameKey(skillPackage.name) === skillNameKey(existing.name));
+    const fallbackId = fallback ? localSkillId(team.id, fallback.directory, fallback.root) : undefined;
+    const cleanup = await this.removeSkillReferences(team.id, new Set([skillId]), 'user_deleted');
+    await rm(directoryPath, { recursive: true, force: true });
+    await this.db.transaction((transaction) => {
+      transaction.delete(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).run();
+      if (fallback && fallbackId) {
+        transaction.insert(skillIdAliases).values({ workspaceId: team.id, oldSkillId: skillId, currentSkillId: fallbackId, skillName: fallback.name })
+          .onConflictDoUpdate({ target: [skillIdAliases.workspaceId, skillIdAliases.oldSkillId], set: { currentSkillId: fallbackId, skillName: fallback.name } }).run();
+        transaction.insert(auditLogs).values({
+          id: `audit_${randomUUID()}`,
+          workspaceId: team.id,
+          action: 'skill.historical_alias_created',
+          resource: skillId,
+          metadata: { oldSkillId: skillId, currentSkillId: fallbackId, skillName: fallback.name },
+        }).run();
+      }
+      transaction.insert(auditLogs).values({
+        id: `audit_${randomUUID()}`,
+        workspaceId: team.id,
+        action: 'skill.deleted',
+        resource: skillId,
+        metadata: { skillId, root: existing.root, directory: existing.directory, directoryPath, cleaned: cleanup },
+      }).run();
+    });
+    this.logger.log(`Deleted Skill ${skillId} from ${existing.root} root at ${directoryPath}; cleaned references ${JSON.stringify(cleanup)}.`);
+    return { deleted: skillId, directory: existing.directory, root: existing.root, directoryPath, cleaned: cleanup };
   }
 
   async executeSkillScript(request: Request, workspaceSlug: string, skillId: string, input: ExecuteSkillScriptRequest): Promise<CommandExecutionView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.syncLocalSkills(team.id);
     const [skill] = await this.db.select().from(skills).where(and(eq(skills.id, skillId), eq(skills.workspaceId, team.id))).limit(1);
     if (!skill) throw new NotFoundException('Skill not found');
+    if (skill.validation !== 'valid') throw new BadRequestException(skill.validationReason ?? 'This Skill package is invalid and cannot be executed.');
     if (!input || typeof input.scriptPath !== 'string' || !Array.isArray(input.arguments) || input.arguments.some((argument) => typeof argument !== 'string')) {
       throw new BadRequestException('A Skill script path and string argument array are required.');
     }
@@ -752,9 +1276,10 @@ export class WorkspaceResourcesService {
 
   async platformSnapshot(request: Request, workspaceSlug: string) {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const skillSync = await this.syncLocalSkills(workspace.id);
     const [providerRows, skillRows, mcpRows, workflowRows, agentTeamRows, scheduleRows, settingsRows, officialAccountRows] = await Promise.all([
       this.providers(request, workspaceSlug),
-      this.db.select().from(skills).where(and(eq(skills.workspaceId, workspace.id), ne(skills.id, CHAT_PLATFORM_SKILL_ID))).orderBy(skills.name),
+      this.db.select().from(skills).where(eq(skills.workspaceId, workspace.id)).orderBy(skills.name),
       this.db.select().from(mcpServers).where(eq(mcpServers.workspaceId, workspace.id)).orderBy(mcpServers.name),
       this.db.select().from(workflows).where(eq(workflows.workspaceId, workspace.id)).orderBy(workflows.name),
       this.db.select().from(agentTeams).where(eq(agentTeams.workspaceId, workspace.id)).orderBy(agentTeams.name),
@@ -762,8 +1287,10 @@ export class WorkspaceResourcesService {
       this.db.select().from(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspace.id)).limit(1),
       this.db.select({ id: wechatOfficialAccounts.id, displayName: wechatOfficialAccounts.displayName, status: wechatOfficialAccounts.status }).from(wechatOfficialAccounts).where(eq(wechatOfficialAccounts.workspaceId, workspace.id)),
     ]);
+    const coreDirectory = skillDirectoryName(WORKLITE_PLATFORM_SKILL_NAME);
+    const visibleSkillRows = skillRows.filter((row) => row.root !== 'platform' || row.directory !== coreDirectory);
     const providerNames = new Map(providerRows.map((provider) => [provider.id, provider.name]));
-    const skillNames = new Map(skillRows.map((skill) => [skill.id, skill.name]));
+    const skillNames = new Map(visibleSkillRows.map((skill) => [skill.id, skill.name]));
     const mcpNames = new Map(mcpRows.map((server) => [server.id, server.name]));
 
     const snapshot = {
@@ -971,12 +1498,17 @@ export class WorkspaceResourcesService {
         status: provider.status,
         models: provider.models ?? [],
       })),
-      skills: skillRows.map((skill) => ({
+      skills: visibleSkillRows.map((skill) => ({
         id: skill.id,
         name: skill.name,
         source: skill.source,
+        root: skill.root,
+        rootPath: skillRootDirectory(skill.root),
+        directory: skill.directory,
         version: skill.version,
         validation: skill.validation,
+        ...(skill.validationReason ? { validationReason: skill.validationReason } : {}),
+        ...(skillSync.conflicts.get(skill.id) ? { conflict: skillSync.conflicts.get(skill.id) } : {}),
       })),
       mcpServers: mcpRows.map((server) => ({
         id: server.id,

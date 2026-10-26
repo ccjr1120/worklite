@@ -254,6 +254,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const [existing] = await this.db.select({ id: agentTeamRuns.id }).from(agentTeamRuns)
       .where(and(eq(agentTeamRuns.id, acceptance.runId), eq(agentTeamRuns.workspaceId, workspaceId))).limit(1);
     if (existing) return this.getRunView(existing.id, workspaceId);
+    await this.resources.reconcileWorkspaceSkills(workspaceId);
     const runId = acceptance.runId;
     const versionId = `atver_${randomUUID()}`;
     const resolvedProjectDirectory = resolve(projectDirectory);
@@ -324,6 +325,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const [existing] = await this.db.select({ id: agentTeamRuns.id }).from(agentTeamRuns)
       .where(and(eq(agentTeamRuns.id, acceptance.runId), eq(agentTeamRuns.workspaceId, workspaceId))).limit(1);
     if (existing) return this.getRunView(existing.id, workspaceId);
+    await this.resources.reconcileWorkspaceSkills(workspaceId);
 
     const [team] = await this.db.select().from(agentTeams)
       .where(and(eq(agentTeams.id, request.teamId), eq(agentTeams.workspaceId, workspaceId)))

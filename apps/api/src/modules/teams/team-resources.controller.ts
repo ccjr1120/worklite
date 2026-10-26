@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
-import type { CreateMcpServerRequest, CreateSkillRequest, ExecuteSkillScriptRequest, ImportSkillRequest, UpdateMcpServerRequest, UpdateSkillRequest, UpdateWorkspaceSettingsRequest } from '@worklite/contracts';
+import type { CreateMcpServerRequest, CreateSkillRequest, ExecuteSkillScriptRequest, ImportSkillRequest, UpdateMcpServerRequest, UpdateWorkspaceSettingsRequest } from '@worklite/contracts';
 import { WorkspaceResourcesService } from './team-resources.service';
 
 @Controller()
@@ -18,9 +18,6 @@ export class WorkspaceResourcesController {
 
   @Post('skills')
   createSkill(@Req() request: Request, @Body() body: CreateSkillRequest) { return this.resources.createSkill(request, 'personal', body); }
-
-  @Patch('skills/:skillId')
-  updateSkill(@Req() request: Request, @Param('skillId') skillId: string, @Body() body: UpdateSkillRequest) { return this.resources.updateSkill(request, 'personal', skillId, body); }
 
   @Delete('skills/:skillId')
   deleteSkill(@Req() request: Request, @Param('skillId') skillId: string) { return this.resources.deleteSkill(request, 'personal', skillId); }

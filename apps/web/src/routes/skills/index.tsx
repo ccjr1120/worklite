@@ -4,7 +4,7 @@ import { Blocks, FolderUp, Settings2, Trash2 } from 'lucide-react';
 import { useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import type { SkillView } from '@worklite/contracts';
+import { WORKLITE_PLATFORM_SKILL_NAME, type SkillView } from '@worklite/contracts';
 import { api } from '@/api/client';
 import { skillsQueryKey, useSkillsQuery } from '@/api/queries';
 import { CollectionLoading } from '@/components/collection-loading';
@@ -17,6 +17,7 @@ import { useLocale } from '@/components/locale-provider';
 import { PageHeading } from '@/components/page-heading';
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { formatDateTime } from '@/i18n/format';
 
@@ -40,13 +41,13 @@ function SkillListPage() {
   const [deleteError, setDeleteError] = useState('');
   const { data: all = [], isLoading, isError, refetch } = useSkillsQuery(workspaceSlug);
   const visibleSkills = useMemo(
-    () => all.filter((skill) => skill.id !== 'sk_worklite_platform'),
+    () => all.filter((skill) => skill.root !== 'platform' || skill.directory !== WORKLITE_PLATFORM_SKILL_NAME),
     [all],
   );
   const items = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
     return visibleSkills
-      .filter((skill) => !normalizedSearch || `${skill.name} ${skill.description ?? ''} ${skill.source} ${skill.version} ${skill.validation}`.toLowerCase().includes(normalizedSearch))
+      .filter((skill) => !normalizedSearch || `${skill.name} ${skill.description ?? ''} ${skill.root} ${skill.directory} ${skill.version} ${skill.validation} ${skill.validationReason ?? ''} ${skill.conflict?.reason ?? ''}`.toLowerCase().includes(normalizedSearch))
       .sort((left, right) => left.name.localeCompare(right.name));
   }, [search, visibleSkills]);
 
@@ -121,7 +122,7 @@ function SkillListPage() {
         {isLoading ? (
           <CollectionLoading
             label={t('loading')}
-            columns={[t('columns.skill'), t('columns.source'), t('columns.version'), t('columns.validation'), t('columns.updated'), t('columns.actions')]}
+            columns={[t('columns.skill'), t('columns.root'), t('columns.version'), t('columns.validation'), t('columns.updated'), t('columns.actions')]}
             headerClassName={tableClassName}
             rowClassName={tableClassName}
           />
@@ -133,17 +134,21 @@ function SkillListPage() {
           <EmptyState title={t('noMatches.title')} description={t('noMatches.description', { search })} actionLabel={t('common:actions.clearFilters')} onAction={() => setSearch('')} />
         ) : (
           <CollectionTable>
-            <CollectionHeader className={tableClassName} columns={[t('columns.skill'), t('columns.source'), t('columns.version'), t('columns.validation'), t('columns.updated'), t('columns.actions')]} />
+            <CollectionHeader className={tableClassName} columns={[t('columns.skill'), t('columns.root'), t('columns.version'), t('columns.validation'), t('columns.updated'), t('columns.actions')]} />
             {items.map((skill) => (
               <CollectionRow key={skill.id} className={tableClassName}>
                 <Link to="/skills/$skillId" params={{ skillId: skill.id }} className="flex min-w-0 items-center gap-3">
                   <Blocks className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                   <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium">{skill.name}</span>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="block truncate text-sm font-medium">{skill.name}</span>
+                      {skill.conflict ? <Badge variant="warning" title={`${skill.conflict.reason} ${skill.conflict.ignoredPath}`}>{t('conflict.title')}</Badge> : null}
+                      {skill.validation === 'invalid' && skill.validationReason ? <Badge variant="warning" title={skill.validationReason}>{t('invalid.title')}</Badge> : null}
+                    </span>
                     {skill.description ? <span className="block truncate text-[13px] text-muted-foreground">{skill.description}</span> : null}
                   </span>
                 </Link>
-                <span className="text-[13px] text-muted-foreground">{t(`source.${skill.source}`)}</span>
+                <span className="text-[13px] text-muted-foreground" title={skill.directory}>{skill.rootPath}</span>
                 <span className="font-mono text-[13px]">{skill.version}</span>
                 <StatusBadge status={skill.validation} />
                 <span className="tabular-nums text-[13px] text-muted-foreground">{formatDateTime(skill.updatedAt, locale)}</span>
@@ -166,7 +171,7 @@ function SkillListPage() {
         open={deleteTarget !== null}
         onOpenChange={(nextOpen) => { if (!nextOpen && !deleteBusy) setDeleteTarget(null); }}
         title={t('delete.title', { name: deleteTarget?.name ?? '' })}
-        description={t('delete.description')}
+        description={t('delete.description', { root: deleteTarget?.rootPath ?? '', directory: deleteTarget?.directory ?? '' })}
         confirmLabel={t('common:actions.delete')}
         cancelLabel={t('common:actions.cancel')}
         busyLabel={t('delete.deleting')}

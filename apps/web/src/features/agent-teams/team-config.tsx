@@ -106,7 +106,7 @@ function RoleCard({ teamId, role, skills, mcpServerNames }: { teamId: string; ro
                       aria-label={skill.name}
                     />
                     <span className="min-w-0 flex-1 truncate text-[13px]">{skill.name}</span>
-                    {skill.source ? <Badge variant="neutral">{t(`skills:source.${skill.source}` as never)}</Badge> : null}
+                    <Badge variant="neutral">{t(`skills:root.${skill.root}` as never)}</Badge>
                   </label>
                 ))}
               </div>
@@ -176,7 +176,7 @@ export function TeamConfig({ teamId }: { teamId: string }) {
 
   const team = teamQuery.data;
   const mcpServerNames = new Map((mcpServersQuery.data ?? []).map((server) => [server.id, server.name]));
-  const availableSkills = (skillsQuery.data ?? []).filter((skill) => skill.id !== 'sk_worklite_platform');
+  const availableSkills = skillsQuery.data ?? [];
 
   return (
     <PageContainer width="detail">

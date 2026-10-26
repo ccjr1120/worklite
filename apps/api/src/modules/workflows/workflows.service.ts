@@ -51,12 +51,14 @@ export class WorkflowsService {
 
   async list(request: Request, workspaceSlug: string): Promise<WorkflowView[]> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.resources.reconcileWorkspaceSkills(workspace.id);
     const rows = await this.db.select().from(workflows).where(eq(workflows.workspaceId, workspace.id));
     return Promise.all(rows.map((row) => this.toView(row, workspaceSlug)));
   }
 
   async get(request: Request, workspaceSlug: string, workflowId: string): Promise<WorkflowDetailView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.resources.reconcileWorkspaceSkills(workspace.id);
     const row = await this.findWorkflow(workspace.id, workflowId);
     if (!row) throw new NotFoundException('Workflow not found');
     await this.ensureDraft(row);
@@ -65,6 +67,7 @@ export class WorkflowsService {
 
   async create(request: Request, workspaceSlug: string, input: CreateWorkflowRequest): Promise<WorkflowDetailView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.resources.reconcileWorkspaceSkills(workspace.id);
     const name = input.name?.trim();
     if (!name) throw new BadRequestException('Workflow name is required.');
     const workflowId = `wf_${randomUUID()}`;
@@ -83,6 +86,7 @@ export class WorkflowsService {
 
   async exportWorkflow(request: Request, workspaceSlug: string, workflowId: string): Promise<PortableWorkflowDocument> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.resources.reconcileWorkspaceSkills(workspace.id);
     const workflow = await this.findWorkflow(workspace.id, workflowId);
     if (!workflow) throw new NotFoundException('Workflow not found');
     await this.ensureDraft(workflow);
@@ -117,6 +121,7 @@ export class WorkflowsService {
     const name = typeof input.workflow.name === 'string' ? input.workflow.name.trim() : '';
     if (!name || !isRecord(input.workflow.definition)) throw new BadRequestException('The imported workflow name and definition are required.');
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.resources.reconcileWorkspaceSkills(workspace.id);
     const definition = normalizeDefinition(input.workflow.definition as unknown as WorkflowDefinition);
     for (const node of definition.nodes) {
       const config = isRecord(node.config) ? { ...node.config } : {};
@@ -124,10 +129,10 @@ export class WorkflowsService {
         const skillNames = readPortableNames(config.skills, 'Skill');
         const mcpNames = readPortableNames(config.mcpServers, 'MCP server');
         const [skillRows, mcpRows] = await Promise.all([
-          skillNames.length === 0 ? [] : this.db.select({ id: skills.id, name: skills.name }).from(skills).where(and(eq(skills.workspaceId, workspace.id), inArray(skills.name, skillNames))),
+          skillNames.length === 0 ? [] : this.db.select({ id: skills.id, name: skills.name, root: skills.root }).from(skills).where(eq(skills.workspaceId, workspace.id)),
           mcpNames.length === 0 ? [] : this.db.select({ id: mcpServers.id, name: mcpServers.name }).from(mcpServers).where(and(eq(mcpServers.workspaceId, workspace.id), inArray(mcpServers.name, mcpNames))),
         ]);
-        config.skillIds = resolvePortableNames(skillNames, skillRows, 'Skill');
+        config.skillIds = resolvePortableSkillNames(skillNames, skillRows);
         config.mcpServerIds = resolvePortableNames(mcpNames, mcpRows, 'MCP server');
         delete config.skills;
         delete config.mcpServers;
@@ -217,6 +222,7 @@ export class WorkflowsService {
     prepare: (snapshot: StoredWorkflowDefinition) => Promise<{ operations: WorkflowEditOperation[]; source: 'manual' | 'assistant'; sourceInstruction?: string }>,
   ): Promise<WorkflowDetailView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.resources.reconcileWorkspaceSkills(workspace.id);
     const workflow = await this.findWorkflow(workspace.id, workflowId);
     if (!workflow) throw new NotFoundException('Workflow not found');
     await this.ensureDraft(workflow);
@@ -224,9 +230,12 @@ export class WorkflowsService {
     if (!draft || draft.currentRevisionId !== baseRevisionId) throw new ConflictException('The workflow draft changed. Reload it before applying edits.');
     const currentRevision = await this.loadRevision(workspace.id, baseRevisionId);
     if (!currentRevision) throw new ConflictException('The workflow base revision is unavailable.');
-    const { operations, source, sourceInstruction } = await prepare(currentRevision.snapshot);
+    // Reconciliation may canonicalize mutable draft Skill ids while immutable edit
+    // revision snapshots retain the historical ids. Apply new edits to the current
+    // draft representation so a migration cannot reintroduce a retired id.
+    const { operations, source, sourceInstruction } = await prepare(draft.definition);
     if (operations.length === 0) throw new BadRequestException('At least one workflow operation is required.');
-    const nextDefinition = applyOperations(currentRevision.snapshot, operations);
+    const nextDefinition = applyOperations(draft.definition, operations);
     validateDefinition(nextDefinition, false);
     await this.validateWorkspaceReferences(workspace.id, nextDefinition);
     const revisionId = `wfr_${randomUUID()}`;
@@ -250,6 +259,7 @@ export class WorkflowsService {
 
   async publish(request: Request, workspaceSlug: string, workflowId: string): Promise<WorkflowVersionView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.resources.reconcileWorkspaceSkills(workspace.id);
     const workflow = await this.findWorkflow(workspace.id, workflowId);
     if (!workflow) throw new NotFoundException('Workflow not found');
     await this.ensureDraft(workflow);
@@ -259,10 +269,12 @@ export class WorkflowsService {
     const skillIds = collectWorkflowResourceIds(draft.definition, 'skillIds');
     const mcpServerIds = collectWorkflowResourceIds(draft.definition, 'mcpServerIds');
     const [availableSkills, availableMcpServers] = await Promise.all([
-      skillIds.length === 0 ? [] : this.db.select({ id: skills.id }).from(skills).where(and(eq(skills.workspaceId, workspace.id), inArray(skills.id, skillIds))),
+      skillIds.length === 0 ? [] : this.db.select({ id: skills.id, name: skills.name, validation: skills.validation, validationReason: skills.validationReason }).from(skills).where(and(eq(skills.workspaceId, workspace.id), inArray(skills.id, skillIds))),
       mcpServerIds.length === 0 ? [] : this.db.select({ id: mcpServers.id }).from(mcpServers).where(and(eq(mcpServers.workspaceId, workspace.id), inArray(mcpServers.id, mcpServerIds))),
     ]);
     if (availableSkills.length !== skillIds.length) throw new BadRequestException('Every Workflow Agent Skill must belong to this workspace.');
+    const invalidSkill = availableSkills.find((skill) => skill.validation !== 'valid');
+    if (invalidSkill) throw new BadRequestException(invalidSkill.validationReason ?? `Workflow Agent Skill ${invalidSkill.name} is invalid.`);
     if (availableMcpServers.length !== mcpServerIds.length) throw new BadRequestException('Every Workflow Agent MCP server must belong to this workspace.');
     const latest = await this.db.select({ version: workflowVersions.version }).from(workflowVersions).where(eq(workflowVersions.workflowId, workflowId)).orderBy(desc(workflowVersions.version)).limit(1);
     const versionNumber = (latest[0]?.version ?? 0) + 1;
@@ -295,6 +307,7 @@ export class WorkflowsService {
 
   private async moveDraftPointer(request: Request, workspaceSlug: string, workflowId: string, direction: 'undo' | 'redo'): Promise<WorkflowDetailView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.resources.reconcileWorkspaceSkills(workspace.id);
     const workflow = await this.findWorkflow(workspace.id, workflowId);
     if (!workflow) throw new NotFoundException('Workflow not found');
     await this.ensureDraft(workflow);
@@ -315,11 +328,13 @@ export class WorkflowsService {
     const mcpServerIds = collectWorkflowResourceIds(definition, 'mcpServerIds');
     const accountIds = definition.nodes.filter((node) => node.type === 'wechat-official-account/publish').map((node) => isRecord(node.config) && typeof node.config.accountId === 'string' ? node.config.accountId : '').filter(Boolean);
     const [availableSkills, availableMcpServers, availableAccounts] = await Promise.all([
-      skillIds.length === 0 ? [] : this.db.select({ id: skills.id }).from(skills).where(and(eq(skills.workspaceId, workspaceId), inArray(skills.id, skillIds))),
+      skillIds.length === 0 ? [] : this.db.select({ id: skills.id, name: skills.name, validation: skills.validation, validationReason: skills.validationReason }).from(skills).where(and(eq(skills.workspaceId, workspaceId), inArray(skills.id, skillIds))),
       mcpServerIds.length === 0 ? [] : this.db.select({ id: mcpServers.id }).from(mcpServers).where(and(eq(mcpServers.workspaceId, workspaceId), inArray(mcpServers.id, mcpServerIds))),
       accountIds.length === 0 ? [] : this.db.select({ id: wechatOfficialAccounts.id }).from(wechatOfficialAccounts).where(and(eq(wechatOfficialAccounts.workspaceId, workspaceId), inArray(wechatOfficialAccounts.id, accountIds))),
     ]);
     if (availableSkills.length !== skillIds.length) throw new BadRequestException('Every Workflow Skill must belong to this workspace.');
+    const invalidSkill = availableSkills.find((skill) => skill.validation !== 'valid');
+    if (invalidSkill) throw new BadRequestException(invalidSkill.validationReason ?? `Workflow Skill ${invalidSkill.name} is invalid.`);
     if (availableMcpServers.length !== mcpServerIds.length) throw new BadRequestException('Every Workflow MCP server must belong to this workspace.');
     if (availableAccounts.length !== new Set(accountIds).size) throw new BadRequestException('Every WeChat Official Account must belong to this workspace.');
   }
@@ -1026,5 +1041,16 @@ function resolvePortableNames(names: string[], rows: { id: string; name: string 
     const matches = rows.filter((row) => row.name === name);
     if (matches.length !== 1) throw new BadRequestException(`${resource} ${name} is missing or ambiguous in this workspace.`);
     return matches[0].id;
+  });
+}
+
+function resolvePortableSkillNames(names: string[], rows: { id: string; name: string; root: 'agents' | 'platform' }[]): string[] {
+  return names.map((name) => {
+    const key = name.trim().toLocaleLowerCase('en-US');
+    const matches = rows.filter((row) => row.name.trim().toLocaleLowerCase('en-US') === key);
+    const agentsMatches = matches.filter((row) => row.root === 'agents');
+    const preferred = agentsMatches.length > 0 ? agentsMatches : matches;
+    if (preferred.length !== 1) throw new BadRequestException(`Skill ${name} is missing or ambiguous in this workspace.`);
+    return preferred[0].id;
   });
 }

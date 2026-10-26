@@ -35,11 +35,12 @@ export class AgentTeamsService {
 
   async get(request: Request, workspaceSlug: string, teamId: string): Promise<AgentTeamView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    return toTeamView(await this.getTeam(teamId, workspace.id));
+    return toTeamView(await this.configuration.getTeam(workspace.id, teamId));
   }
 
   async list(request: Request, workspaceSlug: string): Promise<AgentTeamView[]> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.configuration.reconcileSkills(workspace.id);
     const rows = await this.db.select().from(agentTeams)
       .where(eq(agentTeams.workspaceId, workspace.id)).orderBy(asc(agentTeams.name));
     return rows.map(toTeamView);
@@ -72,7 +73,7 @@ export class AgentTeamsService {
 
   async records(request: Request, workspaceSlug: string, teamId: string): Promise<AgentTeamRunSummary[]> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    await this.getTeam(teamId, workspace.id);
+    await this.configuration.getTeam(workspace.id, teamId);
     const rows = await this.db.select({ id: agentTeamRuns.id, intent: agentTeamRuns.intent,
       projectDirectory: agentTeamRuns.projectDirectory, mode: agentTeamRuns.mode,
       modeRationale: agentTeamRuns.modeRationale, modeDecidedAt: agentTeamRuns.modeDecidedAt, snapshot: agentTeamVersions.snapshot,

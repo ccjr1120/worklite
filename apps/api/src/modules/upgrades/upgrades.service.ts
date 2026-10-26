@@ -17,6 +17,7 @@ import type { FeishuService } from '../plugins/feishu/feishu.service';
 import type { FeishuRegistrationService } from '../plugins/feishu/feishu-registration.service';
 import type { WechatService } from '../plugins/wechat/wechat.service';
 import type { Request } from 'express';
+import { WORKLITE_PLATFORM_SKILL_NAME } from '@worklite/contracts';
 
 type UpgradeJob = {
   id: string; releaseHash: string; gatewayHash?: string; releaseDirectory: string; summary: string; phase: string;
@@ -82,7 +83,7 @@ export class UpgradesService implements OnModuleInit {
     const currentTurn = execution ? execution.modelMessages.slice(execution.modelMessages.map((message) => message.role).lastIndexOf('user')) : [];
     const currentCall = currentTurn.some((message) => message.role === 'assistant' && message.content.some((part) => part.type === 'tool-call' && part.toolCallId === call?.toolCallId));
     if (!execution || execution.status !== 'running' || !userMessage || userMessage.id !== input.userMessageId || !input.summary?.trim()
-      || call?.status !== 'running' || call.skillId !== 'sk_worklite_platform' || call.scriptPath !== 'scripts/redeploy.mjs' || !currentCall) {
+      || call?.status !== 'running' || call.skillName !== WORKLITE_PLATFORM_SKILL_NAME || call.scriptPath !== 'scripts/redeploy.mjs' || !currentCall) {
       throw new BadRequestException('Redeployment requires the current server-bound Chat user request.');
     }
     const [chat] = await this.db.select({ id: externalChats.id }).from(externalChats).where(eq(externalChats.executionId, execution.id)).limit(1);

@@ -35,7 +35,6 @@ const GENERIC_AGENT_ERROR = 'Chat could not complete this turn. Check its provid
 const AGENT_TURN_ERROR = 'Chat could not complete this turn.';
 const SKILL_EXECUTION_ERROR = 'The Skill script could not be completed.';
 const RESTARTED_AGENT_ERROR = 'The API restarted before this Chat turn completed.';
-const CHAT_PLATFORM_SKILL_ID = 'sk_worklite_platform';
 
 type QueuedMessage = { id: string; text: string };
 type ActiveWorkflowRun = { workflow: WorkflowView; run: RunView; input: string };
@@ -169,7 +168,7 @@ function ChatWorkspace() {
     setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
     setExecutorContext(agentQuery.data.chatConfiguration?.executorContext ?? '');
     setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
-    setChatSkillIds((agentQuery.data.chatConfiguration?.skillIds ?? []).filter((id) => id !== CHAT_PLATFORM_SKILL_ID));
+    setChatSkillIds(agentQuery.data.chatConfiguration?.skillIds ?? []);
     setExecutorModels({
       claude: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.claude),
       codex: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.codex),
@@ -199,7 +198,7 @@ function ChatWorkspace() {
         setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
         setExecutorContext(agentQuery.data.chatConfiguration?.executorContext ?? '');
         setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
-        setChatSkillIds((agentQuery.data.chatConfiguration?.skillIds ?? []).filter((id) => id !== CHAT_PLATFORM_SKILL_ID));
+        setChatSkillIds(agentQuery.data.chatConfiguration?.skillIds ?? []);
         setExecutorModels({
           claude: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.claude),
           codex: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.codex),
