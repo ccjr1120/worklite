@@ -339,8 +339,9 @@ function SkillEditorPage() {
                   aria-invalid={Boolean(argumentError)}
                 />
                 {argumentError ? <p className="mt-1 text-xs text-danger" role="alert">{argumentError}</p> : <p className="mt-1 text-xs text-muted-foreground">{t('editor.run.argumentsHint')}</p>}
-            </div>
+              </div>
               {saveState !== 'saved' ? <p className="pt-6 text-xs text-warning">{t('editor.run.saveFirst')}</p> : null}
+            </div>
           </div>
         ) : null}
         <textarea
