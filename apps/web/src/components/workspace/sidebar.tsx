@@ -1,5 +1,5 @@
 import { Link, useRouterState } from '@tanstack/react-router';
-import { FileText, MessageSquareText, KeyRound, Puzzle, ScrollText, Settings, UsersRound, Workflow } from 'lucide-react';
+import { Blocks, FileText, MessageSquareText, KeyRound, Puzzle, ScrollText, Server, Settings, UsersRound, Workflow } from 'lucide-react';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChatConversationsQuery } from '@/api/queries';
@@ -25,7 +25,9 @@ const navigationGroups = [
     id: 'resources',
     labelKey: 'nav.resourceManagement',
     items: [
-      { id: 'resources', labelKey: 'nav.allResources', to: '/capabilities', icon: Puzzle },
+      { id: 'plugins', labelKey: 'nav.plugins', to: '/plugins', icon: Puzzle },
+      { id: 'skills', labelKey: 'nav.skills', to: '/skills', icon: Blocks },
+      { id: 'mcpServers', labelKey: 'nav.mcpServers', to: '/mcp-servers', icon: Server },
       { id: 'artifacts', labelKey: 'nav.artifacts', to: '/artifacts', icon: FileText },
     ],
   },

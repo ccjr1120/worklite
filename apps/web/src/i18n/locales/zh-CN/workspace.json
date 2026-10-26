@@ -11,7 +11,6 @@
     "mcpServers": "MCP 服务器",
     "plugins": "插件",
     "resourceManagement": "资源管理",
-    "allResources": "全部资源",
     "modelProviders": "模型提供商",
     "logs": "日志",
     "usage": "用量",
@@ -19,28 +18,6 @@
     "title": "导航",
     "chat": "Chat",
     "live": "有正在进行的对话"
-  },
-  "capabilityResources": {
-    "search": "搜索插件、MCP 服务器或 Skill…",
-    "loading": "正在加载资源…",
-    "loadFailed": "加载资源失败，请重试。",
-    "configure": "配置 {{name}}",
-    "emptyGroup": "暂无此类资源",
-    "empty": {
-      "title": "还没有资源",
-      "description": "插件、MCP 服务器和 Skill 会统一显示在这里。"
-    },
-    "noMatches": {
-      "title": "没有匹配的资源",
-      "description": "没有找到与“{{search}}”匹配的插件、MCP 服务器或 Skill。"
-    },
-    "columns": {
-      "resource": "资源",
-      "type": "类型",
-      "details": "详情",
-      "updated": "更新时间",
-      "actions": "操作"
-    }
   },
   "command": {
     "title": "命令菜单",

@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router';
-import { FileText, KeyRound, MessageSquareText, Plus, Puzzle, ScrollText, UsersRound, Workflow } from 'lucide-react';
+import { Blocks, FileText, KeyRound, MessageSquareText, Plus, Puzzle, ScrollText, Server, UsersRound, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   CommandDialog,
@@ -43,8 +43,14 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
           </CommandItem>
         </CommandGroup>
         <CommandGroup heading={t('nav.resourceManagement')}>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/capabilities' }))}>
-            <Puzzle className="size-4" /> {t('nav.allResources')}
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/plugins' }))}>
+            <Puzzle className="size-4" /> {t('nav.plugins')}
+          </CommandItem>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/skills' }))}>
+            <Blocks className="size-4" /> {t('nav.skills')}
+          </CommandItem>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/mcp-servers' }))}>
+            <Server className="size-4" /> {t('nav.mcpServers')}
           </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/artifacts' }))}>
             <FileText className="size-4" /> {t('nav.artifacts')}

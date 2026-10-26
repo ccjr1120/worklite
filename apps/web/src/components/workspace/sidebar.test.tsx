@@ -14,6 +14,8 @@ vi.mock('@/api/queries', () => ({
   useChatConversationsQuery: () => ({ data: undefined }),
 }));
 
+const routerState = vi.hoisted(() => ({ pathname: '/chat' }));
+
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, to, ...props }: { children: React.ReactNode; to: string }) => (
     <a href={to} {...props}>
@@ -24,7 +26,7 @@ vi.mock('@tanstack/react-router', () => ({
     select,
   }: {
     select: (state: { location: { pathname: string } }) => unknown;
-  }) => select({ location: { pathname: '/chat' } }),
+  }) => select({ location: { pathname: routerState.pathname } }),
 }));
 
 class ResizeObserverStub {
@@ -34,6 +36,7 @@ class ResizeObserverStub {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  routerState.pathname = '/chat';
   vi.stubGlobal('ResizeObserver', ResizeObserverStub);
 });
 
@@ -72,5 +75,22 @@ describe('Sidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: /v9\.9\.9/ }));
 
     expect(reloadPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows plugins, skills, and MCP servers as first-level destinations', () => {
+    renderSidebar(false);
+
+    expect(screen.getByRole('link', { name: '插件' })).toHaveAttribute('href', '/plugins');
+    expect(screen.getByRole('link', { name: '技能' })).toHaveAttribute('href', '/skills');
+    expect(screen.getByRole('link', { name: 'MCP 服务器' })).toHaveAttribute('href', '/mcp-servers');
+    expect(screen.queryByRole('link', { name: '全部资源' })).not.toBeInTheDocument();
+  });
+
+  it('marks the matching resource destination active on a detail page', () => {
+    routerState.pathname = '/mcp-servers/mcp_1';
+    renderSidebar(false);
+
+    expect(screen.getByRole('link', { name: 'MCP 服务器' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: '插件' })).not.toHaveAttribute('aria-current');
   });
 });
