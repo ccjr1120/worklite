@@ -35,6 +35,8 @@
   },
   "breadcrumbs": "面包屑导航",
   "openNavigation": "打开导航",
+  "collapseNavigation": "收起侧边栏",
+  "expandNavigation": "展开侧边栏",
   "reload": "刷新页面",
   "route": {
     "loading": "正在加载页面...",

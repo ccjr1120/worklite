@@ -46,10 +46,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderSidebar(collapsed: boolean) {
+function renderSidebar(
+  collapsed: boolean,
+  onToggleCollapsed?: () => void,
+  onNavigate?: () => void,
+) {
   return render(
     <TooltipProvider>
-      <Sidebar collapsed={collapsed} />
+      <Sidebar
+        collapsed={collapsed}
+        onToggleCollapsed={onToggleCollapsed}
+        onNavigate={onNavigate}
+      />
     </TooltipProvider>,
   );
 }
@@ -92,5 +100,36 @@ describe('Sidebar', () => {
 
     expect(screen.getByRole('link', { name: 'MCP 服务器' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: '插件' })).not.toHaveAttribute('aria-current');
+  });
+
+  it('toggles the sidebar from the labeled control at the top', () => {
+    const onToggleCollapsed = vi.fn();
+    renderSidebar(false, onToggleCollapsed);
+
+    const toggle = screen.getByRole('button', { name: '收起侧边栏' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(toggle);
+
+    expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the expand control and hides text when collapsed', () => {
+    renderSidebar(true, vi.fn());
+
+    expect(screen.getByRole('button', { name: '展开侧边栏' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('工作区')).not.toBeInTheDocument();
+    expect(screen.queryByText('资源管理')).not.toBeInTheDocument();
+    expect(screen.queryByText('配置')).not.toBeInTheDocument();
+  });
+
+  it('keeps navigation links clickable when collapsed', () => {
+    const onNavigate = vi.fn();
+    renderSidebar(true, vi.fn(), onNavigate);
+
+    const plugins = screen.getByRole('link', { name: '插件' });
+    expect(plugins).toHaveAttribute('href', '/plugins');
+    fireEvent.click(plugins);
+
+    expect(onNavigate).toHaveBeenCalledTimes(1);
   });
 });
