@@ -75,6 +75,18 @@ export class UpgradesService implements OnModuleInit {
     return this.view(id);
   }
 
+  private prepareDeploymentRelease(projectRoot: string, directory: string, id: string) {
+    execFileSync(process.execPath, [join(projectRoot, 'scripts/bump-deployment-version.mjs')], {
+      cwd: projectRoot,
+      stdio: 'inherit',
+    });
+    return JSON.parse(execFileSync(process.execPath, [join(projectRoot, 'scripts/upgrade-runner.mjs'), 'prepare', projectRoot, directory, id], { encoding: 'utf8' })) as {
+      releaseHash: string;
+      gatewayHash: string;
+      releaseDirectory: string;
+    };
+  }
+
   async redeploy(input: { summary: string; executionId: string; submissionId: string; userMessageId: string }) {
     const directory = this.directory();
     const [execution] = await this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, input.executionId), eq(agentExecutions.agentId, 'agt_system_helper_chat'))).limit(1);
@@ -91,7 +103,7 @@ export class UpgradesService implements OnModuleInit {
     if (existsSync(join(directory, 'upgrades', `${id}.json`))) return this.view(id);
     this.requireIdle();
     const runtime = this.readFile<{ projectRoot: string }>(join(directory, 'current.json'));
-    const release = JSON.parse(execFileSync(process.execPath, [join(runtime.projectRoot, 'scripts/upgrade-runner.mjs'), 'prepare', runtime.projectRoot, directory, id], { encoding: 'utf8' })) as { releaseHash: string; gatewayHash: string; releaseDirectory: string };
+    const release = this.prepareDeploymentRelease(runtime.projectRoot, directory, id);
     const job: UpgradeJob = {
       id, ...release, summary: input.summary.trim(), phase: 'authorized', workspaceId: execution.workspaceId,
       submissionId: id, executionId: execution.id, token: randomBytes(32).toString('hex'), pausedTeams: [], pausedWorkflows: [],
@@ -163,7 +175,7 @@ export class UpgradesService implements OnModuleInit {
 
     const [chat] = await this.db.select({ id: externalChats.id }).from(externalChats).where(eq(externalChats.executionId, execution.id)).limit(1);
     const summary = [`项目任务已完成：${task.goal}`, task.result].filter(Boolean).join('\n\n').slice(0, 100_000);
-    const release = JSON.parse(execFileSync(process.execPath, [join(runtime.projectRoot, 'scripts/upgrade-runner.mjs'), 'prepare', runtime.projectRoot, directory, id], { encoding: 'utf8' })) as { releaseHash: string; gatewayHash: string; releaseDirectory: string };
+    const release = this.prepareDeploymentRelease(runtime.projectRoot, directory, id);
     const job: UpgradeJob = {
       id, ...release, summary, phase: 'authorized', workspaceId: execution.workspaceId,
       submissionId: id, executionId: execution.id, token: randomBytes(32).toString('hex'), pausedTeams: [], pausedWorkflows: [],
