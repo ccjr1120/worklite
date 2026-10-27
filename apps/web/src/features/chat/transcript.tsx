@@ -2,7 +2,8 @@ import { Link } from '@tanstack/react-router';
 import { Activity, Ban, ChevronDown, ChevronRight, CircleX, FileCode2, Hourglass, LoaderCircle, MessageCircleQuestion, MessageSquareText, Play, RefreshCw, ShieldAlert, X } from 'lucide-react';
 import { memo, createContext, useContext, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AgentExecutionView, AgentToolCallView, ChatConversationView, ChatProjectTaskView, ChatSubmissionView, RunView, WorkflowView } from '@worklite/contracts';
+import { splitChatAttachmentImages, type AgentExecutionView, type AgentToolCallView, type ChatConversationView, type ChatProjectTaskView, type ChatSubmissionView, type RunView, type WorkflowView } from '@worklite/contracts';
+import { MarkdownImage } from '@/components/ai/markdown-image';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import { isLiveStatus, StatusBadge, toStatusKey, type StatusKey } from '@/components/status-badge';
 import { Badge } from '@/components/ui/badge';
@@ -22,6 +23,7 @@ import { toSingleLine } from '@/lib/single-line';
 import { ApiError, api } from '@/api/client';
 import { useChatProjectOperationQuery } from '@/api/queries';
 import { PinTrackingContext } from './pinned-executions';
+import { messagePreview } from './attachment-preview';
 
 type TranscriptMessage = AgentExecutionView['messages'][number];
 type TurnSegment = { kind: 'message'; item: TranscriptMessage } | { kind: 'tool'; item: AgentToolCallView } | { kind: 'question'; item: AgentToolCallView; text: string };
@@ -145,10 +147,14 @@ function buildTimeline(sources: {
 // so a streaming turn does not re-render earlier messages.
 const UserMessage = memo(function UserMessage({ message, pending = false }: { message: TranscriptMessage; pending?: boolean }) {
   const { t } = useTranslation('assistant');
+  // Images the reader pasted into the composer travel in the message text as attachment references;
+  // show them as the pictures they are instead of printing their Markdown in the bubble.
+  const { text, images } = splitChatAttachmentImages(message.content);
   return (
     <Message from="user" aria-label={t('speaker.you')} aria-busy={pending || undefined} className="wl-enter">
       <MessageContent className={cn('max-w-[min(78%,640px)] rounded-2xl rounded-br-md bg-brand-subtle px-4 py-2.5 transition-opacity duration-[140ms] ease-[var(--ease-out)]', pending && 'opacity-60')}>
-        <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.content}</p>
+        {text ? <p className="whitespace-pre-wrap break-words text-sm leading-6">{text}</p> : null}
+        {images.map((image) => <MarkdownImage key={image.id} src={image.url} alt={image.alt} />)}
       </MessageContent>
     </Message>
   );
@@ -402,7 +408,7 @@ function QueueRows({ queued, paused, sendingId, onRemove }: { queued: Array<{ id
         {queued.map((item, index) => (
           <li key={item.id} className="flex items-start gap-2">
             <span className="mt-0.5 shrink-0 font-mono text-xs text-muted-foreground">{index + 1}</span>
-            <TruncatedText text={item.text} className="flex-1 text-[13px] leading-5" />
+            <TruncatedText text={messagePreview(item.text, (count) => t('attachment.imageSummary', { count }))} className="flex-1 text-[13px] leading-5" />
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button type="button" variant="ghost" size="icon-compact" aria-label={t('queue.remove')} disabled={sendingId === item.id} onClick={() => onRemove(item.id)}>

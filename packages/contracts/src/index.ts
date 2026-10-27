@@ -372,6 +372,25 @@ export type ChatAttachmentView = {
   expiresAt: string;
 };
 
+// Attachment images are referenced in message text as ![description](/api/chat/attachments/att_…),
+// the same form for executor-produced report images and for images the user pasted into the Web
+// composer. A fresh instance per call keeps the global flag's lastIndex from leaking between callers.
+export function chatAttachmentImagePattern(): RegExp {
+  return /!\[([^\]\n]*)\]\((?:https?:\/\/[^\s)]*?)?\/api\/chat\/attachments\/(att_[A-Za-z0-9-]+)\)/g;
+}
+
+export type ChatAttachmentImageReference = { alt: string; id: string; url: string };
+
+/** Separates a message's prose from the attachment images embedded in it, in order of appearance. */
+export function splitChatAttachmentImages(markdown: string): { text: string; images: ChatAttachmentImageReference[] } {
+  const images = Array.from(markdown.matchAll(chatAttachmentImagePattern()), (match) => ({
+    alt: (match[1] ?? '').trim(), id: match[2]!, url: `/api/chat/attachments/${match[2]!}`,
+  }));
+  if (!images.length) return { text: markdown, images };
+  const text = markdown.replace(chatAttachmentImagePattern(), '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return { text, images };
+}
+
 // A user-submitted mid-run correction, an increment on the captured goal rather than a replacement.
 // 'delivered' reached the live Codex turn through turn/steer; 'queued' is waiting for the task's
 // next round boundary (Claude Code, or a Codex turn that could not accept it); 'consumed' was

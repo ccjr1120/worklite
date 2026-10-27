@@ -77,6 +77,15 @@ async function prepare(directory: string, request: ProjectExecutorRequest): Prom
   for (const reference of request.references ?? []) {
     references.push(await writeInside(join(directory, 'references'), reference.path, reference.content));
   }
+  // Images the user supplied with the request are written as real files rather than passed through
+  // an executor-specific multimodal input: Codex and Claude Code both read a local image with their
+  // own tool, so one materialization serves both adapters.
+  const imageLines: string[] = [];
+  const imageNames = new Set<string>();
+  for (const image of request.images ?? []) {
+    const path = await writeImageInside(join(directory, 'images'), uniqueImageName(image.fileName, imageNames), image.body);
+    imageLines.push(image.description ? `${path} — ${image.description}` : path);
+  }
   return {
     directory,
     skillRoot,
@@ -87,11 +96,34 @@ async function prepare(directory: string, request: ProjectExecutorRequest): Prom
         ? `WorkLite-managed shared executor context (applies equally to Codex and Claude Code):\n${request.executorContext.trim()}\n\nUse it as persistent supplemental guidance; follow the explicit requirements of the current task when they conflict.`
         : '',
       references.length ? `Pinned read-only process reference files:\n${references.join('\n')}` : '',
+      imageLines.length
+        ? `The user supplied ${imageLines.length === 1 ? 'this image' : 'these images'} with the task; ${imageLines.length === 1 ? 'it is' : 'they are'} already saved as read-only local file${imageLines.length === 1 ? '' : 's'} outside the project:\n${imageLines.join('\n')}\nOpen each path with your own image-reading tool (Claude Code: the Read tool; Codex: view_image) before acting on any instruction that refers to a picture, screenshot or design. Treat them as task input, not as something you produced, and do not copy them into the project.`
+        : '',
     ].filter(Boolean).join('\n\n'),
     mcpServers: request.mcpServers
       .filter((server) => server.endpoint.trim())
       .map((server) => ({ ...server, key: `worklite_${server.id.replace(/[^A-Za-z0-9_-]/g, '_')}` })),
   };
+}
+
+// Pasted images arrive with a client-supplied file name; keep only a flat, safe leaf name so the
+// written path can never escape the per-execution directory, and keep names distinct.
+function uniqueImageName(fileName: string, used: Set<string>): string {
+  const safe = fileName.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^[._]+/, '').slice(-120) || 'image.png';
+  const dot = safe.lastIndexOf('.');
+  const base = dot > 0 ? safe.slice(0, dot) : safe;
+  const extension = dot > 0 ? safe.slice(dot) : '';
+  let name = safe;
+  for (let index = 2; used.has(name); index += 1) name = `${base}-${index}${extension}`;
+  used.add(name);
+  return name;
+}
+
+async function writeImageInside(root: string, fileName: string, body: Buffer): Promise<string> {
+  const path = join(root, fileName);
+  await mkdir(root, { recursive: true });
+  await writeFile(path, body, { mode: 0o600 });
+  return path;
 }
 
 async function writeInside(root: string, relativePath: string, content: string): Promise<string> {

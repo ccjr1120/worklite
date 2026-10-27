@@ -1,7 +1,7 @@
 import { ArrowUp, Download, History, LoaderCircle, Play, Plus, Sparkles, Square, X } from 'lucide-react';
-import { type CompositionEvent as ReactCompositionEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { type ClipboardEvent as ReactClipboardEvent, type CompositionEvent as ReactCompositionEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { WorkflowView } from '@worklite/contracts';
+import type { ChatAttachmentView, WorkflowView } from '@worklite/contracts';
 import { PromptInput, PromptInputSubmit, PromptInputTextarea } from '@/components/ai-elements/prompt-input';
 import { Button } from '@/components/ui/button';
 import { Command, CommandEmpty, CommandItem, CommandList } from '@/components/ui/command';
@@ -29,6 +29,11 @@ type ComposerProps = {
   onFocus: () => void;
   selectedWorkflow: WorkflowView | null;
   onRemoveWorkflow: () => void;
+  attachments: ChatAttachmentView[];
+  attachmentsUploading: number;
+  attachmentError: string;
+  onPasteImages: (files: File[]) => void;
+  onRemoveAttachment: (id: string) => void;
   commandMatches: Array<{ value: SlashCommand; icon: typeof Download; descriptionKey: 'commands.logDescription' | 'commands.newDescription' | 'commands.resumeDescription' | 'commands.summarizeDescription' }>;
   commandMenuOpen: boolean;
   onRunCommand: (command: SlashCommand) => void;
@@ -53,6 +58,7 @@ type ComposerProps = {
 function Composer({
   draft, onDraftChange, onSubmit, onKeyDown, onCompositionStart, onCompositionEnd, onFocus,
   selectedWorkflow, onRemoveWorkflow,
+  attachments, attachmentsUploading, attachmentError, onPasteImages, onRemoveAttachment,
   commandMatches, commandMenuOpen, onRunCommand,
   mentionMatches, mentionMenuOpen, onSelectMention,
   activeValue, onActiveValueChange, onDismissMenus,
@@ -61,6 +67,15 @@ function Composer({
   const { t } = useTranslation('assistant');
   const menuOpen = commandMenuOpen || mentionMenuOpen;
 
+  // Ctrl/Cmd+V of a screenshot puts the image on the clipboard as a file. Text pasted alongside it
+  // keeps the browser's own insertion, so only an image-only paste is taken over here.
+  function handlePaste(event: ReactClipboardEvent<HTMLTextAreaElement>) {
+    const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith('image/'));
+    if (!images.length) return;
+    if (!event.clipboardData.getData('text/plain')) event.preventDefault();
+    onPasteImages(images);
+  }
+
   return (
     <PromptInput onSubmit={onSubmit} className="mx-auto max-w-3xl px-4 pb-4 pt-1 md:px-0">
       <label htmlFor="assistant-message" className="sr-only">{t('composer.label')}</label>
@@ -68,6 +83,33 @@ function Composer({
         <PopoverAnchor asChild>
           {/* The composer is one floating card: mention token, auto-growing text, and submit share it. */}
           <div className="flex min-w-0 flex-1 flex-wrap items-end gap-1.5 rounded-2xl border border-border bg-surface py-1.5 pl-2.5 pr-1.5 shadow-sm transition-[border-color,box-shadow] duration-[200ms] ease-[var(--ease-out)] focus-within:border-brand/60 focus-within:shadow-md focus-within:ring-[3px] focus-within:ring-ring/15">
+            {attachments.length || attachmentsUploading ? (
+              <ul className="wl-enter mb-1 flex w-full flex-wrap gap-2 px-1 pt-1" aria-label={t('attachment.listLabel')}>
+                {attachments.map((attachment) => (
+                  <li key={attachment.id} className="relative size-16 overflow-hidden rounded-lg border border-border bg-surface-subtle">
+                    <img src={attachment.url} alt={attachment.fileName} className="size-full object-cover" />
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className={cn('wl-press absolute right-0.5 top-0.5 rounded-full bg-background/85 p-0.5 text-muted-foreground shadow-xs hover:text-foreground', focusRingInset)}
+                          aria-label={t('attachment.remove', { name: attachment.fileName })}
+                          onClick={() => onRemoveAttachment(attachment.id)}
+                        >
+                          <X className="size-3.5" aria-hidden="true" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t('attachment.remove', { name: attachment.fileName })}</TooltipContent>
+                    </Tooltip>
+                  </li>
+                ))}
+                {Array.from({ length: attachmentsUploading }, (_value, index) => (
+                  <li key={`uploading-${index}`} className="flex size-16 items-center justify-center rounded-lg border border-dashed border-border bg-surface-subtle" aria-label={t('attachment.uploading')}>
+                    <LoaderCircle className="size-4 text-muted-foreground motion-safe:animate-spin" aria-hidden="true" />
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             {selectedWorkflow ? (
               <span className="wl-enter mb-1.5 inline-flex h-7 max-w-[min(16rem,70%)] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-brand/30 bg-brand-subtle pl-2.5 pr-1.5 text-[13px] font-medium text-foreground">
                 <Play className="size-3.5 shrink-0 text-brand" aria-hidden="true" />
@@ -90,6 +132,7 @@ function Composer({
               value={draft}
               onValueChange={onDraftChange}
               onFocus={onFocus}
+              onPaste={handlePaste}
               onKeyDown={onKeyDown}
               onCompositionStart={onCompositionStart}
               onCompositionEnd={onCompositionEnd}
@@ -124,6 +167,7 @@ function Composer({
               </TooltipTrigger>
               <TooltipContent>{running ? t(cancelling ? 'composer.cancelling' : 'composer.cancel') : t('composer.send')}</TooltipContent>
             </Tooltip>
+            {attachmentError ? <p role="alert" className="w-full px-1 pb-0.5 text-xs text-danger">{attachmentError}</p> : null}
           </div>
         </PopoverAnchor>
         <PopoverContent

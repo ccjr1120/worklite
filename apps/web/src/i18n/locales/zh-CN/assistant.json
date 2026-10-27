@@ -460,7 +460,12 @@
     "command": "命令"
   },
   "attachment": {
-    "expired": "图片已过期"
+    "expired": "图片已过期",
+    "listLabel": "待发送的图片",
+    "remove": "移除图片 {{name}}",
+    "uploading": "图片上传中…",
+    "uploadFailed": "图片上传失败，请重试。",
+    "imageSummary": "[{{count}} 张图片]"
   },
   "teamRun": {
     "panel": "Agent Team 任务",

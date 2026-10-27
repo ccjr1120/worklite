@@ -1,11 +1,11 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit, PayloadTooLargeException, UnsupportedMediaTypeException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { and, eq, inArray, lte } from 'drizzle-orm';
 import { chatAttachments, type Database } from '@worklite/db';
-import type { ChatAttachmentView } from '@worklite/contracts';
+import { chatAttachmentImagePattern, type ChatAttachmentView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 
 type Attachment = typeof chatAttachments.$inferSelect;
@@ -16,18 +16,17 @@ export const ATTACHMENT_MIME_TYPES: Record<string, string> = { 'image/png': 'png
 const DEFAULT_RETENTION_HOURS = 12;
 const PRUNE_INTERVAL_MS = 10 * 60 * 1000;
 const ATTACHMENT_ROUTE = '/api/chat/attachments/';
-const ATTACHMENT_IMAGE = /!\[([^\]\n]*)\]\((?:https?:\/\/[^\s)]*?)?\/api\/chat\/attachments\/(att_[A-Za-z0-9-]+)\)/g;
 
 /** Replaces attachment image references for channels that cannot load WorkLite URLs. */
 export function attachmentImagesAsText(markdown: string): string {
-  return markdown.replace(ATTACHMENT_IMAGE, (_match, alt: string, id: string) => `[图片：${alt.trim() || id}，请在 Web 查看]`);
+  return markdown.replace(chatAttachmentImagePattern(), (_match, alt: string, id: string) => `[图片：${alt.trim() || id}，请在 Web 查看]`);
 }
 
 export type AttachmentImageReference = { alt: string; id: string };
 
 /** Lists the Chat attachment images embedded in a reply, in the order they appear. */
 export function attachmentImageReferences(markdown: string): AttachmentImageReference[] {
-  return Array.from(markdown.matchAll(ATTACHMENT_IMAGE), (match) => ({ alt: (match[1] ?? '').trim(), id: match[2]! }));
+  return Array.from(markdown.matchAll(chatAttachmentImagePattern()), (match) => ({ alt: (match[1] ?? '').trim(), id: match[2]! }));
 }
 
 /**
@@ -37,7 +36,7 @@ export function attachmentImageReferences(markdown: string): AttachmentImageRefe
 export function detachAttachmentImages(markdown: string): { text: string; references: AttachmentImageReference[] } {
   const references = attachmentImageReferences(markdown);
   // Remove the line the reference occupied, but keep surrounding blank-line paragraphs intact.
-  const text = markdown.replace(ATTACHMENT_IMAGE, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  const text = markdown.replace(chatAttachmentImagePattern(), '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   return { text, references };
 }
 
@@ -98,6 +97,19 @@ export class ChatAttachmentsService implements OnModuleInit, OnModuleDestroy {
     const attachment = this.db.select().from(chatAttachments).where(and(eq(chatAttachments.id, id), eq(chatAttachments.workspaceId, workspaceId))).get();
     if (!attachment || attachment.expiresAt.getTime() <= now.getTime()) throw new NotFoundException('图片已过期或不存在。');
     return { attachment, path: this.filePath(id) };
+  }
+
+  /**
+   * Reads a live attachment's bytes for a consumer that needs the file itself rather than a URL,
+   * such as handing a user-pasted image to a project executor. An attachment that has expired or
+   * been removed returns null so the consumer can continue without it instead of failing the task.
+   */
+  async load(workspaceId: string, id: string): Promise<{ fileName: string; mimeType: string; body: Buffer } | null> {
+    let opened: { attachment: Attachment; path: string };
+    try { opened = this.open(workspaceId, id); }
+    catch { return null; }
+    try { return { fileName: opened.attachment.fileName, mimeType: opened.attachment.mimeType, body: await readFile(opened.path) }; }
+    catch { return null; }
   }
 
   async remove(workspaceId: string, id: string): Promise<void> {

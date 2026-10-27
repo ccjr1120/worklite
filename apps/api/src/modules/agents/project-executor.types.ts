@@ -49,6 +49,10 @@ export type ProjectExecutorRequest = {
   mcpServers: readonly ProjectExecutorMcpServer[];
   // Read-only files the executor may consult, materialized outside the project.
   references?: ReadonlyArray<{ path: string; content: string }>;
+  // User-supplied images for this task (the Web composer's pasted images). prepare() materializes
+  // them next to the references and names their absolute paths in the prompt; both executors read
+  // an image from disk with their own image tool, so no executor-specific input format is needed.
+  images?: ReadonlyArray<{ fileName: string; description?: string; body: Buffer }>;
   signal: AbortSignal;
   correlation?: GatewayCorrelation;
   // Caller-owned mid-run steering channel; the executor sets `deliver` once a steerable turn exists.

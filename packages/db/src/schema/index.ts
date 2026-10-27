@@ -525,6 +525,10 @@ export type StoredChatProjectTaskSnapshot = {
   projectInstructions: Array<{ path: string; content: string }>;
   capabilities: StoredChatCapabilities;
   readOnly?: boolean;
+  // Chat attachment images the user sent with the request that dispatched this task. Only the
+  // reference is captured; the bytes stay in the attachment store and are materialized for the
+  // executor at each round, so an expired attachment degrades to running without that image.
+  inboundImages?: Array<{ attachmentId: string; description: string }>;
   redeployAfterSuccess?: boolean;
   redeployAuthorization?: { userMessageId: string };
 };

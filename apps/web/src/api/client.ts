@@ -78,6 +78,7 @@ import type {
   ChatConversationView,
   ChatConversationRecords,
   SummarizeChatConversationResponse,
+  ChatAttachmentView,
   WorkliteUpgradeView,
   WorkflowScheduleView,
   ImportWorkflowRequest,
@@ -184,6 +185,14 @@ export const api = {
   answerChatProjectTask: (taskId: string, input: AnswerAgentQuestionRequest) => apiPost<ChatProjectTaskView>(`/api/chat/project-tasks/${encodeURIComponent(taskId)}/answer`, input),
   cancelChatProjectTask: (taskId: string) => apiPost<ChatProjectTaskView>(`/api/chat/project-tasks/${encodeURIComponent(taskId)}/cancel`),
   steerChatProjectTask: (taskId: string, input: SteerProjectTaskRequest) => apiPost<ChatProjectTaskView>(`/api/chat/project-tasks/${encodeURIComponent(taskId)}/steer`, input),
+  // Inbound composer images use the same attachment store as executor-produced report images: the
+  // raw bytes are the request body and the returned Markdown is what the message carries.
+  uploadChatAttachment: (file: Blob, options: { fileName: string; conversationId?: string | null }) => {
+    const search = new URLSearchParams({ fileName: options.fileName });
+    if (options.conversationId) search.set('conversationId', options.conversationId);
+    return apiRequest<ChatAttachmentView>(`/api/chat/attachments?${search}`, { method: 'POST', body: file, headers: { 'Content-Type': file.type } });
+  },
+  deleteChatAttachment: (id: string) => apiDelete(`/api/chat/attachments/${encodeURIComponent(id)}`),
   chatMemories: () => apiGet<ChatMemoryList>('/api/chat/memories'),
   updateChatMemory: (memoryId: string, input: UpdateChatMemoryRequest) => apiPatch<ChatMemoryView>(`/api/chat/memories/${encodeURIComponent(memoryId)}`, input),
   deleteChatMemory: (memoryId: string) => apiDelete(`/api/chat/memories/${encodeURIComponent(memoryId)}`),

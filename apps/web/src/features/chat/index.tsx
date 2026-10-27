@@ -2,7 +2,7 @@ import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { Brain, ChevronRight, Cpu, List, Plus, Radio, ScrollText, Settings, ShieldAlert, SlidersHorizontal } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type CompositionEvent as ReactCompositionEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AgentExecutionView, AgentToolCallView, ChatConversationView, ChatSubmissionView, DispatchChatRequest, ProjectExecutor, RunView, WorkflowView } from '@worklite/contracts';
+import type { AgentExecutionView, AgentToolCallView, ChatAttachmentView, ChatConversationView, ChatSubmissionView, DispatchChatRequest, ProjectExecutor, RunView, WorkflowView } from '@worklite/contracts';
 import { ApiError, api, parseAgentExecutionEvent } from '@/api/client';
 import { chatConversationsQueryKey, useAgentQuery, useModelProvidersQuery, useSkillsQuery, useWorkflowsQuery } from '@/api/queries';
 import { Conversation, ConversationContent } from '@/components/ai-elements/conversation';
@@ -50,7 +50,13 @@ function textToModelList(value: string): string | string[] | null {
   if (entries.length === 0) return null;
   return entries.length === 1 ? entries[0]! : entries;
 }
-const conversationDrafts = new Map<string, { draft: string; queued: QueuedMessage[]; paused: boolean }>();
+const conversationDrafts = new Map<string, { draft: string; queued: QueuedMessage[]; paused: boolean; attachments: ChatAttachmentView[] }>();
+// Attachment ids are embedded in the sent message as Markdown images; the server then hands the same
+// images to whatever project task the turn dispatches.
+function withAttachments(message: string, attachments: ChatAttachmentView[]): string {
+  if (!attachments.length) return message;
+  return [message, attachments.map((attachment) => attachment.markdown).join('\n')].filter(Boolean).join('\n\n');
+}
 const NO_SUBMISSIONS: ChatSubmissionView[] = [];
 const NO_RECEIPTS: PendingReceipt[] = [];
 // The transcript mounts only the newest entries until the reader asks for the rest, so opening a
@@ -149,6 +155,9 @@ function ChatWorkspace() {
   const [cancelling, setCancelling] = useState(false);
   const [loadingExecution, setLoadingExecution] = useState(false);
   const [error, setError] = useState('');
+  const [attachments, setAttachments] = useState<ChatAttachmentView[]>(() => conversationDrafts.get(selectedConversationId ?? 'new')?.attachments ?? []);
+  const [attachmentsUploading, setAttachmentsUploading] = useState(0);
+  const [attachmentError, setAttachmentError] = useState('');
   const [queued, setQueued] = useState<QueuedMessage[]>(() => conversationDrafts.get(selectedConversationId ?? 'new')?.queued ?? []);
   const [queuePaused, setQueuePaused] = useState(() => conversationDrafts.get(selectedConversationId ?? 'new')?.paused ?? false);
   const [queueSendingId, setQueueSendingId] = useState<string | null>(null);
@@ -268,10 +277,10 @@ function ChatWorkspace() {
     if (options?.discardDraft) {
       // A slash command is not composer content: retire the text instead of carrying it
       // into the conversation being left, where it would come back as a restored draft.
-      conversationDrafts.set(selectedConversationId ?? 'new', { draft: '', queued, paused: queuePaused });
+      conversationDrafts.set(selectedConversationId ?? 'new', { draft: '', queued, paused: queuePaused, attachments });
       writeChatDraft(selectedConversationId, '');
     } else {
-      conversationDrafts.set(selectedConversationId ?? 'new', { draft, queued, paused: queuePaused });
+      conversationDrafts.set(selectedConversationId ?? 'new', { draft, queued, paused: queuePaused, attachments });
       // Persist the outgoing draft at switch time as well, so the next keystroke is never
       // required before the draft is safe on disk.
       writeChatDraft(selectedConversationId, draft);
@@ -295,6 +304,9 @@ function ChatWorkspace() {
     setLoadingExecution(Boolean(id));
     if (!id) setRecordsOpen(false);
     setQueued(remembered?.queued ?? []);
+    setAttachments(remembered?.attachments ?? []);
+    setAttachmentsUploading(0);
+    setAttachmentError('');
     setDraft(readChatDraft(id) ?? remembered?.draft ?? '');
     setQueuePaused(remembered?.paused ?? false);
     setError('');
@@ -304,11 +316,13 @@ function ChatWorkspace() {
   }
 
   useEffect(() => {
-    conversationDrafts.set(selectedConversationId ?? 'new', { draft, queued, paused: queuePaused });
+    conversationDrafts.set(selectedConversationId ?? 'new', { draft, queued, paused: queuePaused, attachments });
     // Keystone of draft persistence: every composer edit belongs to the conversation that
     // is selected right now, so a route change, reload or conversation switch can restore it.
+    // Pasted images stay in this in-memory slot only: the attachment ids are server-side and
+    // expire, so a reloaded tab starts without them rather than with dead references.
     writeChatDraft(selectedConversationId, draft);
-  }, [selectedConversationId, draft, queued, queuePaused]);
+  }, [selectedConversationId, draft, queued, queuePaused, attachments]);
 
   useEffect(() => () => { ++mainRequestGenerationRef.current; }, []);
 
@@ -545,6 +559,33 @@ function ChatWorkspace() {
     setPendingAnswer({ id: `pending_${crypto.randomUUID()}`, text, createdAt: new Date().toISOString() });
   }
 
+  // A pasted image is uploaded immediately, so the composer previews the stored file and the sent
+  // message only has to carry its /api/chat/attachments reference.
+  async function uploadPastedImages(files: File[]) {
+    setAttachmentError('');
+    setAttachmentsUploading((count) => count + files.length);
+    await Promise.all(files.map(async (file, index) => {
+      try {
+        const uploaded = await api.uploadChatAttachment(file, {
+          fileName: file.name || `pasted-${Date.now()}-${index + 1}.${(file.type.split('/')[1] ?? 'png').replace(/[^a-z0-9]/g, '')}`,
+          conversationId: selectedConversationId,
+        });
+        setAttachments((current) => [...current, uploaded]);
+      } catch (uploadError) {
+        setAttachmentError(apiErrorMessage(uploadError, t('assistant:attachment.uploadFailed')));
+      } finally {
+        setAttachmentsUploading((count) => Math.max(0, count - 1));
+      }
+    }));
+  }
+
+  function removeAttachment(id: string) {
+    setAttachments((current) => current.filter((attachment) => attachment.id !== id));
+    setAttachmentError('');
+    // Discarding before sending drops the stored file too; a failed delete only leaves it to expire.
+    void api.deleteChatAttachment(id).catch(() => undefined);
+  }
+
   function enqueue(text: string) {
     setQueued((current) => [...current, { id: `web_${crypto.randomUUID()}`, text }]);
     setDraft('');
@@ -555,9 +596,13 @@ function ChatWorkspace() {
   async function submit(event: FormEvent) {
     event.preventDefault();
     const trimmedMessage = draft.trim();
-    if (busy || cancelling || (!trimmedMessage && !selectedWorkflow)) return;
+    if (busy || cancelling || (!trimmedMessage && !selectedWorkflow && !attachments.length)) return;
     const generation = mainRequestGenerationRef.current;
     const command = trimmedMessage.toLowerCase();
+    // The images this submission carries; they leave the composer only once it is accepted.
+    const sentAttachments = attachments;
+    const outgoingMessage = withAttachments(trimmedMessage, sentAttachments);
+    const clearAttachments = () => setAttachments((current) => current.filter((attachment) => !sentAttachments.includes(attachment)));
     if (command === '/log' || command === '/new' || command === '/resume' || command === '/summarize') {
       runCommand(command);
       return;
@@ -567,6 +612,8 @@ function ChatWorkspace() {
       setBusy(true);
       setError('');
       try {
+        // A Workflow run takes plain text input and has no image handling, so pasted images stay
+        // in the composer instead of becoming a dangling attachment URL in the run input.
         const created = await dispatchRequest({ message: trimmedMessage, target: { kind: 'workflow', workflowId: selectedWorkflow.id }, executionId: activeId });
         if (created.reference.kind !== 'workflow') throw new Error(t('assistant:workflowRun.requestFailed'));
         const run = await api.run(workspaceSlug, created.reference.runId);
@@ -598,10 +645,11 @@ function ChatWorkspace() {
     if (waitingForInput && visibleExecution?.pendingQuestion) {
       setBusy(true);
       setError('');
-      showPendingAnswer(trimmedMessage);
+      showPendingAnswer(outgoingMessage);
       setDraft('');
+      clearAttachments();
       try {
-        const next = await sendConversation(trimmedMessage, visibleExecution.id, visibleExecution.pendingQuestion.id);
+        const next = await sendConversation(outgoingMessage, visibleExecution.id, visibleExecution.pendingQuestion.id);
         if (generation !== mainRequestGenerationRef.current) return;
         setExecution(next);
         setQueuePaused(false);
@@ -609,6 +657,7 @@ function ChatWorkspace() {
         if (generation !== mainRequestGenerationRef.current) return;
         // Only an empty composer receives the answer back, so text typed meanwhile is never replaced.
         setDraft((current) => current || trimmedMessage);
+        setAttachments((current) => [...sentAttachments.filter((attachment) => !current.includes(attachment)), ...current]);
         setError(apiErrorMessage(answerError, t('assistant:execution.answerFailed')));
       } finally {
         if (generation === mainRequestGenerationRef.current) { setBusy(false); setPendingAnswer(null); }
@@ -617,14 +666,15 @@ function ChatWorkspace() {
     }
     if (!isConfigured) return;
     if (running) {
-      enqueue(trimmedMessage);
+      enqueue(outgoingMessage);
+      clearAttachments();
       return;
     }
     const fromNewConversation = selectedConversationId === null;
     setBusy(true);
     setError('');
     try {
-      const next = await sendConversation(trimmedMessage, activeId);
+      const next = await sendConversation(outgoingMessage, activeId);
       if (generation !== mainRequestGenerationRef.current) return;
       setSelectedConversationId(next.id);
       void navigate({ to: '/chat', search: { view: 'conversation', conversation: next.id } });
@@ -634,6 +684,7 @@ function ChatWorkspace() {
       setQueuePaused(false);
       void applyCompletedResults(next);
       setDraft('');
+      clearAttachments();
       // The accepted message now belongs to the created conversation, so the new-conversation
       // slot must not keep a copy that would surface when the reader starts another chat.
       if (fromNewConversation) {
@@ -908,7 +959,7 @@ function ChatWorkspace() {
   const composerAvailable = Boolean(isConfigured || eligibleWorkflows.length > 0 || canCancel);
   const composerLoading = agentQuery.isLoading || workflowsQuery.isLoading;
   const stopTarget = running || workflowRunning;
-  const submitDisabled = stopTarget ? cancelling : busy || cancelling || (!draft.trim() && !selectedWorkflow && !stopTarget) || (!selectedWorkflow && !stopTarget && !isConfigured);
+  const submitDisabled = stopTarget ? cancelling : busy || cancelling || attachmentsUploading > 0 || (!draft.trim() && !selectedWorkflow && !attachments.length && !stopTarget) || (!selectedWorkflow && !stopTarget && !isConfigured);
 
   const selected = currentView?.conversation;
   const selectedWithoutExecution = Boolean(selectedConversationId && !activeId);
@@ -972,6 +1023,7 @@ function ChatWorkspace() {
               <Composer draft={draft} onDraftChange={(value) => { setDraft(value); setSlashDismissed(false); setMentionDismissed(false); setActiveValue(''); }} onSubmit={submit} onKeyDown={handleComposerKeyDown} onFocus={() => {}}
                 onCompositionStart={handleCompositionStart} onCompositionEnd={handleCompositionEnd}
                 selectedWorkflow={selectedWorkflow} onRemoveWorkflow={() => setSelectedWorkflow(null)} commandMatches={commandMatches} commandMenuOpen={commandMenuOpen} onRunCommand={runCommand}
+                attachments={attachments} attachmentsUploading={attachmentsUploading} attachmentError={attachmentError} onPasteImages={(files) => void uploadPastedImages(files)} onRemoveAttachment={removeAttachment}
                 mentionMatches={mentionMatches} mentionMenuOpen={mentionMenuOpen} onSelectMention={selectMention} activeValue={activeValue} onActiveValueChange={setActiveValue}
                 onDismissMenus={() => { setSlashDismissed(true); setMentionDismissed(true); }} running={stopTarget} busy={busy || cancelling} canCancel={canCancel} cancelling={cancelling} submitDisabled={submitDisabled} waitingForInput={Boolean(waitingForInput)} onStop={() => void cancelExecution()} />
             ) : <div className="px-4 pb-4 md:px-8"><button type="button" className={cn('wl-press mx-auto flex min-h-12 w-full max-w-3xl items-center gap-2.5 rounded-xl border border-warning/30 bg-warning-subtle px-4 text-left text-[13px] font-medium text-foreground shadow-xs hover:border-warning/50', focusRingInset)} onClick={() => openSettings('configuration')}><ShieldAlert className="size-4 text-warning" />{t('assistant:composer.configure')}<ChevronRight className="ml-auto size-4" /></button></div>}

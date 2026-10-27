@@ -4,10 +4,11 @@ import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { agentExecutions, agentToolCalls, chatConfigurations, chatProjectOperations, chatProjectTasks, chatProjectTaskSubscriptions, type Database, type StoredProjectExecutor, type StoredProjectExecutorLaunch, type StoredProjectExecutorModelSource, type StoredProjectTaskSteerInstruction } from '@worklite/db';
-import type { AnswerAgentQuestionRequest, ChatProjectOperationDetailView, ChatProjectTaskView } from '@worklite/contracts';
+import { splitChatAttachmentImages, type AnswerAgentQuestionRequest, type ChatProjectOperationDetailView, type ChatProjectTaskView } from '@worklite/contracts';
 import { normalizePublicModelList } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
+import { ChatAttachmentsService } from './chat-attachments.service';
 import { ClaudeCodeError } from './claude-code.service';
 import { CodexAppServerError } from './codex-app-server.service';
 import { ProjectExecutorService } from './project-executor.service';
@@ -88,6 +89,7 @@ export class ChatProjectTasksService {
     @Inject(DATABASE) private readonly db: Database,
     private readonly executors: ProjectExecutorService,
     private readonly resources: WorkspaceResourcesService,
+    private readonly attachments: ChatAttachmentsService,
   ) {}
 
   async capture(workspaceId: string, executionId: string, callId: string, input: unknown): Promise<Task> {
@@ -143,6 +145,9 @@ export class ChatProjectTasksService {
     if (model) await this.executors.requireModel(workspaceId, executor, model);
     const modelSource: StoredProjectExecutorModelSource = requestedModel ? 'task' : declaredModel ? 'configuration' : 'executor';
     const capturedLaunch: StoredProjectExecutorLaunch = { ...launch, model, modelSource };
+    // Images the user attached to the request that produced this call. Only the turn's own user
+    // message is read, so an image pasted in an earlier turn never leaks into an unrelated task.
+    const inboundImages = this.inboundImagesOf(workspaceId, [...(execution?.displayMessages ?? [])].reverse().find((message) => message.role === 'user')?.content ?? '');
     const projectInstructions: Array<{ path: string; content: string }> = [];
     for (const path of ['AGENTS.md', 'AGENTS_WORKFLOW.md', 'CLAUDE.md']) {
       try { projectInstructions.push({ path, content: await readFile(join(projectDirectory, path), 'utf8') }); }
@@ -150,10 +155,34 @@ export class ChatProjectTasksService {
     }
     return this.db.insert(chatProjectTasks).values({
       id: callId, workspaceId, executionId, goal, projectDirectory, model: model ?? '',
-      snapshot: { launch: capturedLaunch, projectInstructions, capabilities: execution.capabilitySnapshot, readOnly, ...(redeployAfterSuccess ? { redeployAfterSuccess, redeployAuthorization } : {}) }, status: 'running',
+      snapshot: { launch: capturedLaunch, projectInstructions, capabilities: execution.capabilitySnapshot, readOnly, ...(inboundImages.length ? { inboundImages } : {}), ...(redeployAfterSuccess ? { redeployAfterSuccess, redeployAuthorization } : {}) }, status: 'running',
       worktreePath: null, worktreeBranch: null, baseBranch: null, baseCommit: null,
       mergeStatus: 'not_attempted',
     }).returning().get();
+  }
+
+  // Attachment images embedded in a user message, kept only when the attachment is still live and
+  // owned by this workspace, so a task never carries a reference it cannot resolve later.
+  private inboundImagesOf(workspaceId: string, content: string): Array<{ attachmentId: string; description: string }> {
+    const seen = new Set<string>();
+    return splitChatAttachmentImages(content).images.flatMap((image) => {
+      if (seen.has(image.id)) return [];
+      seen.add(image.id);
+      try { this.attachments.open(workspaceId, image.id); }
+      catch { return []; }
+      return [{ attachmentId: image.id, description: image.alt }];
+    });
+  }
+
+  // Reads the captured inbound images back out of the attachment store for one executor round. An
+  // image that expired or was deleted meanwhile is skipped rather than failing the round.
+  private async loadInboundImages(task: Task): Promise<Array<{ fileName: string; description?: string; body: Buffer }>> {
+    const captured = task.snapshot.inboundImages ?? [];
+    const loaded = await Promise.all(captured.map((image) => this.attachments.load(task.workspaceId, image.attachmentId)
+      // The captured description is the Markdown alt text, which defaults to the file name; repeating
+      // it next to the path would tell the executor nothing.
+      .then((file) => file ? { fileName: file.fileName, ...(image.description && image.description !== file.fileName ? { description: image.description } : {}), body: file.body } : null)));
+    return loaded.filter((image): image is { fileName: string; description?: string; body: Buffer } => image !== null);
   }
 
   async run(taskId: string, onProgress: () => Promise<void>, onSettled?: (task: Task) => void): Promise<Task> {
@@ -386,6 +415,7 @@ export class ChatProjectTasksService {
         : [];
       const steerPort: ProjectExecutorSteerPort = {};
       this.steerPorts.set(taskId, steerPort);
+      const inboundImages = await this.loadInboundImages(task);
       const output = await this.executors.execute({
         owner: 'chat', workspaceId: task.workspaceId, launch, model: task.model || null,
         // A project task's Gateway traffic belongs to the conversation that dispatched
@@ -400,8 +430,12 @@ export class ChatProjectTasksService {
           'To show an image such as a screenshot in your report, upload the file as the raw request body to attachmentUploadUrl from the input with its image media type, for example `curl -sS --data-binary @shot.png -H \'Content-Type: image/png\' "<attachmentUploadUrl>&fileName=shot.png"`. Only PNG, JPEG, GIF and WebP up to 10 MB are accepted. Put the returned `markdown` value, such as ![shot.png](/api/chat/attachments/att_…), in the summary exactly as returned; never reference local file paths or file:// URLs as images. Uploaded images expire with the request logs.',
         ].filter(Boolean).join('\n\n'),
         references: task.snapshot.projectInstructions.map((instruction) => ({ path: `project-instructions/${instruction.path}`, content: instruction.content })),
+        images: inboundImages,
         input: JSON.stringify({
           goal: task.goal, projectDirectory: workingDirectory, taskId: task.id, attachmentUploadUrl: attachmentUploadUrl(task),
+          // The user's own images for this task. The system prompt holds the authoritative absolute
+          // paths, written by the executor boundary that materialized the files.
+          ...(inboundImages.length ? { userImageCount: inboundImages.length } : {}),
           ...(task.snapshot.redeployAfterSuccess ? { redeployAfterSuccess: true } : {}),
           ...(task.answers.length ? { answers: task.answers } : {}),
           ...(previousEvidence ? { previousEvidence } : {}),

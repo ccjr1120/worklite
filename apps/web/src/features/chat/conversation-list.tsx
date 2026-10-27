@@ -11,6 +11,7 @@ import { focusRingInset } from '@/components/ui/interaction';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
 import { cn } from '@/lib/utils';
+import { messagePreview } from './attachment-preview';
 
 type Group = { id: 'today' | 'earlier'; items: ChatConversationSummary[] };
 
@@ -83,7 +84,7 @@ export function ConversationList({ selectedId, onSelect, onNew }: { selectedId: 
                           {selected ? <span className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-brand" aria-hidden="true" /> : null}
                           <StatusDot status={statusKey} className="mt-0.5" />
                           <span className="min-w-0 flex-1">
-                            <TruncatedText text={item.title || t('history.untitled')} className={cn('text-[13px]', live || selected ? 'font-semibold' : 'font-medium', !live && !selected && 'text-foreground/85')} />
+                            <TruncatedText text={messagePreview(item.title, (count) => t('attachment.imageSummary', { count })) || t('history.untitled')} className={cn('text-[13px]', live || selected ? 'font-semibold' : 'font-medium', !live && !selected && 'text-foreground/85')} />
                             <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
                               <TruncatedText text={channelName(item.channel)} className="inline" />
                               <span aria-hidden="true">·</span>
