@@ -4,7 +4,7 @@ import { rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Lexer, type Token, type Tokens } from 'marked';
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 import { chromium, type Browser, type BrowserContext, type Locator, type Page, type Response } from 'playwright';
 import type { NodeExecutionRequest, NodeExecutionResult, PendingNodeExecutionResult } from '@worklite/workflow-engine';
 import { wechatOfficialAccounts, wechatPublications, workflowPendingActions, type Database } from '@worklite/db';
@@ -12,10 +12,10 @@ import type { WechatOfficialAccountView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { decryptSecret, encryptSecret, WECHAT_OFFICIAL_ACCOUNT_ID } from './plugins.service';
 import { applyInlineImageUrls, findInlineImageReferences, planInlineImageUploads, validateGeneratedInlineImages, type GeneratedInlineImage } from './wechat-article-images';
-import { normalizeQrPngDataUrl } from './qr-png';
+import { inspectQrPng } from './qr-png';
 
 type ActionListener = (actionId: string) => void;
-type BrowserSession = { browser: Browser; context: BrowserContext; page: Page };
+type BrowserSession = { browser: Browser; context: BrowserContext; page: Page; headed?: boolean };
 type QrSourceEvaluation = {
   sourceKind: 'image-url' | 'image-data-url' | 'image-blob-url' | 'canvas' | 'none' | 'unsupported';
   sourceMimeType: string | null;
@@ -23,9 +23,24 @@ type QrSourceEvaluation = {
   height: number | null;
   failure: string | null;
 };
+type QrEncodeResult = { dataUrl: string | null; failure: string | null };
 
 const LOGIN_URL = 'https://mp.weixin.qq.com/';
 const QR_LIFETIME_MS = 120_000;
+// A visible login browser is driven by a person, so it outlives the scannable
+// lifetime of a single QR code.
+const BROWSER_LOGIN_LIFETIME_MS = 15 * 60_000;
+// Opening the window is a foreground request, so cap the whole launch-and-load
+// sequence across every candidate browser.
+const BROWSER_LAUNCH_BUDGET_MS = 60_000;
+const QR_CAPTURE_TIMEOUT_MS = 15_000;
+// A scannable QR covers a modest share of its own bitmap. Anything outside
+// this band is a blank, solid or otherwise unusable capture.
+const QR_MIN_DARK_RATIO = 0.01;
+const QR_MAX_DARK_RATIO = 0.85;
+// Playwright's own Chromium is the fallback: a browser a person has to sign in
+// through works far better as the Chrome or Edge they already use.
+const LOGIN_BROWSER_CHANNELS: Array<string | undefined> = ['chrome', 'msedge', undefined];
 
 @Injectable()
 export class WechatOfficialAccountService {
@@ -99,6 +114,57 @@ export class WechatOfficialAccountService {
     return this.openDraftForConfirmation(actionId, publication, account.encryptedStorageState);
   }
 
+  /**
+   * Open the official login page in a browser window on the WorkLite host so a
+   * person can sign in with any method the page offers. It replaces the
+   * headless QR session for the same action: two concurrent login sessions on
+   * one account invalidate each other's codes.
+   */
+  async openLoginInBrowser(actionId: string): Promise<Date> {
+    const [action] = await this.db.select().from(workflowPendingActions).where(eq(workflowPendingActions.id, actionId)).limit(1);
+    if (!action) throw new NotFoundException('Pending action not found.');
+    if (action.type !== 'wechat_login' || (action.status !== 'pending' && action.status !== 'expired')) {
+      throw new BadRequestException('Browser login is only available for a waiting WeChat Official Account login.');
+    }
+    const [publication] = await this.db.select().from(wechatPublications).where(eq(wechatPublications.nodeRunId, action.nodeRunId)).limit(1);
+    if (!publication) throw new NotFoundException('WeChat publication not found.');
+
+    const existing = this.sessions.get(actionId);
+    if (existing?.headed && !existing.page.isClosed()) {
+      await existing.page.bringToFront().catch(() => undefined);
+      const expiresAt = new Date(Date.now() + BROWSER_LOGIN_LIFETIME_MS);
+      await this.extendPendingAction(actionId, expiresAt);
+      return expiresAt;
+    }
+    this.assertAccountAvailable(actionId);
+
+    // Launch before taking over, so a host that cannot open a login browser
+    // leaves the existing QR session untouched instead of stranding the Run.
+    let session: BrowserSession;
+    try {
+      session = await this.openLoginBrowser();
+    } catch (error) {
+      throw new BadRequestException(`Unable to open the WeChat Official Account login browser: ${errorMessage(error)}`);
+    }
+    await this.closeSession(actionId);
+    await this.resetAccountForLogin(publication.accountId);
+    this.sessions.set(actionId, session);
+    this.activeActionId = actionId;
+    const expiresAt = new Date(Date.now() + BROWSER_LOGIN_LIFETIME_MS);
+    try {
+      // The page is left on whichever panel it opens with. Unlike the headless
+      // capture, a person can reach either login method by clicking, and
+      // steering the panels here would fight their own clicks.
+      await session.page.bringToFront().catch(() => undefined);
+      await this.extendPendingAction(actionId, expiresAt);
+      void this.monitorLogin(actionId, publication.accountId, session, expiresAt, true);
+      return expiresAt;
+    } catch (error) {
+      await this.closeSession(actionId);
+      throw new BadRequestException(`Unable to open the WeChat Official Account login browser: ${errorMessage(error)}`);
+    }
+  }
+
   async startAccountLogin(): Promise<WechatOfficialAccountView> {
     const actionId = `wechat_login_${randomUUID()}`;
     await this.startLogin(actionId, WECHAT_OFFICIAL_ACCOUNT_ID);
@@ -131,6 +197,10 @@ export class WechatOfficialAccountService {
 
   private async startLogin(actionId: string, accountId: string, waitForPendingAction = false): Promise<PendingNodeExecutionResult['pendingAction']> {
     this.assertAccountAvailable(actionId);
+    // Clear the error left by an earlier attempt up front, so a transient
+    // capture failure cannot leave the account reading as broken once a new
+    // attempt is under way.
+    await this.resetAccountForLogin(accountId);
     const session = await this.createSession();
     this.sessions.set(actionId, session);
     this.activeActionId = actionId;
@@ -242,6 +312,7 @@ export class WechatOfficialAccountService {
       if (await isLoginConfirmed(session.context)) {
         const storageState = await session.context.storageState();
         await this.db.update(wechatOfficialAccounts).set({ status: 'connected', encryptedStorageState: encryptSecret(JSON.stringify(storageState)), qrCode: null, qrExpiresAt: null, lastVerifiedAt: new Date(), lastError: null, updatedAt: new Date() }).where(eq(wechatOfficialAccounts.id, accountId));
+        if (waitForPendingAction) await this.restorePendingActionForCompletion(actionId);
         await this.closeSession(actionId);
         this.complete(actionId);
         return;
@@ -299,10 +370,81 @@ export class WechatOfficialAccountService {
   }
 
   private async createSession(encryptedStorageState?: string): Promise<BrowserSession> {
-    const browser = await chromium.launch({ headless: process.env.WECHAT_HEADED !== '1' });
+    const headless = process.env.WECHAT_HEADED !== '1';
+    const browser = await chromium.launch({ headless });
     const context = await browser.newContext(encryptedStorageState ? { storageState: JSON.parse(decryptSecret(encryptedStorageState)) } : undefined);
     const page = await context.newPage();
-    return { browser, context, page };
+    return { browser, context, page, headed: !headless };
+  }
+
+  /**
+   * Launch a visible browser that actually renders the login page. Chromium
+   * builds and installed browsers differ in what they can load here, so try
+   * each in turn and keep only a window that reached a real login panel —
+   * returning a window stuck on a network error page is what leaves a person
+   * staring at "this page cannot be loaded".
+   */
+  private async openLoginBrowser(): Promise<BrowserSession> {
+    const deadline = Date.now() + BROWSER_LAUNCH_BUDGET_MS;
+    const failures: string[] = [];
+    for (const channel of LOGIN_BROWSER_CHANNELS) {
+      if (Date.now() >= deadline) break;
+      const label = channel ?? 'bundled chromium';
+      let session: BrowserSession | null = null;
+      try {
+        const browser = await chromium.launch(channel ? { headless: false, channel } : { headless: false });
+        const context = await browser.newContext();
+        session = { browser, context, page: await context.newPage(), headed: true };
+        await this.loadLoginPage(session.page, deadline);
+        return session;
+      } catch (error) {
+        failures.push(`${label}: ${errorMessage(error)}`);
+        if (session) await session.browser.close().catch(() => undefined);
+      }
+    }
+    throw new Error(`no browser on this host could load the WeChat Official Account login page (${failures.join('; ') || 'launch budget exhausted'})`);
+  }
+
+  /** Reached a real login panel, not a browser window parked on an error page. */
+  private async loadLoginPage(page: Page, deadline: number): Promise<void> {
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 2_000) break;
+      if (attempt > 0) await delay(1_000);
+      try {
+        // The URL is fixed here and never supplied by a request.
+        const response = await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: Math.min(20_000, remaining) });
+        if (response && response.status() >= 400) throw new Error(`login page responded with HTTP ${response.status()}`);
+        await page.locator('.login__type__container__account, .login__type__container__scan').first().waitFor({ state: 'attached', timeout: Math.max(2_000, Math.min(15_000, deadline - Date.now())) });
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('the login page did not render a login panel in time');
+  }
+
+  /** Keep a login the user is still working through from reading as expired. */
+  private async extendPendingAction(actionId: string, expiresAt: Date): Promise<void> {
+    await this.db.update(workflowPendingActions).set({ status: 'pending', expiresAt, updatedAt: new Date() })
+      .where(and(eq(workflowPendingActions.id, actionId), inArray(workflowPendingActions.status, ['pending', 'expired'])));
+  }
+
+  /**
+   * A login that already succeeded has to resume its Run even when the QR it
+   * started from timed out in the meantime: the Run scheduler only picks up a
+   * pending action.
+   */
+  private async restorePendingActionForCompletion(actionId: string): Promise<void> {
+    const now = new Date();
+    await this.db.update(workflowPendingActions).set({ status: 'pending', expiresAt: new Date(now.getTime() + QR_LIFETIME_MS), updatedAt: now })
+      .where(and(eq(workflowPendingActions.id, actionId), eq(workflowPendingActions.status, 'expired')));
+  }
+
+  private async resetAccountForLogin(accountId: string): Promise<void> {
+    await this.db.update(wechatOfficialAccounts).set({ status: 'qr_pending', qrCode: null, qrExpiresAt: null, lastError: null, updatedAt: new Date() })
+      .where(and(eq(wechatOfficialAccounts.id, accountId), ne(wechatOfficialAccounts.status, 'connected')));
   }
 
   private assertAccountAvailable(actionId: string): void {
@@ -362,39 +504,73 @@ async function captureLoginQrCode(page: Page): Promise<string> {
   return captureQrBitmap(page, selector, qr);
 }
 
+/**
+ * Turn the live QR element into a PNG data URL the Web UI can render.
+ *
+ * The login page swaps and re-fades its QR element while it refreshes, so a
+ * single attempt races that churn. Each attempt tries two independent
+ * strategies, because either one alone has a blind spot: re-encoding the source
+ * bitmap in the page keeps the intrinsic pixels and ignores CSS opacity but
+ * fails on a cross-origin tainted canvas, while an element screenshot always
+ * reads back but can catch a faded or covered element as blank. Every candidate
+ * is validated as a complete PNG that carries QR-shaped ink before it is
+ * accepted, and the whole loop keeps retrying until the deadline.
+ */
 async function captureQrBitmap(page: Page, selector: string, qr: Locator): Promise<string> {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + QR_CAPTURE_TIMEOUT_MS;
   let latest: QrSourceEvaluation | null = null;
-  let captureFailure: string | null = null;
+  const failures = new Map<string, string>();
   do {
+    try {
+      const encoded = await page.evaluate<QrEncodeResult>(QR_BITMAP_DATA_URL, selector);
+      const accepted = acceptQrPng(encoded.dataUrl);
+      if (typeof accepted === 'string') return accepted;
+      failures.set('page-bitmap', encoded.failure ?? accepted.reason);
+    } catch (error) {
+      failures.set('page-bitmap', errorMessage(error));
+    }
+
+    try {
+      const screenshot = await qr.screenshot({ type: 'png', animations: 'disabled', timeout: Math.max(100, Math.min(1_000, deadline - Date.now())) });
+      const accepted = acceptQrPng(`data:image/png;base64,${screenshot.toString('base64')}`);
+      if (typeof accepted === 'string') return accepted;
+      failures.set('element-screenshot', accepted.reason);
+    } catch (error) {
+      // The login page can replace the QR element while it refreshes. Retry a
+      // transient detach, but retain the last capture failure for diagnostics.
+      failures.set('element-screenshot', errorMessage(error));
+    }
+
+    // Only needed to describe a failed attempt, so probe the source after both
+    // strategies have already declined this one.
     try {
       latest = await page.evaluate<QrSourceEvaluation>(QR_SOURCE_INFO, selector);
     } catch (error) {
       latest = null;
-      captureFailure = `source inspection failed: ${errorMessage(error)}`;
+      failures.set('source', `inspection failed: ${errorMessage(error)}`);
     }
-    try {
-      // Capture the rendered DOM element, then validate its PNG bytes. This
-      // lets Chromium decode remote URLs, base64 data URLs, blob URLs, SVGs,
-      // and canvas output without relying on a second canvas that may be
-      // cross-origin tainted.
-      const screenshot = await qr.screenshot({ type: 'png', animations: 'disabled', timeout: Math.max(100, Math.min(1_000, deadline - Date.now())) });
-      const normalized = normalizeQrPngDataUrl(`data:image/png;base64,${screenshot.toString('base64')}`);
-      if (normalized) return normalized;
-      captureFailure = 'rendered element screenshot did not contain a complete PNG';
-    } catch (error) {
-      // The login page can replace the QR element while it refreshes. Retry a
-      // transient detach, but retain the last capture failure for diagnostics.
-      captureFailure = errorMessage(error);
-    }
+
     if (Date.now() < deadline) await page.waitForTimeout(100);
   } while (Date.now() < deadline);
 
   const input = latest
     ? `${latest.sourceKind}${latest.sourceMimeType ? ` (${latest.sourceMimeType})` : ''}${latest.width && latest.height ? ` ${latest.width}x${latest.height}` : ''}`
     : 'unavailable';
-  const reason = captureFailure ?? latest?.failure ?? 'invalid PNG image data';
-  throw new Error(`WeChat QR image could not be converted to a PNG data URL. Input: ${input}; reason: ${reason}.`);
+  if (latest?.failure) failures.set('source', latest.failure);
+  const reason = failures.size > 0 ? [...failures].map(([strategy, detail]) => `${strategy}: ${detail}`).join('; ') : 'invalid PNG image data';
+  throw new Error(`WeChat QR image could not be converted to a PNG data URL. Input: ${input}; attempts over ${QR_CAPTURE_TIMEOUT_MS}ms: ${reason}.`);
+}
+
+/** The normalized data URL, or why this candidate is not a usable QR image. */
+function acceptQrPng(candidate: string | null): string | { reason: string } {
+  if (!candidate) return { reason: 'no image data' };
+  const inspection = inspectQrPng(candidate);
+  if (!inspection) return { reason: 'not a complete PNG of at least 64x64' };
+  const { darkRatio } = inspection;
+  if (darkRatio === null) return inspection.dataUrl;
+  if (darkRatio < QR_MIN_DARK_RATIO) return { reason: `blank capture, only ${(darkRatio * 100).toFixed(2)}% dark pixels in ${inspection.width}x${inspection.height}` };
+  if (darkRatio > QR_MAX_DARK_RATIO) return { reason: `solid capture, ${(darkRatio * 100).toFixed(2)}% dark pixels in ${inspection.width}x${inspection.height}` };
+  return inspection.dataUrl;
 }
 
 // Playwright evaluates this expression inside the page. Keep it as a string so
@@ -479,6 +655,54 @@ const QR_SOURCE_INFO = `(qrSelector) => {
   }
 
   return { sourceKind, sourceMimeType, width, height, failure: null };
+}`;
+
+// Re-encode the source bitmap rather than a screenshot of the composited page
+// element, so a CSS opacity or transition on a freshly refreshed QR cannot turn
+// a valid code into a blank image, and the intrinsic pixel size is preserved.
+// A cross-origin QR taints the canvas and makes toDataURL throw; that is
+// reported so the caller can fall back to a screenshot.
+const QR_BITMAP_DATA_URL = `(qrSelector) => {
+  const visible = (element) => {
+    const bounds = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return element.isConnected && bounds.width > 0 && bounds.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+  };
+  const candidates = Array.from(document.querySelectorAll(qrSelector)).filter(visible);
+  const element = candidates[candidates.length - 1];
+  if (!element) return { dataUrl: null, failure: 'no-visible-qr-image' };
+
+  let width;
+  let height;
+  if (element instanceof HTMLImageElement) {
+    if (!element.complete || element.naturalWidth < 64 || element.naturalHeight < 64) return { dataUrl: null, failure: 'image-not-decoded' };
+    width = element.naturalWidth;
+    height = element.naturalHeight;
+  } else if (element instanceof HTMLCanvasElement && element.width >= 64 && element.height >= 64) {
+    width = element.width;
+    height = element.height;
+  } else {
+    return { dataUrl: null, failure: 'unsupported-qr-element' };
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) return { dataUrl: null, failure: 'no-2d-context' };
+  // A QR drawn as dark ink on transparency stays scannable only over white.
+  context.fillStyle = '#fff';
+  context.fillRect(0, 0, width, height);
+  try {
+    context.drawImage(element, 0, 0, width, height);
+  } catch (error) {
+    return { dataUrl: null, failure: 'draw-failed: ' + (error && error.message ? error.message : String(error)) };
+  }
+  try {
+    return { dataUrl: canvas.toDataURL('image/png'), failure: null };
+  } catch (error) {
+    return { dataUrl: null, failure: 'canvas-tainted: ' + (error && error.message ? error.message : String(error)) };
+  }
 }`;
 
 async function waitForScannableQrCode(page: Page, selector: string): Promise<void> {

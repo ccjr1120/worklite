@@ -568,6 +568,19 @@ export class RunsService {
     return this.get(request, workspaceSlug, runId);
   }
 
+  async openPendingActionBrowser(request: Request, workspaceSlug: string, runId: string): Promise<RunView> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const [run] = await this.db.select().from(workflowRuns).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id))).limit(1);
+    if (!run) throw new NotFoundException('Run not found');
+    if (run.status !== 'waiting_for_input') throw new NotFoundException('Run has no pending action.');
+    const [action] = await this.db.select().from(workflowPendingActions).where(and(eq(workflowPendingActions.runId, runId), inArray(workflowPendingActions.status, ['pending', 'expired']))).orderBy(desc(workflowPendingActions.createdAt)).limit(1);
+    if (!action) throw new NotFoundException('Pending action not found.');
+    if (action.type !== 'wechat_login') throw new BadRequestException('Browser login is only available for WeChat Official Account sign-in.');
+    const expiresAt = await this.wechatOfficialAccount.openLoginInBrowser(action.id);
+    await this.publish(runId, 'pending_action.updated', { actionId: action.id, status: 'pending', expiresAt: expiresAt.toISOString() });
+    return this.get(request, workspaceSlug, runId);
+  }
+
   async retryNode(request: Request, workspaceSlug: string, runId: string, nodeRunId: string): Promise<RunView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [run] = await this.db.select().from(workflowRuns).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id))).limit(1);
