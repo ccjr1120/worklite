@@ -3,7 +3,10 @@
   "compilerOptions": {
     "noEmit": true,
     "outDir": "./dist",
-    "baseUrl": "./"
+    "baseUrl": "./",
+    // Type checking reaches into the workspace packages this app keeps external,
+    // whose relative imports carry a ".ts" extension because Node resolves them.
+    "allowImportingTsExtensions": true
   },
   "include": ["src"]
 }

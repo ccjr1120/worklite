@@ -1,7 +1,11 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "noEmit": false
+    "noEmit": false,
+    // TypeScript only accepts allowImportingTsExtensions alongside emit when it is
+    // allowed to rewrite those specifiers. The rewrite is inert here: the packages
+    // that use ".ts" specifiers stay external to the webpack bundle.
+    "rewriteRelativeImportExtensions": true
   },
   "exclude": ["node_modules", "dist"]
 }

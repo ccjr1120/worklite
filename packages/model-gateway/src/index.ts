@@ -1,7 +1,7 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { APICallError, generateText, InvalidToolInputError, isStepCount, JSONParseError, jsonSchema, NoOutputGeneratedError, Output, streamText, ToolLoopAgent, tool, wrapLanguageModel, type LanguageModel, type LanguageModelCallEndEvent, type LanguageModelUsage, type ModelMessage, type PrepareStepFunction, type ToolExecutionEndEvent, type ToolSet } from 'ai';
-import { gatewayAttributionHeaders, type GatewayCorrelation } from './attribution';
+import { gatewayAttributionHeaders, type GatewayCorrelation } from './attribution.ts';
 
 // The Anthropic protocol requires max_tokens and the AI SDK defaults it to 4096
 // when unset, which silently truncates long Agent outputs (for example a
@@ -41,7 +41,7 @@ export type GatewayAgentMessage =
 
 export type GatewayToolResultOutput = { type: 'text' | 'error-text'; value: string };
 
-export { gatewayAttributionHeaders, type GatewayCorrelation } from './attribution';
+export { gatewayAttributionHeaders, type GatewayCorrelation } from './attribution.ts';
 
 // A model configuration slot may declare one model or an ordered list of fallback candidates; a plain
 // string is a one-element list. The Gateway tries each candidate in order and switches to the next only
