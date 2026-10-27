@@ -95,7 +95,6 @@ type IsolatedAgentInvocationRequest = {
   builtinToolNames?: readonly string[];
   role?: AgentTeamRoleId;
   projectDirectory?: string;
-  authorizedCommands?: readonly string[];
   processReferencePaths?: readonly string[];
   readProcessReference?: (path: string) => Promise<string>;
   readTeamDocument?: (documentId: string, revision: number) => Promise<{ title: string; content: string }>;
@@ -201,7 +200,7 @@ export class IsolatedAgentInvocationService {
           `- Work in ${request.projectDirectory} unless a tool explicitly receives another server-authorized path.`,
           '- Follow the project instructions and any unresolved authorization limits.',
           '- The selected execution mode does not override either constraint.',
-          '- Execute bash only with a command exactly listed in authorizedCommands.',
+          '- Run the commands the task needs with bash directly; WorkLite requires no command grant and records every execution as Command evidence.',
         ].join('\n')
         : '',
       request.role && request.processReferencePaths?.length
@@ -263,11 +262,6 @@ export class IsolatedAgentInvocationService {
       // journal: a rejected path carries no uncertain external effect.
       return (await this.runToolEffect(request, assignedSkills, mcpTools, selectedBuiltinToolNames, call)).output;
     }
-    // An unauthorized bash command never executed, so the rejection carries no uncertain
-    // effect: hand it back as tool feedback instead of failing the attempt. The role can
-    // then pick an authorized command or ask for the grant through waiting_for_input.
-    const authorizationError = this.teamCommandAuthorizationError(request, call);
-    if (authorizationError) return { type: 'error-text', value: authorizationError };
     if (!request.operation) {
       return (await this.runToolEffect(request, assignedSkills, mcpTools, selectedBuiltinToolNames, call)).output;
     }
@@ -533,16 +527,6 @@ export class IsolatedAgentInvocationService {
       status: 'succeeded',
     });
     return { output: { type: 'text', value: boundedToolResult(value, request.limits?.maxToolResultChars) } };
-  }
-
-  private teamCommandAuthorizationError(
-    request: IsolatedAgentInvocationRequest,
-    call: WorkflowAgentToolCall,
-  ): string | null {
-    if (!request.role || !request.projectDirectory || call.toolName !== 'bash') return null;
-    const command = requiredString((call.input as { command?: unknown } | null)?.command, 'command');
-    if (request.authorizedCommands?.includes(command)) return null;
-    return `The exact shell command is not authorized for this project task: ${command}. Do not call it again; either use a command listed in authorizedCommands, or return a waiting_for_input response naming the exact command you need so the user can grant it.`;
   }
 
   private validateProcessReference(

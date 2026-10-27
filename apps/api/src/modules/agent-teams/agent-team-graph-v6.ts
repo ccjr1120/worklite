@@ -22,7 +22,6 @@ export type AgentTeamGroupGraphInitial = {
   projectDirectory: string;
   outputDirectory: string;
   scopeRevision: number;
-  authorizedCommands: readonly string[];
   projectInstructions: readonly AgentTeamProjectInstructionFile[];
   groupContext: AgentTeamGroupRunContext;
   // Optional for historical callers/tests; v10 enables Dispatcher routing.
@@ -36,7 +35,6 @@ type GroupGraphState = {
   projectDirectory: string;
   outputDirectory: string;
   scopeRevision: number;
-  authorizedCommands: readonly string[];
   projectInstructions: readonly AgentTeamProjectInstructionFile[];
   groupContext: AgentTeamGroupRunContext;
   currentRole: AgentTeamRoleId;
@@ -70,7 +68,6 @@ const groupState = Annotation.Root({
   projectDirectory: Annotation<string>(),
   outputDirectory: Annotation<string>(),
   scopeRevision: Annotation<number>(),
-  authorizedCommands: Annotation<readonly string[]>({ reducer: (_left, right) => right, default: () => [] }),
   projectInstructions: Annotation<readonly AgentTeamProjectInstructionFile[]>({ reducer: (_left, right) => right, default: () => [] }),
   groupContext: Annotation<AgentTeamGroupRunContext>(),
   currentRole: Annotation<AgentTeamRoleId>(),
@@ -104,7 +101,6 @@ export function createAgentTeamGroupGraph(
       projectDirectory: state.projectDirectory,
       outputDirectory: state.outputDirectory,
       scopeRevision: state.scopeRevision,
-      authorizedCommands: state.authorizedCommands,
       projectInstructions: state.projectInstructions,
       groupContext: state.groupContext,
       groupMessage: state.currentMessage,
@@ -247,7 +243,6 @@ export function createAgentTeamGroupGraph(
       projectDirectory: initial.projectDirectory,
       outputDirectory: initial.outputDirectory,
       scopeRevision: initial.scopeRevision,
-      authorizedCommands: initial.authorizedCommands,
       projectInstructions: initial.projectInstructions,
       groupContext: initial.groupContext,
       currentRole: initial.groupContext.targetRole,
@@ -271,7 +266,6 @@ export function createAgentTeamGroupGraph(
         pendingInput: null,
         activeTaskKey: null,
         taskAnswers: { [state.activeTaskKey]: answer.answer },
-        authorizedCommands: answer.authorizedCommands,
         ...(bound.length ? {
           groupContext: { ...state.groupContext, repositories: [...state.groupContext.repositories, ...bound] },
           selectedRepositoryIds: [...new Set([...state.selectedRepositoryIds, ...bound.map((repository) => repository.id)])],

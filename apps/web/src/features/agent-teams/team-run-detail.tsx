@@ -103,7 +103,9 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
           {run.worktreeBasePath ? <div><dt className="text-muted-foreground">{t('run.worktreeBasePath')}</dt><dd className="mt-1 font-mono break-all">{run.worktreeBasePath}</dd></div> : null}
           {run.runBranch ? <div><dt className="text-muted-foreground">{t('run.runBranch')}</dt><dd className="mt-1 font-mono break-all">{run.runBranch}</dd></div> : null}
           <div className="md:col-span-2"><dt className="text-muted-foreground">{t('run.intent')}</dt><dd className="mt-1 whitespace-pre-wrap break-words">{run.intent}</dd></div>
-          <div className="md:col-span-2"><dt className="text-muted-foreground">{t('run.commands')}</dt><dd className="mt-1">{run.authorizedCommands.length ? <ul className="space-y-1">{run.authorizedCommands.map((command) => <li key={command} className="font-mono text-xs break-all">{command}</li>)}</ul> : <span className="text-muted-foreground">{t('run.noCommands')}</span>}</dd></div>
+          {/* Historical evidence only: Team roles now execute commands directly, so only
+              Runs recorded under the retired grant model list command strings here. */}
+          {run.authorizedCommands.length ? <div className="md:col-span-2"><dt className="text-muted-foreground">{t('run.commands')}</dt><dd className="mt-1"><ul className="space-y-1">{run.authorizedCommands.map((command) => <li key={command} className="font-mono text-xs break-all">{command}</li>)}</ul></dd></div> : null}
           {run.teamVersion.projectExecutorLaunches ? <div className="md:col-span-2"><dt className="text-muted-foreground">{t('run.executors')}</dt><dd><JsonEvidence value={run.teamVersion.projectExecutorLaunches} /></dd></div> : null}
         </dl>
       </section>

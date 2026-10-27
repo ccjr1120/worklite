@@ -33,8 +33,7 @@
     "worktreeBasePath": "基础 Worktree",
     "runBranch": "Run 分支",
     "intent": "任务目标",
-    "commands": "精确命令授权",
-    "noCommands": "未授权命令",
+    "commands": "历史命令授权（已停用）",
     "scopeRevision": "授权范围版本",
     "detail": {
       "title": "Agent Team 执行"
@@ -42,8 +41,7 @@
     "continueInChat": "在 Chat 中处理任务",
     "inputInChat": "问题和恢复操作由 Chat 任务卡片处理。",
     "openArchive": "查看历史对话",
-    "executors": "捕获的项目执行器",
-    "commandsPlaceholder": "每行一条完整命令"
+    "executors": "捕获的项目执行器"
   },
   "tasks": {
     "title": "任务",
@@ -87,8 +85,7 @@
     "answer": "提交回答",
     "answering": "正在提交回答",
     "answerFailed": "无法提交回答",
-    "answerPlaceholder": "输入完整回答…",
-    "commands": "追加精确命令授权"
+    "answerPlaceholder": "输入完整回答…"
   },
   "recovery": {
     "title": "操作恢复",

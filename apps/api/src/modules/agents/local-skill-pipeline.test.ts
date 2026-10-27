@@ -143,7 +143,6 @@ describe('Local directory Skill pipeline', () => {
       builtinToolNames: testRunner.toolNames,
       role: 'test_runner',
       projectDirectory: '/tmp/project',
-      authorizedCommands: [],
       signal: new AbortController().signal,
     });
 

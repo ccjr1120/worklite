@@ -34,10 +34,6 @@ const teamState = Annotation.Root({
   projectDirectory: Annotation<string>(),
   outputDirectory: Annotation<string>(),
   scopeRevision: Annotation<number>(),
-  authorizedCommands: Annotation<readonly string[]>({
-    reducer: (left, right) => [...new Set([...left, ...right])],
-    default: () => [],
-  }),
   projectInstructions: Annotation<readonly AgentTeamProjectInstructionFile[]>({
     reducer: (_left, right) => right,
     default: () => [],
@@ -285,7 +281,6 @@ async function executeTask(
     projectDirectory: state.projectDirectory,
     outputDirectory: state.outputDirectory,
     scopeRevision: state.scopeRevision,
-    authorizedCommands: state.authorizedCommands,
     projectInstructions: state.projectInstructions,
     upstream: state.documents,
     pendingInputId: state.pendingInput?.id ?? (state.taskAnswers[taskKey] ? state.taskPendingInputIds[taskKey] : undefined),
@@ -304,7 +299,6 @@ function inputNode() {
       pendingInput: null,
       activeTaskKey: null,
       taskAnswers: { [state.activeTaskKey]: answer.answer },
-      authorizedCommands: answer.authorizedCommands,
     };
   };
 }
@@ -716,7 +710,6 @@ function createTeamGraphV2(
           projectDirectory: state.projectDirectory,
           outputDirectory: state.outputDirectory,
           scopeRevision: state.scopeRevision,
-          authorizedCommands: state.authorizedCommands,
           projectInstructions: state.projectInstructions,
           upstream: state.documents,
           pendingInputId: pendingInput?.id ?? (state.developmentTaskAnswers[taskKey] ? pendingInputId : undefined),
@@ -741,7 +734,6 @@ function createTeamGraphV2(
           developmentPendingInputs: { [developerId]: null },
           developmentActiveTaskKeys: { [developerId]: null },
           ...(taskKey ? { developmentTaskAnswers: { [taskKey]: answer.answer } } : {}),
-          authorizedCommands: answer.authorizedCommands,
         };
       })
       .addEdge(inputNodeName, developerNode)
@@ -841,7 +833,6 @@ export function toGraphResult(state: AgentTeamGraphState | AgentTeamGraphV2State
     projectDirectory: state.projectDirectory,
     outputDirectory: state.outputDirectory,
     scopeRevision: state.scopeRevision,
-    authorizedCommands: state.authorizedCommands,
     projectInstructions: state.projectInstructions,
     documents: state.documents,
     unresolvedIssues: state.unresolvedIssues,

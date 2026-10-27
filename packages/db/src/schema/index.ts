@@ -921,6 +921,8 @@ export const agentTeamRuns = sqliteTable('agent_team_runs', {
   // placeholder until its Dispatcher commits the decision and rationale.
   modeRationale: text('mode_rationale'),
   modeDecidedAt: integer('mode_decided_at', { mode: 'timestamp_ms' }),
+  // Retired grant model, retained as read-only historical evidence: Team work roles now
+  // execute commands directly, so new Runs never write this column.
   authorizedCommands: text('authorized_commands', { mode: 'json' }).$type<string[]>().notNull().default([]),
   scopeRevision: integer('scope_revision').notNull().default(1),
   desiredControlState: text('desired_control_state').$type<'none' | 'pause_requested' | 'cancel_requested'>().notNull().default('none'),

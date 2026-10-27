@@ -97,7 +97,6 @@ describe('Team role Skill pipeline', () => {
       builtinToolNames: role.toolNames,
       role: 'test_designer',
       projectDirectory: '/tmp/project',
-      authorizedCommands: [],
       signal: new AbortController().signal,
     });
 

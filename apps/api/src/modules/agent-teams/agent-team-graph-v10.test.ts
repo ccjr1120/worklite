@@ -40,7 +40,6 @@ function initial(targetRole: string, mode: AgentTeamMode, orchestrationVersion: 
     projectDirectory: '/tmp/worklite-test-project',
     outputDirectory: '/tmp/worklite-test-output',
     scopeRevision: 1,
-    authorizedCommands: [],
     projectInstructions: [],
     groupContext: {
       groupId: 'atgroup_v10_test',

@@ -246,11 +246,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (mode !== 'plan_only' && mode !== 'validate_existing' && mode !== 'implement_and_validate') {
       throw new BadRequestException('A supported TeamRun mode is required.');
     }
-    const authorizedCommands = normalizeAuthorizedCommands(request?.authorizedCommands);
-    if (mode === 'plan_only' && authorizedCommands.length > 0) {
-      throw new BadRequestException('Plan-only Agent Team runs cannot authorize commands.');
-    }
-
     const [existing] = await this.db.select({ id: agentTeamRuns.id }).from(agentTeamRuns)
       .where(and(eq(agentTeamRuns.id, acceptance.runId), eq(agentTeamRuns.workspaceId, workspaceId))).limit(1);
     if (existing) return this.getRunView(existing.id, workspaceId);
@@ -292,7 +287,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         projectDirectory: resolvedProjectDirectory,
         projectInstructions,
         mode,
-        authorizedCommands,
         scopeRevision: 1,
         langGraphThreadId: `atthread_${runId}`,
       }).run();
@@ -371,7 +365,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         mode,
         modeRationale: request.targetRole === AGENT_TEAM_DISPATCHER_ROLE ? null : directRoleModeRationale(request.targetRole),
         modeDecidedAt: request.targetRole === AGENT_TEAM_DISPATCHER_ROLE ? null : now,
-        authorizedCommands: [],
         scopeRevision: 1,
         langGraphThreadId: `atthread_${runId}`,
         createdAt: now,
@@ -647,6 +640,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       // operator can resolve manually. Surfaced until the contracts lane adds the fields.
       worktreeBasePath: worktree.worktreeBasePath ?? null,
       runBranch: worktree.runBranch ?? null,
+      // Historical evidence: only Runs from before direct Team command execution carry
+      // granted command strings. New Runs always report an empty list.
       authorizedCommands: run.authorizedCommands,
       scopeRevision: run.scopeRevision,
       desiredControlState: run.desiredControlState,
@@ -719,10 +714,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (request.scopeRevision !== run.scopeRevision) {
       throw new BadRequestException('The pending input scope revision is stale.');
     }
-    const grantedCommands = normalizeAuthorizedCommands(request?.authorizedCommands);
-    if (run.mode === 'plan_only' && grantedCommands.length > 0) {
-      throw new BadRequestException('Plan-only Agent Team runs cannot authorize commands.');
-    }
     // Directories carried by an answer are validated before the answer is accepted, so an
     // invalid path rejects the whole answer instead of consuming it.
     const directories = await this.normalizeBindingDirectories(request?.directories);
@@ -755,12 +746,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         eq(agentTeamPendingInputs.status, 'pending'),
       )).returning().all();
       if (rows.length === 0) return null;
-      const [currentRun] = transaction.select({ authorizedCommands: agentTeamRuns.authorizedCommands })
-        .from(agentTeamRuns)
-        .where(eq(agentTeamRuns.id, runId))
-        .limit(1)
-        .all();
-      const nextCommands = mergeAuthorizedCommands(currentRun?.authorizedCommands ?? [], grantedCommands);
       const remaining = transaction.select({ id: agentTeamPendingInputs.id })
         .from(agentTeamPendingInputs)
         .where(and(
@@ -773,22 +758,20 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       transaction.update(agentTeamRuns).set({
         status: remaining.length > 0 ? 'waiting_for_input' : 'running',
         desiredControlState: 'none',
-        authorizedCommands: nextCommands,
         updatedAt: now,
       }).where(and(eq(agentTeamRuns.id, runId), eq(agentTeamRuns.status, 'waiting_for_input'))).run();
       this.appendEvent(transaction, runId, 'input.answered', {
         pendingInputId: request.pendingInputId,
         kind: 'question',
         answer: request.answer,
-        ...(grantedCommands.length > 0 ? { authorizedCommands: grantedCommands } : {}),
         ...(directories.length > 0 ? { directories } : {}),
       });
       this.appendProgressIfChanged(transaction, runId);
-      return nextCommands;
+      return true;
     });
     if (!answered) throw new BadRequestException('The pending input is no longer active.');
 
-    const resume = pendingInputAnswer(request.answer, answered, directories);
+    const resume = pendingInputAnswer(request.answer, directories);
     this.scheduleExecution(runId, new Command({
       resume: orchestrationVersion === 2 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7 || orchestrationVersion === 8 || orchestrationVersion === 9 || orchestrationVersion === 10 || orchestrationVersion === 11 ? { [resumeInterruptId as string]: resume } : resume,
     }));
@@ -1509,7 +1492,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         projectDirectory: run.projectDirectory,
         outputDirectory: this.runOutputDirectory(run.id),
         scopeRevision: run.scopeRevision,
-        authorizedCommands: run.authorizedCommands,
         projectInstructions: run.projectInstructions,
         groupContext: run.groupContext as AgentTeamGroupRunContext,
         orchestrationVersion,
@@ -1747,7 +1729,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         } : {}),
         role: taskRole,
         projectDirectory: taskRole === 'team-manager' ? '' : request.projectDirectory,
-        authorizedCommands: taskRole === 'team-manager' ? [] : request.authorizedCommands,
         processReferencePaths: taskRole === 'team-manager' ? [] : role.processReferences ?? [],
         readProcessReference: (path) => this.readCapturedProcessFile(version, path),
         ...(request.groupContext && taskRole !== 'team-manager' ? {
@@ -2364,7 +2345,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       .limit(1);
     return row?.answer === undefined || row.answer === null
       ? undefined
-      : pendingInputAnswer(row.answer, run.authorizedCommands);
+      : pendingInputAnswer(row.answer);
   }
 
   private async getDesiredControlState(
@@ -2997,7 +2978,6 @@ function initialGraphState(run: AgentTeamRun, outputDirectory: string): AgentTea
     projectDirectory: run.projectDirectory,
     outputDirectory,
     scopeRevision: run.scopeRevision,
-    authorizedCommands: run.authorizedCommands,
     projectInstructions: run.projectInstructions,
     documents: [],
     unresolvedIssues: [],
@@ -3292,7 +3272,7 @@ function taskSystemPrompt(instructions: string, executor: boolean, addition?: st
 
 You are executing one WorkLite Agent Team task. Use tools only when the captured role configuration and project authorization permit them. Return exactly one JSON object whose "status" is exactly one of: "waiting_for_input", "completed".
 
-Follow the captured project instructions supplied in the task context, and discover additional applicable AGENTS.md or AGENTS_WORKFLOW.md files before changing or assessing project files. If a project rule or missing user decision requires explicit authorization for an action, return the waiting_for_input response instead of taking that action. ${executor ? 'You run as a project executor in the project directory with your own native tools. WorkLite requires neither proposal confirmation nor exact-command grants. A previous attempt may have changed the project; inspect its actual state rather than assuming earlier work is absent or complete. Read pinned process references from the files listed in the system prompt.' : 'If a required shell command is not present verbatim in authorizedCommands, return the waiting_for_input response instead of calling bash. Use process_reference only with one of the exact pinned paths listed in the system prompt.'} Map the process package's project root to projectDirectory and its process output location to outputDirectory. The output directory is managed by WorkLite: return documents in JSON rather than writing planning output there directly.
+Follow the captured project instructions supplied in the task context, and discover additional applicable AGENTS.md or AGENTS_WORKFLOW.md files before changing or assessing project files. If a project rule or missing user decision requires explicit authorization for an action, return the waiting_for_input response instead of taking that action. ${executor ? 'You run as a project executor in the project directory with your own native tools. WorkLite requires neither proposal confirmation nor exact-command grants. A previous attempt may have changed the project; inspect its actual state rather than assuming earlier work is absent or complete. Read pinned process references from the files listed in the system prompt.' : 'Run whatever shell commands the task needs with bash directly; WorkLite requires no command grant and records every execution as Command evidence. Use process_reference only with one of the exact pinned paths listed in the system prompt.'} Map the process package's project root to projectDirectory and its process output location to outputDirectory. The output directory is managed by WorkLite: return documents in JSON rather than writing planning output there directly.
 
 When more user input is required, return:
 {"status":"waiting_for_input","pendingInput":{"question":"One specific question"}}
@@ -3357,7 +3337,6 @@ function taskContext(request: AgentTeamTaskRequest, executor: boolean, correctio
     projectDirectory: request.projectDirectory,
     outputDirectory: request.outputDirectory,
     authorization: modeAuthorization(request.mode),
-    ...(executor ? {} : { authorizedCommands: request.authorizedCommands }),
     projectInstructions: request.projectInstructions,
     upstreamDocuments: request.upstream,
     ...(request.assignment ? { assignment: request.assignment } : {}),
@@ -3493,8 +3472,8 @@ function teamMemoryProjection(memories: Array<{ role: string | null; content: st
 
 function modeAuthorization(mode: AgentTeamMode): string {
   if (mode === 'plan_only') return 'Read the declared project. Do not modify project files or execute commands.';
-  if (mode === 'validate_existing') return 'Read the declared project and run only checks authorized by the user and project instructions. Do not modify project files or author new tests.';
-  return 'Read and modify the declared project only within the confirmed implementation scope, and run only checks authorized by the user and project instructions.';
+  if (mode === 'validate_existing') return 'Read the declared project and run the checks this task and the project instructions call for. Do not modify project files or author new tests.';
+  return 'Read and modify the declared project only within the confirmed implementation scope, and run the checks this task and the project instructions call for.';
 }
 
 function directRoleModeRationale(role: AgentTeamRoleId): string {
@@ -4066,7 +4045,6 @@ function isUsableGraphState(value: unknown, run: AgentTeamRun): value is AgentTe
     Array.isArray(state.projectInstructions) &&
     JSON.stringify(state.projectInstructions) === JSON.stringify(run.projectInstructions) &&
     state.scopeRevision === run.scopeRevision &&
-    Array.isArray(state.authorizedCommands) &&
     Array.isArray(state.documents) &&
     Array.isArray(state.unresolvedIssues) &&
     Array.isArray(state.commandIds) &&
@@ -4099,27 +4077,8 @@ function recordCompletedCommand(
   if (record?.status === 'completed' && record.commandId) commandIds.add(record.commandId);
 }
 
-function normalizeAuthorizedCommands(value: unknown): string[] {
-  if (value === undefined) return [];
-  if (!Array.isArray(value)) throw new BadRequestException('Authorized commands must be an array.');
-  const commands = value.map((command) => {
-    if (typeof command !== 'string' || !command.trim()) {
-      throw new BadRequestException('Each authorized command must be a non-empty string.');
-    }
-    return command.trim();
-  });
-  if (new Set(commands).size !== commands.length) {
-    throw new BadRequestException('Authorized commands must be unique.');
-  }
-  return commands;
-}
-
-function mergeAuthorizedCommands(left: readonly string[], right: readonly string[]): string[] {
-  return [...new Set([...left, ...right])];
-}
-
-function pendingInputAnswer(answer: string, authorizedCommands: readonly string[], directories: readonly string[] = []): AgentTeamPendingInputAnswer {
-  return directories.length ? { answer, authorizedCommands, directories } : { answer, authorizedCommands };
+function pendingInputAnswer(answer: string, directories: readonly string[] = []): AgentTeamPendingInputAnswer {
+  return directories.length ? { answer, directories } : { answer };
 }
 
 function isAbortError(error: unknown): boolean {
