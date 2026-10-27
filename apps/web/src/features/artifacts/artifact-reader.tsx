@@ -18,23 +18,23 @@ function ArtifactReader({ artifact }: { artifact: ArtifactDetailView }) {
   const unresolvedImages = artifact.inlineImages.filter((image) => !image.url);
 
   const markdown = useMemo(() => {
-    if (artifact.type !== 'markdown') return '';
+    if (artifact.format !== 'markdown') return '';
     const content = artifact.content.trimStart();
     // The reading page has no separate title block; use the artifact name only
     // when the article did not supply its own heading.
     return /^#\s+/m.test(content) ? content : `# ${artifact.name}\n\n${content}`;
-  }, [artifact.content, artifact.name, artifact.type]);
+  }, [artifact.content, artifact.name, artifact.format]);
 
   const prettyJson = useMemo(
-    () => (artifact.type === 'json' ? formattedJson(artifact.content) : ''),
-    [artifact.content, artifact.type],
+    () => (artifact.format === 'json' ? formattedJson(artifact.content) : ''),
+    [artifact.content, artifact.format],
   );
 
-  if (artifact.type === 'unsupported') {
+  if (artifact.format === 'unsupported') {
     return <p className="text-[13px] text-muted-foreground">{t('details.unsupported')}</p>;
   }
 
-  if (artifact.type === 'image') {
+  if (artifact.format === 'image') {
     if (!artifact.contentUrl) return <p className="text-[13px] text-muted-foreground">{t('details.unavailableDescription')}</p>;
     return (
       <div role="group" aria-label={t('details.imagePreview')} className="overflow-hidden rounded-xl border border-border bg-surface p-2 shadow-xs md:p-4">
@@ -64,11 +64,11 @@ function ArtifactReader({ artifact }: { artifact: ArtifactDetailView }) {
       ) : null}
 
       <div className="rounded-xl border border-border bg-surface p-5 shadow-xs md:p-8">
-        {artifact.type === 'markdown' ? (
+        {artifact.format === 'markdown' ? (
           <ArtifactMarkdown content={markdown} images={artifact.inlineImages} />
         ) : (
           <pre className="max-w-full overflow-x-auto whitespace-pre-wrap break-words font-mono text-[13px] leading-6">
-            {artifact.type === 'json' ? prettyJson : artifact.content}
+            {artifact.format === 'json' ? prettyJson : artifact.content}
           </pre>
         )}
       </div>

@@ -349,7 +349,7 @@ function ArtifactRow({ artifact, locale }: ArtifactRowProps) {
         className="flex flex-col gap-1 rounded-md border border-border bg-surface px-3 py-2 transition-colors duration-[120ms] hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 sm:grid sm:grid-cols-[minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,0.7fr)_minmax(0,1fr)] sm:items-center sm:gap-3"
       >
         <span className="min-w-0 truncate text-sm font-medium">{artifact.name}</span>
-        <span className="text-[13px] text-muted-foreground">{artifact.type}</span>
+        <span className="text-[13px] text-muted-foreground">{artifact.format}</span>
         <span className="text-[13px] tabular-nums text-muted-foreground">{artifact.size}</span>
         <span className="text-[13px] tabular-nums">{formatDateTime(artifact.createdAt, locale)}</span>
       </Link>

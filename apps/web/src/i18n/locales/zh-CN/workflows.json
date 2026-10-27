@@ -163,18 +163,19 @@
     "queryDescriptionFields": "Description fields",
     "queryDescription": "Read matching workspace history, including detached Artifacts and intermediate drafts. No matches return an empty candidate list.",
     "artifactNode": "产物",
-    "artifactNodeDescription": "将运行数据或 PNG 图片保存为具名产物",
+    "artifactNodeDescription": "将输入数据保存为具名产物，格式默认自动识别",
     "artifactName": "产物名称",
-    "artifactType": "产物类型",
-    "artifactCreationDescription": "运行成功后创建产物，节点输出携带产物引用；图片产物会保存 PNG 内容、尺寸和字节数。",
-    "artifactImageRole": "图片用途",
-    "artifactImageRoles": {
-      "inline": "正文配图",
-      "asset": "封面或其他素材"
+    "artifactFormatOverride": "格式覆盖",
+    "artifactFormatAuto": "自动识别",
+    "artifactCreationDescription": "运行成功后创建产物，节点输出携带产物引用；格式会根据输入自动识别，也可显式覆盖。图片会保留 PNG 内容、尺寸和字节数。",
+    "artifactPlacement": "图片位置",
+    "artifactPlacements": {
+      "inline": "正文内嵌",
+      "asset": "独立资源"
     },
-    "artifactImageRoleHint": "正文配图产物按输入顺序解析 Markdown 图片占位符；封面或其他素材不会占用正文图片位置。",
+    "artifactPlacementHint": "正文内嵌的图片按输入顺序解析 Markdown 图片占位符；独立资源不会占用正文图片位置。",
     "artifactUnnamed": "未命名产物",
-    "artifactTypes": {
+    "artifactFormats": {
       "text": "文本",
       "markdown": "Markdown",
       "json": "JSON",
@@ -200,7 +201,7 @@
     },
     "imageSize": "尺寸",
     "imageSummary": "{{count}} 张图片 · {{background}} · {{quality}} · {{size}}",
-    "imageConnectionHint": "生成图片可连接到微信 v2、Compose Article 或 Join。要保存图片，另连到 type=image 的 Artifact；正文配图 Artifact 应接收与 Compose/微信 images 相同顺序的图片。",
+    "imageConnectionHint": "生成图片可连接到微信 v2、Compose Article、Join 或 Artifact data 输入；Artifact 会自动识别图片格式。正文内嵌位置按输入顺序解析 Markdown 图片占位符。",
     "imagePromptPath": "提示词路径",
     "imagePromptPathHint": "可选。没有直接连入提示词时，从 context 或工作流输入里按点分路径读取，例如 coverPrompt。",
     "stickerNode": "Canvas 贴图",

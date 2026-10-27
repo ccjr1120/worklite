@@ -23,7 +23,7 @@ export type AgentExecutionRequest = {
 
 export type AgentExecutionResult = {
   output: unknown;
-  artifacts?: Array<{ id: string; type: string; name?: string }>;
+  artifacts?: Array<{ id: string; format: string; name?: string }>;
 };
 
 export type AgentExecutor = (request: AgentExecutionRequest) => Promise<AgentExecutionResult>;

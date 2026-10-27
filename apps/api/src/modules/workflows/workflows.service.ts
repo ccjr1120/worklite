@@ -704,8 +704,16 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
   }
   if (type === 'worklite/artifact') {
     if (typeof value.name !== 'string' || !value.name.trim()) throw new BadRequestException('Artifact node name must be a non-empty string.');
-    if (value.type !== 'text' && value.type !== 'markdown' && value.type !== 'json' && value.type !== 'image') throw new BadRequestException('Artifact node type must be text, markdown, json, or image.');
-    if (value.imageRole !== undefined && (value.type !== 'image' || (value.imageRole !== 'inline' && value.imageRole !== 'asset'))) throw new BadRequestException('Image Artifact role must be inline or asset and requires an image Artifact.');
+    const formatValues = ['text', 'markdown', 'json', 'image'];
+    const configuredFormat = value.format ?? value.type;
+    if (value.format !== undefined && !formatValues.includes(value.format as string)) throw new BadRequestException('Artifact format override must be text, markdown, json, or image.');
+    if (value.type !== undefined && !formatValues.includes(value.type as string)) throw new BadRequestException('Legacy Artifact format override must be text, markdown, json, or image.');
+    if (value.format !== undefined && value.type !== undefined && value.format !== value.type) throw new BadRequestException('Artifact format and legacy type overrides must match when both are supplied.');
+    const placement = value.placement ?? value.imageRole;
+    if (value.placement !== undefined && value.placement !== 'inline' && value.placement !== 'asset') throw new BadRequestException('Artifact placement must be inline or asset.');
+    if (value.imageRole !== undefined && value.imageRole !== 'inline' && value.imageRole !== 'asset') throw new BadRequestException('Legacy imageRole must be inline or asset.');
+    if (value.placement !== undefined && value.imageRole !== undefined && value.placement !== value.imageRole) throw new BadRequestException('Artifact placement and legacy imageRole must match when both are supplied.');
+    if (placement !== undefined && configuredFormat !== undefined && configuredFormat !== 'image') throw new BadRequestException('Artifact placement can only be used with the image format.');
   }
   if (type === 'worklite/artifact-query') {
     if (typeof value.name !== 'string' || !value.name.trim()) throw new BadRequestException('Artifact Query name must be a non-empty string.');
@@ -969,12 +977,13 @@ function isGeneratedImageConnectionAllowed(
   const isWeChatImageInput = target.type === 'wechat-official-account/publish' && target.typeVersion === '2' && (targetPort === 'coverImage' || targetPort === 'images');
   const isArtifactDataTarget = target.type === 'worklite/artifact' && targetPort === 'data';
   const targetConfig = target.config && typeof target.config === 'object' && !Array.isArray(target.config) ? target.config as Record<string, unknown> : null;
-  const isImageArtifactTarget = isArtifactDataTarget && targetConfig?.type === 'image';
+  const artifactFormat = targetConfig?.format ?? targetConfig?.type;
+  const isImageArtifactTarget = isArtifactDataTarget && (artifactFormat === undefined || artifactFormat === 'image');
   const isComposeImageInput = target.type === 'worklite/compose-article' && targetPort === 'images';
   const isComposeCoverInput = target.type === 'worklite/compose-article' && targetPort === 'coverImage';
   const isJoinInput = target.type === 'worklite/join' && targetPort === 'input';
-  // Generated images can feed WeChat's image inputs, image Artifacts, Compose,
-  // and Join. Other Artifact types remain textual/JSON sinks.
+  // Generated images can feed WeChat's image inputs, Artifact's inferred image
+  // format, Compose, and Join. Explicit non-image Artifact formats remain incompatible.
   if (isImageOutput || isAggregateImageOutput) return isWeChatImageInput || isImageArtifactTarget || isComposeImageInput || isComposeCoverInput || isJoinInput;
   return !isWeChatImageInput;
 }

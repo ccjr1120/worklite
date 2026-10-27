@@ -31,7 +31,7 @@ import { renderCanvasScript, validateCanvasRenderCode, validateCanvasRenderConfi
 import { ArtifactStorageService } from '../artifacts/artifact-storage.service';
 
 type RunListener = (event: RunProgressEvent) => void;
-type PreparedArtifactItem = { id: string; name: string; type: 'text' | 'markdown' | 'json' | 'image' };
+type PreparedArtifactItem = { id: string; name: string; format: 'text' | 'markdown' | 'json' | 'image' };
 type PreparedArtifactNode = {
   records: Array<typeof artifacts.$inferInsert>;
   items: PreparedArtifactItem[];
@@ -112,7 +112,7 @@ export class RunsService {
         const descriptionFields = settings?.descriptionFields as string[];
         const rows = await this.db.select({ id: artifacts.id, content: artifacts.content, createdAt: artifacts.createdAt })
           .from(artifacts)
-          .where(and(eq(artifacts.workspaceId, context.workspaceId), eq(artifacts.name, name), eq(artifacts.type, 'json')))
+          .where(and(eq(artifacts.workspaceId, context.workspaceId), eq(artifacts.name, name), eq(artifacts.format, 'json')))
           .orderBy(desc(artifacts.createdAt), desc(artifacts.id));
         const candidates: Array<{ artifactId: string; title: string; description: string; createdAt: string | null }> = [];
         for (const row of rows) {
@@ -755,7 +755,7 @@ export class RunsService {
           throw error;
         }
         for (const artifact of artifactToPersist?.items ?? []) {
-          await this.publish(runId, 'artifact.created', { artifactId: artifact.id, nodeId: node.id, name: artifact.name, type: artifact.type });
+          await this.publish(runId, 'artifact.created', { artifactId: artifact.id, nodeId: node.id, name: artifact.name, format: artifact.format });
         }
         await this.publish(runId, 'node.completed', { nodeId: node.id, nodeRunId, output: sanitizeWorkflowImages(output), artifactIds });
       }
@@ -866,27 +866,33 @@ export class RunsService {
   private async prepareArtifactNode(run: typeof workflowRuns.$inferSelect, node: StoredWorkflowNode, output: unknown): Promise<PreparedArtifactNode | null> {
     if (node.type !== 'worklite/artifact') return null;
     const config = asRecord(node.config);
-    if (!config || typeof config.name !== 'string' || !config.name.trim()) throw new Error('Artifact node requires a name and supported artifact type.');
-    const type = config.type;
-    if (type !== 'text' && type !== 'markdown' && type !== 'json' && type !== 'image') throw new Error('Artifact node requires a name and supported artifact type.');
+    if (!config || typeof config.name !== 'string' || !config.name.trim()) throw new Error('Artifact node requires a name.');
+    const formatOverride = config.format ?? config.type;
+    if (formatOverride !== undefined && formatOverride !== 'text' && formatOverride !== 'markdown' && formatOverride !== 'json' && formatOverride !== 'image') {
+      throw new Error('Artifact format override must be text, markdown, json, or image.');
+    }
     const name = config.name.trim();
     const images = collectGeneratedWorkflowImages(output);
-    if (type !== 'image') {
-      if (images.length > 0) throw new Error('Generated PNG input requires the Artifact node type to be image.');
+    const inferredFormat = inferArtifactFormat(output, images.length > 0);
+    const format = formatOverride ?? inferredFormat;
+    const configuredPlacement = config.placement ?? config.imageRole;
+    if (configuredPlacement !== undefined && configuredPlacement !== 'inline' && configuredPlacement !== 'asset') throw new Error('Artifact placement must be inline or asset.');
+    if (configuredPlacement !== undefined && format !== 'image') throw new Error('Artifact placement can only be used with the image format.');
+    if (format !== 'image') {
+      if (images.length > 0) throw new Error('Generated PNG input requires the Artifact format to be image.');
       const content = typeof output === 'string' ? output : JSON.stringify(output ?? '');
       const id = `art_${randomUUID()}`;
-      const record: typeof artifacts.$inferInsert = { id, workspaceId: run.workspaceId, workflowId: run.workflowId, runId: run.id, name, type, size: `${Buffer.byteLength(content, 'utf8')} B`, content };
-      return { records: [record], items: [{ id, name, type }], storageKeys: [], output: { type: 'artifact', artifactId: id, name, artifactType: type } };
+      const record: typeof artifacts.$inferInsert = { id, workspaceId: run.workspaceId, workflowId: run.workflowId, runId: run.id, name, format, placement: null, size: `${Buffer.byteLength(content, 'utf8')} B`, content };
+      return { records: [record], items: [{ id, name, format }], storageKeys: [], output: { type: 'artifact', artifactId: id, name, format } };
     }
 
-    if (images.length === 0) throw new Error('Image Artifact requires at least one generated PNG image as input.');
-    if (config.imageRole !== undefined && config.imageRole !== 'inline' && config.imageRole !== 'asset') throw new Error('Image Artifact role must be inline or asset.');
-    const imageRole: 'inline' | 'asset' = config.imageRole === 'asset' ? 'asset' : 'inline';
+    if (images.length === 0) throw new Error('Artifact format image requires at least one generated PNG image as input.');
+    const placement: 'inline' | 'asset' = configuredPlacement === 'asset' ? 'asset' : 'inline';
     let nextImagePosition: number | null = null;
-    if (imageRole === 'inline') {
+    if (placement === 'inline') {
       const [positionRow] = await this.db.select({ maxPosition: sql<number>`coalesce(max(${artifacts.imagePosition}), 0)` })
         .from(artifacts)
-        .where(and(eq(artifacts.runId, run.id), eq(artifacts.type, 'image'), sql`coalesce(${artifacts.imageRole}, 'inline') = 'inline'`));
+        .where(and(eq(artifacts.runId, run.id), eq(artifacts.format, 'image'), sql`coalesce(${artifacts.placement}, 'inline') = 'inline'`));
       nextImagePosition = Number(positionRow?.maxPosition ?? 0) + 1;
     }
     const records: Array<typeof artifacts.$inferInsert> = [];
@@ -896,11 +902,11 @@ export class RunsService {
       for (const image of images) {
         for (const imageData of image.data) {
           const encoded = imageData.b64Json;
-          if (encoded.length > 45_000_000) throw new Error('Image Artifact input must be a valid PNG no larger than 32 MB.');
-          if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) throw new Error('Image Artifact input contains invalid base64 data.');
+          if (encoded.length > 45_000_000) throw new Error('Artifact PNG input must be no larger than 32 MB.');
+          if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) throw new Error('Artifact PNG input contains invalid base64 data.');
           const content = Buffer.from(encoded, 'base64');
           if (content.byteLength === 0 || content.byteLength > 32 * 1024 * 1024 || content.toString('base64').replace(/=+$/, '') !== encoded.replace(/=+$/, '')) {
-            throw new Error('Image Artifact input must be a valid PNG no larger than 32 MB.');
+            throw new Error('Artifact image format requires valid PNG data no larger than 32 MB.');
           }
           const dimensions = pngDimensions(content);
           const id = `art_${randomUUID()}`;
@@ -915,7 +921,7 @@ export class RunsService {
             workflowId: run.workflowId,
             runId: run.id,
             name: itemName,
-            type: 'image',
+            format: 'image',
             size: `${content.byteLength} B`,
             content: '',
             objectKey,
@@ -925,9 +931,9 @@ export class RunsService {
             sizeBytes: content.byteLength,
             imageKey,
             imagePosition,
-            imageRole,
+            placement,
           });
-          items.push({ id, name: itemName, type: 'image' });
+          items.push({ id, name: itemName, format: 'image' });
         }
       }
     } catch (error) {
@@ -940,7 +946,7 @@ export class RunsService {
       records,
       items,
       storageKeys,
-      output: { type: 'artifact', artifactId: artifactIds[0], artifactIds, name, artifactType: 'image', imageCount: artifactIds.length },
+      output: { type: 'artifact', artifactId: artifactIds[0], artifactIds, name, format: 'image', imageCount: artifactIds.length },
     };
   }
 
@@ -1132,6 +1138,20 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
+function inferArtifactFormat(output: unknown, hasGeneratedImages: boolean): 'text' | 'json' | 'image' {
+  if (hasGeneratedImages) return 'image';
+  if (output === null || output === undefined) return 'text';
+  if (typeof output === 'string') {
+    try {
+      JSON.parse(output);
+      return 'json';
+    } catch {
+      return 'text';
+    }
+  }
+  return typeof output === 'object' || typeof output === 'number' || typeof output === 'boolean' ? 'json' : 'text';
+}
+
 // An Agent node's model configuration is one public model id, or an ordered list of fallback
 // candidates; a historical row only ever holds a single string.
 function modelOrList(value: unknown): string | string[] | null {
@@ -1198,10 +1218,10 @@ function collectGeneratedWorkflowImages(value: unknown): GeneratedWorkflowImage[
 
 function pngDimensions(content: Buffer): { width: number; height: number } {
   const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-  if (content.byteLength < 24 || !content.subarray(0, 8).equals(signature)) throw new Error('Image Artifact input must contain a PNG image.');
+  if (content.byteLength < 24 || !content.subarray(0, 8).equals(signature)) throw new Error('Artifact image format requires PNG data.');
   const width = content.readUInt32BE(16);
   const height = content.readUInt32BE(20);
-  if (width < 1 || height < 1) throw new Error('Image Artifact input has invalid PNG dimensions.');
+  if (width < 1 || height < 1) throw new Error('Artifact image format has invalid PNG dimensions.');
   return { width, height };
 }
 
@@ -1239,7 +1259,8 @@ function toArtifactView(row: typeof artifacts.$inferSelect, workspaceSlug: strin
     id: row.id,
     workspaceSlug,
     name: row.name,
-    type: row.type,
+    format: row.format,
+    placement: row.placement,
     workflowId: row.workflowId ?? null,
     workflowName,
     runId: row.runId ?? '',
@@ -1248,7 +1269,7 @@ function toArtifactView(row: typeof artifacts.$inferSelect, workspaceSlug: strin
     width: row.width,
     height: row.height,
     sizeBytes: row.sizeBytes,
-    contentUrl: row.type === 'image' && row.objectKey ? `/api/artifacts/${encodeURIComponent(row.id)}/content` : null,
+    contentUrl: row.format === 'image' && row.objectKey ? `/api/artifacts/${encodeURIComponent(row.id)}/content` : null,
     createdAt: row.createdAt?.toISOString() ?? '',
     content: row.content,
   };

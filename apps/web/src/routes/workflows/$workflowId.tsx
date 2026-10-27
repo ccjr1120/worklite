@@ -390,7 +390,7 @@ function WorkflowEditorPage() {
       type: 'artifact',
       position: nextPosition(),
       selected: true,
-      data: { nodeType: 'artifact', label: t('editor.artifactNode'), artifactName: '', artifactType: 'text', errorPolicy: executionPolicy },
+      data: { nodeType: 'artifact', label: t('editor.artifactNode'), artifactName: '', errorPolicy: executionPolicy },
     };
     addNode(node, sourceNodeId);
   }
@@ -894,10 +894,37 @@ function WorkflowEditorPage() {
         </> : null}
         {selectedNode.data.nodeType === 'artifact' ? <>
           <Field label={t('editor.artifactName')} htmlFor="artifact-name"><Input id="artifact-name" value={selectedNode.data.artifactName ?? ''} onChange={(event) => { const artifactName = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, artifactName } } : node)); setSaveState('unsaved'); }} /></Field>
-          <Field label={t('editor.artifactType')} htmlFor="artifact-type"><Select value={selectedNode.data.artifactType ?? 'text'} onValueChange={(value) => { const artifactType = value as 'text' | 'markdown' | 'json' | 'image'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, artifactType } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="artifact-type"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">{t('editor.artifactTypes.text')}</SelectItem><SelectItem value="markdown">{t('editor.artifactTypes.markdown')}</SelectItem><SelectItem value="json">{t('editor.artifactTypes.json')}</SelectItem><SelectItem value="image">{t('editor.artifactTypes.image')}</SelectItem></SelectContent></Select></Field>
-          {selectedNode.data.artifactType === 'image' ? <>
-            <Field label={t('editor.artifactImageRole')} htmlFor="artifact-image-role"><Select value={selectedNode.data.artifactImageRole ?? 'inline'} onValueChange={(value) => { const artifactImageRole = value as 'inline' | 'asset'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, artifactImageRole } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="artifact-image-role"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="inline">{t('editor.artifactImageRoles.inline')}</SelectItem><SelectItem value="asset">{t('editor.artifactImageRoles.asset')}</SelectItem></SelectContent></Select></Field>
-            <p className="text-[12px] text-muted-foreground">{t('editor.artifactImageRoleHint')}</p>
+          <Field label={t('editor.artifactFormatOverride')} htmlFor="artifact-format">
+            <Select value={selectedNode.data.artifactFormat ?? 'auto'} onValueChange={(value) => {
+              const artifactFormat = value === 'auto' ? undefined : value as 'text' | 'markdown' | 'json' | 'image';
+              setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, artifactFormat } } : node));
+              setSaveState('unsaved');
+            }}>
+              <SelectTrigger id="artifact-format"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">{t('editor.artifactFormatAuto')}</SelectItem>
+                <SelectItem value="text">{t('editor.artifactFormats.text')}</SelectItem>
+                <SelectItem value="markdown">{t('editor.artifactFormats.markdown')}</SelectItem>
+                <SelectItem value="json">{t('editor.artifactFormats.json')}</SelectItem>
+                <SelectItem value="image">{t('editor.artifactFormats.image')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          {!selectedNode.data.artifactFormat || selectedNode.data.artifactFormat === 'image' ? <>
+            <Field label={t('editor.artifactPlacement')} htmlFor="artifact-placement">
+              <Select value={selectedNode.data.artifactPlacement ?? 'inline'} onValueChange={(value) => {
+                const artifactPlacement = value as 'inline' | 'asset';
+                setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, artifactPlacement } } : node));
+                setSaveState('unsaved');
+              }}>
+                <SelectTrigger id="artifact-placement"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="inline">{t('editor.artifactPlacements.inline')}</SelectItem>
+                  <SelectItem value="asset">{t('editor.artifactPlacements.asset')}</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <p className="text-[12px] text-muted-foreground">{t('editor.artifactPlacementHint')}</p>
           </> : null}
           <p className="text-[12px] text-muted-foreground">{t('editor.artifactCreationDescription')}</p>
         </> : null}
@@ -1218,8 +1245,16 @@ function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
         skillNames: Array.isArray(config.skillNames) ? config.skillNames.filter((value): value is string => typeof value === 'string') : [],
         dashboardLayout: readDashboardLayout(config.layout),
         artifactName: typeof config.name === 'string' ? config.name : undefined,
-        artifactType: config.type === 'json' || config.type === 'text' || config.type === 'markdown' || config.type === 'image' ? config.type : undefined,
-        artifactImageRole: config.imageRole === 'asset' ? 'asset' : 'inline',
+        artifactFormat: config.format === 'json' || config.format === 'text' || config.format === 'markdown' || config.format === 'image'
+          ? config.format
+          : config.type === 'json' || config.type === 'text' || config.type === 'markdown' || config.type === 'image'
+            ? config.type
+            : undefined,
+        artifactPlacement: config.placement === 'asset' || config.placement === 'inline'
+          ? config.placement
+          : config.imageRole === 'asset' || config.imageRole === 'inline'
+            ? config.imageRole
+            : undefined,
         queryName: typeof config.name === 'string' ? config.name : undefined,
         queryTitleField: typeof config.titleField === 'string' ? config.titleField : undefined,
         queryDescriptionFields: Array.isArray(config.descriptionFields) ? config.descriptionFields.filter((value): value is string => typeof value === 'string') : undefined,
@@ -1425,8 +1460,14 @@ function toDefinitionNode(node: WorkflowCanvasNode): WorkflowNodeDefinition {
     config = { ...base, layout: node.data.dashboardLayout ?? { header: [], main: [], footer: [] } };
   } else if (node.data.nodeType === 'artifact') {
     type = 'worklite/artifact';
-    const artifactType = node.data.artifactType ?? 'text';
-    config = { ...withoutNodeConfigFields(base, ['imageRole']), name: node.data.artifactName ?? '', type: artifactType, ...(artifactType === 'image' ? { imageRole: node.data.artifactImageRole ?? 'inline' } : {}) };
+    const artifactFormat = node.data.artifactFormat;
+    const artifactPlacement = node.data.artifactPlacement;
+    config = {
+      ...withoutNodeConfigFields(base, ['format', 'type', 'placement', 'imageRole']),
+      name: node.data.artifactName ?? '',
+      ...(artifactFormat ? { format: artifactFormat } : {}),
+      ...(artifactPlacement && (!artifactFormat || artifactFormat === 'image') ? { placement: artifactPlacement } : {}),
+    };
   } else if (node.data.nodeType === 'artifactQuery') {
     type = 'worklite/artifact-query';
     config = { ...base, name: node.data.queryName ?? '', titleField: node.data.queryTitleField ?? '', descriptionFields: node.data.queryDescriptionFields ?? [] };

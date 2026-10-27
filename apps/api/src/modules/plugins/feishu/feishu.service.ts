@@ -480,7 +480,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
         if (Buffer.byteLength(content) <= 20_000) state.content += `\n\n${content}`;
         else files.push({ id: `workflow-result:${run.id}:${digest(content)}`, name: 'workflow-result.json', content });
       }
-      for (const artifact of run.artifacts ?? []) files.push({ id: `artifact:${artifact.id}`, name: `${artifact.name.replace(/[\/\\]/g, '_')}.${artifact.type === 'markdown' ? 'md' : artifact.type === 'json' ? 'json' : 'txt'}`, content: artifact.content });
+      for (const artifact of run.artifacts ?? []) files.push({ id: `artifact:${artifact.id}`, name: `${artifact.name.replace(/[\/\\]/g, '_')}.${artifact.format === 'markdown' ? 'md' : artifact.format === 'json' ? 'json' : 'txt'}`, content: artifact.content });
     }
     for (const file of files) {
       try { await this.file(chatId, file.id, file.name, file.content); }

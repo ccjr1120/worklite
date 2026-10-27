@@ -34,8 +34,8 @@ const DOWNLOAD_EXTENSIONS: Record<string, string> = {
   text: '.txt',
 };
 
-function downloadFileName(name: string, type: string) {
-  const extension = DOWNLOAD_EXTENSIONS[type] ?? '';
+function downloadFileName(name: string, format: string) {
+  const extension = DOWNLOAD_EXTENSIONS[format] ?? '';
   return extension && name.toLowerCase().endsWith(extension) ? name : `${name}${extension}`;
 }
 
@@ -70,8 +70,8 @@ function ArtifactDetailsPage() {
   }
 
   function downloadArtifact() {
-    if (!artifact || artifact.type === 'unsupported') return;
-    if (artifact.type === 'image') {
+    if (!artifact || artifact.format === 'unsupported') return;
+    if (artifact.format === 'image') {
       if (!artifact.contentUrl) return;
       const link = document.createElement('a');
       link.href = `${artifact.contentUrl}?download=true`;
@@ -81,11 +81,11 @@ function ArtifactDetailsPage() {
       link.remove();
       return;
     }
-    const mediaType = DOWNLOAD_MEDIA_TYPES[artifact.type] ?? 'text/plain';
+    const mediaType = DOWNLOAD_MEDIA_TYPES[artifact.format] ?? 'text/plain';
     const url = URL.createObjectURL(new Blob([artifact.content], { type: `${mediaType};charset=utf-8` }));
     const link = document.createElement('a');
     link.href = url;
-    link.download = downloadFileName(artifact.name, artifact.type);
+    link.download = downloadFileName(artifact.name, artifact.format);
     document.body.append(link);
     link.click();
     link.remove();
@@ -94,7 +94,7 @@ function ArtifactDetailsPage() {
   }
 
   async function copyArtifact() {
-    if (!artifact || artifact.type === 'image') return;
+    if (!artifact || artifact.format === 'image') return;
     try {
       await navigator.clipboard.writeText(artifact.content);
       toast.success(t('reader.copied'));
@@ -156,13 +156,13 @@ function ArtifactDetailsPage() {
         back={backButton}
         actions={
           <div className="flex items-center gap-1.5">
-            {artifact.type === 'image' ? null : (
+            {artifact.format === 'image' ? null : (
               <Button type="button" variant="ghost" size="compact" onClick={() => void copyArtifact()}>
                 <Copy className="size-4" />
                 {t('reader.copy')}
               </Button>
             )}
-            {artifact.type === 'unsupported' ? null : (
+            {artifact.format === 'unsupported' ? null : (
               <Button type="button" variant="ghost" size="icon-compact" aria-label={t('common:actions.download')} onClick={downloadArtifact}>
                 <Download className="size-4" />
               </Button>
@@ -181,10 +181,11 @@ function ArtifactDetailsPage() {
         }
       />
 
-      {artifact.type === 'markdown' ? null : <PageHeading className="mt-5" title={artifact.name} />}
+      {artifact.format === 'markdown' ? null : <PageHeading className="mt-5" title={artifact.name} />}
 
       <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-muted-foreground">
-        <Badge variant="brand">{artifact.type === 'image' ? t('list.imageType') : artifact.type}</Badge>
+        <Badge variant="brand">{artifact.format === 'image' ? t('list.imageFormat') : artifact.format}</Badge>
+        {artifact.format === 'image' && artifact.placement ? <span>{artifact.placement === 'inline' ? t('list.inlinePlacement') : t('list.assetPlacement')}</span> : null}
         {artifact.workflowId ? (
           <Link to="/workflows/$workflowId" params={{ workflowId: artifact.workflowId }} className="truncate font-medium text-brand-text underline-offset-2 hover:underline">
             {artifact.workflowName}
@@ -201,7 +202,7 @@ function ArtifactDetailsPage() {
         )}
         <span className="tabular-nums">{formatDateTime(artifact.createdAt, locale)}</span>
         <span className="tabular-nums">{artifact.size}</span>
-        {artifact.type === 'image'
+        {artifact.format === 'image'
           ? <span className="tabular-nums">{t('list.dimensions', { width: artifact.width ?? '—', height: artifact.height ?? '—' })}</span>
           : <span className="tabular-nums">{t('list.length', { count: artifact.contentLength })}</span>}
       </div>

@@ -11,7 +11,7 @@
   },
   "columns": {
     "artifact": "产物",
-    "type": "类型",
+    "format": "格式",
     "workflow": "工作流",
     "run": "运行记录",
     "size": "大小",
@@ -25,7 +25,9 @@
     "count": "共 {{count}} 个",
     "length": "{{count}} 字符",
     "dimensions": "{{width}} × {{height}}",
-    "imageType": "图片",
+    "imageFormat": "图片",
+    "inlinePlacement": "正文内嵌",
+    "assetPlacement": "独立资源",
     "page": "第 {{page}} / {{pages}} 页",
     "previous": "上一页",
     "next": "下一页",
@@ -34,7 +36,7 @@
     "loadFailedDescription": "请检查本地服务是否可用，然后重试。",
     "noWorkflowMatches": "没有来自“{{workflow}}”的产物。",
     "selectTitle": "选择一个产物",
-    "selectDescription": "从左侧选择文章或数据产物，在这里阅读全文。",
+    "selectDescription": "从左侧选择产物，在这里查看内容。",
     "back": "返回产物列表"
   },
   "reader": {

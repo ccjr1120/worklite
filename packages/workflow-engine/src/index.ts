@@ -48,7 +48,7 @@ export type WorkflowNodeCapability = {
 
 export type ArtifactRef = {
   id: string;
-  type: string;
+  format: string;
   name?: string;
 };
 
@@ -175,18 +175,20 @@ const WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     id: 'worklite/artifact',
     version: '1',
     name: 'Artifact',
-    purpose: 'Persist successful run data or generated PNG images as Artifacts and expose their references.',
+    purpose: 'Persist successful run data as Artifacts with a format inferred from the input or explicitly overridden.',
     inputs: [{ name: 'data', required: true, dataType: 'json', multiple: false }],
     outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
     inputSchema: {},
     outputSchema: { type: 'object' },
     configSchema: {
       type: 'object',
-      required: ['name', 'type'],
+      required: ['name'],
       properties: {
         name: { type: 'string', minLength: 1 },
-        type: { type: 'string', enum: ['text', 'markdown', 'json', 'image'] },
-        imageRole: { type: 'string', enum: ['inline', 'asset'] },
+        format: { type: 'string', enum: ['text', 'markdown', 'json', 'image'], description: 'Optional format override; omitted formats are inferred from the input.' },
+        placement: { type: 'string', enum: ['inline', 'asset'], description: 'Optional image placement metadata; inline images can resolve Markdown image placeholders.' },
+        type: { type: 'string', enum: ['text', 'markdown', 'json', 'image'], deprecated: true, description: 'Legacy format override retained for existing workflow versions.' },
+        imageRole: { type: 'string', enum: ['inline', 'asset'], deprecated: true, description: 'Legacy image placement field retained for existing workflow versions.' },
       },
     },
   },

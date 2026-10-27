@@ -354,7 +354,7 @@ describe('WorkflowsService deletion', () => {
       workflowId: created.id,
       runId,
       name: 'Result',
-      type: 'json',
+      format: 'json',
       content: '{"ok":true}',
     }).run();
 
@@ -434,7 +434,7 @@ describe('WorkflowsService deletion', () => {
       workflowId: created.id,
       runId,
       name: 'Forced result',
-      type: 'markdown',
+      format: 'markdown',
       content: '# Result',
     }).run();
 
@@ -514,7 +514,7 @@ function canvasRenderDefinition(configOverrides: Record<string, unknown> = {}, t
       defaults: { errorPolicy: 'stop' },
       nodes: [
         render,
-        { id: 'artifact', position: { x: 300, y: 0 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'figure', type: 'json' }, errorPolicy: 'stop' },
+        { id: 'artifact', position: { x: 300, y: 0 }, type: 'worklite/artifact', typeVersion: '1', config: { name: 'figure' }, errorPolicy: 'stop' },
       ],
       edges: [{ id: 'edge-artifact', sourceNodeId: 'render', sourcePort: 'output', targetNodeId: 'artifact', targetPort: 'data' }],
     };

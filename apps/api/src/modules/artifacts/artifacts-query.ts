@@ -56,7 +56,8 @@ export async function listArtifacts(
     .select({
       id: artifacts.id,
       name: artifacts.name,
-      type: artifacts.type,
+      format: artifacts.format,
+      placement: artifacts.placement,
       workflowId: artifacts.workflowId,
       workflowName: workflows.name,
       runId: artifacts.runId,
@@ -81,7 +82,8 @@ export async function listArtifacts(
     id: row.id,
     workspaceSlug,
     name: row.name,
-    type: row.type,
+    format: row.format,
+    placement: row.placement,
     workflowId: row.workflowId ?? null,
     workflowName: row.workflowName ?? UNKNOWN_WORKFLOW,
     runId: row.runId ?? '',
@@ -90,7 +92,7 @@ export async function listArtifacts(
     width: row.width,
     height: row.height,
     sizeBytes: row.sizeBytes,
-    contentUrl: row.type === 'image' && row.objectKey ? `/api/artifacts/${encodeURIComponent(row.id)}/content` : null,
+    contentUrl: row.format === 'image' && row.objectKey ? `/api/artifacts/${encodeURIComponent(row.id)}/content` : null,
     createdAt: row.createdAt?.toISOString() ?? '',
     contentLength: Number(row.contentLength ?? 0),
     summary: row.summary ?? '',
@@ -118,7 +120,8 @@ export async function getArtifactDetail(
     id: artifact.id,
     workspaceSlug,
     name: artifact.name,
-    type: artifact.type,
+    format: artifact.format,
+    placement: artifact.placement,
     workflowId: artifact.workflowId ?? null,
     workflowName: row.workflowName ?? UNKNOWN_WORKFLOW,
     runId: artifact.runId ?? '',
@@ -127,7 +130,7 @@ export async function getArtifactDetail(
     width: artifact.width,
     height: artifact.height,
     sizeBytes: artifact.sizeBytes,
-    contentUrl: artifact.type === 'image' && artifact.objectKey ? `/api/artifacts/${encodeURIComponent(artifact.id)}/content` : null,
+    contentUrl: artifact.format === 'image' && artifact.objectKey ? `/api/artifacts/${encodeURIComponent(artifact.id)}/content` : null,
     createdAt: artifact.createdAt?.toISOString() ?? '',
     content: artifact.content,
   };
@@ -159,14 +162,14 @@ async function loadRunRecords(
       .from(workflowNodeRuns)
       .where(and(eq(workflowNodeRuns.runId, runId), eq(workflowNodeRuns.workspaceId, workspaceId))),
     db
-      .select({ id: artifacts.id, imageKey: artifacts.imageKey, imagePosition: artifacts.imagePosition, imageRole: artifacts.imageRole, objectKey: artifacts.objectKey })
+      .select({ id: artifacts.id, imageKey: artifacts.imageKey, imagePosition: artifacts.imagePosition, placement: artifacts.placement, objectKey: artifacts.objectKey })
       .from(artifacts)
-      .where(and(eq(artifacts.runId, runId), eq(artifacts.workspaceId, workspaceId), eq(artifacts.type, 'image')))
+      .where(and(eq(artifacts.runId, runId), eq(artifacts.workspaceId, workspaceId), eq(artifacts.format, 'image')))
       .orderBy(asc(artifacts.imagePosition), asc(artifacts.createdAt), asc(artifacts.id)),
   ]);
   return {
     records: [run?.result ?? null, ...nodeRuns.flatMap((nodeRun) => [nodeRun.input, nodeRun.output])],
-    imageArtifacts: imageRows.filter((row) => row.imageRole !== 'asset').map((row) => ({
+    imageArtifacts: imageRows.filter((row) => row.placement !== 'asset').map((row) => ({
       key: row.imageKey,
       position: row.imagePosition,
       url: row.objectKey ? `/api/artifacts/${encodeURIComponent(row.id)}/content` : null,

@@ -1803,11 +1803,11 @@ export class WorkspaceResourcesService {
 
   async artifactContent(request: Request, workspaceSlug: string, artifactId: string): Promise<{ content: Buffer; mimeType: string; sizeBytes: number; fileName: string }> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [artifact] = await this.db.select({ id: artifacts.id, type: artifacts.type, objectKey: artifacts.objectKey, mimeType: artifacts.mimeType, sizeBytes: artifacts.sizeBytes, name: artifacts.name })
+    const [artifact] = await this.db.select({ id: artifacts.id, format: artifacts.format, objectKey: artifacts.objectKey, mimeType: artifacts.mimeType, sizeBytes: artifacts.sizeBytes, name: artifacts.name })
       .from(artifacts)
       .where(and(eq(artifacts.id, artifactId), eq(artifacts.workspaceId, team.id)))
       .limit(1);
-    if (!artifact || artifact.type !== 'image' || !artifact.objectKey) throw new NotFoundException('Artifact image not found');
+    if (!artifact || artifact.format !== 'image' || !artifact.objectKey) throw new NotFoundException('Artifact content not found');
     const content = await this.artifactStorage.read(artifact.objectKey);
     return {
       content,
@@ -1819,9 +1819,9 @@ export class WorkspaceResourcesService {
 
   async deleteArtifact(request: Request, workspaceSlug: string, artifactId: string): Promise<void> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [deleted] = await this.db.delete(artifacts).where(and(eq(artifacts.id, artifactId), eq(artifacts.workspaceId, team.id))).returning({ id: artifacts.id, type: artifacts.type, objectKey: artifacts.objectKey });
+    const [deleted] = await this.db.delete(artifacts).where(and(eq(artifacts.id, artifactId), eq(artifacts.workspaceId, team.id))).returning({ id: artifacts.id, format: artifacts.format, objectKey: artifacts.objectKey });
     if (!deleted) throw new NotFoundException('Artifact not found');
-    if (deleted.type === 'image' && deleted.objectKey) await this.artifactStorage.remove(deleted.objectKey);
+    if (deleted.format === 'image' && deleted.objectKey) await this.artifactStorage.remove(deleted.objectKey);
   }
 
   private async workflowResourceIsReferenced(workspaceId: string, field: 'skillIds' | 'mcpServerIds', resourceId: string): Promise<boolean> {

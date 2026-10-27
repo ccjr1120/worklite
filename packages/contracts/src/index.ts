@@ -1358,11 +1358,16 @@ export type GatewayRequestLogList = {
   retainedFrom: string;
 };
 
+export type ArtifactFormat = 'json' | 'text' | 'markdown' | 'image' | 'unsupported';
+
+export type ArtifactPlacement = 'inline' | 'asset';
+
 export type ArtifactView = {
   id: string;
   workspaceSlug: string;
   name: string;
-  type: 'json' | 'text' | 'markdown' | 'image' | 'unsupported';
+  format: ArtifactFormat;
+  placement: ArtifactPlacement | null;
   workflowId: string | null;
   workflowName: string;
   runId: string;
@@ -1381,7 +1386,8 @@ export type ArtifactListItemView = {
   id: string;
   workspaceSlug: string;
   name: string;
-  type: 'json' | 'text' | 'markdown' | 'image' | 'unsupported';
+  format: ArtifactFormat;
+  placement: ArtifactPlacement | null;
   workflowId: string | null;
   workflowName: string;
   runId: string;

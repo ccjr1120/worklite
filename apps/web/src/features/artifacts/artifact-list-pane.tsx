@@ -145,16 +145,16 @@ function ArtifactListPane({ activeArtifactId }: { activeArtifactId: string | nul
                   >
                     <div className="flex min-w-0 items-center gap-2">
                       <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
-                      <Badge variant={active ? 'brand' : 'neutral'}>{item.type === 'image' ? t('list.imageType') : item.type}</Badge>
+                      <Badge variant={active ? 'brand' : 'neutral'}>{item.format === 'image' ? t('list.imageFormat') : item.format}</Badge>
                     </div>
                     <p className="mt-1 truncate text-xs text-muted-foreground">{item.workflowName}</p>
-                    {item.type === 'image' && item.contentUrl ? (
+                    {item.format === 'image' && item.contentUrl ? (
                       <img src={item.contentUrl} alt="" loading="lazy" className="mt-2 h-24 w-full rounded-md border border-border/70 bg-surface-subtle object-cover" />
                     ) : summary ? <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground/90">{summary}</p> : null}
                     <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] tabular-nums text-muted-foreground">
                       <time dateTime={item.createdAt}>{formatDateTime(item.createdAt, locale)}</time>
                       <span className="shrink-0">
-                        {item.type === 'image'
+                        {item.format === 'image'
                           ? `${item.width ?? '—'} × ${item.height ?? '—'} · ${item.size}`
                           : t('list.length', { count: item.contentLength })}
                       </span>
