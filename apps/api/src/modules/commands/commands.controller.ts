@@ -1,7 +1,9 @@
-import { Body, Controller, Get, Header, Headers, Param, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Header, Headers, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import type { CommandExecutionEvent, CreateCommandRequest } from '@worklite/contracts';
+import type { CommandExecutionEvent, CommandExecutionStatus, CreateCommandRequest } from '@worklite/contracts';
 import { CommandsService } from './commands.service';
+
+const ACTIVE_COMMAND_STATUSES: CommandExecutionStatus[] = ['queued', 'running', 'cancelling'];
 
 @Controller('commands')
 export class CommandsController {
@@ -13,8 +15,13 @@ export class CommandsController {
   }
 
   @Get()
-  list() {
-    return this.commands.list();
+  list(@Query('status') status?: string, @Query('limit') limit?: string) {
+    const requested = status?.trim() === 'active' ? ACTIVE_COMMAND_STATUSES : undefined;
+    const parsedLimit = Number(limit);
+    return this.commands.list({
+      statuses: requested,
+      limit: Number.isSafeInteger(parsedLimit) && parsedLimit > 0 ? parsedLimit : undefined,
+    });
   }
 
   @Get(':commandId/events')

@@ -1325,6 +1325,14 @@ export class WorkspaceResourcesService {
           development: { webPort: 3390, proxiedApiPort: 23391, gatewayPort: 23392, separateDatabase: false },
           deployment: { webPort: 23390, apiPort: 23391, gatewayPort: 23392 },
           sharedPersistentState: '.data/deployment',
+          persistedStateRetention: {
+            maintenance: 'both SQLite databases run a periodic pass that expires history, reclaims free pages and truncates the WAL (SQLITE_MAINTENANCE_INTERVAL_MINUTES, SQLITE_WAL_SIZE_LIMIT_MEGABYTES, SQLITE_INCREMENTAL_VACUUM_PAGES)',
+            commandStreams: 'COMMAND_STREAM_RETENTION_DAYS, default 7 days, then only COMMAND_STREAM_TAIL_KILOBYTES of trailing output is kept',
+            runEventStreams: 'RUN_EVENT_RETENTION_DAYS, default 0 meaning every Workflow Run, Team Run and Chat execution replay stream is kept; runs, node records, results and artifacts are never pruned',
+            gatewayRequestLogs: '12 hours; statistics are indefinite',
+            releases: 'WORKLITE_RELEASE_RETENTION, default 3 newest unreferenced release directories under runtime/releases',
+            upgradeRecords: 'WORKLITE_UPGRADE_RECORD_RETENTION_DAYS, default 30 days for terminal upgrade job records and deployment logs',
+          },
         },
         chatAttachments: { upload: 'POST /chat/attachments (raw image body; image/png, image/jpeg, image/gif or image/webp; at most 10 MB; optional fileName, conversationId, projectTaskId query)', read: 'GET /chat/attachments/:id', delete: 'DELETE /chat/attachments/:id', reference: '![description](/api/chat/attachments/att_…)', storage: '.data/deployment/chat-attachments', retention: 'CHAT_ATTACHMENT_RETENTION_HOURS, default 12 hours like Gateway request logs', producers: 'project executors receive attachmentUploadUrl in task input', feishu: 'replaced by a text note pointing to Web' },
         chatShell: {

@@ -99,6 +99,10 @@ function getDatabase(): BetterSqlite3.Database {
   // body insert takes; rollback mode serialized all gateway traffic behind them.
   database.pragma('journal_mode = WAL');
   database.pragma('busy_timeout = 5000');
+  // Captured request and response bodies are large, so the journal outgrows the database
+  // within hours. Without a size limit SQLite only shrinks the WAL when it happens to
+  // reset it, and a passive checkpoint under continuous traffic never does.
+  database.pragma(`journal_size_limit = ${WAL_SIZE_LIMIT_BYTES}`);
   database.exec(`
     CREATE TABLE IF NOT EXISTS gateway_providers (
       id TEXT PRIMARY KEY,
@@ -224,6 +228,46 @@ function pruneRequestLogs(target: BetterSqlite3.Database): void {
   if (now - requestLogsPrunedAt < REQUEST_LOG_PRUNE_INTERVAL_MS) return;
   requestLogsPrunedAt = now;
   target.prepare('DELETE FROM gateway_request_logs WHERE occurred_at < ?').run(now - REQUEST_LOG_RETENTION_MS);
+}
+
+function configuredBound(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+const WAL_SIZE_LIMIT_BYTES = configuredBound('SQLITE_WAL_SIZE_LIMIT_MEGABYTES', 64) * 1024 * 1024;
+const MAINTENANCE_INTERVAL_MS = configuredBound('SQLITE_MAINTENANCE_INTERVAL_MINUTES', 15) * 60_000;
+const MAINTENANCE_VACUUM_PAGES = Math.floor(configuredBound('SQLITE_INCREMENTAL_VACUUM_PAGES', 16_384));
+let maintenanceTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Keeps the Gateway database bounded while the process runs. Expiring log rows only moves
+ * their pages onto the free list, and the retention delete itself is what grows the WAL, so
+ * both reclamation steps have to run on a schedule rather than once at startup.
+ */
+export function startGatewayDatabaseMaintenance(): void {
+  if (maintenanceTimer) return;
+  maintenanceTimer = setInterval(() => {
+    try {
+      const target = getDatabase();
+      requestLogsPrunedAt = 0;
+      pruneRequestLogs(target);
+      target.pragma(`incremental_vacuum(${MAINTENANCE_VACUUM_PAGES})`);
+      // TRUNCATE waits for the readers a passive checkpoint gives up on; a busy result
+      // is expected under load and simply leaves the work for the next pass.
+      target.pragma('wal_checkpoint(TRUNCATE)');
+    } catch {
+      // Maintenance is best effort; a locked database must never take the Gateway down.
+    }
+  }, MAINTENANCE_INTERVAL_MS);
+  maintenanceTimer.unref();
+}
+
+export function stopGatewayDatabaseMaintenance(): void {
+  if (maintenanceTimer) clearInterval(maintenanceTimer);
+  maintenanceTimer = null;
 }
 
 function secretKey(): Buffer {

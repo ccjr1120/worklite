@@ -5,7 +5,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
 import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, lstatSync, readlinkSync, symlinkSync, chmodSync, rmSync, openSync, closeSync, writeSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync, lstatSync, readlinkSync, symlinkSync, chmodSync, rmSync, openSync, closeSync, writeSync, statSync } from 'node:fs';
 import { gatewayFingerprint } from './gateway-fingerprint.mjs';
 
 const [command, ...args] = process.argv.slice(2);
@@ -20,6 +20,115 @@ function runtimeRoot(runtime) {
 }
 function gatewayRoot(gateway, runtime) {
   return resolve(gateway?.supervisorDirectory ?? gateway?.releaseDirectory ?? gateway?.projectRoot ?? runtimeRoot(runtime));
+}
+
+// Each prepared release is a full working copy of the project plus the node_modules its
+// build installs, so an unpruned releases/ directory grows by roughly a gigabyte per
+// deployment. Upgrade job records and deployment logs accumulate the same way.
+const TERMINAL_PHASES = ['succeeded', 'rolled_back', 'failed'];
+function retentionBound(name, fallback) {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 1 ? Math.floor(value) : fallback;
+}
+function readIfPresent(path) {
+  try { return existsSync(path) ? read(path) : null; } catch { return null; }
+}
+
+/**
+ * A job still holds its release when it is the active one, when it is authorized and has not
+ * settled, or while it is young enough to still be confirmed. A proposal the user never
+ * confirmed would otherwise pin its release directory forever.
+ */
+function jobHoldsRelease(job, recordCutoff) {
+  if (TERMINAL_PHASES.includes(job.phase)) return false;
+  if (job.confirmedAt) return true;
+  const proposedAt = Date.parse(job.updatedAt ?? '');
+  return !Number.isFinite(proposedAt) || proposedAt >= recordCutoff;
+}
+
+/**
+ * Every release directory that must survive pruning: the running deployment, the release a
+ * pending or in-flight upgrade would start or fall back to, and the checkout this runner is
+ * itself executing from.
+ */
+function protectedReleaseDirectories(state, extraIds = [], recordCutoff = 0) {
+  const protectedPaths = new Set();
+  const add = (value) => { if (typeof value === 'string' && value.trim()) protectedPaths.add(resolve(value)); };
+  add(resolve(dirname(fileURLToPath(import.meta.url)), '..'));
+  add(process.env.WORKLITE_RELEASE_ROOT);
+  for (const id of extraIds) add(join(state, 'releases', id));
+  const current = readIfPresent(join(state, 'current.json'));
+  add(current?.releaseDirectory);
+  add(current?.gateway?.releaseDirectory);
+  add(current?.gateway?.supervisorDirectory);
+  const active = readIfPresent(join(state, 'active.json'));
+  if (active?.jobId) add(join(state, 'releases', active.jobId));
+  const upgradesDirectory = join(state, 'upgrades');
+  if (!existsSync(upgradesDirectory)) return protectedPaths;
+  for (const entry of readdirSync(upgradesDirectory)) {
+    if (!entry.endsWith('.json')) continue;
+    const job = readIfPresent(join(upgradesDirectory, entry));
+    if (!job) continue;
+    if (jobHoldsRelease(job, recordCutoff)) { add(job.releaseDirectory); add(job.previous?.releaseDirectory); }
+  }
+  return protectedPaths;
+}
+
+function pruneReleases(state, extraIds = []) {
+  const releasesDirectory = join(state, 'releases');
+  if (!existsSync(releasesDirectory)) return;
+  const keep = retentionBound('WORKLITE_RELEASE_RETENTION', 3);
+  const protectedPaths = protectedReleaseDirectories(state, extraIds, recordCutoff());
+  const candidates = [];
+  for (const entry of readdirSync(releasesDirectory)) {
+    const path = join(releasesDirectory, entry);
+    if (protectedPaths.has(resolve(path))) continue;
+    let modifiedAt = 0;
+    try { const info = statSync(path); if (!info.isDirectory()) continue; modifiedAt = info.mtimeMs; } catch { continue; }
+    candidates.push({ path, modifiedAt });
+  }
+  candidates.sort((left, right) => right.modifiedAt - left.modifiedAt);
+  for (const candidate of candidates.slice(keep)) {
+    try { rmSync(candidate.path, { recursive: true, force: true }); } catch { /* a locked release is retried on the next deployment */ }
+  }
+}
+
+function recordCutoff() {
+  return Date.now() - retentionBound('WORKLITE_UPGRADE_RECORD_RETENTION_DAYS', 30) * 86_400_000;
+}
+
+function pruneUpgradeRecords(state) {
+  const cutoff = recordCutoff();
+  const activeJobId = readIfPresent(join(state, 'active.json'))?.jobId ?? null;
+  const upgradesDirectory = join(state, 'upgrades');
+  if (existsSync(upgradesDirectory)) for (const entry of readdirSync(upgradesDirectory)) {
+    if (!entry.endsWith('.json')) continue;
+    const id = entry.slice(0, -'.json'.length);
+    if (id === activeJobId) continue;
+    const job = readIfPresent(join(upgradesDirectory, entry));
+    // Settled jobs and proposals the user never confirmed both expire; an authorized job
+    // that has not settled is live state and is kept whatever its age.
+    if (!job || jobHoldsRelease(job, cutoff)) continue;
+    const settledAt = Date.parse(job.updatedAt ?? '');
+    if (!Number.isFinite(settledAt) || settledAt >= cutoff) continue;
+    for (const path of [join(upgradesDirectory, entry), join(upgradesDirectory, `${id}.log`)]) {
+      try { rmSync(path, { force: true }); } catch { /* retried on the next deployment */ }
+    }
+  }
+  const deploymentsDirectory = join(state, 'deployments');
+  if (existsSync(deploymentsDirectory)) for (const entry of readdirSync(deploymentsDirectory)) {
+    if (!entry.endsWith('.log')) continue;
+    const path = join(deploymentsDirectory, entry);
+    try { if (statSync(path).mtimeMs < cutoff) rmSync(path, { force: true }); } catch { /* retried on the next deployment */ }
+  }
+}
+
+/** Runtime state retention. Never writes to stdout: prepare's stdout is the release record the API parses. */
+function pruneRuntimeState(state, extraIds = []) {
+  try { pruneReleases(state, extraIds); } catch { /* retention failure must not fail a deployment */ }
+  try { pruneUpgradeRecords(state); } catch { /* retention failure must not fail a deployment */ }
 }
 
 function prepare(projectRoot, state, id) {
@@ -54,6 +163,7 @@ function prepare(projectRoot, state, id) {
   const releaseHash = createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
   const gatewayHash = gatewayFingerprint(manifest, process.env);
   write(join(root, 'release-manifest.json'), { releaseHash, gatewayHash, files: manifest });
+  pruneRuntimeState(state, [id]);
   return { releaseHash, gatewayHash, releaseDirectory: root };
 }
 
@@ -602,6 +712,7 @@ async function deploy(profile) {
     if (cleanupErrors.length) throw new Error(`${describeError(error)} Candidate cleanup also failed: ${cleanupErrors.join('; ')}.`, { cause: error });
     throw error;
   } finally { closeSync(log); }
+  pruneRuntimeState(stateDirectory);
   process.stdout.write(`Managed WorkLite deployment completed on port ${runtime.ports[0]} at version ${runtime.version}.\n`);
 }
 
@@ -651,7 +762,9 @@ async function run(state, id) {
     };
     for (const runId of latest.pausedWorkflows ?? []) await request(`/api/runs/${encodeURIComponent(runId)}/cancel`, 'Workflow cancellation');
     for (const runId of latest.pausedTeams ?? []) await request(`/api/agent-teams/${encodeURIComponent(runId)}/cancel`, 'Team cancellation');
-    const commandsResponse = await fetchForUpgrade(`http://127.0.0.1:${previous.ports[1]}/api/commands`, { signal: AbortSignal.timeout(5_000) }, 'Command list');
+    // Only active commands are cancelled here, and the unfiltered list is the whole command
+    // history: asking for the full table during a drain made this call scale with history size.
+    const commandsResponse = await fetchForUpgrade(`http://127.0.0.1:${previous.ports[1]}/api/commands?status=active`, { signal: AbortSignal.timeout(5_000) }, 'Command list');
     if (!commandsResponse.ok) throw new Error(`Command list returned HTTP ${commandsResponse.status}${commandsResponse.statusText ? ` ${commandsResponse.statusText}` : ''}.`);
     const commandRows = await commandsResponse.json();
     const commands = Array.isArray(commandRows) ? commandRows : Array.isArray(commandRows.commands) ? commandRows.commands : [];
@@ -774,6 +887,8 @@ async function run(state, id) {
     write(currentPath, candidate);
     await ready(candidate.pid, candidate.ports, candidate.releaseHash, candidate.gateway);
     phase('succeeded', { interruptionPolicy: 'cancel_active_work_without_resume' });
+    // current.json now names the candidate, so retention keeps it and the newest fallbacks.
+    pruneRuntimeState(state);
     stage = 'reconnecting Feishu';
     try { await call('complete'); }
     catch (error) { writeSync(log, `Upgrade ${id} channel reconnect notice: ${describeError(error)}\n`); }

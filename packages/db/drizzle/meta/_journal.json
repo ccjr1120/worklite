@@ -372,6 +372,13 @@
       "when": 1793000000002,
       "tag": "0053_artifact_image_references",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "6",
+      "when": 1793000000003,
+      "tag": "0054_history_retention_indexes",
+      "breakpoints": true
     }
   ]
 }
