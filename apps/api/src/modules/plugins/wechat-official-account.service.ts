@@ -1507,12 +1507,14 @@ async function uploadInlineArticleImages(page: Page, article: string, images: Ge
   return applyInlineImageUrls(article, plan, urls);
 }
 
-// The article's own image control opens the same material picker the cover
-// flow uses. Uploading here puts the PNG in the account's material library and
-// yields the mmbiz CDN URL that belongs in the article body; the picker is then
-// dismissed without selecting anything, so the upload itself changes no draft
-// content.
-const ARTICLE_IMAGE_CONTROLS = ['#js_editor_insertimage', '.js_insertmedia', '.js_insertimage', '.edui-for-insertimage', '[data-action="insertimage"]'];
+// The article toolbar's image control is a dropdown, not a dialog opener:
+// clicking it only reveals `本地上传 / 从图片库选择 / 微信扫码上传 / AI 配图`.
+// 从图片库选择 opens the same material picker the cover flow uses, so uploading
+// there puts the PNG in the account's material library and yields the mmbiz CDN
+// URL that belongs in the article body; the picker is then dismissed without
+// selecting anything, so the upload itself changes no draft content.
+const ARTICLE_IMAGE_MENU = 'li#js_editor_insertimage';
+const IMAGE_LIBRARY_LABEL = '从图片库选择';
 
 async function uploadImageToMaterial(page: Page, imagePath: string, label: string): Promise<string> {
   await openArticleImagePicker(page);
@@ -1521,7 +1523,7 @@ async function uploadImageToMaterial(page: Page, imagePath: string, label: strin
     await imageDialog.waitFor({ state: 'visible', timeout: 20_000 });
     const fileInput = imageDialog.locator('.js_upload_btn_container input[type="file"], input[type="file"]').last();
     const items = imageDialog.locator('.weui-desktop-img-picker__item');
-    const before = await pickerItemSources(items);
+    const before = await settledPickerItemSources(items);
     const beforeKeys = new Set(before.map(thumbnailIdentity));
     await fileInput.setInputFiles(imagePath);
 
@@ -1549,31 +1551,58 @@ async function uploadImageToMaterial(page: Page, imagePath: string, label: strin
 }
 
 async function openArticleImagePicker(page: Page): Promise<void> {
-  for (const selector of ARTICLE_IMAGE_CONTROLS) {
-    const control = page.locator(selector).first();
-    if (!await control.isVisible().catch(() => false)) continue;
-    await control.click({ force: true }).catch(() => undefined);
-    if (await imagePickerVisible(page, 2_000)) return;
-  }
-  const labeled = page.locator('button:visible, a:visible, [role="button"]:visible').filter({ hasText: /^(图片|Image)$/ }).last();
-  if (await labeled.isVisible().catch(() => false)) {
-    await labeled.click({ force: true }).catch(() => undefined);
-    if (await imagePickerVisible(page, 2_000)) return;
-  }
-  // Fall back to the cover's material picker: it uploads to the same library,
-  // and dismissing it without a selection leaves the cover untouched.
-  const cover = page.locator('#js_cover_area');
-  if (await cover.isVisible().catch(() => false)) {
-    await cover.scrollIntoViewIfNeeded().catch(() => undefined);
-    await cover.click({ force: true }).catch(() => undefined);
-    const imageLibraryButton = page.locator('#js_cover_area .js_imagedialog:visible, #js_cover_null .js_imagedialog:visible').last();
-    if (await imageLibraryButton.isVisible().catch(() => false)) {
-      await imageLibraryButton.click({ force: true }).catch(() => undefined);
-      if (await imagePickerVisible(page, 5_000)) return;
+  const menu = page.locator(ARTICLE_IMAGE_MENU).first();
+  if (await menu.isVisible().catch(() => false)) {
+    await menu.scrollIntoViewIfNeeded().catch(() => undefined);
+    await menu.click({ force: true }).catch(() => undefined);
+    // Match the entry by its label as well as its class: the label is what the
+    // editor shows a person, so it survives the class churn that broke the
+    // previous selectors.
+    const entry = menu.locator('.js_img_from_local, .tpl_dropdown_menu_item').filter({ hasText: IMAGE_LIBRARY_LABEL }).first();
+    if (await entry.waitFor({ state: 'visible', timeout: 5_000 }).then(() => true).catch(() => false)) {
+      await entry.click({ force: true }).catch(() => undefined);
+      if (await imagePickerVisible(page, 20_000)) return;
     }
   }
+  // Fall back to the cover's own 从图片库选择 entry: it opens the same picker and
+  // uploads to the same library, and dismissing it without a selection leaves
+  // the cover untouched. The entry stays `visibility: hidden` until the cover
+  // popover opens, so Playwright never counts it as clickable — dispatch the
+  // click inside the page instead of waiting for actionability.
+  if (await clickCoverImageLibraryEntry(page) && await imagePickerVisible(page, 20_000)) return;
   await page.screenshot({ path: '/tmp/worklite-inline-image-control-timeout.png', fullPage: true }).catch(() => undefined);
   throw new Error('WeChat editor image insert control is unavailable, so inline images could not be uploaded.');
+}
+
+async function clickCoverImageLibraryEntry(page: Page): Promise<boolean> {
+  return page.evaluate<boolean>(`(() => {
+    const label = ${JSON.stringify(IMAGE_LIBRARY_LABEL)};
+    const scope = document.querySelector('#js_cover_area') ?? document.querySelector('#js_cover_null') ?? document;
+    const entries = [...scope.querySelectorAll('.js_imagedialog'), ...scope.querySelectorAll('a, button, li, span')];
+    for (const entry of entries) {
+      if (!entry.classList.contains('js_imagedialog') && (entry.textContent ?? '').trim() !== label) continue;
+      entry.click();
+      return true;
+    }
+    return false;
+  })()`).catch(() => false);
+}
+
+// The library paints the images it already holds about a second after the
+// dialog appears. Snapshotting before that leaves the baseline empty, and the
+// first image the library then paints reads as the one just uploaded — so the
+// article would carry some unrelated picture from the account's library.
+async function settledPickerItemSources(items: Locator): Promise<string[]> {
+  const deadline = Date.now() + 15_000;
+  let sources: string[] = [];
+  let stable = 0;
+  while (Date.now() < deadline && stable < 2) {
+    const current = await pickerItemSources(items);
+    stable = current.length > 0 && current.length === sources.length ? stable + 1 : 0;
+    sources = current;
+    if (stable < 2) await delay(400);
+  }
+  return sources;
 }
 
 async function imagePickerVisible(page: Page, timeout: number): Promise<boolean> {
@@ -1592,6 +1621,9 @@ async function closeImagePicker(page: Page): Promise<void> {
       .locator('.weui-desktop-dialog__close, .weui-desktop-dialog__close-btn, button[aria-label="Close"], button[aria-label="关闭"]')
       .first();
     if (await closeButton.isVisible().catch(() => false)) await closeButton.click({ force: true }).catch(() => undefined);
+    // The picker's own 取消 leaves the upload in the library and selects nothing.
+    const cancelButton = imageDialog.locator('button').filter({ hasText: /^(取消|Cancel)$/ }).first();
+    if (await cancelButton.isVisible().catch(() => false)) await cancelButton.click({ force: true }).catch(() => undefined);
   }
   if (await imagePickerVisible(page, 1_500)) throw new Error('WeChat image picker stayed open after uploading an inline image.');
 }
