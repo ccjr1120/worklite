@@ -15,6 +15,7 @@ export type CanvasStickerConfig = {
   height: number;
   shape: CanvasStickerShape;
   backgroundColor: string;
+  key?: string;
   cornerRadius?: number;
   text?: CanvasStickerTextConfig;
 };
@@ -33,6 +34,11 @@ export function validateCanvasStickerConfig(value: unknown): CanvasStickerConfig
   if (typeof config.height !== 'number' || !Number.isInteger(config.height) || config.height < 64 || config.height > 2048) throw new Error('Canvas Sticker node height must be an integer between 64 and 2048.');
   if (config.shape !== 'none' && config.shape !== 'roundedRect' && config.shape !== 'circle' && config.shape !== 'ribbon') throw new Error('Canvas Sticker node shape must be none, roundedRect, circle, or ribbon.');
   const backgroundColor = assertColor(config.backgroundColor, 'Canvas Sticker node backgroundColor');
+  let key: string | undefined;
+  if (config.key !== undefined) {
+    if (typeof config.key !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(config.key)) throw new Error('Canvas Sticker node key must be 1-64 characters of letters, digits, dots, underscores, or hyphens.');
+    key = config.key;
+  }
   let cornerRadius: number | undefined;
   if (config.cornerRadius !== undefined) {
     if (typeof config.cornerRadius !== 'number' || !Number.isInteger(config.cornerRadius) || config.cornerRadius < 0) throw new Error('Canvas Sticker node cornerRadius must be a non-negative integer.');
@@ -54,7 +60,7 @@ export function validateCanvasStickerConfig(value: unknown): CanvasStickerConfig
       align: rawText.align as CanvasStickerTextConfig['align'],
     };
   }
-  return { width: config.width, height: config.height, shape: config.shape, backgroundColor, cornerRadius, text };
+  return { width: config.width, height: config.height, shape: config.shape, backgroundColor, key, cornerRadius, text };
 }
 
 function traceShapePath(ctx: ReturnType<ReturnType<typeof createCanvas>['getContext']>, config: CanvasStickerConfig): void {

@@ -7,6 +7,7 @@ const URL_MAP_FIELDS = new Set(['inlineImageUrls', 'workliteImageUrls', 'imageUr
 const HTTP_URL = /^https?:\/\//i;
 
 type Placeholder = { key: string; alt: string };
+export type ArtifactImageReference = { key: string | null; position: number | null; url: string | null };
 
 /** Unique placeholder keys in document order; the first alt text wins. */
 export function findArtifactImagePlaceholders(content: string): Placeholder[] {
@@ -26,17 +27,65 @@ export function findArtifactImagePlaceholders(content: string): Placeholder[] {
  * WeChat material URLs never leave the publishing session. This walk still
  * picks up a real URL when an upstream node or a future run view exposes one.
  */
-export function resolveArtifactInlineImages(content: string, runRecords: readonly unknown[]): ArtifactInlineImageView[] {
+export function resolveArtifactInlineImages(
+  content: string,
+  runRecords: readonly unknown[],
+  imageArtifacts: readonly ArtifactImageReference[] = [],
+): ArtifactInlineImageView[] {
   const placeholders = findArtifactImagePlaceholders(content);
   if (placeholders.length === 0) return [];
   const keys = new Set(placeholders.map((placeholder) => placeholder.key));
   const urls = new Map<string, string>();
   const visited = new WeakSet<object>();
   for (const record of runRecords) collectImageUrls(record, keys, urls, visited);
+  const imageUrlsByKey = new Map<string, string>();
+  const ambiguousKeys = new Set<string>();
+  const imageUrlsByPosition = new Map<number, string>();
+  const ambiguousPositions = new Set<number>();
+  for (const image of imageArtifacts) {
+    if (!image.url || !ARTIFACT_CONTENT_URL.test(image.url)) continue;
+    if (image.key) addUniqueImageReference(imageUrlsByKey, ambiguousKeys, image.key, image.url);
+    if (Number.isInteger(image.position) && image.position! > 0) addUniqueImageReference(imageUrlsByPosition, ambiguousPositions, image.position!, image.url);
+  }
   return placeholders.map((placeholder) => ({
     ...placeholder,
-    url: urls.get(placeholder.key) ?? urls.get(placeholder.alt) ?? null,
+    url: urls.get(placeholder.key)
+      ?? urls.get(placeholder.alt)
+      ?? resolveImageArtifactUrl(placeholder.key, imageUrlsByKey, ambiguousKeys, imageUrlsByPosition, ambiguousPositions),
   }));
+}
+
+const ARTIFACT_CONTENT_URL = /^\/api\/artifacts\/art_[A-Za-z0-9-]+\/content$/;
+
+function addUniqueImageReference<Key extends string | number>(
+  references: Map<Key, string>,
+  ambiguous: Set<Key>,
+  key: Key,
+  url: string,
+): void {
+  if (ambiguous.has(key)) return;
+  const existing = references.get(key);
+  if (existing && existing !== url) {
+    references.delete(key);
+    ambiguous.add(key);
+    return;
+  }
+  references.set(key, url);
+}
+
+function resolveImageArtifactUrl(
+  key: string,
+  byKey: ReadonlyMap<string, string>,
+  ambiguousKeys: ReadonlySet<string>,
+  byPosition: ReadonlyMap<number, string>,
+  ambiguousPositions: ReadonlySet<number>,
+): string | null {
+  if (ambiguousKeys.has(key)) return null;
+  const exact = byKey.get(key);
+  if (exact) return exact;
+  if (!/^[1-9]\d*$/.test(key)) return null;
+  const position = Number(key);
+  return ambiguousPositions.has(position) ? null : byPosition.get(position) ?? null;
 }
 
 function collectImageUrls(value: unknown, keys: ReadonlySet<string>, urls: Map<string, string>, visited: WeakSet<object>): void {

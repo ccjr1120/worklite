@@ -895,6 +895,10 @@ function WorkflowEditorPage() {
         {selectedNode.data.nodeType === 'artifact' ? <>
           <Field label={t('editor.artifactName')} htmlFor="artifact-name"><Input id="artifact-name" value={selectedNode.data.artifactName ?? ''} onChange={(event) => { const artifactName = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, artifactName } } : node)); setSaveState('unsaved'); }} /></Field>
           <Field label={t('editor.artifactType')} htmlFor="artifact-type"><Select value={selectedNode.data.artifactType ?? 'text'} onValueChange={(value) => { const artifactType = value as 'text' | 'markdown' | 'json' | 'image'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, artifactType } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="artifact-type"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">{t('editor.artifactTypes.text')}</SelectItem><SelectItem value="markdown">{t('editor.artifactTypes.markdown')}</SelectItem><SelectItem value="json">{t('editor.artifactTypes.json')}</SelectItem><SelectItem value="image">{t('editor.artifactTypes.image')}</SelectItem></SelectContent></Select></Field>
+          {selectedNode.data.artifactType === 'image' ? <>
+            <Field label={t('editor.artifactImageRole')} htmlFor="artifact-image-role"><Select value={selectedNode.data.artifactImageRole ?? 'inline'} onValueChange={(value) => { const artifactImageRole = value as 'inline' | 'asset'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, artifactImageRole } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="artifact-image-role"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="inline">{t('editor.artifactImageRoles.inline')}</SelectItem><SelectItem value="asset">{t('editor.artifactImageRoles.asset')}</SelectItem></SelectContent></Select></Field>
+            <p className="text-[12px] text-muted-foreground">{t('editor.artifactImageRoleHint')}</p>
+          </> : null}
           <p className="text-[12px] text-muted-foreground">{t('editor.artifactCreationDescription')}</p>
         </> : null}
         {selectedNode.data.nodeType === 'artifactQuery' ? <>
@@ -906,6 +910,7 @@ function WorkflowEditorPage() {
         {selectedNode.data.nodeType === 'image' ? <>
           <Field label={t('editor.imageModel')} htmlFor="image-model"><Input id="image-model" value="codex/gpt-image-2" readOnly /></Field>
           <Field label={t('editor.imageCount')} htmlFor="image-count"><Input id="image-count" type="number" min={1} step={1} value={String(selectedNode.data.imageCount ?? 1)} onChange={(event) => { const imageCount = Number(event.target.value); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, imageCount: Number.isFinite(imageCount) ? imageCount : 1 } } : node)); setSaveState('unsaved'); }} /></Field>
+          <Field label={t('editor.imageKey')} htmlFor="image-key" hint={t('editor.imageKeyHint')}><Input id="image-key" value={selectedNode.data.imageKey ?? ''} onChange={(event) => { const imageKey = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, imageKey } } : node)); setSaveState('unsaved'); }} /></Field>
           <Field label={t('editor.imageBackground')} htmlFor="image-background"><Select value={selectedNode.data.imageBackground ?? 'opaque'} onValueChange={(value) => { const imageBackground = value as 'opaque' | 'transparent'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, imageBackground } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="image-background"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="opaque">{t('editor.imageBackgrounds.opaque')}</SelectItem><SelectItem value="transparent">{t('editor.imageBackgrounds.transparent')}</SelectItem></SelectContent></Select></Field>
           <Field label={t('editor.imageQuality')} htmlFor="image-quality"><Select value={selectedNode.data.imageQuality ?? 'medium'} onValueChange={(value) => { const imageQuality = value as 'low' | 'medium' | 'high'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, imageQuality } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="image-quality"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="low">{t('editor.imageQualities.low')}</SelectItem><SelectItem value="medium">{t('editor.imageQualities.medium')}</SelectItem><SelectItem value="high">{t('editor.imageQualities.high')}</SelectItem></SelectContent></Select></Field>
           <Field label={t('editor.imageSize')} htmlFor="image-size"><Select value={selectedNode.data.imageSize ?? '1024x1024'} onValueChange={(value) => { const imageSize = value as '1024x1024' | '1536x1024' | '1024x1536'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, imageSize } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="image-size"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="1024x1024">1024×1024</SelectItem><SelectItem value="1536x1024">1536×1024</SelectItem><SelectItem value="1024x1536">1024×1536</SelectItem></SelectContent></Select></Field>
@@ -917,6 +922,7 @@ function WorkflowEditorPage() {
           <Field label={t('editor.stickerHeight')} htmlFor="sticker-height"><Input id="sticker-height" type="number" min={64} max={2048} step={1} value={String(selectedNode.data.stickerHeight ?? 512)} onChange={(event) => { const stickerHeight = Number(event.target.value); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, stickerHeight: Number.isFinite(stickerHeight) ? stickerHeight : 512 } } : node)); setSaveState('unsaved'); }} /></Field>
           <Field label={t('editor.stickerShape')} htmlFor="sticker-shape"><Select value={selectedNode.data.stickerShape ?? 'roundedRect'} onValueChange={(value) => { const stickerShape = value as 'none' | 'roundedRect' | 'circle' | 'ribbon'; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, stickerShape } } : node)); setSaveState('unsaved'); }}><SelectTrigger id="sticker-shape"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">{t('editor.stickerShapes.none')}</SelectItem><SelectItem value="roundedRect">{t('editor.stickerShapes.roundedRect')}</SelectItem><SelectItem value="circle">{t('editor.stickerShapes.circle')}</SelectItem><SelectItem value="ribbon">{t('editor.stickerShapes.ribbon')}</SelectItem></SelectContent></Select></Field>
           <Field label={t('editor.stickerBackgroundColor')} htmlFor="sticker-background-color"><Input id="sticker-background-color" value={selectedNode.data.stickerBackgroundColor ?? '#2563eb'} onChange={(event) => { const stickerBackgroundColor = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, stickerBackgroundColor } } : node)); setSaveState('unsaved'); }} /></Field>
+          <Field label={t('editor.stickerKey')} htmlFor="sticker-key" hint={t('editor.stickerKeyHint')}><Input id="sticker-key" value={selectedNode.data.stickerKey ?? ''} onChange={(event) => { const stickerKey = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, stickerKey } } : node)); setSaveState('unsaved'); }} /></Field>
           {selectedNode.data.stickerShape === 'roundedRect' ? <Field label={t('editor.stickerCornerRadius')} htmlFor="sticker-corner-radius"><Input id="sticker-corner-radius" type="number" min={0} step={1} value={String(selectedNode.data.stickerCornerRadius ?? 0)} onChange={(event) => { const stickerCornerRadius = Number(event.target.value); setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, stickerCornerRadius: Number.isFinite(stickerCornerRadius) ? stickerCornerRadius : 0 } } : node)); setSaveState('unsaved'); }} /></Field> : null}
           <Field label={t('editor.stickerTextContent')} htmlFor="sticker-text-content" hint={t('editor.stickerTextContentHint')}><Input id="sticker-text-content" value={selectedNode.data.stickerTextContent ?? ''} onChange={(event) => { const stickerTextContent = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, stickerTextContent } } : node)); setSaveState('unsaved'); }} /></Field>
           <Field label={t('editor.stickerTextColor')} htmlFor="sticker-text-color"><Input id="sticker-text-color" value={selectedNode.data.stickerTextColor ?? '#ffffff'} onChange={(event) => { const stickerTextColor = event.target.value; setNodes((current) => current.map((node) => node.id === selectedNode.id ? { ...node, data: { ...node.data, stickerTextColor } } : node)); setSaveState('unsaved'); }} /></Field>
@@ -1213,6 +1219,7 @@ function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
         dashboardLayout: readDashboardLayout(config.layout),
         artifactName: typeof config.name === 'string' ? config.name : undefined,
         artifactType: config.type === 'json' || config.type === 'text' || config.type === 'markdown' || config.type === 'image' ? config.type : undefined,
+        artifactImageRole: config.imageRole === 'asset' ? 'asset' : 'inline',
         queryName: typeof config.name === 'string' ? config.name : undefined,
         queryTitleField: typeof config.titleField === 'string' ? config.titleField : undefined,
         queryDescriptionFields: Array.isArray(config.descriptionFields) ? config.descriptionFields.filter((value): value is string => typeof value === 'string') : undefined,
@@ -1220,6 +1227,7 @@ function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
         wechatMode: config.mode === 'draft' || config.mode === 'publish' ? config.mode : undefined,
         wechatNodeVersion: node.typeVersion === '1' || node.typeVersion === '2' ? node.typeVersion : undefined,
         imageCount: typeof config.n === 'number' && Number.isInteger(config.n) ? config.n : 1,
+        imageKey: typeof config.key === 'string' ? config.key : undefined,
         imageBackground: config.background === 'transparent' ? 'transparent' : 'opaque',
         imageQuality: config.quality === 'low' || config.quality === 'high' ? config.quality : 'medium',
         imageSize: config.size === '1536x1024' || config.size === '1024x1536' ? config.size : '1024x1024',
@@ -1227,6 +1235,7 @@ function toFlowNodes(definition: WorkflowDefinition): WorkflowCanvasNode[] {
         stickerHeight: typeof config.height === 'number' && Number.isInteger(config.height) ? config.height : 512,
         stickerShape: config.shape === 'none' || config.shape === 'circle' || config.shape === 'ribbon' ? config.shape : 'roundedRect',
         stickerBackgroundColor: typeof config.backgroundColor === 'string' ? config.backgroundColor : '#2563eb',
+        stickerKey: typeof config.key === 'string' ? config.key : undefined,
         stickerCornerRadius: typeof config.cornerRadius === 'number' && Number.isInteger(config.cornerRadius) ? config.cornerRadius : undefined,
         stickerTextContent: typeof stickerTextConfig.content === 'string' ? stickerTextConfig.content : undefined,
         stickerTextColor: typeof stickerTextConfig.color === 'string' ? stickerTextConfig.color : '#ffffff',
@@ -1416,28 +1425,31 @@ function toDefinitionNode(node: WorkflowCanvasNode): WorkflowNodeDefinition {
     config = { ...base, layout: node.data.dashboardLayout ?? { header: [], main: [], footer: [] } };
   } else if (node.data.nodeType === 'artifact') {
     type = 'worklite/artifact';
-    config = { ...base, name: node.data.artifactName ?? '', type: node.data.artifactType ?? 'text' };
+    const artifactType = node.data.artifactType ?? 'text';
+    config = { ...withoutNodeConfigFields(base, ['imageRole']), name: node.data.artifactName ?? '', type: artifactType, ...(artifactType === 'image' ? { imageRole: node.data.artifactImageRole ?? 'inline' } : {}) };
   } else if (node.data.nodeType === 'artifactQuery') {
     type = 'worklite/artifact-query';
     config = { ...base, name: node.data.queryName ?? '', titleField: node.data.queryTitleField ?? '', descriptionFields: node.data.queryDescriptionFields ?? [] };
   } else if (node.data.nodeType === 'image') {
     type = 'worklite/image';
     config = {
-      ...base,
+      ...withoutNodeConfigFields(base, ['key']),
       model: 'codex/gpt-image-2',
       n: node.data.imageCount ?? 1,
       background: node.data.imageBackground ?? 'opaque',
       quality: node.data.imageQuality ?? 'medium',
       size: node.data.imageSize ?? '1024x1024',
+      ...(node.data.imageKey?.trim() ? { key: node.data.imageKey.trim() } : {}),
     };
   } else if (node.data.nodeType === 'canvasSticker') {
     type = 'worklite/canvas-sticker';
     config = {
-      ...base,
+      ...withoutNodeConfigFields(base, ['key']),
       width: node.data.stickerWidth ?? 512,
       height: node.data.stickerHeight ?? 512,
       shape: node.data.stickerShape ?? 'roundedRect',
       backgroundColor: node.data.stickerBackgroundColor ?? '#2563eb',
+      ...(node.data.stickerKey?.trim() ? { key: node.data.stickerKey.trim() } : {}),
       ...(node.data.stickerCornerRadius !== undefined ? { cornerRadius: node.data.stickerCornerRadius } : {}),
       text: {
         ...(node.data.stickerTextContent?.trim() ? { content: node.data.stickerTextContent.trim() } : {}),
@@ -1450,7 +1462,7 @@ function toDefinitionNode(node: WorkflowCanvasNode): WorkflowNodeDefinition {
   } else if (node.data.nodeType === 'canvasRender') {
     type = 'worklite/canvas-render';
     config = {
-      ...base,
+      ...withoutNodeConfigFields(base, ['key']),
       width: node.data.renderWidth ?? 1024,
       height: node.data.renderHeight ?? 1024,
       backgroundColor: node.data.renderBackgroundColor ?? '#ffffff',
@@ -1479,6 +1491,12 @@ function toDefinitionNode(node: WorkflowCanvasNode): WorkflowNodeDefinition {
     config,
     errorPolicy: node.data.errorPolicy,
   };
+}
+
+function withoutNodeConfigFields(config: Record<string, unknown>, fields: readonly string[]): Record<string, unknown> {
+  const next = { ...config };
+  for (const field of fields) delete next[field];
+  return next;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

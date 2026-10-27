@@ -302,7 +302,8 @@ export class RunsService {
           size: config.size,
           signal: request.signal,
         });
-        return { output };
+        const key = typeof config.key === 'string' && config.key.trim() ? config.key.trim() : undefined;
+        return { output: key ? { ...output, key } : output };
       },
     });
     this.registry.register({
@@ -317,6 +318,7 @@ export class RunsService {
             type: 'workflow_image',
             model: 'worklite/canvas-sticker',
             mediaType: 'image/png',
+            ...(config.key ? { key: config.key } : {}),
             data: [{ b64Json: png.toString('base64') }],
           },
         };
@@ -864,6 +866,15 @@ export class RunsService {
     }
 
     if (images.length === 0) throw new Error('Image Artifact requires at least one generated PNG image as input.');
+    if (config.imageRole !== undefined && config.imageRole !== 'inline' && config.imageRole !== 'asset') throw new Error('Image Artifact role must be inline or asset.');
+    const imageRole: 'inline' | 'asset' = config.imageRole === 'asset' ? 'asset' : 'inline';
+    let nextImagePosition: number | null = null;
+    if (imageRole === 'inline') {
+      const [positionRow] = await this.db.select({ maxPosition: sql<number>`coalesce(max(${artifacts.imagePosition}), 0)` })
+        .from(artifacts)
+        .where(and(eq(artifacts.runId, run.id), eq(artifacts.type, 'image'), sql`coalesce(${artifacts.imageRole}, 'inline') = 'inline'`));
+      nextImagePosition = Number(positionRow?.maxPosition ?? 0) + 1;
+    }
     const records: Array<typeof artifacts.$inferInsert> = [];
     const items: PreparedArtifactItem[] = [];
     const storageKeys: string[] = [];
@@ -882,6 +893,8 @@ export class RunsService {
           const objectKey = await this.artifactStorage.writePng(id, content);
           storageKeys.push(objectKey);
           const itemName = images.length === 1 && image.data.length === 1 ? name : `${name} ${items.length + 1}`;
+          const imageKey = image.data.length === 1 && typeof image.key === 'string' && image.key.trim() ? image.key.trim() : null;
+          const imagePosition = nextImagePosition === null ? null : nextImagePosition++;
           records.push({
             id,
             workspaceId: run.workspaceId,
@@ -896,6 +909,9 @@ export class RunsService {
             width: dimensions.width,
             height: dimensions.height,
             sizeBytes: content.byteLength,
+            imageKey,
+            imagePosition,
+            imageRole,
           });
           items.push({ id, name: itemName, type: 'image' });
         }

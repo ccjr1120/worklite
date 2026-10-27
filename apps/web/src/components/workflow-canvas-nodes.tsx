@@ -35,6 +35,7 @@ export type WorkflowCanvasNodeData = {
   dashboardLayout?: WorkflowDashboardLayout;
   artifactName?: string;
   artifactType?: 'text' | 'markdown' | 'json' | 'image';
+  artifactImageRole?: 'inline' | 'asset';
   queryName?: string;
   queryTitleField?: string;
   queryDescriptionFields?: string[];
@@ -42,6 +43,7 @@ export type WorkflowCanvasNodeData = {
   wechatMode?: 'draft' | 'publish';
   wechatNodeVersion?: '1' | '2';
   imageCount?: number;
+  imageKey?: string;
   imageBackground?: 'opaque' | 'transparent';
   imageQuality?: 'low' | 'medium' | 'high';
   imageSize?: '1024x1024' | '1536x1024' | '1024x1536';
@@ -49,6 +51,7 @@ export type WorkflowCanvasNodeData = {
   stickerHeight?: number;
   stickerShape?: 'none' | 'roundedRect' | 'circle' | 'ribbon';
   stickerBackgroundColor?: string;
+  stickerKey?: string;
   stickerCornerRadius?: number;
   stickerTextContent?: string;
   stickerTextColor?: string;

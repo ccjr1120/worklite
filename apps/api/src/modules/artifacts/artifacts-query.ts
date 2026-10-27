@@ -1,4 +1,4 @@
-import { and, desc, eq, like, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, like, or, sql, type SQL } from 'drizzle-orm';
 import type {
   ArtifactDetailView,
   ArtifactListItemView,
@@ -7,7 +7,7 @@ import type {
   ArtifactView,
 } from '@worklite/contracts';
 import { artifacts, workflowNodeRuns, workflowRuns, workflows, type Database } from '@worklite/db';
-import { findArtifactImagePlaceholders, resolveArtifactInlineImages } from './artifact-inline-images';
+import { findArtifactImagePlaceholders, resolveArtifactInlineImages, type ArtifactImageReference } from './artifact-inline-images';
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -135,16 +135,20 @@ export async function getArtifactDetail(
   // Only resolve image references when the article actually carries them; the
   // run payload can be large and most artifacts are plain text or JSON.
   const hasPlaceholders = findArtifactImagePlaceholders(artifact.content).length > 0;
-  const runRecords = hasPlaceholders && artifact.runId ? await loadRunRecords(db, workspaceId, artifact.runId) : [];
+  const runData = hasPlaceholders && artifact.runId ? await loadRunRecords(db, workspaceId, artifact.runId) : { records: [], imageArtifacts: [] };
   return {
     ...view,
     contentLength: artifact.content.length,
-    inlineImages: hasPlaceholders ? resolveArtifactInlineImages(artifact.content, runRecords) : [],
+    inlineImages: hasPlaceholders ? resolveArtifactInlineImages(artifact.content, runData.records, runData.imageArtifacts) : [],
   };
 }
 
-async function loadRunRecords(db: Database, workspaceId: string, runId: string): Promise<unknown[]> {
-  const [[run], nodeRuns] = await Promise.all([
+async function loadRunRecords(
+  db: Database,
+  workspaceId: string,
+  runId: string,
+): Promise<{ records: unknown[]; imageArtifacts: ArtifactImageReference[] }> {
+  const [[run], nodeRuns, imageRows] = await Promise.all([
     db
       .select({ result: workflowRuns.result })
       .from(workflowRuns)
@@ -154,6 +158,18 @@ async function loadRunRecords(db: Database, workspaceId: string, runId: string):
       .select({ input: workflowNodeRuns.input, output: workflowNodeRuns.output })
       .from(workflowNodeRuns)
       .where(and(eq(workflowNodeRuns.runId, runId), eq(workflowNodeRuns.workspaceId, workspaceId))),
+    db
+      .select({ id: artifacts.id, imageKey: artifacts.imageKey, imagePosition: artifacts.imagePosition, imageRole: artifacts.imageRole, objectKey: artifacts.objectKey })
+      .from(artifacts)
+      .where(and(eq(artifacts.runId, runId), eq(artifacts.workspaceId, workspaceId), eq(artifacts.type, 'image')))
+      .orderBy(asc(artifacts.imagePosition), asc(artifacts.createdAt), asc(artifacts.id)),
   ]);
-  return [run?.result ?? null, ...nodeRuns.flatMap((nodeRun) => [nodeRun.input, nodeRun.output])];
+  return {
+    records: [run?.result ?? null, ...nodeRuns.flatMap((nodeRun) => [nodeRun.input, nodeRun.output])],
+    imageArtifacts: imageRows.filter((row) => row.imageRole !== 'asset').map((row) => ({
+      key: row.imageKey,
+      position: row.imagePosition,
+      url: row.objectKey ? `/api/artifacts/${encodeURIComponent(row.id)}/content` : null,
+    })),
+  };
 }

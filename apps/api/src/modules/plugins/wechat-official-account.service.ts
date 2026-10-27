@@ -12,9 +12,17 @@ import type { WechatOfficialAccountView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { decryptSecret, encryptSecret, WECHAT_OFFICIAL_ACCOUNT_ID } from './plugins.service';
 import { applyInlineImageUrls, findInlineImageReferences, planInlineImageUploads, validateGeneratedInlineImages, type GeneratedInlineImage } from './wechat-article-images';
+import { normalizeQrPngDataUrl } from './qr-png';
 
 type ActionListener = (actionId: string) => void;
 type BrowserSession = { browser: Browser; context: BrowserContext; page: Page };
+type QrSourceEvaluation = {
+  sourceKind: 'image-url' | 'image-data-url' | 'image-blob-url' | 'canvas' | 'none' | 'unsupported';
+  sourceMimeType: string | null;
+  width: number | null;
+  height: number | null;
+  failure: string | null;
+};
 
 const LOGIN_URL = 'https://mp.weixin.qq.com/';
 const QR_LIFETIME_MS = 120_000;
@@ -338,12 +346,12 @@ async function captureQrCode(page: Page): Promise<string> {
     await page.screenshot({ path: '/tmp/worklite-publish-qr-timeout.png', fullPage: true });
     throw new Error(`WeChat publication QR code did not load as a scannable image: ${errorMessage(error)}`);
   }
-  return `data:image/png;base64,${(await qr.screenshot()).toString('base64')}`;
+  return captureQrBitmap(page, selector, qr);
 }
 
 async function captureLoginQrCode(page: Page): Promise<string> {
   const selector = 'img.login__type__container__scan__qrcode';
-  const qr = page.locator(selector);
+  const qr = page.locator(`${selector}:visible`).last();
   try {
     await qr.waitFor({ state: 'visible', timeout: 20_000 });
     await waitForScannableQrCode(page, selector);
@@ -351,7 +359,42 @@ async function captureLoginQrCode(page: Page): Promise<string> {
     await page.screenshot({ path: '/tmp/worklite-login-qr-timeout.png', fullPage: true }).catch(() => undefined);
     throw new Error(`WeChat login QR code did not load as a scannable image: ${errorMessage(error)}`);
   }
-  return `data:image/png;base64,${(await qr.screenshot()).toString('base64')}`;
+  return captureQrBitmap(page, selector, qr);
+}
+
+async function captureQrBitmap(page: Page, selector: string, qr: Locator): Promise<string> {
+  const deadline = Date.now() + 5_000;
+  let latest: QrSourceEvaluation | null = null;
+  let captureFailure: string | null = null;
+  do {
+    try {
+      latest = await page.evaluate<QrSourceEvaluation>(QR_SOURCE_INFO, selector);
+    } catch (error) {
+      latest = null;
+      captureFailure = `source inspection failed: ${errorMessage(error)}`;
+    }
+    try {
+      // Capture the rendered DOM element, then validate its PNG bytes. This
+      // lets Chromium decode remote URLs, base64 data URLs, blob URLs, SVGs,
+      // and canvas output without relying on a second canvas that may be
+      // cross-origin tainted.
+      const screenshot = await qr.screenshot({ type: 'png', animations: 'disabled', timeout: Math.max(100, Math.min(1_000, deadline - Date.now())) });
+      const normalized = normalizeQrPngDataUrl(`data:image/png;base64,${screenshot.toString('base64')}`);
+      if (normalized) return normalized;
+      captureFailure = 'rendered element screenshot did not contain a complete PNG';
+    } catch (error) {
+      // The login page can replace the QR element while it refreshes. Retry a
+      // transient detach, but retain the last capture failure for diagnostics.
+      captureFailure = errorMessage(error);
+    }
+    if (Date.now() < deadline) await page.waitForTimeout(100);
+  } while (Date.now() < deadline);
+
+  const input = latest
+    ? `${latest.sourceKind}${latest.sourceMimeType ? ` (${latest.sourceMimeType})` : ''}${latest.width && latest.height ? ` ${latest.width}x${latest.height}` : ''}`
+    : 'unavailable';
+  const reason = captureFailure ?? latest?.failure ?? 'invalid PNG image data';
+  throw new Error(`WeChat QR image could not be converted to a PNG data URL. Input: ${input}; reason: ${reason}.`);
 }
 
 // Playwright evaluates this expression inside the page. Keep it as a string so
@@ -398,6 +441,44 @@ const SCANNABLE_QR_PREDICATE = `(qrSelector) => {
   } catch {
     return false;
   }
+}`;
+
+// A QR may arrive as a remote/data/blob image URL or as a page canvas. The
+// browser decodes that source and re-encodes its pixels as PNG; the source URL
+// itself is never copied into the pending action or diagnostic message.
+const QR_SOURCE_INFO = `(qrSelector) => {
+  const visible = (element) => {
+    const bounds = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return element.isConnected && bounds.width > 0 && bounds.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+  };
+  const candidates = Array.from(document.querySelectorAll(qrSelector)).filter(visible);
+  const element = candidates[candidates.length - 1];
+  if (!element) return { sourceKind: 'none', sourceMimeType: null, width: null, height: null, failure: 'no-visible-qr-image' };
+
+  let width;
+  let height;
+  let sourceKind;
+  let sourceMimeType = null;
+  if (element instanceof HTMLImageElement) {
+    const sourceUrl = element.currentSrc || element.src;
+    const isDataUrl = sourceUrl.toLowerCase().startsWith('data:');
+    sourceKind = isDataUrl ? 'image-data-url' : sourceUrl.toLowerCase().startsWith('blob:') ? 'image-blob-url' : 'image-url';
+    sourceMimeType = isDataUrl ? (/^data:([^;,]+)/i.exec(sourceUrl)?.[1]?.toLowerCase() || null) : null;
+    if (!element.complete || element.naturalWidth < 64 || element.naturalHeight < 64) {
+      return { sourceKind, sourceMimeType, width: element.naturalWidth || null, height: element.naturalHeight || null, failure: 'image-not-decoded' };
+    }
+    width = element.naturalWidth;
+    height = element.naturalHeight;
+  } else if (element instanceof HTMLCanvasElement && element.width >= 64 && element.height >= 64) {
+    width = element.width;
+    height = element.height;
+    sourceKind = 'canvas';
+  } else {
+    return { sourceKind: 'unsupported', sourceMimeType: null, width: null, height: null, failure: 'unsupported-qr-element' };
+  }
+
+  return { sourceKind, sourceMimeType, width, height, failure: null };
 }`;
 
 async function waitForScannableQrCode(page: Page, selector: string): Promise<void> {

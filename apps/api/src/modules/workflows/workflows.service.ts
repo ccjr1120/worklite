@@ -705,6 +705,7 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
   if (type === 'worklite/artifact') {
     if (typeof value.name !== 'string' || !value.name.trim()) throw new BadRequestException('Artifact node name must be a non-empty string.');
     if (value.type !== 'text' && value.type !== 'markdown' && value.type !== 'json' && value.type !== 'image') throw new BadRequestException('Artifact node type must be text, markdown, json, or image.');
+    if (value.imageRole !== undefined && (value.type !== 'image' || (value.imageRole !== 'inline' && value.imageRole !== 'asset'))) throw new BadRequestException('Image Artifact role must be inline or asset and requires an image Artifact.');
   }
   if (type === 'worklite/artifact-query') {
     if (typeof value.name !== 'string' || !value.name.trim()) throw new BadRequestException('Artifact Query name must be a non-empty string.');
@@ -714,6 +715,8 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
   if (type === 'worklite/image') {
     if (value.model !== 'codex/gpt-image-2') throw new BadRequestException('Image node model must be codex/gpt-image-2.');
     if (typeof value.n !== 'number' || !Number.isInteger(value.n) || value.n < 1) throw new BadRequestException('Image node image count must be a positive integer.');
+    if (value.key !== undefined && (typeof value.key !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(value.key))) throw new BadRequestException('Image node key must be 1-64 characters of letters, digits, dots, underscores, or hyphens.');
+    if (value.key !== undefined && value.n !== 1) throw new BadRequestException('Image node key is supported only when generating one image; use the 1-based image position for multiple images.');
     if (value.background !== 'opaque' && value.background !== 'transparent') throw new BadRequestException('Image node background must be opaque or transparent.');
     if (value.quality !== 'low' && value.quality !== 'medium' && value.quality !== 'high') throw new BadRequestException('Image node quality must be low, medium, or high.');
     if (value.size !== '1024x1024' && value.size !== '1536x1024' && value.size !== '1024x1536') throw new BadRequestException('Image node size is not supported.');
@@ -736,6 +739,7 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
     if (typeof value.height !== 'number' || !Number.isInteger(value.height) || value.height < 64 || value.height > 2048) throw new BadRequestException('Canvas Sticker node height must be an integer between 64 and 2048.');
     if (value.shape !== 'none' && value.shape !== 'roundedRect' && value.shape !== 'circle' && value.shape !== 'ribbon') throw new BadRequestException('Canvas Sticker node shape must be none, roundedRect, circle, or ribbon.');
     if (typeof value.backgroundColor !== 'string' || !CANVAS_STICKER_COLOR_PATTERN.test(value.backgroundColor.trim())) throw new BadRequestException('Canvas Sticker node backgroundColor must be a #hex, rgb(a)(), or transparent color.');
+    if (value.key !== undefined && (typeof value.key !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(value.key))) throw new BadRequestException('Canvas Sticker node key must be 1-64 characters of letters, digits, dots, underscores, or hyphens.');
     if (value.cornerRadius !== undefined && (typeof value.cornerRadius !== 'number' || !Number.isInteger(value.cornerRadius) || value.cornerRadius < 0)) throw new BadRequestException('Canvas Sticker node cornerRadius must be a non-negative integer.');
     if (value.text !== undefined) {
       if (!isRecord(value.text)) throw new BadRequestException('Canvas Sticker node text must be an object.');

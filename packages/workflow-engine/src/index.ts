@@ -183,6 +183,7 @@ const WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
       properties: {
         name: { type: 'string', minLength: 1 },
         type: { type: 'string', enum: ['text', 'markdown', 'json', 'image'] },
+        imageRole: { type: 'string', enum: ['inline', 'asset'] },
       },
     },
   },
@@ -227,7 +228,17 @@ const WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     ],
     outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
     inputSchema: { type: 'object', properties: { prompt: { type: 'string' }, context: {} } },
-    outputSchema: { type: 'object' },
+    outputSchema: {
+      type: 'object',
+      required: ['type', 'model', 'mediaType', 'data'],
+      properties: {
+        type: { type: 'string', enum: ['workflow_image'] },
+        model: { type: 'string' },
+        mediaType: { type: 'string', enum: ['image/png'] },
+        key: { type: 'string' },
+        data: { type: 'array', items: { type: 'object', required: ['b64Json'], properties: { b64Json: { type: 'string' } } } },
+      },
+    },
     configSchema: {
       type: 'object',
       required: ['model', 'n', 'background', 'quality', 'size'],
@@ -237,6 +248,7 @@ const WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
         background: { type: 'string', enum: ['opaque', 'transparent'] },
         quality: { type: 'string', enum: ['low', 'medium', 'high'] },
         size: { type: 'string', enum: ['1024x1024', '1536x1024', '1024x1536'] },
+        key: { type: 'string', minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9._-]+$' },
         promptPath: { type: 'string', minLength: 1 },
       },
     },
@@ -249,7 +261,17 @@ const WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     inputs: [{ name: 'text', required: false, dataType: 'string', multiple: false }],
     outputs: [{ name: 'output', required: false, dataType: 'json', multiple: true }],
     inputSchema: { type: 'object', properties: { text: { type: 'string' } } },
-    outputSchema: { type: 'object' },
+    outputSchema: {
+      type: 'object',
+      required: ['type', 'model', 'mediaType', 'data'],
+      properties: {
+        type: { type: 'string', enum: ['workflow_image'] },
+        model: { type: 'string' },
+        mediaType: { type: 'string', enum: ['image/png'] },
+        key: { type: 'string' },
+        data: { type: 'array', items: { type: 'object', required: ['b64Json'], properties: { b64Json: { type: 'string' } } } },
+      },
+    },
     configSchema: {
       type: 'object',
       required: ['width', 'height', 'shape', 'backgroundColor'],
@@ -258,6 +280,7 @@ const WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
         height: { type: 'integer', minimum: 64, maximum: 2048 },
         shape: { type: 'string', enum: ['none', 'roundedRect', 'circle', 'ribbon'] },
         backgroundColor: { type: 'string' },
+        key: { type: 'string', minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9._-]+$' },
         cornerRadius: { type: 'integer', minimum: 0 },
         text: {
           type: 'object',
@@ -1158,7 +1181,7 @@ function readComposeConfigString(config: unknown, key: keyof ComposeWorkflowArti
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-function validateComposedWorkflowImage(value: unknown, label: string, requireKey: boolean): string | undefined {
+function validateComposedWorkflowImage(value: unknown, label: string): { key?: string; imageCount: number } {
   const record = asWorkflowRecord(value);
   if (!record || record.type !== 'workflow_image' || record.mediaType !== 'image/png') {
     throw new Error(`${label} must be a generated workflow_image with mediaType image/png.`);
@@ -1168,10 +1191,8 @@ function validateComposedWorkflowImage(value: unknown, label: string, requireKey
     const data = asWorkflowRecord(entry);
     if (!data || typeof data.b64Json !== 'string' || !data.b64Json) throw new Error(`${label} has invalid image data.`);
   }
-  if (!requireKey) return undefined;
-  const key = typeof record.key === 'string' ? record.key.trim() : '';
-  if (!key) throw new Error(`${label} must carry a key.`);
-  return key;
+  if (record.key !== undefined && (typeof record.key !== 'string' || !record.key.trim())) throw new Error(`${label} has an invalid image key.`);
+  return { ...(typeof record.key === 'string' && record.key.trim() ? { key: record.key.trim() } : {}), imageCount: record.data.length };
 }
 
 function scanMarkdownH1Headings(markdown: string): string[] {
@@ -1244,27 +1265,42 @@ export function composeWorkflowArticle(input: unknown, config: unknown): string 
     if (Array.isArray(entry)) flattenedImages.push(...entry);
     else flattenedImages.push(entry);
   }
-  const keys: string[] = [];
-  const seenKeys = new Set<string>();
+  const imageReferences: Array<{ key?: string; position: number }> = [];
+  const explicitKeys = new Set<string>();
+  let imagePosition = 0;
   for (const entry of flattenedImages) {
-    const key = validateComposedWorkflowImage(entry, 'Inline image', true) as string;
-    if (seenKeys.has(key)) throw new Error(`Compose found duplicate image key "${key}".`);
-    seenKeys.add(key);
-    keys.push(key);
+    const image = validateComposedWorkflowImage(entry, 'Inline image');
+    if (image.imageCount === 1 && image.key) {
+      if (explicitKeys.has(image.key)) throw new Error(`Compose found duplicate image key "${image.key}".`);
+      explicitKeys.add(image.key);
+    }
+    for (let index = 0; index < image.imageCount; index += 1) {
+      imagePosition += 1;
+      imageReferences.push({ position: imagePosition, ...(image.imageCount === 1 && image.key ? { key: image.key } : {}) });
+    }
   }
-  const referenced = new Set<string>();
+
+  const imageByReference = new Map<string, number>();
+  for (const image of imageReferences) imageByReference.set(String(image.position), image.position);
+  for (const image of imageReferences) if (image.key) imageByReference.set(image.key, image.position);
+  const availableKeys = [...imageByReference.keys()].sort();
+  const referencedPositions = new Set<number>();
   for (const placeholder of placeholders) {
     const key = placeholder[2];
-    referenced.add(key);
-    if (!seenKeys.has(key)) throw new Error(`Compose placeholder references missing image "${key}". Available keys: ${keys.join(', ') || '(none)'}.`);
+    const position = imageByReference.get(key);
+    if (position === undefined) throw new Error(`Compose placeholder references missing image "${key}". Available keys: ${availableKeys.join(', ') || '(none)'}.`);
+    referencedPositions.add(position);
   }
 
-  validateComposedWorkflowImage(record.coverImage, 'Cover image', false);
+  validateComposedWorkflowImage(record.coverImage, 'Cover image');
 
-  const unused = keys.filter((key) => !referenced.has(key));
+  const unused = imageReferences.filter((image) => !referencedPositions.has(image.position));
   const policy = readComposeConfigString(config, 'unusedImagePolicy') ?? 'drop';
   if (policy === 'append' && unused.length > 0) {
-    const appended = unused.map((key) => `![${key}](worklite-image:${key})`).join('\n\n');
+    const appended = unused.map((image) => {
+      const key = image.key ?? String(image.position);
+      return `![${key}](worklite-image:${key})`;
+    }).join('\n\n');
     markdown = `${markdown.trimEnd()}\n\n${appended}\n`;
   }
   if (unused.length > 0 && policy === 'drop') {
