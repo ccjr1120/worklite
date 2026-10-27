@@ -588,7 +588,7 @@ async function install(profile) {
       throw error;
     }
     process.stdout.write(`Managed WorkLite deployment started on port ${runtime.ports[0]} at version ${runtime.version}.\n`);
-  } finally { closeSync(log); }
+  } finally { closeSync(log); pruneRuntimeState(stateDirectory); }
 }
 
 function verifiedOrphanGroups(runtime) {
@@ -711,8 +711,12 @@ async function deploy(profile) {
     }
     if (cleanupErrors.length) throw new Error(`${describeError(error)} Candidate cleanup also failed: ${cleanupErrors.join('; ')}.`, { cause: error });
     throw error;
-  } finally { closeSync(log); }
-  pruneRuntimeState(stateDirectory);
+  } finally {
+    closeSync(log);
+    // Retention runs on every deployment attempt, not only the ones that reach readiness:
+    // a failed attempt leaves a release directory and a deployment log of its own behind.
+    pruneRuntimeState(stateDirectory);
+  }
   process.stdout.write(`Managed WorkLite deployment completed on port ${runtime.ports[0]} at version ${runtime.version}.\n`);
 }
 
@@ -887,8 +891,6 @@ async function run(state, id) {
     write(currentPath, candidate);
     await ready(candidate.pid, candidate.ports, candidate.releaseHash, candidate.gateway);
     phase('succeeded', { interruptionPolicy: 'cancel_active_work_without_resume' });
-    // current.json now names the candidate, so retention keeps it and the newest fallbacks.
-    pruneRuntimeState(state);
     stage = 'reconnecting Feishu';
     try { await call('complete'); }
     catch (error) { writeSync(log, `Upgrade ${id} channel reconnect notice: ${describeError(error)}\n`); }
@@ -903,7 +905,13 @@ async function run(state, id) {
     } else {
       phase('failed', { error: '升级在「' + stage + '」阶段失败：' + detail + '。切换尚未开始，现有运行版本未被替换；已经中断的任务不会自动恢复。详情见本机升级日志。' });
     }
-  } finally { closeSync(log); rmSync(lockPath, { force: true }); }
+  } finally {
+    // Whichever branch the upgrade ended in, current.json now names the release that is
+    // running, so retention keeps it and the newest fallbacks and reclaims the rest.
+    pruneRuntimeState(state);
+    closeSync(log);
+    rmSync(lockPath, { force: true });
+  }
 }
 
 if (command === 'prepare') process.stdout.write(JSON.stringify(prepare(...args)));
