@@ -63,8 +63,6 @@ import type {
   ExecuteSkillScriptRequest,
   UpdateWorkspaceSettingsRequest,
   WorkspaceSettingsView,
-  WebSearchSettingsView,
-  UpdateWebSearchSettingsRequest,
   PortkeyGatewayView,
   CodexAccountUsageSnapshot,
   CodexAuthStatus,
@@ -189,10 +187,6 @@ export const api = {
   answerAgentQuestion: (_workspace: string | undefined, agentId: string, executionId: string, input: AnswerAgentQuestionRequest) => apiPost<AgentExecutionView>(`/api/agents/${encodeURIComponent(agentId)}/executions/${encodeURIComponent(executionId)}/answers`, input),
   settings: () => apiGet<WorkspaceSettingsView>('/api/settings'),
   updateSettings: (input: UpdateWorkspaceSettingsRequest) => apiPatch<WorkspaceSettingsView>('/api/settings', input),
-  webSearchSettings: () => apiGet<WebSearchSettingsView>('/api/web-search/settings'),
-  saveWebSearchKey: (input: UpdateWebSearchSettingsRequest) => apiPut<WebSearchSettingsView>('/api/web-search/settings', input),
-  clearWebSearchKey: () => apiDelete<WebSearchSettingsView>('/api/web-search/settings'),
-  testWebSearch: (input: { query: string }) => apiPost<{ configured: true; resultCount: number }>('/api/web-search/settings/test', input),
   portkeyGateway: () => apiGet<PortkeyGatewayView>('/api/portkey-gateway'),
   codexAuthStatus: () => apiGet<CodexAuthStatus>('/api/portkey-gateway/codex/auth/status'),
   codexAccountUsages: () => apiGet<CodexAccountUsageSnapshot>('/api/portkey-gateway/codex/accounts/usage'),
@@ -306,6 +300,7 @@ export const api = {
   pauseRun: (_workspace: string | undefined, runId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/pause`),
   resumeRun: (_workspace: string | undefined, runId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/resume`),
   refreshRunPendingAction: (_workspace: string | undefined, runId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/pending-action/refresh`),
+  openRunPendingActionBrowser: (_workspace: string | undefined, runId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/pending-action/open-browser`),
   retryRunNode: (_workspace: string | undefined, runId: string, nodeRunId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeRunId)}/retry`),
 };
 

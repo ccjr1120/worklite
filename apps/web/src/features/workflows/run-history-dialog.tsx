@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { AlertCircle, Check, ChevronDown, FileStack, LoaderCircle, QrCode, X } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, ExternalLink, FileStack, LoaderCircle, QrCode, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ArtifactView, RunProgressEvent, RunView } from '@worklite/contracts';
@@ -100,9 +100,12 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
   const [qrRefreshError, setQrRefreshError] = useState<string | null>(null);
   const [qrRefreshed, setQrRefreshed] = useState(false);
   const [qrCacheBust, setQrCacheBust] = useState(0);
+  const [browserOpening, setBrowserOpening] = useState(false);
+  const [browserOpenError, setBrowserOpenError] = useState<string | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
   const [, setExpiryTick] = useState(0);
   const qrRefreshingRef = useRef(false);
+  const browserOpeningRef = useRef(false);
   const qrRefreshedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => () => {
@@ -137,7 +140,7 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
   // current code hidden until the user asks, and replace expired codes only
   // after that request reaches the run-level refresh endpoint.
   const refreshQrCode = useCallback(async () => {
-    if (qrRefreshingRef.current) return;
+    if (qrRefreshingRef.current || browserOpeningRef.current) return;
     qrRefreshingRef.current = true;
     setQrReplacing(true);
     setQrVisible(false);
@@ -167,6 +170,25 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
     } finally {
       qrRefreshingRef.current = false;
       setQrReplacing(false);
+    }
+  }, [run.id, t]);
+
+  // The login page opens in a browser on the WorkLite host, so a sign-in that
+  // needs an account password or a trusted browser can still finish and resume
+  // this run.
+  const openLoginInBrowser = useCallback(async () => {
+    if (browserOpeningRef.current || qrRefreshingRef.current) return;
+    browserOpeningRef.current = true;
+    setBrowserOpening(true);
+    setBrowserOpenError(null);
+    try {
+      const next = await api.openRunPendingActionBrowser('personal', run.id);
+      queryClient.setQueryData(['run', run.id], next);
+    } catch (cause) {
+      setBrowserOpenError(cause instanceof Error && cause.message ? cause.message : t('runs:pendingAction.browserOpenFailed'));
+    } finally {
+      browserOpeningRef.current = false;
+      setBrowserOpening(false);
     }
   }, [run.id, t]);
 
@@ -236,11 +258,18 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
                   ) : null}
                   {qrExpired ? <p className="mt-3 text-[13px] text-muted-foreground" role="status">{t('runs:pendingAction.expired')}</p> : null}
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <Button type="button" size="compact" onClick={() => void refreshQrCode()} disabled={qrReplacing} aria-busy={qrReplacing}>
+                    <Button type="button" size="compact" onClick={() => void refreshQrCode()} disabled={qrReplacing || browserOpening} aria-busy={qrReplacing}>
                       {qrReplacing ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <QrCode aria-hidden="true" />}
                       {qrReplacing ? t('runs:pendingAction.replacing') : showQr ? t('runs:pendingAction.refresh') : qrExpired ? t('runs:pendingAction.getAgain') : t('runs:pendingAction.get')}
                     </Button>
+                    {pendingAction.type === 'wechat_login' ? (
+                      <Button type="button" size="compact" variant="secondary" onClick={() => void openLoginInBrowser()} disabled={qrReplacing || browserOpening} aria-busy={browserOpening}>
+                        {browserOpening ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <ExternalLink aria-hidden="true" />}
+                        {browserOpening ? t('runs:pendingAction.openingBrowser') : t('runs:pendingAction.openBrowser')}
+                      </Button>
+                    ) : null}
                   </div>
+                  {pendingAction.type === 'wechat_login' ? <p className="mt-2 text-[13px] text-muted-foreground">{t('runs:pendingAction.browserHelp')}</p> : null}
                   {qrRefreshed ? (
                     <p className="mt-2 flex items-center gap-1.5 text-[13px] text-success" role="status">
                       <Check className="size-3.5" aria-hidden="true" />
@@ -248,6 +277,7 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
                     </p>
                   ) : null}
                   {qrRefreshError ? <p className="mt-2 text-[13px] text-danger" role="alert">{qrRefreshError}</p> : null}
+                  {browserOpenError ? <p className="mt-2 text-[13px] text-danger" role="alert">{browserOpenError}</p> : null}
                   <div className="mt-4 flex flex-wrap gap-2">
                     <Button type="button" size="compact" variant="ghost" onClick={() => void cancelRun()} disabled={cancelBusy}>{cancelBusy ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <X aria-hidden="true" />}{t('runs:pendingAction.cancel')}</Button>
                   </div>

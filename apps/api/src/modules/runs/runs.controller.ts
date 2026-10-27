@@ -92,6 +92,11 @@ export class RunsController {
     return this.runs.refreshPendingAction(request, 'personal', runId);
   }
 
+  @Post('runs/:runId/pending-action/open-browser')
+  openPendingActionBrowser(@Req() request: Request, @Param('runId') runId: string) {
+    return this.runs.openPendingActionBrowser(request, 'personal', runId);
+  }
+
   @Post('runs/:runId/nodes/:nodeRunId/retry')
   retryNode(@Req() request: Request, @Param('runId') runId: string, @Param('nodeRunId') nodeRunId: string) {
     return this.runs.retryNode(request, 'personal', runId, nodeRunId);

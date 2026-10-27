@@ -1,45 +1,22 @@
-import { Body, Controller, Delete, Get, HttpCode, Post, Put } from '@nestjs/common';
-import { WebSearchCredentialService, type WebSearchCredentialStatus } from './web-search-credential.service';
+import { Body, Controller, HttpCode, Post } from '@nestjs/common';
+import { readWebSearchApiKey } from './web-search-api-key';
 import { VolcengineSearchService, type WebSearchResponse } from './volcengine-search.service';
 import { WebFetchService, type WebFetchResponse } from './web-fetch.service';
 
-// WorkLite's loopback API endpoints for Chat and the workspace UI. The
-// credential service encrypts keys before storage; these routes never return a
-// key, and the settings test returns only a result count.
+// WorkLite's loopback API endpoints for Chat's web_search and web_fetch tools.
+// The search key comes from the API process environment; it is never accepted,
+// stored or returned over this API.
 @Controller('web-search')
 export class WebSearchController {
   constructor(
-    private readonly credentials: WebSearchCredentialService,
     private readonly searches: VolcengineSearchService,
     private readonly pages: WebFetchService,
   ) {}
 
-  @Get('settings')
-  settings(): Promise<WebSearchCredentialStatus> {
-    return this.credentials.status();
-  }
-
-  @Put('settings')
-  saveSettings(@Body() body: { apiKey?: unknown }): Promise<WebSearchCredentialStatus> {
-    return this.credentials.save(body?.apiKey);
-  }
-
-  @Post('settings/test')
-  @HttpCode(200)
-  async testSettings(@Body() body: { query?: unknown }): Promise<{ configured: true; resultCount: number }> {
-    const result = await this.searches.search({ query: body?.query, count: 1 }, await this.credentials.read());
-    return { configured: true, resultCount: result.resultCount ?? result.results.length };
-  }
-
-  @Delete('settings')
-  clearSettings(): Promise<WebSearchCredentialStatus> {
-    return this.credentials.clear();
-  }
-
   @Post('search')
   @HttpCode(200)
   async search(@Body() body: unknown): Promise<WebSearchResponse> {
-    return this.searches.search(body, await this.credentials.read());
+    return this.searches.search(body, readWebSearchApiKey());
   }
 
   @Post('fetch')

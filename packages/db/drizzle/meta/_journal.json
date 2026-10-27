@@ -377,7 +377,14 @@
       "idx": 53,
       "version": "6",
       "when": 1793000000003,
-      "tag": "0054_history_retention_indexes",
+      "tag": "0054_drop_workspace_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1793000000004,
+      "tag": "0055_history_retention_indexes",
       "breakpoints": true
     }
   ]

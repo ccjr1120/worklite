@@ -14,7 +14,7 @@ const ROLE_ALLOWED_TOOL_NAMES: Partial<Record<string, readonly string[]>> = {
   developer: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference', 'read_team_document'],
   test_author: ['read', 'write', 'glob', 'grep', 'process_reference', 'read_team_document'],
   test_runner: ['bash', 'read', 'write', 'glob', 'grep', 'read_team_document'],
-  reviewer: [...READ_ONLY_TOOL_NAMES, 'read_team_document'],
+  reviewer: ['bash', ...READ_ONLY_TOOL_NAMES, 'read_team_document'],
 };
 
 export function selectBuiltinToolNames(role: AgentTeamRoleId, requestedToolNames: readonly string[]): string[] {

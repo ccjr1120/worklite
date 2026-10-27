@@ -611,16 +611,6 @@ export const mcpServers = sqliteTable('mcp_servers', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), endpoint: text('endpoint').notNull().default(''), connection: text('connection').$type<'connected' | 'unreachable' | 'auth_failed' | 'unconfigured'>().notNull().default('unconfigured'), connectionError: text('connection_error').$type<'authentication' | 'unreachable' | 'unsupported_protocol' | 'malformed_response'>(), transport: text('transport').notNull().default('Streamable HTTP'), allowedTools: integer('allowed_tools').notNull().default(0), allowedToolNames: text('allowed_tool_names', { mode: 'json' }).$type<string[]>().notNull().default([]), version: text('version').notNull().default('v1'), authSecret: text('auth_secret'), updatedAt: timestamp('updated_at'),
 });
 
-// Workspace-scoped write-only credentials for external services such as the
-// Volcengine web search API. Values are AES-256-GCM ciphertext and are never
-// returned by an API response.
-export const workspaceCredentials = sqliteTable('workspace_credentials', {
-  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
-  credentialKey: text('credential_key').notNull(),
-  encryptedValue: text('encrypted_value').notNull(),
-  updatedAt: timestamp('updated_at').notNull(),
-}, (table) => [primaryKey({ columns: [table.workspaceId, table.credentialKey] })]);
-
 export const agentSkills = sqliteTable('agent_skills', {
   agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }),
   skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
