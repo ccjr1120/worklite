@@ -1813,6 +1813,8 @@ export type AgentTeamRunView = {
   mode: AgentTeamMode;
   modeRationale: string | null;
   modeDecidedAt: string | null;
+  // Historical evidence only: Runs recorded before Team roles gained direct command
+  // execution keep the exact command strings the user had granted. Never written again.
   authorizedCommands: string[];
   scopeRevision: number;
   desiredControlState: 'none' | 'pause_requested' | 'cancel_requested';
@@ -1874,7 +1876,6 @@ export type CreateAgentTeamRunRequest = {
   intent: string;
   projectDirectory: string;
   mode: AgentTeamMode;
-  authorizedCommands?: string[];
 };
 
 export type CreateAgentTeamRunResponse = {
@@ -1885,7 +1886,6 @@ export type AnswerAgentTeamRunRequest = {
   pendingInputId: string;
   scopeRevision: number;
   answer: string;
-  authorizedCommands?: string[];
   directories?: string[];
 };
 

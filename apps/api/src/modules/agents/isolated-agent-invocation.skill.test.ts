@@ -51,7 +51,6 @@ function baseRequest(overrides: Record<string, unknown> = {}) {
     builtinToolNames: ['read'],
     role: 'test_runner',
     projectDirectory: '/tmp/project',
-    authorizedCommands: [],
     signal: new AbortController().signal,
     ...overrides,
   } as never;

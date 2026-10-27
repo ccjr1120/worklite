@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { useContext, useEffect, useState, type FormEvent } from 'react';
 import { ChevronDown, LoaderCircle, Pause, Play, RefreshCw, RotateCcw, Square, Users } from 'lucide-react';
-import type { AgentTeamPendingInputView, AgentTeamRunView, AgentTeamTaskAttemptView, ChatSubmissionView } from '@worklite/contracts';
+import type { AgentTeamPendingInputView, AgentTeamRunView, ChatSubmissionView } from '@worklite/contracts';
 import { agentTeamGroupQueryKey, agentTeamRunQueryKey, useAgentTeamRunQuery, useRunQuery, useWorkliteUpgradeQuery } from '@/api/queries';
 import { TaskLink } from './records';
 import { PinTrackingContext } from './pinned-executions';
@@ -43,14 +43,12 @@ function WorkflowTask({ submission }: { submission: ChatSubmissionView }) {
   </div>;
 }
 
-function TeamPendingInput({ run, pendingInput, owner, onRunUpdate }: { run: AgentTeamRunView; pendingInput: AgentTeamPendingInputView; owner?: AgentTeamTaskAttemptView; onRunUpdate: (run: AgentTeamRunView) => void }) {
+function TeamPendingInput({ run, pendingInput, onRunUpdate }: { run: AgentTeamRunView; pendingInput: AgentTeamPendingInputView; onRunUpdate: (run: AgentTeamRunView) => void }) {
   const { t } = useTranslation('assistant');
   const { t: tTeams } = useTranslation('agentTeams');
   const [answer, setAnswer] = useState('');
-  const [commands, setCommands] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const canGrantCommands = Boolean(owner && run.mode !== 'plan_only' && owner.role !== 'developer' && owner.role !== 'team-manager' && !run.teamVersion.projectExecutorLaunches?.[owner.role]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -61,7 +59,6 @@ function TeamPendingInput({ run, pendingInput, owner, onRunUpdate }: { run: Agen
         pendingInputId: pendingInput.id,
         scopeRevision: pendingInput.scopeRevision,
         answer,
-        authorizedCommands: canGrantCommands ? commands.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) : [],
       });
       onRunUpdate(response.run);
     } catch (cause) { setError(cause instanceof Error ? cause.message : tTeams('input.answerFailed')); }
@@ -72,7 +69,6 @@ function TeamPendingInput({ run, pendingInput, owner, onRunUpdate }: { run: Agen
     <MessageResponse content={pendingInput.question} enabled />
     <div className="mt-3 space-y-3">
       <Field label={tTeams('input.answer')} htmlFor={`chat-team-answer-${pendingInput.id}`}><Textarea id={`chat-team-answer-${pendingInput.id}`} value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder={tTeams('input.answerPlaceholder')} /></Field>
-      {canGrantCommands ? <Field label={tTeams('input.commands')} htmlFor={`chat-team-commands-${pendingInput.id}`}><Textarea id={`chat-team-commands-${pendingInput.id}`} value={commands} onChange={(event) => setCommands(event.target.value)} placeholder={tTeams('run.commandsPlaceholder')} /></Field> : null}
       <Button type="submit" size="compact" disabled={busy}>{busy ? <LoaderCircle className="size-3.5 motion-safe:animate-spin" aria-hidden="true" /> : null}{busy ? tTeams('input.answering') : tTeams('input.answer')}</Button>
       {error ? <p className="text-[13px] text-danger" role="alert">{error}</p> : null}
     </div>
@@ -226,7 +222,7 @@ function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissio
       {submission.error ? <TruncatedText as="p" text={toSingleLine(submission.error)} title={submission.error} className="text-[13px] text-danger" role="alert" /> : null}
       {query.isError ? <p className="text-[13px] text-danger" role="alert">{t('records.taskLoadFailed')}</p> : null}
       {failure ? <TruncatedText as="p" text={toSingleLine(failure)} title={failure} className="text-[13px] text-danger" role="alert" /> : null}
-      {run ? questions.map((question) => <TeamPendingInput key={question.id} run={run} pendingInput={question} owner={run.tasks.find((task) => task.id === question.taskAttemptId)} onRunUpdate={onRunUpdate} />) : null}
+      {run ? questions.map((question) => <TeamPendingInput key={question.id} run={run} pendingInput={question} onRunUpdate={onRunUpdate} />) : null}
       {run ? recoveries.map((pending) => {
         const operation = run.operations.find((item) => item.operationKey === pending.operationKey);
         if (!operation) return null;

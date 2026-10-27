@@ -307,7 +307,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       const run = await this.teams.getRun(request, 'personal', action.runId);
       const pending = run.pendingInputs.find((item) => item.id === action.pendingInputId);
       if (pending?.status === 'answered') return; // Acknowledgement may have been interrupted after the domain committed.
-      await this.teams.answer(request, 'personal', action.runId, { pendingInputId: action.pendingInputId, scopeRevision: action.scopeRevision, answer, authorizedCommands: string(form.commands).split('\n').map((item) => item.trim()).filter(Boolean) });
+      await this.teams.answer(request, 'personal', action.runId, { pendingInputId: action.pendingInputId, scopeRevision: action.scopeRevision, answer });
     } else if (action.kind === 'agent_answer') {
       const [accepted] = await this.db.select({ reference: chatSubmissions.reference }).from(chatSubmissions).where(eq(chatSubmissions.id, eventId)).limit(1);
       if (accepted?.reference) {
@@ -443,9 +443,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       if (run.status === 'failed' && active?.error) state.content += `\n\n${active.error}`;
       const pending = run.pendingInputs.find((item) => item.status === 'pending');
       if (pending?.kind === 'question') {
-        const owner = run.tasks.find((task) => task.id === pending.taskAttemptId);
-        const executorBacked = Boolean(owner && run.teamVersion.projectExecutorLaunches?.[owner.role]);
-        state.question = { text: pending.question, action: { kind: 'answer', runId: run.id, pendingInputId: pending.id, scopeRevision: pending.scopeRevision }, commands: Boolean(owner && run.mode !== 'plan_only' && owner.role !== 'developer' && owner.role !== 'team-manager' && !executorBacked) };
+        state.question = { text: pending.question, action: { kind: 'answer', runId: run.id, pendingInputId: pending.id, scopeRevision: pending.scopeRevision } };
       }
       if (pending?.kind === 'operation_recovery' && pending.operationKey) {
         state.content += `\n\n${pending.question}`;

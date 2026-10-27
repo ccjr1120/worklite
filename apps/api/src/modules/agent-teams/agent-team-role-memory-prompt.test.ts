@@ -37,7 +37,6 @@ function request(taskKey: string, role: string, memories: Array<{ id: string; re
     projectDirectory: '/projects/api',
     outputDirectory: '/projects/output',
     scopeRevision: 1,
-    authorizedCommands: [],
     projectInstructions: [],
     upstream: [],
     groupContext: {

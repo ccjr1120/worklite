@@ -19,7 +19,6 @@ export type AgentTeamPendingInput = {
 
 export type AgentTeamPendingInputAnswer = {
   answer: string;
-  authorizedCommands: readonly string[];
   directories?: readonly string[];
 };
 
@@ -111,7 +110,6 @@ export type AgentTeamTaskRequest = {
   projectDirectory: string;
   outputDirectory: string;
   scopeRevision: number;
-  authorizedCommands: readonly string[];
   projectInstructions: readonly AgentTeamProjectInstructionFile[];
   upstream: readonly AgentTeamDocument[];
   pendingInputId?: string;
@@ -171,7 +169,6 @@ export type AgentTeamRunRequest = {
   projectDirectory: string;
   outputDirectory: string;
   scopeRevision: number;
-  authorizedCommands: readonly string[];
   projectInstructions: readonly AgentTeamProjectInstructionFile[];
 };
 
