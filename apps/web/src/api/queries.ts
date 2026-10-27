@@ -214,10 +214,6 @@ export function useModelProvidersQuery(workspace?: string) {
   return useQuery({ queryKey: ['model-providers'] as const, queryFn: () => api.modelProviders(workspace) });
 }
 
-export function useWebSearchSettingsQuery() {
-  return useQuery({ queryKey: ['web-search-settings'] as const, queryFn: api.webSearchSettings });
-}
-
 export function usePortkeyGatewayQuery() {
   return useQuery({ queryKey: ['portkey-gateway'] as const, queryFn: api.portkeyGateway });
 }

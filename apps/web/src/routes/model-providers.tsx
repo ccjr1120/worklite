@@ -32,7 +32,6 @@ import type { AppLocale } from '@/i18n/locale';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { GatewayStatistics } from '@/features/logs/gateway-statistics';
 import { GatewayRequestLogs, type RequestLogFilters } from '@/features/logs/request-logs';
-import { WebSearchSettings } from '@/features/web-search-settings';
 
 type ProviderActivity = { provider: ModelProviderView; from: string; to: string; model?: string; statusClass?: RequestLogFilters['statusClass'] };
 
@@ -478,7 +477,6 @@ function ModelProvidersPage() {
     <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome crumbs={[{ label: t('providers.title') }]} />
       <PageHeading title={t('providers.title')} description={t('providers.description')} />
-      <WebSearchSettings />
       <GatewayPanel
         gateway={gatewayQuery.data}
         providers={modelProviders}
