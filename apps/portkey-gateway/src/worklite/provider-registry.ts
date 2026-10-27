@@ -221,13 +221,18 @@ export function prepareGatewayDatabase(): void {
 // Pruning runs at most once per minute: it previously ran after every captured
 // request, adding a second write transaction (and fsync) to each LLM call.
 const REQUEST_LOG_PRUNE_INTERVAL_MS = 60_000;
+// Rows one prune may remove. A database that accumulated logs while retention was not
+// running would otherwise delete the whole backlog inside a single request's transaction.
+const REQUEST_LOG_PRUNE_BATCH_ROWS = 5_000;
 let requestLogsPrunedAt = 0;
 
-function pruneRequestLogs(target: BetterSqlite3.Database): void {
+function pruneRequestLogs(target: BetterSqlite3.Database, limit = REQUEST_LOG_PRUNE_BATCH_ROWS): number {
   const now = Date.now();
-  if (now - requestLogsPrunedAt < REQUEST_LOG_PRUNE_INTERVAL_MS) return;
+  if (now - requestLogsPrunedAt < REQUEST_LOG_PRUNE_INTERVAL_MS) return 0;
   requestLogsPrunedAt = now;
-  target.prepare('DELETE FROM gateway_request_logs WHERE occurred_at < ?').run(now - REQUEST_LOG_RETENTION_MS);
+  return target
+    .prepare('DELETE FROM gateway_request_logs WHERE id IN (SELECT id FROM gateway_request_logs WHERE occurred_at < ? ORDER BY occurred_at LIMIT ?)')
+    .run(now - REQUEST_LOG_RETENTION_MS, limit).changes;
 }
 
 function configuredBound(name: string, fallback: number): number {
@@ -240,33 +245,61 @@ function configuredBound(name: string, fallback: number): number {
 const WAL_SIZE_LIMIT_BYTES = configuredBound('SQLITE_WAL_SIZE_LIMIT_MEGABYTES', 64) * 1024 * 1024;
 const MAINTENANCE_INTERVAL_MS = configuredBound('SQLITE_MAINTENANCE_INTERVAL_MINUTES', 15) * 60_000;
 const MAINTENANCE_VACUUM_PAGES = Math.floor(configuredBound('SQLITE_INCREMENTAL_VACUUM_PAGES', 16_384));
-let maintenanceTimer: ReturnType<typeof setInterval> | null = null;
+// While a backlog remains, passes run on this shorter cadence and move this much more per
+// pass. Both bounds stay finite, so no single pass holds the write lock for long.
+const MAINTENANCE_CATCH_UP_FACTOR = 4;
+const MAINTENANCE_CATCH_UP_INTERVAL_MS = Math.min(60_000, MAINTENANCE_INTERVAL_MS);
+const MAINTENANCE_CATCH_UP_FREE_PAGES = 4_096;
+let maintenanceTimer: ReturnType<typeof setTimeout> | null = null;
+let maintenanceStopped = false;
+let maintenanceCatchingUp = false;
 
-/**
- * Keeps the Gateway database bounded while the process runs. Expiring log rows only moves
- * their pages onto the free list, and the retention delete itself is what grows the WAL, so
- * both reclamation steps have to run on a schedule rather than once at startup.
- */
-export function startGatewayDatabaseMaintenance(): void {
-  if (maintenanceTimer) return;
-  maintenanceTimer = setInterval(() => {
-    try {
-      const target = getDatabase();
-      requestLogsPrunedAt = 0;
-      pruneRequestLogs(target);
-      target.pragma(`incremental_vacuum(${MAINTENANCE_VACUUM_PAGES})`);
-      // TRUNCATE waits for the readers a passive checkpoint gives up on; a busy result
-      // is expected under load and simply leaves the work for the next pass.
-      target.pragma('wal_checkpoint(TRUNCATE)');
-    } catch {
-      // Maintenance is best effort; a locked database must never take the Gateway down.
-    }
-  }, MAINTENANCE_INTERVAL_MS);
+function scheduleGatewayMaintenance(delayMs: number): void {
+  if (maintenanceTimer) clearTimeout(maintenanceTimer);
+  if (maintenanceStopped) { maintenanceTimer = null; return; }
+  maintenanceTimer = setTimeout(gatewayMaintenancePass, delayMs);
   maintenanceTimer.unref();
 }
 
+/**
+ * One pass: expire log rows, hand the pages they freed back to the filesystem, then fold the
+ * WAL into the database and truncate it. Expiring rows only moves their pages onto the free
+ * list, and the retention delete itself is what grows the WAL, so both reclamation steps have
+ * to run on a schedule rather than once at startup.
+ */
+function gatewayMaintenancePass(): void {
+  try {
+    const target = getDatabase();
+    const factor = maintenanceCatchingUp ? MAINTENANCE_CATCH_UP_FACTOR : 1;
+    const batch = REQUEST_LOG_PRUNE_BATCH_ROWS * factor;
+    requestLogsPrunedAt = 0;
+    const removed = pruneRequestLogs(target, batch);
+    target.pragma(`incremental_vacuum(${MAINTENANCE_VACUUM_PAGES * factor})`);
+    // TRUNCATE waits for the readers a passive checkpoint gives up on; a busy result
+    // is expected under load and simply leaves the work for the next pass.
+    target.pragma('wal_checkpoint(TRUNCATE)');
+    const freePages = target.pragma('freelist_count', { simple: true });
+    // A full batch means more expired rows are waiting, and free pages beyond one pass'
+    // budget mean the database is still holding space it no longer uses.
+    maintenanceCatchingUp = removed >= batch || (typeof freePages === 'number' && freePages > MAINTENANCE_CATCH_UP_FREE_PAGES);
+  } catch {
+    // Maintenance is best effort; a locked database must never take the Gateway down.
+    maintenanceCatchingUp = false;
+  } finally {
+    scheduleGatewayMaintenance(maintenanceCatchingUp ? MAINTENANCE_CATCH_UP_INTERVAL_MS : MAINTENANCE_INTERVAL_MS);
+  }
+}
+
+/** Starts the periodic pass. The first one runs shortly after boot so a backlog is not left waiting a full interval. */
+export function startGatewayDatabaseMaintenance(): void {
+  if (maintenanceTimer) return;
+  maintenanceStopped = false;
+  scheduleGatewayMaintenance(MAINTENANCE_CATCH_UP_INTERVAL_MS);
+}
+
 export function stopGatewayDatabaseMaintenance(): void {
-  if (maintenanceTimer) clearInterval(maintenanceTimer);
+  maintenanceStopped = true;
+  if (maintenanceTimer) clearTimeout(maintenanceTimer);
   maintenanceTimer = null;
 }
 
