@@ -3,8 +3,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 import { resolve } from 'node:path';
-import { and, asc, desc, eq, gt } from 'drizzle-orm';
-import type { CommandExecutionEvent as CommandEventView, CommandExecutionView, CreateCommandRequest } from '@worklite/contracts';
+import { and, asc, desc, eq, gt, inArray } from 'drizzle-orm';
+import type { CommandExecutionEvent as CommandEventView, CommandExecutionStatus, CommandExecutionView, CreateCommandRequest } from '@worklite/contracts';
 import { commandExecutionEvents, commandExecutions, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 
@@ -133,8 +133,16 @@ export class CommandsService {
     return events.filter((event) => event.type === 'stdout' || event.type === 'stderr').map((event) => event.data).join('');
   }
 
-  async list(): Promise<CommandExecutionView[]> {
-    const rows = await this.db.select().from(commandExecutions).orderBy(desc(commandExecutions.createdAt));
+  /**
+   * The unfiltered list is the whole command history, which reaches tens of thousands of
+   * rows on a long-lived deployment. The filters are additive read-only projections, so an
+   * omitted option keeps the full list; callers that only need active work pass statuses.
+   */
+  async list(options: { statuses?: CommandExecutionStatus[]; limit?: number } = {}): Promise<CommandExecutionView[]> {
+    const statement = this.db.select().from(commandExecutions)
+      .where(options.statuses?.length ? inArray(commandExecutions.status, options.statuses) : undefined)
+      .orderBy(desc(commandExecutions.createdAt));
+    const rows = options.limit === undefined ? await statement : await statement.limit(options.limit);
     return rows.map(toView);
   }
 
