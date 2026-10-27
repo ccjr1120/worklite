@@ -1527,12 +1527,19 @@ async function uploadImageToMaterial(page: Page, imagePath: string, label: strin
     const beforeKeys = new Set(before.map(thumbnailIdentity));
     await fileInput.setInputFiles(imagePath);
 
+    // An item appears about 200ms into the upload carrying nothing but its
+    // progress text, `100% <filename>.png`, which parses into a 32-character
+    // identity and so used to read as a finished material; the library then
+    // reloads the whole grid and paints the real thumbnail about 1.7s in.
+    // Wait for a reference that is actually a material URL rather than for the
+    // grid to merely differ from the baseline, which it does throughout.
     const uploadDeadline = Date.now() + 30_000;
     let sources = before;
     let addedIndex = -1;
     while (Date.now() < uploadDeadline) {
       sources = await pickerItemSources(items);
       addedIndex = sources.findIndex((source) => {
+        if (!materialImageCandidate(source)) return false;
         const identity = thumbnailIdentity(source);
         return identity.length >= 32 && !beforeKeys.has(identity);
       });
@@ -1641,11 +1648,18 @@ async function pickerItemSources(items: Locator): Promise<string[]> {
   }));
 }
 
-function materialImageUrl(source: string, label: string): string {
+// The CDN URL a picker item serves once its material exists, or null while the
+// item is still an upload placeholder. Readiness and the returned URL have to
+// agree: anything this rejects must keep the upload polling rather than reach
+// materialImageUrl, which can only fail the run.
+function materialImageCandidate(source: string): string | null {
   const value = source.match(/url\(["']?(.*?)["']?\)/)?.[1] ?? source;
-  if (!/^https?:\/\//.test(value) || !/mmbiz/.test(value)) {
-    throw new Error(`WeChat returned an unusable material URL for inline image "${label}": ${thumbnailIdentity(value) || 'empty'}.`);
-  }
+  return /^https?:\/\//.test(value) && isUploadedMaterialReference(value) ? value : null;
+}
+
+function materialImageUrl(source: string, label: string): string {
+  const value = materialImageCandidate(source);
+  if (!value) throw new Error(`WeChat returned an unusable material URL for inline image "${label}": ${thumbnailIdentity(source) || 'empty'}.`);
   return value;
 }
 
@@ -1679,7 +1693,11 @@ async function setCoverImage(page: Page, coverPath: string): Promise<void> {
     after = await pickerItemIdentities(items);
     // A new material shifts every following item, so positional comparison
     // picks a pre-existing thumbnail. Match on identity instead of index.
+    // Same upload placeholder as the inline flow: matching it here would click
+    // an item that the library's reload then replaces, applying whichever
+    // material lands on that index.
     addedIndex = after.findIndex((identity) => {
+      if (!materialImageCandidate(identity)) return false;
       const key = thumbnailIdentity(identity);
       return key.length >= 32 && !beforeKeys.has(key);
     });
