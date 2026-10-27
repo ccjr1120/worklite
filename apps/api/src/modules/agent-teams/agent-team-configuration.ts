@@ -41,7 +41,7 @@ export const AGENT_TEAM_ROLE_TOOL_NAMES: Partial<Record<string, readonly string[
   developer: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference'],
   test_author: ['read', 'write', 'glob', 'grep', 'process_reference'],
   test_runner: ['bash', 'read', 'write', 'glob', 'grep'],
-  reviewer: ['read', 'glob', 'grep', 'process_reference'],
+  reviewer: ['bash', 'read', 'glob', 'grep', 'process_reference'],
   // The v5-v9 Worktree Manager plans and reports; project executors choose Git operations.
   'worktree-manager': ['read', 'glob', 'grep', 'process_reference'],
 };
