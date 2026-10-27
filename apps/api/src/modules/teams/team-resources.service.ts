@@ -31,7 +31,7 @@ import type {
   UsageRow,
   WorkspaceSettingsView,
 } from '@worklite/contracts';
-import { WORKLITE_PLATFORM_SKILL_NAME } from '@worklite/contracts';
+import { GATEWAY_STATS_GROUP_BYS, GATEWAY_SURFACES, WORKLITE_PLATFORM_SKILL_NAME } from '@worklite/contracts';
 import {
   agentExecutions,
   agentMcpServers,
@@ -187,6 +187,7 @@ const MAX_SKILL_PACKAGE_BYTES = 1 * 1_024 * 1_024;
 
 const GATEWAY_PROVIDER_ID = 'gateway-provider';
 const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392);
+const GATEWAY_ATTRIBUTION_FILTERS = ['surface', 'conversationId', 'projectTaskId', 'executor', 'teamId', 'teamRunId', 'workflowId', 'workflowRunId'] as const;
 const GATEWAY_PROVIDER_URL = `http://127.0.0.1:${GATEWAY_PORT}/worklite/providers`;
 
 function validatePackageFiles(input: unknown): PackageFile[] {
@@ -1311,13 +1312,21 @@ export class WorkspaceResourcesService {
           repairDispatch: 'project_task for independent Chat execution; Chat dispatch_task creates an Agent Team group chat and binds its first role task to a Run',
           inspectionAuthorizesRepair: false,
           gatewayLogs: {
-            statistics: { tool: 'inspect_gateway_stats', route: 'GET /portkey-gateway/stats', retention: 'indefinite' },
-            list: { tool: 'inspect_gateway_request_logs', route: 'GET /portkey-gateway/request-logs', filters: ['from', 'to', 'provider', 'model', 'statusClass', 'workflowRunId', 'teamRunId', 'limit', 'cursor'] },
+            statistics: { tool: 'inspect_gateway_stats', route: 'GET /portkey-gateway/stats', retention: 'indefinite', filters: ['from', 'to', 'groupBy', ...GATEWAY_ATTRIBUTION_FILTERS] },
+            list: { tool: 'inspect_gateway_request_logs', route: 'GET /portkey-gateway/request-logs', filters: ['from', 'to', 'provider', 'model', 'statusClass', ...GATEWAY_ATTRIBUTION_FILTERS, 'limit', 'cursor'] },
             detail: { tool: 'inspect_gateway_request_log', route: 'GET /portkey-gateway/request-logs/:requestLogId', capture: 'complete stored request and response' },
             timeRange: 'explicit absolute from/to ISO-8601 instants',
             requestRetentionHours: 12,
             retentionMetadata: ['from', 'to', 'retainedFrom', 'retentionHours'],
-            correlation: ['workflowRunId', 'nodeRunId', 'teamRunId', 'teamTaskAttemptId', 'teamOperationKey'],
+            correlation: ['surface', 'conversationId', 'projectTaskId', 'executor', 'workflowId', 'workflowRunId', 'nodeRunId', 'teamId', 'teamRunId', 'teamRole', 'teamTaskAttemptId', 'teamOperationKey'],
+            usageAttribution: {
+              surfaces: [...GATEWAY_SURFACES],
+              groupBy: [...GATEWAY_STATS_GROUP_BYS],
+              defaultGroupBy: 'surface',
+              scope: 'conversation, executor, team and workflow groupings count only requests carrying that identifier; surface covers every request',
+              persistence: 'attribution is written to the permanent statistics as well as the 12-hour request details',
+              coverage: 'only traffic that passes through the Gateway; a Codex task with no declared Gateway model runs on local configuration and contributes no tokens, so executor token usage is never complete',
+            },
             profile: 'server-owned WORKLITE_API_URL; no URL or profile override',
           },
         },

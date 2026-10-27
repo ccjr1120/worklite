@@ -5,6 +5,7 @@ import BetterSqlite3 from 'better-sqlite3';
 import { codexAuthStatus } from './codex-auth';
 import { codexModels } from './codex-transport';
 import { freshPromptTokens, type InputTokenSemantics } from './token-usage';
+import { isStatsGroupBy, UNATTRIBUTED_SURFACE, type GatewayAttribution, type GatewayStatsGroupBy, type GatewaySurface } from './attribution';
 
 export type GatewayProviderProtocol = 'openai/chat' | 'openai/responses' | 'anthropic/messages' | 'codex/responses' | 'typesafe/systemone';
 
@@ -28,6 +29,51 @@ export type GatewayProviderView = Omit<GatewayProvider, 'headers'> & {
 export type GatewayTimeRangeQuery = {
   from?: string;
   to?: string;
+};
+
+/**
+ * Filters that select one platform surface's traffic. They apply to both the
+ * permanent statistics and the 12-hour request details, so the same question can be
+ * asked of either store.
+ */
+export type GatewayAttributionQuery = {
+  surface?: string;
+  conversationId?: string;
+  projectTaskId?: string;
+  executor?: string;
+  teamId?: string;
+  teamRunId?: string;
+  workflowId?: string;
+  workflowRunId?: string;
+};
+
+export type GatewayUsageTotals = {
+  requests: number;
+  successful: number;
+  failed: number;
+  averageLatencyMs: number | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheCreationTokens: number | null;
+  totalTokens: number | null;
+  usageRequests: number;
+};
+
+/**
+ * One row of the attribution breakdown. Only the identifiers the active groupBy
+ * actually groups on are populated; the rest stay null rather than carrying an
+ * arbitrary member of the group.
+ */
+export type GatewayAttributionGroup = GatewayUsageTotals & {
+  key: string;
+  surface: GatewaySurface | null;
+  conversationId: string | null;
+  executor: string | null;
+  teamId: string | null;
+  teamRunId: string | null;
+  workflowId: string | null;
+  workflowRunId: string | null;
 };
 
 export type GatewayStats = {
@@ -62,6 +108,15 @@ export type GatewayStats = {
     endpoints: Array<{ endpoint: string; requests: number }>;
     statuses: Array<{ status: number; requests: number }>;
   }>;
+  /**
+   * Usage grouped by platform surface instead of provider and model. It is always
+   * present so a reader never has to ask twice, and it is additive: `summary` and
+   * `breakdown` keep their original meaning and shape.
+   */
+  attribution: {
+    groupBy: GatewayStatsGroupBy;
+    groups: GatewayAttributionGroup[];
+  };
 };
 
 type ProviderRow = {
@@ -130,7 +185,16 @@ function getDatabase(): BetterSqlite3.Database {
       cache_read_tokens INTEGER,
       cache_creation_tokens INTEGER,
       completion_tokens INTEGER,
-      total_tokens INTEGER
+      total_tokens INTEGER,
+      surface TEXT,
+      conversation_id TEXT,
+      project_task_id TEXT,
+      executor TEXT,
+      workflow_id TEXT,
+      workflow_run_id TEXT,
+      team_id TEXT,
+      team_run_id TEXT,
+      team_role TEXT
     );
     CREATE INDEX IF NOT EXISTS gateway_request_stats_occurred_idx ON gateway_request_stats(occurred_at);
     CREATE INDEX IF NOT EXISTS gateway_request_stats_provider_model_idx ON gateway_request_stats(provider_name, model);
@@ -144,9 +208,16 @@ function getDatabase(): BetterSqlite3.Database {
       duration_ms INTEGER NOT NULL,
       streaming INTEGER NOT NULL DEFAULT 0,
       source TEXT,
+      surface TEXT,
+      conversation_id TEXT,
+      project_task_id TEXT,
+      executor TEXT,
+      workflow_id TEXT,
       workflow_run_id TEXT,
       node_run_id TEXT,
+      team_id TEXT,
       team_run_id TEXT,
+      team_role TEXT,
       team_task_attempt_id TEXT,
       team_operation_key TEXT,
       prompt_tokens INTEGER,
@@ -169,16 +240,40 @@ function getDatabase(): BetterSqlite3.Database {
   return database;
 }
 
+// Attribution columns the two tables share. Statistics are kept forever, so this is
+// where a surface's token totals have to land for a question asked after the 12-hour
+// detail window to still have an answer.
+const ATTRIBUTION_COLUMNS: Array<[string, string]> = [
+  ['surface', 'TEXT'],
+  ['conversation_id', 'TEXT'],
+  ['project_task_id', 'TEXT'],
+  ['executor', 'TEXT'],
+  ['workflow_id', 'TEXT'],
+  ['workflow_run_id', 'TEXT'],
+  ['team_id', 'TEXT'],
+  ['team_run_id', 'TEXT'],
+  ['team_role', 'TEXT'],
+];
+
 function addMissingRequestStatColumns(database: BetterSqlite3.Database): void {
   const columns = new Set(database.prepare('PRAGMA table_info(gateway_request_stats)').all().map((column) => (column as { name: string }).name));
   const additions: Array<[string, string]> = [
     ['input_token_semantics', 'TEXT'],
     ['cache_read_tokens', 'INTEGER'],
     ['cache_creation_tokens', 'INTEGER'],
+    ...ATTRIBUTION_COLUMNS,
   ];
   for (const [name, type] of additions) {
     if (!columns.has(name)) database.prepare(`ALTER TABLE gateway_request_stats ADD COLUMN ${name} ${type}`).run();
   }
+  // Rows recorded before attribution existed stay NULL rather than being backfilled
+  // to a surface nobody observed; `requestStats` reports them as 'unattributed'.
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS gateway_request_stats_surface_idx ON gateway_request_stats(surface, occurred_at);
+    CREATE INDEX IF NOT EXISTS gateway_request_stats_conversation_idx ON gateway_request_stats(conversation_id, occurred_at);
+    CREATE INDEX IF NOT EXISTS gateway_request_stats_team_idx ON gateway_request_stats(team_id, occurred_at);
+    CREATE INDEX IF NOT EXISTS gateway_request_stats_workflow_idx ON gateway_request_stats(workflow_id, occurred_at);
+  `);
 }
 
 function addMissingRequestLogColumns(database: BetterSqlite3.Database): void {
@@ -190,12 +285,15 @@ function addMissingRequestLogColumns(database: BetterSqlite3.Database): void {
     ['input_token_semantics', 'TEXT'],
     ['cache_read_tokens', 'INTEGER'],
     ['cache_creation_tokens', 'INTEGER'],
+    ...ATTRIBUTION_COLUMNS,
   ];
   for (const [name, type] of additions) {
     if (!columns.has(name)) database.prepare(`ALTER TABLE gateway_request_logs ADD COLUMN ${name} ${type}`).run();
   }
   database.exec(`
     CREATE INDEX IF NOT EXISTS gateway_request_logs_team_run_idx ON gateway_request_logs(team_run_id);
+    CREATE INDEX IF NOT EXISTS gateway_request_logs_surface_idx ON gateway_request_logs(surface, occurred_at);
+    CREATE INDEX IF NOT EXISTS gateway_request_logs_conversation_idx ON gateway_request_logs(conversation_id, occurred_at);
   `);
 }
 
@@ -574,13 +672,211 @@ export function recordRequestStat(input: {
   cacheCreationTokens?: number | null;
   completionTokens?: number | null;
   totalTokens?: number | null;
+  attribution?: GatewayAttribution;
 }): void {
-  getDatabase().prepare(`INSERT INTO gateway_request_stats (occurred_at, provider_name, model, endpoint, status, duration_ms, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(Date.now(), input.provider || 'Unknown', input.model || 'Unknown', input.endpoint || '/', input.status, Math.max(0, Math.round(input.durationMs)), input.promptTokens ?? null, input.inputTokenSemantics ?? null, input.cacheReadTokens ?? null, input.cacheCreationTokens ?? null, input.completionTokens ?? null, input.totalTokens ?? null);
+  const attribution = input.attribution;
+  getDatabase().prepare(`INSERT INTO gateway_request_stats (occurred_at, provider_name, model, endpoint, status, duration_ms, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens, surface, conversation_id, project_task_id, executor, workflow_id, workflow_run_id, team_id, team_run_id, team_role) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    Date.now(),
+    input.provider || 'Unknown',
+    input.model || 'Unknown',
+    input.endpoint || '/',
+    input.status,
+    Math.max(0, Math.round(input.durationMs)),
+    input.promptTokens ?? null,
+    input.inputTokenSemantics ?? null,
+    input.cacheReadTokens ?? null,
+    input.cacheCreationTokens ?? null,
+    input.completionTokens ?? null,
+    input.totalTokens ?? null,
+    attribution?.surface ?? UNATTRIBUTED_SURFACE,
+    attribution?.conversationId ?? null,
+    attribution?.projectTaskId ?? null,
+    attribution?.executor ?? null,
+    attribution?.workflowId ?? null,
+    attribution?.workflowRunId ?? null,
+    attribution?.teamId ?? null,
+    attribution?.teamRunId ?? null,
+    attribution?.teamRole ?? null,
+  );
 }
 
-export function requestStats(query: GatewayTimeRangeQuery = {}): GatewayStats {
+// The stored prompt token count is either already cache-exclusive ('fresh') or a
+// cache-inclusive total; the breakdown always reports the fresh part. This mirrors
+// freshPromptTokens() so the SQL aggregation and the in-memory one agree.
+const FRESH_INPUT_SQL = `CASE
+  WHEN prompt_tokens IS NULL THEN NULL
+  WHEN input_token_semantics = 'total' THEN MAX(0, prompt_tokens - COALESCE(cache_read_tokens, 0) - COALESCE(cache_creation_tokens, 0))
+  ELSE prompt_tokens
+END`;
+
+// Grouping keys per dimension. Legacy rows have no surface, so every dimension reads
+// the surface through the same 'unattributed' fallback used when writing new rows.
+const SURFACE_SQL = `COALESCE(surface, '${UNATTRIBUTED_SURFACE}')`;
+
+// The fields each dimension groups on, named as they appear on a group row. Every
+// other field of the row stays null so a reader cannot mistake an arbitrary member of
+// the group for a property of the group.
+const GROUP_BY_FIELDS: Record<GatewayStatsGroupBy, Array<keyof typeof GROUP_FIELD_SQL>> = {
+  surface: ['surface'],
+  // A conversation's executor traffic is charged to the same conversation, so the
+  // surface stays in the key: one row for its model loop, one for its project tasks.
+  conversation: ['surface', 'conversationId'],
+  executor: ['surface', 'executor'],
+  team: ['teamId', 'teamRunId'],
+  workflow: ['workflowId', 'workflowRunId'],
+};
+
+const GROUP_FIELD_SQL = {
+  surface: { column: SURFACE_SQL, alias: 'surface' },
+  conversationId: { column: 'conversation_id', alias: 'conversation_id' },
+  executor: { column: 'executor', alias: 'executor' },
+  teamId: { column: 'team_id', alias: 'team_id' },
+  teamRunId: { column: 'team_run_id', alias: 'team_run_id' },
+  workflowId: { column: 'workflow_id', alias: 'workflow_id' },
+  workflowRunId: { column: 'workflow_run_id', alias: 'workflow_run_id' },
+} as const;
+
+/**
+ * Rows a dimension is actually about. Grouping by conversation, executor, Team or
+ * Workflow without this would collect every unrelated request into one null-keyed
+ * row, which reads like a real group and is not one. `surface` has no scope because
+ * every request belongs to exactly one surface.
+ */
+const GROUP_BY_SCOPE: Record<GatewayStatsGroupBy, string | null> = {
+  surface: null,
+  conversation: 'conversation_id IS NOT NULL',
+  executor: 'executor IS NOT NULL',
+  team: 'team_id IS NOT NULL',
+  workflow: 'workflow_id IS NOT NULL',
+};
+
+type AttributionGroupRow = {
+  surface: string | null;
+  conversation_id: string | null;
+  executor: string | null;
+  team_id: string | null;
+  team_run_id: string | null;
+  workflow_id: string | null;
+  workflow_run_id: string | null;
+  requests: number;
+  successful: number;
+  duration_total: number;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  cache_read_tokens: number | null;
+  cache_creation_tokens: number | null;
+  total_tokens: number | null;
+  usage_requests: number;
+};
+
+/**
+ * Builds the attribution filter clause shared by statistics and request details.
+ * Requesting 'unattributed' also matches rows stored before surfaces existed, which
+ * have no surface at all. The clause compares the bare column rather than the
+ * COALESCE expression so the (surface, occurred_at) index stays usable.
+ */
+function attributionConditions(query: GatewayAttributionQuery): { conditions: string[]; values: Array<string | number> } {
+  const conditions: string[] = [];
+  const values: Array<string | number> = [];
+  const surface = query.surface?.trim();
+  if (surface === UNATTRIBUTED_SURFACE) {
+    conditions.push(`(surface IS NULL OR surface = '${UNATTRIBUTED_SURFACE}')`);
+  } else if (surface) {
+    conditions.push('surface = ?');
+    values.push(surface);
+  }
+  const columns: Array<[string, string | undefined]> = [
+    ['conversation_id', query.conversationId],
+    ['project_task_id', query.projectTaskId],
+    ['executor', query.executor],
+    ['team_id', query.teamId],
+    ['team_run_id', query.teamRunId],
+    ['workflow_id', query.workflowId],
+    ['workflow_run_id', query.workflowRunId],
+  ];
+  for (const [column, value] of columns) {
+    const trimmed = value?.trim();
+    if (!trimmed) continue;
+    conditions.push(`${column} = ?`);
+    values.push(trimmed);
+  }
+  return { conditions, values };
+}
+
+/**
+ * Aggregates one attribution dimension in SQL. Statistics are retained forever, so a
+ * wide range can cover far more rows than a page of details; grouping in the database
+ * keeps a conversation-level question from materializing every row in the range.
+ */
+function attributionGroups(
+  database: BetterSqlite3.Database,
+  fromMs: number,
+  toMs: number,
+  groupBy: GatewayStatsGroupBy,
+  filters: { conditions: string[]; values: Array<string | number> },
+): GatewayAttributionGroup[] {
+  const fields = GROUP_BY_FIELDS[groupBy];
+  const grouped = new Set<string>(fields);
+  const projection = (Object.keys(GROUP_FIELD_SQL) as Array<keyof typeof GROUP_FIELD_SQL>).map((field) => {
+    const { column, alias } = GROUP_FIELD_SQL[field];
+    return grouped.has(field) ? `${column} AS ${alias}` : `NULL AS ${alias}`;
+  });
+  const keyColumns = fields.map((field) => GROUP_FIELD_SQL[field].column);
+  const scope = GROUP_BY_SCOPE[groupBy];
+  const where = ['occurred_at >= ?', 'occurred_at <= ?', ...filters.conditions, ...(scope ? [scope] : [])].join(' AND ');
+  const rows = database.prepare(`SELECT
+      ${projection.join(', ')},
+      COUNT(*) AS requests,
+      SUM(CASE WHEN status >= 200 AND status < 400 THEN 1 ELSE 0 END) AS successful,
+      SUM(duration_ms) AS duration_total,
+      SUM(${FRESH_INPUT_SQL}) AS prompt_tokens,
+      SUM(completion_tokens) AS completion_tokens,
+      SUM(cache_read_tokens) AS cache_read_tokens,
+      SUM(cache_creation_tokens) AS cache_creation_tokens,
+      SUM(total_tokens) AS total_tokens,
+      SUM(CASE WHEN total_tokens IS NOT NULL THEN 1 ELSE 0 END) AS usage_requests
+    FROM gateway_request_stats
+    WHERE ${where}
+    GROUP BY ${keyColumns.join(', ')}
+    ORDER BY requests DESC`).all(fromMs, toMs, ...filters.values) as AttributionGroupRow[];
+  const fieldValue = (row: AttributionGroupRow, field: keyof typeof GROUP_FIELD_SQL): string | null => {
+    if (field === 'surface') return row.surface;
+    if (field === 'conversationId') return row.conversation_id;
+    if (field === 'executor') return row.executor;
+    if (field === 'teamId') return row.team_id;
+    if (field === 'teamRunId') return row.team_run_id;
+    if (field === 'workflowId') return row.workflow_id;
+    return row.workflow_run_id;
+  };
+  return rows.map((row) => ({
+    key: fields.map((field) => fieldValue(row, field) ?? '').join('\u0000'),
+    surface: row.surface as GatewaySurface | null,
+    conversationId: row.conversation_id,
+    executor: row.executor,
+    teamId: row.team_id,
+    teamRunId: row.team_run_id,
+    workflowId: row.workflow_id,
+    workflowRunId: row.workflow_run_id,
+    requests: row.requests,
+    successful: row.successful,
+    failed: row.requests - row.successful,
+    averageLatencyMs: row.requests ? Math.round(row.duration_total / row.requests) : null,
+    promptTokens: row.prompt_tokens,
+    completionTokens: row.completion_tokens,
+    cacheReadTokens: row.cache_read_tokens,
+    cacheCreationTokens: row.cache_creation_tokens,
+    totalTokens: row.total_tokens,
+    usageRequests: row.usage_requests,
+  }));
+}
+
+export function requestStats(query: GatewayTimeRangeQuery & GatewayAttributionQuery & { groupBy?: string } = {}): GatewayStats {
   const { fromMs, toMs } = resolveTimeRange(query);
-  const records = getDatabase().prepare('SELECT provider_name, model, endpoint, status, duration_ms, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens FROM gateway_request_stats WHERE occurred_at >= ? AND occurred_at <= ? ORDER BY occurred_at DESC').all(fromMs, toMs) as Array<{ provider_name: string; model: string; endpoint: string; status: number; duration_ms: number; prompt_tokens: number | null; input_token_semantics: InputTokenSemantics | null; cache_read_tokens: number | null; cache_creation_tokens: number | null; completion_tokens: number | null; total_tokens: number | null }>;
+  const groupBy = isStatsGroupBy(query.groupBy) ? query.groupBy : 'surface';
+  const database = getDatabase();
+  const filters = attributionConditions(query);
+  const where = ['occurred_at >= ?', 'occurred_at <= ?', ...filters.conditions].join(' AND ');
+  const records = database.prepare(`SELECT provider_name, model, endpoint, status, duration_ms, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens FROM gateway_request_stats WHERE ${where} ORDER BY occurred_at DESC`).all(fromMs, toMs, ...filters.values) as Array<{ provider_name: string; model: string; endpoint: string; status: number; duration_ms: number; prompt_tokens: number | null; input_token_semantics: InputTokenSemantics | null; cache_read_tokens: number | null; cache_creation_tokens: number | null; completion_tokens: number | null; total_tokens: number | null }>;
   const freshInput = (record: typeof records[number]) => freshPromptTokens(record.prompt_tokens, record.input_token_semantics, record.cache_read_tokens, record.cache_creation_tokens);
   const successful = records.filter((record) => record.status >= 200 && record.status < 400).length;
   const summaryTokens = {
@@ -635,6 +931,7 @@ export function requestStats(query: GatewayTimeRangeQuery = {}): GatewayStats {
       usageRequests: records.filter((record) => record.total_tokens !== null).length,
     },
     breakdown,
+    attribution: { groupBy, groups: attributionGroups(database, fromMs, toMs, groupBy, filters) },
   };
 }
 
@@ -654,9 +951,16 @@ type GatewayRequestLogRow = {
   duration_ms: number;
   streaming: number;
   source: string | null;
+  surface: string | null;
+  conversation_id: string | null;
+  project_task_id: string | null;
+  executor: string | null;
+  workflow_id: string | null;
   workflow_run_id: string | null;
   node_run_id: string | null;
+  team_id: string | null;
   team_run_id: string | null;
+  team_role: string | null;
   team_task_attempt_id: string | null;
   team_operation_key: string | null;
   prompt_tokens: number | null;
@@ -674,7 +978,7 @@ type GatewayRequestLogListRow = Omit<GatewayRequestLogRow, 'request_body' | 'res
 
 // The list view never reads the captured bodies: selecting them pulled ~25 MB from
 // disk per page. Only the single-log detail query fetches them.
-const REQUEST_LOG_LIST_COLUMNS = 'id, occurred_at, provider_name, model, endpoint, status, duration_ms, streaming, source, workflow_run_id, node_run_id, team_run_id, team_task_attempt_id, team_operation_key, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens, response_kind';
+const REQUEST_LOG_LIST_COLUMNS = 'id, occurred_at, provider_name, model, endpoint, status, duration_ms, streaming, source, surface, conversation_id, project_task_id, executor, workflow_id, workflow_run_id, node_run_id, team_id, team_run_id, team_role, team_task_attempt_id, team_operation_key, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens, response_kind';
 
 export function recordRequestLog(input: {
   id?: string | null;
@@ -684,12 +988,7 @@ export function recordRequestLog(input: {
   status: number;
   durationMs: number;
   streaming: boolean;
-  source?: string | null;
-  workflowRunId?: string | null;
-  nodeRunId?: string | null;
-  teamRunId?: string | null;
-  teamTaskAttemptId?: string | null;
-  teamOperationKey?: string | null;
+  attribution?: GatewayAttribution;
   promptTokens?: number | null;
   inputTokenSemantics?: InputTokenSemantics | null;
   cacheReadTokens?: number | null;
@@ -701,7 +1000,8 @@ export function recordRequestLog(input: {
 }): string {
   const database = getDatabase();
   const id = input.id?.trim() || `glog_${randomUUID()}`;
-  database.prepare(`INSERT INTO gateway_request_logs (id, occurred_at, provider_name, model, endpoint, status, duration_ms, streaming, source, workflow_run_id, node_run_id, team_run_id, team_task_attempt_id, team_operation_key, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens, request_body, response_kind, response_body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+  const attribution = input.attribution;
+  database.prepare(`INSERT INTO gateway_request_logs (id, occurred_at, provider_name, model, endpoint, status, duration_ms, streaming, source, surface, conversation_id, project_task_id, executor, workflow_id, workflow_run_id, node_run_id, team_id, team_run_id, team_role, team_task_attempt_id, team_operation_key, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens, request_body, response_kind, response_body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     id,
     Date.now(),
     input.provider || 'Unknown',
@@ -710,12 +1010,19 @@ export function recordRequestLog(input: {
     input.status,
     Math.max(0, Math.round(input.durationMs)),
     input.streaming ? 1 : 0,
-    input.source ?? null,
-    input.workflowRunId ?? null,
-    input.nodeRunId ?? null,
-    input.teamRunId ?? null,
-    input.teamTaskAttemptId ?? null,
-    input.teamOperationKey ?? null,
+    attribution?.source ?? null,
+    attribution?.surface ?? UNATTRIBUTED_SURFACE,
+    attribution?.conversationId ?? null,
+    attribution?.projectTaskId ?? null,
+    attribution?.executor ?? null,
+    attribution?.workflowId ?? null,
+    attribution?.workflowRunId ?? null,
+    attribution?.nodeRunId ?? null,
+    attribution?.teamId ?? null,
+    attribution?.teamRunId ?? null,
+    attribution?.teamRole ?? null,
+    attribution?.teamTaskAttemptId ?? null,
+    attribution?.teamOperationKey ?? null,
     input.promptTokens ?? null,
     input.inputTokenSemantics ?? null,
     input.cacheReadTokens ?? null,
@@ -776,9 +1083,18 @@ function requestLogListItem(row: GatewayRequestLogListRow) {
     durationMs: row.duration_ms,
     streaming: row.streaming === 1,
     source: row.source,
+    // Rows captured before surfaces existed carry no surface; they are reported as
+    // 'unattributed' rather than guessed from their other identifiers.
+    surface: (row.surface ?? UNATTRIBUTED_SURFACE) as GatewaySurface,
+    conversationId: row.conversation_id,
+    projectTaskId: row.project_task_id,
+    executor: row.executor,
+    workflowId: row.workflow_id,
     workflowRunId: row.workflow_run_id,
     nodeRunId: row.node_run_id,
+    teamId: row.team_id,
     teamRunId: row.team_run_id,
+    teamRole: row.team_role,
     teamTaskAttemptId: row.team_task_attempt_id,
     teamOperationKey: row.team_operation_key,
     promptTokens: freshPromptTokens(row.prompt_tokens, row.input_token_semantics, row.cache_read_tokens, row.cache_creation_tokens),
@@ -791,12 +1107,10 @@ function requestLogListItem(row: GatewayRequestLogListRow) {
 
 const REQUEST_LOG_PAGE_LIMIT = 50;
 
-export function requestLogs(query: GatewayTimeRangeQuery & {
+export function requestLogs(query: GatewayTimeRangeQuery & GatewayAttributionQuery & {
   provider?: string;
   model?: string;
   statusClass?: string;
-  workflowRunId?: string;
-  teamRunId?: string;
   limit?: number;
   cursor?: string;
 }) {
@@ -819,14 +1133,9 @@ export function requestLogs(query: GatewayTimeRangeQuery & {
     conditions.push('model = ?');
     values.push(query.model.trim());
   }
-  if (query.workflowRunId?.trim()) {
-    conditions.push('workflow_run_id = ?');
-    values.push(query.workflowRunId.trim());
-  }
-  if (query.teamRunId?.trim()) {
-    conditions.push('team_run_id = ?');
-    values.push(query.teamRunId.trim());
-  }
+  const attribution = attributionConditions(query);
+  conditions.push(...attribution.conditions);
+  values.push(...attribution.values);
   if (query.statusClass === 'success') conditions.push('status >= 200 AND status < 400');
   if (query.statusClass === 'client_error') conditions.push('status >= 400 AND status < 500');
   if (query.statusClass === 'server_error') conditions.push('status >= 500');

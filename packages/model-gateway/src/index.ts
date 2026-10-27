@@ -1,6 +1,7 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { APICallError, generateText, InvalidToolInputError, isStepCount, JSONParseError, jsonSchema, NoOutputGeneratedError, Output, streamText, ToolLoopAgent, tool, wrapLanguageModel, type LanguageModel, type LanguageModelCallEndEvent, type LanguageModelUsage, type ModelMessage, type PrepareStepFunction, type ToolExecutionEndEvent, type ToolSet } from 'ai';
+import { gatewayAttributionHeaders, type GatewayCorrelation } from './attribution';
 
 // The Anthropic protocol requires max_tokens and the AI SDK defaults it to 4096
 // when unset, which silently truncates long Agent outputs (for example a
@@ -40,14 +41,7 @@ export type GatewayAgentMessage =
 
 export type GatewayToolResultOutput = { type: 'text' | 'error-text'; value: string };
 
-export type GatewayCorrelation = {
-  source: 'agent' | 'workflow' | 'team';
-  workflowRunId?: string;
-  nodeRunId?: string;
-  teamRunId?: string;
-  teamTaskAttemptId?: string;
-  teamOperationKey?: string;
-};
+export { gatewayAttributionHeaders, type GatewayCorrelation } from './attribution';
 
 // A model configuration slot may declare one model or an ordered list of fallback candidates; a plain
 // string is a one-element list. The Gateway tries each candidate in order and switches to the next only
@@ -143,6 +137,7 @@ export type StreamTextRequest = {
   messages: readonly GatewayMessage[];
   temperature?: number;
   maxOutputTokens?: number;
+  correlation?: GatewayCorrelation;
   abortSignal?: AbortSignal;
 };
 
@@ -193,7 +188,7 @@ export class AiSdkModelGateway implements ModelGateway {
     // candidate is attempted; a future caller that needs fallback here should get a buffered
     // variant rather than bolting a loop onto this streaming path.
     const first = request.candidates[0]!;
-    const model = resolveModel(first.provider, first.model);
+    const model = resolveModel(first.provider, first.model, request.correlation);
     const messages = toModelMessages(request.messages);
     const result = streamText({
       model,
@@ -810,18 +805,6 @@ function argumentArray(value: unknown): string[] | null {
   return value.map(String);
 }
 
-function correlationHeaders(correlation: GatewayCorrelation | undefined): Record<string, string> {
-  if (!correlation) return {};
-  return {
-    'x-worklite-log-source': correlation.source,
-    ...(correlation.workflowRunId ? { 'x-worklite-workflow-run-id': correlation.workflowRunId } : {}),
-    ...(correlation.nodeRunId ? { 'x-worklite-node-run-id': correlation.nodeRunId } : {}),
-    ...(correlation.teamRunId ? { 'x-worklite-team-run-id': correlation.teamRunId } : {}),
-    ...(correlation.teamTaskAttemptId ? { 'x-worklite-team-task-attempt-id': correlation.teamTaskAttemptId } : {}),
-    ...(correlation.teamOperationKey ? { 'x-worklite-team-operation-key': correlation.teamOperationKey } : {}),
-  };
-}
-
 function resolveModel(provider: ModelProviderConfig, modelId: string, correlation?: GatewayCorrelation): LanguageModel {
   if (!modelId.trim()) {
     throw new ModelGatewayError('INVALID_REQUEST', 'A model id is required.');
@@ -841,7 +824,7 @@ function resolveModel(provider: ModelProviderConfig, modelId: string, correlatio
   const headers = {
     ...(provider.headers ?? {}),
     ...(provider.gatewayProviderName ? { 'x-worklite-stat-provider': provider.gatewayProviderName } : {}),
-    ...correlationHeaders(correlation),
+    ...gatewayAttributionHeaders(correlation),
     'x-portkey-config': portkeyConfig,
   };
   const baseURL = gatewayBaseURL();

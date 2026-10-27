@@ -1,6 +1,7 @@
 import { Context } from 'hono';
 import { getRuntimeKey } from 'hono/adapter';
 import { recordRequestLog, recordRequestStat, type GatewayRequestLogResponse } from '../../worklite/provider-registry';
+import { readAttribution } from '../../worklite/attribution';
 import { normalizeTokenUsage, usageFromStreamEvents } from '../../worklite/token-usage';
 
 let logId = 0;
@@ -127,6 +128,14 @@ async function processLog(c: Context, start: number) {
     ?? (responseBody && typeof responseBody === 'object' && responseBody.usage && typeof responseBody.usage === 'object' ? responseBody.usage : undefined);
   const endpoint = new URL(c.req.url).pathname;
   const tokenUsage = normalizeTokenUsage(usage, endpoint);
+  const correlationHeader = (name: string): string | null => {
+    const value = c.req.header(name);
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+  };
+  // Statistics are retained forever while details expire after 12 hours, so the same
+  // attribution is written to both: a question about a surface's token usage must still
+  // have an answer once the details are gone.
+  const attribution = readAttribution(correlationHeader);
   recordRequestStat({
     provider,
     model,
@@ -134,12 +143,9 @@ async function processLog(c: Context, start: number) {
     status: c.res.status,
     durationMs: ms,
     ...tokenUsage,
+    attribution,
   });
 
-  const correlationHeader = (name: string): string | null => {
-    const value = c.req.header(name);
-    return typeof value === 'string' && value.trim() ? value.trim() : null;
-  };
   try {
     recordRequestLog({
       id: correlationHeader('x-worklite-log-id'),
@@ -149,12 +155,7 @@ async function processLog(c: Context, start: number) {
       status: c.res.status,
       durationMs: ms,
       streaming,
-      source: correlationHeader('x-worklite-log-source'),
-      workflowRunId: correlationHeader('x-worklite-workflow-run-id'),
-      nodeRunId: correlationHeader('x-worklite-node-run-id'),
-      teamRunId: correlationHeader('x-worklite-team-run-id'),
-      teamTaskAttemptId: correlationHeader('x-worklite-team-task-attempt-id'),
-      teamOperationKey: correlationHeader('x-worklite-team-operation-key'),
+      attribution,
       ...tokenUsage,
       request: requestOptionsArray[0].transformedRequest?.body ?? requestOptionsArray[0].requestParams ?? null,
       response: captured.capture,
