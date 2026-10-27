@@ -15,7 +15,7 @@ export function volcengineSearchMcpEndpoint(): string {
 
 /**
  * Stateless MCP server for one call. The search key is resolved by the caller:
- * an inbound Authorization bearer key wins, otherwise the workspace credential.
+ * an inbound Authorization bearer key wins, otherwise the API environment key.
  * It is never included in a tool description, result or error.
  */
 export function createVolcengineSearchMcpServer(options: {
@@ -27,7 +27,7 @@ export function createVolcengineSearchMcpServer(options: {
 
   server.registerTool('web_search', {
     title: 'Web search',
-    description: 'Search the live web through the workspace Volcengine search credential. Returns bounded results with title, URL, site, publish time and summary. Set needContent only when the result body itself is required; prefer web_fetch for one page.',
+    description: 'Search the live web through the configured Volcengine search credential. Returns bounded results with title, URL, site, publish time and summary. Set needContent only when the result body itself is required; prefer web_fetch for one page.',
     annotations: { readOnlyHint: true, openWorldHint: true },
     inputSchema: {
       query: z.string().min(1).max(100).describe('Search query, 1 to 100 characters.'),

@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
-import type { ArtifactListQuery, AssignHomeBoardRequest, CreateHomeBoardCategoryRequest, GatewayRequestLogQuery, GatewayTimeRange, UpdateChatMemoryRequest, UpdateHomeBoardCategoryRequest } from '@worklite/contracts';
+import type { ArtifactListQuery, AssignHomeBoardRequest, CreateHomeBoardCategoryRequest, GatewayRequestLogQuery, PortkeyGatewayStatsQuery, UpdateChatMemoryRequest, UpdateHomeBoardCategoryRequest } from '@worklite/contracts';
 
 export const workflowScheduleQueryKey = (workflowId: string) => ['workflow-schedule', workflowId] as const;
 export const pluginsQueryKey = () => ['plugins'] as const;
@@ -214,10 +214,6 @@ export function useModelProvidersQuery(workspace?: string) {
   return useQuery({ queryKey: ['model-providers'] as const, queryFn: () => api.modelProviders(workspace) });
 }
 
-export function useWebSearchSettingsQuery() {
-  return useQuery({ queryKey: ['web-search-settings'] as const, queryFn: api.webSearchSettings });
-}
-
 export function usePortkeyGatewayQuery() {
   return useQuery({ queryKey: ['portkey-gateway'] as const, queryFn: api.portkeyGateway });
 }
@@ -230,17 +226,23 @@ export function useCodexAccountUsagesQuery(enabled: boolean) {
   return useQuery({ queryKey: ['codex-account-usages'] as const, queryFn: api.codexAccountUsages, enabled, refetchInterval: 60_000 });
 }
 
-export function usePortkeyGatewayStatsQuery(range: GatewayTimeRange) {
+// Attribution filters are part of the question, so they are part of the cache key;
+// leaving them out would serve a Chat-only answer for a Team-only request.
+function attributionKey(query: { surface?: string; conversationId?: string; projectTaskId?: string; executor?: string; teamId?: string; teamRunId?: string; workflowId?: string; workflowRunId?: string }) {
+  return [query.surface ?? '', query.conversationId ?? '', query.projectTaskId ?? '', query.executor ?? '', query.teamId ?? '', query.teamRunId ?? '', query.workflowId ?? '', query.workflowRunId ?? ''] as const;
+}
+
+export function usePortkeyGatewayStatsQuery(query: PortkeyGatewayStatsQuery) {
   return useQuery({
-    queryKey: ['portkey-gateway-stats', range.from ?? '', range.to ?? ''] as const,
-    queryFn: () => api.portkeyGatewayStats(range),
+    queryKey: ['portkey-gateway-stats', query.from ?? '', query.to ?? '', query.groupBy ?? '', ...attributionKey(query)] as const,
+    queryFn: () => api.portkeyGatewayStats(query),
     refetchInterval: 30_000,
   });
 }
 
 export function useGatewayRequestLogsQuery(query: GatewayRequestLogQuery) {
   return useQuery({
-    queryKey: ['gateway-request-logs', query.from ?? '', query.to ?? '', query.provider ?? '', query.model ?? '', query.statusClass ?? '', query.workflowRunId ?? '', query.teamRunId ?? ''] as const,
+    queryKey: ['gateway-request-logs', query.from ?? '', query.to ?? '', query.provider ?? '', query.model ?? '', query.statusClass ?? '', ...attributionKey(query)] as const,
     queryFn: () => api.gatewayRequestLogs(query),
     refetchInterval: 30_000,
   });

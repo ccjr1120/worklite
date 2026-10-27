@@ -1,6 +1,46 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { GATEWAY_STATS_GROUP_BYS, GATEWAY_SURFACES } from '@worklite/contracts';
 import { PortkeyGatewayService } from './portkey-gateway.service';
-import type { CodexAccountUsageSnapshot, CodexRateLimitSnapshot, CreateModelProviderRequest, GatewayRequestLogDetail, GatewayRequestLogList, PortkeyGatewayStats, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
+import type { CodexAccountUsageSnapshot, CodexRateLimitSnapshot, CreateModelProviderRequest, GatewayAttributionFilters, GatewayRequestLogDetail, GatewayRequestLogList, GatewayStatsGroupBy, GatewaySurface, PortkeyGatewayStats, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
+
+// Express turns a repeated query parameter into an array, so every value is reduced to
+// one string before it is validated or forwarded; a repeated filter takes its first
+// value rather than reaching the Gateway as a malformed one.
+type RawQuery = Record<string, unknown>;
+
+function queryText(value: unknown): string | undefined {
+  const first = Array.isArray(value) ? value[0] : value;
+  return typeof first === 'string' && first.trim() ? first.trim() : undefined;
+}
+
+// An unrecognised surface or groupBy is rejected rather than ignored: ignoring it
+// answers an unfiltered question that looks filtered, which is the one failure mode
+// this attribution is meant to rule out. The id filters are opaque and pass through.
+function attributionFilters(query: RawQuery): GatewayAttributionFilters {
+  const surface = queryText(query.surface);
+  if (surface && !GATEWAY_SURFACES.includes(surface as GatewaySurface)) {
+    throw new BadRequestException(`Unknown Gateway usage surface ${surface}.`);
+  }
+  return {
+    surface: surface as GatewaySurface | undefined,
+    conversationId: queryText(query.conversationId),
+    projectTaskId: queryText(query.projectTaskId),
+    executor: queryText(query.executor),
+    teamId: queryText(query.teamId),
+    teamRunId: queryText(query.teamRunId),
+    workflowId: queryText(query.workflowId),
+    workflowRunId: queryText(query.workflowRunId),
+  };
+}
+
+function statsGroupBy(value: unknown): GatewayStatsGroupBy | undefined {
+  const groupBy = queryText(value);
+  if (!groupBy) return undefined;
+  if (!GATEWAY_STATS_GROUP_BYS.includes(groupBy as GatewayStatsGroupBy)) {
+    throw new BadRequestException(`Unknown Gateway usage grouping ${groupBy}.`);
+  }
+  return groupBy as GatewayStatsGroupBy;
+}
 
 @Controller('portkey-gateway')
 export class PortkeyGatewayController {
@@ -17,32 +57,28 @@ export class PortkeyGatewayController {
   }
 
   @Get('stats')
-  stats(@Query('from') from?: string, @Query('to') to?: string): Promise<PortkeyGatewayStats> {
-    return this.gateway.stats({ from, to });
+  stats(@Query() query: RawQuery): Promise<PortkeyGatewayStats> {
+    return this.gateway.stats({
+      from: queryText(query.from),
+      to: queryText(query.to),
+      groupBy: statsGroupBy(query.groupBy),
+      ...attributionFilters(query),
+    });
   }
 
   @Get('request-logs')
-  requestLogs(
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-    @Query('provider') provider?: string,
-    @Query('model') model?: string,
-    @Query('statusClass') statusClass?: string,
-    @Query('workflowRunId') workflowRunId?: string,
-    @Query('teamRunId') teamRunId?: string,
-    @Query('limit') limit?: string,
-    @Query('cursor') cursor?: string,
-  ): Promise<GatewayRequestLogList> {
+  requestLogs(@Query() query: RawQuery): Promise<GatewayRequestLogList> {
+    const statusClass = queryText(query.statusClass);
+    const limit = queryText(query.limit);
     return this.gateway.requestLogs({
-      from,
-      to,
-      provider,
-      model,
+      from: queryText(query.from),
+      to: queryText(query.to),
+      provider: queryText(query.provider),
+      model: queryText(query.model),
       statusClass: statusClass === 'success' || statusClass === 'client_error' || statusClass === 'server_error' ? statusClass : undefined,
-      workflowRunId,
-      teamRunId,
+      ...attributionFilters(query),
       limit: limit ? Number(limit) : undefined,
-      cursor,
+      cursor: queryText(query.cursor),
     });
   }
 

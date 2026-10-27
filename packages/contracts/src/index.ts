@@ -548,17 +548,6 @@ export type WorkspaceSettingsView = {
 
 export type UpdateWorkspaceSettingsRequest = Partial<Pick<WorkspaceSettingsView, 'appearance'>>;
 
-// Web search credentials are write-only: responses report whether a key exists,
-// never the key or a reversible fragment of it.
-export type WebSearchSettingsView = {
-  configured: boolean;
-  updatedAt: string | null;
-};
-
-export type UpdateWebSearchSettingsRequest = {
-  apiKey: string;
-};
-
 export type PortkeyGatewayStatus = 'starting' | 'running' | 'failed';
 
 export type PortkeyGatewayView = {
@@ -636,6 +625,63 @@ export type GatewayTimeRange = {
   to?: string;
 };
 
+/**
+ * The platform features a Gateway request can be charged to. Every WorkLite path
+ * that reaches the Gateway declares exactly one of these; a request that declares
+ * none is recorded as `unattributed` rather than joining another surface's totals.
+ */
+export const GATEWAY_SURFACES = [
+  'chat',
+  'chat_project_task',
+  'agent',
+  'workflow',
+  'team',
+  'team_project_task',
+  'provider_test',
+  'external',
+  'unattributed',
+] as const;
+
+export type GatewaySurface = (typeof GATEWAY_SURFACES)[number];
+
+export const GATEWAY_STATS_GROUP_BYS = ['surface', 'conversation', 'executor', 'team', 'workflow'] as const;
+
+export type GatewayStatsGroupBy = (typeof GATEWAY_STATS_GROUP_BYS)[number];
+
+/** Filters that select one surface's traffic; they apply to statistics and details alike. */
+export type GatewayAttributionFilters = {
+  surface?: GatewaySurface;
+  conversationId?: string;
+  projectTaskId?: string;
+  executor?: string;
+  teamId?: string;
+  teamRunId?: string;
+  workflowId?: string;
+  workflowRunId?: string;
+};
+
+export type GatewayAttributionGroup = {
+  /** Stable identity of this group within the active groupBy. */
+  key: string;
+  surface: GatewaySurface | null;
+  conversationId: string | null;
+  executor: string | null;
+  teamId: string | null;
+  teamRunId: string | null;
+  workflowId: string | null;
+  workflowRunId: string | null;
+  requests: number;
+  successful: number;
+  failed: number;
+  averageLatencyMs: number | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheCreationTokens: number | null;
+  totalTokens: number | null;
+  usageRequests: number;
+};
+
 export type PortkeyGatewayStatsBreakdown = {
   provider: string;
   model: string;
@@ -670,6 +716,19 @@ export type PortkeyGatewayStats = {
     usageRequests: number;
   };
   breakdown: PortkeyGatewayStatsBreakdown[];
+  /**
+   * Usage grouped by platform surface rather than provider and model. It is additive:
+   * `summary` and `breakdown` keep their original meaning, so a reader built before
+   * attribution existed is unaffected.
+   */
+  attribution: {
+    groupBy: GatewayStatsGroupBy;
+    groups: GatewayAttributionGroup[];
+  };
+};
+
+export type PortkeyGatewayStatsQuery = GatewayTimeRange & GatewayAttributionFilters & {
+  groupBy?: GatewayStatsGroupBy;
 };
 
 export type PortkeyGatewayModel = {
@@ -1210,7 +1269,11 @@ export type TestModelProviderRequest = {
   model: string;
 };
 
-export type GatewayRequestLogSource = 'agent' | 'workflow' | 'team' | 'provider_test' | 'proxy';
+/**
+ * The coarse label that predates surfaces. It is kept so readers and filters built on
+ * it keep working; `surface` on the same record carries the detail it cannot express.
+ */
+export type GatewayRequestLogSource = 'chat' | 'agent' | 'workflow' | 'team' | 'provider_test' | 'external' | 'proxy';
 
 export type GatewayRequestLogStatusClass = 'success' | 'client_error' | 'server_error';
 
@@ -1224,9 +1287,16 @@ export type GatewayRequestLogListItem = {
   durationMs: number;
   streaming: boolean;
   source: GatewayRequestLogSource | null;
+  surface: GatewaySurface;
+  conversationId: string | null;
+  projectTaskId: string | null;
+  executor: string | null;
+  workflowId: string | null;
   workflowRunId: string | null;
   nodeRunId: string | null;
+  teamId: string | null;
   teamRunId: string | null;
+  teamRole: string | null;
   teamTaskAttemptId: string | null;
   teamOperationKey: string | null;
   promptTokens: number | null;
@@ -1247,12 +1317,10 @@ export type GatewayRequestLogDetail = GatewayRequestLogListItem & {
   response: GatewayRequestLogResponseCapture;
 };
 
-export type GatewayRequestLogQuery = GatewayTimeRange & {
+export type GatewayRequestLogQuery = GatewayTimeRange & GatewayAttributionFilters & {
   provider?: string;
   model?: string;
   statusClass?: GatewayRequestLogStatusClass;
-  workflowRunId?: string;
-  teamRunId?: string;
   limit?: number;
   cursor?: string;
 };

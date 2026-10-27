@@ -1644,7 +1644,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
             mcpServers: memoryToken ? [...mcpServers, teamMemoryMcpRuntime(memoryToken)] : mcpServers,
             references,
             signal,
-            correlation: { source: 'team', teamRunId: request.runId, teamTaskAttemptId: attempt.id },
+            // The developer role runs in a project executor; it is kept apart from the
+            // Team's model-loop traffic by its own surface rather than merged into it.
+            correlation: { surface: 'team_project_task', teamId: run.teamId, teamRunId: request.runId, teamRole: taskRole, teamTaskAttemptId: attempt.id, executor: execution.executor },
             onEvent: (activity) => {
               commandIds.add(activity.commandExecutionId);
               this.appendEvent(this.db, request.runId, 'task.activity', {
@@ -1741,7 +1743,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         } : {}),
         signal,
         jsonOutput: true,
-        correlation: { source: 'team', teamRunId: request.runId, teamTaskAttemptId: attempt.id },
+        correlation: { surface: 'team', teamId: run.teamId, teamRunId: request.runId, teamRole: taskRole, teamTaskAttemptId: attempt.id },
         // The upstream proxy closes a request that has not produced its first byte within
         // ~120s, and time-to-first-byte grows with the prompt: requests past ~200KB (~70k
         // tokens) stalled for 70-120s and then failed. Bound each tool result and the rolling

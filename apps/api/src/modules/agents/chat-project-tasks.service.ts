@@ -388,6 +388,9 @@ export class ChatProjectTasksService {
       this.steerPorts.set(taskId, steerPort);
       const output = await this.executors.execute({
         owner: 'chat', workspaceId: task.workspaceId, launch, model: task.model || null,
+        // A project task's Gateway traffic belongs to the conversation that dispatched
+        // it and is kept apart from that conversation's own model loop by the surface.
+        correlation: { surface: 'chat_project_task', conversationId: task.executionId, projectTaskId: task.id, executor: launch.executor },
         projectDirectory: workingDirectory,
         skills: [],
         mcpServers: declaredMcpServers,

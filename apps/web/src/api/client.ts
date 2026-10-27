@@ -35,8 +35,9 @@ import type {
   AuditEventView,
   GatewayRequestLogDetail,
   GatewayRequestLogList,
+  GatewayAttributionFilters,
   GatewayRequestLogQuery,
-  GatewayTimeRange,
+  PortkeyGatewayStatsQuery,
   CreateMcpServerRequest,
   DeleteMcpServerResult,
   McpServerReferenceReport,
@@ -63,8 +64,6 @@ import type {
   ExecuteSkillScriptRequest,
   UpdateWorkspaceSettingsRequest,
   WorkspaceSettingsView,
-  WebSearchSettingsView,
-  UpdateWebSearchSettingsRequest,
   PortkeyGatewayView,
   CodexAccountUsageSnapshot,
   CodexAuthStatus,
@@ -121,6 +120,25 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   const text = await response.text();
   if (!text.trim()) return undefined as T;
   return JSON.parse(text) as T;
+}
+
+// Attribution filters are spelled the same way on statistics and on request details,
+// so a view can move one question between the two without rewriting it.
+function appendGatewayAttribution(search: URLSearchParams, filters: GatewayAttributionFilters): void {
+  const entries: Array<[string, string | undefined]> = [
+    ['surface', filters.surface],
+    ['conversationId', filters.conversationId],
+    ['projectTaskId', filters.projectTaskId],
+    ['executor', filters.executor],
+    ['teamId', filters.teamId],
+    ['teamRunId', filters.teamRunId],
+    ['workflowId', filters.workflowId],
+    ['workflowRunId', filters.workflowRunId],
+  ];
+  for (const [name, value] of entries) {
+    const trimmed = value?.trim();
+    if (trimmed) search.set(name, trimmed);
+  }
 }
 
 function apiGet<T>(path: string): Promise<T> {
@@ -189,10 +207,6 @@ export const api = {
   answerAgentQuestion: (_workspace: string | undefined, agentId: string, executionId: string, input: AnswerAgentQuestionRequest) => apiPost<AgentExecutionView>(`/api/agents/${encodeURIComponent(agentId)}/executions/${encodeURIComponent(executionId)}/answers`, input),
   settings: () => apiGet<WorkspaceSettingsView>('/api/settings'),
   updateSettings: (input: UpdateWorkspaceSettingsRequest) => apiPatch<WorkspaceSettingsView>('/api/settings', input),
-  webSearchSettings: () => apiGet<WebSearchSettingsView>('/api/web-search/settings'),
-  saveWebSearchKey: (input: UpdateWebSearchSettingsRequest) => apiPut<WebSearchSettingsView>('/api/web-search/settings', input),
-  clearWebSearchKey: () => apiDelete<WebSearchSettingsView>('/api/web-search/settings'),
-  testWebSearch: (input: { query: string }) => apiPost<{ configured: true; resultCount: number }>('/api/web-search/settings/test', input),
   portkeyGateway: () => apiGet<PortkeyGatewayView>('/api/portkey-gateway'),
   codexAuthStatus: () => apiGet<CodexAuthStatus>('/api/portkey-gateway/codex/auth/status'),
   codexAccountUsages: () => apiGet<CodexAccountUsageSnapshot>('/api/portkey-gateway/codex/accounts/usage'),
@@ -201,10 +215,12 @@ export const api = {
   updateCodexAccount: (accountId: string, enabled: boolean) => apiPatch<CodexAuthStatus>(`/api/portkey-gateway/codex/accounts/${encodeURIComponent(accountId)}`, { enabled }),
   refreshCodexAccount: (accountId: string) => apiPost<CodexAuthStatus>(`/api/portkey-gateway/codex/accounts/${encodeURIComponent(accountId)}/refresh`),
   deleteCodexAccount: (accountId: string) => apiDelete<CodexAuthStatus>(`/api/portkey-gateway/codex/accounts/${encodeURIComponent(accountId)}`),
-  portkeyGatewayStats: (range: GatewayTimeRange = {}) => {
+  portkeyGatewayStats: (query: PortkeyGatewayStatsQuery = {}) => {
     const search = new URLSearchParams();
-    if (range.from?.trim()) search.set('from', range.from.trim());
-    if (range.to?.trim()) search.set('to', range.to.trim());
+    if (query.from?.trim()) search.set('from', query.from.trim());
+    if (query.to?.trim()) search.set('to', query.to.trim());
+    if (query.groupBy) search.set('groupBy', query.groupBy);
+    appendGatewayAttribution(search, query);
     const suffix = search.size > 0 ? `?${search.toString()}` : '';
     return apiGet<PortkeyGatewayStats>(`/api/portkey-gateway/stats${suffix}`);
   },
@@ -263,8 +279,7 @@ export const api = {
     if (query.provider?.trim()) search.set('provider', query.provider.trim());
     if (query.model?.trim()) search.set('model', query.model.trim());
     if (query.statusClass) search.set('statusClass', query.statusClass);
-    if (query.workflowRunId?.trim()) search.set('workflowRunId', query.workflowRunId.trim());
-    if (query.teamRunId?.trim()) search.set('teamRunId', query.teamRunId.trim());
+    appendGatewayAttribution(search, query);
     if (query.limit) search.set('limit', String(query.limit));
     if (query.cursor?.trim()) search.set('cursor', query.cursor.trim());
     const suffix = search.size > 0 ? `?${search.toString()}` : '';
@@ -306,6 +321,7 @@ export const api = {
   pauseRun: (_workspace: string | undefined, runId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/pause`),
   resumeRun: (_workspace: string | undefined, runId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/resume`),
   refreshRunPendingAction: (_workspace: string | undefined, runId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/pending-action/refresh`),
+  openRunPendingActionBrowser: (_workspace: string | undefined, runId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/pending-action/open-browser`),
   retryRunNode: (_workspace: string | undefined, runId: string, nodeRunId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeRunId)}/retry`),
 };
 

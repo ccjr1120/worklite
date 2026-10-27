@@ -54,6 +54,9 @@ export type ArtifactRef = {
 
 export type NodeExecutionContext = {
   workspaceId: string;
+  // The Workflow a node belongs to, so usage recorded against this node survives the
+  // Run that produced it: Gateway statistics outlive Run records.
+  workflowId: string;
   workflowRunId: string;
   workflowVersionId: string;
   nodeId: string;

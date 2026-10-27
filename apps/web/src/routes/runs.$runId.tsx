@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { Ban, Check, FileStack, LoaderCircle, Pause, Play, QrCode } from 'lucide-react';
+import { Ban, Check, ExternalLink, FileStack, LoaderCircle, Pause, Play, QrCode } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RunProgressEvent } from '@worklite/contracts';
@@ -40,8 +40,11 @@ function RunDetailPage() {
   const [qrLoading, setQrLoading] = useState(false);
   const [qrError, setQrError] = useState<string | null>(null);
   const [qrUpdated, setQrUpdated] = useState(false);
+  const [browserOpening, setBrowserOpening] = useState(false);
+  const [browserOpenError, setBrowserOpenError] = useState<string | null>(null);
   const [, setQrExpiryTick] = useState(0);
   const qrLoadingRef = useRef(false);
+  const browserOpeningRef = useRef(false);
   const terminal = run?.status === 'succeeded' || run?.status === 'failed' || run?.status === 'cancelled' || run?.status === 'timed_out';
   const pendingAction = run?.pendingAction ?? null;
   const currentQrCode = pendingAction?.qrCode ?? null;
@@ -149,7 +152,7 @@ function RunDetailPage() {
   };
 
   const refreshPendingActionQr = async () => {
-    if (qrLoadingRef.current) return;
+    if (qrLoadingRef.current || browserOpeningRef.current) return;
     qrLoadingRef.current = true;
     setQrLoading(true);
     setQrVisible(false);
@@ -170,6 +173,25 @@ function RunDetailPage() {
     } finally {
       qrLoadingRef.current = false;
       setQrLoading(false);
+    }
+  };
+
+  // The login page opens in a browser on the WorkLite host, so a sign-in that
+  // needs an account password or a trusted browser can still finish and resume
+  // this run.
+  const openPendingActionBrowser = async () => {
+    if (browserOpeningRef.current || qrLoadingRef.current) return;
+    browserOpeningRef.current = true;
+    setBrowserOpening(true);
+    setBrowserOpenError(null);
+    try {
+      const next = await api.openRunPendingActionBrowser('personal', runId);
+      queryClient.setQueryData(['run', runId], next);
+    } catch (failure) {
+      setBrowserOpenError(failure instanceof Error && failure.message ? failure.message : t('runs:pendingAction.browserOpenFailed'));
+    } finally {
+      browserOpeningRef.current = false;
+      setBrowserOpening(false);
     }
   };
 
@@ -260,13 +282,21 @@ function RunDetailPage() {
           ) : null}
           {pendingQrExpired ? <p className="mt-3 text-[13px] text-muted-foreground" role="status">{t('runs:pendingAction.expired')}</p> : null}
           <div className="mt-4 flex flex-wrap gap-2">
-            <Button type="button" size="compact" onClick={() => void refreshPendingActionQr()} disabled={qrLoading} aria-busy={qrLoading}>
+            <Button type="button" size="compact" onClick={() => void refreshPendingActionQr()} disabled={qrLoading || browserOpening} aria-busy={qrLoading}>
               {qrLoading ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <QrCode aria-hidden="true" />}
               {qrLoading ? t('runs:pendingAction.replacing') : showQr ? t('runs:pendingAction.refresh') : pendingQrExpired ? t('runs:pendingAction.getAgain') : t('runs:pendingAction.get')}
             </Button>
+            {pendingAction.type === 'wechat_login' ? (
+              <Button type="button" size="compact" variant="secondary" onClick={() => void openPendingActionBrowser()} disabled={qrLoading || browserOpening} aria-busy={browserOpening}>
+                {browserOpening ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <ExternalLink aria-hidden="true" />}
+                {browserOpening ? t('runs:pendingAction.openingBrowser') : t('runs:pendingAction.openBrowser')}
+              </Button>
+            ) : null}
           </div>
+          {pendingAction.type === 'wechat_login' ? <p className="mt-2 text-[13px] text-muted-foreground">{t('runs:pendingAction.browserHelp')}</p> : null}
           {qrUpdated ? <p className="mt-2 flex items-center gap-1.5 text-[13px] text-success" role="status"><Check className="size-3.5" aria-hidden="true" />{t('runs:pendingAction.refreshed')}</p> : null}
           {qrError ? <p className="mt-2 text-[13px] text-danger" role="alert">{qrError}</p> : null}
+          {browserOpenError ? <p className="mt-2 text-[13px] text-danger" role="alert">{browserOpenError}</p> : null}
         </section>
       ) : null}
 

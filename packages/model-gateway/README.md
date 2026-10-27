@@ -7,3 +7,5 @@ The package keeps WorkLite-owned request, message, result, usage, and provider c
 Provider credentials are supplied by the caller for one operation. This package does not persist secrets, enforce team authorization, publish model catalogs, retry jobs, or execute tools. Those responsibilities belong to the API, worker, domain services, and agent runtime.
 
 The public contract supports text streaming and one-step Agent generation with normalized Skill-script tool calls. The gateway describes tools and normalizes model messages, while WorkLite domain services retain assignment validation, immediate execution, persistence, and audit ownership. Structured output, multimodal content, model discovery, and provider-specific options will be added only after their WorkLite-neutral contracts are defined.
+
+`apps/api` keeps this package external to its webpack bundle, so Node loads these `.ts` files directly from a deployment release snapshot and resolves their relative imports as ESM. Relative specifiers inside `src` must therefore carry the real `.ts` extension; an extensionless specifier resolves under a bundler but makes the API process exit at startup.

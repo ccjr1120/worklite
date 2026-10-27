@@ -1,7 +1,7 @@
 import { ChevronDown, Clipboard, KeyRound, LoaderCircle } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { GatewayRequestLogList, GatewayRequestLogListItem, GatewayRequestLogStatusClass, ModelProviderView } from '@worklite/contracts';
+import type { GatewayRequestLogList, GatewayRequestLogListItem, GatewayRequestLogStatusClass, GatewaySurface, ModelProviderView } from '@worklite/contracts';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
 import { StatusBadge } from '@/components/status-badge';
@@ -18,8 +18,19 @@ type RequestLogFilters = {
   provider?: string;
   model?: string;
   statusClass?: GatewayRequestLogStatusClass;
+  surface?: GatewaySurface;
+  conversationId?: string;
+  projectTaskId?: string;
+  executor?: string;
+  teamId?: string;
+  teamRunId?: string;
+  workflowId?: string;
   workflowRunId?: string;
 };
+
+// The attribution part of a filter, as chips: these are set by following a usage row
+// rather than typed, so they are shown and cleared rather than offered as pickers.
+const ATTRIBUTION_FILTER_KEYS = ['surface', 'conversationId', 'projectTaskId', 'executor', 'teamId', 'teamRunId', 'workflowId', 'workflowRunId'] as const;
 
 function capturedBodyText(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -107,8 +118,11 @@ function RequestLogRow({ item, expanded, onToggle, locale, onOpenProvider }: { i
         <div className="border-t border-border px-3 py-3">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {item.streaming ? <span>{t('requests.streaming')}</span> : null}
-            {item.source ? <span className="font-mono">{item.source}</span> : null}
+            <span className="font-mono">{t(`usage.surfaces.${item.surface}` as never)}</span>
+            {item.executor ? <span className="font-mono">{item.executor}</span> : null}
+            {item.conversationId ? <span className="font-mono">{t('requests.correlatedConversation', { id: item.conversationId })}</span> : null}
             {item.workflowRunId ? <span className="font-mono">{t('requests.correlatedRun', { id: item.workflowRunId })}</span> : null}
+            {item.teamRunId ? <span className="font-mono">{t('requests.correlatedTeamRun', { id: item.teamRunId })}</span> : null}
             {tokenMetrics.length ? <span className="tabular-nums">{tokenMetrics.join(' · ')}</span> : null}
             {onOpenProvider ? <Button type="button" variant="ghost" size="compact" className="ml-auto" onClick={() => onOpenProvider(item.provider)}><KeyRound className="size-4" aria-hidden="true" />{t('requests.openProvider')}</Button> : null}
           </div>
@@ -147,7 +161,7 @@ function GatewayRequestLogs({ from, to, providers, filters, onFiltersChange, foc
   const [loadingMore, setLoadingMore] = useState(false);
   const logsQuery = useGatewayRequestLogsQuery({ ...filters, from, to });
   const focusedQuery = useGatewayRequestLogQuery(focusedRequestId);
-  const hasFilters = Boolean(filters.provider || filters.model || filters.statusClass || filters.workflowRunId);
+  const hasFilters = Boolean(filters.provider || filters.model || filters.statusClass || ATTRIBUTION_FILTER_KEYS.some((key) => filters[key]));
   const availableModels = filters.provider
     ? providers.find((provider) => provider.name === filters.provider)?.models ?? []
     : [...new Set(providers.flatMap((provider) => provider.models))].sort();
@@ -157,7 +171,7 @@ function GatewayRequestLogs({ from, to, providers, filters, onFiltersChange, foc
   useEffect(() => {
     setPages([]);
     setExpandedId(null);
-  }, [from, to, filters.provider, filters.model, filters.statusClass, filters.workflowRunId]);
+  }, [from, to, filters.provider, filters.model, filters.statusClass, filters.surface, filters.conversationId, filters.projectTaskId, filters.executor, filters.teamId, filters.teamRunId, filters.workflowId, filters.workflowRunId]);
 
   useEffect(() => {
     setExpandedId(focusedRequestId ?? null);
@@ -215,11 +229,14 @@ function GatewayRequestLogs({ from, to, providers, filters, onFiltersChange, foc
             <SelectItem value="server_error">{t('requests.statusClass.serverError')}</SelectItem>
           </SelectContent>
         </Select>
-        {filters.workflowRunId ? (
-          <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-subtle px-2 py-1 font-mono text-xs">
-            {t('requests.correlatedRun', { id: filters.workflowRunId })}
-          </span>
-        ) : null}
+        {ATTRIBUTION_FILTER_KEYS.flatMap((key) => {
+          const value = filters[key];
+          return value ? [(
+            <span key={key} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-subtle px-2 py-1 font-mono text-xs">
+              {`${t(`requests.filters.${key}` as never)}: ${key === 'surface' ? t(`usage.surfaces.${value}` as never) : value}`}
+            </span>
+          )] : [];
+        })}
         {hasFilters ? (
           <Button type="button" variant="ghost" size="compact" onClick={() => onFiltersChange({})}>{t('common:actions.clearFilters')}</Button>
         ) : null}

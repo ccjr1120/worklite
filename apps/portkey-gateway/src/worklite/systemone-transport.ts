@@ -1,4 +1,5 @@
 import { recordRequestLog, recordRequestStat, type GatewayProvider, type GatewayRequestLogResponse } from './provider-registry';
+import { readAttribution } from './attribution';
 
 /**
  * System One is not a text-generation contract: it exchanges a `state` value and
@@ -125,21 +126,16 @@ export async function systemOnePassthrough(request: Request, provider: GatewayPr
   let requestBody: unknown = null;
   try { requestBody = requestText ? JSON.parse(requestText) : null; } catch { requestBody = requestText || null; }
 
+  const attribution = readAttribution((name) => correlation(request, name));
   const finish = (status: number, capture: GatewayRequestLogResponse, payload?: unknown): void => {
     const { promptTokens, completionTokens, totalTokens } = usageTokens(payload);
-    const stat = { provider: provider.name, model, endpoint: SYSTEMONE_PATH, status, durationMs: Date.now() - started, promptTokens, completionTokens, totalTokens };
+    const stat = { provider: provider.name, model, endpoint: SYSTEMONE_PATH, status, durationMs: Date.now() - started, promptTokens, completionTokens, totalTokens, attribution };
     try { recordRequestStat(stat); } catch (error) { console.error('Error recording request stat:', error); }
     try {
       recordRequestLog({
         ...stat,
         id: correlation(request, 'x-worklite-log-id'),
         streaming: false,
-        source: correlation(request, 'x-worklite-log-source'),
-        workflowRunId: correlation(request, 'x-worklite-workflow-run-id'),
-        nodeRunId: correlation(request, 'x-worklite-node-run-id'),
-        teamRunId: correlation(request, 'x-worklite-team-run-id'),
-        teamTaskAttemptId: correlation(request, 'x-worklite-team-task-attempt-id'),
-        teamOperationKey: correlation(request, 'x-worklite-team-operation-key'),
         request: requestBody,
         response: capture,
       });
@@ -198,7 +194,7 @@ export type SystemOneTestResult =
 
 export async function systemOneTest(provider: GatewayProvider, model: string, requestLogId: string): Promise<SystemOneTestResult> {
   const body = JSON.stringify({ model, ...SYSTEM_ONE_TEST_INPUT });
-  const headers = new Headers({ 'content-type': 'application/json', 'x-worklite-log-source': 'provider_test', 'x-worklite-log-id': requestLogId });
+  const headers = new Headers({ 'content-type': 'application/json', 'x-worklite-surface': 'provider_test', 'x-worklite-log-source': 'provider_test', 'x-worklite-log-id': requestLogId });
   const response = await systemOnePassthrough(new Request(`http://127.0.0.1${SYSTEMONE_PATH}`, { method: 'POST', headers, body }), provider, model);
   const raw = await response.text();
   if (!response.ok) return { ok: false, status: response.status, input: SYSTEM_ONE_TEST_INPUT, message: upstreamErrorMessage(raw, response.status) };

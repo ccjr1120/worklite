@@ -2,7 +2,11 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "rootDir": "./src"
+    "rootDir": "./src",
+    // apps/api keeps this package external, so Node loads these .ts files directly
+    // from a release snapshot and resolves relative imports with ESM rules. Relative
+    // specifiers therefore carry the real ".ts" extension.
+    "allowImportingTsExtensions": true
   },
   "include": ["src"]
 }

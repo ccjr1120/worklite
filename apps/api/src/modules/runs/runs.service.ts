@@ -19,7 +19,8 @@ import {
   type StoredWorkflowExecutionState,
   type StoredWorkflowNode,
 } from '@worklite/db';
-import { commitWorkflowInvocation, composeWorkflowArticle, createWorkflowSchedulerState, executeWorkflowMap, NodeTypeRegistry, readWorkflowOutputPath, resolveWorkflowNodeCapability, takeNextWorkflowInvocation, workflowRunResult, type NodeExecutionRequest, type PendingNodeExecutionResult, type WorkflowSchedulerState } from '@worklite/workflow-engine';
+import { commitWorkflowInvocation, composeWorkflowArticle, createWorkflowSchedulerState, executeWorkflowMap, NodeTypeRegistry, readWorkflowOutputPath, resolveWorkflowNodeCapability, takeNextWorkflowInvocation, workflowRunResult, type NodeExecutionContext, type NodeExecutionRequest, type PendingNodeExecutionResult, type WorkflowSchedulerState } from '@worklite/workflow-engine';
+import type { GatewayCorrelation } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from '../agents/agent-executions.service';
@@ -153,7 +154,7 @@ export class RunsService {
           (delta) => { void this.publish(request.context.workflowRunId, 'node.delta', { nodeId: request.context.nodeId, nodeRunId: request.context.nodeRunId, delta }); },
           config.outputFormat === 'json',
           (detail) => this.publishActivity(request.context.workflowRunId, request.context.nodeId, request.context.nodeRunId, detail),
-          { workflowRunId: request.context.workflowRunId, nodeRunId: request.context.nodeRunId },
+          { workflowId: request.context.workflowId, workflowRunId: request.context.workflowRunId, nodeRunId: request.context.nodeRunId },
           { maxToolCalls: config.maxToolCalls as number | undefined, maxToolRounds: config.maxToolRounds as number | undefined, maxToolResultChars: config.maxToolResultChars as number | undefined },
         );
         if (config.outputFormat !== 'json') return { output: response };
@@ -183,8 +184,7 @@ export class RunsService {
           model: config.model,
           state: inputs.state,
           questions: config.questions as Record<string, unknown>,
-          workflowRunId: request.context.workflowRunId,
-          nodeRunId: request.context.nodeRunId,
+          correlation: workflowCorrelation(request.context),
           signal: request.signal,
         });
         const state = inputs.state;
@@ -226,8 +226,7 @@ export class RunsService {
               model: (config.model as string).trim(),
               state: { item, context },
               questions,
-              workflowRunId: request.context.workflowRunId,
-              nodeRunId: request.context.nodeRunId,
+              correlation: workflowCorrelation(request.context),
               signal: request.signal,
             });
             const record = asRecord(item);
@@ -300,6 +299,7 @@ export class RunsService {
           background: config.background,
           quality: config.quality,
           size: config.size,
+          correlation: workflowCorrelation(request.context),
           signal: request.signal,
         });
         const key = typeof config.key === 'string' && config.key.trim() ? config.key.trim() : undefined;
@@ -568,6 +568,19 @@ export class RunsService {
     return this.get(request, workspaceSlug, runId);
   }
 
+  async openPendingActionBrowser(request: Request, workspaceSlug: string, runId: string): Promise<RunView> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const [run] = await this.db.select().from(workflowRuns).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id))).limit(1);
+    if (!run) throw new NotFoundException('Run not found');
+    if (run.status !== 'waiting_for_input') throw new NotFoundException('Run has no pending action.');
+    const [action] = await this.db.select().from(workflowPendingActions).where(and(eq(workflowPendingActions.runId, runId), inArray(workflowPendingActions.status, ['pending', 'expired']))).orderBy(desc(workflowPendingActions.createdAt)).limit(1);
+    if (!action) throw new NotFoundException('Pending action not found.');
+    if (action.type !== 'wechat_login') throw new BadRequestException('Browser login is only available for WeChat Official Account sign-in.');
+    const expiresAt = await this.wechatOfficialAccount.openLoginInBrowser(action.id);
+    await this.publish(runId, 'pending_action.updated', { actionId: action.id, status: 'pending', expiresAt: expiresAt.toISOString() });
+    return this.get(request, workspaceSlug, runId);
+  }
+
   async retryNode(request: Request, workspaceSlug: string, runId: string, nodeRunId: string): Promise<RunView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [run] = await this.db.select().from(workflowRuns).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id))).limit(1);
@@ -675,6 +688,7 @@ export class RunsService {
               input: invocation.input,
               config: node.config,
               context: {
+                workflowId: run.workflowId,
                 workflowRunId: runId,
                 workflowVersionId: run.workflowVersionId,
                 nodeId: node.id,
@@ -1101,6 +1115,17 @@ function rankSystemOneMapResults(entries: Record<string, unknown>[], rank: unkno
     .map((item) => item.entry);
   const limit = typeof config.limit === 'number' && Number.isInteger(config.limit) && config.limit > 0 ? config.limit : null;
   return limit === null ? ordered : ordered.slice(0, limit);
+}
+
+// Every Gateway call a node makes is charged to the Workflow surface with the same
+// three identifiers, so a Workflow node never has to assemble this itself.
+function workflowCorrelation(context: NodeExecutionContext): GatewayCorrelation {
+  return {
+    surface: 'workflow',
+    workflowId: context.workflowId,
+    workflowRunId: context.workflowRunId,
+    nodeRunId: context.nodeRunId,
+  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

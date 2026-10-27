@@ -273,11 +273,11 @@ export const workflowRuns = sqliteTable('workflow_runs', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), workflowId: text('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }), workflowVersionId: text('workflow_version_id').notNull().references(() => workflowVersions.id, { onDelete: 'restrict' }),
   status: text('status').$type<'queued' | 'running' | 'paused' | 'waiting_for_input' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out'>().notNull().default('queued'), input: text('input', { mode: 'json' }).$type<unknown>().notNull(), result: text('result', { mode: 'json' }).$type<unknown>(), executionState: text('execution_state', { mode: 'json' }).$type<StoredWorkflowExecutionState>(), currentNodeId: text('current_node_id'),
   createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'), finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
-});
+}, (table) => [index('workflow_runs_workspace_created_idx').on(table.workspaceId, table.createdAt), index('workflow_runs_workflow_created_idx').on(table.workflowId, table.createdAt)]);
 
 export const workflowNodeRuns = sqliteTable('workflow_node_runs', {
   id: text('id').primaryKey(), runId: text('run_id').notNull().references(() => workflowRuns.id, { onDelete: 'cascade' }), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), nodeId: text('node_id').notNull(), position: integer('position').notNull(), type: text('type').notNull(), typeVersion: text('type_version').notNull(), status: text('status').$type<'queued' | 'running' | 'waiting_for_input' | 'succeeded' | 'failed' | 'cancelled'>().notNull().default('queued'), input: text('input', { mode: 'json' }).$type<unknown>(), output: text('output', { mode: 'json' }).$type<unknown>(), artifactIds: text('artifact_ids', { mode: 'json' }).$type<string[]>().notNull().default([]), error: text('error'), retryCount: integer('retry_count').notNull().default(0), startedAt: integer('started_at', { mode: 'timestamp_ms' }), finishedAt: integer('finished_at', { mode: 'timestamp_ms' }), createdAt: timestamp('created_at'),
-});
+}, (table) => [index('workflow_node_runs_run_position_idx').on(table.runId, table.position)]);
 
 export const workflowPendingActions = sqliteTable('workflow_pending_actions', {
   id: text('id').primaryKey(),
@@ -343,7 +343,7 @@ export const commandExecutions = sqliteTable('command_executions', {
   createdAt: timestamp('created_at'),
   startedAt: integer('started_at', { mode: 'timestamp_ms' }),
   finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
-});
+}, (table) => [index('command_executions_status_created_idx').on(table.status, table.createdAt)]);
 
 export const commandExecutionEvents = sqliteTable('command_execution_events', {
   sequence: integer('sequence').primaryKey({ autoIncrement: true }),
@@ -351,7 +351,7 @@ export const commandExecutionEvents = sqliteTable('command_execution_events', {
   type: text('type').$type<'stdout' | 'stderr' | 'lifecycle'>().notNull(),
   data: text('data').notNull(),
   createdAt: timestamp('created_at'),
-}, (table) => [index('command_execution_events_command_sequence_idx').on(table.commandId, table.sequence)]);
+}, (table) => [index('command_execution_events_command_sequence_idx').on(table.commandId, table.sequence), index('command_execution_events_type_created_idx').on(table.type, table.createdAt)]);
 
 export const skills = sqliteTable('skills', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), source: text('source').$type<'local'>().notNull().default('local'), root: text('root').$type<'agents' | 'platform'>().notNull().default('agents'), directory: text('directory').notNull().default(''), version: text('version').notNull().default('draft'), validation: text('validation').$type<'valid' | 'invalid' | 'pending'>().notNull().default('pending'), validationReason: text('validation_reason'), instructions: text('instructions').notNull().default(''), updatedAt: timestamp('updated_at'),
@@ -614,16 +614,6 @@ export const scheduledAgentTasks = sqliteTable('scheduled_agent_tasks', {
 export const mcpServers = sqliteTable('mcp_servers', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), endpoint: text('endpoint').notNull().default(''), connection: text('connection').$type<'connected' | 'unreachable' | 'auth_failed' | 'unconfigured'>().notNull().default('unconfigured'), connectionError: text('connection_error').$type<'authentication' | 'unreachable' | 'unsupported_protocol' | 'malformed_response'>(), transport: text('transport').notNull().default('Streamable HTTP'), allowedTools: integer('allowed_tools').notNull().default(0), allowedToolNames: text('allowed_tool_names', { mode: 'json' }).$type<string[]>().notNull().default([]), version: text('version').notNull().default('v1'), authSecret: text('auth_secret'), updatedAt: timestamp('updated_at'),
 });
-
-// Workspace-scoped write-only credentials for external services such as the
-// Volcengine web search API. Values are AES-256-GCM ciphertext and are never
-// returned by an API response.
-export const workspaceCredentials = sqliteTable('workspace_credentials', {
-  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
-  credentialKey: text('credential_key').notNull(),
-  encryptedValue: text('encrypted_value').notNull(),
-  updatedAt: timestamp('updated_at').notNull(),
-}, (table) => [primaryKey({ columns: [table.workspaceId, table.credentialKey] })]);
 
 export const agentSkills = sqliteTable('agent_skills', {
   agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }),
@@ -1034,11 +1024,11 @@ export const modelProviders = sqliteTable('model_providers', {
 
 export const artifacts = sqliteTable('artifacts', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), workflowId: text('workflow_id').references(() => workflows.id, { onDelete: 'set null' }), runId: text('run_id').references(() => workflowRuns.id, { onDelete: 'set null' }), name: text('name').notNull(), type: text('type').$type<'json' | 'text' | 'markdown' | 'image' | 'unsupported'>().notNull(), size: text('size').notNull().default('0 B'), content: text('content').notNull().default(''), objectKey: text('object_key'), mimeType: text('mime_type'), width: integer('width'), height: integer('height'), sizeBytes: integer('size_bytes'), imageKey: text('image_key'), imagePosition: integer('image_position'), imageRole: text('image_role').$type<'inline' | 'asset'>(), createdAt: timestamp('created_at'),
-});
+}, (table) => [index('artifacts_run_created_idx').on(table.runId, table.createdAt)]);
 
 export const auditLogs = sqliteTable('audit_logs', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), actorId: text('actor_id'), action: text('action').notNull(), resource: text('resource').notNull(), metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}), createdAt: timestamp('created_at'),
-});
+}, (table) => [index('audit_logs_workspace_created_idx').on(table.workspaceId, table.createdAt), index('audit_logs_action_resource_idx').on(table.action, table.resource)]);
 
 export type Workspace = typeof workspaces.$inferSelect;
 export type Plugin = typeof plugins.$inferSelect;

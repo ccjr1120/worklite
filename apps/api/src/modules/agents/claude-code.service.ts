@@ -3,6 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { StoredProjectExecutorLaunch } from '@worklite/db';
+import { gatewayAttributionHeaders } from '@worklite/model-gateway';
 import { CommandsService, type CommandStdioProcess } from '../commands/commands.service';
 import { McpClientService } from '../mcp-servers/mcp-client.service';
 import { requireGatewayUrl, isGatewayPublicModel, localGatewayBaseUrl, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
@@ -320,12 +321,16 @@ class ClaudeCodeSession {
   }
 }
 
+/**
+ * Claude Code sends these with every request it makes to its configured Anthropic base
+ * URL, which is the WorkLite Gateway. Without them the executor's traffic reaches the
+ * Gateway with no attribution and lands in the 'unattributed' group, so the full
+ * correlation is rendered here rather than only the Team fields.
+ */
 function correlationHeaders(request: ProjectExecutorRequest): string {
-  return [
-    `x-worklite-log-source: ${request.owner}`,
-    ...(request.correlation?.teamRunId ? [`x-worklite-team-run-id: ${request.correlation.teamRunId}`] : []),
-    ...(request.correlation?.teamTaskAttemptId ? [`x-worklite-team-task-attempt-id: ${request.correlation.teamTaskAttemptId}`] : []),
-  ].join('\n');
+  const correlation = request.correlation
+    ?? { surface: request.owner === 'team' ? 'team_project_task' as const : 'chat_project_task' as const, executor: 'claude' as const };
+  return Object.entries(gatewayAttributionHeaders(correlation)).map(([name, value]) => `${name}: ${value}`).join('\n');
 }
 
 function toolSummary(name: string, input: unknown): string | undefined {
