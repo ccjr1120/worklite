@@ -757,9 +757,10 @@ async function fillArticle(page: Page, title: string, article: string, inlineIma
   const bodyEditor = await articleEditor(page);
   await bodyEditor.waitFor({ state: 'visible', timeout: 20_000 });
   const articleBody = article.replace(/^#\s+.+$/m, '').trim() || article;
-  // Illustrations are uploaded before the body is written: the material
-  // library returns a WeChat CDN URL, and the Markdown/HTML pass then renders
-  // an ordinary <img> the editor already accepts.
+  // Inline materials are selected into the editor before their canonical
+  // image URL is read. Keep the body editor focused so those temporary images
+  // land in the body; the content API below replaces them with the final HTML.
+  await bodyEditor.click();
   const renderedArticle = await uploadInlineArticleImages(page, articleBody, inlineImages);
   const html = markdownToHtml(renderedArticle);
   // The article editor is ProseMirror, so pasted markup is reparsed against its
@@ -1495,66 +1496,81 @@ async function uploadInlineArticleImages(page: Page, article: string, images: Ge
   if (findInlineImageReferences(article).length === 0) return article;
   const plan = planInlineImageUploads(article, images);
   const urls = new Map<string, string>();
-  for (const upload of plan.uploads) {
-    const imagePath = join(tmpdir(), `worklite-wechat-inline-${randomUUID()}.png`);
-    await writeFile(imagePath, Buffer.from(upload.b64Json, 'base64'));
-    try {
-      urls.set(upload.uploadKey, await uploadImageToMaterial(page, imagePath, upload.uploadKey));
-    } finally {
-      await rm(imagePath, { force: true }).catch(() => undefined);
+  await openArticleImagePicker(page);
+  const imageDialog = page.locator('.weui-desktop-dialog_img-picker:visible').last();
+  try {
+    await imageDialog.waitFor({ state: 'visible', timeout: 20_000 });
+    const items = imageDialog.locator('.weui-desktop-img-picker__item');
+    const knownIdentities = new Set((await settledPickerItemSources(items)).map(thumbnailIdentity));
+    const uploadedImages: Array<{ uploadKey: string; identity: string; label: string }> = [];
+    for (const upload of plan.uploads) {
+      const imagePath = join(tmpdir(), `worklite-wechat-inline-${randomUUID()}.png`);
+      await writeFile(imagePath, Buffer.from(upload.b64Json, 'base64'));
+      try {
+        const identity = await uploadImageToMaterial(page, imageDialog, items, imagePath, upload.uploadKey, knownIdentities);
+        uploadedImages.push({ uploadKey: upload.uploadKey, identity, label: upload.uploadKey });
+      } finally {
+        await rm(imagePath, { force: true }).catch(() => undefined);
+      }
     }
+    const uploadedUrls = await insertUploadedMaterialsAndReadOriginalUrls(page, imageDialog, items, uploadedImages);
+    for (const upload of uploadedImages) {
+      const url = uploadedUrls.get(upload.uploadKey);
+      if (!url) throw new Error(`The original URL for inline image "${upload.label}" is unavailable.`);
+      urls.set(upload.uploadKey, url);
+    }
+  } finally {
+    await closeImagePicker(page);
   }
   return applyInlineImageUrls(article, plan, urls);
 }
 
 // The article toolbar's image control is a dropdown, not a dialog opener:
 // clicking it only reveals `本地上传 / 从图片库选择 / 微信扫码上传 / AI 配图`.
-// 从图片库选择 opens the same material picker the cover flow uses, so uploading
-// there puts the PNG in the account's material library and yields the mmbiz CDN
-// URL that belongs in the article body; the picker is then dismissed without
-// selecting anything, so the upload itself changes no draft content.
+// 从图片库选择 opens the material picker. The newly uploaded rows are inserted
+// together into the focused body editor so its image elements expose the
+// canonical material URLs; fillArticle then replaces those temporary nodes with
+// the final rendered article content without saving a draft.
 const ARTICLE_IMAGE_MENU = 'li#js_editor_insertimage';
 const IMAGE_LIBRARY_LABEL = '从图片库选择';
 
-async function uploadImageToMaterial(page: Page, imagePath: string, label: string): Promise<string> {
-  await openArticleImagePicker(page);
-  const imageDialog = page.locator('.weui-desktop-dialog_img-picker:visible').last();
-  try {
-    await imageDialog.waitFor({ state: 'visible', timeout: 20_000 });
-    const fileInput = imageDialog.locator('.js_upload_btn_container input[type="file"], input[type="file"]').last();
-    const items = imageDialog.locator('.weui-desktop-img-picker__item');
-    const before = await settledPickerItemSources(items);
-    const beforeKeys = new Set(before.map(thumbnailIdentity));
-    await fileInput.setInputFiles(imagePath);
+async function uploadImageToMaterial(
+  page: Page,
+  imageDialog: Locator,
+  items: Locator,
+  imagePath: string,
+  label: string,
+  knownIdentities: Set<string>,
+): Promise<string> {
+  const fileInput = imageDialog.locator('.js_upload_btn_container input[type="file"], input[type="file"]').last();
+  await fileInput.setInputFiles(imagePath);
 
-    // An item appears about 200ms into the upload carrying nothing but its
-    // progress text, `100% <filename>.png`, which parses into a 32-character
-    // identity and so used to read as a finished material; the library then
-    // reloads the whole grid and paints the real thumbnail about 1.7s in.
-    // Wait for a reference that is actually a material URL rather than for the
-    // grid to merely differ from the baseline, which it does throughout.
-    const uploadDeadline = Date.now() + 30_000;
-    let sources = before;
-    let addedIndex = -1;
-    while (Date.now() < uploadDeadline) {
-      sources = await pickerItemSources(items);
-      addedIndex = sources.findIndex((source) => {
-        if (!materialImageCandidate(source)) return false;
-        const identity = thumbnailIdentity(source);
-        return identity.length >= 32 && !beforeKeys.has(identity);
-      });
-      if (addedIndex >= 0) break;
-      await delay(500);
+  // An item first appears with only progress text, then the library reloads and
+  // paints its thumbnail. Keep waiting until the same identity logic used by
+  // the cover flow sees a real, previously unseen material URL.
+  const uploadDeadline = Date.now() + 30_000;
+  let sources: string[] = [];
+  let addedIdentity = '';
+  while (Date.now() < uploadDeadline) {
+    sources = await pickerItemSources(items);
+    const addedSource = sources.find((source) => {
+      if (!materialImageCandidate(source)) return false;
+      const identity = thumbnailIdentity(source);
+      return identity.length >= 32 && !knownIdentities.has(identity);
+    });
+    if (addedSource) {
+      addedIdentity = thumbnailIdentity(addedSource);
+      knownIdentities.add(addedIdentity);
+      break;
     }
-    if (addedIndex < 0) {
-      await page.screenshot({ path: '/tmp/worklite-inline-image-upload-timeout.png', fullPage: true }).catch(() => undefined);
-      await writeFile('/tmp/worklite-inline-image-upload-dom.json', JSON.stringify({ label, before, after: sources }, null, 2), 'utf8').catch(() => undefined);
-      throw new Error(`WeChat did not add the inline image "${label}" to the material library. The picker held ${before.length} items before the upload and ${sources.length} after.`);
-    }
-    return materialImageUrl(sources[addedIndex]!, label);
-  } finally {
-    await closeImagePicker(page);
+    await delay(500);
   }
+  if (!addedIdentity) {
+    await page.screenshot({ path: '/tmp/worklite-inline-image-upload-timeout.png', fullPage: true }).catch(() => undefined);
+    await writeFile('/tmp/worklite-inline-image-upload-dom.json', JSON.stringify({ label, knownIdentities: [...knownIdentities], after: sources }, null, 2), 'utf8').catch(() => undefined);
+    throw new Error(`WeChat did not add the inline image "${label}" to the material library. The picker held ${knownIdentities.size} known items and ${sources.length} visible items after upload.`);
+  }
+  return addedIdentity;
 }
 
 async function openArticleImagePicker(page: Page): Promise<void> {
@@ -1648,10 +1664,8 @@ async function pickerItemSources(items: Locator): Promise<string[]> {
   }));
 }
 
-// The CDN URL a picker item serves once its material exists, or null while the
-// item is still an upload placeholder. Readiness and the returned URL have to
-// agree: anything this rejects must keep the upload polling rather than reach
-// materialImageUrl, which can only fail the run.
+// A picker URL establishes that upload finished, but may be a thumbnail. The
+// original material URL is read after the editor inserts the selected image.
 function materialImageCandidate(source: string): string | null {
   const value = source.match(/url\(["']?(.*?)["']?\)/)?.[1] ?? source;
   return /^https?:\/\//.test(value) && isUploadedMaterialReference(value) ? value : null;
@@ -1660,7 +1674,87 @@ function materialImageCandidate(source: string): string | null {
 function materialImageUrl(source: string, label: string): string {
   const value = materialImageCandidate(source);
   if (!value) throw new Error(`WeChat returned an unusable material URL for inline image "${label}": ${thumbnailIdentity(source) || 'empty'}.`);
+  if (isThumbnailMaterialUrl(value)) throw new Error(`WeChat returned a thumbnail URL for inline image "${label}" instead of the editor's original image URL.`);
   return value;
+}
+
+function isThumbnailMaterialUrl(value: string): boolean {
+  try {
+    return /\/300\/?$/.test(new URL(value).pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function insertUploadedMaterialsAndReadOriginalUrls(
+  page: Page,
+  imageDialog: Locator,
+  items: Locator,
+  uploads: Array<{ uploadKey: string; identity: string; label: string }>,
+): Promise<Map<string, string>> {
+  const bodyEditor = page.locator('#ueditor_0');
+  await bodyEditor.waitFor({ state: 'visible', timeout: 20_000 });
+  const imageSelector = 'img[data-src], img[data-imgfileid]';
+  const previousImageCount = await bodyEditor.locator(imageSelector).count();
+  const sources = await pickerItemSources(items);
+  const uploadedIndices = uploads.map((upload) => sources.findIndex((source) => thumbnailIdentity(source) === upload.identity));
+  if (uploadedIndices.some((index) => index < 0)) throw new Error('A newly uploaded inline image disappeared from the material picker before insertion.');
+
+  // Uploading selects new rows automatically. Clear unrelated rows and make
+  // sure every newly uploaded image is selected before the single insertion.
+  const selectedIndices = await imageDialog.locator('.weui-desktop-img-picker__item.selected').evaluateAll((selectedItems) => {
+    const dialog = selectedItems[0]?.closest('.weui-desktop-dialog_img-picker');
+    const allItems = Array.from(dialog?.querySelectorAll('.weui-desktop-img-picker__item') ?? []);
+    return selectedItems.map((item) => allItems.indexOf(item));
+  });
+  for (const index of selectedIndices) {
+    if (index >= 0 && !uploadedIndices.includes(index)) await items.nth(index).click({ force: true });
+  }
+  for (const index of uploadedIndices) {
+    if (!await items.nth(index).evaluate((element) => element.classList.contains('selected'))) {
+      await items.nth(index).click({ force: true });
+    }
+  }
+
+  const confirmButton = imageDialog.locator('button:visible').filter({ hasText: '确定' }).last();
+  await confirmButton.waitFor({ state: 'visible', timeout: 10_000 });
+  const confirmHandle = await confirmButton.elementHandle();
+  if (!confirmHandle) throw new Error('WeChat did not expose article image insertion for the uploaded materials.');
+  await page.waitForFunction(
+    (button) => !button.hasAttribute('disabled') && !button.classList.contains('weui-desktop-btn_disabled'),
+    confirmHandle,
+    { timeout: 15_000 },
+  );
+  await confirmButton.click();
+  await imageDialog.waitFor({ state: 'hidden', timeout: 20_000 });
+  const expectedImageCount = previousImageCount + uploads.length;
+  const insertionDeadline = Date.now() + 20_000;
+  let currentImageCount = await bodyEditor.locator(imageSelector).count();
+  while (currentImageCount < expectedImageCount && Date.now() < insertionDeadline) {
+    await delay(300);
+    currentImageCount = await bodyEditor.locator(imageSelector).count();
+  }
+  if (currentImageCount < expectedImageCount) throw new Error('WeChat did not insert every selected image into the article body.');
+
+  const insertedImages = await bodyEditor.locator(imageSelector).evaluateAll((images) => images.map((image) => ({
+    src: image.getAttribute('src'),
+    dataSrc: image.getAttribute('data-src'),
+    dataOriginal: image.getAttribute('data-original'),
+    dataUrl: image.getAttribute('data-url'),
+  })));
+  const uploadedUrls = new Map<string, string>();
+  for (const image of insertedImages.slice(previousImageCount)) {
+    const originalUrl = [image.dataSrc, image.src, image.dataOriginal, image.dataUrl]
+      .find((candidate) => Boolean(candidate && materialImageCandidate(candidate) && !isThumbnailMaterialUrl(candidate)));
+    if (!originalUrl) throw new Error('WeChat did not insert an original material URL into the article body.');
+    const identity = thumbnailIdentity(originalUrl);
+    const upload = uploads.find((candidate) => candidate.identity === identity);
+    if (!upload) throw new Error('An inserted article image did not match a newly uploaded material.');
+    if (uploadedUrls.has(upload.uploadKey)) throw new Error(`WeChat inserted inline image "${upload.label}" more than once.`);
+    uploadedUrls.set(upload.uploadKey, materialImageUrl(originalUrl, upload.label));
+  }
+  if (uploadedUrls.size !== uploads.length) throw new Error('WeChat did not insert every newly uploaded material into the article body.');
+  return uploadedUrls;
 }
 
 async function setCoverImage(page: Page, coverPath: string): Promise<void> {
