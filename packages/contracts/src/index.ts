@@ -539,17 +539,6 @@ export type WorkspaceSettingsView = {
 
 export type UpdateWorkspaceSettingsRequest = Partial<Pick<WorkspaceSettingsView, 'appearance'>>;
 
-// Web search credentials are write-only: responses report whether a key exists,
-// never the key or a reversible fragment of it.
-export type WebSearchSettingsView = {
-  configured: boolean;
-  updatedAt: string | null;
-};
-
-export type UpdateWebSearchSettingsRequest = {
-  apiKey: string;
-};
-
 export type PortkeyGatewayStatus = 'starting' | 'running' | 'failed';
 
 export type PortkeyGatewayView = {

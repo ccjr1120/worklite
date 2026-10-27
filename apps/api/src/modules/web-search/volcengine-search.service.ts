@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { WEB_SEARCH_API_KEY_ENV_KEY } from './web-search-api-key';
 
 const SEARCH_ENDPOINT = 'https://open.feedcoopapi.com/search_api/web_search';
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -66,13 +67,13 @@ export type WebSearchResponse = {
 @Injectable()
 export class VolcengineSearchService {
   /**
-   * Runs one web search. The caller supplies the key or falls back to the
-   * workspace credential; the key never appears in the result or an error.
+   * Runs one web search. The caller resolves the key from the API environment or
+   * an inbound bearer token; the key never appears in the result or an error.
    */
   async search(raw: unknown, apiKey: string | null): Promise<WebSearchResponse> {
     const params = normalizeSearchParams(raw);
     if (!apiKey) {
-      throw new ServiceUnavailableException('Web search is not configured. Enter the Volcengine search API key in the secure web search form first.');
+      throw new ServiceUnavailableException(`Web search is not configured. Set ${WEB_SEARCH_API_KEY_ENV_KEY} in the WorkLite API environment first.`);
     }
     const timeoutMs = params.maxWaitTime === undefined
       ? DEFAULT_TIMEOUT_MS
