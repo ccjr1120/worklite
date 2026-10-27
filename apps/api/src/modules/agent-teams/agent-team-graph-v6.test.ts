@@ -42,7 +42,6 @@ function baseInitial(overrides: Partial<AgentTeamGroupGraphInitial> = {}): Agent
     projectDirectory: '/tmp/worklite-test-project',
     outputDirectory: '/tmp/worklite-test-output',
     scopeRevision: 1,
-    authorizedCommands: [],
     projectInstructions: [],
     groupContext: groupContext(),
     ...overrides,
@@ -152,7 +151,7 @@ describe('createAgentTeamGroupGraph first dispatch (v8 no-history scenario)', ()
 
     // Resuming that same thread after an answer is recorded uses a Command, matching the
     // runtime's answer path; this is unaffected by the fix and still works.
-    const resumeStream = await graph.stream(new Command({ resume: { answer: 'ok', authorizedCommands: [] } }), {
+    const resumeStream = await graph.stream(new Command({ resume: { answer: 'ok' } }), {
       configurable: { thread_id: threadId },
     });
     for await (const _chunk of resumeStream) {

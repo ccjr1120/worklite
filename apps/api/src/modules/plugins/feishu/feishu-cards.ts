@@ -23,7 +23,7 @@ export type CardState = {
   conversation?: boolean;
   streaming?: boolean;
   details?: string;
-  question?: { text: string; action: FeishuAction; commands?: boolean; replyOnly?: boolean };
+  question?: { text: string; action: FeishuAction; replyOnly?: boolean };
   imageKey?: string;
 };
 export type FeishuCard = {
@@ -88,8 +88,7 @@ export function renderCard(submissionId: string, state: CardState): SavedCard {
     elements.push({ tag: 'markdown', element_id: 'question', content: attachmentImagesAsText(state.question.text) });
     if (!state.question.replyOnly) elements.push({ tag: 'form', element_id: 'answer_form', name: 'task_answer', elements: [
       { tag: 'input', name: 'answer', input_type: 'multiline_text', label: text('回答'), placeholder: text('补充当前任务需要的信息'), required: true },
-      ...(state.question.commands ? [{ tag: 'input', name: 'commands', input_type: 'multiline_text', label: text('授权执行的完整命令（可选，每行一条）'), placeholder: text('只有在此明确提交的命令才会获得授权') }] : []),
-      button({ label: state.question.commands ? '提交回答与命令授权' : '提交回答', action: state.question.action }, true),
+      button({ label: '提交回答', action: state.question.action }, true),
     ] });
   }
   // JSON 2.0 places interactive components in columns rather than a legacy action container.
