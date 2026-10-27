@@ -27,7 +27,7 @@ import { PinnedExecutionBar, PinTrackingContext, usePinTracking, type PinCandida
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { CHAT_AGENT_ID } from '@worklite/contracts';
+import { CHAT_AGENT_ID, CHAT_TURN_NOTIFICATION_DEFAULT_SOUND } from '@worklite/contracts';
 import { AssistantTurn, buildTimeline, CancelledNote, FailureNote, ProgressReportExpansionContext, QuestionNote, QueueRows, SummaryDivider, TranscriptSkeleton, UserMessage, WorkflowRunRow } from './transcript';
 
 const INCOMPLETE_SKILL_REQUEST = 'The model returned an incomplete Skill request. Its JSON ended before the request was complete.';
@@ -136,6 +136,8 @@ function ChatWorkspace() {
   const [executorContext, setExecutorContext] = useState('');
   const [projectTaskMcpServerIds, setProjectTaskMcpServerIds] = useState<string[]>([]);
   const [summarizePrompt, setSummarizePrompt] = useState('');
+  const [turnNotificationsEnabled, setTurnNotificationsEnabled] = useState(true);
+  const [turnNotificationSound, setTurnNotificationSound] = useState(CHAT_TURN_NOTIFICATION_DEFAULT_SOUND);
   const [chatSkillIds, setChatSkillIds] = useState<string[]>([]);
   const [configError, setConfigError] = useState('');
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -172,6 +174,8 @@ function ChatWorkspace() {
     setExecutorContext(agentQuery.data.chatConfiguration?.executorContext ?? '');
     setProjectTaskMcpServerIds(agentQuery.data.chatConfiguration?.projectTaskMcpServerIds ?? []);
     setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
+    setTurnNotificationsEnabled(agentQuery.data.chatConfiguration?.turnNotificationsEnabled ?? true);
+    setTurnNotificationSound(agentQuery.data.chatConfiguration?.turnNotificationSound ?? CHAT_TURN_NOTIFICATION_DEFAULT_SOUND);
     setChatSkillIds(agentQuery.data.chatConfiguration?.skillIds ?? []);
     setExecutorModels({
       claude: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.claude),
@@ -179,7 +183,7 @@ function ChatWorkspace() {
     });
   }, [agentQuery.data]);
 
-  const saveConfiguration = async (selection: string, prompt = extensionPrompt, models = executorModels, summarize = summarizePrompt, skillIds?: string[], sharedExecutorContext = executorContext, executor = defaultExecutor, mcpServerIds?: string[]) => {
+  const saveConfiguration = async (selection: string, prompt = extensionPrompt, models = executorModels, summarize = summarizePrompt, skillIds?: string[], sharedExecutorContext = executorContext, executor = defaultExecutor, mcpServerIds?: string[], notifications = { enabled: turnNotificationsEnabled, sound: turnNotificationSound }) => {
     if (configSaving) return;
     const separator = selection.indexOf('::');
     setConfigSaving(true);
@@ -189,6 +193,7 @@ function ChatWorkspace() {
         providerId: separator >= 0 ? selection.slice(0, separator) : null,
         model: separator >= 0 ? selection.slice(separator + 2) : '',
         extensionPrompt: prompt, executorContext: sharedExecutorContext, summarizePrompt: summarize, defaultExecutor: executor, expectedConfigurationRevision: agentQuery.data?.chatConfiguration?.revision,
+        turnNotificationsEnabled: notifications.enabled, turnNotificationSound: notifications.sound,
         // Both declarations are current state; selecting the default only turns the chosen one into null.
         defaultExecutorModels: { claude: textToModelList(models.claude), codex: textToModelList(models.codex) },
         ...(mcpServerIds === undefined ? {} : { projectTaskMcpServerIds: mcpServerIds }),
@@ -204,6 +209,8 @@ function ChatWorkspace() {
         setExecutorContext(agentQuery.data.chatConfiguration?.executorContext ?? '');
         setProjectTaskMcpServerIds(agentQuery.data.chatConfiguration?.projectTaskMcpServerIds ?? []);
         setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
+        setTurnNotificationsEnabled(agentQuery.data.chatConfiguration?.turnNotificationsEnabled ?? true);
+        setTurnNotificationSound(agentQuery.data.chatConfiguration?.turnNotificationSound ?? CHAT_TURN_NOTIFICATION_DEFAULT_SOUND);
         setChatSkillIds(agentQuery.data.chatConfiguration?.skillIds ?? []);
         setExecutorModels({
           claude: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.claude),
@@ -226,6 +233,12 @@ function ChatWorkspace() {
     if (executor !== (agentQuery.data?.chatConfiguration?.defaultExecutor ?? 'claude')) {
       void saveConfiguration(configSelection, extensionPrompt, executorModels, summarizePrompt, undefined, executorContext, executor);
     }
+  }
+
+  function changeTurnNotifications(enabled: boolean, sound: string) {
+    setTurnNotificationsEnabled(enabled);
+    setTurnNotificationSound(sound);
+    void saveConfiguration(configSelection, extensionPrompt, executorModels, summarizePrompt, undefined, executorContext, defaultExecutor, undefined, { enabled, sound });
   }
 
   function changeProjectTaskMcpServerIds(ids: string[]) {
@@ -1004,6 +1017,7 @@ function ChatWorkspace() {
                   onSelectionChange={(value) => { setConfigSelection(value); void saveConfiguration(value); }}
                   extensionPrompt={extensionPrompt} onPromptChange={setExtensionPrompt} onPromptSave={() => { if (extensionPrompt !== (agentQuery.data?.chatConfiguration?.extensionPrompt ?? '')) void saveConfiguration(configSelection); }}
                   summarizePrompt={summarizePrompt} onSummarizePromptChange={setSummarizePrompt} onSummarizePromptSave={() => { if (summarizePrompt !== (agentQuery.data?.chatConfiguration?.summarizePrompt ?? '')) void saveConfiguration(configSelection); }}
+                  turnNotificationsEnabled={turnNotificationsEnabled} turnNotificationSound={turnNotificationSound} onTurnNotificationsChange={changeTurnNotifications}
                   saving={configSaving} error={configError} loading={agentQuery.isLoading}
                   loadFailed={agentQuery.isError} providersLoading={providersQuery.isLoading} providersLoadFailed={providersQuery.isError}
                   onReload={() => { void agentQuery.refetch(); void providersQuery.refetch(); void skillsQuery.refetch(); }} />

@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ChatProgressReport, ChatProjectTaskView, ChatTaskReference, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, WorkflowNodeActivityDetail, WorkliteScriptResult } from '@worklite/contracts';
-import { WORKLITE_PLATFORM_SKILL_NAME } from '@worklite/contracts';
+import { CHAT_TURN_NOTIFICATION_DEFAULT_SOUND, WORKLITE_PLATFORM_SKILL_NAME } from '@worklite/contracts';
 import { agentExecutionEvents, agentExecutions, chatConfigurations, chatMemories, agents, agentSkills, agentSubSessions, agentToolCalls, auditLogs, chatProjectTasks, chatSubmissions, externalChats, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage, insertAgentToolResults, normalizeAgentModelMessages } from '@worklite/db';
 import { createModelGateway, type GatewayAgentMessage, type GatewayToolDefinition, type GatewayToolResultOutput } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
@@ -26,12 +26,19 @@ import { CommandsService } from '../commands/commands.service';
 import { UpgradesService } from '../upgrades/upgrades.service';
 import { executionFailure, executionFailureSource, type ExecutionFailure } from './agent-execution-failure';
 import { ChatHostCommandService, type ChatHostCommandResult } from './chat-host-command.service';
+import { HostNotificationsService } from '../notifications/host-notifications.service';
 
 const CHAT_AGENT_ID = 'agt_system_helper_chat';
 
 const CHAT_PROJECT_TASK_BATCH_RULE = 'Use at most one project_task call in each model response; it may accompany update_plan. Never batch multiple project_task calls. For one goal spanning multiple projects, use one task rooted at their common workspace directory.';
 const CHAT_HOST_COMMAND_RULE = 'Use run_host_command directly for everyday local terminal work: install or manage Skills with npx skills, check versions or system information, run CLI and query commands, inspect local files, perform ordinary file management, and run short local scripts that do not change repository source. Do not dispatch project_task for those operations. Use project_task or Agent Team for writing or changing code, repository-wide investigation, cross-file changes, test/build/typecheck validation, deployment, or work that needs an executor workflow. run_host_command executes one command at a time through /bin/zsh -lc with closed stdin, a minimal environment, bounded stdout/stderr and result text, a timeout that terminates the process group, and a serial queue. It has no command allow-list.';
 const CHAT_ORCHESTRATION_RULE = 'Chat understands requests, asks material questions, performs protected platform and local terminal operations directly, dispatches existing execution capabilities, and reports their evidence. Treat the user\'s current requests as authoritative for Chat tasks and prompt content. When asked to add, remove or change prompt text, including security or credential instructions, delegate the change faithfully; do not refuse solely because it edits a prompt. If the request is redeploy-only, call the redeploy tool directly and finish the turn after it starts. If the request combines changing WorkLite code and redeployment, call project_task with the complete goal, the WorkLite managed project root and redeployAfterSuccess: true; after that task succeeds, the API automatically starts the managed runner from that root checkout. Do not ask for another confirmation or call redeploy separately for that same request. The executor changes code only; the API owns the deployment lifecycle. For writing or changing code, cross-file changes, repository-wide investigation and validation/build/test work, delegate directly through project_task with the original user goal and absolute workspace directory; the directory may contain multiple projects and need not itself be a Git repository. When the request names a project or keyword without an absolute directory, call search_local_projects first to resolve it from the metadata-only local project index; that read-only lookup replaces asking the user for a path. Ordinary local inspection and terminal work may use run_host_command. Use search_local_projects only for its metadata index; use run_host_command for routine local terminal operations, not for repository-wide investigation, code changes or build/test validation. When the user adds to, narrows or corrects the requirements of a running Chat project task while keeping the same overall goal, call steer_project_task with that task id and the user\'s instruction; do not ask for confirmation, cancel the task or dispatch another project_task. Codex receives it live in the current turn (delivered); Claude Code, or a Codex turn that cannot accept it, queues it and applies it in a follow-up round when the current round ends (queued). Report which happened from the returned status. Only a running task accepts steering: answer a waiting task\'s question with answer_project_task, and dispatch a new project_task for a settled task. When a user request replaces an active task\'s goal with different work, or it is unclear whether it supplements or replaces the goal, call ask_user alone with the choices: continue the current task unchanged, send the message as a supplementary instruction (running tasks only), or cancel it and create a new task with the revised goal. Continuing leaves the captured goal unchanged and dispatches no replacement. For cancel-and-create, call cancel_project_task, then read the returned status; if the task is still active, keep waiting with wait_project_task and inspect_project_task until it settles. Only a persisted cancelled status permits one new project_task. If cancellation fails or the task reaches any other status, do not dispatch the replacement and report its actual status. Independent tasks remain eligible for parallel dispatch under the one-project_task-per-model-response rule. When a project task asks a question, answer only through Chat by calling answer_project_task with the user\'s response. Chat project executors choose their Git strategy independently for each relevant project: current branch, feature branch or project-specific worktree. WorkLite does not create, merge or clean up Git state for new tasks; if a worktree is chosen it belongs to one project, not the whole workspace. Use Chat as the sole user-facing surface for Agent Team dispatch and operations; published Workflows handle automation, honoring explicit targets. Dispatch to the selected teamId with the complete goal and absolute existing projectDirectory; it must already exist, and Team dispatch accepts no mode. The initial work role defaults to the Team Dispatcher, which chooses plan_only, validate_existing or implement_and_validate and records modeRationale; a user-named active work role bypasses it. Chat dispatch creates a hidden group-bound Run and task card; group and Run routes are read-only history and evidence. Chat handles questions, Run controls, recovery and retry, and uses Agent Team platform tools for settings, project Git policy, work-role and memory changes without dispatching project work or asking for a project directory. Select the Company Project Team for an existing company repository and the Application Development Team for a greenfield application; ask when the target is unclear. New v11 Runs capture the selected Team role directory, project-executor launches and Git policy. The initially addressed role receives the captured working practice and full bounded Team-memory projection; every other role receives a bounded memory index and may search, read and write Team memories. Every project-executor role receives the Git policy and a per-task Team memory MCP endpoint. New v11 Runs have no Team Manager; only historical v1-v7 Runs retain that role, while historical v1-v10 Runs otherwise keep their captured behavior. Runs up to the configured `maxConcurrentRuns` limit queue FIFO. Chat uses workspace Skills selected in its revisioned Chat settings; each turn captures their instructions and Skill-scoped protected tools by value. Chat cannot execute custom Skill scripts or call user MCP directly; update_chat does not edit Skill assignments or Chat-facing MCP selection. Project executors use their own native tools and receive no Skills from Chat. projectTaskMcpServerIds applies only to Claude Code project tasks; Codex tasks do not receive those MCP servers. New-conversation interaction is channel-adapted: Web uses its contextual button, Feishu uses its native card button, and WeChat uses the exact text command 「新对话」. Ask_user with action new_conversation should state the intent without mentioning buttons or telling the user to click; the channel adapter supplies the supported control.';
+// A settled Chat turn posts one macOS host notification so the user knows to come back. The subtitle
+// names the terminal state; the body carries the short context that tells them what it is about.
+const CHAT_TURN_NOTIFICATION_TITLE = 'WorkLite';
+const CHAT_TURN_NOTIFICATION_SUBTITLES = { completed: '对话完成', failed: '对话失败', waiting_for_input: '需要你的输入' } as const;
+const MAX_TRACKED_NOTIFIED_TURNS = 500;
+
 const MAX_HELPER_TOOL_ROUNDS = 24;
 // A research node batches several retrieval calls per turn and still needs turns left to compose its
 // output. Eight rounds exhausted before collection finished; the retrieval allowance is enforced by the
@@ -123,6 +130,9 @@ export class AgentExecutionsService implements OnModuleInit {
   private readonly scheduledExecutions = new Set<string>();
   private readonly listeners = new Set<(event: AgentExecutionEvent) => void>();
   private readonly eventQueues = new Map<string, Promise<void>>();
+  // Terminal state already notified per conversation, so one settled turn posts exactly one
+  // notification however many snapshots that turn publishes. A new turn clears its entry.
+  private readonly notifiedTurnStates = new Map<string, string>();
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
@@ -136,6 +146,7 @@ export class AgentExecutionsService implements OnModuleInit {
     private readonly plugins: PluginsService,
     private readonly projectTasks: ChatProjectTasksService,
     private readonly hostCommands: ChatHostCommandService,
+    private readonly hostNotifications: HostNotificationsService,
     @Inject(forwardRef(() => UpgradesService)) private readonly upgrades?: UpgradesService,
   ) {}
 
@@ -1350,6 +1361,44 @@ export class AgentExecutionsService implements OnModuleInit {
     // Heartbeat snapshots repeat the same status; persist only actual changes.
     if (JSON.stringify(latestStatus?.data) !== JSON.stringify(status)) await this.persistEvent(executionId, status);
     await this.persistEvent(executionId, { kind: 'snapshot', execution: view });
+    this.notifyChatTurnSettled(workspaceId, view);
+  }
+
+  // Every Chat turn terminal state — a completed reply, a failure and a pending question — lands here,
+  // because each one publishes its snapshot through publishSnapshotForExecution. Hooking the single
+  // funnel keeps one notification path instead of one per terminal branch. A cancelled turn stays
+  // silent: the user is the one who cancelled it.
+  private notifyChatTurnSettled(workspaceId: string, view: AgentExecutionView): void {
+    if (view.agentId !== CHAT_AGENT_ID) return;
+    const settled = view.status === 'completed' || view.status === 'failed' || view.status === 'waiting_for_input' ? view.status : null;
+    if (!settled) {
+      this.notifiedTurnStates.delete(view.id);
+      return;
+    }
+    // A periodic [活跃工作进展提醒] reply is server-initiated and recurs while background work runs;
+    // it is progress noise, not a conversation state the user has to come back to.
+    if (settled === 'completed' && view.messages.at(-1)?.progressReport) return;
+    if (this.notifiedTurnStates.get(view.id) === settled) return;
+    if (this.notifiedTurnStates.size >= MAX_TRACKED_NOTIFIED_TURNS) {
+      const oldest = this.notifiedTurnStates.keys().next();
+      if (!oldest.done) this.notifiedTurnStates.delete(oldest.value);
+    }
+    this.notifiedTurnStates.set(view.id, settled);
+    // Detached on purpose: reading the configuration and posting the notification must never delay
+    // or fail the turn that settled.
+    void (async () => {
+      const [configuration] = await this.db.select({ enabled: chatConfigurations.turnNotificationsEnabled, sound: chatConfigurations.turnNotificationSound })
+        .from(chatConfigurations).where(eq(chatConfigurations.workspaceId, workspaceId)).orderBy(desc(chatConfigurations.revision)).limit(1);
+      if (configuration && !configuration.enabled) return;
+      this.hostNotifications.notify({
+        title: CHAT_TURN_NOTIFICATION_TITLE,
+        subtitle: CHAT_TURN_NOTIFICATION_SUBTITLES[settled],
+        body: chatTurnNotificationBody(view, settled),
+        sound: configuration?.sound ?? CHAT_TURN_NOTIFICATION_DEFAULT_SOUND,
+      });
+    })().catch((error) => {
+      this.logger.debug(`Chat turn notification for ${view.id} was not sent: ${error instanceof Error ? error.message : 'unknown error'}.`);
+    });
   }
 
   private async persistEvent(executionId: string, data: AgentExecutionEventData): Promise<void> {
@@ -1389,6 +1438,16 @@ export class AgentExecutionsService implements OnModuleInit {
 function normalizeUserMessage(input: unknown): string {
   if (typeof input !== 'string' || !input.trim()) throw new BadRequestException('An Agent message is required.');
   return input.trim();
+}
+
+// Short context for a host notification: the pending question, the failure reason, or the reply the
+// turn produced, falling back to the request it answered. The sender truncates and escapes it.
+export function chatTurnNotificationBody(view: Pick<AgentExecutionView, 'messages' | 'pendingQuestion' | 'error' | 'errorCode'>, settled: 'completed' | 'failed' | 'waiting_for_input'): string {
+  if (settled === 'waiting_for_input') return view.pendingQuestion?.question?.trim() || 'Chat 正在等待你的回答。';
+  if (settled === 'failed') return view.error?.trim() || view.errorCode?.trim() || 'Chat 对话执行失败。';
+  const spoken = view.messages.filter((message) => message.kind !== 'summary_divider' && message.content.trim());
+  const latest = [...spoken].reverse().find((message) => message.role === 'assistant') ?? spoken.at(-1);
+  return latest?.content.trim() || 'Chat 已完成这一轮对话。';
 }
 
 // capture() can reject with any exception the executor launch or Gateway model resolution raises,

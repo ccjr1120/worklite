@@ -226,6 +226,11 @@ export const CHAT_MEMORY_CATEGORY_META: Record<ChatMemoryCategory, { injection: 
 };
 export const CHAT_MEMORY_DEFAULT_CATEGORY: ChatMemoryCategory = 'preference';
 
+// macOS system sounds the Chat turn notification may use; the API accepts only these names, and an
+// empty selection delivers the notification silently. The Web settings surface offers the same list.
+export const CHAT_TURN_NOTIFICATION_SOUNDS: readonly string[] = ['Glass', 'Ping', 'Hero', 'Submarine', 'Blow', 'Bottle', 'Frog', 'Funk', 'Morse', 'Pop', 'Purr', 'Sosumi', 'Tink'];
+export const CHAT_TURN_NOTIFICATION_DEFAULT_SOUND = 'Glass';
+
 export type ChatMemoryView = {
   id: string;
   content: string;
@@ -257,7 +262,7 @@ export type PluginTestResult = {
 
 export type AgentView = {
   // Each declared executor default is one model id, or an ordered list of fallback candidates.
-  chatConfiguration?: { revision: number; extensionPrompt: string; executorContext: string; summarizePrompt: string; defaultExecutor: ProjectExecutor; defaultExecutorModels: Partial<Record<ProjectExecutor, string | string[]>>; projectTaskMcpServerIds: string[]; skillIds: string[] };
+  chatConfiguration?: { revision: number; extensionPrompt: string; executorContext: string; summarizePrompt: string; defaultExecutor: ProjectExecutor; defaultExecutorModels: Partial<Record<ProjectExecutor, string | string[]>>; projectTaskMcpServerIds: string[]; turnNotificationsEnabled: boolean; turnNotificationSound: string; skillIds: string[] };
   id: string;
   workspaceSlug: string;
   kind: 'system' | 'custom';
@@ -514,6 +519,10 @@ export type UpdateAgentRequest = Partial<CreateAgentRequest> & {
   defaultExecutorModels?: Partial<Record<ProjectExecutor, string | string[] | null>>;
   // Workspace MCP servers injected into Claude Code project tasks; an omitted key keeps the declaration.
   projectTaskMcpServerIds?: string[];
+  // macOS host notification for a settled Chat conversation turn, and its system sound name; an
+  // empty sound name delivers the notification silently.
+  turnNotificationsEnabled?: boolean;
+  turnNotificationSound?: string;
   expectedConfigurationRevision?: number;
 };
 

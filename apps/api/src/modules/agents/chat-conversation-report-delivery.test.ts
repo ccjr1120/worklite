@@ -3,6 +3,7 @@ import { createDb, initializeDatabase, agentExecutions, agentToolCalls, chatProj
 import type { ChatProgressReport } from '@worklite/contracts';
 import { AgentExecutionsService } from './agent-executions.service';
 import type { ChatProjectTasksService } from './chat-project-tasks.service';
+import type { HostNotificationsService } from '../notifications/host-notifications.service';
 
 // Exercises the gap where a background report (project task settlement, periodic active-work
 // progress) appended its reply only to the execution's own message history: the WeChat/Feishu
@@ -26,7 +27,9 @@ async function setup() {
   // on the synchronous settlement-transaction side effect, so a rejecting getWorkspace is fine as
   // long as it is observed (avoids an unhandled-rejection warning from the untested background path).
   const workspaces = { getWorkspace: async () => { throw new Error('not exercised by this test'); } };
-  const service = new AgentExecutionsService(db, workspaces as never, unused, unused, unused, unused, unused, unused, unused, projectTasks, unused);
+  // A stub sender keeps these tests from posting real host notifications when a snapshot publishes.
+  const hostNotifications = { notify: () => {} } as unknown as HostNotificationsService;
+  const service = new AgentExecutionsService(db, workspaces as never, unused, unused, unused, unused, unused, unused, unused, projectTasks, unused, hostNotifications);
   return { db, service };
 }
 

@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
-import { hostCommandToolCallUpdate, platformRuntimeTool, projectTaskCaptureFailureMessage, projectTaskSteerOutput, toolCallRejection, type ToolCallAdmission } from './agent-executions.service';
+import { chatTurnNotificationBody, hostCommandToolCallUpdate, platformRuntimeTool, projectTaskCaptureFailureMessage, projectTaskSteerOutput, toolCallRejection, type ToolCallAdmission } from './agent-executions.service';
 import { CHAT_PROJECT_TASK_STEER_TOOL, CHAT_PROJECT_TASK_TOOL } from './chat-project-tasks.service';
 import { ClaudeCodeError } from './claude-code.service';
 import { CodexAppServerError } from './codex-app-server.service';
@@ -153,5 +153,26 @@ describe('run_host_command runtime tool', () => {
       output: result.output,
       exitCode: 137,
     });
+  });
+});
+
+describe('chatTurnNotificationBody', () => {
+  const message = (role: 'user' | 'assistant', content: string, kind?: 'summary_divider') => ({ id: `msg_${content}`, role, content, createdAt: '2026-01-01T00:00:00.000Z', ...(kind ? { kind } : {}) });
+
+  it('reports the pending question for a turn waiting on the user', () => {
+    expect(chatTurnNotificationBody({ messages: [message('user', '继续')], pendingQuestion: { id: 'q1', question: '要用哪个目录？', options: [], createdAt: '' }, error: null, errorCode: null }, 'waiting_for_input')).toBe('要用哪个目录？');
+  });
+
+  it('reports the failure reason for a failed turn, falling back to its code', () => {
+    expect(chatTurnNotificationBody({ messages: [], pendingQuestion: null, error: 'Provider 请求失败', errorCode: 'provider' }, 'failed')).toBe('Provider 请求失败');
+    expect(chatTurnNotificationBody({ messages: [], pendingQuestion: null, error: null, errorCode: 'provider' }, 'failed')).toBe('provider');
+  });
+
+  it('reports the latest spoken reply for a completed turn and ignores summary dividers', () => {
+    expect(chatTurnNotificationBody({ messages: [message('user', '改一下首页'), message('assistant', '已经改好了'), message('assistant', '对话已总结', 'summary_divider')], pendingQuestion: null, error: null, errorCode: null }, 'completed')).toBe('已经改好了');
+  });
+
+  it('falls back to the request when the completed turn spoke no reply', () => {
+    expect(chatTurnNotificationBody({ messages: [message('user', '改一下首页')], pendingQuestion: null, error: null, errorCode: null }, 'completed')).toBe('改一下首页');
   });
 });

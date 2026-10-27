@@ -440,6 +440,10 @@ export const chatConfigurations = sqliteTable('chat_bot_configurations', {
   defaultExecutorModels: text('default_executor_models', { mode: 'json' }).$type<Partial<Record<StoredProjectExecutor, string | string[]>>>().notNull().default({}),
   // Workspace MCP servers injected into Claude Code project tasks; empty keeps the executor's launch unchanged.
   projectTaskMcpServerIds: text('project_task_mcp_server_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
+  // macOS host notification for a settled Chat conversation turn. An empty sound name delivers silently;
+  // both are ignored on every non-darwin host.
+  turnNotificationsEnabled: integer('turn_notifications_enabled', { mode: 'boolean' }).notNull().default(true),
+  turnNotificationSound: text('turn_notification_sound').notNull().default('Glass'),
   providerId: text('provider_id'), model: text('model').notNull(),
   skillIds: text('skill_ids', { mode: 'json' }).$type<string[]>().notNull(),
   mcpServerIds: text('mcp_server_ids', { mode: 'json' }).$type<string[]>().notNull(),

@@ -18,6 +18,7 @@ import { ProjectExecutorService } from './project-executor.service';
 import { ChatAttachmentsService } from './chat-attachments.service';
 import { ChatAttachmentsController } from './chat-attachments.controller';
 import { ChatHostCommandService } from './chat-host-command.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 
-@Module({ imports: [WorkspaceModule, SkillsModule, CommandsModule, McpServersModule, forwardRef(() => PluginsModule)], controllers: [AgentsController, ChatAttachmentsController], providers: [AgentsService, AgentExecutionsService, McpRuntimeService, BuiltinAgentToolsService, IsolatedAgentInvocationService, CodexAppServerService, ClaudeCodeService, ProjectExecutorService, ChatProjectTasksService, ChatMemoriesService, ChatAttachmentsService, ChatHostCommandService], exports: [AgentsService, AgentExecutionsService, IsolatedAgentInvocationService, ProjectExecutorService, ChatProjectTasksService, ChatMemoriesService, ChatAttachmentsService] })
+@Module({ imports: [WorkspaceModule, SkillsModule, CommandsModule, McpServersModule, NotificationsModule, forwardRef(() => PluginsModule)], controllers: [AgentsController, ChatAttachmentsController], providers: [AgentsService, AgentExecutionsService, McpRuntimeService, BuiltinAgentToolsService, IsolatedAgentInvocationService, CodexAppServerService, ClaudeCodeService, ProjectExecutorService, ChatProjectTasksService, ChatMemoriesService, ChatAttachmentsService, ChatHostCommandService], exports: [AgentsService, AgentExecutionsService, IsolatedAgentInvocationService, ProjectExecutorService, ChatProjectTasksService, ChatMemoriesService, ChatAttachmentsService] })
 export class AgentsModule {}

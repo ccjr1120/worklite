@@ -206,6 +206,11 @@
     "promptHint": "仅影响 Chat 模型。离开输入框后保存，从下一轮对话生效。",
     "summarizePrompt": "总结提示词",
     "summarizePromptHint": "留空使用默认提示词，离开输入框后保存，从下一次 /summarize 生效。",
+    "turnNotifications": "对话完成通知",
+    "turnNotificationsHint": "Chat 对话一轮结束时，在运行 WorkLite 的 macOS 主机上弹出系统通知：完成、失败、需要你的输入各用不同副标题，正文给出简短上下文。改动立即生效；非 macOS 主机不会弹出通知。",
+    "turnNotificationsEnabled": "结束一轮对话时弹出系统通知",
+    "turnNotificationSound": "提示音",
+    "turnNotificationSoundSilent": "无提示音",
     "saveFailed": "配置未保存，请重试。",
     "loadFailed": "无法加载配置。"
   },
