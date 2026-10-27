@@ -108,9 +108,22 @@ app.get('/worklite/runtime', (c) => c.json({
 }));
 
 app.get('/worklite/providers', async (c) => c.json(await listProviders()));
+// Attribution filters select one platform surface's traffic. The same names apply to
+// statistics and to request details, so a reader can move between the two stores
+// without rewriting the question.
+const attributionQuery = (c: Context) => ({
+  surface: c.req.query('surface'),
+  conversationId: c.req.query('conversationId'),
+  projectTaskId: c.req.query('projectTaskId'),
+  executor: c.req.query('executor'),
+  teamId: c.req.query('teamId'),
+  teamRunId: c.req.query('teamRunId'),
+  workflowId: c.req.query('workflowId'),
+  workflowRunId: c.req.query('workflowRunId'),
+});
 app.get('/worklite/stats', (c) => {
   try {
-    return c.json(requestStats({ from: c.req.query('from'), to: c.req.query('to') }));
+    return c.json(requestStats({ from: c.req.query('from'), to: c.req.query('to'), groupBy: c.req.query('groupBy'), ...attributionQuery(c) }));
   } catch (error) {
     return c.json({ message: error instanceof RangeError ? error.message : 'Gateway statistics are unavailable.' }, 400);
   }
@@ -124,8 +137,7 @@ app.get('/worklite/request-logs', (c) => {
       provider: c.req.query('provider'),
       model: c.req.query('model'),
       statusClass: statusClass === 'success' || statusClass === 'client_error' || statusClass === 'server_error' ? statusClass : undefined,
-      workflowRunId: c.req.query('workflowRunId'),
-      teamRunId: c.req.query('teamRunId'),
+      ...attributionQuery(c),
       limit: c.req.query('limit') ? Number(c.req.query('limit')) : undefined,
       cursor: c.req.query('cursor'),
     }));
@@ -241,6 +253,7 @@ app.post('/worklite/providers/:providerId/test', async (c) => {
   const headers = new Headers({ 'content-type': 'application/json', 'x-portkey-config': JSON.stringify({ provider: adapter, api_key: provider.apiKey, custom_host: portkeyCustomHost(provider), ...(Object.keys(provider.headers ?? {}).length > 0 ? { forward_headers: Object.keys(provider.headers ?? {}) } : {}) }) });
   for (const [name, value] of Object.entries(provider.headers ?? {})) headers.set(name, value);
   const requestLogId = `glog_${crypto.randomUUID()}`;
+  headers.set('x-worklite-surface', 'provider_test');
   headers.set('x-worklite-log-source', 'provider_test');
   headers.set('x-worklite-log-id', requestLogId);
   headers.set('x-worklite-stat-provider', provider.name);
@@ -346,7 +359,13 @@ async function unifiedProxy(c: Context, operation: UnifiedProxyOperation): Promi
   const headers = new Headers(c.req.raw.headers);
   headers.set('x-worklite-provider-id', selection.providerId);
   if (!headers.has('x-worklite-log-id')) headers.set('x-worklite-log-id', `glog_${crypto.randomUUID()}`);
-  if (!headers.has('x-worklite-log-source')) headers.set('x-worklite-log-source', 'external');
+  // A public-endpoint request that declares no surface comes from a client outside
+  // WorkLite; saying so is what keeps 'unattributed' meaning "a WorkLite path that
+  // forgot to declare itself" rather than "someone else's traffic".
+  if (!headers.has('x-worklite-surface') && !headers.has('x-worklite-log-source')) {
+    headers.set('x-worklite-surface', 'external');
+    headers.set('x-worklite-log-source', 'external');
+  }
   headers.delete('content-length');
   const query = new URL(c.req.url).search;
   const request = new Request(new URL(`/worklite/proxy/${operation}${query}`, c.req.url), {

@@ -35,8 +35,9 @@ import type {
   AuditEventView,
   GatewayRequestLogDetail,
   GatewayRequestLogList,
+  GatewayAttributionFilters,
   GatewayRequestLogQuery,
-  GatewayTimeRange,
+  PortkeyGatewayStatsQuery,
   CreateMcpServerRequest,
   DeleteMcpServerResult,
   McpServerReferenceReport,
@@ -121,6 +122,25 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   return JSON.parse(text) as T;
 }
 
+// Attribution filters are spelled the same way on statistics and on request details,
+// so a view can move one question between the two without rewriting it.
+function appendGatewayAttribution(search: URLSearchParams, filters: GatewayAttributionFilters): void {
+  const entries: Array<[string, string | undefined]> = [
+    ['surface', filters.surface],
+    ['conversationId', filters.conversationId],
+    ['projectTaskId', filters.projectTaskId],
+    ['executor', filters.executor],
+    ['teamId', filters.teamId],
+    ['teamRunId', filters.teamRunId],
+    ['workflowId', filters.workflowId],
+    ['workflowRunId', filters.workflowRunId],
+  ];
+  for (const [name, value] of entries) {
+    const trimmed = value?.trim();
+    if (trimmed) search.set(name, trimmed);
+  }
+}
+
 function apiGet<T>(path: string): Promise<T> {
   return apiRequest<T>(path);
 }
@@ -195,10 +215,12 @@ export const api = {
   updateCodexAccount: (accountId: string, enabled: boolean) => apiPatch<CodexAuthStatus>(`/api/portkey-gateway/codex/accounts/${encodeURIComponent(accountId)}`, { enabled }),
   refreshCodexAccount: (accountId: string) => apiPost<CodexAuthStatus>(`/api/portkey-gateway/codex/accounts/${encodeURIComponent(accountId)}/refresh`),
   deleteCodexAccount: (accountId: string) => apiDelete<CodexAuthStatus>(`/api/portkey-gateway/codex/accounts/${encodeURIComponent(accountId)}`),
-  portkeyGatewayStats: (range: GatewayTimeRange = {}) => {
+  portkeyGatewayStats: (query: PortkeyGatewayStatsQuery = {}) => {
     const search = new URLSearchParams();
-    if (range.from?.trim()) search.set('from', range.from.trim());
-    if (range.to?.trim()) search.set('to', range.to.trim());
+    if (query.from?.trim()) search.set('from', query.from.trim());
+    if (query.to?.trim()) search.set('to', query.to.trim());
+    if (query.groupBy) search.set('groupBy', query.groupBy);
+    appendGatewayAttribution(search, query);
     const suffix = search.size > 0 ? `?${search.toString()}` : '';
     return apiGet<PortkeyGatewayStats>(`/api/portkey-gateway/stats${suffix}`);
   },
@@ -257,8 +279,7 @@ export const api = {
     if (query.provider?.trim()) search.set('provider', query.provider.trim());
     if (query.model?.trim()) search.set('model', query.model.trim());
     if (query.statusClass) search.set('statusClass', query.statusClass);
-    if (query.workflowRunId?.trim()) search.set('workflowRunId', query.workflowRunId.trim());
-    if (query.teamRunId?.trim()) search.set('teamRunId', query.teamRunId.trim());
+    appendGatewayAttribution(search, query);
     if (query.limit) search.set('limit', String(query.limit));
     if (query.cursor?.trim()) search.set('cursor', query.cursor.trim());
     const suffix = search.size > 0 ? `?${search.toString()}` : '';

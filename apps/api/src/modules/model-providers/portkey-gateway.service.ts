@@ -6,12 +6,31 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { BadRequestException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import type { Request, Response } from 'express';
-import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, GatewayRequestLogDetail, GatewayRequestLogList, GatewayRequestLogQuery, GatewayTimeRange, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatus, PortkeyGatewayView, SystemOneTestInput, SystemOneWorkflowOutput, SystemOneWorkflowRequest, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
-import type { ModelProviderConfig } from '@worklite/model-gateway';
+import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, GatewayAttributionFilters, GatewayRequestLogDetail, GatewayRequestLogList, GatewayRequestLogQuery, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatsQuery, PortkeyGatewayStatus, PortkeyGatewayView, SystemOneTestInput, SystemOneWorkflowOutput, SystemOneWorkflowRequest, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
+import { gatewayAttributionHeaders, type GatewayCorrelation, type ModelProviderConfig } from '@worklite/model-gateway';
 import { agents, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 
 const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392);
+
+// Attribution filters are named identically on statistics and request details so a
+// reader can carry one question between the permanent and the 12-hour store.
+function appendAttributionFilters(search: URLSearchParams, filters: GatewayAttributionFilters): void {
+  const entries: Array<[string, string | undefined]> = [
+    ['surface', filters.surface],
+    ['conversationId', filters.conversationId],
+    ['projectTaskId', filters.projectTaskId],
+    ['executor', filters.executor],
+    ['teamId', filters.teamId],
+    ['teamRunId', filters.teamRunId],
+    ['workflowId', filters.workflowId],
+    ['workflowRunId', filters.workflowRunId],
+  ];
+  for (const [name, value] of entries) {
+    const trimmed = value?.trim();
+    if (trimmed) search.set(name, trimmed);
+  }
+}
 
 const portkeyRequire = createRequire(__filename);
 const HOP_BY_HOP_HEADERS = new Set([
@@ -153,11 +172,13 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     return this.gatewayJson<ModelProviderView[]>('/worklite/providers');
   }
 
-  async stats(range: GatewayTimeRange = {}): Promise<PortkeyGatewayStats> {
+  async stats(query: PortkeyGatewayStatsQuery = {}): Promise<PortkeyGatewayStats> {
     await this.ensureGatewayForDiscovery();
     const search = new URLSearchParams();
-    if (range.from?.trim()) search.set('from', range.from.trim());
-    if (range.to?.trim()) search.set('to', range.to.trim());
+    if (query.from?.trim()) search.set('from', query.from.trim());
+    if (query.to?.trim()) search.set('to', query.to.trim());
+    if (query.groupBy) search.set('groupBy', query.groupBy);
+    appendAttributionFilters(search, query);
     const suffix = search.size > 0 ? `?${search.toString()}` : '';
     return this.gatewayJson<PortkeyGatewayStats>(`/worklite/stats${suffix}`);
   }
@@ -170,8 +191,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     if (query.provider?.trim()) search.set('provider', query.provider.trim());
     if (query.model?.trim()) search.set('model', query.model.trim());
     if (query.statusClass) search.set('statusClass', query.statusClass);
-    if (query.workflowRunId?.trim()) search.set('workflowRunId', query.workflowRunId.trim());
-    if (query.teamRunId?.trim()) search.set('teamRunId', query.teamRunId.trim());
+    appendAttributionFilters(search, query);
     if (query.limit) search.set('limit', String(query.limit));
     if (query.cursor?.trim()) search.set('cursor', query.cursor.trim());
     const suffix = search.size > 0 ? `?${search.toString()}` : '';
@@ -373,6 +393,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     background?: string;
     quality?: string;
     size?: string;
+    correlation: GatewayCorrelation;
     signal?: AbortSignal;
   }): Promise<{ type: 'workflow_image'; model: string; mediaType: 'image/png'; data: Array<{ b64Json: string }> }> {
     await this.ensureGatewayForDiscovery();
@@ -391,7 +412,12 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
       '/worklite/proxy/images/generations',
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-worklite-provider-id': provider.id },
+        headers: {
+          'content-type': 'application/json',
+          'x-worklite-provider-id': provider.id,
+          'x-worklite-log-id': `glog_${randomUUID()}`,
+          ...gatewayAttributionHeaders(input.correlation),
+        },
         body: JSON.stringify({ prompt, model: modelId, n: input.n, background: input.background, quality: input.quality, size: input.size }),
         signal: input.signal,
       },
@@ -407,8 +433,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
   }
 
   async executeSystemOne(input: SystemOneWorkflowRequest & {
-    workflowRunId: string;
-    nodeRunId: string;
+    correlation: GatewayCorrelation;
     signal?: AbortSignal;
   }): Promise<SystemOneWorkflowOutput> {
     await this.ensureGatewayForDiscovery();
@@ -426,9 +451,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
         'content-type': 'application/json',
         'x-worklite-provider-id': provider.id,
         'x-worklite-log-id': `glog_${randomUUID()}`,
-        'x-worklite-log-source': 'workflow',
-        'x-worklite-workflow-run-id': input.workflowRunId,
-        'x-worklite-node-run-id': input.nodeRunId,
+        ...gatewayAttributionHeaders(input.correlation),
       },
       body: JSON.stringify({ model: modelId, state: input.state, questions: input.questions }),
       signal: input.signal,

@@ -215,7 +215,7 @@ export class AgentExecutionsService implements OnModuleInit {
     onTextDelta?: (delta: string) => void | Promise<void>,
     jsonOutput = false,
     activity?: WorkflowAgentActivityReporter,
-    correlation?: { workflowRunId: string; nodeRunId: string },
+    correlation?: { workflowId: string; workflowRunId: string; nodeRunId: string },
     limits?: { maxToolCalls?: number; maxToolRounds?: number; maxToolResultChars?: number },
   ): Promise<string> {
     const selectedSkillIds = await this.resources.resolveSkillIds(workspaceId, requestedSkillIds);
@@ -249,7 +249,7 @@ export class AgentExecutionsService implements OnModuleInit {
       onSkillScript: activity ? async (detail) => activity({ phase: 'skill.script', ...detail }) : undefined,
       onMcpCall: activity ? async (detail) => activity({ phase: 'mcp.call', ...detail }) : undefined,
       jsonOutput,
-      correlation: correlation ? { source: 'workflow', ...correlation } : undefined,
+      correlation: correlation ? { surface: 'workflow', ...correlation } : undefined,
       limits,
     });
   }
@@ -596,7 +596,12 @@ export class AgentExecutionsService implements OnModuleInit {
         await this.db.update(agentExecutions).set({ modelMessages: modelMessagesBeforeInference, updatedAt: new Date() }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'running')));
       }
       const inferenceMessages = diagnosticModelMessages(modelMessagesBeforeInference, diagnosticCalls);
-      const result = await createModelGateway().generateAgentStep({ candidates: [{ provider: runtime.provider, model: runtime.model }], systemPrompt, messages: inferenceMessages, skillScripts: availableSkillScripts, builtinTools: builtinToolDefinitions, mcpTools: availableMcpTools, maxToolRounds: MAX_HELPER_TOOL_ROUNDS, abortSignal: abortController.signal, onTextDelta: (delta) => this.persistEvent(executionId, { kind: 'message_delta', messageId: streamedMessageId, delta, ...messagePresentation }) });
+      // Chat's own model loop is charged to the conversation it is running; any other
+      // Agent is the 'agent' surface, which has no conversation of its own.
+      const correlation = agent.id === CHAT_AGENT_ID
+        ? { surface: 'chat' as const, conversationId: executionId }
+        : { surface: 'agent' as const };
+      const result = await createModelGateway().generateAgentStep({ candidates: [{ provider: runtime.provider, model: runtime.model }], systemPrompt, messages: inferenceMessages, skillScripts: availableSkillScripts, builtinTools: builtinToolDefinitions, mcpTools: availableMcpTools, maxToolRounds: MAX_HELPER_TOOL_ROUNDS, correlation, abortSignal: abortController.signal, onTextDelta: (delta) => this.persistEvent(executionId, { kind: 'message_delta', messageId: streamedMessageId, delta, ...messagePresentation }) });
       const responseText = normalizeAssistantMessage(result.text);
       if (!responseText && result.toolCalls.length === 0) throw new Error('Empty Agent response');
       const currentExecution = await this.loadExecution(workspace.id, execution.agentId, executionId);

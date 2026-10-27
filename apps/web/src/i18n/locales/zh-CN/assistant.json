@@ -329,9 +329,19 @@
     "goal": "任务目标",
     "projectDirectory": "项目目录",
     "worktree": "任务 worktree",
-    "mergeStatus": { "merging": "正在合并", "merged": "已合并回原分支", "merged_cleanup_pending": "已合并，worktree 待清理", "conflict": "合并冲突，已保留", "skipped_not_git": "非 Git 目录", "skipped_read_only": "只读任务，无 worktree" },
+    "mergeStatus": {
+      "merging": "正在合并",
+      "merged": "已合并回原分支",
+      "merged_cleanup_pending": "已合并，worktree 待清理",
+      "conflict": "合并冲突，已保留",
+      "skipped_not_git": "非 Git 目录",
+      "skipped_read_only": "只读任务，无 worktree"
+    },
     "model": "模型",
-    "executorName": { "codex": "Codex", "claude": "Claude Code" },
+    "executorName": {
+      "codex": "Codex",
+      "claude": "Claude Code"
+    },
     "defaultModel": "执行器默认模型",
     "status": "状态",
     "elapsed": "已耗时 {{duration}}",
@@ -459,5 +469,24 @@
     "defaultModel": "默认模型",
     "tasks": "角色任务",
     "openRun": "打开任务详情"
+  },
+  "usage": {
+    "title": "本对话 Gateway 用量",
+    "totalTokens": "Token 总量",
+    "requests": "请求数",
+    "unavailable": "不可用",
+    "loadFailed": "无法加载本对话的用量。",
+    "caveat": "仅统计经过 Gateway 的调用，包含本对话的模型循环与其项目任务执行器；未指定模型的 Codex 任务走本机配置、不经 Gateway，其 token 不在此列。",
+    "surfaces": {
+      "chat": "Chat 主对话",
+      "chat_project_task": "Chat 项目任务",
+      "agent": "独立 Agent",
+      "workflow": "Workflow 节点",
+      "team": "Agent Team 角色",
+      "team_project_task": "Agent Team 执行器",
+      "provider_test": "供应商连接测试",
+      "external": "外部直连",
+      "unattributed": "未归因"
+    }
   }
 }

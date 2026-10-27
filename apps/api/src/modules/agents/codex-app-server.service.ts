@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, resolve } from 'node:path';
 import type { StoredProjectExecutorLaunch } from '@worklite/db';
+import { gatewayAttributionHeaders } from '@worklite/model-gateway';
 import { CommandsService, type CommandStdioProcess } from '../commands/commands.service';
 import { requireSafeCommandWord, isGatewayPublicModel, localGatewayBaseUrl, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
 
@@ -59,7 +60,7 @@ export class CodexAppServerService {
       // Provider; a native Codex model keeps the operator's own Codex configuration untouched.
       const model = request.model ?? launch.model;
       const gatewayModel = isGatewayPublicModel(model);
-      const mcp = codexMcpServers(prepared, gatewayModel);
+      const mcp = codexMcpServers(prepared, gatewayModel, attributionHeaders(request));
       process = await this.commands.openStdioProcess(
         appServerArguments(launch, mcp.config), request.projectDirectory, mcp.env,
         (event) => {
@@ -287,7 +288,20 @@ class CodexAppServerSession {
 // Selected MCP servers join the operator's own servers; bearer tokens travel through the process environment.
 // A Gateway-selected model also adds a per-run Responses Provider pointing at the local Gateway, so Codex sends
 // the public `<provider>/<model>` id there instead of requiring it in the operator's own Codex catalog.
-export function codexMcpServers(prepared: PreparedProjectExecution, gatewayModel: boolean): { config: Record<string, unknown>; env: Record<string, string> } {
+/**
+ * Codex only reaches the Gateway through the per-run Responses Provider below, and it
+ * sends nothing WorkLite-specific of its own, so without these configured headers the
+ * executor's traffic arrives unattributed. A Codex task with no declared Gateway model
+ * runs on the operator's local configuration and never passes through the Gateway at
+ * all; no header can make that traffic visible here.
+ */
+export function attributionHeaders(request: ProjectExecutorRequest): Record<string, string> {
+  const correlation = request.correlation
+    ?? { surface: request.owner === 'team' ? 'team_project_task' as const : 'chat_project_task' as const, executor: 'codex' as const };
+  return gatewayAttributionHeaders(correlation);
+}
+
+export function codexMcpServers(prepared: PreparedProjectExecution, gatewayModel: boolean, gatewayHeaders: Record<string, string> = {}): { config: Record<string, unknown>; env: Record<string, string> } {
   const config: Record<string, unknown> = {};
   const env: Record<string, string> = {};
   prepared.mcpServers.forEach((server, index) => {
@@ -306,6 +320,7 @@ export function codexMcpServers(prepared: PreparedProjectExecution, gatewayModel
       base_url: `${localGatewayBaseUrl()}/v1`,
       wire_api: 'responses',
       env_key: GATEWAY_MODEL_API_KEY_ENV,
+      ...(Object.keys(gatewayHeaders).length > 0 ? { http_headers: gatewayHeaders } : {}),
     };
     // Codex requires the configured key variable to be present; the Gateway resolves the real Provider credential.
     env[GATEWAY_MODEL_API_KEY_ENV] = 'worklite';

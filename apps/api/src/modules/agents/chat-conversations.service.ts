@@ -195,6 +195,8 @@ export class ChatConversationsService {
       candidates: [{ provider: runtime.provider, model: runtime.model }],
       systemPrompt: configuration?.summarizePrompt.trim() || DEFAULT_SUMMARIZE_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: transcript }],
+      // Summarizing a conversation is work that conversation caused, so it is charged there.
+      correlation: { surface: 'chat', conversationId: execution.id },
     }).result;
     const summary = text.trim();
     // The slash command is intercepted by the composer and never becomes a visible message,
