@@ -29,7 +29,7 @@ async function setup() {
   const workspaces = { getWorkspace: async () => { throw new Error('not exercised by this test'); } };
   // A stub sender keeps these tests from posting real host notifications when a snapshot publishes.
   const hostNotifications = { notify: () => {} } as unknown as HostNotificationsService;
-  const service = new AgentExecutionsService(db, workspaces as never, unused, unused, unused, unused, unused, unused, unused, projectTasks, unused, hostNotifications);
+  const service = new AgentExecutionsService(db, workspaces as never, unused, unused, unused, unused, unused, unused, unused, projectTasks, unused, unused, hostNotifications);
   return { db, service };
 }
 

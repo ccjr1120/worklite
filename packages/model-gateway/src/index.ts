@@ -34,8 +34,15 @@ export type GatewayMessage = {
   content: string;
 };
 
+// Everything a user message can carry. Plain text is the ordinary case; the ordered part array
+// exists for a turn that also carries images the user attached, which only the user role may hold
+// because assistant text and tool results are always text on this boundary.
+export type GatewayUserContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; image: string; mediaType: string };
+
 export type GatewayAgentMessage =
-  | { role: 'user'; content: string }
+  | { role: 'user'; content: string | GatewayUserContentPart[] }
   | { role: 'assistant'; content: Array<{ type: 'text'; text: string } | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown }> }
   | { role: 'tool'; content: Array<{ type: 'tool-result'; toolCallId: string; toolName: string; output: GatewayToolResultOutput }> };
 

@@ -100,6 +100,19 @@ export class ChatAttachmentsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Describes a live attachment without reading its file, for a consumer that must judge the
+   * image before loading it: projectTaskId identifies an executor-produced report image, while a
+   * null one is an image the user uploaded themselves. Expired and unknown ids return null, so a
+   * reference whose record is already pruned is simply of unknown origin rather than an error.
+   */
+  describe(workspaceId: string, id: string): { id: string; fileName: string; mimeType: string; size: number; projectTaskId: string | null } | null {
+    let attachment: Attachment;
+    try { attachment = this.open(workspaceId, id).attachment; }
+    catch { return null; }
+    return { id: attachment.id, fileName: attachment.fileName, mimeType: attachment.mimeType, size: attachment.size, projectTaskId: attachment.projectTaskId };
+  }
+
+  /**
    * Reads a live attachment's bytes for a consumer that needs the file itself rather than a URL,
    * such as handing a user-pasted image to a project executor. An attachment that has expired or
    * been removed returns null so the consumer can continue without it instead of failing the task.

@@ -3,7 +3,7 @@ import { BadRequestException, ConflictException, forwardRef, Inject, Injectable,
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
-import type { AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ChatProgressReport, ChatProjectTaskView, ChatTaskReference, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, WorkflowNodeActivityDetail, WorkliteScriptResult } from '@worklite/contracts';
+import type { AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ChatProgressReport, ChatProjectTaskView, ChatTaskReference, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, ModelProviderProtocol, WorkflowNodeActivityDetail, WorkliteScriptResult } from '@worklite/contracts';
 import { CHAT_TURN_NOTIFICATION_DEFAULT_SOUND, WORKLITE_PLATFORM_SKILL_NAME } from '@worklite/contracts';
 import { agentExecutionEvents, agentExecutions, chatConfigurations, chatMemories, agents, agentSkills, agentSubSessions, agentToolCalls, auditLogs, chatProjectTasks, chatSubmissions, externalChats, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage, insertAgentToolResults, normalizeAgentModelMessages } from '@worklite/db';
 import { createModelGateway, type GatewayAgentMessage, type GatewayToolDefinition, type GatewayToolResultOutput } from '@worklite/model-gateway';
@@ -18,6 +18,8 @@ import { BuiltinAgentToolsService } from './builtin-agent-tools.service';
 import { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
 import { CODEX_CLI_AGENT_ID, CODEX_CLI_PLUGIN_ID, PluginsService, decryptSecret } from '../plugins/plugins.service';
 import { CHAT_PROJECT_TASK_ANSWER_TOOL, CHAT_PROJECT_TASK_CANCEL_TOOL, CHAT_PROJECT_TASK_STEER_TOOL, CHAT_PROJECT_TASK_TOOL, ChatProjectTasksService } from './chat-project-tasks.service';
+import { ChatAttachmentsService } from './chat-attachments.service';
+import { inlineUserAttachmentImages } from './chat-model-images';
 import { buildChatMemoriesPrompt } from './chat-memories.service';
 import { ClaudeCodeError } from './claude-code.service';
 import { CodexAppServerError } from './codex-app-server.service';
@@ -145,6 +147,7 @@ export class AgentExecutionsService implements OnModuleInit {
     private readonly invocations: IsolatedAgentInvocationService,
     private readonly plugins: PluginsService,
     private readonly projectTasks: ChatProjectTasksService,
+    private readonly attachments: ChatAttachmentsService,
     private readonly hostCommands: ChatHostCommandService,
     private readonly hostNotifications: HostNotificationsService,
     @Inject(forwardRef(() => UpgradesService)) private readonly upgrades?: UpgradesService,
@@ -606,7 +609,7 @@ export class AgentExecutionsService implements OnModuleInit {
       if (JSON.stringify(modelMessagesBeforeInference) !== JSON.stringify(execution.modelMessages)) {
         await this.db.update(agentExecutions).set({ modelMessages: modelMessagesBeforeInference, updatedAt: new Date() }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'running')));
       }
-      const inferenceMessages = diagnosticModelMessages(modelMessagesBeforeInference, diagnosticCalls);
+      const inferenceMessages = await this.withUserImages(workspace.id, executionId, runtime.protocol, diagnosticModelMessages(modelMessagesBeforeInference, diagnosticCalls));
       // Chat's own model loop is charged to the conversation it is running; any other
       // Agent is the 'agent' surface, which has no conversation of its own.
       const correlation = agent.id === CHAT_AGENT_ID
@@ -701,6 +704,30 @@ export class AgentExecutionsService implements OnModuleInit {
       if (this.activeModelRequests.get(executionId) === abortController) this.activeModelRequests.delete(executionId);
     }
     return this.toView(await this.loadExecution(workspace.id, execution.agentId, executionId));
+  }
+
+  /**
+   * Turns the user's own attachment images into real image content for this one request, so the
+   * conversation model reads the picture the reader pasted instead of a URL it cannot open. The
+   * stored history keeps its Markdown references, so nothing here changes what the conversation
+   * or any channel shows.
+   */
+  private async withUserImages(workspaceId: string, executionId: string, protocol: ModelProviderProtocol, messages: GatewayAgentMessage[]): Promise<GatewayAgentMessage[]> {
+    const result = await inlineUserAttachmentImages(messages, {
+      protocol,
+      store: {
+        describe: (id) => this.attachments.describe(workspaceId, id),
+        load: (id) => this.attachments.load(workspaceId, id),
+      },
+    });
+    if (result.skipped.length > 0) {
+      // Named per reason so an image the model never saw is explainable without reproducing the turn.
+      const reasons = result.skipped.map((skip) => `${skip.id}:${skip.reason}`).join(', ');
+      this.logger.warn(`Chat conversation ${executionId} sent ${result.inlined} user image(s) to ${protocol} and left ${result.skipped.length} as text (${reasons}).`);
+    } else if (result.inlined > 0) {
+      this.logger.debug(`Chat conversation ${executionId} sent ${result.inlined} user image(s) to ${protocol}.`);
+    }
+    return result.messages;
   }
 
   private async executeToolCall(request: Request, workspaceSlug: string, workspaceId: string, agentId: string, executionId: string, callId: string): Promise<void> {
