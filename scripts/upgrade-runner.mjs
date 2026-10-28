@@ -180,12 +180,28 @@ function assertRelease(release, verifyGatewayConfiguration = false) {
 }
 
 function releaseGatewayHash(release) {
-  if (release.gatewayHash) return release.gatewayHash;
-  if (!release.releaseDirectory) return null;
-  const manifestPath = join(release.releaseDirectory, 'release-manifest.json');
-  if (!existsSync(manifestPath)) return null;
-  const manifest = read(manifestPath);
-  return manifest.gatewayHash ?? gatewayFingerprint(manifest.files, process.env);
+  // The immutable release manifest is authoritative; runtime summary fields can lag behind it.
+  if (release.releaseDirectory) {
+    const manifestPath = join(release.releaseDirectory, 'release-manifest.json');
+    if (existsSync(manifestPath)) {
+      const manifest = read(manifestPath);
+      return manifest.gatewayHash ?? gatewayFingerprint(manifest.files, process.env);
+    }
+  }
+  return release.gatewayHash ?? null;
+}
+
+function runtimeGatewayHash(runtime) {
+  const gateway = runtime?.gateway;
+  if (!gateway) return releaseGatewayHash(runtime);
+
+  // Compare against the release actually serving Gateway traffic, not the API/Web release.
+  const gatewayReleaseDirectory = gateway.releaseDirectory ?? gateway.supervisorDirectory ?? gateway.projectRoot;
+  if (gatewayReleaseDirectory) {
+    const hash = releaseGatewayHash({ releaseDirectory: gatewayReleaseDirectory });
+    if (hash) return hash;
+  }
+  return gateway.gatewayHash ?? releaseGatewayHash(runtime);
 }
 
 async function withRouteTreeRestored(root, operation) {
@@ -734,7 +750,7 @@ async function run(state, id) {
   const phase = (value, extra = {}) => { job = { ...read(jobPath), ...extra, phase: value, runnerPid: process.pid, updatedAt: new Date().toISOString() }; write(jobPath, job); };
   let stage = 'upgrade initialization';
   const candidateGatewayHash = releaseGatewayHash(job);
-  const previousGatewayHash = releaseGatewayHash(previous);
+  const previousGatewayHash = runtimeGatewayHash(previous);
   const gatewayHasChanged = candidateGatewayHash !== previousGatewayHash;
   let previousGatewayStopped = false;
   let candidateGateway;
