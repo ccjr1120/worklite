@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { BadRequestException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import type { Request, Response } from 'express';
-import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, GatewayAttributionFilters, GatewayRequestLogDetail, GatewayRequestLogList, GatewayRequestLogQuery, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatsQuery, PortkeyGatewayStatus, PortkeyGatewayView, SystemOneTestInput, SystemOneWorkflowOutput, SystemOneWorkflowRequest, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
+import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, GatewayAttributionFilters, GatewayRequestLogDetail, GatewayRequestLogList, GatewayRequestLogQuery, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatsQuery, PortkeyGatewayStatus, PortkeyGatewayView, SystemOneTestInput, SystemOneWorkflowOutput, SystemOneWorkflowRequest, TestModelProviderRequest, UpdateModelProviderModelsRequest, UpdateModelProviderModelsResult, UpdateModelProviderRequest } from '@worklite/contracts';
 import { gatewayAttributionHeaders, type GatewayCorrelation, type ModelProviderConfig } from '@worklite/model-gateway';
 import { agents, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
@@ -258,6 +258,19 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
       }
     }
     return provider;
+  }
+
+  async discoverProviderModels(providerId: string): Promise<DiscoverModelProviderResult> {
+    await this.ensureGatewayForDiscovery();
+    return this.gatewayJson<DiscoverModelProviderResult>('/worklite/providers/' + encodeURIComponent(providerId) + '/discover-models', { method: 'POST' });
+  }
+
+  async updateProviderModels(providerId: string, input: UpdateModelProviderModelsRequest): Promise<UpdateModelProviderModelsResult> {
+    return this.gatewayJson<UpdateModelProviderModelsResult>('/worklite/providers/' + encodeURIComponent(providerId) + '/models', {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+      headers: { 'content-type': 'application/json' },
+    });
   }
 
   async deleteProvider(providerId: string) {

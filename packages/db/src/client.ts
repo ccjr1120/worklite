@@ -21,7 +21,7 @@ Managed server upgrades capture and build an immutable release snapshot, run iso
 The development profile is Web-only on port 3390 and proxies to the managed deployment API on port 23391; the deployment Gateway uses port 23392. There is no separate development database.
 When several inline PNGs need persistence, connect their ordered image output to the Artifact node's single \`data\` port, using \`worklite/join@1\` when needed to preserve order. Each PNG is saved as one image-format Artifact and keeps its input position for Markdown placeholder resolution.
 Workflows use one Artifact resource model. \`worklite/artifact@1\` infers \`format\` as \`image\` for generated PNG output, \`json\` for structured values or valid JSON text, and \`text\` otherwise; use the optional \`format\` override when needed, including for \`markdown\`. Each PNG in a multi-image input is saved as its own image-format Artifact with dimensions, byte size, and a content URL at \`GET /api/artifacts/:artifactId/content\`. The optional \`placement\` value \`inline\` or \`asset\` controls whether an image-format Artifact participates in Markdown placeholder resolution; it does not create another Artifact kind. Existing workflow definitions using \`type\` and \`imageRole\` remain readable. Markdown-format Artifact details resolve placeholders only to an unambiguous matching inline image-format Artifact from the same Run, by exact key first and then by 1-based position; unmatched or ambiguous placeholders keep \`url: null\`. Keep the original generated image outputs connected to the WeChat v2 \`coverImage\`/\`images\` inputs: that node continues uploading its own materials and rewriting the article to mmbiz URLs.
-Model Provider drafts require an explicit protocol selection. Supported protocols are \`openai/chat\`, \`openai/responses\`, \`anthropic/messages\`, \`codex/responses\`, and \`typesafe/systemone\`; do not invent or default another protocol. System One exchanges typed \`state\` and \`questions\` for typed \`answers\`, has no model-discovery endpoint, and cannot run a Workflow Agent node. It can be used through the dedicated \`typesafe/systemone@1\` Workflow node, which stores a public model id and typed questions, accepts JSON state, retains object state fields, and exposes typed answers. Its connection test uses a typed state/question payload and returns typed answers; it is not a chat test. Existing \`deepseek/chat\` records are not migrated or aliased.
+Model Provider drafts require an explicit protocol selection. Supported protocols are \`openai/chat\`, \`openai/responses\`, \`anthropic/messages\`, \`codex/responses\`, and \`typesafe/systemone\`; do not invent or default another protocol. System One exchanges typed \`state\` and \`questions\` for typed \`answers\`, has no model-discovery endpoint, and cannot run a Workflow Agent node. It can be used through the dedicated \`typesafe/systemone@1\` Workflow node, which stores a public model id and typed questions, accepts JSON state, retains object state fields, and exposes typed answers. Its connection test uses a typed state/question payload and returns typed answers; it is not a chat test. Existing \`deepseek/chat\` records are not migrated or aliased. If a saved Provider id is unknown, use query_platform GET /portkey-gateway/providers to identify it; query_platform redacts secret fields. Then use discover_provider_models(providerId) to fetch upstream model ids with stored credentials and update_provider_models(providerId, addModels) to add selected ids while retaining current models; the typed tools return only Provider/model identifiers and never request or return API keys.
 The unified Provider proxy supports Codex image generation at \`/api/portkey-gateway/v1/images/generations\` with the public model \`codex/gpt-image-2\`; it returns base64 image JSON and does not support image edits. Workflows can use the first-party \`worklite/image@1\` node instead: it requires \`prompt\`, fixes the model to \`codex/gpt-image-2\`, retains generated PNG data in scheduler execution state and exposes image summaries in public logs, results, and events. Connecting generated image output to an Artifact node automatically creates one image-format Artifact per PNG, retaining dimensions and byte size and making each available in the Artifact list; no format selection is required. Generated image output may connect only to the WeChat v2 \`coverImage\` or \`images\` input, or to a \`worklite/artifact@1\` \`data\` input; the Artifact format is inferred as image unless explicitly overridden. For a deterministic PNG without a model call, use \`worklite/canvas-sticker@1\` instead: its configuration fixes \`width\`, \`height\`, \`shape\` (none, roundedRect, circle, or ribbon), \`backgroundColor\`, an optional \`cornerRadius\`, and an optional \`text\` object (content, color, fontSize, fontFamily, align); it accepts an optional \`text\` string input that overrides the configured text content, draws with the Canvas 2D API, and produces the identical PNG for identical configuration and text every time. To let an Agent design the drawing itself, use \`worklite/canvas-render@1\`: it takes a required \`code\` string input containing a synchronous JavaScript Canvas 2D script, and its configuration requires \`width\` and \`height\` (16-4096 each, at most 8000000 total pixels) plus an optional \`backgroundColor\`, \`key\`, \`timeoutMs\` (default 10000), and \`maxOutputBytes\` (default 8388608). The script runs in an isolated worker with a hard timeout, memory and output caps, and no filesystem, network, process, timer, require/import, Date, or Math.random access; it receives \`ctx\`, \`canvas\`, \`width\`, \`height\`, \`backgroundColor\`, and the detected CJK-capable \`fontFamily\`, and its output is the same generated-image shape as \`worklite/image@1\` plus \`width\`, \`height\`, and the configured \`key\`. The WeChat v2 \`images\` input is optional and accepts multiple generated images; article Markdown places them with \`![alt](worklite-image:<key>)\`, using the image's \`key\` or its 1-based arrival position; each PNG in a multi-image output counts as its own position. The node uploads each referenced PNG to the account material library and rewrites the article to the resulting mmbiz URL before saving the draft.
 For TypeSafe Workflow automation, use \`typesafe/systemone@1\` with \`config.model\` set to the public \`<providerName>/<modelId>\` value, \`config.questions\` as the immutable typed question object, and a required \`state\` input from a JSON-producing upstream node. The node output retains object state fields and overlays the upstream System One response, including \`answers\`; primitive or array state is exposed under \`state\`. Route typed results with structured paths such as \`$.answers.articleType.choice\`.
 TypeSafe Workflow node output retains object state fields alongside the upstream typed response; primitive and array state is exposed under \`state\`. This allows a typed classification to route the original Workflow context without adding a merge node. Gateway transport remains unchanged.
@@ -38,6 +38,10 @@ Before claiming a platform operation completed, wait for the tool result. Keep r
 const WORKLITE_PLATFORM_SKILL_MD = `# worklite-platform
 
 Platform operations are typed tools generated from this package, plus the protected runtime run_host_command terminal tool. Each tool's description and input schema is its contract: call it with one JSON object that matches the schema. A failed call returns the error together with the expected input; correct the request from that instead of guessing field names.
+
+## Model Providers
+
+For an already saved Provider, call query_platform GET /portkey-gateway/providers if its id is unknown; query_platform redacts secret fields. Then call discover_provider_models with its Provider id to fetch upstream model ids using the stored credentials. The tool returns model ids only. To add one or more ids, call update_provider_models with providerId and addModels; it keeps existing models, removes duplicates, and returns the merged id list. These operations never require requesting or returning an API key. System One has no model-discovery endpoint.
 
 ## Choosing the executor
 
@@ -385,6 +389,13 @@ const WORKLITE_PLATFORM_TOOL_SPECS: Array<[path: string, description: string, in
     baseURL: toolString(),
     models: toolStrings('Model ids offered by the Provider.'),
   }, ['name', 'protocol', 'baseURL', 'models'])],
+  ['scripts/discover-provider-models.mjs', 'Fetch upstream model ids for an already saved Provider using its stored credentials. Returns model ids only and does not reveal the API key. System One has no model-discovery endpoint.', toolInput({
+    providerId: toolString('Saved Provider id returned by query_platform GET /portkey-gateway/providers.'),
+  }, ['providerId'])],
+  ['scripts/update-provider-models.mjs', 'Add one or more model ids to an existing Provider without replacing its current models. Returns the merged model list and Provider id only; credentials are never returned.', toolInput({
+    providerId: toolString('Saved Provider id returned by query_platform GET /portkey-gateway/providers.'),
+    addModels: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 240 }, description: 'Model ids to add. Existing ids are kept and duplicates are removed.' },
+  }, ['providerId', 'addModels'])],
   ['scripts/create-skill.mjs', 'Create a Skill package. The files must include a root SKILL.md containing the instructions; text files may also live under scripts/ (executable only with a shebang) and references/.', toolInput({
     name: toolString(),
     files: { type: 'array', minItems: 1, maxItems: 100, items: toolInput({ path: toolString('Relative path, such as SKILL.md or scripts/run.sh.'), content: toolString() }, ['path', 'content']) },
@@ -1243,6 +1254,26 @@ if (!id) throw new Error('requestLogId is required.');
 const data = await call('/portkey-gateway/request-logs/' + encodeURIComponent(id));
 print({ worklite: { type: 'snapshot' }, data });
 `],
+  ['scripts/discover-provider-models.mjs', [
+    '#!/usr/bin/env node',
+    "import { call, exactKeys, input, print, requiredString } from './lib.mjs';",
+    "const raw = input(); exactKeys(raw, ['providerId']);",
+    "const providerId = requiredString(raw.providerId, 'providerId', 240);",
+    "const result = await call('/portkey-gateway/providers/' + encodeURIComponent(providerId) + '/discover-models', { method: 'POST' });",
+    "const models = Array.isArray(result && result.models) ? result.models.filter((model) => typeof model === 'string').map((model) => model.trim()).filter(Boolean) : [];",
+    "print({ worklite: { type: 'provider_models', providerId }, data: { models } });",
+  ].join('\n') + '\n'],
+  ['scripts/update-provider-models.mjs', [
+    '#!/usr/bin/env node',
+    "import { call, exactKeys, input, print, requiredString, stringArray } from './lib.mjs';",
+    "const raw = input(); exactKeys(raw, ['providerId', 'addModels']);",
+    "const providerId = requiredString(raw.providerId, 'providerId', 240);",
+    "const addModels = stringArray(raw.addModels, 'addModels', 100, 240);",
+    "const result = await call('/portkey-gateway/providers/' + encodeURIComponent(providerId) + '/models', { method: 'PATCH', body: { addModels } });",
+    "const models = Array.isArray(result && result.models) ? result.models.filter((model) => typeof model === 'string').map((model) => model.trim()).filter(Boolean) : [];",
+    "const resultProviderId = result && typeof result.providerId === 'string' ? result.providerId : providerId;",
+    "print({ worklite: { type: 'provider_models', providerId: resultProviderId }, data: { providerId: resultProviderId, models } });",
+  ].join('\n') + '\n'],
   ['scripts/create-provider.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, oneOf, optionalString, print, requiredString, stringArray } from './lib.mjs';
 const raw = input();

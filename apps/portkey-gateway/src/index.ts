@@ -35,7 +35,7 @@ import { imageEditsHandler } from './handlers/imageEditsHandler';
 import { messagesCountTokensHandler } from './handlers/messagesCountTokensHandler';
 import { modelsHandler } from './handlers/modelsHandler';
 import modelResponsesHandler from './handlers/modelResponsesHandler';
-import { createProvider, deleteProvider, getProvider, listProviders, portkeyCustomHost, prepareGatewayDatabase, providerView, requestLog, requestLogs, requestStats, startGatewayDatabaseMaintenance, updateProvider } from './worklite/provider-registry';
+import { addProviderModels, createProvider, deleteProvider, getProvider, listProviders, portkeyCustomHost, prepareGatewayDatabase, providerView, requestLog, requestLogs, requestStats, startGatewayDatabaseMaintenance, updateProvider } from './worklite/provider-registry';
 import { codexAuthStatus, deleteCodexAccount, importCodexAccounts, refreshCodexAccount, startCodexLogin, startCodexOAuthCallbackServer, updateCodexAccount } from './worklite/codex-auth';
 import { codexAccountUsages, codexRateLimits } from './worklite/codex-transport';
 import { isSystemOneProtocol, systemOnePassthrough, systemOneTest } from './worklite/systemone-transport';
@@ -54,6 +54,23 @@ const internalProviderRequests = new WeakSet<Request>();
 
 async function dispatchInternal(request: Request, c: Context): Promise<Response> {
   return runtime === 'workerd' ? app.fetch(request, c.env, c.executionCtx) : app.fetch(request, c.env);
+}
+
+function providerModelIds(payload: unknown): string[] {
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? Object.values(payload).find((value) => Array.isArray(value)) ?? []
+      : [];
+  return [...new Set(rows.flatMap((row) => {
+    if (typeof row === 'string') return [row.trim()];
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return [];
+    for (const key of ['id', 'name', 'model']) {
+      const value = (row as Record<string, unknown>)[key];
+      if (typeof value === 'string') return [value.trim()];
+    }
+    return [];
+  }).filter(Boolean))];
 }
 
 if (runtime === 'node' && process.env.REDIS_CONNECTION_STRING) {
@@ -172,6 +189,43 @@ app.delete('/worklite/codex/accounts/:accountId', (c) => c.json(deleteCodexAccou
 app.get('/worklite/providers/:providerId', async (c) => {
   const provider = await getProvider(c.req.param('providerId'));
   return provider ? c.json(providerView(provider)) : c.json({ message: 'Model provider not found.' }, 404);
+});
+app.post('/worklite/providers/:providerId/discover-models', async (c) => {
+  const provider = await getProvider(c.req.param('providerId'));
+  if (!provider) return c.json({ message: 'Model provider not found.' }, 404);
+
+  const adapter = provider.protocol === 'anthropic/messages'
+    ? 'anthropic'
+    : provider.protocol === 'codex/responses'
+      ? 'codex'
+      : provider.protocol === 'openai/chat' || provider.protocol === 'openai/responses'
+        ? 'openai'
+        : null;
+  if (!adapter) return c.json({ message: 'This Provider protocol does not support model discovery.' }, 400);
+
+  const customHeaders = provider.headers ?? {};
+  const config = {
+    provider: adapter,
+    api_key: provider.apiKey,
+    custom_host: portkeyCustomHost(provider),
+    ...(Object.keys(customHeaders).length > 0 ? { forward_headers: Object.keys(customHeaders) } : {}),
+  };
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(customHeaders)) headers.set(name, value);
+  headers.set('x-portkey-config', JSON.stringify(config));
+  const request = new Request(new URL('/v1/models', c.req.url), { method: 'GET', headers });
+  internalProviderRequests.add(request);
+
+  try {
+    const upstream = await dispatchInternal(request, c);
+    if (!upstream.ok) return c.json({ message: 'The provider did not return a model list (HTTP ' + upstream.status + ').' }, 502);
+    const payload = await upstream.json().catch(() => null) as unknown;
+    const models = providerModelIds(payload);
+    if (models.length === 0) return c.json({ message: 'The provider returned no usable models.' }, 502);
+    return c.json({ models });
+  } catch {
+    return c.json({ message: 'Provider model discovery failed.' }, 502);
+  }
 });
 type ResponsesTestPayload = {
   output_text?: string;
@@ -298,6 +352,14 @@ app.post('/worklite/providers', async (c) => {
 });
 app.patch('/worklite/providers/:providerId', async (c) => {
   try { return c.json(await updateProvider(c.req.param('providerId'), await c.req.json())); } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Provider could not be updated.' }, 400); }
+});
+app.patch('/worklite/providers/:providerId/models', async (c) => {
+  try {
+    return c.json(await addProviderModels(c.req.param('providerId'), await c.req.json()));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Provider models could not be updated.';
+    return c.json({ message }, message === 'Model provider not found.' ? 404 : 400);
+  }
 });
 app.delete('/worklite/providers/:providerId', async (c) => {
   try { await deleteProvider(c.req.param('providerId')); return c.body(null, 204); } catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Provider could not be deleted.' }, 404); }

@@ -1477,6 +1477,15 @@ export type DiscoverModelProviderResult = {
   models: string[];
 };
 
+export type UpdateModelProviderModelsRequest = {
+  addModels: string[];
+};
+
+export type UpdateModelProviderModelsResult = {
+  providerId: string;
+  models: string[];
+};
+
 export type CreateMcpServerRequest = {
   name: string;
   endpoint: string;

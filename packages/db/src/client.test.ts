@@ -271,4 +271,37 @@ describe('initializeDatabase restart recovery', () => {
     expect(chat.systemPrompt).toContain('delegate writing or changing code, repository-wide investigation, cross-file changes and validation/build/test work');
     expect(chat.systemPrompt).not.toMatch(/whitelist|restricted run_host_command|General read, glob, grep and bash|no bash|no direct read/i);
   });
+
+  it('registers saved Provider model tools with credential-free outputs', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+
+    const files = await db.select().from(schema.skillFiles).where(eq(schema.skillFiles.skillId, 'sk_worklite_platform'));
+    const content = new Map(files.map((file) => [file.path, file.content]));
+    const tools = JSON.parse(content.get('scripts/tools.json')!) as Record<string, {
+      name: string;
+      description: string;
+      inputSchema: { required?: string[]; properties: Record<string, { type?: string; minItems?: number; maxItems?: number; items?: { minLength?: number; maxLength?: number } }> };
+    }>;
+    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
+    const discover = tools['scripts/discover-provider-models.mjs'];
+    const update = tools['scripts/update-provider-models.mjs'];
+
+    expect(discover.name).toBe('discover_provider_models');
+    expect(discover.inputSchema.required).toEqual(['providerId']);
+    expect(discover.description).toContain('stored credentials');
+    expect(update.name).toBe('update_provider_models');
+    expect(update.inputSchema.required).toEqual(['providerId', 'addModels']);
+    expect(update.inputSchema.properties.addModels).toMatchObject({ type: 'array', minItems: 1, maxItems: 100 });
+    expect(update.inputSchema.properties.addModels.items).toMatchObject({ minLength: 1, maxLength: 240 });
+    expect(content.get('scripts/discover-provider-models.mjs')).toContain('/discover-models');
+    expect(content.get('scripts/discover-provider-models.mjs')).not.toMatch(/apiKey|api_key|encrypted/i);
+    expect(content.get('scripts/update-provider-models.mjs')).toContain("method: 'PATCH'");
+    expect(content.get('scripts/update-provider-models.mjs')).not.toMatch(/apiKey|api_key|encrypted/i);
+    expect(content.get('SKILL.md')).toContain('discover_provider_models');
+    expect(content.get('SKILL.md')).toContain('update_provider_models');
+    expect(chat.systemPrompt).toContain('discover_provider_models(providerId)');
+    expect(chat.systemPrompt).toContain('update_provider_models(providerId, addModels)');
+    expect(chat.systemPrompt).toContain('never request or return API keys');
+  });
 });

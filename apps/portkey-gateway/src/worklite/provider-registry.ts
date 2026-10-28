@@ -611,6 +611,29 @@ export async function updateProvider(id: string, input: unknown): Promise<Gatewa
   return view({ ...provider, apiKey, ...(headers ? { headers } : {}) });
 }
 
+export function addProviderModels(id: string, input: unknown): { providerId: string; models: string[] } {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Provider model additions must be an object.');
+  const value = input as Record<string, unknown>;
+  if (Object.keys(value).some((key) => key !== 'addModels')) throw new Error('Only addModels is supported.');
+  const addModels = value.addModels;
+  if (!Array.isArray(addModels) || addModels.length < 1 || addModels.length > 100) throw new Error('addModels must contain 1 to 100 model ids.');
+  const additions = addModels.map((model) => typeof model === 'string' ? model.trim() : '');
+  if (additions.some((model) => !model || model.length > 240)) throw new Error('Every added model id must be a non-empty string of at most 240 characters.');
+  if (id === GATEWAY_PROVIDER_ID) throw new Error('Model provider not found.');
+
+  const database = getDatabase();
+  const add = database.transaction(() => {
+    const row = database.prepare('SELECT id, name, base_url, protocol, models, api_key, headers, updated_at FROM gateway_providers WHERE id = ?').get(id) as ProviderRow | undefined;
+    if (!row) throw new Error('Model provider not found.');
+    const current = providerFromRow(row);
+    if (isAutomaticCodexProvider(current)) throw new Error('The codex Provider is managed automatically by the Gateway.');
+    const models = [...new Set([...current.models, ...additions])];
+    database.prepare('UPDATE gateway_providers SET models = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(models), Date.now(), id);
+    return { providerId: current.id, models };
+  });
+  return add.immediate();
+}
+
 export async function deleteProvider(id: string): Promise<void> {
   const row = getDatabase().prepare('SELECT id, name, base_url, protocol, models, api_key, headers, updated_at FROM gateway_providers WHERE id = ?').get(id) as ProviderRow | undefined;
   const current = row ? providerFromRow(row) : undefined;

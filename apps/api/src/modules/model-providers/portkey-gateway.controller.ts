@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { GATEWAY_STATS_GROUP_BYS, GATEWAY_SURFACES } from '@worklite/contracts';
 import { PortkeyGatewayService } from './portkey-gateway.service';
-import type { CodexAccountUsageSnapshot, CodexRateLimitSnapshot, CreateModelProviderRequest, GatewayAttributionFilters, GatewayRequestLogDetail, GatewayRequestLogList, GatewayStatsGroupBy, GatewaySurface, PortkeyGatewayStats, TestModelProviderRequest, UpdateModelProviderRequest } from '@worklite/contracts';
+import type { CodexAccountUsageSnapshot, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderResult, GatewayAttributionFilters, GatewayRequestLogDetail, GatewayRequestLogList, GatewayStatsGroupBy, GatewaySurface, PortkeyGatewayStats, TestModelProviderRequest, UpdateModelProviderModelsRequest, UpdateModelProviderModelsResult, UpdateModelProviderRequest } from '@worklite/contracts';
 
 // Express turns a repeated query parameter into an array, so every value is reduced to
 // one string before it is validated or forwarded; a repeated filter takes its first
@@ -135,6 +135,16 @@ export class PortkeyGatewayController {
   @Patch('providers/:providerId')
   updateProvider(@Param('providerId') providerId: string, @Body() body: UpdateModelProviderRequest) {
     return this.gateway.updateProvider(providerId, body);
+  }
+
+  @Post('providers/:providerId/discover-models')
+  discoverProviderModels(@Param('providerId') providerId: string): Promise<DiscoverModelProviderResult> {
+    return this.gateway.discoverProviderModels(providerId);
+  }
+
+  @Patch('providers/:providerId/models')
+  updateProviderModels(@Param('providerId') providerId: string, @Body() body: UpdateModelProviderModelsRequest): Promise<UpdateModelProviderModelsResult> {
+    return this.gateway.updateProviderModels(providerId, body);
   }
 
   @Delete('providers/:providerId')
