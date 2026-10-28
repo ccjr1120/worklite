@@ -46,8 +46,33 @@ describe('validateCanvasRenderConfig', () => {
 
   it('rejects an empty or oversized script', () => {
     expect(() => validateCanvasRenderCode('   ')).toThrow('non-empty code input');
+    expect(() => validateCanvasRenderCode('```js\n```')).toThrow('non-empty code input');
     expect(() => validateCanvasRenderCode('x'.repeat(65_537))).toThrow('must not exceed');
-    expect(validateCanvasRenderCode('ctx.fillRect(0, 0, 10, 10);')).toContain('fillRect');
+    const code = 'ctx.fillRect(0, 0, 10, 10);';
+    expect(validateCanvasRenderCode(code)).toBe(code);
+  });
+
+  it('strips one complete supported Markdown code fence before validation', () => {
+    const code = 'ctx.fillRect(0, 0, 10, 10);\n';
+    for (const openingFence of ['```', '```js', '```javascript']) {
+      expect(validateCanvasRenderCode(openingFence + '\n' + code + '``` \t\n')).toBe(code);
+    }
+  });
+
+  it('applies the script length limit after stripping the outer code fence', () => {
+    const maximumScript = 'x'.repeat(65_535) + '\n';
+    expect(validateCanvasRenderCode('```js\n' + maximumScript + '```')).toBe(maximumScript);
+    expect(() => validateCanvasRenderCode('```js\n' + 'x'.repeat(65_536) + '\n```')).toThrow('must not exceed');
+  });
+
+  it('leaves incomplete, nested, or mixed Markdown fences unchanged', () => {
+    const incomplete = '```js\nctx.fillRect(0, 0, 10, 10);';
+    const nested = '```js\nconst outer = 1;\n```python\nconst inner = 2;\n```\n';
+    const mixed = 'Here is the script:\n```js\nctx.fillRect(0, 0, 10, 10);\n```';
+
+    expect(validateCanvasRenderCode(incomplete)).toBe(incomplete);
+    expect(validateCanvasRenderCode(nested)).toBe(nested);
+    expect(validateCanvasRenderCode(mixed)).toBe(mixed);
   });
 });
 
@@ -67,6 +92,13 @@ describe('renderCanvasScript', () => {
     expect(pixel(20, 20)).toEqual([255, 0, 0, 255]);
     expect(pixel(80, 20)).toEqual([0, 0, 255, 255]);
     expect(pixel(200, 140)).toEqual([255, 255, 255, 255]);
+  });
+
+  it('executes a script after its complete Markdown code fence is stripped', async () => {
+    const code = validateCanvasRenderCode('```javascript\nctx.fillStyle = "#ff0000";\nctx.fillRect(0, 0, 20, 20);\n```');
+    const result = await renderCanvasScript(config({ width: 32, height: 32 }), code);
+    const decoded = await pixels(result.png);
+    expect(Array.from(decoded.data.slice(0, 4))).toEqual([255, 0, 0, 255]);
   });
 
   it('applies the configured background before the script draws', async () => {

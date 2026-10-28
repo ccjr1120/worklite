@@ -58,10 +58,28 @@ export function validateCanvasRenderConfig(value: unknown): CanvasRenderConfig {
   return { width: config.width, height: config.height, backgroundColor, key, timeoutMs, maxOutputBytes };
 }
 
+/** Removes one complete outer Markdown fence; malformed and nested fences remain untouched. */
+function stripCompleteMarkdownCodeFence(value: string): string {
+  const openingFence = /^```(?:js|javascript)?\r?\n/.exec(value);
+  if (!openingFence) return value;
+
+  const fencedContent = value.slice(openingFence[0].length);
+  const closingFence = /(?:^|\r?\n)```[ \t]*\s*$/.exec(fencedContent);
+  if (!closingFence) return value;
+
+  const closingLineSeparatorLength = closingFence[0].startsWith('\r\n') ? 2 : closingFence[0].startsWith('\n') ? 1 : 0;
+  const code = fencedContent.slice(0, closingFence.index + closingLineSeparatorLength);
+  if (/^[ \t]*```/m.test(code)) return value;
+
+  return code;
+}
+
 export function validateCanvasRenderCode(value: unknown): string {
-  if (typeof value !== 'string' || !value.trim()) throw new Error('Canvas Render node requires a non-empty code input.');
-  if (value.length > MAX_SCRIPT_LENGTH) throw new Error(`Canvas Render node code must not exceed ${MAX_SCRIPT_LENGTH} characters.`);
-  return value;
+  if (typeof value !== 'string') throw new Error('Canvas Render node requires a non-empty code input.');
+  const code = stripCompleteMarkdownCodeFence(value);
+  if (!code.trim()) throw new Error('Canvas Render node requires a non-empty code input.');
+  if (code.length > MAX_SCRIPT_LENGTH) throw new Error(`Canvas Render node code must not exceed ${MAX_SCRIPT_LENGTH} characters.`);
+  return code;
 }
 
 // The worker runs one script and exits. Isolating the render keeps a runaway
