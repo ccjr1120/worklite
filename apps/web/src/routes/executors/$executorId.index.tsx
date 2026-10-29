@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { TeamRecords } from '@/features/executor-categories/team-records';
+import { TeamRecords } from '@/features/executors/team-records';
 
 export const Route = createFileRoute('/executors/$executorId/')({
   component: AgentTeamRecordsRoute,

@@ -17,8 +17,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { TruncatedText } from '@/components/ui/truncated-text';
 import { toSingleLine } from '@/lib/single-line';
 import { cn } from '@/lib/utils';
-import { runModeLabel } from '@/features/executor-categories/run-mode';
-import { formatElapsed, isSettledTeamRun, teamCurrentLabel, teamRoleLabel } from '@/features/executor-categories/team-run-summary';
+import { runModeLabel } from '@/features/executors/run-mode';
+import { formatElapsed, isSettledTeamRun, teamCurrentLabel, teamRoleLabel } from '@/features/executors/team-run-summary';
 
 function WorkflowTask({ submission }: { submission: ChatSubmissionView }) {
   const { t } = useTranslation('assistant');
@@ -45,7 +45,7 @@ function WorkflowTask({ submission }: { submission: ChatSubmissionView }) {
 
 function TeamPendingInput({ run, pendingInput, onRunUpdate }: { run: AgentTeamRunView; pendingInput: AgentTeamPendingInputView; onRunUpdate: (run: AgentTeamRunView) => void }) {
   const { t } = useTranslation('assistant');
-  const { t: tTeams } = useTranslation('executorCategories');
+  const { t: tTeams } = useTranslation('executors');
   const [answer, setAnswer] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -76,7 +76,7 @@ function TeamPendingInput({ run, pendingInput, onRunUpdate }: { run: AgentTeamRu
 }
 
 function TeamRunActions({ run, groupId, onRunUpdate }: { run: AgentTeamRunView; groupId?: string; onRunUpdate: (run: AgentTeamRunView) => void }) {
-  const { t } = useTranslation('executorCategories');
+  const { t } = useTranslation('executors');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [reexecutedRunId, setReexecutedRunId] = useState('');
@@ -119,7 +119,7 @@ function TeamRunActions({ run, groupId, onRunUpdate }: { run: AgentTeamRunView; 
 }
 
 function TeamOperationRecovery({ run, operation, onRunUpdate }: { run: AgentTeamRunView; operation: AgentTeamRunView['operations'][number]; onRunUpdate: (run: AgentTeamRunView) => void }) {
-  const { t } = useTranslation('executorCategories');
+  const { t } = useTranslation('executors');
   const [decision, setDecision] = useState<'adopt_command' | 'mark_failed' | 'replay'>('adopt_command');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -145,7 +145,7 @@ function TeamOperationRecovery({ run, operation, onRunUpdate }: { run: AgentTeam
 // questions and recovery decisions stay visible because the Run is blocked on them.
 function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissionView; runId: string; groupId?: string }) {
   const { t } = useTranslation('assistant');
-  const { t: tTeams } = useTranslation('executorCategories');
+  const { t: tTeams } = useTranslation('executors');
   const pins = useContext(PinTrackingContext);
   const query = useAgentTeamRunQuery('personal', runId);
   const run = query.data;

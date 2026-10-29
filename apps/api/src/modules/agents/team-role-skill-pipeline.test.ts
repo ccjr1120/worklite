@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Request } from 'express';
 import { executorCategories, createDb, initializeDatabase, type Database } from '@worklite/db';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
-import { AgentTeamConfigurationService } from '../executor-categories/executor-category-configuration.service';
+import { AgentTeamConfigurationService } from '../executors/executor-configuration.service';
 import { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
 
 // End-to-end for the supported integration path: import a local Skill as a

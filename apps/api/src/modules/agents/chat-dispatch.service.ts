@@ -7,7 +7,7 @@ import { agentExecutionEvents, agentExecutions, chatSubmissions, workflowVersion
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from './agent-executions.service';
-import { AgentTeamGroupsService } from '../executor-categories/executor-groups.service';
+import { AgentTeamGroupsService } from '../executors/executor-groups.service';
 import { RunsService } from '../runs/runs.service';
 
 export const CHAT_AGENT_ID = 'agt_system_helper_chat';

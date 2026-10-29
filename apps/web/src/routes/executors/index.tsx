@@ -1,5 +1,5 @@
 import { createFileRoute, Navigate } from '@tanstack/react-router';
-import { DEFAULT_EXECUTOR_CATEGORY_ID } from '@/features/executor-categories/team-switcher';
+import { DEFAULT_EXECUTOR_CATEGORY_ID } from '@/features/executors/team-switcher';
 
 export const Route = createFileRoute('/executors/')({
   component: AgentTeamsIndexRoute,

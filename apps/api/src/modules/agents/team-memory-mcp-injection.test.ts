@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeClaudeMcpConfiguration } from './claude-code.service';
 import { codexMcpServers } from './codex-app-server.service';
 import type { PreparedProjectExecution } from './project-executor.types';
-import { teamMemoryMcpRuntime } from '../executor-categories/team-memory-mcp';
+import { teamMemoryMcpRuntime } from '../executors/executor-memory-mcp';
 
 // A v11 project executor receives the executor memory MCP server like any other MCP
 // server: Claude Code through the owner-only mcp.json and Codex through

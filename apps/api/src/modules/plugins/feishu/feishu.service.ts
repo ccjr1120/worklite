@@ -7,8 +7,8 @@ import { chatSubmissions, externalChats, feishuDeliveries, feishuEvents, type Da
 import { DATABASE } from '../../../infrastructure/database.module';
 import { AgentExecutionsService } from '../../agents/agent-executions.service';
 import { CHAT_AGENT_ID, ChatDispatchService } from '../../agents/chat-dispatch.service';
-import { AgentTeamDocumentsService } from '../../executor-categories/executor-category-documents.service';
-import { AgentTeamsService } from '../../executor-categories/executor-categories.service';
+import { AgentTeamDocumentsService } from '../../executors/executor-documents.service';
+import { ExecutorsService } from '../../executors/executors.service';
 import { RunsService } from '../../runs/runs.service';
 import { PluginsService } from '../plugins.service';
 import { renderCard, renderTaskCard, statusText, teamRoleName, teamRunMeta, type CardButton, type CardState, type CardTransport, type CardUpdate, type FeishuAction, type FeishuCard, type SavedCard } from './feishu-cards';
@@ -47,7 +47,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
     private readonly dispatches: ChatDispatchService,
     private readonly executions: AgentExecutionsService,
     private readonly documents: AgentTeamDocumentsService,
-    private readonly teams: AgentTeamsService,
+    private readonly teams: ExecutorsService,
     private readonly runs: RunsService,
     private readonly upgrades: UpgradesService,
   ) {}

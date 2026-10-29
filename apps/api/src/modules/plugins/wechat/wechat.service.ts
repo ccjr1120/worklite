@@ -11,7 +11,7 @@ import { assertRuntimeAdmission, runtimeAdmissionClosed, runtimeWritesFrozen, up
 import { AgentExecutionsService } from '../../agents/agent-executions.service';
 import { CHAT_AGENT_ID, ChatDispatchService } from '../../agents/chat-dispatch.service';
 import { ChatAttachmentsService, detachAttachmentImages } from '../../agents/chat-attachments.service';
-import { AgentTeamsService } from '../../executor-categories/executor-categories.service';
+import { ExecutorsService } from '../../executors/executors.service';
 import { RunsService } from '../../runs/runs.service';
 import { UpgradesService } from '../../upgrades/upgrades.service';
 import { encryptSecret, PluginsService } from '../plugins.service';
@@ -111,7 +111,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
     private readonly plugins: PluginsService,
     private readonly dispatches: ChatDispatchService,
     private readonly executions: AgentExecutionsService,
-    private readonly teams: AgentTeamsService,
+    private readonly teams: ExecutorsService,
     private readonly runs: RunsService,
     private readonly upgrades: UpgradesService,
     private readonly attachments: ChatAttachmentsService,

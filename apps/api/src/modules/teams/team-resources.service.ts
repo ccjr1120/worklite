@@ -81,7 +81,7 @@ import {
 import { McpClientService } from '../mcp-servers/mcp-client.service';
 import { getArtifactDetail, listArtifacts } from '../artifacts/artifacts-query';
 import { ArtifactStorageService } from '../artifacts/artifact-storage.service';
-import { EXECUTOR_CATEGORY_ROLES, BUILT_IN_EXECUTOR_CATEGORY_ID, DIRECT_EXECUTOR_CATEGORY_ID } from '../executor-categories/executor-category-configuration';
+import { EXECUTOR_CATEGORY_ROLES, BUILT_IN_EXECUTOR_CATEGORY_ID, DIRECT_EXECUTOR_CATEGORY_ID } from '../executors/executor-configuration';
 import { isWorkliteNavigationTarget, resolveWorkliteNavigationRoute } from './worklite-navigation';
 
 function maskSecret(value: string): string {
