@@ -77,7 +77,7 @@ describe('Chat Team Run card', () => {
     expect(screen.getByText('总耗时 1 小时 25 分钟')).toBeVisible();
     expect(screen.getByRole('button', { name: '暂停' })).toBeVisible();
     expect(screen.queryByText('角色任务')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '展开团队任务详情' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: '展开执行任务详情' })).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('shows parallel Developer lanes by count with assignment progress', () => {
@@ -97,7 +97,7 @@ describe('Chat Team Run card', () => {
   it('lists role tasks with model and elapsed time only after expanding', () => {
     mockRun(teamRun());
     render(<TaskCard submission={submission} />);
-    fireEvent.click(screen.getByRole('button', { name: '展开团队任务详情' }));
+    fireEvent.click(screen.getByRole('button', { name: '展开执行任务详情' }));
 
     expect(screen.getByText('角色任务')).toBeVisible();
     expect(screen.getByText('Planner · planning · gpt-planner · 10 分钟')).toBeVisible();

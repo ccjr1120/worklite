@@ -175,7 +175,7 @@ describe('TeamConfig', () => {
   it('shows the Team switcher below the heading with links to each Team\'s configuration', () => {
     mockQueries();
     render(<TeamConfig teamId="team_1" />);
-    const switcher = screen.getByRole('navigation', { name: '选择 Coding Executor 团队' });
+    const switcher = screen.getByRole('navigation', { name: '选择执行器分类' });
     expect(within(switcher).getByRole('link', { name: /Delivery/ })).toHaveAttribute('aria-current', 'page');
     expect(within(switcher).getByRole('link', { name: /Applications/ })).toHaveAttribute('href', '/agent-teams/team_2/config');
   });
@@ -199,6 +199,6 @@ describe('TeamConfig', () => {
   it('renders the empty memories state', () => {
     mockQueries({ memories: [] });
     render(<TeamConfig teamId="team_1" />);
-    expect(screen.getByText('暂无 Team 记忆。')).toBeInTheDocument();
+    expect(screen.getByText('暂无执行器记忆。')).toBeInTheDocument();
   });
 });

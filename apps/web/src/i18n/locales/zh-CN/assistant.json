@@ -28,7 +28,7 @@
     "stage": "阶段：{{stage}}",
     "kind": {
       "task": "项目任务",
-      "team": "团队任务",
+      "team": "执行任务",
       "workflow": "工作流"
     }
   },
@@ -443,9 +443,9 @@
     "imageSummary": "[{{count}} 张图片]"
   },
   "teamRun": {
-    "panel": "Coding Executors 任务",
-    "expand": "展开团队任务详情",
-    "collapse": "收起团队任务详情",
+    "panel": "执行任务",
+    "expand": "展开执行任务详情",
+    "collapse": "收起执行任务详情",
     "activeRoles": "{{count}} 个角色进行中",
     "parallelRole": "{{role}} ×{{count}}",
     "betweenRoles": "等待下一个角色",

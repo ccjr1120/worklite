@@ -56,8 +56,8 @@
       "conversationId": "对话",
       "projectTaskId": "项目任务",
       "executor": "执行器",
-      "teamId": "Team",
-      "teamRunId": "Team 运行",
+      "teamId": "执行器分类",
+      "teamRunId": "执行记录",
       "workflowId": "Workflow",
       "workflowRunId": "Workflow 运行"
     },
@@ -96,7 +96,7 @@
     "error": "无法加载请求日志。",
     "detailError": "无法加载该捕获的请求。",
     "correlatedConversation": "对话 {{id}}",
-    "correlatedTeamRun": "Team 运行 {{id}}"
+    "correlatedTeamRun": "执行记录 {{id}}"
   },
   "usage": {
     "title": "按功能/来源的用量",
@@ -107,7 +107,7 @@
       "surface": "按功能",
       "conversation": "按对话",
       "executor": "按执行器",
-      "team": "按 Team",
+      "team": "按执行器分类",
       "workflow": "按 Workflow"
     },
     "surfaces": {
@@ -115,8 +115,8 @@
       "chat_project_task": "Chat 项目任务",
       "agent": "独立 Agent",
       "workflow": "Workflow 节点",
-      "team": "Coding Executors 角色",
-      "team_project_task": "Coding Executors 执行器",
+      "team": "执行器角色",
+      "team_project_task": "执行器",
       "provider_test": "供应商连接测试",
       "external": "外部直连",
       "unattributed": "未归因"
@@ -136,6 +136,6 @@
     "failed": "失败",
     "withUsage": "含用量数据",
     "emptyTitle": "该时间范围内没有可归因的用量",
-    "emptyDescription": "切换分组维度或扩大时间范围；按对话、执行器、Team、Workflow 分组只统计带有对应标识的请求。"
+    "emptyDescription": "切换分组维度或扩大时间范围；按对话、执行器、执行器分类、Workflow 分组只统计带有对应标识的请求。"
   }
 }
