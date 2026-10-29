@@ -16,21 +16,21 @@ CREATE UNIQUE INDEX `agent_teams_workspace_id_name_unique` ON `agent_teams` (`wo
 CREATE TABLE `agent_team_versions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`workspace_id` text NOT NULL,
-	`team_id` text NOT NULL,
+	`executor_category_id` text NOT NULL,
 	`version` integer NOT NULL,
 	`snapshot` text NOT NULL,
 	`created_at` integer DEFAULT (unixepoch() * 1000) NOT NULL,
 	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`team_id`) REFERENCES `agent_teams`(`id`) ON UPDATE no action ON DELETE restrict
+	FOREIGN KEY (`executor_category_id`) REFERENCES `agent_teams`(`id`) ON UPDATE no action ON DELETE restrict
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `agent_team_versions_team_id_version_unique` ON `agent_team_versions` (`team_id`,`version`);
+CREATE UNIQUE INDEX `agent_team_versions_executor_category_id_version_unique` ON `agent_team_versions` (`executor_category_id`,`version`);
 --> statement-breakpoint
 CREATE TABLE `agent_team_runs` (
 	`id` text PRIMARY KEY NOT NULL,
 	`workspace_id` text NOT NULL,
-	`team_id` text NOT NULL,
-	`team_version_id` text NOT NULL,
+	`executor_category_id` text NOT NULL,
+	`executor_category_version_id` text NOT NULL,
 	`status` text DEFAULT 'queued' NOT NULL,
 	`intent` text NOT NULL,
 	`project_directory` text NOT NULL,
@@ -43,8 +43,8 @@ CREATE TABLE `agent_team_runs` (
 	`updated_at` integer DEFAULT (unixepoch() * 1000) NOT NULL,
 	`finished_at` integer,
 	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`team_id`) REFERENCES `agent_teams`(`id`) ON UPDATE no action ON DELETE restrict,
-	FOREIGN KEY (`team_version_id`) REFERENCES `agent_team_versions`(`id`) ON UPDATE no action ON DELETE restrict
+	FOREIGN KEY (`executor_category_id`) REFERENCES `agent_teams`(`id`) ON UPDATE no action ON DELETE restrict,
+	FOREIGN KEY (`executor_category_version_id`) REFERENCES `agent_team_versions`(`id`) ON UPDATE no action ON DELETE restrict
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `agent_team_runs_lang_graph_thread_id_unique` ON `agent_team_runs` (`lang_graph_thread_id`);

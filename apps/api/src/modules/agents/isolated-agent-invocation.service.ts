@@ -257,7 +257,7 @@ export class IsolatedAgentInvocationService {
   ): Promise<WorkflowAgentToolResult> {
     request.signal.throwIfAborted();
     this.validateProcessReference(request, call);
-    if (call.toolName === 'read_team_document' || call.toolName === 'skill_reference') {
+    if (call.toolName === 'read_executor_document' || call.toolName === 'skill_reference') {
       // Both tools only read immutable captured content, so they bypass the command
       // journal: a rejected path carries no uncertain external effect.
       return (await this.runToolEffect(request, assignedSkills, mcpTools, selectedBuiltinToolNames, call)).output;
@@ -405,7 +405,7 @@ export class IsolatedAgentInvocationService {
       return { output: { type: 'text', value: boundedToolResult(value, request.limits?.maxToolResultChars) } };
     }
 
-    if (call.toolName === 'read_team_document') {
+    if (call.toolName === 'read_executor_document') {
       if (!request.readTeamDocument) throw new BadRequestException('No Team document was handed to this Agent task.');
       const input = call.input as { documentId?: unknown; revision?: unknown } | null;
       const documentId = requiredString(input?.documentId, 'documentId');

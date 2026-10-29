@@ -151,11 +151,11 @@ export type AgentTeamTaskResult =
       pendingInput: AgentTeamPendingInput;
     };
 
-export type AgentTeamGraphDelegate = {
+export type AgentExecutorCategoryGraphDelegate = {
   executeTask(request: AgentTeamTaskRequest): Promise<AgentTeamTaskResult>;
 };
 
-export type AgentTeamGraphOptions = {
+export type AgentExecutorCategoryGraphOptions = {
   maxRepairRounds?: number;
   orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
   developerIds?: readonly string[];
@@ -172,7 +172,7 @@ export type AgentTeamRunRequest = {
   projectInstructions: readonly AgentTeamProjectInstructionFile[];
 };
 
-export type AgentTeamGraphResult = AgentTeamRunRequest & {
+export type AgentExecutorCategoryGraphResult = AgentTeamRunRequest & {
   documents: readonly AgentTeamDocument[];
   unresolvedIssues: readonly string[];
   commandIds: readonly string[];

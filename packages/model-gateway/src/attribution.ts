@@ -19,9 +19,9 @@ const SURFACES = [
   // A Workflow node: Agent, System One and image nodes.
   'workflow',
   // An Agent Team role's model loop.
-  'team',
+  'executor_category',
   // An Agent Team developer role running in Claude Code or Codex.
-  'team_project_task',
+  'executor_category_project_task',
   // A Provider connection test issued from WorkLite.
   'provider_test',
   // A client outside WorkLite calling the Gateway's public endpoints directly.
@@ -43,9 +43,9 @@ export type GatewayCorrelation = {
   workflowId?: string;
   workflowRunId?: string;
   nodeRunId?: string;
-  teamId?: string;
+  executorCategoryId?: string;
   teamRunId?: string;
-  /** Agent Team role id, for team and team_project_task. */
+  /** Agent Team role id, for team and executor_category_project_task. */
   teamRole?: string;
   teamTaskAttemptId?: string;
   teamOperationKey?: string;
@@ -58,7 +58,7 @@ export type GatewayCorrelation = {
  */
 function logSourceForSurface(surface: GatewaySurface): string {
   if (surface === 'chat' || surface === 'chat_project_task') return 'chat';
-  if (surface === 'team' || surface === 'team_project_task') return 'team';
+  if (surface === 'executor_category' || surface === 'executor_category_project_task') return 'executor_category';
   if (surface === 'workflow') return 'workflow';
   if (surface === 'agent') return 'agent';
   if (surface === 'provider_test') return 'provider_test';
@@ -75,7 +75,7 @@ export function gatewayAttributionHeaders(correlation: GatewayCorrelation | unde
     ['x-worklite-workflow-id', correlation.workflowId],
     ['x-worklite-workflow-run-id', correlation.workflowRunId],
     ['x-worklite-node-run-id', correlation.nodeRunId],
-    ['x-worklite-team-id', correlation.teamId],
+    ['x-worklite-team-id', correlation.executorCategoryId],
     ['x-worklite-team-run-id', correlation.teamRunId],
     ['x-worklite-team-role', correlation.teamRole],
     ['x-worklite-team-task-attempt-id', correlation.teamTaskAttemptId],

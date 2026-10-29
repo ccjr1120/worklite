@@ -1,7 +1,7 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import { applyDocumentLocale } from './locale';
-import zhAgentTeams from './locales/zh-CN/agentTeams.json';
+import zhAgentTeams from './locales/zh-CN/executorCategories.json';
 import zhAssistant from './locales/zh-CN/assistant.json';
 import zhArtifacts from './locales/zh-CN/artifacts.json';
 import zhCommon from './locales/zh-CN/common.json';
@@ -20,7 +20,7 @@ const NAMESPACES = [
   'workspace',
   'home',
   'assistant',
-  'agentTeams',
+  'executorCategories',
   'workflows',
   'runs',
   'skills',
@@ -37,7 +37,7 @@ const resources = {
     workspace: zhWorkspace,
     home: zhHome,
     assistant: zhAssistant,
-    agentTeams: zhAgentTeams,
+    executorCategories: zhAgentTeams,
     workflows: zhWorkflows,
     runs: zhRuns,
     skills: zhSkills,

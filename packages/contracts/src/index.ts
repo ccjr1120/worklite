@@ -117,13 +117,13 @@ export type UpdatePluginRequest = {
 export type ChatTarget =
   | { kind: 'conversation' }
   // `mode` remains accepted only for older callers. Current dispatch ignores it
-  // and the Team Dispatcher chooses the Run mode.
-  | { kind: 'team'; teamId: string; projectDirectory: string; role?: AgentTeamRoleId; mode?: 'plan_only' | 'validate_existing' | 'implement_and_validate' }
+  // and the executor category Dispatcher chooses the Run mode.
+  | { kind: 'executor_category'; executorCategoryId: string; projectDirectory: string; role?: AgentTeamRoleId; mode?: 'plan_only' | 'validate_existing' | 'implement_and_validate' }
   | { kind: 'workflow'; workflowId: string };
 
 export type ChatTaskReference =
   | { kind: 'conversation'; executionId: string; afterMessageId: string | null; afterSequence: number; untilMessageId?: string | null; completionStatus?: string; completionError?: string | null }
-  | { kind: 'team'; teamId: string; runId: string; groupId?: string }
+  | { kind: 'executor_category'; executorCategoryId: string; runId: string; groupId?: string }
   | { kind: 'workflow'; runId: string; workflowVersionId: string }
   | { kind: 'upgrade'; jobId: string };
 
@@ -325,7 +325,7 @@ export type AgentExecutionErrorCode =
 export type ChatProgressReport = {
   // stage/progress/updatedAt are presentation fields for the collapsible Web card; the reminder
   // text and its dedupe signature do not depend on them.
-  items: Array<{ kind: 'task' | 'team' | 'workflow'; id: string; title: string; status: string; stage?: string; progress?: string; updatedAt?: string }>;
+  items: Array<{ kind: 'task' | 'executor_category' | 'workflow'; id: string; title: string; status: string; stage?: string; progress?: string; updatedAt?: string }>;
 };
 
 export type AgentExecutionMessage = {
@@ -645,8 +645,8 @@ export const GATEWAY_SURFACES = [
   'chat_project_task',
   'agent',
   'workflow',
-  'team',
-  'team_project_task',
+  'executor_category',
+  'executor_category_project_task',
   'provider_test',
   'external',
   'unattributed',
@@ -654,7 +654,7 @@ export const GATEWAY_SURFACES = [
 
 export type GatewaySurface = (typeof GATEWAY_SURFACES)[number];
 
-export const GATEWAY_STATS_GROUP_BYS = ['surface', 'conversation', 'executor', 'team', 'workflow'] as const;
+export const GATEWAY_STATS_GROUP_BYS = ['surface', 'conversation', 'executor', 'executor_category', 'workflow'] as const;
 
 export type GatewayStatsGroupBy = (typeof GATEWAY_STATS_GROUP_BYS)[number];
 
@@ -664,7 +664,7 @@ export type GatewayAttributionFilters = {
   conversationId?: string;
   projectTaskId?: string;
   executor?: string;
-  teamId?: string;
+  executorCategoryId?: string;
   teamRunId?: string;
   workflowId?: string;
   workflowRunId?: string;
@@ -676,7 +676,7 @@ export type GatewayAttributionGroup = {
   surface: GatewaySurface | null;
   conversationId: string | null;
   executor: string | null;
-  teamId: string | null;
+  executorCategoryId: string | null;
   teamRunId: string | null;
   workflowId: string | null;
   workflowRunId: string | null;
@@ -1157,8 +1157,8 @@ export type SkillReferenceCleanup = {
   agentIds: string[];
   chatConfigurationRevisions: number[];
   workflowDrafts: Array<{ workflowId: string; nodeIds: string[] }>;
-  agentTeamRoles: Array<{ teamId: string; role: string }>;
-  agentTeamDeveloperInstances: Array<{ teamId: string; role: string; developerId: string }>;
+  agentTeamRoles: Array<{ executorCategoryId: string; role: string }>;
+  agentTeamDeveloperInstances: Array<{ executorCategoryId: string; role: string; developerId: string }>;
 };
 
 export type DeleteSkillResult = {
@@ -1193,8 +1193,8 @@ export type McpServerReferenceReport = {
   activeChatTurns: boolean;
   workflowDrafts: Array<{ workflowId: string; workflowName: string; nodeIds: string[] }>;
   workflowVersions: Array<{ workflowId: string; workflowName: string; version: number; nodeIds: string[] }>;
-  agentTeamRoles: Array<{ teamId: string; teamName: string; role: string; displayName: string | null }>;
-  agentTeamVersions: Array<{ teamId: string; versionId: string; version: number; roles: string[] }>;
+  agentTeamRoles: Array<{ executorCategoryId: string; teamName: string; role: string; displayName: string | null }>;
+  agentTeamVersions: Array<{ executorCategoryId: string; versionId: string; version: number; roles: string[] }>;
 };
 
 export type DeleteMcpServerResult = {
@@ -1282,7 +1282,7 @@ export type TestModelProviderRequest = {
  * The coarse label that predates surfaces. It is kept so readers and filters built on
  * it keep working; `surface` on the same record carries the detail it cannot express.
  */
-export type GatewayRequestLogSource = 'chat' | 'agent' | 'workflow' | 'team' | 'provider_test' | 'external' | 'proxy';
+export type GatewayRequestLogSource = 'chat' | 'agent' | 'workflow' | 'executor_category' | 'provider_test' | 'external' | 'proxy';
 
 export type GatewayRequestLogStatusClass = 'success' | 'client_error' | 'server_error';
 
@@ -1303,7 +1303,7 @@ export type GatewayRequestLogListItem = {
   workflowId: string | null;
   workflowRunId: string | null;
   nodeRunId: string | null;
-  teamId: string | null;
+  executorCategoryId: string | null;
   teamRunId: string | null;
   teamRole: string | null;
   teamTaskAttemptId: string | null;
@@ -1813,12 +1813,12 @@ export type AgentTeamRunSummary = {
 };
 
 export type AgentTeamRunListItem = AgentTeamRunSummary & {
-  teamId: string;
+  executorCategoryId: string;
   teamName: string;
 };
 
 export type AgentTeamRunListQuery = {
-  teamIds?: string[];
+  executorCategoryIds?: string[];
   cursor?: string;
   limit?: number;
 };
@@ -1872,7 +1872,7 @@ export type AgentTeamGroupSummary = {
 };
 
 export type AgentTeamGroupView = AgentTeamGroupSummary & {
-  teamId: string;
+  executorCategoryId: string;
   workingPractice: string;
   messages: AgentTeamGroupMessage[];
   runs: Array<{ id: string; targetRole: AgentTeamRoleId | null; currentRole: AgentTeamRoleId | null; status: AgentTeamRunStatus; intent: string; repositoryIds: string[]; createdAt: string; finishedAt: string | null; pendingInputs: Array<{ id: string; question: string; scopeRevision: number }> }>;
@@ -1920,7 +1920,7 @@ export type AgentTeamGroupEvent = {
 
 export type AgentTeamRunView = {
   id: string;
-  teamId: string;
+  executorCategoryId: string;
   groupId: string | null;
   targetRole: AgentTeamRoleId | null;
   repositoryIds: string[];

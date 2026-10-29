@@ -124,7 +124,7 @@ const mcpLogger = new Logger('ClaudeCodeMcp');
 /**
  * Writes the owner-only mcp.json and returns the Claude Code argv fragment. A server
  * whose discovery fails is skipped rather than injected unvetted, but the failure is
- * logged: silently dropping the WorkLite Team memory server would hide its tools.
+ * logged: silently dropping the WorkLite executor category memory server would hide its tools.
  */
 export async function writeClaudeMcpConfiguration(
   directory: string,
@@ -329,7 +329,7 @@ class ClaudeCodeSession {
  */
 function correlationHeaders(request: ProjectExecutorRequest): string {
   const correlation = request.correlation
-    ?? { surface: request.owner === 'team' ? 'team_project_task' as const : 'chat_project_task' as const, executor: 'claude' as const };
+    ?? { surface: request.owner === 'executor_category' ? 'executor_category_project_task' as const : 'chat_project_task' as const, executor: 'claude' as const };
   return Object.entries(gatewayAttributionHeaders(correlation)).map(([name, value]) => `${name}: ${value}`).join('\n');
 }
 

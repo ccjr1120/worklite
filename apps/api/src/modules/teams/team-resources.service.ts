@@ -35,7 +35,7 @@ import { GATEWAY_STATS_GROUP_BYS, GATEWAY_SURFACES, WORKLITE_PLATFORM_SKILL_NAME
 import {
   agentExecutions,
   agentMcpServers,
-  agentTeams,
+  executorCategories,
   agentTeamVersions,
   artifacts,
   agentSkills,
@@ -81,7 +81,7 @@ import {
 import { McpClientService } from '../mcp-servers/mcp-client.service';
 import { getArtifactDetail, listArtifacts } from '../artifacts/artifacts-query';
 import { ArtifactStorageService } from '../artifacts/artifact-storage.service';
-import { AGENT_TEAM_ROLES, BUILT_IN_AGENT_TEAM_ID } from '../agent-teams/agent-team-configuration';
+import { EXECUTOR_CATEGORY_ROLES, BUILT_IN_EXECUTOR_CATEGORY_ID } from '../executor-categories/agent-team-configuration';
 import { isWorkliteNavigationTarget, resolveWorkliteNavigationRoute } from './worklite-navigation';
 
 function maskSecret(value: string): string {
@@ -187,7 +187,7 @@ const MAX_SKILL_PACKAGE_BYTES = 1 * 1_024 * 1_024;
 
 const GATEWAY_PROVIDER_ID = 'gateway-provider';
 const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392);
-const GATEWAY_ATTRIBUTION_FILTERS = ['surface', 'conversationId', 'projectTaskId', 'executor', 'teamId', 'teamRunId', 'workflowId', 'workflowRunId'] as const;
+const GATEWAY_ATTRIBUTION_FILTERS = ['surface', 'conversationId', 'projectTaskId', 'executor', 'executorCategoryId', 'teamRunId', 'workflowId', 'workflowRunId'] as const;
 const GATEWAY_PROVIDER_URL = `http://127.0.0.1:${GATEWAY_PORT}/worklite/providers`;
 
 function validatePackageFiles(input: unknown): PackageFile[] {
@@ -785,7 +785,7 @@ export class WorkspaceResourcesService {
         instructions: skill.instructions,
         files: currentFiles.filter((file) => file.skillId === skill.id).map(({ path, content }) => ({ path, content })),
       });
-      const teams = transaction.select().from(agentTeams).where(eq(agentTeams.workspaceId, workspaceId)).all();
+      const teams = transaction.select().from(executorCategories).where(eq(executorCategories.workspaceId, workspaceId)).all();
       for (const team of teams) {
         let changed = false;
         const roles = team.roles.map((role) => {
@@ -793,7 +793,7 @@ export class WorkspaceResourcesService {
           if (next) changed = true;
           return next ?? role;
         });
-        if (changed) transaction.update(agentTeams).set({ roles, updatedAt: new Date() }).where(eq(agentTeams.id, team.id)).run();
+        if (changed) transaction.update(executorCategories).set({ roles, updatedAt: new Date() }).where(eq(executorCategories.id, team.id)).run();
       }
 
       for (const [oldSkillId, alias] of aliases) {
@@ -842,21 +842,21 @@ export class WorkspaceResourcesService {
         cleanup.workflowDrafts.push({ workflowId: draft.workflowId, nodeIds });
       }
 
-      const teams = transaction.select().from(agentTeams).where(eq(agentTeams.workspaceId, workspaceId)).all();
+      const teams = transaction.select().from(executorCategories).where(eq(executorCategories.workspaceId, workspaceId)).all();
       for (const team of teams) {
         let changed = false;
         const roles = team.roles.map((role) => {
           const next = rewriteRoleSkillIds(role, removeMapping, true);
           if (!next) return role;
           changed = true;
-          cleanup.agentTeamRoles.push({ teamId: team.id, role: role.role });
+          cleanup.agentTeamRoles.push({ executorCategoryId: team.id, role: role.role });
           for (const instance of next.developerInstances ?? []) {
             const previous = role.developerInstances?.find((candidate) => candidate.developerId === instance.developerId);
-            if (previous && previous.skills.length !== instance.skills.length) cleanup.agentTeamDeveloperInstances.push({ teamId: team.id, role: role.role, developerId: instance.developerId });
+            if (previous && previous.skills.length !== instance.skills.length) cleanup.agentTeamDeveloperInstances.push({ executorCategoryId: team.id, role: role.role, developerId: instance.developerId });
           }
           return next;
         });
-        if (changed) transaction.update(agentTeams).set({ roles, updatedAt: new Date() }).where(eq(agentTeams.id, team.id)).run();
+        if (changed) transaction.update(executorCategories).set({ roles, updatedAt: new Date() }).where(eq(executorCategories.id, team.id)).run();
       }
 
       for (const skillId of ids) transaction.insert(auditLogs).values({
@@ -1120,14 +1120,14 @@ export class WorkspaceResourcesService {
           transaction.update(workflowDrafts).set({ currentRevisionId: revisionId, definition: next, updatedAt: new Date() }).where(eq(workflowDrafts.id, draft.id)).run();
           workflowDraftCount += 1;
         }
-        const teamRows = transaction.select({ team: agentTeams }).from(agentTeams).where(eq(agentTeams.workspaceId, team.id)).all();
+        const teamRows = transaction.select({ team: executorCategories }).from(executorCategories).where(eq(executorCategories.workspaceId, team.id)).all();
         for (const { team: agentTeam } of teamRows) {
           if (!agentTeam.roles.some((role) => role.mcpServers.some((server) => server.id === serverId))) continue;
           agentTeamRoleCount += agentTeam.roles.filter((role) => role.mcpServers.some((server) => server.id === serverId)).length;
-          transaction.update(agentTeams).set({
+          transaction.update(executorCategories).set({
             roles: agentTeam.roles.map((role) => ({ ...role, mcpServers: role.mcpServers.filter((server) => server.id !== serverId) })),
             updatedAt: new Date(),
-          }).where(eq(agentTeams.id, agentTeam.id)).run();
+          }).where(eq(executorCategories.id, agentTeam.id)).run();
         }
       }
       transaction.delete(mcpServers).where(and(eq(mcpServers.id, serverId), eq(mcpServers.workspaceId, team.id))).run();
@@ -1150,7 +1150,7 @@ export class WorkspaceResourcesService {
       this.db.select({ version: workflowVersions, workflowName: workflows.name }).from(workflowVersions)
         .innerJoin(workflows, eq(workflowVersions.workflowId, workflows.id))
         .where(eq(workflowVersions.workspaceId, workspaceId)),
-      this.db.select().from(agentTeams).where(eq(agentTeams.workspaceId, workspaceId)),
+      this.db.select().from(executorCategories).where(eq(executorCategories.workspaceId, workspaceId)),
       this.db.select().from(agentTeamVersions).where(eq(agentTeamVersions.workspaceId, workspaceId)),
     ]);
     return {
@@ -1165,11 +1165,11 @@ export class WorkspaceResourcesService {
         return nodeIds.length ? [{ workflowId: version.workflowId, workflowName, version: version.version, nodeIds }] : [];
       }),
       agentTeamRoles: teamRows.flatMap((row) => row.roles.flatMap((role) => role.mcpServers.some((server) => server.id === serverId)
-        ? [{ teamId: row.id, teamName: row.name, role: role.role, displayName: role.displayName ?? null }]
+        ? [{ executorCategoryId: row.id, teamName: row.name, role: role.role, displayName: role.displayName ?? null }]
         : [])),
       agentTeamVersions: teamVersionRows.flatMap((row) => {
         const roles = row.snapshot.roles.filter((role) => role.mcpServers.some((server) => server.id === serverId)).map((role) => role.role);
-        return roles.length ? [{ teamId: row.teamId, versionId: row.id, version: row.version, roles }] : [];
+        return roles.length ? [{ executorCategoryId: row.executorCategoryId, versionId: row.id, version: row.version, roles }] : [];
       }),
     };
   }
@@ -1281,7 +1281,7 @@ export class WorkspaceResourcesService {
       this.db.select().from(skills).where(eq(skills.workspaceId, workspace.id)).orderBy(skills.name),
       this.db.select().from(mcpServers).where(eq(mcpServers.workspaceId, workspace.id)).orderBy(mcpServers.name),
       this.db.select().from(workflows).where(eq(workflows.workspaceId, workspace.id)).orderBy(workflows.name),
-      this.db.select().from(agentTeams).where(eq(agentTeams.workspaceId, workspace.id)).orderBy(agentTeams.name),
+      this.db.select().from(executorCategories).where(eq(executorCategories.workspaceId, workspace.id)).orderBy(executorCategories.name),
       this.db.select().from(workflowSchedules).where(eq(workflowSchedules.workspaceId, workspace.id)),
       this.db.select().from(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspace.id)).limit(1),
       this.db.select({ id: wechatOfficialAccounts.id, displayName: wechatOfficialAccounts.displayName, status: wechatOfficialAccounts.status }).from(wechatOfficialAccounts).where(eq(wechatOfficialAccounts.workspaceId, workspace.id)),
@@ -1314,7 +1314,7 @@ export class WorkspaceResourcesService {
             timeRange: 'explicit absolute from/to ISO-8601 instants',
             requestRetentionHours: 12,
             retentionMetadata: ['from', 'to', 'retainedFrom', 'retentionHours'],
-            correlation: ['surface', 'conversationId', 'projectTaskId', 'executor', 'workflowId', 'workflowRunId', 'nodeRunId', 'teamId', 'teamRunId', 'teamRole', 'teamTaskAttemptId', 'teamOperationKey'],
+            correlation: ['surface', 'conversationId', 'projectTaskId', 'executor', 'workflowId', 'workflowRunId', 'nodeRunId', 'executorCategoryId', 'teamRunId', 'teamRole', 'teamTaskAttemptId', 'teamOperationKey'],
             usageAttribution: {
               surfaces: [...GATEWAY_SURFACES],
               groupBy: [...GATEWAY_STATS_GROUP_BYS],
@@ -1387,7 +1387,7 @@ export class WorkspaceResourcesService {
           memory: { store: 'workspace-level chat_memories rows with content, category, source conversation and timestamps', categories: ['rule', 'preference', 'project', 'project_state', 'workflow', 'other'], categoryMetadata: '@worklite/contracts CHAT_MEMORY_CATEGORY_META is the single source for which categories are always injected (rule, preference) versus on-demand', tools: ['list_memories', 'save_memory', 'update_memory', 'delete_memory'], routes: ['GET /chat/memories', 'GET /chat/memories/:id', 'POST /chat/memories', 'PATCH /chat/memories/:id', 'DELETE /chat/memories/:id'], injection: 'bounded projection captured per accepted turn into the capability snapshot system prompt: rule and preference categories inject full content, other categories inject only an id/category/summary catalog for on-demand reads through list_memories', bounds: { contentChars: 2000, entries: 100, promptEntries: 50, promptChars: 6000, catalogEntries: 50, catalogChars: 2000 }, management: 'Web Chat settings dialog, grouped and filterable by category' },
         },
         upgrades: { operatorDeploymentVersion: { command: 'pnpm deploy:local', source: 'apps/web/package.json', bump: 'patch before compilation on every invocation', initialBaseline: 'builds in the project root before starting managed services', laterDeployment: 'installs dependencies and builds in the project root while current services keep running; after success, verifies port ownership, then restarts API, Web and Gateway from project-root build outputs', legacyTakeover: 'reads old current.json release fields and verifies the recorded process paths, groups and target listeners before stopping them', unknownListeners: 'left untouched; deployment fails', failedAttempt: 'consumes source version; build failure leaves current processes untouched; startup failure leaves current.json at the last successful deployment and does not restore the stopped program or data', webVersion: 'version from the last successful deployment', gitMutations: false, databaseBackups: false, automaticRollback: false, releaseSnapshots: false }, proposeRoute: 'POST /upgrades', redeployRoute: 'POST /upgrades/redeploy', redeployTool: 'redeploy', inspectRoute: 'GET /upgrades/:id', authorization: 'explicit current Chat user request; no second confirmation', authorizationBinding: 'persisted user message and immutable release', combinedRepairRedeploy: 'dispatch the change to Direct, then Chat calls redeploy after the Run reports success', deduplication: 'one job per execution and user message', profile: 'current managed runtime only; no model override', progress: 'original conversation; automatic observation after reconnect', requiresManagedBaseline: true, projectRoot: process.env.WORKLITE_PROJECT_ROOT ?? null, phases: ['proposed', 'authorized', 'preflighting', 'draining', 'frozen', 'switching', 'recovering', 'succeeded', 'rolled_back', 'failed'], uninterruptedIngress: false, interruptionPolicy: 'cancel active Agent, Team, Workflow and Command work after isolated preflight; never automatically resume' },
-        chat: { workspaceRoute: '/chat', channelsRoute: 'GET /chat/channels', conversationsRoute: 'GET /chat/conversations', conversationRoute: 'GET /chat/conversations/:id', recordsRoute: 'GET /chat/conversations/:id/records', recordsSnapshots: 'latest snapshot plus all non-snapshot events', maxSkillScriptOutputChars: 60000, diagnosticTool: { name: 'inspect_chat_conversation', records: 'current evidence and status/receipt metadata; repeated snapshots and cards referenced', fullToolOutputInput: 'toolCallId', completeEvidence: 'fullRecordsRoute', inferenceHistory: 'raw replay snapshots replaced with explicit retained-evidence references; original history unchanged' }, channels: [{ id: 'web', builtIn: true, presentation: ['streaming', 'markdown', 'questions'] }, { id: 'feishu', builtIn: false, presentation: ['native streamed cards', 'collapsed task details', 'forms', 'QR images', 'files'] }, { id: 'wechat', builtIn: false, presentation: ['text messages', 'QR images', 'Chat attachment images'] }], histories: 'server-persisted; unrelated conversations remain separate', backgroundConversations: { start: 'start_chat_conversation', monitor: ['wait_chat_conversation', 'inspect_chat_conversation'], reply: 'message_chat_conversation', userActivation: false, origin: 'first user message names the starting conversation', messaging: 'only conversations started from the current conversation', nesting: false, recoveryQuestions: 'user only' }, masterAgentId: 'agt_system_helper_chat', dispatchRoute: 'POST /chat/dispatch', taskFeedback: 'task state is independent of Chat turn; Team questions, failures and failed dispatches remain visible', teamDispatch: { owner: 'Chat Agent', recordsRoute: 'GET /agent-teams/:teamId/runs', groupRoute: 'read-only archive at /agent-team-groups/:groupId', runRoute: 'read-only evidence at /agent-team-runs/:runId', requires: ['named teamId', 'goal', 'absolute existing projectDirectory', 'mode'], initialRole: 'Planner unless the user names an active work role', submissionReference: ['groupId', 'runId'], entry: 'dispatch_task creates a hidden persistent group and bound Run; Chat owns the task card and all follow-up actions', controls: ['answer', 'pause', 'resume', 'cancel', 'retry', 'reexecute', 'recover'], roleControl: 'Chat task card controls the bound Run; reexecution creates a new group message and Run', commandAuthorization: 'none; every Team work role executes its commands directly on any channel through its configured tool surface, and WorkLite records command text, exit code, output and Command references as evidence', contextIsolation: ['initially addressed role', 'selected repositories', 'v8-v9 working practice and matching Team memories go only to the initially addressed role', 'v9 project Git policy goes to every project-executor role'], handoffs: 'summary and immutable file references; recipients read document content on demand', busyTeam: 'queue the bound Run when maxConcurrentRuns is reached; start queued Runs FIFO when an active slot opens' }, targets: ['conversation', 'team', 'workflow'], workflowVersions: 'published only', externalPluginId: 'feishu-bot', mergeHistories: false, webAccess: 'inspect and continue selected persisted conversation', feishu: { privateChat: true, defaultTarget: 'conversation', persistentTargetSelection: false, choices: 'current pending Agent question; plan not required', replyProgress: 'separate queued, thinking, responding and processing component in the same CardKit entity', cardPresentation: { transport: 'CardKit JSON 2.0 entity', requiredPermission: 'cardkit:card:write', replyAnimation: 'native fast typewriter', updates: 'component-local; full card for structural transitions', progressIcon: 'neutral native loading icon; no custom animation', taskDetails: 'default-collapsed Team task attempts and Workflow node execution statuses', visibleContext: ['current task or step', 'outcome', 'questions', 'failures', 'QR images', 'answer forms', 'controls'], streamingLifecycle: 'model output only; close for tools, questions and terminal states; renew platform window', persistedDelivery: ['cardId', 'sequence', 'last delivered card', 'streaming start', 'pending idempotent UUID and exact payload'], legacyCardConversion: false }, completedDialogue: 'content without task header or completion label', taskAnswers: 'reply to the task card or submit its form', groupChat: false, inbound: ['text', 'card actions'], outbound: ['updated response cards', 'task questions and controls', 'QR images', 'Team documents', 'Workflow Artifacts'], configurationRoute: '/chat?view=channels', applicationRegistration: { available: true, archetype: 'PersonalAgent', startRoute: 'POST /plugins/feishu-bot/feishu/registration', cancelRoute: 'DELETE /plugins/feishu-bot/feishu/registration', operator: 'user through Web configuration', automaticCredentialPersistence: true, userBinding: 'automatic when returned, otherwise manual', resumable: true, manualExistingApplication: true, platformSetup: ['bot capability', 'IM permissions', 'long-connection message and card subscriptions', 'publication'], userOAuth: false, runtimeCompatibility: 'requires authorized real integration' }, wechat: { pluginId: 'wechat-bot', protocol: 'Tencent iLink bot long-poll', login: { startRoute: 'POST /plugins/wechat-bot/wechat/login', cancelRoute: 'DELETE /plugins/wechat-bot/wechat/login', mechanism: 'QR scan; scanning user becomes the allowed user', credentialStorage: 'encrypted bot token in the plugin row' }, privateChat: true, groupChat: false, inbound: ['text'], outbound: ['whole text replies', 'conversation question prompts', 'task status notifications', 'Workflow QR images', 'Chat attachment images'], streaming: false, cards: false, media: 'images outbound only', defaultTarget: 'conversation', questionAnswers: 'plain text answers to Chat pending questions; Chat Agent handles Team actions', disconnectRoute: 'POST /plugins/wechat-bot/wechat/disconnect', configurationRoute: '/chat?view=channels', staleToken: 'status error; user re-logins by QR' } } },
+        chat: { workspaceRoute: '/chat', channelsRoute: 'GET /chat/channels', conversationsRoute: 'GET /chat/conversations', conversationRoute: 'GET /chat/conversations/:id', recordsRoute: 'GET /chat/conversations/:id/records', recordsSnapshots: 'latest snapshot plus all non-snapshot events', maxSkillScriptOutputChars: 60000, diagnosticTool: { name: 'inspect_chat_conversation', records: 'current evidence and status/receipt metadata; repeated snapshots and cards referenced', fullToolOutputInput: 'toolCallId', completeEvidence: 'fullRecordsRoute', inferenceHistory: 'raw replay snapshots replaced with explicit retained-evidence references; original history unchanged' }, channels: [{ id: 'web', builtIn: true, presentation: ['streaming', 'markdown', 'questions'] }, { id: 'feishu', builtIn: false, presentation: ['native streamed cards', 'collapsed task details', 'forms', 'QR images', 'files'] }, { id: 'wechat', builtIn: false, presentation: ['text messages', 'QR images', 'Chat attachment images'] }], histories: 'server-persisted; unrelated conversations remain separate', backgroundConversations: { start: 'start_chat_conversation', monitor: ['wait_chat_conversation', 'inspect_chat_conversation'], reply: 'message_chat_conversation', userActivation: false, origin: 'first user message names the starting conversation', messaging: 'only conversations started from the current conversation', nesting: false, recoveryQuestions: 'user only' }, masterAgentId: 'agt_system_helper_chat', dispatchRoute: 'POST /chat/dispatch', taskFeedback: 'task state is independent of Chat turn; Team questions, failures and failed dispatches remain visible', teamDispatch: { owner: 'Chat Agent', recordsRoute: 'GET /executor-categories/:executorCategoryId/runs', groupRoute: 'read-only archive at /executor-groups/:groupId', runRoute: 'read-only evidence at /executor-runs/:runId', requires: ['named executorCategoryId', 'goal', 'absolute existing projectDirectory', 'mode'], initialRole: 'Planner unless the user names an active work role', submissionReference: ['groupId', 'runId'], entry: 'dispatch_task creates a hidden persistent group and bound Run; Chat owns the task card and all follow-up actions', controls: ['answer', 'pause', 'resume', 'cancel', 'retry', 'reexecute', 'recover'], roleControl: 'Chat task card controls the bound Run; reexecution creates a new group message and Run', commandAuthorization: 'none; every Team work role executes its commands directly on any channel through its configured tool surface, and WorkLite records command text, exit code, output and Command references as evidence', contextIsolation: ['initially addressed role', 'selected repositories', 'v8-v9 working practice and matching Team memories go only to the initially addressed role', 'v9 project Git policy goes to every project-executor role'], handoffs: 'summary and immutable file references; recipients read document content on demand', busyTeam: 'queue the bound Run when maxConcurrentRuns is reached; start queued Runs FIFO when an active slot opens' }, targets: ['conversation', 'executor_category', 'workflow'], workflowVersions: 'published only', externalPluginId: 'feishu-bot', mergeHistories: false, webAccess: 'inspect and continue selected persisted conversation', feishu: { privateChat: true, defaultTarget: 'conversation', persistentTargetSelection: false, choices: 'current pending Agent question; plan not required', replyProgress: 'separate queued, thinking, responding and processing component in the same CardKit entity', cardPresentation: { transport: 'CardKit JSON 2.0 entity', requiredPermission: 'cardkit:card:write', replyAnimation: 'native fast typewriter', updates: 'component-local; full card for structural transitions', progressIcon: 'neutral native loading icon; no custom animation', taskDetails: 'default-collapsed Team task attempts and Workflow node execution statuses', visibleContext: ['current task or step', 'outcome', 'questions', 'failures', 'QR images', 'answer forms', 'controls'], streamingLifecycle: 'model output only; close for tools, questions and terminal states; renew platform window', persistedDelivery: ['cardId', 'sequence', 'last delivered card', 'streaming start', 'pending idempotent UUID and exact payload'], legacyCardConversion: false }, completedDialogue: 'content without task header or completion label', taskAnswers: 'reply to the task card or submit its form', groupChat: false, inbound: ['text', 'card actions'], outbound: ['updated response cards', 'task questions and controls', 'QR images', 'Team documents', 'Workflow Artifacts'], configurationRoute: '/chat?view=channels', applicationRegistration: { available: true, archetype: 'PersonalAgent', startRoute: 'POST /plugins/feishu-bot/feishu/registration', cancelRoute: 'DELETE /plugins/feishu-bot/feishu/registration', operator: 'user through Web configuration', automaticCredentialPersistence: true, userBinding: 'automatic when returned, otherwise manual', resumable: true, manualExistingApplication: true, platformSetup: ['bot capability', 'IM permissions', 'long-connection message and card subscriptions', 'publication'], userOAuth: false, runtimeCompatibility: 'requires authorized real integration' }, wechat: { pluginId: 'wechat-bot', protocol: 'Tencent iLink bot long-poll', login: { startRoute: 'POST /plugins/wechat-bot/wechat/login', cancelRoute: 'DELETE /plugins/wechat-bot/wechat/login', mechanism: 'QR scan; scanning user becomes the allowed user', credentialStorage: 'encrypted bot token in the plugin row' }, privateChat: true, groupChat: false, inbound: ['text'], outbound: ['whole text replies', 'conversation question prompts', 'task status notifications', 'Workflow QR images', 'Chat attachment images'], streaming: false, cards: false, media: 'images outbound only', defaultTarget: 'conversation', questionAnswers: 'plain text answers to Chat pending questions; Chat Agent handles Team actions', disconnectRoute: 'POST /plugins/wechat-bot/wechat/disconnect', configurationRoute: '/chat?view=channels', staleToken: 'status error; user re-logins by QR' } } },
         supportedResourceOperations: [
           'inspect Gateway statistics and request logs',
           'delegate independent project work to a Codex or Claude Code project executor',
@@ -1461,36 +1461,36 @@ export class WorkspaceResourcesService {
           predefinedTeamCount: 2,
           teamCreation: false,
           teamDeletion: true,
-          teamListRoute: 'GET /agent-teams',
-          teamSelection: 'one Chat chooses a named predefined Team by teamId for each dispatch and configuration change; existing company repositories use Company Project, and other project work uses Direct (Planner then project Executor, no Dispatcher)',
-          webRoute: `/agent-teams/${BUILT_IN_AGENT_TEAM_ID}`,
+          teamListRoute: 'GET /executor-categories',
+          teamSelection: 'one Chat chooses a named predefined Team by executorCategoryId for each dispatch and configuration change; existing company repositories use Company Project, and other project work uses Direct (Planner then project Executor, no Dispatcher)',
+          webRoute: `/executor-categories/${BUILT_IN_EXECUTOR_CATEGORY_ID}`,
           webDefaultTab: 'records',
-          recordsRoute: 'GET /agent-teams/:teamId/runs',
-          runRecordsRoute: 'GET /agent-teams/:teamId/runs',
+          recordsRoute: 'GET /executor-categories/:executorCategoryId/runs',
+          runRecordsRoute: 'GET /executor-categories/:executorCategoryId/runs',
           webGroupCreation: false,
           webConfiguration: false,
           chatAgentDispatchOnly: true,
           dispatchRoute: 'POST /chat/dispatch',
-          dispatchRequires: ['named teamId', 'goal in message', 'absolute existing projectDirectory', 'mode'],
+          dispatchRequires: ['named executorCategoryId', 'goal in message', 'absolute existing projectDirectory', 'mode'],
           busyDispatch: 'persist as queued when maxConcurrentRuns is reached; start queued Runs FIFO when an active slot opens',
           maxConcurrentRuns: { configurable: true, minimum: 1, default: 3 },
           submissionBinding: 'stable submission id atomically binds groupId and runId; repeated delivery is idempotent',
           orchestrationVersion: { newRuns: 11, defaultInitialRole: 'dispatcher', handoffs: 'role handoffs continue inside the group-bound Run over the captured dynamic role directory', historicalVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] },
-          historicalTeamManager: { role: 'team-manager', appliesTo: 'captured v1-v7 TeamVersions only; new v8-v11 Runs have no Team Manager work role' },
+          historicalTeamManager: { role: 'executor-manager', appliesTo: 'captured v1-v7 TeamVersions only; new v8-v11 Runs have no Executor Manager work role' },
           groupRoutes: {
             persistence: 'groups bind Chat submissions and preserve transcript and repository context for captured Runs',
-            archive: 'GET /agent-team-groups/:groupId is read-only history; no user-facing composer, answer, repository mutation or controls',
+            archive: 'GET /executor-groups/:groupId is read-only history; no user-facing composer, answer, repository mutation or controls',
             operations: 'Chat dispatch and protected Chat platform tools own user-requested actions',
             retiredRoutes: 'Direct group creation, message, answer, group repository and Team group-list APIs are removed; only archive reads/events and Chat-bound reexecution remain',
           },
-          teamMemory: { routes: 'GET/POST/PATCH/DELETE /agent-teams/:teamId/memories through protected Chat platform tools', scope: ['Team', 'canonical repository'], injection: 'v11 initially addressed role receives the full captured projection and every other role a bounded index; v8-v10 keep the bounded initial-role projection only; historical v1-v7 retain captured injection behavior', writeOwner: 'Chat has full management; v11 roles may search, read and write Team memories within the Run repository scope through managed tools or the per-task executor MCP endpoint' },
+          teamMemory: { routes: 'GET/POST/PATCH/DELETE /executor-categories/:executorCategoryId/memories through protected Chat platform tools', scope: ['Team', 'canonical repository'], injection: 'v11 initially addressed role receives the full captured projection and every other role a bounded index; v8-v10 keep the bounded initial-role projection only; historical v1-v7 retain captured injection behavior', writeOwner: 'Chat has full management; v11 roles may search, read and write Team memories within the Run repository scope through managed tools or the per-task executor MCP endpoint' },
           workingPractice: 'captured by each new v8-v11 group Run and injected into the initially addressed role only',
-          projectGitPolicy: { perTeam: true, editableThrough: 'update_agent_team with teamId', capturedBy: 'new v9-v11 TeamVersion', injection: 'every project-executor work role in the captured Run', enforcement: 'guidance for native project executors; WorkLite does not create, merge, or clean Git branches or worktrees' },
-          teamDeletion: { deleteRoute: 'DELETE /agent-teams/:teamId', deleteRequires: 'path teamId and body confirmTeamId matching', softDelete: true, deletedTeamsExcludedFrom: ['team list', 'inspect_agent_team', 'update_agent_team', 'role CRUD', 'dispatch targets'], deletedTeamsPreserve: ['historical Run data', 'TeamVersion snapshots', 'team memories', 'group archives', 'role directory'], beforeDelete: 'ask_user for confirmation; prevent if active Runs exist or last team', handWritingDeleteRecovery: 'manual NULL UPDATE to deleted_at column restores a deleted team' },
-          runWebRoute: '/agent-team-runs/:runId',
+          projectGitPolicy: { perTeam: true, editableThrough: 'update_executor_category with executorCategoryId', capturedBy: 'new v9-v11 TeamVersion', injection: 'every project-executor work role in the captured Run', enforcement: 'guidance for native project executors; WorkLite does not create, merge, or clean Git branches or worktrees' },
+          teamDeletion: { deleteRoute: 'DELETE /executor-categories/:executorCategoryId', deleteRequires: 'path executorCategoryId and body confirmTeamId matching', softDelete: true, deletedTeamsExcludedFrom: ['team list', 'inspect_agent_team', 'update_executor_category', 'role CRUD', 'dispatch targets'], deletedTeamsPreserve: ['historical Run data', 'TeamVersion snapshots', 'team memories', 'group archives', 'role directory'], beforeDelete: 'ask_user for confirmation; prevent if active Runs exist or last team', handWritingDeleteRecovery: 'manual NULL UPDATE to deleted_at column restores a deleted team' },
+          runWebRoute: '/executor-runs/:runId',
           predefinedTeamIds: agentTeamRows.map((team) => team.id),
-          roles: [...AGENT_TEAM_ROLES],
-          dynamicRoleDirectory: { customIds: 'server-assigned stable opaque ids', workRoleCrud: ['POST /agent-teams/:teamId/roles', 'PATCH /agent-teams/:teamId/roles/:roleId', 'DELETE /agent-teams/:teamId/roles/:roleId'], historicalProtectedRole: 'team-manager in captured v1-v7 versions' },
+          roles: [...EXECUTOR_CATEGORY_ROLES],
+          dynamicRoleDirectory: { customIds: 'server-assigned stable opaque ids', workRoleCrud: ['POST /executor-categories/:executorCategoryId/roles', 'PATCH /executor-categories/:executorCategoryId/roles/:roleId', 'DELETE /executor-categories/:executorCategoryId/roles/:roleId'], historicalProtectedRole: 'executor-manager in captured v1-v7 versions' },
           developerExecution: {
             executors: ['claude', 'codex'],
             roleField: 'developer defaults to claude; orchestration v7-v11 captures executor launches for configured work roles with an executor',
@@ -1505,7 +1505,7 @@ export class WorkspaceResourcesService {
           multiDeveloper: {
             configuration: 'single developer role; the Planner decides per Run how many of the fixed 4 lanes (developer, developer-2, developer-3, developer-4) execute via developmentAssignments without developerId',
             reservedPrimaryId: 'developer',
-            orchestrationVersion: 'new TeamVersions use v11, which keeps the v10 Team Dispatcher mode decision and adds role search/read/write Team memory plus a bounded memory index for non-initial roles; v10 starts at the Team Dispatcher unless the user names a role and enforces the decided mode route; v9 has no Team Manager role, captured project Git policy for project-executor roles, and working practice plus matching memories in the initially addressed role; v8 has no Team Manager and retains initial-role working practice and memory projections; v7 keeps its protected Team Manager; v6 retains dynamic group handoffs and Developer fan-out; v4 keeps managed worktree lifecycle and v5 keeps advisory per-project strategy; versions 1–10 keep their captured graphs, prompts, tool surfaces and dispatch-time mode',
+            orchestrationVersion: 'new TeamVersions use v11, which keeps the v10 executor category Dispatcher mode decision and adds role search/read/write executor category memory plus a bounded memory index for non-initial roles; v10 starts at the executor category Dispatcher unless the user names a role and enforces the decided mode route; v9 has no Executor Manager role, captured project Git policy for project-executor roles, and working practice plus matching memories in the initially addressed role; v8 has no Executor Manager and retains initial-role working practice and memory projections; v7 keeps its protected Executor Manager; v6 retains dynamic group handoffs and Developer fan-out; v4 keeps managed worktree lifecycle and v5 keeps advisory per-project strategy; versions 1–10 keep their captured graphs, prompts, tool surfaces and dispatch-time mode',
             taskKeys: 'group_<step>_<role> and group_<step>_developer_<developerId> in v6; earlier versions keep their captured keys',
             assignments: 'planner-produced non-overlapping ownedPaths mapped to lanes in order; targeted repairRequests per developerId; a role output that fails validation earns exactly one corrective re-invocation',
             retryBarrier: 'one retry resumes all failed assignments in the same fan-out; completed siblings never rerun',
@@ -1516,29 +1516,29 @@ export class WorkspaceResourcesService {
           modes: ['plan_only', 'validate_existing', 'implement_and_validate'],
           modeSelection: 'Coding Executors teams do not accept a mode on dispatch. Direct starts at its Planner; in other teams the v10-v11 Dispatcher decides it and records modeRationale and modeDecidedAt on the Run; historical v1-v9 Runs keep their captured mode.',
           teamRoutes: {
-            detail: 'GET /agent-teams/:teamId',
-            update: 'PATCH /agent-teams/:teamId',
-            createRole: 'POST /agent-teams/:teamId/roles (server assigns stable role id)',
-            updateRole: 'PATCH /agent-teams/:teamId/roles/:roleId',
-            deleteRole: 'DELETE /agent-teams/:teamId/roles/:roleId',
-            records: 'GET /agent-teams/:teamId/runs (read-only Run summaries)',
-            archive: 'GET /agent-team-groups/:groupId (read-only transcript)',
+            detail: 'GET /executor-categories/:executorCategoryId',
+            update: 'PATCH /executor-categories/:executorCategoryId',
+            createRole: 'POST /executor-categories/:executorCategoryId/roles (server assigns stable role id)',
+            updateRole: 'PATCH /executor-categories/:executorCategoryId/roles/:roleId',
+            deleteRole: 'DELETE /executor-categories/:executorCategoryId/roles/:roleId',
+            records: 'GET /executor-categories/:executorCategoryId/runs (read-only Run summaries)',
+            archive: 'GET /executor-groups/:groupId (read-only transcript)',
             groups: 'internal Chat dispatch persistence; no user-facing create or message route',
-            memories: 'GET/POST/PATCH/DELETE /agent-teams/:teamId/memories',
+            memories: 'GET/POST/PATCH/DELETE /executor-categories/:executorCategoryId/memories',
           },
           documentRoutes: {
             detail: 'GET /agent-team-documents/:documentId',
             download: 'GET /agent-team-documents/:documentId/download',
           },
           runRoutes: {
-            detail: 'GET /agent-team-runs/:runId',
-            events: 'GET /agent-team-runs/:runId/events',
-            answer: 'POST /agent-team-runs/:runId/answer',
-            recoverOperation: 'POST /agent-team-runs/:runId/operations/:operationKey/recovery',
-            pause: 'POST /agent-team-runs/:runId/pause',
-            resume: 'POST /agent-team-runs/:runId/resume',
-            cancel: 'POST /agent-team-runs/:runId/cancel',
-            retryTask: 'POST /agent-team-runs/:runId/tasks/:taskKey/retry',
+            detail: 'GET /executor-runs/:runId',
+            events: 'GET /executor-runs/:runId/events',
+            answer: 'POST /executor-runs/:runId/answer',
+            recoverOperation: 'POST /executor-runs/:runId/operations/:operationKey/recovery',
+            pause: 'POST /executor-runs/:runId/pause',
+            resume: 'POST /executor-runs/:runId/resume',
+            cancel: 'POST /executor-runs/:runId/cancel',
+            retryTask: 'POST /executor-runs/:runId/tasks/:taskKey/retry',
           },
           events: { persisted: true, replay: 'Last-Event-ID', live: 'server-sent events', taskActivity: 'developer executor process, session or thread, and command, file and tool activity' },
           directRunCreationApi: false,
@@ -1616,7 +1616,7 @@ export class WorkspaceResourcesService {
         allowedToolCount: server.allowedTools,
         version: server.version,
       })),
-      agentTeams: agentTeamRows.map((team) => ({
+      executorCategories: agentTeamRows.map((team) => ({
         id: team.id,
         name: team.name,
         description: team.description,
@@ -1840,7 +1840,7 @@ export class WorkspaceResourcesService {
     resourceId: string,
   ): Promise<boolean> {
     const [teamRows, versionRows] = await Promise.all([
-      this.db.select({ roles: agentTeams.roles }).from(agentTeams).where(eq(agentTeams.workspaceId, workspaceId)),
+      this.db.select({ roles: executorCategories.roles }).from(executorCategories).where(eq(executorCategories.workspaceId, workspaceId)),
       this.db.select({ snapshot: agentTeamVersions.snapshot }).from(agentTeamVersions).where(eq(agentTeamVersions.workspaceId, workspaceId)),
     ]);
     return [...teamRows, ...versionRows.map((row) => ({ roles: row.snapshot.roles }))]

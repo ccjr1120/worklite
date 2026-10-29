@@ -8,13 +8,13 @@ type StartOptions = { cwd?: string; reserveCommand?: CommandReservation };
 
 const READ_ONLY_TOOL_NAMES = ['read', 'glob', 'grep', 'process_reference'];
 const ROLE_ALLOWED_TOOL_NAMES: Partial<Record<string, readonly string[]>> = {
-  planner: [...READ_ONLY_TOOL_NAMES, 'read_team_document'],
-  'worktree-manager': [...READ_ONLY_TOOL_NAMES, 'read_team_document'],
-  test_designer: [...READ_ONLY_TOOL_NAMES, 'read_team_document'],
-  developer: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference', 'read_team_document'],
-  test_author: ['read', 'write', 'glob', 'grep', 'process_reference', 'read_team_document'],
-  test_runner: ['bash', 'read', 'write', 'glob', 'grep', 'read_team_document'],
-  reviewer: ['bash', ...READ_ONLY_TOOL_NAMES, 'read_team_document'],
+  planner: [...READ_ONLY_TOOL_NAMES, 'read_executor_document'],
+  'worktree-manager': [...READ_ONLY_TOOL_NAMES, 'read_executor_document'],
+  test_designer: [...READ_ONLY_TOOL_NAMES, 'read_executor_document'],
+  developer: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference', 'read_executor_document'],
+  test_author: ['read', 'write', 'glob', 'grep', 'process_reference', 'read_executor_document'],
+  test_runner: ['bash', 'read', 'write', 'glob', 'grep', 'read_executor_document'],
+  reviewer: ['bash', ...READ_ONLY_TOOL_NAMES, 'read_executor_document'],
 };
 
 export function selectBuiltinToolNames(role: AgentTeamRoleId, requestedToolNames: readonly string[]): string[] {
@@ -29,7 +29,7 @@ const definitions: GatewayToolDefinition[] = [
   { name: 'glob', description: 'Find files matching a glob pattern.', inputSchema: { type: 'object', additionalProperties: false, required: ['pattern'], properties: { pattern: { type: 'string' } } } },
   { name: 'grep', description: 'Search files with a regular expression.', inputSchema: { type: 'object', additionalProperties: false, required: ['pattern'], properties: { pattern: { type: 'string' }, path: { type: 'string' } } } },
   { name: 'process_reference', description: 'Read a file from the pinned Coding Executors team process package.', inputSchema: { type: 'object', additionalProperties: false, required: ['path'], properties: { path: { type: 'string' } } } },
-  { name: 'read_team_document', description: 'Read an exact immutable Team document version that was explicitly handed to this task.', inputSchema: { type: 'object', additionalProperties: false, required: ['documentId', 'revision'], properties: { documentId: { type: 'string' }, revision: { type: 'integer', minimum: 1 } } } },
+  { name: 'read_executor_document', description: 'Read an exact immutable Team document version that was explicitly handed to this task.', inputSchema: { type: 'object', additionalProperties: false, required: ['documentId', 'revision'], properties: { documentId: { type: 'string' }, revision: { type: 'integer', minimum: 1 } } } },
 ];
 
 @Injectable()

@@ -7,8 +7,8 @@ import { chatSubmissions, externalChats, feishuDeliveries, feishuEvents, type Da
 import { DATABASE } from '../../../infrastructure/database.module';
 import { AgentExecutionsService } from '../../agents/agent-executions.service';
 import { CHAT_AGENT_ID, ChatDispatchService } from '../../agents/chat-dispatch.service';
-import { AgentTeamDocumentsService } from '../../agent-teams/agent-team-documents.service';
-import { AgentTeamsService } from '../../agent-teams/agent-teams.service';
+import { AgentTeamDocumentsService } from '../../executor-categories/agent-team-documents.service';
+import { AgentTeamsService } from '../../executor-categories/executor-categories.service';
 import { RunsService } from '../../runs/runs.service';
 import { PluginsService } from '../plugins.service';
 import { renderCard, renderTaskCard, statusText, teamRoleName, teamRunMeta, type CardButton, type CardState, type CardTransport, type CardUpdate, type FeishuAction, type FeishuCard, type SavedCard } from './feishu-cards';
@@ -59,7 +59,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
         void this.db.update(chatSubmissions).set({ settled: false }).where(sql`json_extract(${chatSubmissions.reference}, '$.runId') = ${event.runId}`).then(() => undefined);
       }),
       this.teams.subscribe((event) => {
-        void this.db.update(chatSubmissions).set({ settled: false }).where(sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'team' and json_extract(${chatSubmissions.reference}, '$.runId') = ${event.runId}`).then(() => undefined);
+        void this.db.update(chatSubmissions).set({ settled: false }).where(sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'executor_category' and json_extract(${chatSubmissions.reference}, '$.runId') = ${event.runId}`).then(() => undefined);
       }),
     ];
     await this.connect();
@@ -331,7 +331,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
           await this.db.update(chatSubmissions).set({ reference }).where(eq(chatSubmissions.id, parentId));
         } else if (turn.reference.completionStatus) throw new ConflictException('This conversation turn has already ended.');
       }
-      if (action.domain === 'team') {
+      if (action.domain === 'executor_category') {
         if (action.action === 'retry') await this.teams.retry(request, 'personal', action.runId, action.taskKey ?? '');
         else await this.teams[action.action](request, 'personal', action.runId);
       } else if (action.domain === 'workflow') {
@@ -427,7 +427,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
         state.content = terminal ? '完整回复见 Markdown 文件。' : '正在生成较长回复，完成后将发送完整文件。';
         state.streaming = false;
       }
-    } else if (reference?.kind === 'team') {
+    } else if (reference?.kind === 'executor_category') {
       state.title = 'Chat · Coding Executors';
       const run = await this.teams.getRun(request, 'personal', reference.runId);
       const phaseText: Record<string, string> = { planning: '规划中', test_design: '测试设计中', development: '开发中', test_authoring: '测试编写中', test_execution: '测试执行中', review: '审查中', repair: '修复中', waiting: '等待输入', terminal: '已结束' };
@@ -449,7 +449,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
         state.content += `\n\n${pending.question}`;
         state.buttons.push(...(['adopt_command', 'mark_failed', 'replay'] as const).map((decision) => ({ label: ({ adopt_command: '采用已执行结果', mark_failed: '标记操作失败', replay: '重新执行此操作' })[decision], action: { kind: 'recovery', runId: run.id, operationKey: pending.operationKey!, decision } as FeishuAction })));
       }
-      this.controls(state.buttons, 'team', run.id, run.status, active?.retryable ? active.taskKey : undefined);
+      this.controls(state.buttons, 'executor_category', run.id, run.status, active?.retryable ? active.taskKey : undefined);
       terminal = ['succeeded', 'failed', 'cancelled'].includes(run.status);
       if (run.outcome) state.content += `\n\n${run.outcome.summary}${run.outcome.unresolvedIssues.length ? `\n\n待解决：\n${run.outcome.unresolvedIssues.map((issue) => `- ${issue}`).join('\n')}` : ''}`;
       for (const document of run.documents) {
@@ -709,7 +709,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
       .onConflictDoUpdate({ target: feishuEvents.id, set: { payload: { direction: 'outbound', ...payload }, error } });
   }
 
-  private controls(buttons: CardButton[], domain: 'team' | 'workflow', runId: string, status: string, retryable?: string): void {
+  private controls(buttons: CardButton[], domain: 'executor_category' | 'workflow', runId: string, status: string, retryable?: string): void {
     if (status === 'queued' || status === 'running') buttons.push({ label: '暂停任务', action: { kind: 'control', domain, runId, action: 'pause' } });
     if (status === 'paused') buttons.push({ label: '继续任务', action: { kind: 'control', domain, runId, action: 'resume' } });
     if (['queued', 'running', 'paused', 'waiting_for_input'].includes(status)) buttons.push({ label: '取消任务', action: { kind: 'control', domain, runId, action: 'cancel' } });

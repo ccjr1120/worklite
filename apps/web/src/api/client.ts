@@ -132,7 +132,7 @@ function appendGatewayAttribution(search: URLSearchParams, filters: GatewayAttri
     ['conversationId', filters.conversationId],
     ['projectTaskId', filters.projectTaskId],
     ['executor', filters.executor],
-    ['teamId', filters.teamId],
+    ['executorCategoryId', filters.executorCategoryId],
     ['teamRunId', filters.teamRunId],
     ['workflowId', filters.workflowId],
     ['workflowRunId', filters.workflowRunId],
@@ -296,25 +296,25 @@ export const api = {
     return apiGet<GatewayRequestLogList>(`/api/portkey-gateway/request-logs${suffix}`);
   },
   gatewayRequestLog: (requestLogId: string) => apiGet<GatewayRequestLogDetail>(`/api/portkey-gateway/request-logs/${encodeURIComponent(requestLogId)}`),
-  agentTeams: () => apiGet<AgentTeamView[]>('/api/agent-teams'),
-  agentTeamRecords: (teamId: string) => apiGet<AgentTeamRunSummary[]>(`/api/agent-teams/${encodeURIComponent(teamId)}/runs`),
-  agentTeamRunList: (query: { teamIds?: string[]; cursor?: string; limit?: number }) => {
+  executorCategories: () => apiGet<AgentTeamView[]>('/api/executor-categories'),
+  agentTeamRecords: (executorCategoryId: string) => apiGet<AgentTeamRunSummary[]>(`/api/executor-categories/${encodeURIComponent(executorCategoryId)}/runs`),
+  agentTeamRunList: (query: { executorCategoryIds?: string[]; cursor?: string; limit?: number }) => {
     const search = new URLSearchParams();
-    if (query.teamIds?.length) {
-      query.teamIds.forEach(id => search.append('teamId', id));
+    if (query.executorCategoryIds?.length) {
+      query.executorCategoryIds.forEach(id => search.append('executorCategoryId', id));
     }
     if (query.cursor?.trim()) search.set('cursor', query.cursor.trim());
     if (query.limit) search.set('limit', String(query.limit));
     const suffix = search.size > 0 ? `?${search.toString()}` : '';
-    return apiGet<AgentTeamRunListPage>(`/api/agent-team-runs${suffix}`);
+    return apiGet<AgentTeamRunListPage>(`/api/executor-runs${suffix}`);
   },
-  agentTeam: (teamId: string) => apiGet<AgentTeamView>(`/api/agent-teams/${encodeURIComponent(teamId)}`),
-  updateAgentTeamRole: (teamId: string, roleId: string, input: Partial<Omit<AgentTeamRoleConfiguration, 'role'>>) =>
-    apiPatch<AgentTeamView>(`/api/agent-teams/${encodeURIComponent(teamId)}/roles/${encodeURIComponent(roleId)}`, input),
-  agentTeamMemories: (teamId: string) => apiGet<AgentTeamMemoryView[]>(`/api/agent-teams/${encodeURIComponent(teamId)}/memories`),
-  agentTeamGroup: (groupId: string) => apiGet<AgentTeamGroupView>(`/api/agent-team-groups/${encodeURIComponent(groupId)}`),
-  controlAgentTeamGroup: (groupId: string, input: { operation: 'reexecute'; runIds: string[] }) => apiPost<AgentTeamGroupView>(`/api/agent-team-groups/${encodeURIComponent(groupId)}/controls`, input),
-  agentTeamGroupEventsUrl: (groupId: string) => `/api/agent-team-groups/${encodeURIComponent(groupId)}/events`,
+  agentTeam: (executorCategoryId: string) => apiGet<AgentTeamView>(`/api/executor-categories/${encodeURIComponent(executorCategoryId)}`),
+  updateAgentTeamRole: (executorCategoryId: string, roleId: string, input: Partial<Omit<AgentTeamRoleConfiguration, 'role'>>) =>
+    apiPatch<AgentTeamView>(`/api/executor-categories/${encodeURIComponent(executorCategoryId)}/roles/${encodeURIComponent(roleId)}`, input),
+  executorCategoryMemories: (executorCategoryId: string) => apiGet<AgentTeamMemoryView[]>(`/api/executor-categories/${encodeURIComponent(executorCategoryId)}/memories`),
+  agentTeamGroup: (groupId: string) => apiGet<AgentTeamGroupView>(`/api/executor-groups/${encodeURIComponent(groupId)}`),
+  controlAgentTeamGroup: (groupId: string, input: { operation: 'reexecute'; runIds: string[] }) => apiPost<AgentTeamGroupView>(`/api/executor-groups/${encodeURIComponent(groupId)}/controls`, input),
+  executorGroupEventsUrl: (groupId: string) => `/api/executor-groups/${encodeURIComponent(groupId)}/events`,
   agentTeamDocument: (documentId: string) => apiGet<AgentTeamDocumentView>(`/api/agent-team-documents/${encodeURIComponent(documentId)}`),
   downloadAgentTeamDocument: async (documentId: string): Promise<Blob> => {
     const response = await fetch(`/api/agent-team-documents/${encodeURIComponent(documentId)}/download`, {
@@ -325,14 +325,14 @@ export const api = {
     }
     return response.blob();
   },
-  agentTeamRun: (runId: string) => apiGet<AgentTeamRunView>(`/api/agent-team-runs/${encodeURIComponent(runId)}`),
-  agentTeamRunEventsUrl: (runId: string) => `/api/agent-team-runs/${encodeURIComponent(runId)}/events`,
-  answerAgentTeamRun: (runId: string, input: AnswerAgentTeamRunRequest) => apiPost<AgentTeamRunActionResponse>(`/api/agent-team-runs/${encodeURIComponent(runId)}/answer`, input),
-  recoverAgentTeamOperation: (runId: string, operationKey: string, input: RecoverAgentTeamOperationRequest) => apiPost<AgentTeamRunActionResponse>(`/api/agent-team-runs/${encodeURIComponent(runId)}/operations/${encodeURIComponent(operationKey)}/recovery`, input),
-  pauseAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/agent-team-runs/${encodeURIComponent(runId)}/pause`),
-  resumeAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/agent-team-runs/${encodeURIComponent(runId)}/resume`),
-  cancelAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/agent-team-runs/${encodeURIComponent(runId)}/cancel`),
-  retryAgentTeamTask: (runId: string, taskKey: string) => apiPost<AgentTeamRunActionResponse>(`/api/agent-team-runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskKey)}/retry`),
+  agentTeamRun: (runId: string) => apiGet<AgentTeamRunView>(`/api/executor-runs/${encodeURIComponent(runId)}`),
+  executorRunEventsUrl: (runId: string) => `/api/executor-runs/${encodeURIComponent(runId)}/events`,
+  answerAgentTeamRun: (runId: string, input: AnswerAgentTeamRunRequest) => apiPost<AgentTeamRunActionResponse>(`/api/executor-runs/${encodeURIComponent(runId)}/answer`, input),
+  recoverAgentTeamOperation: (runId: string, operationKey: string, input: RecoverAgentTeamOperationRequest) => apiPost<AgentTeamRunActionResponse>(`/api/executor-runs/${encodeURIComponent(runId)}/operations/${encodeURIComponent(operationKey)}/recovery`, input),
+  pauseAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/executor-runs/${encodeURIComponent(runId)}/pause`),
+  resumeAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/executor-runs/${encodeURIComponent(runId)}/resume`),
+  cancelAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/executor-runs/${encodeURIComponent(runId)}/cancel`),
+  retryAgentTeamTask: (runId: string, taskKey: string) => apiPost<AgentTeamRunActionResponse>(`/api/executor-runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskKey)}/retry`),
   runs: (_workspace?: string) => apiGet<RunView[]>('/api/runs'),
   run: (_workspace: string | undefined, runId: string) => apiGet<RunView>(`/api/runs/${encodeURIComponent(runId)}`),
   runEventsUrl: (runId: string) => `/api/runs/${encodeURIComponent(runId)}/events`,

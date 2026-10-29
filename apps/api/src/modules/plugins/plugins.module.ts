@@ -4,7 +4,7 @@ import { PluginsService } from './plugins.service';
 import { FeishuService } from './feishu/feishu.service';
 import { FeishuRegistrationService } from './feishu/feishu-registration.service';
 import { ChatDispatchModule } from '../agents/chat-dispatch.module';
-import { AgentTeamsModule } from '../agent-teams/agent-teams.module';
+import { AgentTeamsModule } from '../executor-categories/executor-categories.module';
 import { RunsModule } from '../runs/runs.module';
 import { WechatOfficialAccountService } from './wechat-official-account.service';
 import { WechatService } from './wechat/wechat.service';

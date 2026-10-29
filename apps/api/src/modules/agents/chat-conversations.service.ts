@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { and, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import { CHAT_AGENT_ID, type AgentExecutionEventData, type AgentExecutionView, type ChatChannelView, type ChatConversationList, type ChatConversationRecords, type ChatConversationSummary, type ChatConversationView, type ChatSubmissionView } from '@worklite/contracts';
-import { agentExecutionEvents, agentExecutions, agentTeamRuns, agentToolCalls, agents, chatConfigurations, chatProjectTasks, chatSubmissions, externalChats, feishuDeliveries, feishuEvents, plugins, wechatEvents, workflowRuns, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
+import { agentExecutionEvents, agentExecutions, executorRuns, agentToolCalls, agents, chatConfigurations, chatProjectTasks, chatSubmissions, externalChats, feishuDeliveries, feishuEvents, plugins, wechatEvents, workflowRuns, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
 import { createModelGateway } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
@@ -218,9 +218,9 @@ export class ChatConversationsService {
     const tasks = await this.db.select({ executionId: chatProjectTasks.executionId }).from(chatProjectTasks)
       .where(and(eq(chatProjectTasks.workspaceId, workspaceId), inArray(chatProjectTasks.status, ['running', 'waiting_for_input'])));
     const teamRuns = await this.db.select({ executionId: chatSubmissions.executionId }).from(chatSubmissions)
-      .innerJoin(agentTeamRuns, sql`${agentTeamRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
+      .innerJoin(executorRuns, sql`${executorRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
       .where(and(eq(chatSubmissions.workspaceId, workspaceId), isNotNull(chatSubmissions.executionId),
-        notInArray(agentTeamRuns.status, ['succeeded', 'failed', 'cancelled'])));
+        notInArray(executorRuns.status, ['succeeded', 'failed', 'cancelled'])));
     const workflows = await this.db.select({ executionId: chatSubmissions.executionId }).from(chatSubmissions)
       .innerJoin(workflowRuns, sql`${workflowRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
       .where(and(eq(chatSubmissions.workspaceId, workspaceId), isNotNull(chatSubmissions.executionId),

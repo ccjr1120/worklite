@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Request } from 'express';
-import { agentTeams, createDb, initializeDatabase, type Database } from '@worklite/db';
+import { executorCategories, createDb, initializeDatabase, type Database } from '@worklite/db';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
-import { AgentTeamConfigurationService } from '../agent-teams/agent-team-configuration.service';
+import { AgentTeamConfigurationService } from '../executor-categories/agent-team-configuration.service';
 import { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
 
 // End-to-end for the supported integration path: import a local Skill as a
@@ -24,7 +24,7 @@ async function setup() {
   const database = createDb(':memory:');
   db = database;
   await initializeDatabase(database);
-  database.insert(agentTeams).values({
+  database.insert(executorCategories).values({
     id: 'agent_team_bmad_tea',
     workspaceId: 'workspace_personal',
     name: 'Company Project',

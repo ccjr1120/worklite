@@ -5,7 +5,7 @@ import type { Request } from 'express';
 import {
   agentMcpServers,
   agentTeamVersions,
-  agentTeams,
+  executorCategories,
   agents,
   createDb,
   initializeDatabase,
@@ -89,7 +89,7 @@ function seedWorkflow(mcpServerIds: string[], options: { publishedVersion?: bool
 }
 
 function seedAgentTeam(mcpServerIds: string[], options: { capturedVersion?: boolean } = {}) {
-  db!.insert(agentTeams).values({
+  db!.insert(executorCategories).values({
     id: 'team_1',
     workspaceId: WORKSPACE_ID,
     name: 'Delivery',
@@ -102,7 +102,7 @@ function seedAgentTeam(mcpServerIds: string[], options: { capturedVersion?: bool
     db!.insert(agentTeamVersions).values({
       id: 'teamv_1',
       workspaceId: WORKSPACE_ID,
-      teamId: 'team_1',
+      executorCategoryId: 'team_1',
       version: 1,
       snapshot: {
         processId: 'process',
@@ -173,8 +173,8 @@ describe('WorkspaceResourcesService.deleteMcpServer', () => {
     const references = badRequestReferences(error);
     expect(references.workflowDrafts).toEqual([{ workflowId: 'wf_1', workflowName: 'Research', nodeIds: ['agent-1'] }]);
     expect(references.workflowVersions).toEqual([{ workflowId: 'wf_1', workflowName: 'Research', version: 1, nodeIds: ['agent-1'] }]);
-    expect(references.agentTeamRoles).toEqual([{ teamId: 'team_1', teamName: 'Delivery', role: 'developer', displayName: null }]);
-    expect(references.agentTeamVersions).toEqual([{ teamId: 'team_1', versionId: 'teamv_1', version: 1, roles: ['developer'] }]);
+    expect(references.agentTeamRoles).toEqual([{ executorCategoryId: 'team_1', teamName: 'Delivery', role: 'developer', displayName: null }]);
+    expect(references.agentTeamVersions).toEqual([{ executorCategoryId: 'team_1', versionId: 'teamv_1', version: 1, roles: ['developer'] }]);
     expect((error as BadRequestException).message).toContain('Research');
     expect((error as BadRequestException).message).toContain('Delivery');
     // Nothing was deleted or rewritten.
@@ -199,7 +199,7 @@ describe('WorkspaceResourcesService.deleteMcpServer', () => {
     expect(revision.source).toBe('migration');
     expect(revision.snapshot).toEqual(draft.definition);
 
-    const [team] = db!.select().from(agentTeams).where(eq(agentTeams.id, 'team_1')).all();
+    const [team] = db!.select().from(executorCategories).where(eq(executorCategories.id, 'team_1')).all();
     expect(team.roles[0]!.mcpServers).toEqual([]);
 
     // Immutable history keeps its references.

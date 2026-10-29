@@ -407,6 +407,13 @@
       "when": 1793200000000,
       "tag": "0058_agent_teams_soft_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1793300000000,
+      "tag": "0059_rename_agent_teams_to_executor_categories",
+      "breakpoints": true
     }
   ]
 }

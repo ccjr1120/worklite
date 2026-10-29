@@ -11,7 +11,7 @@ import { assertRuntimeAdmission, runtimeAdmissionClosed, runtimeWritesFrozen, up
 import { AgentExecutionsService } from '../../agents/agent-executions.service';
 import { CHAT_AGENT_ID, ChatDispatchService } from '../../agents/chat-dispatch.service';
 import { ChatAttachmentsService, detachAttachmentImages } from '../../agents/chat-attachments.service';
-import { AgentTeamsService } from '../../agent-teams/agent-teams.service';
+import { AgentTeamsService } from '../../executor-categories/executor-categories.service';
 import { RunsService } from '../../runs/runs.service';
 import { UpgradesService } from '../../upgrades/upgrades.service';
 import { encryptSecret, PluginsService } from '../plugins.service';
@@ -124,7 +124,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
         void this.db.update(chatSubmissions).set({ settled: false }).where(sql`json_extract(${chatSubmissions.reference}, '$.runId') = ${event.runId}`).then(() => undefined);
       }),
       this.teams.subscribe((event) => {
-        void this.db.update(chatSubmissions).set({ settled: false }).where(sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'team' and json_extract(${chatSubmissions.reference}, '$.runId') = ${event.runId}`).then(() => undefined);
+        void this.db.update(chatSubmissions).set({ settled: false }).where(sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'executor_category' and json_extract(${chatSubmissions.reference}, '$.runId') = ${event.runId}`).then(() => undefined);
       }),
     ];
     await this.connect();
@@ -603,7 +603,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
           else text += '\n\n请直接回复你的答案。';
         }
       }
-    } else if (reference?.kind === 'team') {
+    } else if (reference?.kind === 'executor_category') {
       const run = await this.teams.getRun(request, 'personal', reference.runId);
       terminal = ['succeeded', 'failed', 'cancelled'].includes(run.status);
       const pending = run.pendingInputs.find((item) => item.status === 'pending');

@@ -17,8 +17,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { TruncatedText } from '@/components/ui/truncated-text';
 import { toSingleLine } from '@/lib/single-line';
 import { cn } from '@/lib/utils';
-import { runModeLabel } from '@/features/agent-teams/run-mode';
-import { formatElapsed, isSettledTeamRun, teamCurrentLabel, teamRoleLabel } from '@/features/agent-teams/team-run-summary';
+import { runModeLabel } from '@/features/executor-categories/run-mode';
+import { formatElapsed, isSettledTeamRun, teamCurrentLabel, teamRoleLabel } from '@/features/executor-categories/team-run-summary';
 
 function WorkflowTask({ submission }: { submission: ChatSubmissionView }) {
   const { t } = useTranslation('assistant');
@@ -45,7 +45,7 @@ function WorkflowTask({ submission }: { submission: ChatSubmissionView }) {
 
 function TeamPendingInput({ run, pendingInput, onRunUpdate }: { run: AgentTeamRunView; pendingInput: AgentTeamPendingInputView; onRunUpdate: (run: AgentTeamRunView) => void }) {
   const { t } = useTranslation('assistant');
-  const { t: tTeams } = useTranslation('agentTeams');
+  const { t: tTeams } = useTranslation('executorCategories');
   const [answer, setAnswer] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -76,7 +76,7 @@ function TeamPendingInput({ run, pendingInput, onRunUpdate }: { run: AgentTeamRu
 }
 
 function TeamRunActions({ run, groupId, onRunUpdate }: { run: AgentTeamRunView; groupId?: string; onRunUpdate: (run: AgentTeamRunView) => void }) {
-  const { t } = useTranslation('agentTeams');
+  const { t } = useTranslation('executorCategories');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [reexecutedRunId, setReexecutedRunId] = useState('');
@@ -98,7 +98,7 @@ function TeamRunActions({ run, groupId, onRunUpdate }: { run: AgentTeamRunView; 
       const createdRun = [...group.runs].filter((item) => item.id !== run.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
       if (createdRun) setReexecutedRunId(createdRun.id);
       queryClient.setQueryData(agentTeamGroupQueryKey(groupId), group);
-      void queryClient.invalidateQueries({ queryKey: ['agent-team-records', run.teamId] });
+      void queryClient.invalidateQueries({ queryKey: ['agent-team-records', run.executorCategoryId] });
     } catch (cause) { setError(cause instanceof Error ? cause.message : t('controls.failed')); }
     finally { setBusy(''); }
   }
@@ -113,13 +113,13 @@ function TeamRunActions({ run, groupId, onRunUpdate }: { run: AgentTeamRunView; 
       </> : null}
       {groupId && ['succeeded', 'failed', 'cancelled'].includes(run.status) && !reexecutedRunId ? <Button type="button" variant="secondary" size="compact" disabled={Boolean(busy)} onClick={() => void reexecute()}><RefreshCw className="size-3.5" aria-hidden="true" />{t('controls.reexecute')}</Button> : null}
     {run.tasks.filter((task) => task.status === 'failed' && task.retryable).map((task) => <Button key={task.taskKey} type="button" variant="secondary" size="compact" disabled={Boolean(busy)} onClick={() => void perform(`retry:${task.taskKey}`, () => api.retryAgentTeamTask(run.id, task.taskKey))}><RotateCcw className="size-3.5" aria-hidden="true" />{t('tasks.retryTask', { taskKey: task.taskKey })}</Button>)}
-    {reexecutedRunId ? <Link to="/agent-team-runs/$runId" params={{ runId: reexecutedRunId }} className="text-[13px] text-brand-text underline underline-offset-4">{t('run.detail.title')}</Link> : null}
+    {reexecutedRunId ? <Link to="/executor-runs/$runId" params={{ runId: reexecutedRunId }} className="text-[13px] text-brand-text underline underline-offset-4">{t('run.detail.title')}</Link> : null}
     {error ? <p className="basis-full text-right text-[13px] text-danger" role="alert">{error}</p> : null}
   </div>;
 }
 
 function TeamOperationRecovery({ run, operation, onRunUpdate }: { run: AgentTeamRunView; operation: AgentTeamRunView['operations'][number]; onRunUpdate: (run: AgentTeamRunView) => void }) {
-  const { t } = useTranslation('agentTeams');
+  const { t } = useTranslation('executorCategories');
   const [decision, setDecision] = useState<'adopt_command' | 'mark_failed' | 'replay'>('adopt_command');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -145,7 +145,7 @@ function TeamOperationRecovery({ run, operation, onRunUpdate }: { run: AgentTeam
 // questions and recovery decisions stay visible because the Run is blocked on them.
 function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissionView; runId: string; groupId?: string }) {
   const { t } = useTranslation('assistant');
-  const { t: tTeams } = useTranslation('agentTeams');
+  const { t: tTeams } = useTranslation('executorCategories');
   const pins = useContext(PinTrackingContext);
   const query = useAgentTeamRunQuery('personal', runId);
   const run = query.data;
@@ -164,7 +164,7 @@ function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissio
   }, [live, runId]);
   function onRunUpdate(updated: AgentTeamRunView) {
     queryClient.setQueryData(agentTeamRunQueryKey(updated.id), updated);
-    void queryClient.invalidateQueries({ queryKey: ['agent-team-records', updated.teamId] });
+    void queryClient.invalidateQueries({ queryKey: ['agent-team-records', updated.executorCategoryId] });
   }
   const failure = run?.status === 'failed' ? [...run.tasks].reverse().find((task) => task.status === 'failed')?.error : null;
   const questions = run?.pendingInputs.filter((input) => input.status === 'pending' && input.kind === 'question') ?? [];
@@ -246,7 +246,7 @@ function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissio
         </ol>
       </section> : null}
       {typeof submission.renderedCard?.content === 'string' ? <TruncatedText as="p" text={toSingleLine(submission.renderedCard.content)} title={submission.renderedCard.content} /> : null}
-      <Link to="/agent-team-runs/$runId" params={{ runId }} className="inline-block text-brand-text underline underline-offset-4">{t('teamRun.openRun')}</Link>
+      <Link to="/executor-runs/$runId" params={{ runId }} className="inline-block text-brand-text underline underline-offset-4">{t('teamRun.openRun')}</Link>
     </div> : null}
   </article>;
 }
@@ -279,6 +279,6 @@ function UpgradeTask({ jobId }: { jobId: string }) {
 export function TaskCard({ submission }: { submission: ChatSubmissionView }) {
   const { t } = useTranslation('assistant');
   const pins = useContext(PinTrackingContext);
-  if (submission.reference?.kind === 'team') return <TeamRunCard submission={submission} runId={submission.reference.runId} groupId={submission.reference.groupId} />;
+  if (submission.reference?.kind === 'executor_category') return <TeamRunCard submission={submission} runId={submission.reference.runId} groupId={submission.reference.groupId} />;
   return <section ref={pins?.track(submission.id)} tabIndex={-1} className="wl-enter my-4 space-y-3 rounded-xl border border-border bg-surface p-4 shadow-xs outline-none"><TruncatedText as="p" text={toSingleLine(submission.message)} title={submission.message} className="text-sm" />{submission.error ? <div className="space-y-2"><StatusBadge status="failed" label={t('status.failed')} /><TruncatedText as="p" text={toSingleLine(submission.error)} title={submission.error} className="text-[13px] text-danger" role="alert" /></div> : null}{submission.reference?.kind === 'workflow' ? <WorkflowTask submission={submission} /> : submission.reference?.kind === 'upgrade' ? <UpgradeTask jobId={submission.reference.jobId} /> : typeof submission.renderedCard?.content === 'string' ? <TruncatedText as="p" text={toSingleLine(submission.renderedCard.content)} title={submission.renderedCard.content} className="text-[13px]" /> : null}</section>;
 }
