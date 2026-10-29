@@ -15,8 +15,9 @@ export const DEFAULT_MAX_CONCURRENT_RUNS = 3;
 
 // The Dispatcher is a server-owned built-in role. Its stable id is the default
 // v10 Run recipient; Chat never invents or selects this id.
+// The Dispatcher is an optional role. Teams may include it as the default entry point.
+// If absent, the Planner becomes the entry point.
 export const AGENT_TEAM_DISPATCHER_ROLE = 'dispatcher';
-export const DEFAULT_AGENT_TEAM_ROLE = AGENT_TEAM_DISPATCHER_ROLE;
 
 // Existing role ids stay stable; server-created v8-v9 work roles receive dynamic ids captured by each TeamVersion.
 export type AgentTeamRuntimeRole = AgentTeamRoleId;
@@ -63,10 +64,17 @@ export const AGENT_TEAM_ROLE_INSTRUCTIONS: Partial<Record<string, string>> = {
   executor: 'Implement the Planner\'s handed-off plan in the authorized project. Follow the project\'s own repository instructions and the Team Git policy. Report the changes you made and any gaps between the plan and what you could complete.',
 };
 
-// The Direct team has no Dispatcher; its Run starts at the Planner. Every
-// other built-in and custom Team still starts at the server-owned Dispatcher.
-export function teamEntryRole(teamId: string): AgentTeamRoleId {
-  return teamId === DIRECT_AGENT_TEAM_ID ? 'planner' : AGENT_TEAM_DISPATCHER_ROLE;
+// Determine a team's entry role based on its configured roles. The Dispatcher is the default
+// entry point when present; if absent, the Planner is the entry point instead.
+export function teamEntryRole(team: { id: string; roles: ReadonlyArray<{ role: string }> }): AgentTeamRoleId {
+  if (team.roles.some((r) => r.role === AGENT_TEAM_DISPATCHER_ROLE)) {
+    return AGENT_TEAM_DISPATCHER_ROLE;
+  }
+  if (team.roles.some((r) => r.role === 'planner')) {
+    return 'planner';
+  }
+  // This should not happen if schema validation is correct, but fail fast if it does.
+  throw new Error(`Team ${team.id} has no Dispatcher or Planner role; cannot determine entry role.`);
 }
 
 // A directly addressed role bypasses the Dispatcher. Validation roles stay on

@@ -49,7 +49,7 @@ export class AgentTeamGroupsService {
     acceptance: Parameters<AgentTeamRuntimeService['createGroupRun']>[2],
   ): Promise<AgentTeamGroupView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    await this.getTeam(teamId, workspace.id);
+    const team = await this.getTeam(teamId, workspace.id);
     const digest = createHash('sha256').update(`${workspace.id}:${input.submissionId}`).digest('hex');
     const groupId = `atgroup_chat_${digest}`;
     const now = new Date();
@@ -70,9 +70,9 @@ export class AgentTeamGroupsService {
     if (!repository) throw new BadRequestException('The Chat project directory was not attached to its task group.');
     return this.sendMessage(request, workspaceSlug, groupId, {
       body: input.message,
-      // The Team Dispatcher decides the Run mode unless the user named a role;
-      // the Direct Team has no Dispatcher and enters at its Planner instead.
-      recipientRole: input.role ?? teamEntryRole(teamId),
+      // Determine entry role from team's actual roles. If user specified a role, use that.
+      // Otherwise, resolve to the team's entry role (Dispatcher if present, else Planner).
+      recipientRole: input.role ?? teamEntryRole(team),
       repositoryIds: [repository.id],
       submissionId: `chat_${input.submissionId}`,
     }, acceptance);
@@ -312,6 +312,7 @@ export class AgentTeamGroupsService {
   async control(request: Request, workspaceSlug: string, groupId: string, input: AgentTeamGroupControlRequest) {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const group = await this.getGroup(groupId, workspace.id);
+    const team = await this.getTeam(group.teamId, workspace.id);
     if (input?.operation !== 'reexecute') throw new BadRequestException('Only Chat re-execution is available for Coding Executors team groups.');
     const runIds = [...new Set(input?.runIds ?? [])];
     if (!runIds.length) throw new BadRequestException('Select at least one Run to re-execute.');
@@ -322,7 +323,12 @@ export class AgentTeamGroupsService {
       if (!run.targetRole || !run.groupMessageId) throw new BadRequestException('The selected Run has no re-executable group message.');
       const [message] = await this.db.select().from(agentTeamGroupMessages).where(eq(agentTeamGroupMessages.id, run.groupMessageId)).limit(1);
       if (!message) throw new NotFoundException('The original group message was not found.');
-      const initialRole = run.targetRole === 'team-manager' ? 'planner' : run.targetRole;
+      // If the original targetRole is team-manager or no longer exists in the team,
+      // fall back to the team's current entry role.
+      let initialRole = run.targetRole as AgentTeamRoleId;
+      if (initialRole === 'team-manager' || !team.roles.some((r) => r.role === initialRole)) {
+        initialRole = teamEntryRole(team);
+      }
       const submissionId = `reexecute_${run.id}_${randomUUID()}`;
       // A Run bound to a Chat conversation keeps its replacement in that conversation: the new
       // Run gets its own task submission, so its card, pin, progress and terminal report follow it.

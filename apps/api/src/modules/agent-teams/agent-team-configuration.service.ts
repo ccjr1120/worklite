@@ -102,13 +102,19 @@ export class AgentTeamConfigurationService {
   async deleteRole(workspaceId: string, teamId: string, roleId: string): Promise<AgentTeam> {
     const team = await this.getTeam(workspaceId, teamId);
     if (!team.roles.some((role) => role.role === roleId)) throw new NotFoundException('Coding Executors team role not found.');
-    // The Direct Team has no Dispatcher; its Planner is the required entry role instead.
+    // The Direct Team requires its Planner as the entry role.
+    // Other teams require either a Dispatcher or Planner as the entry role.
+    const remainingRoles = team.roles.filter((role) => role.role !== roleId);
     if (teamId === DIRECT_AGENT_TEAM_ID) {
       if (roleId === 'planner') throw new BadRequestException('The Planner role is required and cannot be deleted.');
-    } else if (roleId === AGENT_TEAM_DISPATCHER_ROLE) {
-      throw new BadRequestException('The Dispatcher role is required and cannot be deleted.');
+    } else {
+      const hasDispatcher = remainingRoles.some((role) => role.role === AGENT_TEAM_DISPATCHER_ROLE);
+      const hasPlanner = remainingRoles.some((role) => role.role === 'planner');
+      if (!hasDispatcher && !hasPlanner) {
+        throw new BadRequestException('A Dispatcher or Planner role is required as the Team entry role.');
+      }
     }
-    return this.update(workspaceId, teamId, { roles: team.roles.filter((role) => role.role !== roleId).map(toPublicRole) });
+    return this.update(workspaceId, teamId, { roles: remainingRoles.map(toPublicRole) });
   }
 
   private async resolveRoles(workspaceId: string, values: AgentTeamRoleConfiguration[], teamId?: string): Promise<StoredAgentTeamRoleConfiguration[]> {
@@ -121,11 +127,16 @@ export class AgentTeamConfigurationService {
       byRole.set(value.role, value);
     }
     if (byRole.has('team-manager')) throw new BadRequestException('Team Manager is not an active work role.');
-    // The Direct Team has no Dispatcher; it requires a Planner as its entry role instead.
+    // The Direct Team requires a Planner as its entry role.
+    // Other teams require either a Dispatcher or Planner as their entry role.
     if (teamId === DIRECT_AGENT_TEAM_ID) {
       if (!byRole.has('planner')) throw new BadRequestException('The Planner role is required.');
-    } else if (!byRole.has(AGENT_TEAM_DISPATCHER_ROLE)) {
-      throw new BadRequestException('The Dispatcher role is required.');
+    } else {
+      const hasDispatcher = byRole.has(AGENT_TEAM_DISPATCHER_ROLE);
+      const hasPlanner = byRole.has('planner');
+      if (!hasDispatcher && !hasPlanner) {
+        throw new BadRequestException('A Dispatcher or Planner role is required as the Team entry role.');
+      }
     }
 
     const normalized: Array<Omit<StoredAgentTeamRoleConfiguration, 'skills' | 'mcpServers'>> = [];

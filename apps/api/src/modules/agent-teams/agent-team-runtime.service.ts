@@ -338,11 +338,18 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const snapshot = await this.createVersionSnapshot(team.roles, team.workingPractice, CURRENT_GROUP_ORCHESTRATION_VERSION, team.projectGitPolicy);
     const primary = repositories[0];
     const now = new Date();
-    // v10+ starts at the server-owned Dispatcher unless the user named a role.
-    // The placeholder plan_only mode grants no authority before the decision.
+    // Determine mode based on targetRole.
+    // - If dispatcher: placeholder plan_only mode (dispatcher will decide)
+    // - If planner and no dispatcher in team: implement_and_validate (direct entry, no mode decision)
+    // - Otherwise: use initialAgentTeamModeForRole
+    const hasDispatcher = team.roles.some((r) => r.role === AGENT_TEAM_DISPATCHER_ROLE);
+    const isDefaultEntry = request.targetRole === AGENT_TEAM_DISPATCHER_ROLE || (request.targetRole === 'planner' && !hasDispatcher);
     const mode = request.targetRole === AGENT_TEAM_DISPATCHER_ROLE
       ? 'plan_only'
       : initialAgentTeamModeForRole(request.targetRole);
+    const modeRationale = request.targetRole === AGENT_TEAM_DISPATCHER_ROLE
+      ? null
+      : (isDefaultEntry && !hasDispatcher ? `Team has no Dispatcher; the Run entered at its Planner with ${mode} (default entry).` : directRoleModeRationale(request.targetRole));
     await this.transaction((transaction) => {
       const [latest] = transaction.select({ version: agentTeamVersions.version })
         .from(agentTeamVersions).where(eq(agentTeamVersions.teamId, team.id))
@@ -365,7 +372,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         projectDirectory: primary ? resolve(primary.directory) : '',
         projectInstructions: primary?.projectInstructions ?? [],
         mode,
-        modeRationale: request.targetRole === AGENT_TEAM_DISPATCHER_ROLE ? null : directRoleModeRationale(request.targetRole),
+        modeRationale,
         modeDecidedAt: request.targetRole === AGENT_TEAM_DISPATCHER_ROLE ? null : now,
         scopeRevision: 1,
         langGraphThreadId: `atthread_${runId}`,
@@ -3141,18 +3148,12 @@ function defaultRoleConfiguration(role: AgentTeamRuntimeRole): StoredAgentTeamRo
   };
 }
 
-// Existing built-in Teams predate the Dispatcher. Add the server-owned role
-// idempotently while leaving every captured role instruction untouched. A new
-// Dispatcher inherits the Planner model and MCP servers so it reads the same
-// project context the Planner already uses.
+// Existing built-in Teams may lack some default roles. Ensure Planner and Worktree Manager
+// are present, but do not add Dispatcher back if it has been deleted.
 function ensureBuiltInTeamRoles(roles: readonly StoredAgentTeamRoleConfiguration[]): StoredAgentTeamRoleConfiguration[] {
   const active = roles.filter((role) => role.role !== 'team-manager');
-  if (!active.some((role) => role.role === AGENT_TEAM_DISPATCHER_ROLE)) {
-    const planner = active.find((role) => role.role === 'planner');
-    active.unshift({
-      ...defaultRoleConfiguration(AGENT_TEAM_DISPATCHER_ROLE),
-      ...(planner ? { publicModelId: planner.publicModelId, mcpServers: planner.mcpServers } : {}),
-    });
+  if (!active.some((role) => role.role === 'planner')) {
+    active.unshift(defaultRoleConfiguration('planner'));
   }
   if (!active.some((role) => role.role === 'worktree-manager')) active.push(defaultRoleConfiguration('worktree-manager'));
   return active;
