@@ -90,7 +90,7 @@ export class ChatDispatchService {
         const runId = `atrun_chat_${digest}`;
         const groupId = `atgroup_chat_${digest}`;
         // Agent Teams decide their own Run mode; older callers may still send one.
-        if (target.mode !== undefined) this.logger.warn(`Ignoring deprecated Agent Team mode "${String(target.mode)}" for Chat submission ${submission.id}.`);
+        if (target.mode !== undefined) this.logger.warn(`Ignoring deprecated Coding Executors team mode "${String(target.mode)}" for Chat submission ${submission.id}.`);
         const dispatched = await this.teamGroups.dispatchFromChat(request, 'personal', target.teamId, {
           message: input.message,
           projectDirectory: target.projectDirectory,

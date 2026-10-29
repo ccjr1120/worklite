@@ -35,7 +35,7 @@ describe('Feishu Team Run card summary', () => {
   });
 
   it('keeps task details in the default-collapsed panel', () => {
-    const { card } = renderCard('sub_1', { title: 'Chat · Agent Team', status: '正在执行', meta: 'Reviewer · gpt-review', content: '目标', details: '- review', buttons: [] });
+    const { card } = renderCard('sub_1', { title: 'Chat · Coding Executors', status: '正在执行', meta: 'Reviewer · gpt-review', content: '目标', details: '- review', buttons: [] });
     const elements = card.body.elements;
     expect(elements.find((element) => element.element_id === 'meta')).toMatchObject({ text: { content: 'Reviewer · gpt-review' } });
     expect(elements.find((element) => element.element_id === 'details')).toMatchObject({ tag: 'collapsible_panel', expanded: false });

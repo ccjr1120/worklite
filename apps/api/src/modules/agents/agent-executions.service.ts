@@ -1,5 +1,5 @@
 import { assertRuntimeAdmission } from '../../infrastructure/runtime-upgrade-state';
-import { BadRequestException, ConflictException, forwardRef, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException, type OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException, type OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
@@ -17,7 +17,7 @@ import { McpRuntimeService } from './mcp-runtime.service';
 import { BuiltinAgentToolsService } from './builtin-agent-tools.service';
 import { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
 import { CODEX_CLI_AGENT_ID, CODEX_CLI_PLUGIN_ID, PluginsService, decryptSecret } from '../plugins/plugins.service';
-import { CHAT_PROJECT_TASK_ANSWER_TOOL, CHAT_PROJECT_TASK_CANCEL_TOOL, CHAT_PROJECT_TASK_STEER_TOOL, CHAT_PROJECT_TASK_TOOL, ChatProjectTasksService } from './chat-project-tasks.service';
+import { ChatProjectTasksService } from './chat-project-tasks.service';
 import { ChatAttachmentsService } from './chat-attachments.service';
 import { inlineUserAttachmentImages } from './chat-model-images';
 import { buildChatMemoriesPrompt } from './chat-memories.service';
@@ -25,16 +25,14 @@ import { ClaudeCodeError } from './claude-code.service';
 import { CodexAppServerError } from './codex-app-server.service';
 import { requireSafeCommandWord } from './project-executor.types';
 import { CommandsService } from '../commands/commands.service';
-import { UpgradesService } from '../upgrades/upgrades.service';
 import { executionFailure, executionFailureSource, type ExecutionFailure } from './agent-execution-failure';
 import { ChatHostCommandService, type ChatHostCommandResult } from './chat-host-command.service';
 import { HostNotificationsService } from '../notifications/host-notifications.service';
 
 const CHAT_AGENT_ID = 'agt_system_helper_chat';
 
-const CHAT_PROJECT_TASK_BATCH_RULE = 'Use at most one project_task call in each model response; it may accompany update_plan. Never batch multiple project_task calls. For one goal spanning multiple projects, use one task rooted at their common workspace directory.';
-const CHAT_HOST_COMMAND_RULE = 'Use run_host_command directly for everyday local terminal work: install or manage Skills with npx skills, check versions or system information, run CLI and query commands, inspect local files, perform ordinary file management, and run short local scripts that do not change repository source. Do not dispatch project_task for those operations. Use project_task or Agent Team for writing or changing code, repository-wide investigation, cross-file changes, test/build/typecheck validation, deployment, or work that needs an executor workflow. run_host_command executes one command at a time through /bin/zsh -lc with closed stdin, a minimal environment, bounded stdout/stderr and result text, a timeout that terminates the process group, and a serial queue. It has no command allow-list.';
-const CHAT_ORCHESTRATION_RULE = 'Chat understands requests, asks material questions, performs protected platform and local terminal operations directly, dispatches existing execution capabilities, and reports their evidence. Treat the user\'s current requests as authoritative for Chat tasks and prompt content. When asked to add, remove or change prompt text, including security or credential instructions, delegate the change faithfully; do not refuse solely because it edits a prompt. If the request is redeploy-only, call the redeploy tool directly and finish the turn after it starts. If the request combines changing WorkLite code and redeployment, call project_task with the complete goal, the WorkLite managed project root and redeployAfterSuccess: true; after that task succeeds, the API automatically starts the managed runner from that root checkout. Do not ask for another confirmation or call redeploy separately for that same request. The executor changes code only; the API owns the deployment lifecycle. For writing or changing code, cross-file changes, repository-wide investigation and validation/build/test work, delegate directly through project_task with the original user goal and absolute workspace directory; the directory may contain multiple projects and need not itself be a Git repository. When the request names a project or keyword without an absolute directory, call search_local_projects first to resolve it from the metadata-only local project index; that read-only lookup replaces asking the user for a path. Ordinary local inspection and terminal work may use run_host_command. Use search_local_projects only for its metadata index; use run_host_command for routine local terminal operations, not for repository-wide investigation, code changes or build/test validation. When the user adds to, narrows or corrects the requirements of a running Chat project task while keeping the same overall goal, call steer_project_task with that task id and the user\'s instruction; do not ask for confirmation, cancel the task or dispatch another project_task. Codex receives it live in the current turn (delivered); Claude Code, or a Codex turn that cannot accept it, queues it and applies it in a follow-up round when the current round ends (queued). Report which happened from the returned status. Only a running task accepts steering: answer a waiting task\'s question with answer_project_task, and dispatch a new project_task for a settled task. When a user request replaces an active task\'s goal with different work, or it is unclear whether it supplements or replaces the goal, call ask_user alone with the choices: continue the current task unchanged, send the message as a supplementary instruction (running tasks only), or cancel it and create a new task with the revised goal. Continuing leaves the captured goal unchanged and dispatches no replacement. For cancel-and-create, call cancel_project_task, then read the returned status; if the task is still active, keep waiting with wait_project_task and inspect_project_task until it settles. Only a persisted cancelled status permits one new project_task. If cancellation fails or the task reaches any other status, do not dispatch the replacement and report its actual status. Independent tasks remain eligible for parallel dispatch under the one-project_task-per-model-response rule. When a project task asks a question, answer only through Chat by calling answer_project_task with the user\'s response. Chat project executors choose their Git strategy independently for each relevant project: current branch, feature branch or project-specific worktree. WorkLite does not create, merge or clean up Git state for new tasks; if a worktree is chosen it belongs to one project, not the whole workspace. Use Chat as the sole user-facing surface for Agent Team dispatch and operations; published Workflows handle automation, honoring explicit targets. Dispatch to the selected teamId with the complete goal and absolute existing projectDirectory; it must already exist, and Team dispatch accepts no mode. The initial work role defaults to the Team Dispatcher, which chooses plan_only, validate_existing or implement_and_validate and records modeRationale; a user-named active work role bypasses it. Chat dispatch creates a hidden group-bound Run and task card; group and Run routes are read-only history and evidence. Chat handles questions, Run controls, recovery and retry, and uses Agent Team platform tools for settings, project Git policy, work-role and memory changes without dispatching project work or asking for a project directory. Select the Company Project Team for an existing company repository and the Application Development Team for a greenfield application; ask when the target is unclear. New v11 Runs capture the selected Team role directory, project-executor launches and Git policy. The initially addressed role receives the captured working practice and full bounded Team-memory projection; every other role receives a bounded memory index and may search, read and write Team memories. Every project-executor role receives the Git policy and a per-task Team memory MCP endpoint. New v11 Runs have no Team Manager; only historical v1-v7 Runs retain that role, while historical v1-v10 Runs otherwise keep their captured behavior. Runs up to the configured `maxConcurrentRuns` limit queue FIFO. Chat uses workspace Skills selected in its revisioned Chat settings; each turn captures their instructions and Skill-scoped protected tools by value. Chat cannot execute custom Skill scripts or call user MCP directly; update_chat does not edit Skill assignments or Chat-facing MCP selection. Project executors use their own native tools and receive no Skills from Chat. projectTaskMcpServerIds applies only to Claude Code project tasks; Codex tasks do not receive those MCP servers. New-conversation interaction is channel-adapted: Web uses its contextual button, Feishu uses its native card button, and WeChat uses the exact text command 「新对话」. Ask_user with action new_conversation should state the intent without mentioning buttons or telling the user to click; the channel adapter supplies the supported control.';
+const CHAT_HOST_COMMAND_RULE = 'Use run_host_command directly for everyday local terminal work: install or manage Skills with npx skills, check versions or system information, run CLI and query commands, inspect local files, perform ordinary file management, and run short local scripts that do not change repository source. Do not dispatch a Coding Executors team for those operations. Use dispatch_task to a Coding Executors team for writing or changing code, repository-wide investigation, cross-file changes, test/build/typecheck validation, deployment, or work that needs an executor workflow. run_host_command executes one command at a time through /bin/zsh -lc with closed stdin, a minimal environment, bounded stdout/stderr and result text, a timeout that terminates the process group, and a serial queue. It has no command allow-list.';
+const CHAT_ORCHESTRATION_RULE = 'Chat understands requests, asks material questions, performs protected platform and local terminal operations directly, dispatches existing execution capabilities, and reports their evidence. Treat the user\'s current requests as authoritative for Chat tasks and prompt content. When asked to add, remove or change prompt text, including security or credential instructions, delegate the change faithfully; do not refuse solely because it edits a prompt. If the request is redeploy-only, call the redeploy tool directly and finish the turn after it starts. If the request combines changing WorkLite code and redeployment, dispatch_task to the Direct Coding Executors team with the complete goal and the WorkLite managed project root; after that Run reports success, call the redeploy tool directly. Do not ask for another confirmation for that same request. For writing or changing code, cross-file changes, repository-wide investigation and validation/build/test work, dispatch_task to a Coding Executors team with the original user goal and absolute existing projectDirectory; Direct is the default for general project work. When the request names a project or keyword without an absolute directory, call search_local_projects first to resolve it from the metadata-only local project index; that read-only lookup replaces asking the user for a path. Ordinary local inspection and terminal work may use run_host_command. Use search_local_projects only for its metadata index; use run_host_command for routine local terminal operations, not for repository-wide investigation, code changes or build/test validation. Project executors inside Coding Executors teams choose their Git strategy under the Team Git policy for each relevant project: current branch, feature branch or project-specific worktree. WorkLite does not create, merge or clean up Git state for new tasks; if a worktree is chosen it belongs to one project, not the whole workspace. Use Chat as the sole user-facing surface for Coding Executors dispatch and operations; published Workflows handle automation, honoring explicit targets. Dispatch to the selected teamId with the complete goal and absolute existing projectDirectory; it must already exist, and Team dispatch accepts no mode. The initial work role defaults to the Team Dispatcher, which chooses plan_only, validate_existing or implement_and_validate and records modeRationale; a user-named active work role bypasses it. Direct has no Dispatcher: its Run starts at the Planner, which hands its plan to the project Executor. Chat dispatch creates a hidden group-bound Run and task card; group and Run routes are read-only history and evidence. Chat handles questions, Run controls, recovery and retry, and uses the Team platform tools for settings, project Git policy, work-role and memory changes without dispatching project work or asking for a project directory. Select Direct for general project work, including WorkLite's own code, Company Project for an existing company repository that needs its full review process, and Application Development for a greenfield application; ask when the target is unclear. New v11 Runs capture the selected Team role directory, project-executor launches and Git policy. The initially addressed role receives the captured working practice and full bounded Team-memory projection; every other role receives a bounded memory index and may search, read and write Team memories. Every project-executor role receives the Git policy and a per-task Team memory MCP endpoint. New v11 Runs have no Team Manager; only historical v1-v7 Runs retain that role, while historical v1-v10 Runs otherwise keep their captured behavior. Runs up to the configured `maxConcurrentRuns` limit queue FIFO. Chat uses workspace Skills selected in its revisioned Chat settings; each turn captures their instructions and Skill-scoped protected tools by value. Chat cannot execute custom Skill scripts or call user MCP directly; update_chat does not edit Skill assignments or Chat-facing MCP selection. Project executors use their own native tools and receive no Skills from Chat. New-conversation interaction is channel-adapted: Web uses its contextual button, Feishu uses its native card button, and WeChat uses the exact text command 「新对话」. Ask_user with action new_conversation should state the intent without mentioning buttons or telling the user to click; the channel adapter supplies the supported control.';
 // A settled Chat turn posts one macOS host notification so the user knows to come back. The subtitle
 // names the terminal state; the body carries the short context that tells them what it is about.
 const CHAT_TURN_NOTIFICATION_TITLE = 'WorkLite';
@@ -150,7 +148,6 @@ export class AgentExecutionsService implements OnModuleInit {
     private readonly attachments: ChatAttachmentsService,
     private readonly hostCommands: ChatHostCommandService,
     private readonly hostNotifications: HostNotificationsService,
-    @Inject(forwardRef(() => UpgradesService)) private readonly upgrades?: UpgradesService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -565,7 +562,7 @@ export class AgentExecutionsService implements OnModuleInit {
     const availableSkillScripts = clarificationPass ? [] : skillScripts;
     const availableMcpTools = clarificationPass ? [] : mcpTools;
     const builtinToolDefinitions = agent.id === CHAT_AGENT_ID
-      ? clarificationPass ? HELPER_BUILTIN_TOOLS : [CHAT_PROJECT_TASK_TOOL, CHAT_PROJECT_TASK_ANSWER_TOOL, CHAT_PROJECT_TASK_STEER_TOOL, CHAT_PROJECT_TASK_CANCEL_TOOL, ...HELPER_BUILTIN_TOOLS, ...(hostCommandTool ? [hostCommandTool] : [])]
+      ? clarificationPass ? HELPER_BUILTIN_TOOLS : [...HELPER_BUILTIN_TOOLS, ...(hostCommandTool ? [hostCommandTool] : [])]
       : [];
     const skillInstructions = assignedSkills.map((skill) => `## ${skill.name}\n${skill.instructions}`).filter((value) => value.trim()).join('\n\n');
     const chatOrchestrationRule = agent.id === CHAT_AGENT_ID
@@ -582,14 +579,12 @@ export class AgentExecutionsService implements OnModuleInit {
       agent.systemPrompt.trim(),
       conversationShellCalls.length ? `Historical Shell evidence (new direct commands use run_host_command; old uncertain effects require explicit recovery):\n${JSON.stringify(conversationShellCalls)}` : '',
       agent.id === CHAT_AGENT_ID && this.projectTasks.list(executionId).length ? `Conversation-owned project tasks, including background tasks settled after their turn (inspect recorded activity and the project's actual state before repeating a request):\n${JSON.stringify(this.projectTasks.list(executionId))}` : '',
-      agent.id === CHAT_AGENT_ID ? CHAT_PROJECT_TASK_BATCH_RULE : '',
-      agent.id === CHAT_AGENT_ID ? 'A project_task runs in the background: finish the current turn right after dispatching instead of waiting, progress stays visible on the task card, and a task completion, failure or question is reported to the user automatically; never poll for task state.' : '',
       conversationTasks.length ? `Bound conversation tasks (inspect authoritative Run state before answering or repeating a dispatch):\n${JSON.stringify(conversationTasks)}` : '',
       skillInstructions ? `Assigned Skill instructions:\n\n${skillInstructions}` : '',
       availableSkillScripts.length > 0 ? 'Request at most one Skill script tool at a time. Every valid request executes immediately on the WorkLite host without user approval.' : '',
       scriptList ? `Assigned executable Skill scripts:\n${scriptList}\nUse skill_script only with an exact listed Skill id and script path.` : '',
       builtinToolDefinitions.length > 0 ? 'Converse naturally. Use update_plan for multi-step work. Use ask_user only when a material user choice or missing information blocks the current request, with relevant options when helpful; a plan is not required. When the intent and target are clear, proceed through the assigned platform scripts.' : '',
-      hostCommandTool ? 'Use run_host_command directly for everyday installs, system/version/CLI queries, ordinary file management and short local scripts. It runs through a login zsh with closed stdin, bounded output and a timeout, and executes commands serially. Use project_task or Agent Team for writing or changing code, repository-wide investigation, cross-file edits and build/test validation.' : '',
+      hostCommandTool ? 'Use run_host_command directly for everyday installs, system/version/CLI queries, ordinary file management and short local scripts. It runs through a login zsh with closed stdin, bounded output and a timeout, and executes commands serially. Use dispatch_task to a Coding Executors team for writing or changing code, repository-wide investigation, cross-file edits and build/test validation.' : '',
       availableMcpTools.length > 0 ? `Assigned MCP tools:\n${availableMcpTools.map((tool) => `- ${tool.name}: ${tool.description}`).join('\n')}` : '',
       chatOrchestrationRule,
     ].filter(Boolean).join('\n\n');
@@ -1015,29 +1010,13 @@ export class AgentExecutionsService implements OnModuleInit {
     for (const subscription of this.projectTasks.subscriptionsFor(taskId)) {
       this.scheduleSubscriptionReport(workspaceId, subscription.subscriberExecutionId, taskId, subscription.id);
     }
-    let deployment: { jobId?: string; error?: string } | undefined;
-    if (task.status === 'succeeded' && task.snapshot.redeployAfterSuccess === true) {
-      try {
-        if (!this.upgrades) throw new Error('Managed deployment service is unavailable.');
-        if (await this.upgrades.hasActiveProjectTasksForRoot(task.id)) {
-          // Do not snapshot a checkout while another task that could change it is still active.
-          this.scheduleProjectTaskReport(workspaceId, executionId, taskId, 15000, deferredAttempts + 1);
-          return;
-        }
-        const job = await this.upgrades.redeployAfterProjectTask(task.id);
-        deployment = { jobId: job.id };
-      } catch (error) {
-        deployment = { error: error instanceof Error ? error.message : '托管部署未能启动。' };
-        this.logger.warn(`Automatic redeployment for project task ${task.id} did not start: ${deployment.error}`);
-      }
-    }
     const execution = await this.loadExecution(workspaceId, CHAT_AGENT_ID, executionId);
     if (execution.status === 'running' || execution.status === 'waiting_for_input') {
       // A conversation blocked for hours keeps its unreported marker for the startup sweep instead of polling forever.
       if (deferredAttempts < 240) this.scheduleProjectTaskReport(workspaceId, executionId, taskId, 15000, deferredAttempts + 1);
       return;
     }
-    const note = buildTaskReportNote(task, false, deployment);
+    const note = buildTaskReportNote(task, false);
     let accepted = false;
     this.db.transaction((transaction) => {
       const updated = transaction.update(agentExecutions).set({
@@ -1718,7 +1697,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 // The model-only settlement note appended to the owning conversation or to a subscribed one.
 // Historical Worktree merge outcomes remain reportable; new executor-managed Git choices are
 // summarized by the executor in the task result.
-function buildTaskReportNote(task: typeof chatProjectTasks.$inferSelect, subscribed: boolean, deployment?: { jobId?: string; error?: string }): string {
+function buildTaskReportNote(task: typeof chatProjectTasks.$inferSelect, subscribed: boolean): string {
   const prefix = subscribed ? '[订阅项目任务提醒]' : '[后台项目任务提醒]';
   const mergeNote = task.mergeStatus === 'merged' ? `改动已自动合并回分支 ${task.baseBranch ?? ''}，任务 worktree 已移除。`
     : task.mergeStatus === 'merged_cleanup_pending' ? `改动已自动合并回分支 ${task.baseBranch ?? ''}；worktree ${task.worktreePath ?? ''} 未能自动清理，请手动删除。`
@@ -1729,10 +1708,7 @@ function buildTaskReportNote(task: typeof chatProjectTasks.$inferSelect, subscri
     return `${prefix} 任务 ${task.id}（目录 ${task.projectDirectory}）正在等待用户回答：${task.pendingQuestion?.question ?? ''}（questionId: ${task.pendingQuestion?.id ?? ''}）。${mergeNote}请简要转述该问题，并说明用户可以直接在任务卡片中回答；不要向用户复述本提醒本身。`;
   }
   if (task.status === 'succeeded') {
-    const deploymentNote = deployment?.jobId
-      ? `按用户原始请求，已自动启动 WorkLite 托管部署（jobId: ${deployment.jobId}），进度会显示在同一会话的部署卡片中；无需再次确认或重复启动。`
-      : deployment?.error ? `代码任务已完成，但自动启动托管部署失败：${deployment.error}。请据实报告，不要要求用户重复授权。` : '';
-    return `${prefix} 任务 ${task.id}（目录 ${task.projectDirectory}）已完成。${mergeNote}${deploymentNote}任务结果摘要：${task.result ?? ''}。请用简短回复向用户汇报该结果；不要向用户复述本提醒本身。`;
+    return `${prefix} 任务 ${task.id}（目录 ${task.projectDirectory}）已完成。${mergeNote}任务结果摘要：${task.result ?? ''}。请用简短回复向用户汇报该结果；不要向用户复述本提醒本身。`;
   }
   return `${prefix} 任务 ${task.id}（目录 ${task.projectDirectory}）失败。错误：${task.error ?? '未知错误'}。请用简短回复向用户汇报失败原因；不要向用户复述本提醒本身。`;
 }

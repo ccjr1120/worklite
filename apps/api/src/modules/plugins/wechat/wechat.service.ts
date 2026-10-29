@@ -608,12 +608,12 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
       terminal = ['succeeded', 'failed', 'cancelled'].includes(run.status);
       const pending = run.pendingInputs.find((item) => item.status === 'pending');
       if (terminal) {
-        text = `【Agent Team】任务${statusText[run.status] ?? run.status}\n${run.intent}`;
+        text = `【Coding Executors】任务${statusText[run.status] ?? run.status}\n${run.intent}`;
         if (run.outcome) text += `\n\n${run.outcome.summary}${run.outcome.unresolvedIssues.length ? `\n\n待解决：\n${run.outcome.unresolvedIssues.map((issue) => `- ${issue}`).join('\n')}` : ''}`;
       } else if (pending) {
-        text = `【Agent Team】任务等待你的输入\n${pending.question}\n\n请前往 WorkLite 处理该问题。`;
+        text = `【Coding Executors】任务等待你的输入\n${pending.question}\n\n请前往 WorkLite 处理该问题。`;
       } else {
-        text = `【Agent Team】任务已开始执行\n${run.intent}`;
+        text = `【Coding Executors】任务已开始执行\n${run.intent}`;
       }
     } else if (reference?.kind === 'workflow') {
       let run = await this.runs.get(request, 'personal', reference.runId);
