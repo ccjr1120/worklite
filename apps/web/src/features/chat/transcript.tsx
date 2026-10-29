@@ -611,7 +611,6 @@ function CodexToolCallPanel({ task: inputTask }: { task: ChatProjectTaskView }) 
     if (itemType === 'file_change') return t('codex.itemType.file_change');
     if (itemType === 'agent_message') return t('codex.itemType.agent_message');
     if (itemType === 'mcp_tool_call') return t('codex.itemType.mcp_tool_call');
-    if (itemType === 'web_search') return t('codex.itemType.web_search');
     if (itemType === 'todo_list') return t('codex.itemType.todo_list');
     return itemType;
   };

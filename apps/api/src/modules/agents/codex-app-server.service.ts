@@ -375,7 +375,6 @@ function codexItemSummary(item: Record<string, any>): string | undefined {
     return item.changes.map((change: { path?: unknown }) => change.path).filter((path: unknown): path is string => typeof path === 'string').join(', ') || undefined;
   }
   if (item.type === 'mcpToolCall' && typeof item.tool === 'string') return [item.server, item.tool].filter((part) => typeof part === 'string').join(' · ');
-  if (item.type === 'webSearch' && typeof item.query === 'string') return item.query;
   return undefined;
 }
 
