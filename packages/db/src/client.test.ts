@@ -191,7 +191,7 @@ describe('initializeDatabase restart recovery', () => {
 
     const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
     const [skill] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'SKILL.md'))).limit(1);
-    expect(chat.systemPrompt).toContain('three predefined Coding Executors teams, Company Project, Application Development and Direct');
+    expect(chat.systemPrompt).toContain('two predefined Coding Executors teams, Company Project and Direct');
     expect(chat.systemPrompt).not.toMatch(/\b(?:answer|steer|cancel)_project_task\b|redeployAfterSuccess|Agent Team/);
     expect(skill.content).not.toMatch(/\b(?:answer|steer|cancel)_project_task\b|redeployAfterSuccess|Agent Team/);
     expect(skill.content).toContain('Direct is the default for general project work');

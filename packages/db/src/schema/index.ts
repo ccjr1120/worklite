@@ -722,6 +722,7 @@ export const agentTeams = sqliteTable('agent_teams', {
   maxConcurrentRuns: integer('max_concurrent_runs').notNull().default(3),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
+  deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),
 }, (table) => [unique().on(table.workspaceId, table.name)]);
 
 export const agentTeamRepositories = sqliteTable('agent_team_repositories', {

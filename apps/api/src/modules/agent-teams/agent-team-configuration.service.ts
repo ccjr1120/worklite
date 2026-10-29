@@ -1,9 +1,10 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { AgentTeamRoleId, AgentTeamRoleConfiguration, UpdateAgentTeamRequest } from '@worklite/contracts';
 import {
   agentTeams,
+  agentTeamRuns,
   mcpServers,
   skillFiles,
   skills,
@@ -49,6 +50,7 @@ export class AgentTeamConfigurationService {
 
   async update(workspaceId: string, teamId: string, input: UpdateAgentTeamRequest): Promise<AgentTeam> {
     const team = await this.getTeam(workspaceId, teamId);
+    if (team.deletedAt) throw new ConflictException('This Coding Executors team has been deleted.');
     if (!input || typeof input !== 'object' || Array.isArray(input)
       || Object.keys(input).some((key) => !['roles', 'maxConcurrentRuns', 'workingPractice', 'projectGitPolicy'].includes(key))) {
       throw new BadRequestException('Only Coding Executors team roles, working practice, project Git policy and concurrency can be changed.');
@@ -79,6 +81,7 @@ export class AgentTeamConfigurationService {
 
   async createRole(workspaceId: string, teamId: string, input: Omit<AgentTeamRoleConfiguration, 'role'>, roleId?: string): Promise<AgentTeam> {
     const team = await this.getTeam(workspaceId, teamId);
+    if (team.deletedAt) throw new ConflictException('This Coding Executors team has been deleted.');
     const role = roleId ?? `role_${randomUUID()}`;
     if (team.roles.some((item) => item.role === role)) return team;
     return this.update(workspaceId, teamId, { roles: [...toPublicRoles(team.roles), { ...input, role }] });
@@ -91,6 +94,7 @@ export class AgentTeamConfigurationService {
     changes: Partial<Omit<AgentTeamRoleConfiguration, 'role'>>,
   ): Promise<AgentTeam> {
     const team = await this.getTeam(workspaceId, teamId);
+    if (team.deletedAt) throw new ConflictException('This Coding Executors team has been deleted.');
     const target = team.roles.find((role) => role.role === roleId);
     if (!target) throw new NotFoundException('Coding Executors team role not found.');
     const updated = { ...toPublicRole(target), ...changes, role: roleId };
@@ -101,6 +105,7 @@ export class AgentTeamConfigurationService {
 
   async deleteRole(workspaceId: string, teamId: string, roleId: string): Promise<AgentTeam> {
     const team = await this.getTeam(workspaceId, teamId);
+    if (team.deletedAt) throw new ConflictException('This Coding Executors team has been deleted.');
     if (!team.roles.some((role) => role.role === roleId)) throw new NotFoundException('Coding Executors team role not found.');
     // The Direct Team requires its Planner as the entry role.
     // Other teams require either a Dispatcher or Planner as the entry role.
@@ -211,6 +216,70 @@ export class AgentTeamConfigurationService {
     // server connects and discovers its tools here before the capture.
     const resolved = await Promise.all(rows.map((row) => row.connection === 'unconfigured' ? this.resources.autoConnectMcpServer(row, true) : row));
     return new Map(resolved.map((row) => [row.id, { id: row.id, name: row.name, allowedToolNames: row.allowedToolNames ?? [] }]));
+  }
+
+  async deleteTeam(workspaceId: string, teamId: string, confirmTeamId: string): Promise<{ teamId: string; deletedAt: Date }> {
+    if (teamId !== confirmTeamId) {
+      throw new BadRequestException('The team id in the path and confirmTeamId in the body must match.');
+    }
+
+    // Check team exists and is not already deleted
+    const [team] = await this.db.select().from(agentTeams)
+      .where(and(eq(agentTeams.id, teamId), eq(agentTeams.workspaceId, workspaceId)))
+      .limit(1);
+    if (!team) throw new NotFoundException('Coding Executors team not found.');
+    if (team.deletedAt) throw new ConflictException('This Coding Executors team has already been deleted.');
+
+    // Check for active runs using active statuses: queued, running, waiting_for_input, paused
+    const ACTIVE_RUN_STATUSES = ['queued', 'running', 'waiting_for_input', 'paused'] as const;
+    const [activeRunCount] = await this.db.select({ count: agentTeamRuns.id }).from(agentTeamRuns)
+      .where(and(
+        eq(agentTeamRuns.teamId, teamId),
+        eq(agentTeamRuns.workspaceId, workspaceId),
+        inArray(agentTeamRuns.status, [...ACTIVE_RUN_STATUSES]),
+      ))
+      .limit(1);
+    if (activeRunCount && activeRunCount.count) {
+      const [activeRuns] = await this.db.select({ id: agentTeamRuns.id }).from(agentTeamRuns)
+        .where(and(
+          eq(agentTeamRuns.teamId, teamId),
+          eq(agentTeamRuns.workspaceId, workspaceId),
+          inArray(agentTeamRuns.status, [...ACTIVE_RUN_STATUSES]),
+        ))
+        .limit(5);
+      const activeIds = activeRuns ? await this.db.select({ id: agentTeamRuns.id }).from(agentTeamRuns)
+        .where(and(
+          eq(agentTeamRuns.teamId, teamId),
+          eq(agentTeamRuns.workspaceId, workspaceId),
+          inArray(agentTeamRuns.status, [...ACTIVE_RUN_STATUSES]),
+        ))
+        .limit(5) : [];
+      throw new ConflictException(
+        `Cannot delete this Coding Executors team: it has ${activeRunCount.count} active run(s). ` +
+        `Active run ids: ${activeIds.map((r) => r.id).join(', ')}. ` +
+        `Please cancel or wait for these runs to complete before deleting.`,
+      );
+    }
+
+    // Check if this is the last non-deleted team
+    const [nonDeletedCount] = await this.db.select({ count: agentTeams.id }).from(agentTeams)
+      .where(and(
+        eq(agentTeams.workspaceId, workspaceId),
+        isNull(agentTeams.deletedAt),
+      ))
+      .limit(1);
+    if (!nonDeletedCount || nonDeletedCount.count <= 1) {
+      throw new ConflictException('Cannot delete the last Coding Executors team. At least one team must remain available.');
+    }
+
+    // Perform soft delete in a transaction
+    const deletedAt = new Date();
+    await this.db.update(agentTeams)
+      .set({ deletedAt, updatedAt: deletedAt })
+      .where(eq(agentTeams.id, teamId))
+      .run();
+
+    return { teamId, deletedAt };
   }
 }
 

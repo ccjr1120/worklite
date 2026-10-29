@@ -76,6 +76,11 @@ export class AgentTeamsController {
   deleteMemory(@Req() request: Request, @Param('teamId') teamId: string, @Param('memoryId') memoryId: string) {
     return this.groups.deleteMemory(request, 'personal', teamId, memoryId);
   }
+
+  @Delete(':teamId')
+  delete(@Req() request: Request, @Param('teamId') teamId: string, @Body() body: { confirmTeamId: string }) {
+    return this.teams.delete(request, 'personal', teamId, body.confirmTeamId);
+  }
 }
 
 @Controller('agent-team-groups')
