@@ -15,7 +15,7 @@ import { AgentTeamDocumentsService } from './executor-category-documents.service
 import { AgentTeamGroupsService } from './executor-groups.service';
 import { AgentTeamsService } from './executor-categories.service';
 
-@Controller('executor-categories')
+@Controller('executors')
 export class AgentTeamsController {
   constructor(
     private readonly teams: AgentTeamsService,
@@ -27,59 +27,59 @@ export class AgentTeamsController {
     return this.teams.list(request, 'personal');
   }
 
-  @Get(':executorCategoryId')
-  get(@Req() request: Request, @Param('executorCategoryId') executorCategoryId: string) {
-    return this.teams.get(request, 'personal', executorCategoryId);
+  @Get(':executorId')
+  get(@Req() request: Request, @Param('executorId') executorId: string) {
+    return this.teams.get(request, 'personal', executorId);
   }
 
-  @Patch(':executorCategoryId')
-  update(@Req() request: Request, @Param('executorCategoryId') executorCategoryId: string, @Body() body: UpdateAgentTeamRequest) {
-    return this.teams.update(request, 'personal', executorCategoryId, body);
+  @Patch(':executorId')
+  update(@Req() request: Request, @Param('executorId') executorId: string, @Body() body: UpdateAgentTeamRequest) {
+    return this.teams.update(request, 'personal', executorId, body);
   }
 
-  @Post(':executorCategoryId/roles')
-  createRole(@Req() request: Request, @Param('executorCategoryId') executorCategoryId: string, @Body() body: Omit<AgentTeamRoleConfiguration, 'role'>) {
-    return this.teams.createRole(request, 'personal', executorCategoryId, body);
+  @Post(':executorId/roles')
+  createRole(@Req() request: Request, @Param('executorId') executorId: string, @Body() body: Omit<AgentTeamRoleConfiguration, 'role'>) {
+    return this.teams.createRole(request, 'personal', executorId, body);
   }
 
-  @Patch(':executorCategoryId/roles/:roleId')
-  updateRole(@Req() request: Request, @Param('executorCategoryId') executorCategoryId: string, @Param('roleId') roleId: string, @Body() body: Partial<Omit<AgentTeamRoleConfiguration, 'role'>>) {
-    return this.teams.updateRole(request, 'personal', executorCategoryId, roleId, body);
+  @Patch(':executorId/roles/:roleId')
+  updateRole(@Req() request: Request, @Param('executorId') executorId: string, @Param('roleId') roleId: string, @Body() body: Partial<Omit<AgentTeamRoleConfiguration, 'role'>>) {
+    return this.teams.updateRole(request, 'personal', executorId, roleId, body);
   }
 
-  @Delete(':executorCategoryId/roles/:roleId')
-  deleteRole(@Req() request: Request, @Param('executorCategoryId') executorCategoryId: string, @Param('roleId') roleId: string) {
-    return this.teams.deleteRole(request, 'personal', executorCategoryId, roleId);
+  @Delete(':executorId/roles/:roleId')
+  deleteRole(@Req() request: Request, @Param('executorId') executorId: string, @Param('roleId') roleId: string) {
+    return this.teams.deleteRole(request, 'personal', executorId, roleId);
   }
 
-  @Get(':executorCategoryId/runs')
-  records(@Req() request: Request, @Param('executorCategoryId') executorCategoryId: string) {
-    return this.teams.records(request, 'personal', executorCategoryId);
+  @Get(':executorId/runs')
+  records(@Req() request: Request, @Param('executorId') executorId: string) {
+    return this.teams.records(request, 'personal', executorId);
   }
 
-  @Get(':executorCategoryId/memories')
-  memories(@Req() request: Request, @Param('executorCategoryId') executorCategoryId: string) {
-    return this.groups.memories(request, 'personal', executorCategoryId);
+  @Get(':executorId/memories')
+  memories(@Req() request: Request, @Param('executorId') executorId: string) {
+    return this.groups.memories(request, 'personal', executorId);
   }
 
-  @Post(':executorCategoryId/memories')
-  createMemory(@Req() request: Request, @Param('executorCategoryId') executorCategoryId: string, @Body() body: CreateAgentTeamMemoryRequest) {
-    return this.groups.createMemory(request, 'personal', executorCategoryId, body);
+  @Post(':executorId/memories')
+  createMemory(@Req() request: Request, @Param('executorId') executorId: string, @Body() body: CreateAgentTeamMemoryRequest) {
+    return this.groups.createMemory(request, 'personal', executorId, body);
   }
 
-  @Patch(':executorCategoryId/memories/:memoryId')
-  updateMemory(@Req() request: Request, @Param('executorCategoryId') executorCategoryId: string, @Param('memoryId') memoryId: string, @Body() body: UpdateAgentTeamMemoryRequest) {
-    return this.groups.updateMemory(request, 'personal', executorCategoryId, memoryId, body);
+  @Patch(':executorId/memories/:memoryId')
+  updateMemory(@Req() request: Request, @Param('executorId') executorId: string, @Param('memoryId') memoryId: string, @Body() body: UpdateAgentTeamMemoryRequest) {
+    return this.groups.updateMemory(request, 'personal', executorId, memoryId, body);
   }
 
-  @Delete(':executorCategoryId/memories/:memoryId')
-  deleteMemory(@Req() request: Request, @Param('executorCategoryId') executorCategoryId: string, @Param('memoryId') memoryId: string) {
-    return this.groups.deleteMemory(request, 'personal', executorCategoryId, memoryId);
+  @Delete(':executorId/memories/:memoryId')
+  deleteMemory(@Req() request: Request, @Param('executorId') executorId: string, @Param('memoryId') memoryId: string) {
+    return this.groups.deleteMemory(request, 'personal', executorId, memoryId);
   }
 
-  @Delete(':executorCategoryId')
-  delete(@Req() request: Request, @Param('executorCategoryId') executorCategoryId: string, @Body() body: { confirmTeamId: string }) {
-    return this.teams.delete(request, 'personal', executorCategoryId, body.confirmTeamId);
+  @Delete(':executorId')
+  delete(@Req() request: Request, @Param('executorId') executorId: string, @Body() body: { confirmTeamId: string }) {
+    return this.teams.delete(request, 'personal', executorId, body.confirmTeamId);
   }
 }
 
@@ -149,13 +149,13 @@ export class AgentTeamRunsController {
   list(
     @Req() request: Request,
   ) {
-    const executorCategoryIds = request.query.executorCategoryId as string | string[] | undefined;
+    const executorIds = request.query.executorId as string | string[] | undefined;
     const cursor = request.query.cursor as string | undefined;
     const limit = request.query.limit ? Number(request.query.limit) : undefined;
 
-    const executorCategoryIdArray = executorCategoryIds ? (Array.isArray(executorCategoryIds) ? executorCategoryIds : [executorCategoryIds]) : [];
+    const executorIdArray = executorIds ? (Array.isArray(executorIds) ? executorIds : [executorIds]) : [];
 
-    return this.teams.listRuns(request, 'personal', executorCategoryIdArray, cursor, limit);
+    return this.teams.listRuns(request, 'personal', executorIdArray, cursor, limit);
   }
 
   @Get(':runId')
@@ -250,7 +250,7 @@ export class AgentTeamRunsController {
   }
 }
 
-@Controller('agent-team-documents')
+@Controller('executor-documents')
 export class AgentTeamDocumentsController {
   constructor(private readonly documents: AgentTeamDocumentsService) {}
 

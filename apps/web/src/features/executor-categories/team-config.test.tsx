@@ -4,8 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n/config';
 import type { AgentTeamMemoryView, AgentTeamView, McpServerView, SkillView } from '@worklite/contracts';
 import { useAgentTeamMemoriesQuery, useAgentTeamQuery, useAgentTeamRecordsQuery, useAgentTeamsQuery, useMcpServersQuery, useSkillsQuery } from '@/api/queries';
-import { Route as LegacyAgentTeamConfigRoute } from '@/routes/agent-team-config';
-import { Route as AgentTeamConfigRoute } from '@/routes/executor-categories/$executorCategoryId.config';
+import { Route as AgentTeamConfigRoute } from '@/routes/executors/$executorId.config';
 import { TeamConfig } from './team-config';
 
 vi.mock('@/api/queries', () => ({
@@ -30,7 +29,7 @@ vi.mock('@tanstack/react-router', () => {
   return {
     Link: ({ children, to, params, ...props }: { children: React.ReactNode; to: string; params?: Record<string, string> }) => <a href={toHref(to, params)} {...props}>{children}</a>,
     Navigate: ({ to, params, replace }: { to: string; params?: Record<string, string>; replace?: boolean }) => <span data-testid="navigate" data-replace={String(Boolean(replace))}>{toHref(to, params)}</span>,
-    createFileRoute: (path: string) => (options: { component: unknown }) => ({ path, options, useParams: () => ({ executorCategoryId: 'team_1' }) }),
+    createFileRoute: (path: string) => (options: { component: unknown }) => ({ path, options, useParams: () => ({ executorId: 'team_1' }) }),
   };
 });
 
@@ -119,7 +118,7 @@ function mockQueries(options: { team?: AgentTeamView; memories?: AgentTeamMemory
 describe('TeamConfig', () => {
   it('renders the team overview, role configuration and memories without unrelated write controls', () => {
     mockQueries();
-    render(<TeamConfig executorCategoryId="team_1" />);
+    render(<TeamConfig executorId="team_1" />);
 
     const overview = screen.getByRole('heading', { name: '基本信息' }).closest('section') as HTMLElement;
     expect(within(overview).getByText('Delivery')).toBeInTheDocument();
@@ -140,7 +139,7 @@ describe('TeamConfig', () => {
 
   it('lists workspace Skills for a role and saves a checked local Skill', () => {
     mockQueries({ skills: [localDinoSkill] });
-    render(<TeamConfig executorCategoryId="team_1" />);
+    render(<TeamConfig executorId="team_1" />);
 
     const checkbox = screen.getByRole('checkbox', { name: 'dino-account' });
     expect(checkbox).not.toBeChecked();
@@ -153,14 +152,14 @@ describe('TeamConfig', () => {
 
   it('maps MCP server ids to workspace server names and falls back to the id', () => {
     mockQueries();
-    render(<TeamConfig executorCategoryId="team_1" />);
+    render(<TeamConfig executorId="team_1" />);
     expect(screen.getByText('Project info')).toBeInTheDocument();
     expect(screen.getByText('mcp_removed')).toBeInTheDocument();
   });
 
   it('keeps role instructions collapsed until the reader expands them verbatim', () => {
     mockQueries();
-    render(<TeamConfig executorCategoryId="team_1" />);
+    render(<TeamConfig executorId="team_1" />);
     expect(screen.queryByText('Implement the assigned scope.')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '展开指令' }));
     expect(screen.getByText('Implement the assigned scope.')).toBeInTheDocument();
@@ -168,37 +167,29 @@ describe('TeamConfig', () => {
 
   it('links back to the same executor\'s Run records page', () => {
     mockQueries();
-    render(<TeamConfig executorCategoryId="team_1" />);
-    expect(screen.getByRole('link', { name: '返回记录' })).toHaveAttribute('href', '/executor-categories/team_1');
+    render(<TeamConfig executorId="team_1" />);
+    expect(screen.getByRole('link', { name: '返回记录' })).toHaveAttribute('href', '/executors/team_1');
   });
 
   it('shows the executor switcher below the heading with links to each executor\'s configuration', () => {
     mockQueries();
-    render(<TeamConfig executorCategoryId="team_1" />);
+    render(<TeamConfig executorId="team_1" />);
     const switcher = screen.getByRole('navigation', { name: '选择执行器分类' });
     expect(within(switcher).getByRole('link', { name: /Delivery/ })).toHaveAttribute('aria-current', 'page');
-    expect(within(switcher).getByRole('link', { name: /Applications/ })).toHaveAttribute('href', '/executor-categories/team_2/config');
+    expect(within(switcher).getByRole('link', { name: /Applications/ })).toHaveAttribute('href', '/executors/team_2/config');
   });
 
-  it('is served per executor at /executor-categories/:executorCategoryId/config', () => {
-    expect(AgentTeamConfigRoute.path).toBe('/executor-categories/$executorCategoryId/config');
+  it('is served per executor at /executors/:executorId/config', () => {
+    expect(AgentTeamConfigRoute.path).toBe('/executors/$executorId/config');
     mockQueries();
     const Component = AgentTeamConfigRoute.options.component as React.ComponentType;
     render(<Component />);
     expect(vi.mocked(useAgentTeamQuery)).toHaveBeenLastCalledWith('team_1');
   });
 
-  it('redirects the legacy /agent-team-config path to the default executor configuration', () => {
-    expect(LegacyAgentTeamConfigRoute.path).toBe('/agent-team-config');
-    const Component = LegacyAgentTeamConfigRoute.options.component as React.ComponentType;
-    render(<Component />);
-    expect(screen.getByTestId('navigate')).toHaveTextContent('/executor-categories/agent_team_bmad_tea/config');
-    expect(screen.getByTestId('navigate')).toHaveAttribute('data-replace', 'true');
-  });
-
   it('renders the empty memories state', () => {
     mockQueries({ memories: [] });
-    render(<TeamConfig executorCategoryId="team_1" />);
+    render(<TeamConfig executorId="team_1" />);
     expect(screen.getByText('暂无执行器记忆。')).toBeInTheDocument();
   });
 });

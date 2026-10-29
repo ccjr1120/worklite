@@ -163,19 +163,19 @@ export function useSkillQuery(workspace: string | undefined, skillId: string) {
 }
 
 export function useAgentTeamsQuery() {
-  return useQuery({ queryKey: ['executor-categories'] as const, queryFn: () => api.executorCategories() });
+  return useQuery({ queryKey: ['executors'] as const, queryFn: () => api.executors() });
 }
 
 export function useAgentTeamRecordsQuery(executorCategoryId: string) {
-  return useQuery({ queryKey: agentTeamRecordsQueryKey(executorCategoryId), queryFn: () => api.agentTeamRecords(executorCategoryId), enabled: Boolean(executorCategoryId), refetchInterval: 5_000 });
+  return useQuery({ queryKey: agentTeamRecordsQueryKey(executorCategoryId), queryFn: () => api.executorRecords(executorCategoryId), enabled: Boolean(executorCategoryId), refetchInterval: 5_000 });
 }
 
 export function useAgentTeamQuery(executorCategoryId: string) {
-  return useQuery({ queryKey: ['agent-team', executorCategoryId] as const, queryFn: () => api.agentTeam(executorCategoryId), enabled: Boolean(executorCategoryId) });
+  return useQuery({ queryKey: ['executor', executorCategoryId] as const, queryFn: () => api.executor(executorCategoryId), enabled: Boolean(executorCategoryId) });
 }
 
 export function useAgentTeamMemoriesQuery(executorCategoryId: string) {
-  return useQuery({ queryKey: ['agent-team-memories', executorCategoryId] as const, queryFn: () => api.executorCategoryMemories(executorCategoryId), enabled: Boolean(executorCategoryId) });
+  return useQuery({ queryKey: ['agent-team-memories', executorCategoryId] as const, queryFn: () => api.executorMemories(executorCategoryId), enabled: Boolean(executorCategoryId) });
 }
 
 export function useAgentTeamGroupQuery(groupId: string) {
@@ -185,7 +185,7 @@ export function useAgentTeamGroupQuery(groupId: string) {
 export function useAgentTeamDocumentQuery(workspace: string | undefined, documentId: string | null) {
   return useQuery({
     queryKey: agentTeamDocumentQueryKey(documentId ?? ''),
-    queryFn: () => api.agentTeamDocument(documentId as string),
+    queryFn: () => api.executorDocument(documentId as string),
     enabled: Boolean(workspace && documentId),
   });
 }

@@ -21,7 +21,7 @@ const CJK_RUN = /[㐀-鿿]+/g;
 
 /**
  * One-line memory title: the first non-empty line with list/heading markers removed.
- * The index never carries full content; roles read it with team_memory_read.
+ * The index never carries full content; roles read it with executor_memory_read.
  */
 export function memoryTitle(content: string): string {
   const line = content.split('\n').map((value) => value.trim()).find(Boolean) ?? '';

@@ -75,7 +75,7 @@ describe('groupRolePromptAddition v10 compatibility', () => {
     );
 
     expect(addition).toContain('Only the initially addressed role in a new v8-v10 Run receives its bounded captured memory projection; handoff roles receive none');
-    expect(addition).not.toContain('team_memory_search');
+    expect(addition).not.toContain('executor_memory_search');
   });
 });
 
@@ -87,8 +87,8 @@ describe('groupRolePromptAddition v11', () => {
     );
 
     expect(addition).toContain('Executor memories:\n- Deploy with the release script.');
-    expect(addition).toContain('team_memory_search');
-    expect(addition).toContain('team_memory_write');
+    expect(addition).toContain('executor_memory_search');
+    expect(addition).toContain('executor_memory_write');
     expect(addition).not.toContain('Executor memory index');
   });
 

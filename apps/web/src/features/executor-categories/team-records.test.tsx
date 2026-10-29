@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n/config';
 import type { AgentTeamRunSummary, AgentTeamView } from '@worklite/contracts';
 import { useAgentTeamRecordsQuery, useAgentTeamsQuery } from '@/api/queries';
-import { Route as AgentTeamsIndexRoute } from '@/routes/executor-categories/index';
+import { Route as AgentTeamsIndexRoute } from '@/routes/executors/index';
 import { filterRuns, TeamRecords } from './team-records';
 import { TeamSwitcher } from './team-switcher';
 
@@ -102,7 +102,7 @@ describe('filterRuns', () => {
 describe('TeamRecords', () => {
   it('renders one fixed-height single-line row per Run, newest first, linking to the Run detail', () => {
     mockQueries();
-    render(<TeamRecords executorCategoryId="agent_team_bmad_tea" />);
+    render(<TeamRecords executorId="agent_team_bmad_tea" />);
 
     const links = screen.getAllByRole('link').filter((link) => link.getAttribute('href')?.startsWith('/executor-runs/'));
     expect(links.map((link) => link.getAttribute('href'))).toEqual(['/executor-runs/run_new', '/executor-runs/run_q', '/executor-runs/run_mid', '/executor-runs/run_old']);
@@ -119,7 +119,7 @@ describe('TeamRecords', () => {
 
   it('filters by keyword and keeps the list shape', () => {
     mockQueries();
-    render(<TeamRecords executorCategoryId="agent_team_bmad_tea" />);
+    render(<TeamRecords executorId="agent_team_bmad_tea" />);
 
     fireEvent.change(screen.getByRole('textbox', { name: '按标题搜索' }), { target: { value: 'billing' } });
     expect(screen.getByRole('link', { name: /Fix billing export/ })).toBeInTheDocument();
@@ -128,7 +128,7 @@ describe('TeamRecords', () => {
 
   it('filters by status', () => {
     mockQueries();
-    render(<TeamRecords executorCategoryId="agent_team_bmad_tea" />);
+    render(<TeamRecords executorId="agent_team_bmad_tea" />);
 
     fireEvent.keyDown(screen.getByRole('combobox', { name: '按状态筛选' }), { key: 'ArrowDown' });
     fireEvent.click(screen.getByRole('option', { name: '排队中' }));
@@ -138,7 +138,7 @@ describe('TeamRecords', () => {
 
   it('shows a single-line empty state when no Run matches the filters', () => {
     mockQueries();
-    render(<TeamRecords executorCategoryId="agent_team_bmad_tea" />);
+    render(<TeamRecords executorId="agent_team_bmad_tea" />);
 
     fireEvent.change(screen.getByRole('textbox', { name: '按标题搜索' }), { target: { value: 'nothing like this' } });
     expect(screen.getByText('没有符合筛选条件的记录。').parentElement).toHaveClass('h-12');
@@ -147,13 +147,13 @@ describe('TeamRecords', () => {
 
   it('shows a single-line empty state for an executor without Runs', () => {
     mockQueries({ agent_team_bmad_tea: [] });
-    render(<TeamRecords executorCategoryId="agent_team_bmad_tea" />);
+    render(<TeamRecords executorId="agent_team_bmad_tea" />);
     expect(screen.getByText('暂无执行记录。').parentElement).toHaveClass('h-12');
   });
 
   it('keeps the heading and filters mounted behind fixed-height skeleton rows while loading', () => {
     mockQueries(runsByTeam, { isPending: true });
-    render(<TeamRecords executorCategoryId="agent_team_bmad_tea" />);
+    render(<TeamRecords executorId="agent_team_bmad_tea" />);
 
     expect(screen.getByRole('heading', { level: 1, name: 'Coding' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: '按标题搜索' })).toBeDisabled();
@@ -164,14 +164,14 @@ describe('TeamRecords', () => {
 
   it('does not offer an executor switch on the Run list; that belongs to the configuration view', () => {
     mockQueries();
-    render(<TeamRecords executorCategoryId="agent_team_bmad_tea" />);
+    render(<TeamRecords executorId="agent_team_bmad_tea" />);
     expect(screen.queryByRole('navigation', { name: '选择执行器分类' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Direct' })).not.toBeInTheDocument();
   });
 
   it('names the selected executor and renders only its Runs', () => {
     mockQueries();
-    render(<TeamRecords executorCategoryId="agent_team_bmad_tea" />);
+    render(<TeamRecords executorId="agent_team_bmad_tea" />);
 
     expect(screen.getByRole('heading', { level: 1, name: 'Coding' })).toBeInTheDocument();
     expect(screen.getByTestId('crumbs')).toHaveTextContent('Coding / Company Project');
@@ -181,15 +181,15 @@ describe('TeamRecords', () => {
 
   it('puts the configuration entry in the page header for the selected executor', () => {
     mockQueries();
-    render(<TeamRecords executorCategoryId="agent_team_bmad_tea" />);
-    expect(screen.getByRole('link', { name: '查看配置' })).toHaveAttribute('href', '/executor-categories/agent_team_bmad_tea/config');
+    render(<TeamRecords executorId="agent_team_bmad_tea" />);
+    expect(screen.getByRole('link', { name: '查看配置' })).toHaveAttribute('href', '/executors/agent_team_bmad_tea/config');
   });
 
-  it('opens the default Company Project team from /executor-categories', () => {
-    expect(AgentTeamsIndexRoute.path).toBe('/executor-categories/');
+  it('opens the default Company Project team from /executors', () => {
+    expect(AgentTeamsIndexRoute.path).toBe('/executors/');
     const Component = AgentTeamsIndexRoute.options.component as React.ComponentType;
     render(<Component />);
-    expect(screen.getByTestId('navigate')).toHaveTextContent('/executor-categories/agent_team_bmad_tea');
+    expect(screen.getByTestId('navigate')).toHaveTextContent('/executors/agent_team_bmad_tea');
     expect(screen.getByTestId('navigate')).toHaveAttribute('data-replace', 'true');
   });
 });
@@ -204,7 +204,7 @@ describe('TeamSwitcher (configuration view)', () => {
     const direct = within(switcher).getByRole('link', { name: /Direct/ });
 
     expect(company).toHaveAttribute('aria-current', 'page');
-    expect(direct).toHaveAttribute('href', '/executor-categories/agent_team_direct/config');
+    expect(direct).toHaveAttribute('href', '/executors/agent_team_direct/config');
     expect(within(company).getByText('面向已有公司仓库')).toBeInTheDocument();
     expect(within(direct).getByText('两步流程：计划与执行')).toBeInTheDocument();
     expect(within(company).getByText('并发上限').nextSibling).toHaveTextContent('3');

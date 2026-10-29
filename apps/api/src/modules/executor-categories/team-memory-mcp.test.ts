@@ -122,7 +122,7 @@ describe('Executor memory MCP server', () => {
     const { client, close } = await mcpClient(context);
     try {
       const written = await client.callTool({
-        name: 'team_memory_write',
+        name: 'executor_memory_write',
         arguments: { content: 'Executor fact.', repositoryId: 'repo_a1', executorCategoryId: 'team_b' },
       });
       expect(written.isError).toBeFalsy();
@@ -130,7 +130,7 @@ describe('Executor memory MCP server', () => {
       expect(row).toMatchObject({ executorCategoryId: 'team_a', workspaceId: 'workspace_a', createdBy: 'role', repositoryId: 'repo_a1' });
 
       const rejected = await client.callTool({
-        name: 'team_memory_write',
+        name: 'executor_memory_write',
         arguments: { content: 'Escaped fact.', repositoryId: 'repo_outside' },
       });
       expect(rejected.isError).toBe(true);
@@ -143,7 +143,7 @@ describe('Executor memory MCP server', () => {
   it('reports unknown tool names as errors rather than executing them', async () => {
     const { client, close } = await mcpClient(context);
     try {
-      const result = await client.callTool({ name: 'team_memory_delete', arguments: { memoryId: 'x' } });
+      const result = await client.callTool({ name: 'executor_memory_delete', arguments: { memoryId: 'x' } });
       expect(result.isError).toBe(true);
     } finally {
       await close();
@@ -152,9 +152,9 @@ describe('Executor memory MCP server', () => {
 });
 
 describe('teamMemoryMcpRuntime', () => {
-  it('builds the stable worklite_team_memory server identity', () => {
+  it('builds the stable worklite_executor_memory server identity', () => {
     const runtime = teamMemoryMcpRuntime('wtm_token');
-    expect(runtime).toMatchObject({ id: 'team_memory', name: 'Executor Memory', authToken: 'wtm_token' });
+    expect(runtime).toMatchObject({ id: 'executor_memory', name: 'Executor Memory', authToken: 'wtm_token' });
     expect(runtime.endpoint).toMatch(/\/api\/internal\/team-memory-mcp$/);
     expect(runtime.allowedTools).toEqual([...TEAM_MEMORY_MCP_TOOL_NAMES]);
   });

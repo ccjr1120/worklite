@@ -1634,7 +1634,7 @@ function parseWorkliteScriptResult(output: string): WorkliteScriptResult | null 
   const result = asRecord(wrapper?.worklite);
   if (!result || typeof result.type !== 'string') return null;
   if (result.type === 'dispatch' && typeof result.submissionId === 'string' && typeof result.route === 'string' && /^\/(agent-team-runs|workflows)\/[A-Za-z0-9_-]+$/.test(result.route)) return { type: 'dispatch', submissionId: result.submissionId, route: result.route };
-  if (['executor-categories', 'agent-team', 'agent-team-records', 'agent-team-document', 'agent-team-run', 'agent-team-run-action'].includes(result.type)) return { type: 'snapshot' };
+  if (['executors', 'executor', 'executor-records', 'executor-memories', 'executor-memory', 'executor-group', 'executor-document', 'executor-run', 'executor-run-action'].includes(result.type)) return { type: 'snapshot' };
   if (result.type === 'snapshot') return Object.keys(result).length === 1 ? { type: 'snapshot' } : null;
   if (result.type === 'settings') {
     const appearance = result.appearance;

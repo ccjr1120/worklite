@@ -1510,7 +1510,7 @@ export class WorkspaceResourcesService {
           ],
           selection: 'Chat selects an executor by stable executorId and purpose, never by display name; read current names and ids with inspect_executors',
           currentExecutors: agentTeamRows.filter((team) => !team.deletedAt).map((team) => ({ id: team.id, name: team.name })),
-          rename: { tool: 'update_executor', route: 'PATCH /executors/:executorId', field: 'name', rules: 'trimmed 1-64 characters, no control characters, unique among non-deleted executors ignoring case', conflict: 'HTTP 409 EXECUTOR_NAME_CONFLICT', concurrency: 'optional expectedUpdatedAt precondition; a stale value returns HTTP 409 EXECUTOR_REVISION_CONFLICT', affects: 'new Runs only; every Run keeps the executor name captured at dispatch (executorNameSnapshot), falling back to the bound executor version name, then the current name' },
+          rename: { tool: 'update_executor', route: 'PATCH /executors/:executorId', field: 'name', rules: 'trimmed 1-64 characters, no control characters, unique among non-deleted executors ignoring case', conflict: 'HTTP 409 EXECUTOR_NAME_CONFLICT', concurrency: 'optional expectedRevision precondition (the revision from GET /executors/:executorId); a stale value returns HTTP 409 EXECUTOR_REVISION_CONFLICT', affects: 'new Runs only; every Run keeps the executor name captured at dispatch (executorNameSnapshot), falling back to the bound executor version name, then the current name' },
           webRoute: '/executor-runs',
           recordsRoute: 'GET /executors/:executorId/runs',
           runListRoute: 'GET /executor-runs',

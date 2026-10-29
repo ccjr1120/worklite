@@ -125,7 +125,7 @@ function TeamFilterPopover({ selectedTeamIds, onTeamsChange, disabled }: TeamFil
   );
 }
 
-export function TeamRecords({ executorCategoryId }: { executorCategoryId: string }) {
+export function TeamRecords({ executorId: executorCategoryId }: { executorId: string }) {
   const { t } = useTranslation('executorCategories');
   const { locale } = useLocale();
   const search = useSearch({ from: '/' });
@@ -179,7 +179,7 @@ export function TeamRecords({ executorCategoryId }: { executorCategoryId: string
       <PageHeading
         title="Coding"
         description={t('records.description')}
-        actions={<Link to="/executor-categories/$executorCategoryId/config" params={{ executorCategoryId }} className={`inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-border px-3 text-sm font-medium hover:bg-muted ${focusRing}`}><Settings className="size-4" aria-hidden="true" />{t('config.viewConfig')}</Link>}
+        actions={<Link to="/executors/$executorId/config" params={{ executorId: executorCategoryId }} className={`inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-border px-3 text-sm font-medium hover:bg-muted ${focusRing}`}><Settings className="size-4" aria-hidden="true" />{t('config.viewConfig')}</Link>}
       />
       <div className="space-y-4">
         {/* Filters */}

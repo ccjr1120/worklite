@@ -14,8 +14,8 @@ const upsertKey = {
 
 const definitions: GatewayToolDefinition[] = [
   {
-    name: 'team_memory_search',
-    description: 'Search this executor’s long-term memories by keywords. Executor memories are separate from Chat memory. Results carry titles and excerpts; use team_memory_read for full text.',
+    name: 'executor_memory_search',
+    description: 'Search this executor’s long-term memories by keywords. Executor memories are separate from Chat memory. Results carry titles and excerpts; use executor_memory_read for full text.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -27,8 +27,8 @@ const definitions: GatewayToolDefinition[] = [
     },
   },
   {
-    name: 'team_memory_read',
-    description: 'Read one executor memory in full by id from team_memory_search results.',
+    name: 'executor_memory_read',
+    description: 'Read one executor memory in full by id from executor_memory_search results.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -37,7 +37,7 @@ const definitions: GatewayToolDefinition[] = [
     },
   },
   {
-    name: 'team_memory_write',
+    name: 'executor_memory_write',
     description: 'Save a durable executor fact or decision for this executor. The write applies immediately: later dispatches project it and every role can search it. Default scope is the executor; pass repositoryId only when the fact belongs to one repository. Writing the same normalized content in the same scope updates the existing memory. Do not save transient task details.',
     inputSchema: {
       type: 'object',
@@ -47,8 +47,8 @@ const definitions: GatewayToolDefinition[] = [
     },
   },
   {
-    name: 'team_memory_update',
-    description: 'Correct one executor memory by id. Use it when an existing memory is wrong or obsolete; team_memory_write is for new facts.',
+    name: 'executor_memory_update',
+    description: 'Correct one executor memory by id. Use it when an existing memory is wrong or obsolete; executor_memory_write is for new facts.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -77,7 +77,7 @@ export class AgentTeamMemoryToolsService {
     const args = asRecord(input.call.input);
     const context: TeamMemoryActorContext = { ...input.context, createdBy: 'role' };
     switch (input.call.toolName) {
-      case 'team_memory_search': {
+      case 'executor_memory_search': {
         const results = await this.memories.search(context, {
           query: optionalString(args?.query, 'query'),
           // Omitted means every in-scope memory, not only executor-level ones.
@@ -86,11 +86,11 @@ export class AgentTeamMemoryToolsService {
         });
         return JSON.stringify(results);
       }
-      case 'team_memory_read': {
+      case 'executor_memory_read': {
         const memory = await this.memories.read(context, requiredString(args?.memoryId, 'memoryId'));
         return JSON.stringify(memory);
       }
-      case 'team_memory_write': {
+      case 'executor_memory_write': {
         const id = `atmemory_${createHash('sha256')
           .update(JSON.stringify([input.context.runId ?? '', input.taskKey, input.call.toolName, input.call.input]))
           .digest('hex')
@@ -108,7 +108,7 @@ export class AgentTeamMemoryToolsService {
           content: result.memory.content,
         });
       }
-      case 'team_memory_update': {
+      case 'executor_memory_update': {
         const result = await this.memories.update(context, {
           memoryId: requiredString(args?.memoryId, 'memoryId'),
           ...(args?.content === undefined ? {} : { content: requiredString(args.content, 'content') }),

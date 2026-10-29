@@ -7,7 +7,7 @@ import { createTeamMemoryMcpServer } from './team-memory-mcp';
 
 // Internal MCP endpoint for project executors. It is not a user-facing route: the
 // only credential is the short-lived token the runtime registers for one task.
-@Controller('internal/team-memory-mcp')
+@Controller('internal/executor-memory-mcp')
 export class TeamMemoryMcpController {
   constructor(
     private readonly tokens: TeamMemoryMcpTokenService,

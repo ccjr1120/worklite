@@ -46,7 +46,7 @@ For an already saved Provider, call query_platform GET /portkey-gateway/provider
 ## Choosing an executor
 
 - Writing or changing code, repository-wide investigation, cross-file changes and validation/build/test work go through dispatch_task to an appropriate executor with the original goal and the absolute existing project directory. Use run_host_command directly for everyday local terminal work that does not change repository source. Use the WorkLite project root from inspect_workspace when the user means WorkLite, never an immutable running release. Delegate a clear request immediately rather than preparing it with platform inspection. When the user names a project or keyword without an absolute directory, call search_local_projects first to resolve it from the metadata-only local project index; that lookup is not repository investigation and replaces asking the user for a path. A dispatched Run works in the background: the turn settles at dispatch, and its terminal success or failure is reported automatically; never poll. While any dispatched work (executor Run or Workflow Run) is active, the conversation also receives a periodic [活跃工作进展提醒] progress note when something visibly changed; answer it briefly from the note itself without tool calls. The project directory may be a workspace root containing several projects and need not itself be a Git repository. Use one workspace-root dispatch for a goal spanning repositories, and dispatch independent tasks separately. Engine-backed roles inside an executor choose per project, under the executor's Git policy, whether to use the current branch, a feature branch, or a project-specific worktree; WorkLite does not force worktrees or automatically merge/clean Git state. A worktree belongs to one project, never the entire workspace. When a Run asks a question, present it in Chat and answer it there. If the user replaces an active Run's goal with different work, or it is unclear whether the message supplements or replaces it, call ask_user alone to choose between continuing the captured Run unchanged or cancelling it and creating a new task. For cancel-and-create, cancel the Run through its Run controls and inspect it until it settles; dispatch one fresh task only after its persisted status is cancelled. If cancellation fails or the status is anything else, do not dispatch.
-- Collaborative development and independent review use dispatch_task with the selected executor id as target; automation uses dispatch_task with a published Workflow target. For executor work, use inspect_executors to choose the target by purpose and read its current id and name, collect an absolute existing project directory and pass the complete goal as message. Never ask the user to choose a mode and never pass one; the Planner decides it. When the request names an existing company project or general project work, ask if the target is unclear. The task card opens read-only Run evidence; do not continue work from the archived group route. An omitted initial role defaults to the Planner. Chinese parentheses delimit a prose-embedded directory.
+- Collaborative development and independent review use dispatch_task with the selected executor id as target; automation uses dispatch_task with a published Workflow target. For executor work, use inspect_executors to choose the target by purpose and read its current id and name, collect an absolute existing project directory and pass the complete goal as message. Never ask the user to choose a mode and never pass one; the executor's entry role decides it. The general project executor (id agent_team_direct) is the default for general project work; the company project executor (id agent_team_bmad_tea) handles existing company repositories. Executors can be renamed, so select them by id and refer to them by the current name from inspect_executors. When the request names an existing company project or general project work, ask if the target is unclear. The task card opens read-only Run evidence; do not continue work from the archived group route. An omitted initial role defaults to the Planner. Chinese parentheses delimit a prose-embedded directory.
 - For executor settings, role or executor memory requests, use the protected executor platform tools without dispatch_task or a project directory. Call inspect_executors then inspect_executor; use update_executor for name, working practice, project Git policy or concurrency, the role tools for role CRUD, and the executor memory tools for repository-scoped memories. Chat retains full executor administration. The selected executor Git policy is captured for every engine-backed role; working practice and the full memory projection remain scoped to the initially addressed role, while every other role receives a bounded memory index and may search, read and write executor memories; every engine-backed role also receives a per-task executor memory MCP endpoint.
 - Chat can run arbitrary local terminal commands through the protected run_host_command tool. Workspace Skills selected in Chat settings are saved and their instructions and Skill-scoped protected tools are captured by value each turn; Chat cannot execute custom Skill scripts or call user MCP directly. Platform state is read directly through inspect_workflow and query_platform; search_local_projects and the alias tools read only the metadata index and write only the alias dictionary. For online search, web page extraction, and in-depth research, use the selected Tavily Skills (tavily-search, tavily-extract, tavily-research, tavily-cli) through run_host_command to execute tvly with --json flag; see their Skill instructions for specific command syntax. web_fetch is the only outbound network tool and is read-only: it reads public web pages without accessing platform data or files. Chat Skill ids can be updated through update_chat's skillIds field (with an expectedConfigurationRevision precheck), and Chat hands no Skills to execution engines.
 - Inspect tasks already bound to this conversation (inspect_executor_run, inspect_workflow_run, or inspect_project_task for a historical Chat project task) before dispatching again, and report the results of the role that actually produced them. Chat turn completion is separate from task completion. Surface pending questions and safe task failures from their own records. Pass existing review findings and approved scope in the delegated goal so a repair need not repeat a full audit. Historical Chat project tasks, including those of other conversations, are discoverable through list_project_tasks; subscribe_project_task reports such a task's settlement into this conversation once, and wait_project_task blocks until the task's visible progress changes, it settles, or the timeout passes.
@@ -287,7 +287,7 @@ const WORKLITE_PLATFORM_TOOL_SPECS: Array<[path: string, description: string, in
     versions: { type: 'string', enum: ['latest', 'all', 'none'], description: 'Full immutable definitions to include: latest (default) only the newest published version, all every published version, none metadata only.' },
     runLimit: { type: 'integer', minimum: 0, maximum: 20, description: 'Recent Run summaries to return; defaults to 5.' },
   })],
-  ['scripts/query-platform.mjs', 'Query the internal WorkLite platform API for platform facts when no dedicated typed tool covers the route. Large responses include a truncation marker with a bounded preview.', toolInput({
+  ['scripts/query-platform.mjs', 'Query the internal WorkLite platform API for platform facts when no dedicated typed tool covers the route. Supported read-only GET prefixes: /workflows, /workflow-versions, /runs, /artifacts, /home/board-categories, /skills, /mcp-servers, /portkey-gateway, /executors (executor list, detail, roles, /executors/:executorId/runs and /executors/:executorId/memories), /executor-groups, /executor-runs, /executor-documents, /chat/conversations, /chat/project-tasks, /chat/memories, /chat/channels, /usage, /audit-logs, /platform/snapshot, /settings and /local-projects. Event streams are not supported. Large responses include a truncation marker with a bounded preview.', toolInput({
     method: { type: 'string', enum: ['GET'], description: 'Only GET is allowed; omit it for GET.' },
     path: toolString('Site-relative path beginning with /, such as /workflows or /workflow-versions/:versionId. Pass query parameters through query.'),
     query: { type: 'object', additionalProperties: { type: ['string', 'number', 'boolean'] }, description: 'Optional flat scalar query parameters, such as limit or workflowId.' },
@@ -483,16 +483,21 @@ const WORKLITE_PLATFORM_TOOL_SPECS: Array<[path: string, description: string, in
     nodeRunId: toolString('Required for retry: the retryable node run id.'),
   }, ['runId', 'action'])],
   ['scripts/inspect-executors.mjs', 'List the two predefined executors with their stable ids, current names, project focus, Git policy, roles and current settings. Executors can be renamed, so pass the executor id, not its name, to dispatch and configuration tools; these executors share one Chat and do not have separate Chat configurations.', toolInput()],
-  ['scripts/inspect-executor.mjs', 'Read one executor configuration, including every role.', toolInput({
+  ['scripts/inspect-executor.mjs', 'Read one executor configuration: id, current name, revision, settings and every role.', toolInput({
     executorId: toolString(),
   }, ['executorId'])],
-  ['scripts/update-executor.mjs', 'Update one executor\'s name, working practice, project Git policy and/or concurrent Run limit. Use the dedicated role tools to change roles. New Runs capture the selected executor settings and Git policy; the initial role alone receives the working-practice and full executor-memory projections, every other role receives a bounded memory index, and every implementer role receives the Git policy plus per-task executor memory tools.', toolInput({
+  ['scripts/update-executor.mjs', 'Update one executor\'s name, working practice, project Git policy and/or concurrent Run limit. Pass executorId, never a name, to select it. A rename affects only Runs dispatched afterwards; existing Runs keep their captured executor name. Use the dedicated role tools to change roles. New Runs capture the selected executor settings and Git policy; the initial role alone receives the working-practice and full executor-memory projections, every other role receives a bounded memory index, and every engine-backed role receives the Git policy plus per-task executor memory tools.', toolInput({
     executorId: toolString(),
-    name: { type: 'string', description: 'Human-readable executor name (1-64 characters, trimmed, case-insensitive unique). Affects new Runs only; historical Runs keep their captured name.' },
+    name: { type: 'string', minLength: 1, maxLength: 64, description: 'New executor display name: 1-64 characters after trimming, no control characters, unique among non-deleted executors ignoring case (a duplicate is rejected with EXECUTOR_NAME_CONFLICT). Affects new Runs only; every Run keeps the name captured at dispatch.' },
+    expectedRevision: { type: 'integer', minimum: 0, description: 'Optional optimistic-lock precondition: the revision returned by inspect_executor. A stale value is rejected with EXECUTOR_REVISION_CONFLICT; inspect again and retry.' },
     workingPractice: { type: 'string', description: 'Executor working-practice text captured by new Runs and injected into the initially addressed role only; historical versions keep their captured behavior.' },
     projectGitPolicy: { type: 'string', description: 'Executor-specific Git guidance captured by new Runs and passed to every implementer role; implementers perform Git operations using their native tools.' },
     maxConcurrentRuns: { type: 'integer', minimum: 1, description: 'Maximum number of concurrent Runs; additional Runs queue FIFO.' },
   }, ['executorId'])],
+  ['scripts/delete-executor.mjs', 'Soft-delete one executor after the user explicitly confirms. Rejected while the executor has active Runs or when it is the last executor. Historical Runs, versions, memories and group archives are preserved.', toolInput({
+    executorId: toolString(),
+    confirm: { type: 'boolean', description: 'Set true only after the user explicitly confirms the deletion.' },
+  }, ['executorId', 'confirm'])],
   ['scripts/create-executor-role.mjs', 'Create a role in the selected executor. The server assigns its stable role id; inspect the returned executor before addressing it. New role configuration affects future Runs. An empty publicModelId uses the executor default; a list is tried in order with Gateway fallback.', toolInput({
     executorId: toolString(),
     displayName: toolString('Human-readable role name.'),
@@ -1101,7 +1106,7 @@ import { call, exactKeys, input, print, requiredString } from './lib.mjs';
 const MAX_OUTPUT_CHARS = 50000;
 const RESERVE_CHARS = 3000;
 const BACKSLASH = String.fromCharCode(92);
-const READ_PREFIXES = ['/workflows', '/workflow-versions', '/runs', '/artifacts', '/home/board-categories', '/skills', '/mcp-servers', '/portkey-gateway', '/executor-categories', '/executor-groups', '/executor-runs', '/agent-team-documents', '/chat/conversations', '/chat/project-tasks', '/chat/memories', '/chat/channels', '/usage', '/audit-logs', '/platform/snapshot', '/settings', '/local-projects'];
+const READ_PREFIXES = ['/workflows', '/workflow-versions', '/runs', '/artifacts', '/home/board-categories', '/skills', '/mcp-servers', '/portkey-gateway', '/executors', '/executor-groups', '/executor-runs', '/executor-documents', '/chat/conversations', '/chat/project-tasks', '/chat/memories', '/chat/channels', '/usage', '/audit-logs', '/platform/snapshot', '/settings', '/local-projects'];
 const SENSITIVE_KEYS = new Set(['apikey', 'token', 'accesstoken', 'refreshtoken', 'idtoken', 'secret', 'clientsecret', 'password', 'passwd', 'credential', 'credentials', 'authorization', 'privatekey', 'accesskey', 'sessionkey', 'bearer', 'cookie', 'encryptedstorage', 'storagestate', 'encryptedkey', 'encryptionkey']);
 
 const raw = input();
@@ -1371,20 +1376,21 @@ const raw = input();
 exactKeys(raw, ['message', 'target']);
 const target = raw.target;
 if (!target || typeof target !== 'object' || Array.isArray(target)) throw new Error('A target object is required.');
-const kind = oneOf(target.kind, 'target.kind', ['executor_category', 'workflow']);
-exactKeys(target, kind === 'executor_category' ? ['kind', 'executorCategoryId', 'projectDirectory', 'mode', 'role'] : ['kind', 'workflowId']);
+const kind = oneOf(target.kind, 'target.kind', ['executor', 'workflow']);
+exactKeys(target, kind === 'executor' ? ['kind', 'executorId', 'projectDirectory', 'mode', 'role'] : ['kind', 'workflowId']);
 // Chat submission ids bind directly to a group and its first Run, so repeated delivery cannot create another task.
-// A deprecated team mode from older callers is accepted but never forwarded; the Planner decides it.
-const normalized = kind === 'executor_category' ? {
-  kind,
-  executorCategoryId: requiredString(target.executorCategoryId, 'executorCategoryId', 240),
+// A deprecated mode from older callers is accepted but never forwarded; the executor's entry role decides it.
+// The dispatch contract keeps its persisted executor_category target kind and executorCategoryId key.
+const normalized = kind === 'executor' ? {
+  kind: 'executor_category',
+  executorCategoryId: requiredString(target.executorId, 'executorId', 240),
   projectDirectory: requiredString(target.projectDirectory, 'projectDirectory', 2000),
   ...(target.role === undefined ? {} : { role: requiredString(target.role, 'role', 240) }),
 } : { kind, workflowId: requiredString(target.workflowId, 'workflowId', 240) };
 const executionId = requiredString(process.env.WORKLITE_CHAT_EXECUTION_ID, 'server conversation context', 240);
 const submissionId = requiredString(process.env.WORKLITE_CHAT_SUBMISSION_ID, 'server submission context', 240);
 const data = await call('/chat/dispatch', { method: 'POST', body: { submissionId, executionId, message: text(raw.message, 'message', 100000), target: normalized } });
-const route = kind === 'executor_category' ? '/executor-runs/' + encodeURIComponent(data.reference.runId) : '/workflows/' + encodeURIComponent(target.workflowId);
+const route = kind === 'executor' ? '/executor-runs/' + encodeURIComponent(data.reference.runId) : '/workflows/' + encodeURIComponent(target.workflowId);
 print({ worklite: { type: 'dispatch', submissionId: data.submissionId, route }, data });
 `],
   ['scripts/inspect-workflow-run.mjs', `#!/usr/bin/env node
@@ -1418,40 +1424,54 @@ const path = action === 'retry' ? '/runs/' + encodeURIComponent(runId) + '/nodes
 const data = await call(path, { method: 'POST', body: {} });
 print({ worklite: { type: 'snapshot' }, data });
 `],
-  ['scripts/inspect-agent-teams.mjs', `#!/usr/bin/env node
+  ['scripts/inspect-executors.mjs', `#!/usr/bin/env node
 import { call, noInput, print } from './lib.mjs';
 noInput();
-const data = await call('/executor-categories');
-print({ worklite: { type: 'executor-categories' }, data });
+const data = await call('/executors');
+print({ worklite: { type: 'executors' }, data });
 `],
-  ['scripts/inspect-agent-team.mjs', `#!/usr/bin/env node
+  ['scripts/inspect-executor.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print, requiredString } from './lib.mjs';
 const raw = input();
-exactKeys(raw, ['executorCategoryId']);
-const executorCategoryId = requiredString(raw.executorCategoryId, 'executorCategoryId', 240);
-const data = await call('/executor-categories/' + encodeURIComponent(executorCategoryId));
-print({ worklite: { type: 'agent-team', id: data.id }, data });
+exactKeys(raw, ['executorId']);
+const executorId = requiredString(raw.executorId, 'executorId', 240);
+const data = await call('/executors/' + encodeURIComponent(executorId));
+print({ worklite: { type: 'executor', id: data.id }, data });
 `],
-  ['scripts/update-agent-team.mjs', `#!/usr/bin/env node
+  ['scripts/update-executor.mjs', `#!/usr/bin/env node
 import { boundedString, call, exactKeys, input, print, requiredString } from './lib.mjs';
 const raw = input();
-exactKeys(raw, ['executorCategoryId', 'workingPractice', 'projectGitPolicy', 'maxConcurrentRuns']);
-const executorCategoryId = requiredString(raw.executorCategoryId, 'executorCategoryId', 240);
+exactKeys(raw, ['executorId', 'name', 'expectedRevision', 'workingPractice', 'projectGitPolicy', 'maxConcurrentRuns']);
+const executorId = requiredString(raw.executorId, 'executorId', 240);
 const body = {};
+if (raw.name !== undefined) body.name = requiredString(raw.name, 'name', 64);
+if (raw.expectedRevision !== undefined) {
+  if (!Number.isInteger(raw.expectedRevision) || raw.expectedRevision < 0) throw new Error('expectedRevision must be the non-negative integer revision from inspect_executor.');
+  body.expectedRevision = raw.expectedRevision;
+}
 if (raw.workingPractice !== undefined) body.workingPractice = boundedString(raw.workingPractice, 'workingPractice', 100000);
 if (raw.projectGitPolicy !== undefined) body.projectGitPolicy = boundedString(raw.projectGitPolicy, 'projectGitPolicy', 100000);
 if (raw.maxConcurrentRuns !== undefined) {
   if (!Number.isInteger(raw.maxConcurrentRuns) || raw.maxConcurrentRuns < 1) throw new Error('maxConcurrentRuns must be an integer of at least 1.');
   body.maxConcurrentRuns = raw.maxConcurrentRuns;
 }
-if (!Object.keys(body).length) throw new Error('Provide workingPractice, projectGitPolicy or maxConcurrentRuns.');
-const data = await call('/executor-categories/' + encodeURIComponent(executorCategoryId), { method: 'PATCH', body });
-print({ worklite: { type: 'agent-team', id: data.id }, data });
+if (!Object.keys(body).some((key) => key !== 'expectedRevision')) throw new Error('Provide name, workingPractice, projectGitPolicy or maxConcurrentRuns.');
+const data = await call('/executors/' + encodeURIComponent(executorId), { method: 'PATCH', body });
+print({ worklite: { type: 'executor', id: data.id }, data });
 `],
-  ['scripts/create-agent-team-role.mjs', `#!/usr/bin/env node
+  ['scripts/delete-executor.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, print, requiredString } from './lib.mjs';
+const raw = input();
+exactKeys(raw, ['executorId', 'confirm']);
+const executorId = requiredString(raw.executorId, 'executorId', 240);
+if (raw.confirm !== true) throw new Error('confirm must be true after the user explicitly confirms deleting this executor.');
+const data = await call('/executors/' + encodeURIComponent(executorId), { method: 'DELETE', body: { confirmTeamId: executorId } });
+print({ worklite: { type: 'executor', id: executorId }, data });
+`],
+  ['scripts/create-executor-role.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, modelSelection, oneOf, print, requiredString, stringArray } from './lib.mjs';
 const raw = input();
-exactKeys(raw, ['executorCategoryId', 'displayName', 'publicModelId', 'instructions', 'entryPoints', 'skillIds', 'mcpServerIds', 'toolNames', 'executor']);
+exactKeys(raw, ['executorId', 'displayName', 'publicModelId', 'instructions', 'entryPoints', 'skillIds', 'mcpServerIds', 'toolNames', 'executor']);
 const body = {
   displayName: requiredString(raw.displayName, 'displayName', 240),
   publicModelId: modelSelection(raw.publicModelId, 'publicModelId'),
@@ -1462,92 +1482,92 @@ const body = {
   toolNames: raw.toolNames === undefined ? [] : stringArray(raw.toolNames, 'toolNames', 100, 240),
   ...(raw.executor === undefined ? {} : { executor: oneOf(raw.executor, 'executor', ['claude', 'codex']) }),
 };
-const executorCategoryId = requiredString(raw.executorCategoryId, 'executorCategoryId', 240);
-const data = await call('/executor-categories/' + encodeURIComponent(executorCategoryId) + '/roles', { method: 'POST', body });
-print({ worklite: { type: 'agent-team', id: data.id }, data });
+const executorId = requiredString(raw.executorId, 'executorId', 240);
+const data = await call('/executors/' + encodeURIComponent(executorId) + '/roles', { method: 'POST', body });
+print({ worklite: { type: 'executor', id: data.id }, data });
 `],
-  ['scripts/update-agent-team-role.mjs', `#!/usr/bin/env node
+  ['scripts/update-executor-role.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, modelSelection, oneOf, print, requiredString, stringArray } from './lib.mjs';
 const raw = input();
-exactKeys(raw, ['executorCategoryId', 'roleId', 'displayName', 'publicModelId', 'instructions', 'entryPoints', 'skillIds', 'mcpServerIds', 'toolNames', 'executor']);
+exactKeys(raw, ['executorId', 'roleId', 'displayName', 'publicModelId', 'instructions', 'entryPoints', 'skillIds', 'mcpServerIds', 'toolNames', 'executor']);
 const body = {};
 for (const key of ['displayName', 'instructions']) if (raw[key] !== undefined) body[key] = requiredString(raw[key], key, 100000);
 if (raw.publicModelId !== undefined) body.publicModelId = modelSelection(raw.publicModelId, 'publicModelId');
 for (const key of ['entryPoints', 'skillIds', 'mcpServerIds', 'toolNames']) if (raw[key] !== undefined) body[key] = stringArray(raw[key], key, 100, 240);
 if (raw.executor !== undefined) body.executor = raw.executor === null ? null : oneOf(raw.executor, 'executor', ['claude', 'codex']);
 if (!Object.keys(body).length) throw new Error('Provide at least one role field to update.');
-const executorCategoryId = requiredString(raw.executorCategoryId, 'executorCategoryId', 240);
+const executorId = requiredString(raw.executorId, 'executorId', 240);
 const roleId = requiredString(raw.roleId, 'roleId', 240);
-const data = await call('/executor-categories/' + encodeURIComponent(executorCategoryId) + '/roles/' + encodeURIComponent(roleId), { method: 'PATCH', body });
-print({ worklite: { type: 'agent-team', id: data.id }, data });
+const data = await call('/executors/' + encodeURIComponent(executorId) + '/roles/' + encodeURIComponent(roleId), { method: 'PATCH', body });
+print({ worklite: { type: 'executor', id: data.id }, data });
 `],
-  ['scripts/delete-agent-team-role.mjs', `#!/usr/bin/env node
+  ['scripts/delete-executor-role.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print, requiredString } from './lib.mjs';
 const raw = input();
-exactKeys(raw, ['executorCategoryId', 'roleId']);
-const executorCategoryId = requiredString(raw.executorCategoryId, 'executorCategoryId', 240);
+exactKeys(raw, ['executorId', 'roleId']);
+const executorId = requiredString(raw.executorId, 'executorId', 240);
 const roleId = requiredString(raw.roleId, 'roleId', 240);
-const data = await call('/executor-categories/' + encodeURIComponent(executorCategoryId) + '/roles/' + encodeURIComponent(roleId), { method: 'DELETE' });
-print({ worklite: { type: 'agent-team', id: data.id }, data });
+const data = await call('/executors/' + encodeURIComponent(executorId) + '/roles/' + encodeURIComponent(roleId), { method: 'DELETE' });
+print({ worklite: { type: 'executor', id: data.id }, data });
 `],
-  ['scripts/inspect-agent-team-memories.mjs', `#!/usr/bin/env node
+  ['scripts/inspect-executor-memories.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print, requiredString } from './lib.mjs';
 const raw = input();
-exactKeys(raw, ['executorCategoryId', 'repositoryId']);
-const executorCategoryId = requiredString(raw.executorCategoryId, 'executorCategoryId', 240);
-const all = await call('/executor-categories/' + encodeURIComponent(executorCategoryId) + '/memories');
+exactKeys(raw, ['executorId', 'repositoryId']);
+const executorId = requiredString(raw.executorId, 'executorId', 240);
+const all = await call('/executors/' + encodeURIComponent(executorId) + '/memories');
 const data = all.filter((memory) => raw.repositoryId === undefined || memory.repositoryId === raw.repositoryId);
-print({ worklite: { type: 'agent-team-memories', id: executorCategoryId }, data });
+print({ worklite: { type: 'executor-memories', id: executorId }, data });
 `],
-  ['scripts/create-agent-team-memory.mjs', `#!/usr/bin/env node
+  ['scripts/create-executor-memory.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print, requiredString } from './lib.mjs';
 const raw = input();
-exactKeys(raw, ['executorCategoryId', 'content', 'repositoryId']);
+exactKeys(raw, ['executorId', 'content', 'repositoryId']);
 const body = { content: requiredString(raw.content, 'content', 100000) };
 if (raw.repositoryId !== undefined && raw.repositoryId !== '') body.repositoryId = raw.repositoryId === null ? null : requiredString(raw.repositoryId, 'repositoryId', 240);
-const executorCategoryId = requiredString(raw.executorCategoryId, 'executorCategoryId', 240);
-const data = await call('/executor-categories/' + encodeURIComponent(executorCategoryId) + '/memories', { method: 'POST', body });
-print({ worklite: { type: 'agent-team-memory', id: data.id }, data });
+const executorId = requiredString(raw.executorId, 'executorId', 240);
+const data = await call('/executors/' + encodeURIComponent(executorId) + '/memories', { method: 'POST', body });
+print({ worklite: { type: 'executor-memory', id: data.id }, data });
 `],
-  ['scripts/update-agent-team-memory.mjs', `#!/usr/bin/env node
+  ['scripts/update-executor-memory.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print, requiredString } from './lib.mjs';
 const raw = input();
-exactKeys(raw, ['executorCategoryId', 'memoryId', 'content', 'repositoryId']);
+exactKeys(raw, ['executorId', 'memoryId', 'content', 'repositoryId']);
 const body = {};
 if (raw.content !== undefined) body.content = requiredString(raw.content, 'content', 100000);
 if (raw.repositoryId !== undefined) body.repositoryId = raw.repositoryId === null ? null : requiredString(raw.repositoryId, 'repositoryId', 240);
 if (!Object.keys(body).length) throw new Error('Provide at least one executor memory field to update.');
-const executorCategoryId = requiredString(raw.executorCategoryId, 'executorCategoryId', 240);
+const executorId = requiredString(raw.executorId, 'executorId', 240);
 const memoryId = requiredString(raw.memoryId, 'memoryId', 240);
-const data = await call('/executor-categories/' + encodeURIComponent(executorCategoryId) + '/memories/' + encodeURIComponent(memoryId), { method: 'PATCH', body });
-print({ worklite: { type: 'agent-team-memory', id: data.id }, data });
+const data = await call('/executors/' + encodeURIComponent(executorId) + '/memories/' + encodeURIComponent(memoryId), { method: 'PATCH', body });
+print({ worklite: { type: 'executor-memory', id: data.id }, data });
 `],
-  ['scripts/delete-agent-team-memory.mjs', `#!/usr/bin/env node
+  ['scripts/delete-executor-memory.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print, requiredString } from './lib.mjs';
 const raw = input();
-exactKeys(raw, ['executorCategoryId', 'memoryId']);
-const executorCategoryId = requiredString(raw.executorCategoryId, 'executorCategoryId', 240);
+exactKeys(raw, ['executorId', 'memoryId']);
+const executorId = requiredString(raw.executorId, 'executorId', 240);
 const memoryId = requiredString(raw.memoryId, 'memoryId', 240);
-await call('/executor-categories/' + encodeURIComponent(executorCategoryId) + '/memories/' + encodeURIComponent(memoryId), { method: 'DELETE' });
-print({ worklite: { type: 'agent-team-memory', id: memoryId }, data: { deleted: memoryId } });
+await call('/executors/' + encodeURIComponent(executorId) + '/memories/' + encodeURIComponent(memoryId), { method: 'DELETE' });
+print({ worklite: { type: 'executor-memory', id: memoryId }, data: { deleted: memoryId } });
 `],
-  ['scripts/inspect-agent-team-records.mjs', `#!/usr/bin/env node
+  ['scripts/inspect-executor-records.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print, requiredString } from './lib.mjs';
 const raw = input();
-exactKeys(raw, ['executorCategoryId']);
-const executorCategoryId = requiredString(raw.executorCategoryId, 'executorCategoryId', 240);
-const data = await call('/executor-categories/' + encodeURIComponent(executorCategoryId) + '/runs');
-print({ worklite: { type: 'agent-team-records', id: executorCategoryId }, data });
+exactKeys(raw, ['executorId']);
+const executorId = requiredString(raw.executorId, 'executorId', 240);
+const data = await call('/executors/' + encodeURIComponent(executorId) + '/runs');
+print({ worklite: { type: 'executor-records', id: executorId }, data });
 `],
-  ['scripts/inspect-agent-team-group.mjs', `#!/usr/bin/env node
+  ['scripts/inspect-executor-group.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print, requiredString } from './lib.mjs';
 const raw = input();
 exactKeys(raw, ['groupId']);
 const groupId = requiredString(raw.groupId, 'groupId', 240);
 const data = await call('/executor-groups/' + encodeURIComponent(groupId));
-print({ worklite: { type: 'agent-team-group', id: data.id }, data });
+print({ worklite: { type: 'executor-group', id: data.id }, data });
 `],
-  ['scripts/control-agent-team-group.mjs', `#!/usr/bin/env node
+  ['scripts/control-executor-group.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, oneOf, print, requiredString, stringArray } from './lib.mjs';
 const raw = input();
 exactKeys(raw, ['groupId', 'operation', 'runIds']);
@@ -1555,17 +1575,17 @@ const groupId = requiredString(raw.groupId, 'groupId', 240);
 const operation = oneOf(raw.operation, 'operation', ['reexecute']);
 const body = { operation, runIds: stringArray(raw.runIds, 'runIds', 100, 240) };
 const data = await call('/executor-groups/' + encodeURIComponent(groupId) + '/controls', { method: 'POST', body });
-print({ worklite: { type: 'agent-team-group', id: groupId, operation }, data });
+print({ worklite: { type: 'executor-group', id: groupId, operation }, data });
 `],
-  ['scripts/inspect-agent-team-document.mjs', `#!/usr/bin/env node
+  ['scripts/inspect-executor-document.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print, requiredString } from './lib.mjs';
 const raw = input();
 exactKeys(raw, ['documentId']);
 const documentId = requiredString(raw.documentId, 'documentId', 240);
-const data = await call('/agent-team-documents/' + encodeURIComponent(documentId));
-print({ worklite: { type: 'agent-team-document', id: data.id, runId: data.runId }, data });
+const data = await call('/executor-documents/' + encodeURIComponent(documentId));
+print({ worklite: { type: 'executor-document', id: data.id, runId: data.runId }, data });
 `],
-  ['scripts/inspect-agent-team-run.mjs', `#!/usr/bin/env node
+  ['scripts/inspect-executor-run.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print, requiredString } from './lib.mjs';
 const raw = input();
 exactKeys(raw, ['runId']);
@@ -1573,9 +1593,9 @@ const runId = requiredString(raw.runId, 'runId', 240);
 const data = await call('/executor-runs/' + encodeURIComponent(runId));
 const commandIds = [...new Set((data.activities ?? []).map((event) => event.payload?.commandExecutionId).filter((id) => typeof id === 'string'))];
 const backendCommands = await Promise.all(commandIds.map((id) => call('/commands/' + encodeURIComponent(id))));
-print({ worklite: { type: 'agent-team-run', id: data.id }, data, backendCommands });
+print({ worklite: { type: 'executor-run', id: data.id }, data, backendCommands });
 `],
-  ['scripts/answer-agent-team-run.mjs', `#!/usr/bin/env node
+  ['scripts/answer-executor-run.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print, requiredString, stringArray, text } from './lib.mjs';
 const raw = input();
 exactKeys(raw, ['runId', 'pendingInputId', 'scopeRevision', 'answer', 'directories']);
@@ -1588,9 +1608,9 @@ const body = {
 if (raw.directories !== undefined) body.directories = stringArray(raw.directories, 'directories', 10, 1000);
 const runId = requiredString(raw.runId, 'runId', 240);
 const result = await call('/executor-runs/' + encodeURIComponent(runId) + '/answer', { method: 'POST', body });
-print({ worklite: { type: 'agent-team-run-action', action: 'answer', runId: result.run.id }, data: result.run });
+print({ worklite: { type: 'executor-run-action', action: 'answer', runId: result.run.id }, data: result.run });
 `],
-  ['scripts/recover-agent-team-operation.mjs', `#!/usr/bin/env node
+  ['scripts/recover-executor-operation.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, oneOf, print, requiredString } from './lib.mjs';
 const raw = input();
 exactKeys(raw, ['runId', 'operationKey', 'decision']);
@@ -1601,9 +1621,9 @@ const body = {
 const runId = requiredString(raw.runId, 'runId', 240);
 const path = '/executor-runs/' + encodeURIComponent(runId) + '/operations/' + encodeURIComponent(body.operationKey) + '/recovery';
 const result = await call(path, { method: 'POST', body });
-print({ worklite: { type: 'agent-team-run-action', action: 'recover', runId: result.run.id }, data: result.run });
+print({ worklite: { type: 'executor-run-action', action: 'recover', runId: result.run.id }, data: result.run });
 `],
-  ['scripts/control-agent-team-run.mjs', `#!/usr/bin/env node
+  ['scripts/control-executor-run.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, oneOf, print, requiredString } from './lib.mjs';
 const raw = input();
 exactKeys(raw, ['runId', 'action', 'taskKey']);
@@ -1618,7 +1638,7 @@ if (action === 'retry') {
   path = '/executor-runs/' + encodeURIComponent(runId) + '/tasks/' + encodeURIComponent(taskKey) + '/retry';
 }
 const result = await call(path, { method: 'POST', body: {} });
-print({ worklite: { type: 'agent-team-run-action', action, runId: result.run.id }, data: result.run });
+print({ worklite: { type: 'executor-run-action', action, runId: result.run.id }, data: result.run });
 `],
   ['scripts/update-settings.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, oneOf, print } from './lib.mjs';

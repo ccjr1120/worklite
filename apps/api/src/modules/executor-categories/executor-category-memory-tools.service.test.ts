@@ -67,10 +67,10 @@ describe('roleMemoryManagedToolsEnabled', () => {
 describe('AgentTeamMemoryToolsService', () => {
   it('exposes exactly the four role memory tools', () => {
     expect(tools.toolDefinitions().map((definition) => definition.name)).toEqual([
-      'team_memory_search',
-      'team_memory_read',
-      'team_memory_write',
-      'team_memory_update',
+      'executor_memory_search',
+      'executor_memory_read',
+      'executor_memory_write',
+      'executor_memory_update',
     ]);
   });
 
@@ -78,7 +78,7 @@ describe('AgentTeamMemoryToolsService', () => {
     const response = await tools.execute({
       context,
       taskKey: 'group_0_developer',
-      call: { toolName: 'team_memory_write', input: { content: 'Bound fact.', executorCategoryId: 'team_b', workspaceId: 'other' } },
+      call: { toolName: 'executor_memory_write', input: { content: 'Bound fact.', executorCategoryId: 'team_b', workspaceId: 'other' } },
     });
     const parsed = JSON.parse(response) as { id: string; operation: string };
 
@@ -88,7 +88,7 @@ describe('AgentTeamMemoryToolsService', () => {
   });
 
   it('is idempotent per Run, task and tool call', async () => {
-    const call = { toolName: 'team_memory_write', input: { content: 'Retried fact.' } };
+    const call = { toolName: 'executor_memory_write', input: { content: 'Retried fact.' } };
     const first = JSON.parse(await tools.execute({ context, taskKey: 'group_1_developer', call })) as { id: string; operation: string };
     const second = JSON.parse(await tools.execute({ context, taskKey: 'group_1_developer', call })) as { id: string; operation: string };
 
@@ -101,7 +101,7 @@ describe('AgentTeamMemoryToolsService', () => {
     await expect(tools.execute({
       context,
       taskKey: 'group_0_developer',
-      call: { toolName: 'team_memory_write', input: { content: 'Wrong repo.', repositoryId: 'repo_missing' } },
+      call: { toolName: 'executor_memory_write', input: { content: 'Wrong repo.', repositoryId: 'repo_missing' } },
     })).rejects.toMatchObject({ status: 400 });
   });
 
@@ -109,20 +109,20 @@ describe('AgentTeamMemoryToolsService', () => {
     const written = JSON.parse(await tools.execute({
       context,
       taskKey: 'group_0_developer',
-      call: { toolName: 'team_memory_write', input: { content: 'Searchable executor decision.', repositoryId: 'repo_a1' } },
+      call: { toolName: 'executor_memory_write', input: { content: 'Searchable executor decision.', repositoryId: 'repo_a1' } },
     })) as { id: string };
 
     const results = JSON.parse(await tools.execute({
       context,
       taskKey: 'group_0_developer',
-      call: { toolName: 'team_memory_search', input: { query: 'searchable' } },
+      call: { toolName: 'executor_memory_search', input: { query: 'searchable' } },
     })) as Array<{ id: string; repositoryName: string | null }>;
     expect(results).toMatchObject([{ id: written.id, repositoryName: 'api' }]);
 
     const read = JSON.parse(await tools.execute({
       context,
       taskKey: 'group_0_developer',
-      call: { toolName: 'team_memory_read', input: { memoryId: written.id } },
+      call: { toolName: 'executor_memory_read', input: { memoryId: written.id } },
     })) as { content: string };
     expect(read.content).toBe('Searchable executor decision.');
   });
@@ -131,13 +131,13 @@ describe('AgentTeamMemoryToolsService', () => {
     const written = JSON.parse(await tools.execute({
       context,
       taskKey: 'group_0_developer',
-      call: { toolName: 'team_memory_write', input: { content: 'Initial text.' } },
+      call: { toolName: 'executor_memory_write', input: { content: 'Initial text.' } },
     })) as { id: string };
 
     const updated = JSON.parse(await tools.execute({
       context,
       taskKey: 'group_0_developer',
-      call: { toolName: 'team_memory_update', input: { memoryId: written.id, content: 'Corrected text.' } },
+      call: { toolName: 'executor_memory_update', input: { memoryId: written.id, content: 'Corrected text.' } },
     })) as { id: string; content: string; operation: string };
     expect(updated).toMatchObject({ id: written.id, content: 'Corrected text.', operation: 'updated' });
   });

@@ -65,10 +65,10 @@ function RoleCard({ executorCategoryId, role, skills, mcpServerNames }: { execut
     setSavingSkills(true);
     setSkillsError('');
     try {
-      await api.updateAgentTeamRole(executorCategoryId, role.role, { skillIds: selectedSkillIds });
+      await api.updateExecutorRole(executorCategoryId, role.role, { skillIds: selectedSkillIds });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['agent-team', executorCategoryId] }),
-        queryClient.invalidateQueries({ queryKey: ['executor-categories'] }),
+        queryClient.invalidateQueries({ queryKey: ['executor', executorCategoryId] }),
+        queryClient.invalidateQueries({ queryKey: ['executors'] }),
       ]);
       toast.success(t('config.roles.skillsSaved'));
     } catch (error) {
@@ -145,7 +145,7 @@ function RoleCard({ executorCategoryId, role, skills, mcpServerNames }: { execut
   );
 }
 
-export function TeamConfig({ executorCategoryId }: { executorCategoryId: string }) {
+export function TeamConfig({ executorId: executorCategoryId }: { executorId: string }) {
   const { t } = useTranslation('executorCategories');
   const { locale } = useLocale();
   const teamQuery = useAgentTeamQuery(executorCategoryId);
@@ -153,7 +153,7 @@ export function TeamConfig({ executorCategoryId }: { executorCategoryId: string 
   const mcpServersQuery = useMcpServersQuery('personal');
   const skillsQuery = useSkillsQuery('personal');
   const notSet = t('config.notSet');
-  const recordsPath = `/executor-categories/${encodeURIComponent(executorCategoryId)}`;
+  const recordsPath = `/executors/${encodeURIComponent(executorCategoryId)}`;
   const categoryName = t(`focus.${executorCategoryId}` as never, { defaultValue: teamQuery.data?.name });
   const crumbs = [{ label: 'Coding' }, ...(teamQuery.data ? [{ label: categoryName, to: recordsPath }] : []), { label: t('config.title') }];
 
@@ -185,7 +185,7 @@ export function TeamConfig({ executorCategoryId }: { executorCategoryId: string 
       <PageHeading
         title={t('config.title')}
         description={t('config.description')}
-        actions={<Link to="/executor-categories/$executorCategoryId" params={{ executorCategoryId }} className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">{t('config.backToRecords')}</Link>}
+        actions={<Link to="/executors/$executorId" params={{ executorId: executorCategoryId }} className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">{t('config.backToRecords')}</Link>}
       />
       <TeamSwitcher executorCategoryId={executorCategoryId} />
 

@@ -35,29 +35,29 @@ describe('Executor memory MCP injection', () => {
   it('adds the executor memory server to the Claude mcp.json', async () => {
     const prepared = preparedTeamMemory();
     const argv = await writeClaudeMcpConfiguration(prepared.directory, prepared.mcpServers, async () => [
-      { name: 'team_memory_search' },
-      { name: 'team_memory_read' },
-      { name: 'team_memory_write' },
+      { name: 'executor_memory_search' },
+      { name: 'executor_memory_read' },
+      { name: 'executor_memory_write' },
     ]);
 
     expect(argv).toEqual(['--mcp-config', join(directory, 'mcp.json')]);
     const config = JSON.parse(await readFile(join(directory, 'mcp.json'), 'utf8')) as {
       mcpServers: Record<string, { type: string; url: string; headers?: Record<string, string> }>;
     };
-    expect(config.mcpServers.worklite_team_memory).toEqual({
+    expect(config.mcpServers.worklite_executor_memory).toEqual({
       type: 'http',
       url: prepared.mcpServers[0]!.endpoint,
       headers: { Authorization: 'Bearer wtm_executor_token' },
     });
   });
 
-  it('adds mcp_servers.worklite_team_memory for Codex with its bearer environment variable', () => {
+  it('adds mcp_servers.worklite_executor_memory for Codex with its bearer environment variable', () => {
     const prepared = preparedTeamMemory();
     const { config, env } = codexMcpServers(prepared, false);
 
-    expect(config['mcp_servers.worklite_team_memory']).toEqual({
+    expect(config['mcp_servers.worklite_executor_memory']).toEqual({
       url: prepared.mcpServers[0]!.endpoint,
-      enabled_tools: ['team_memory_search', 'team_memory_read', 'team_memory_write'],
+      enabled_tools: ['executor_memory_search', 'executor_memory_read', 'executor_memory_write'],
       bearer_token_env_var: 'WORKLITE_MCP_TOKEN_0',
     });
     expect(env.WORKLITE_MCP_TOKEN_0).toBe('wtm_executor_token');
@@ -72,7 +72,7 @@ describe('Executor memory MCP injection', () => {
       });
 
       expect(argv).toEqual([]);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('worklite_team_memory'));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('worklite_executor_memory'));
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('ECONNREFUSED'));
     } finally {
       warn.mockRestore();

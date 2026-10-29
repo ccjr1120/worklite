@@ -4,14 +4,14 @@ import type { AgentTeamMemoryToolsService } from './executor-category-memory-too
 import type { TeamMemoryActorContext } from './team-memory.service';
 
 // The fixed MCP server id makes Claude Code expose these as
-// mcp__worklite_team_memory__<tool> and keeps Codex's mcp_servers.<key> stable.
-export const TEAM_MEMORY_MCP_SERVER_ID = 'team_memory';
-export const TEAM_MEMORY_MCP_TOOL_NAMES = ['team_memory_search', 'team_memory_read', 'team_memory_write'] as const;
+// mcp__worklite_executor_memory__<tool> and keeps Codex's mcp_servers.<key> stable.
+export const TEAM_MEMORY_MCP_SERVER_ID = 'executor_memory';
+export const TEAM_MEMORY_MCP_TOOL_NAMES = ['executor_memory_search', 'executor_memory_read', 'executor_memory_write'] as const;
 
 export function teamMemoryMcpEndpoint(): string {
   const configured = process.env.WORKLITE_API_URL?.trim();
   const base = configured || `http://127.0.0.1:${Number(process.env.API_PORT ?? 23391)}/api`;
-  return `${base.replace(/\/+$/, '')}/internal/team-memory-mcp`;
+  return `${base.replace(/\/+$/, '')}/internal/executor-memory-mcp`;
 }
 
 /**
@@ -44,7 +44,7 @@ export function createTeamMemoryMcpServer(
   context: TeamMemoryActorContext,
 ): Server {
   const server = new Server(
-    { name: 'worklite-team-memory', version: '1.0.0' },
+    { name: 'worklite-executor-memory', version: '1.0.0' },
     { capabilities: { tools: {} } },
   );
   const allowed = new Set<string>(TEAM_MEMORY_MCP_TOOL_NAMES);

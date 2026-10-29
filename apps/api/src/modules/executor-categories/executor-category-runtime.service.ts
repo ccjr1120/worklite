@@ -3429,14 +3429,14 @@ export function groupRolePromptAddition(
       ...(isInitiallyAddressedRole
         ? [
           ...(fullProjection ? [`Executor memories:\n${fullProjection}`] : []),
-          'Executor memory tools are available: team_memory_search, team_memory_read, team_memory_write and team_memory_update. A memory you save applies immediately to later searches and is projected into the next dispatch.',
+          'Executor memory tools are available: executor_memory_search, executor_memory_read, executor_memory_write and executor_memory_update. A memory you save applies immediately to later searches and is projected into the next dispatch.',
           'Chat retains full executor configuration and memory management; you may search, read and write memories within this Run repository scope.',
         ]
         : [
           `Executor memory index (${index.length} ${index.length === 1 ? 'entry' : 'entries'}):`,
           ...(index.length ? index : ['- (no executor memories yet)']),
-          'This is an index, not the full text. Use team_memory_search to find relevant memories and team_memory_read to read one in full.',
-          'You may save durable executor facts with team_memory_write; Chat retains full executor configuration and memory management.',
+          'This is an index, not the full text. Use executor_memory_search to find relevant memories and executor_memory_read to read one in full.',
+          'You may save durable executor facts with executor_memory_write; Chat retains full executor configuration and memory management.',
         ]),
       'Group messages are scoped by recipient and repository. Do not assume another role can see your message or that a visible transcript entry is model input.',
       'Pause, resume, cancel and retry requests are handled by the control service and are never normal task instructions.',

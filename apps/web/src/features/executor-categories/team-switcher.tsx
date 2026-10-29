@@ -6,7 +6,7 @@ import { focusRing } from '@/components/ui/interaction';
 import { TruncatedText } from '@/components/ui/truncated-text';
 import { cn } from '@/lib/utils';
 
-// `/executor-categories` and the legacy `/agent-team-config` path open the existing Company Project team.
+// `/executors` opens the company project executor by its stable id.
 export const DEFAULT_EXECUTOR_CATEGORY_ID = 'agent_team_bmad_tea';
 
 const ACTIVE_RUN_STATUSES: AgentTeamRunStatus[] = ['running', 'waiting_for_input', 'paused'];
@@ -33,8 +33,8 @@ function TeamCard({ team, selected }: { team: AgentTeamView; selected: boolean }
 
   return (
     <Link
-      to="/executor-categories/$executorCategoryId/config"
-      params={{ executorCategoryId: team.id }}
+      to="/executors/$executorId/config"
+      params={{ executorId: team.id }}
       aria-current={selected ? 'page' : undefined}
       className={cn(
         'wl-press block rounded-xl border p-4 shadow-xs transition-colors',

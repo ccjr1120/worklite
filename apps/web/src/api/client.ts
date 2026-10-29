@@ -8,6 +8,7 @@ import type {
   AgentTeamRunEvent,
   AgentTeamView,
   AgentTeamRoleConfiguration,
+  UpdateAgentTeamRequest,
   AnswerAgentTeamRunRequest,
   RecoverAgentTeamOperationRequest,
   AgentTeamRunActionResponse,
@@ -296,28 +297,29 @@ export const api = {
     return apiGet<GatewayRequestLogList>(`/api/portkey-gateway/request-logs${suffix}`);
   },
   gatewayRequestLog: (requestLogId: string) => apiGet<GatewayRequestLogDetail>(`/api/portkey-gateway/request-logs/${encodeURIComponent(requestLogId)}`),
-  executorCategories: () => apiGet<AgentTeamView[]>('/api/executor-categories'),
-  agentTeamRecords: (executorCategoryId: string) => apiGet<AgentTeamRunSummary[]>(`/api/executor-categories/${encodeURIComponent(executorCategoryId)}/runs`),
+  executors: () => apiGet<AgentTeamView[]>('/api/executors'),
+  executorRecords: (executorId: string) => apiGet<AgentTeamRunSummary[]>(`/api/executors/${encodeURIComponent(executorId)}/runs`),
   agentTeamRunList: (query: { executorCategoryIds?: string[]; cursor?: string; limit?: number }) => {
     const search = new URLSearchParams();
     if (query.executorCategoryIds?.length) {
-      query.executorCategoryIds.forEach(id => search.append('executorCategoryId', id));
+      query.executorCategoryIds.forEach(id => search.append('executorId', id));
     }
     if (query.cursor?.trim()) search.set('cursor', query.cursor.trim());
     if (query.limit) search.set('limit', String(query.limit));
     const suffix = search.size > 0 ? `?${search.toString()}` : '';
     return apiGet<AgentTeamRunListPage>(`/api/executor-runs${suffix}`);
   },
-  agentTeam: (executorCategoryId: string) => apiGet<AgentTeamView>(`/api/executor-categories/${encodeURIComponent(executorCategoryId)}`),
-  updateAgentTeamRole: (executorCategoryId: string, roleId: string, input: Partial<Omit<AgentTeamRoleConfiguration, 'role'>>) =>
-    apiPatch<AgentTeamView>(`/api/executor-categories/${encodeURIComponent(executorCategoryId)}/roles/${encodeURIComponent(roleId)}`, input),
-  executorCategoryMemories: (executorCategoryId: string) => apiGet<AgentTeamMemoryView[]>(`/api/executor-categories/${encodeURIComponent(executorCategoryId)}/memories`),
+  executor: (executorId: string) => apiGet<AgentTeamView>(`/api/executors/${encodeURIComponent(executorId)}`),
+  updateExecutor: (executorId: string, input: UpdateAgentTeamRequest) => apiPatch<AgentTeamView>(`/api/executors/${encodeURIComponent(executorId)}`, input),
+  updateExecutorRole: (executorId: string, roleId: string, input: Partial<Omit<AgentTeamRoleConfiguration, 'role'>>) =>
+    apiPatch<AgentTeamView>(`/api/executors/${encodeURIComponent(executorId)}/roles/${encodeURIComponent(roleId)}`, input),
+  executorMemories: (executorId: string) => apiGet<AgentTeamMemoryView[]>(`/api/executors/${encodeURIComponent(executorId)}/memories`),
   agentTeamGroup: (groupId: string) => apiGet<AgentTeamGroupView>(`/api/executor-groups/${encodeURIComponent(groupId)}`),
   controlAgentTeamGroup: (groupId: string, input: { operation: 'reexecute'; runIds: string[] }) => apiPost<AgentTeamGroupView>(`/api/executor-groups/${encodeURIComponent(groupId)}/controls`, input),
   executorGroupEventsUrl: (groupId: string) => `/api/executor-groups/${encodeURIComponent(groupId)}/events`,
-  agentTeamDocument: (documentId: string) => apiGet<AgentTeamDocumentView>(`/api/agent-team-documents/${encodeURIComponent(documentId)}`),
-  downloadAgentTeamDocument: async (documentId: string): Promise<Blob> => {
-    const response = await fetch(`/api/agent-team-documents/${encodeURIComponent(documentId)}/download`, {
+  executorDocument: (documentId: string) => apiGet<AgentTeamDocumentView>(`/api/executor-documents/${encodeURIComponent(documentId)}`),
+  downloadExecutorDocument: async (documentId: string): Promise<Blob> => {
+    const response = await fetch(`/api/executor-documents/${encodeURIComponent(documentId)}/download`, {
       credentials: 'include',
     });
     if (!response.ok) {
