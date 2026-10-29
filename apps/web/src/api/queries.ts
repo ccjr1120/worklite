@@ -202,6 +202,21 @@ export function useAgentTeamRunQuery(workspace: string | undefined, runId: strin
   });
 }
 
+export function agentTeamRunListQueryKey(teamIds?: string[]) {
+  const sorted = teamIds ? [...teamIds].sort() : [];
+  return ['agent-team-run-list', ...sorted] as const;
+}
+
+export function useAgentTeamRunListQuery(teamIds?: string[]) {
+  return useInfiniteQuery({
+    queryKey: agentTeamRunListQueryKey(teamIds),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => api.agentTeamRunList({ teamIds, cursor: pageParam }),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+    refetchInterval: 5_000,
+  });
+}
+
 export function useMcpServersQuery(workspace?: string) {
   return useQuery({ queryKey: mcpServersQueryKey(), queryFn: () => api.mcpServers(workspace) });
 }

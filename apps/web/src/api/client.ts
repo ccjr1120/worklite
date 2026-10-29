@@ -4,6 +4,7 @@ import type {
   AgentTeamMemoryView,
   AgentTeamRunView,
   AgentTeamRunSummary,
+  AgentTeamRunListPage,
   AgentTeamRunEvent,
   AgentTeamView,
   AgentTeamRoleConfiguration,
@@ -297,6 +298,16 @@ export const api = {
   gatewayRequestLog: (requestLogId: string) => apiGet<GatewayRequestLogDetail>(`/api/portkey-gateway/request-logs/${encodeURIComponent(requestLogId)}`),
   agentTeams: () => apiGet<AgentTeamView[]>('/api/agent-teams'),
   agentTeamRecords: (teamId: string) => apiGet<AgentTeamRunSummary[]>(`/api/agent-teams/${encodeURIComponent(teamId)}/runs`),
+  agentTeamRunList: (query: { teamIds?: string[]; cursor?: string; limit?: number }) => {
+    const search = new URLSearchParams();
+    if (query.teamIds?.length) {
+      query.teamIds.forEach(id => search.append('teamId', id));
+    }
+    if (query.cursor?.trim()) search.set('cursor', query.cursor.trim());
+    if (query.limit) search.set('limit', String(query.limit));
+    const suffix = search.size > 0 ? `?${search.toString()}` : '';
+    return apiGet<AgentTeamRunListPage>(`/api/agent-team-runs${suffix}`);
+  },
   agentTeam: (teamId: string) => apiGet<AgentTeamView>(`/api/agent-teams/${encodeURIComponent(teamId)}`),
   updateAgentTeamRole: (teamId: string, roleId: string, input: Partial<Omit<AgentTeamRoleConfiguration, 'role'>>) =>
     apiPatch<AgentTeamView>(`/api/agent-teams/${encodeURIComponent(teamId)}/roles/${encodeURIComponent(roleId)}`, input),

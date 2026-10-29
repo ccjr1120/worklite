@@ -140,6 +140,19 @@ export class AgentTeamGroupsController {
 export class AgentTeamRunsController {
   constructor(private readonly teams: AgentTeamsService) {}
 
+  @Get()
+  list(
+    @Req() request: Request,
+  ) {
+    const teamIds = request.query.teamId as string | string[] | undefined;
+    const cursor = request.query.cursor as string | undefined;
+    const limit = request.query.limit ? Number(request.query.limit) : undefined;
+
+    const teamIdArray = teamIds ? (Array.isArray(teamIds) ? teamIds : [teamIds]) : [];
+
+    return this.teams.listRuns(request, 'personal', teamIdArray, cursor, limit);
+  }
+
   @Get(':runId')
   get(@Req() request: Request, @Param('runId') runId: string) {
     return this.teams.getRun(request, 'personal', runId);

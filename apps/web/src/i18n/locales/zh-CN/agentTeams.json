@@ -166,16 +166,21 @@
   },
   "records": {
     "title": "执行记录",
-    "description": "这里按执行器分类查看由 Chat 发起的执行记录及其进度。",
+    "description": "查看由 Chat 发起的执行记录及其进度。",
     "empty": "暂无执行记录。",
     "openChat": "在 Chat 中发起任务",
     "finishedAt": "结束时间",
     "loadFailed": "无法加载工作记录",
+    "loading": "加载中…",
+    "loadMore": "加载更多",
+    "total": "共 {{count}} 条",
     "filters": {
       "label": "筛选运行记录",
       "keyword": "按标题搜索",
       "status": "按状态筛选",
-      "allStatuses": "全部状态"
+      "allStatuses": "全部状态",
+      "executor": "执行器",
+      "clearAll": "清空"
     },
     "noMatch": "没有符合筛选条件的记录。"
   },

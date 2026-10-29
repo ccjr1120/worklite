@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type {
   AgentTeamRoleConfiguration,
@@ -170,6 +170,119 @@ export class AgentTeamsService {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     await this.runtime.getRunView(runId, workspace.id);
     return this.runtime.retry(runId, taskKey);
+  }
+
+  async listRuns(
+    request: Request,
+    workspaceSlug: string,
+    teamIds: string[] = [],
+    cursor?: string,
+    limit?: number,
+  ): Promise<{ items: Array<Record<string, unknown>>; nextCursor: string | null; total: number }> {
+    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const LIMIT_MAX = 200;
+    const LIMIT_DEFAULT = 50;
+    const normalizedLimit = Math.min(limit ?? LIMIT_DEFAULT, LIMIT_MAX);
+
+    // Deduplicate and validate teamIds
+    const uniqueTeamIds = [...new Set(teamIds)];
+    if (uniqueTeamIds.length > 0) {
+      const validTeams = await this.db.select({ id: agentTeams.id })
+        .from(agentTeams)
+        .where(and(eq(agentTeams.workspaceId, workspace.id)))
+        .then(rows => new Set(rows.map(r => r.id)));
+      // Filter to valid teams only; if any are invalid, just keep the valid ones
+      const filtered = uniqueTeamIds.filter(id => validTeams.has(id));
+      uniqueTeamIds.length = 0;
+      uniqueTeamIds.push(...filtered);
+    }
+
+    // Parse cursor if provided
+    let cursorCreatedAt: Date | undefined;
+    let cursorId: string | undefined;
+    if (cursor) {
+      try {
+        const decoded = Buffer.from(cursor, 'base64').toString('utf-8');
+        const [createdAtStr, id] = decoded.split(':');
+        cursorCreatedAt = new Date(createdAtStr);
+        cursorId = id;
+        if (isNaN(cursorCreatedAt.getTime())) throw new Error('Invalid cursor');
+      } catch {
+        throw new Error('Invalid cursor format');
+      }
+    }
+
+    // Build query conditions
+    let whereCondition: unknown = eq(agentTeamRuns.workspaceId, workspace.id);
+
+    if (uniqueTeamIds.length > 0) {
+      whereCondition = and(whereCondition, inArray(agentTeamRuns.teamId, uniqueTeamIds));
+    }
+
+    // Add cursor condition for keyset pagination
+    if (cursorCreatedAt && cursorId) {
+      const cursorCondition = or(
+        lt(agentTeamRuns.createdAt, cursorCreatedAt),
+        and(eq(agentTeamRuns.createdAt, cursorCreatedAt), lt(agentTeamRuns.id, cursorId)),
+      );
+      whereCondition = and(whereCondition, cursorCondition);
+    }
+
+    // Fetch one extra row to determine if there's a next page
+    const rows = await this.db.select({
+      id: agentTeamRuns.id,
+      intent: agentTeamRuns.intent,
+      projectDirectory: agentTeamRuns.projectDirectory,
+      mode: agentTeamRuns.mode,
+      modeRationale: agentTeamRuns.modeRationale,
+      modeDecidedAt: agentTeamRuns.modeDecidedAt,
+      snapshot: agentTeamVersions.snapshot,
+      status: agentTeamRuns.status,
+      createdAt: agentTeamRuns.createdAt,
+      finishedAt: agentTeamRuns.finishedAt,
+      teamId: agentTeamRuns.teamId,
+      teamName: agentTeams.name,
+    })
+      .from(agentTeamRuns)
+      .innerJoin(agentTeamVersions, eq(agentTeamVersions.id, agentTeamRuns.teamVersionId))
+      .innerJoin(agentTeams, eq(agentTeams.id, agentTeamRuns.teamId))
+      .where(whereCondition)
+      .orderBy(desc(agentTeamRuns.createdAt), desc(agentTeamRuns.id))
+      .limit(normalizedLimit + 1);
+
+    const hasMore = rows.length > normalizedLimit;
+    const items = rows.slice(0, normalizedLimit);
+    let nextCursor: string | null = null;
+
+    if (hasMore && items.length > 0) {
+      const lastItem = items[items.length - 1];
+      nextCursor = Buffer.from(`${lastItem.createdAt.toISOString()}:${lastItem.id}`).toString('base64');
+    }
+
+    // Compute total count with the same filters (without cursor pagination)
+    let countCondition: any = eq(agentTeamRuns.workspaceId, workspace.id);
+    if (uniqueTeamIds.length > 0) {
+      countCondition = and(countCondition, inArray(agentTeamRuns.teamId, uniqueTeamIds));
+    }
+
+    const countResult = await this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(agentTeamRuns)
+      .where(countCondition);
+
+    const total = Number(countResult[0]?.count) || 0;
+
+    return {
+      items: items.map(({ snapshot, ...row }) => ({
+        ...row,
+        modeDecidedAt: row.modeDecidedAt?.toISOString() ?? null,
+        orchestrationVersion: snapshot.orchestrationVersion ?? 1,
+        createdAt: row.createdAt.toISOString(),
+        finishedAt: row.finishedAt?.toISOString() ?? null,
+      })),
+      nextCursor,
+      total,
+    };
   }
 
   private async getTeam(teamId: string, workspaceId: string): Promise<AgentTeam> {

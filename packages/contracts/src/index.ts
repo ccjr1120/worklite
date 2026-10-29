@@ -1812,6 +1812,23 @@ export type AgentTeamRunSummary = {
   finishedAt: string | null;
 };
 
+export type AgentTeamRunListItem = AgentTeamRunSummary & {
+  teamId: string;
+  teamName: string;
+};
+
+export type AgentTeamRunListQuery = {
+  teamIds?: string[];
+  cursor?: string;
+  limit?: number;
+};
+
+export type AgentTeamRunListPage = {
+  items: AgentTeamRunListItem[];
+  nextCursor: string | null;
+  total: number;
+};
+
 export type AgentTeamGroupRepository = {
   id: string;
   teamRepositoryId: string;
