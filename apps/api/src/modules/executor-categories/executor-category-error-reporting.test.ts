@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatError } from './agent-team-runtime.service';
+import { formatError } from './executor-category-runtime.service';
 
 // formatError() feeds both the Run failure reason persisted by handleGraphFailure and the
 // group transcript system message shown to the user. Before this fix, a LangGraph-internal

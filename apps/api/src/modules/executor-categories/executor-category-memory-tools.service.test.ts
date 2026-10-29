@@ -8,8 +8,8 @@ import {
   workspaces,
   type Database,
 } from '@worklite/db';
-import { AgentTeamMemoryToolsService } from './agent-team-memory-tools.service';
-import { roleMemoryManagedToolsEnabled } from './agent-team-runtime.service';
+import { AgentTeamMemoryToolsService } from './executor-category-memory-tools.service';
+import { roleMemoryManagedToolsEnabled } from './executor-category-runtime.service';
 import { TeamMemoryService } from './team-memory.service';
 
 // The managed memory tools are available to ordinary v11 roles only. Their Team,

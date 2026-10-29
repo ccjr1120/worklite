@@ -13,15 +13,16 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AgentTeamConfigRouteImport } from './routes/agent-team-config'
 import { Route as ArtifactsRouteImport } from './routes/artifacts'
 import { Route as ChatRouteImport } from './routes/chat'
+import { Route as ExecutorCategoryConfigRouteImport } from './routes/executor-category-config'
 import { Route as HomeRouteImport } from './routes/home'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as ModelProvidersRouteImport } from './routes/model-providers'
 import { Route as SettingsRouteRouteImport } from './routes/settings/route'
-import { Route as AgentTeamRunsRunIdRouteImport } from './routes/executor-runs/$runId'
-import { Route as AgentTeamsIndexRouteImport } from './routes/executor-categories/index'
-import { Route as AgentTeamsTeamIdRouteImport } from './routes/executor-categories/$executorCategoryId'
 import { Route as ArtifactsIndexRouteImport } from './routes/artifacts/index'
 import { Route as ArtifactsArtifactIdRouteImport } from './routes/artifacts/$artifactId'
+import { Route as ExecutorCategoriesIndexRouteImport } from './routes/executor-categories/index'
+import { Route as ExecutorCategoriesExecutorCategoryIdRouteImport } from './routes/executor-categories/$executorCategoryId'
+import { Route as ExecutorRunsRunIdRouteImport } from './routes/executor-runs/$runId'
 import { Route as McpServersIndexRouteImport } from './routes/mcp-servers/index'
 import { Route as McpServersServerIdRouteImport } from './routes/mcp-servers/$serverId'
 import { Route as PluginsIndexRouteImport } from './routes/plugins/index'
@@ -35,8 +36,8 @@ import { Route as SkillsIndexRouteImport } from './routes/skills/index'
 import { Route as SkillsSkillIdRouteImport } from './routes/skills/$skillId'
 import { Route as WorkflowsIndexRouteImport } from './routes/workflows/index'
 import { Route as WorkflowsWorkflowIdRouteImport } from './routes/workflows/$workflowId'
-import { Route as AgentTeamsTeamIdIndexRouteImport } from './routes/executor-categories/$executorCategoryId.index'
-import { Route as AgentTeamsTeamIdConfigRouteImport } from './routes/executor-categories/$executorCategoryId.config'
+import { Route as ExecutorCategoriesExecutorCategoryIdIndexRouteImport } from './routes/executor-categories/$executorCategoryId.index'
+import { Route as ExecutorCategoriesExecutorCategoryIdConfigRouteImport } from './routes/executor-categories/$executorCategoryId.config'
 import { Route as WorkflowsWorkflowIdVersionsRouteImport } from './routes/workflows/$workflowId.versions'
 
 const IndexRoute = IndexRouteImport.update({
@@ -59,6 +60,11 @@ const ChatRoute = ChatRouteImport.update({
   path: '/chat',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ExecutorCategoryConfigRoute = ExecutorCategoryConfigRouteImport.update({
+  id: '/executor-category-config',
+  path: '/executor-category-config',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const HomeRoute = HomeRouteImport.update({
   id: '/home',
   path: '/home',
@@ -79,21 +85,6 @@ const SettingsRouteRoute = SettingsRouteRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AgentTeamRunsRunIdRoute = AgentTeamRunsRunIdRouteImport.update({
-  id: '/executor-runs/$runId',
-  path: '/executor-runs/$runId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AgentTeamsIndexRoute = AgentTeamsIndexRouteImport.update({
-  id: '/executor-categories/',
-  path: '/executor-categories/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AgentTeamsTeamIdRoute = AgentTeamsTeamIdRouteImport.update({
-  id: '/executor-categories/$executorCategoryId',
-  path: '/executor-categories/$executorCategoryId',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ArtifactsIndexRoute = ArtifactsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -103,6 +94,22 @@ const ArtifactsArtifactIdRoute = ArtifactsArtifactIdRouteImport.update({
   id: '/$artifactId',
   path: '/$artifactId',
   getParentRoute: () => ArtifactsRoute,
+} as any)
+const ExecutorCategoriesIndexRoute = ExecutorCategoriesIndexRouteImport.update({
+  id: '/executor-categories/',
+  path: '/executor-categories/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExecutorCategoriesExecutorCategoryIdRoute =
+  ExecutorCategoriesExecutorCategoryIdRouteImport.update({
+    id: '/executor-categories/$executorCategoryId',
+    path: '/executor-categories/$executorCategoryId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ExecutorRunsRunIdRoute = ExecutorRunsRunIdRouteImport.update({
+  id: '/executor-runs/$runId',
+  path: '/executor-runs/$runId',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const McpServersIndexRoute = McpServersIndexRouteImport.update({
   id: '/mcp-servers/',
@@ -169,16 +176,18 @@ const WorkflowsWorkflowIdRoute = WorkflowsWorkflowIdRouteImport.update({
   path: '/workflows/$workflowId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AgentTeamsTeamIdIndexRoute = AgentTeamsTeamIdIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => AgentTeamsTeamIdRoute,
-} as any)
-const AgentTeamsTeamIdConfigRoute = AgentTeamsTeamIdConfigRouteImport.update({
-  id: '/config',
-  path: '/config',
-  getParentRoute: () => AgentTeamsTeamIdRoute,
-} as any)
+const ExecutorCategoriesExecutorCategoryIdIndexRoute =
+  ExecutorCategoriesExecutorCategoryIdIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => ExecutorCategoriesExecutorCategoryIdRoute,
+  } as any)
+const ExecutorCategoriesExecutorCategoryIdConfigRoute =
+  ExecutorCategoriesExecutorCategoryIdConfigRouteImport.update({
+    id: '/config',
+    path: '/config',
+    getParentRoute: () => ExecutorCategoriesExecutorCategoryIdRoute,
+  } as any)
 const WorkflowsWorkflowIdVersionsRoute =
   WorkflowsWorkflowIdVersionsRouteImport.update({
     id: '/versions',
@@ -192,12 +201,13 @@ export interface FileRoutesByFullPath {
   '/agent-team-config': typeof AgentTeamConfigRoute
   '/artifacts': typeof ArtifactsRouteWithChildren
   '/chat': typeof ChatRoute
+  '/executor-category-config': typeof ExecutorCategoryConfigRoute
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
-  '/executor-runs/$runId': typeof AgentTeamRunsRunIdRoute
-  '/executor-categories/$executorCategoryId': typeof AgentTeamsTeamIdRouteWithChildren
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
+  '/executor-categories/$executorCategoryId': typeof ExecutorCategoriesExecutorCategoryIdRouteWithChildren
+  '/executor-runs/$runId': typeof ExecutorRunsRunIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -206,26 +216,27 @@ export interface FileRoutesByFullPath {
   '/settings/usage': typeof SettingsUsageRoute
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
-  '/executor-categories/': typeof AgentTeamsIndexRoute
   '/artifacts/': typeof ArtifactsIndexRoute
+  '/executor-categories/': typeof ExecutorCategoriesIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/plugins/': typeof PluginsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/skills/': typeof SkillsIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
-  '/executor-categories/$executorCategoryId/config': typeof AgentTeamsTeamIdConfigRoute
+  '/executor-categories/$executorCategoryId/config': typeof ExecutorCategoriesExecutorCategoryIdConfigRoute
   '/workflows/$workflowId/versions': typeof WorkflowsWorkflowIdVersionsRoute
-  '/executor-categories/$executorCategoryId/': typeof AgentTeamsTeamIdIndexRoute
+  '/executor-categories/$executorCategoryId/': typeof ExecutorCategoriesExecutorCategoryIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/agent-team-config': typeof AgentTeamConfigRoute
   '/chat': typeof ChatRoute
+  '/executor-category-config': typeof ExecutorCategoryConfigRoute
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
-  '/executor-runs/$runId': typeof AgentTeamRunsRunIdRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
+  '/executor-runs/$runId': typeof ExecutorRunsRunIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -234,16 +245,16 @@ export interface FileRoutesByTo {
   '/settings/usage': typeof SettingsUsageRoute
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
-  '/executor-categories': typeof AgentTeamsIndexRoute
   '/artifacts': typeof ArtifactsIndexRoute
+  '/executor-categories': typeof ExecutorCategoriesIndexRoute
   '/mcp-servers': typeof McpServersIndexRoute
   '/plugins': typeof PluginsIndexRoute
   '/settings': typeof SettingsIndexRoute
   '/skills': typeof SkillsIndexRoute
   '/workflows': typeof WorkflowsIndexRoute
-  '/executor-categories/$executorCategoryId/config': typeof AgentTeamsTeamIdConfigRoute
+  '/executor-categories/$executorCategoryId/config': typeof ExecutorCategoriesExecutorCategoryIdConfigRoute
   '/workflows/$workflowId/versions': typeof WorkflowsWorkflowIdVersionsRoute
-  '/executor-categories/$executorCategoryId': typeof AgentTeamsTeamIdIndexRoute
+  '/executor-categories/$executorCategoryId': typeof ExecutorCategoriesExecutorCategoryIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -252,12 +263,13 @@ export interface FileRoutesById {
   '/agent-team-config': typeof AgentTeamConfigRoute
   '/artifacts': typeof ArtifactsRouteWithChildren
   '/chat': typeof ChatRoute
+  '/executor-category-config': typeof ExecutorCategoryConfigRoute
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
-  '/executor-runs/$runId': typeof AgentTeamRunsRunIdRoute
-  '/executor-categories/$executorCategoryId': typeof AgentTeamsTeamIdRouteWithChildren
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
+  '/executor-categories/$executorCategoryId': typeof ExecutorCategoriesExecutorCategoryIdRouteWithChildren
+  '/executor-runs/$runId': typeof ExecutorRunsRunIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -266,16 +278,16 @@ export interface FileRoutesById {
   '/settings/usage': typeof SettingsUsageRoute
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
-  '/executor-categories/': typeof AgentTeamsIndexRoute
   '/artifacts/': typeof ArtifactsIndexRoute
+  '/executor-categories/': typeof ExecutorCategoriesIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/plugins/': typeof PluginsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/skills/': typeof SkillsIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
-  '/executor-categories/$executorCategoryId/config': typeof AgentTeamsTeamIdConfigRoute
+  '/executor-categories/$executorCategoryId/config': typeof ExecutorCategoriesExecutorCategoryIdConfigRoute
   '/workflows/$workflowId/versions': typeof WorkflowsWorkflowIdVersionsRoute
-  '/executor-categories/$executorCategoryId/': typeof AgentTeamsTeamIdIndexRoute
+  '/executor-categories/$executorCategoryId/': typeof ExecutorCategoriesExecutorCategoryIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -285,12 +297,13 @@ export interface FileRouteTypes {
     | '/agent-team-config'
     | '/artifacts'
     | '/chat'
+    | '/executor-category-config'
     | '/home'
     | '/logs'
     | '/model-providers'
-    | '/executor-runs/$runId'
-    | '/executor-categories/$executorCategoryId'
     | '/artifacts/$artifactId'
+    | '/executor-categories/$executorCategoryId'
+    | '/executor-runs/$runId'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
     | '/runs/$runId'
@@ -299,8 +312,8 @@ export interface FileRouteTypes {
     | '/settings/usage'
     | '/skills/$skillId'
     | '/workflows/$workflowId'
-    | '/executor-categories/'
     | '/artifacts/'
+    | '/executor-categories/'
     | '/mcp-servers/'
     | '/plugins/'
     | '/settings/'
@@ -314,11 +327,12 @@ export interface FileRouteTypes {
     | '/'
     | '/agent-team-config'
     | '/chat'
+    | '/executor-category-config'
     | '/home'
     | '/logs'
     | '/model-providers'
-    | '/executor-runs/$runId'
     | '/artifacts/$artifactId'
+    | '/executor-runs/$runId'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
     | '/runs/$runId'
@@ -327,8 +341,8 @@ export interface FileRouteTypes {
     | '/settings/usage'
     | '/skills/$skillId'
     | '/workflows/$workflowId'
-    | '/executor-categories'
     | '/artifacts'
+    | '/executor-categories'
     | '/mcp-servers'
     | '/plugins'
     | '/settings'
@@ -344,12 +358,13 @@ export interface FileRouteTypes {
     | '/agent-team-config'
     | '/artifacts'
     | '/chat'
+    | '/executor-category-config'
     | '/home'
     | '/logs'
     | '/model-providers'
-    | '/executor-runs/$runId'
-    | '/executor-categories/$executorCategoryId'
     | '/artifacts/$artifactId'
+    | '/executor-categories/$executorCategoryId'
+    | '/executor-runs/$runId'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
     | '/runs/$runId'
@@ -358,8 +373,8 @@ export interface FileRouteTypes {
     | '/settings/usage'
     | '/skills/$skillId'
     | '/workflows/$workflowId'
-    | '/executor-categories/'
     | '/artifacts/'
+    | '/executor-categories/'
     | '/mcp-servers/'
     | '/plugins/'
     | '/settings/'
@@ -376,17 +391,18 @@ export interface RootRouteChildren {
   AgentTeamConfigRoute: typeof AgentTeamConfigRoute
   ArtifactsRoute: typeof ArtifactsRouteWithChildren
   ChatRoute: typeof ChatRoute
+  ExecutorCategoryConfigRoute: typeof ExecutorCategoryConfigRoute
   HomeRoute: typeof HomeRoute
   LogsRoute: typeof LogsRoute
   ModelProvidersRoute: typeof ModelProvidersRoute
-  AgentTeamRunsRunIdRoute: typeof AgentTeamRunsRunIdRoute
-  AgentTeamsTeamIdRoute: typeof AgentTeamsTeamIdRouteWithChildren
+  ExecutorCategoriesExecutorCategoryIdRoute: typeof ExecutorCategoriesExecutorCategoryIdRouteWithChildren
+  ExecutorRunsRunIdRoute: typeof ExecutorRunsRunIdRoute
   McpServersServerIdRoute: typeof McpServersServerIdRoute
   PluginsPluginIdRoute: typeof PluginsPluginIdRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
   SkillsSkillIdRoute: typeof SkillsSkillIdRoute
   WorkflowsWorkflowIdRoute: typeof WorkflowsWorkflowIdRouteWithChildren
-  AgentTeamsIndexRoute: typeof AgentTeamsIndexRoute
+  ExecutorCategoriesIndexRoute: typeof ExecutorCategoriesIndexRoute
   McpServersIndexRoute: typeof McpServersIndexRoute
   PluginsIndexRoute: typeof PluginsIndexRoute
   SkillsIndexRoute: typeof SkillsIndexRoute
@@ -423,6 +439,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/executor-category-config': {
+      id: '/executor-category-config'
+      path: '/executor-category-config'
+      fullPath: '/executor-category-config'
+      preLoaderRoute: typeof ExecutorCategoryConfigRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/home': {
       id: '/home'
       path: '/home'
@@ -451,27 +474,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/executor-runs/$runId': {
-      id: '/executor-runs/$runId'
-      path: '/executor-runs/$runId'
-      fullPath: '/executor-runs/$runId'
-      preLoaderRoute: typeof AgentTeamRunsRunIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/executor-categories/': {
-      id: '/executor-categories/'
-      path: '/executor-categories'
-      fullPath: '/executor-categories/'
-      preLoaderRoute: typeof AgentTeamsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/executor-categories/$executorCategoryId': {
-      id: '/executor-categories/$executorCategoryId'
-      path: '/executor-categories/$executorCategoryId'
-      fullPath: '/executor-categories/$executorCategoryId'
-      preLoaderRoute: typeof AgentTeamsTeamIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/artifacts/': {
       id: '/artifacts/'
       path: '/'
@@ -485,6 +487,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/artifacts/$artifactId'
       preLoaderRoute: typeof ArtifactsArtifactIdRouteImport
       parentRoute: typeof ArtifactsRoute
+    }
+    '/executor-categories/': {
+      id: '/executor-categories/'
+      path: '/executor-categories'
+      fullPath: '/executor-categories/'
+      preLoaderRoute: typeof ExecutorCategoriesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/executor-categories/$executorCategoryId': {
+      id: '/executor-categories/$executorCategoryId'
+      path: '/executor-categories/$executorCategoryId'
+      fullPath: '/executor-categories/$executorCategoryId'
+      preLoaderRoute: typeof ExecutorCategoriesExecutorCategoryIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/executor-runs/$runId': {
+      id: '/executor-runs/$runId'
+      path: '/executor-runs/$runId'
+      fullPath: '/executor-runs/$runId'
+      preLoaderRoute: typeof ExecutorRunsRunIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/mcp-servers/': {
       id: '/mcp-servers/'
@@ -581,15 +604,15 @@ declare module '@tanstack/react-router' {
       id: '/executor-categories/$executorCategoryId/'
       path: '/'
       fullPath: '/executor-categories/$executorCategoryId/'
-      preLoaderRoute: typeof AgentTeamsTeamIdIndexRouteImport
-      parentRoute: typeof AgentTeamsTeamIdRoute
+      preLoaderRoute: typeof ExecutorCategoriesExecutorCategoryIdIndexRouteImport
+      parentRoute: typeof ExecutorCategoriesExecutorCategoryIdRoute
     }
     '/executor-categories/$executorCategoryId/config': {
       id: '/executor-categories/$executorCategoryId/config'
       path: '/config'
       fullPath: '/executor-categories/$executorCategoryId/config'
-      preLoaderRoute: typeof AgentTeamsTeamIdConfigRouteImport
-      parentRoute: typeof AgentTeamsTeamIdRoute
+      preLoaderRoute: typeof ExecutorCategoriesExecutorCategoryIdConfigRouteImport
+      parentRoute: typeof ExecutorCategoriesExecutorCategoryIdRoute
     }
     '/workflows/$workflowId/versions': {
       id: '/workflows/$workflowId/versions'
@@ -633,18 +656,23 @@ const ArtifactsRouteWithChildren = ArtifactsRoute._addFileChildren(
   ArtifactsRouteChildren,
 )
 
-interface AgentTeamsTeamIdRouteChildren {
-  AgentTeamsTeamIdConfigRoute: typeof AgentTeamsTeamIdConfigRoute
-  AgentTeamsTeamIdIndexRoute: typeof AgentTeamsTeamIdIndexRoute
+interface ExecutorCategoriesExecutorCategoryIdRouteChildren {
+  ExecutorCategoriesExecutorCategoryIdConfigRoute: typeof ExecutorCategoriesExecutorCategoryIdConfigRoute
+  ExecutorCategoriesExecutorCategoryIdIndexRoute: typeof ExecutorCategoriesExecutorCategoryIdIndexRoute
 }
 
-const AgentTeamsTeamIdRouteChildren: AgentTeamsTeamIdRouteChildren = {
-  AgentTeamsTeamIdConfigRoute: AgentTeamsTeamIdConfigRoute,
-  AgentTeamsTeamIdIndexRoute: AgentTeamsTeamIdIndexRoute,
-}
+const ExecutorCategoriesExecutorCategoryIdRouteChildren: ExecutorCategoriesExecutorCategoryIdRouteChildren =
+  {
+    ExecutorCategoriesExecutorCategoryIdConfigRoute:
+      ExecutorCategoriesExecutorCategoryIdConfigRoute,
+    ExecutorCategoriesExecutorCategoryIdIndexRoute:
+      ExecutorCategoriesExecutorCategoryIdIndexRoute,
+  }
 
-const AgentTeamsTeamIdRouteWithChildren =
-  AgentTeamsTeamIdRoute._addFileChildren(AgentTeamsTeamIdRouteChildren)
+const ExecutorCategoriesExecutorCategoryIdRouteWithChildren =
+  ExecutorCategoriesExecutorCategoryIdRoute._addFileChildren(
+    ExecutorCategoriesExecutorCategoryIdRouteChildren,
+  )
 
 interface WorkflowsWorkflowIdRouteChildren {
   WorkflowsWorkflowIdVersionsRoute: typeof WorkflowsWorkflowIdVersionsRoute
@@ -663,17 +691,19 @@ const rootRouteChildren: RootRouteChildren = {
   AgentTeamConfigRoute: AgentTeamConfigRoute,
   ArtifactsRoute: ArtifactsRouteWithChildren,
   ChatRoute: ChatRoute,
+  ExecutorCategoryConfigRoute: ExecutorCategoryConfigRoute,
   HomeRoute: HomeRoute,
   LogsRoute: LogsRoute,
   ModelProvidersRoute: ModelProvidersRoute,
-  AgentTeamRunsRunIdRoute: AgentTeamRunsRunIdRoute,
-  AgentTeamsTeamIdRoute: AgentTeamsTeamIdRouteWithChildren,
+  ExecutorCategoriesExecutorCategoryIdRoute:
+    ExecutorCategoriesExecutorCategoryIdRouteWithChildren,
+  ExecutorRunsRunIdRoute: ExecutorRunsRunIdRoute,
   McpServersServerIdRoute: McpServersServerIdRoute,
   PluginsPluginIdRoute: PluginsPluginIdRoute,
   RunsRunIdRoute: RunsRunIdRoute,
   SkillsSkillIdRoute: SkillsSkillIdRoute,
   WorkflowsWorkflowIdRoute: WorkflowsWorkflowIdRouteWithChildren,
-  AgentTeamsIndexRoute: AgentTeamsIndexRoute,
+  ExecutorCategoriesIndexRoute: ExecutorCategoriesIndexRoute,
   McpServersIndexRoute: McpServersIndexRoute,
   PluginsIndexRoute: PluginsIndexRoute,
   SkillsIndexRoute: SkillsIndexRoute,

@@ -8,7 +8,7 @@ import {
   type Database,
   type StoredAgentTeamRoleConfiguration,
 } from '@worklite/db';
-import { AgentTeamConfigurationService } from './agent-team-configuration.service';
+import { AgentTeamConfigurationService } from './executor-category-configuration.service';
 
 let db: Database | undefined;
 

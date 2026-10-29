@@ -11,7 +11,7 @@ import {
   workspaces,
   type Database,
 } from '@worklite/db';
-import { AgentTeamMemoryToolsService } from './agent-team-memory-tools.service';
+import { AgentTeamMemoryToolsService } from './executor-category-memory-tools.service';
 import { createTeamMemoryMcpServer, TEAM_MEMORY_MCP_TOOL_NAMES, teamMemoryMcpRuntime } from './team-memory-mcp';
 import { TeamMemoryMcpController } from './team-memory-mcp.controller';
 import { TeamMemoryMcpTokenService } from './team-memory-mcp-token.service';

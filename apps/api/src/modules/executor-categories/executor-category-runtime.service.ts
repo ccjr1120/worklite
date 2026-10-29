@@ -59,7 +59,7 @@ import {
 import {
   Command,
   createSqliteCheckpointer,
-  createTeamGraph,
+  createExecutorCategoryGraph as createTeamGraph,
   DEVELOPER_LANE_IDS,
   getBmadTeaProcessManifest,
   isInterrupted,
@@ -71,8 +71,8 @@ import {
   readBmadTeaProcessFile,
   toGraphResult,
   type AgentTeamDocument,
-  type AgentTeamGraphResult,
-  type AgentTeamGraphState,
+  type AgentExecutorCategoryGraphResult as AgentTeamGraphResult,
+  type AgentExecutorCategoryGraphState as AgentTeamGraphState,
   type AgentTeamTaskRequest,
   type AgentTeamTaskResult,
   type AgentTeamGroupRunContext,
@@ -85,10 +85,10 @@ import {
 } from '../agents/isolated-agent-invocation.service';
 import { ProjectExecutorService } from '../agents/project-executor.service';
 import { enqueueTaskMerge, ensureTaskWorktree, ensureWorktreeAt, inspectGitRepository, mergeTaskWorktree, type PreparedTaskWorktree } from '../agents/git-worktree';
-import { AgentTeamOperationJournalService } from './agent-team-operation-journal.service';
-import { AgentTeamConfigurationService } from './agent-team-configuration.service';
-import { AgentTeamManagerToolsService } from './agent-executor-manager-tools.service';
-import { AgentTeamMemoryToolsService } from './agent-team-memory-tools.service';
+import { AgentTeamOperationJournalService } from './executor-category-operation-journal.service';
+import { AgentTeamConfigurationService } from './executor-category-configuration.service';
+import { AgentTeamManagerToolsService } from './executor-category-manager-tools.service';
+import { AgentTeamMemoryToolsService } from './executor-category-memory-tools.service';
 import { TeamMemoryMcpTokenService } from './team-memory-mcp-token.service';
 import { teamMemoryMcpRuntime } from './team-memory-mcp';
 import { buildTeamMemoryIndex } from './team-memory-ranking';
@@ -106,19 +106,19 @@ import {
   agentTeamContractRole,
   initialAgentTeamModeForRole,
   type AgentTeamRuntimeRole,
-} from './agent-team-configuration';
+} from './executor-category-configuration';
 import {
   createTeamGraphV4,
   type AgentTeamGraphV4Delegate,
   type AgentTeamLaneWorktree,
   type AgentTeamTaskRequestV4,
   type AgentTeamWorktreeTaskResult,
-} from './agent-team-graph-v4';
+} from './executor-category-graph-v4';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { normalizePublicModelList } from '@worklite/model-gateway';
-import { deriveRunCurrent, effectiveTaskModel, taskRoleName } from './agent-team-run-summary';
+import { deriveRunCurrent, effectiveTaskModel, taskRoleName } from './executor-category-run-summary';
 import { CommandsService } from '../commands/commands.service';
-import { createAgentTeamGroupGraph, type AgentTeamGroupGraphInitial, type AgentTeamGroupGraphState } from './agent-team-graph-v6';
+import { createAgentTeamGroupGraph, type AgentTeamGroupGraphInitial, type AgentTeamGroupGraphState } from './executor-category-graph-v6';
 
 const MAX_TOOL_RESULT_CHARS = 100_000;
 const TASK_ROLES: Array<[RegExp, AgentTeamRole]> = [
@@ -3509,7 +3509,7 @@ class TaskOutputValidationError extends Error {
 
 // Worktree Manager output shapes. The setup plan is validated against the fixed naming
 // convention before the runtime executes it; the executed payload additionally carries the
-// project's original branch (see AgentTeamWorktreeSetupState in agent-team-graph-v4).
+// project's original branch (see AgentTeamWorktreeSetupState in executor-category-graph-v4).
 type WorktreeLanePlan = { laneId: string; worktreePath: string; branch: string };
 type WorktreeSetupPlan = { baseWorktreePath: string; runBranch: string; lanes: WorktreeLanePlan[]; originalBranch?: string };
 type WorktreeTeardownDecision = { action: 'merge-and-cleanup' | 'retain'; reason?: string };

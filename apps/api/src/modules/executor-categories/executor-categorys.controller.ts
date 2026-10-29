@@ -11,7 +11,7 @@ import type {
   AgentTeamRoleConfiguration,
   UpdateAgentTeamMemoryRequest,
 } from '@worklite/contracts';
-import { AgentTeamDocumentsService } from './agent-team-documents.service';
+import { AgentTeamDocumentsService } from './executor-category-documents.service';
 import { AgentTeamGroupsService } from './executor-groups.service';
 import { AgentTeamsService } from './executor-categories.service';
 

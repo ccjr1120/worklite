@@ -1,7 +1,7 @@
 import { All, Controller, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { AgentTeamMemoryToolsService } from './agent-team-memory-tools.service';
+import { AgentTeamMemoryToolsService } from './executor-category-memory-tools.service';
 import { TeamMemoryMcpTokenService } from './team-memory-mcp-token.service';
 import { createTeamMemoryMcpServer } from './team-memory-mcp';
 

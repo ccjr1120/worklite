@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { executorCategories, createDb, initializeDatabase, type Database } from '@worklite/db';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
-import { AgentTeamConfigurationService } from '../executor-categories/agent-team-configuration.service';
+import { AgentTeamConfigurationService } from '../executor-categories/executor-category-configuration.service';
 import { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
 import { localSkillId } from '../skills/local-skill-source';
 

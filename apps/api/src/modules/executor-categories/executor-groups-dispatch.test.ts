@@ -7,9 +7,9 @@ import type { Request } from 'express';
 import { createDb, initializeDatabase, executorRuns, agentTeamVersions, executorCategories, chatSubmissions, type Database } from '@worklite/db';
 import { AgentTeamGroupsService } from './executor-groups.service';
 import { AgentTeamsService } from './executor-categories.service';
-import type { AgentTeamConfigurationService } from './agent-team-configuration.service';
-import { EXECUTOR_CATEGORY_DISPATCHER_ROLE } from './agent-team-configuration';
-import type { AgentTeamRuntimeService } from './agent-team-runtime.service';
+import type { AgentTeamConfigurationService } from './executor-category-configuration.service';
+import { EXECUTOR_CATEGORY_DISPATCHER_ROLE } from './executor-category-configuration';
+import type { AgentTeamRuntimeService } from './executor-category-runtime.service';
 import type { WorkspaceService } from '../teams/teams.service';
 
 // Agent Teams no longer accept a mode: Chat dispatch addresses the Team

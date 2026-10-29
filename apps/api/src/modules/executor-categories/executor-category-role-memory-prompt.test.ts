@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentTeamTaskRequest } from '@worklite/team-runtime';
 import type { StoredAgentTeamVersionSnapshot } from '@worklite/db';
-import { groupRolePromptAddition } from './agent-team-runtime.service';
+import { groupRolePromptAddition } from './executor-category-runtime.service';
 import { TEAM_MEMORY_INDEX_CHARS, TEAM_MEMORY_INDEX_ENTRIES } from './team-memory-ranking';
 
 // v11 gives the initially addressed role the full captured projection and every other

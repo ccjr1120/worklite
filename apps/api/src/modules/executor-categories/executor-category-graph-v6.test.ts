@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentTeamGroupRunContext, AgentTeamTaskRequest, AgentTeamTaskResult } from '@worklite/team-runtime';
 import { Command, createSqliteCheckpointer } from '@worklite/team-runtime';
-import { createAgentTeamGroupGraph, type AgentTeamGroupGraphInitial } from './agent-team-graph-v6';
+import { createAgentTeamGroupGraph, type AgentTeamGroupGraphInitial } from './executor-category-graph-v6';
 
 // Regression test for the orchestration-v8 "Received no input writes for __start__" defect:
 // a brand-new group Run (no prior checkpoint) was always started with a `null` graph input
@@ -49,7 +49,7 @@ function baseInitial(overrides: Partial<AgentTeamGroupGraphInitial> = {}): Agent
 }
 
 function newCheckpointer() {
-  const dir = mkdtempSync(join(tmpdir(), 'worklite-agent-team-graph-v6-'));
+  const dir = mkdtempSync(join(tmpdir(), 'worklite-executor-category-graph-v6-'));
   directories.push(dir);
   return createSqliteCheckpointer(join(dir, 'checkpoints.sqlite'));
 }

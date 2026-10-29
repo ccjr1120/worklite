@@ -5,8 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentTeamMode, AgentTeamTaskRequest, AgentTeamTaskResult } from '@worklite/team-runtime';
 import { createSqliteCheckpointer } from '@worklite/team-runtime';
-import { createAgentTeamGroupGraph, type AgentTeamGroupGraphInitial } from './agent-team-graph-v6';
-import { EXECUTOR_CATEGORY_DISPATCHER_ROLE, initialAgentTeamModeForRole } from './agent-team-configuration';
+import { createAgentTeamGroupGraph, type AgentTeamGroupGraphInitial } from './executor-category-graph-v6';
+import { EXECUTOR_CATEGORY_DISPATCHER_ROLE, initialAgentTeamModeForRole } from './executor-category-configuration';
 
 // Orchestration v10 starts at the executor category Dispatcher, which decides the Run mode.
 // The graph enforces that decision regardless of the handoffs roles attempt.

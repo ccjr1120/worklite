@@ -3,7 +3,7 @@ import type { ConfigService } from '@nestjs/config';
 import { createDb, type Database } from '@worklite/db';
 import { activeWorkSignature, buildActiveWorkNote, ChatProgressReportsService, DEFAULT_PROGRESS_NOTE_INTERVAL_SECONDS, type ActiveWorkItem } from './chat-progress-reports.service';
 import type { AgentExecutionsService } from './agent-executions.service';
-import type { AgentTeamRuntimeService } from '../executor-categories/agent-team-runtime.service';
+import type { AgentTeamRuntimeService } from '../executor-categories/executor-category-runtime.service';
 
 const WORKSPACE_ID = 'workspace_personal';
 const EXECUTION_ID = 'aex_progress_test';

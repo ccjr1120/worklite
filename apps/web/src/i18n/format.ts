@@ -50,6 +50,11 @@ export function durationParts(totalSeconds: number): { minutes: string; seconds:
   };
 }
 
+export function formatDuration(totalMilliseconds: number): string {
+  const { minutes, seconds } = durationParts(totalMilliseconds / 1_000);
+  return `${minutes}:${seconds}`;
+}
+
 export function formatList(values: Iterable<string>, locale: AppLocale): string {
   const items = [...values];
   if (items.length === 0) {

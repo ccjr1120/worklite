@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { and, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import { executorRuns, chatSubmissions, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
-import { AgentTeamRuntimeService } from '../executor-categories/agent-team-runtime.service';
+import { AgentTeamRuntimeService } from '../executor-categories/executor-category-runtime.service';
 import { AgentExecutionsService } from './agent-executions.service';
 
 const REPORT_DEFER_MS = 15_000;

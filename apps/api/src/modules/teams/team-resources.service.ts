@@ -81,7 +81,7 @@ import {
 import { McpClientService } from '../mcp-servers/mcp-client.service';
 import { getArtifactDetail, listArtifacts } from '../artifacts/artifacts-query';
 import { ArtifactStorageService } from '../artifacts/artifact-storage.service';
-import { EXECUTOR_CATEGORY_ROLES, BUILT_IN_EXECUTOR_CATEGORY_ID } from '../executor-categories/agent-team-configuration';
+import { EXECUTOR_CATEGORY_ROLES, BUILT_IN_EXECUTOR_CATEGORY_ID } from '../executor-categories/executor-category-configuration';
 import { isWorkliteNavigationTarget, resolveWorkliteNavigationRoute } from './worklite-navigation';
 
 function maskSecret(value: string): string {
@@ -1460,7 +1460,6 @@ export class WorkspaceResourcesService {
           available: true,
           predefinedTeamCount: 2,
           teamCreation: false,
-          teamDeletion: true,
           teamListRoute: 'GET /executor-categories',
           teamSelection: 'one Chat chooses a named predefined Team by executorCategoryId for each dispatch and configuration change; existing company repositories use Company Project, and other project work uses Direct (Planner then project Executor, no Dispatcher)',
           webRoute: `/executor-categories/${BUILT_IN_EXECUTOR_CATEGORY_ID}`,

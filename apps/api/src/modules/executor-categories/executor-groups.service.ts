@@ -30,8 +30,8 @@ import {
 } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
-import { isValidAgentTeamRoleId, teamEntryRole } from './agent-team-configuration';
-import { AgentTeamRuntimeService } from './agent-team-runtime.service';
+import { isValidAgentTeamRoleId, teamEntryRole } from './executor-category-configuration';
+import { AgentTeamRuntimeService } from './executor-category-runtime.service';
 
 @Injectable()
 export class AgentTeamGroupsService {

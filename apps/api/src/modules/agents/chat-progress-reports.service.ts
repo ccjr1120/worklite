@@ -4,7 +4,7 @@ import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { executorRuns, chatProjectTasks, chatSubmissions, workflowRuns, workflows, type Database } from '@worklite/db';
 import type { AgentTeamRunProgress } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
-import { AgentTeamRuntimeService } from '../executor-categories/agent-team-runtime.service';
+import { AgentTeamRuntimeService } from '../executor-categories/executor-category-runtime.service';
 import { AgentExecutionsService } from './agent-executions.service';
 import { deriveTaskStage } from './chat-project-tasks.service';
 

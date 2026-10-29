@@ -11,7 +11,7 @@ import {
   type AgentTeamTaskRequest,
   type AgentTeamTaskResult,
 } from '@worklite/team-runtime';
-import { EXECUTOR_CATEGORY_DISPATCHER_ROLE, agentTeamModeAllowsRole, agentTeamModeEntryRole } from './agent-team-configuration';
+import { EXECUTOR_CATEGORY_DISPATCHER_ROLE, agentTeamModeAllowsRole, agentTeamModeEntryRole } from './executor-category-configuration';
 
 const MAX_AUTOMATIC_HANDOFFS = 16;
 

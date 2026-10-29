@@ -5,7 +5,7 @@ import type { AgentTeamDocumentView, AgentTeamDocumentDownloadView } from '@work
 import { executorDocuments, executorRuns, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
-import { agentTeamDocumentFileName, AgentTeamRuntimeService } from './agent-team-runtime.service';
+import { agentTeamDocumentFileName, AgentTeamRuntimeService } from './executor-category-runtime.service';
 
 @Injectable()
 export class AgentTeamDocumentsService {

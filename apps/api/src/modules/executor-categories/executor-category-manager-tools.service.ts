@@ -10,8 +10,8 @@ import {
 } from '@worklite/db';
 import type { GatewayToolDefinition, WorkflowAgentToolCall } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
-import { AgentTeamConfigurationService } from './agent-team-configuration.service';
-import { BUILT_IN_EXECUTOR_CATEGORY_ID } from './agent-team-configuration';
+import { AgentTeamConfigurationService } from './executor-category-configuration.service';
+import { BUILT_IN_EXECUTOR_CATEGORY_ID } from './executor-category-configuration';
 
 const emptyObject = { type: 'object', additionalProperties: false, properties: {} };
 const string = { type: 'string' };

@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNull, notInArray } from 'drizzle-orm';
 import type { AgentTeamRoleId, AgentTeamRoleConfiguration, UpdateAgentTeamRequest } from '@worklite/contracts';
 import {
   executorCategories,
@@ -23,7 +23,7 @@ import {
   RETIRED_AGENT_TEAM_IDS,
   agentTeamEntryPoints,
   isValidAgentTeamRoleId,
-} from './agent-team-configuration';
+} from './executor-category-configuration';
 
 const ROLE_CONFIGURATION_KEYS = [
   'role', 'displayName', 'publicModelId', 'instructions', 'entryPoints', 'skillIds', 'mcpServerIds', 'toolNames', 'executor',
@@ -270,10 +270,11 @@ export class AgentTeamConfigurationService {
     }
 
     // Check if this is the last non-deleted team
-    const [nonDeletedCount] = await this.db.select({ count: executorCategories.id }).from(executorCategories)
+    const [nonDeletedCount] = await this.db.select({ count: count() }).from(executorCategories)
       .where(and(
         eq(executorCategories.workspaceId, workspaceId),
         isNull(executorCategories.deletedAt),
+        notInArray(executorCategories.id, [...RETIRED_AGENT_TEAM_IDS]),
       ))
       .limit(1);
     if (!nonDeletedCount || nonDeletedCount.count <= 1) {

@@ -1,6 +1,6 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import type { AgentTeamMemoryToolsService } from './agent-team-memory-tools.service';
+import type { AgentTeamMemoryToolsService } from './executor-category-memory-tools.service';
 import type { TeamMemoryActorContext } from './team-memory.service';
 
 // The fixed MCP server id makes Claude Code expose these as

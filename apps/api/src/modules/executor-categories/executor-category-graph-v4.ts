@@ -15,7 +15,7 @@ import type {
   AgentTeamCriterionAssessment,
   AgentTeamDevelopmentAssignment,
   AgentTeamDocument,
-  AgentTeamGraphOptions,
+  AgentExecutorCategoryGraphOptions as AgentTeamGraphOptions,
   AgentTeamPendingInput,
   AgentTeamProjectInstructionFile,
   AgentTeamRepairRequest,
@@ -26,7 +26,7 @@ import type {
   AgentTeamTaskRequest,
   AgentTeamTaskResult,
 } from '@worklite/team-runtime';
-import type { AgentTeamRuntimeRole } from './agent-team-configuration';
+import type { AgentTeamRuntimeRole } from './executor-category-configuration';
 
 /**
  * App-local graph shell for orchestration v4 and v5. Version 4 keeps the managed

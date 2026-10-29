@@ -21,8 +21,8 @@ import {
 } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
-import { AgentTeamRuntimeService } from './agent-team-runtime.service';
-import { AgentTeamConfigurationService } from './agent-team-configuration.service';
+import { AgentTeamRuntimeService } from './executor-category-runtime.service';
+import { AgentTeamConfigurationService } from './executor-category-configuration.service';
 
 @Injectable()
 export class AgentTeamsService {

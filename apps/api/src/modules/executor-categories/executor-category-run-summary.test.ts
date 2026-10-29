@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentTeamTaskAttemptView } from '@worklite/contracts';
 import type { StoredAgentTeamRoleConfiguration, StoredAgentTeamVersionSnapshot } from '@worklite/db';
-import { deriveRunCurrent, effectiveTaskModel, taskRoleName } from './agent-team-run-summary';
+import { deriveRunCurrent, effectiveTaskModel, taskRoleName } from './executor-category-run-summary';
 
 function role(overrides: Partial<StoredAgentTeamRoleConfiguration> & Pick<StoredAgentTeamRoleConfiguration, 'role'>): StoredAgentTeamRoleConfiguration {
   return { publicModelId: '', instructions: '', entryPoints: [], skills: [], mcpServers: [], toolNames: [], ...overrides };

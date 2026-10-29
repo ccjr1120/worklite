@@ -7,7 +7,7 @@ import { chatSubmissions, externalChats, feishuDeliveries, feishuEvents, type Da
 import { DATABASE } from '../../../infrastructure/database.module';
 import { AgentExecutionsService } from '../../agents/agent-executions.service';
 import { CHAT_AGENT_ID, ChatDispatchService } from '../../agents/chat-dispatch.service';
-import { AgentTeamDocumentsService } from '../../executor-categories/agent-team-documents.service';
+import { AgentTeamDocumentsService } from '../../executor-categories/executor-category-documents.service';
 import { AgentTeamsService } from '../../executor-categories/executor-categories.service';
 import { RunsService } from '../../runs/runs.service';
 import { PluginsService } from '../plugins.service';
