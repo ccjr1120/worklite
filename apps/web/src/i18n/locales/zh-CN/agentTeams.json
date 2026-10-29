@@ -161,8 +161,7 @@
   },
   "focus": {
     "agent_team_bmad_tea": "面向已有公司仓库",
-    "agent_team_application": "面向全新应用开发",
-    "agent_team_direct": "面向单次直接执行"
+    "agent_team_direct": "两步流程：计划与执行"
   },
   "records": {
     "title": "执行记录",

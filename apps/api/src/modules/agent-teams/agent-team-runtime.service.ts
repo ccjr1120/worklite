@@ -260,6 +260,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       .where(and(eq(agentTeams.id, BUILT_IN_AGENT_TEAM_ID), eq(agentTeams.workspaceId, workspaceId)))
       .limit(1);
     if (!team) throw new NotFoundException('The built-in Coding Executors team was not found.');
+    if (team.deletedAt) throw new BadRequestException('This Coding Executors team has been deleted and is no longer available for dispatch.');
 
     const snapshot = await this.createVersionSnapshot(team.roles, team.workingPractice, 5);
     const now = new Date();
@@ -327,6 +328,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       .where(and(eq(agentTeams.id, request.teamId), eq(agentTeams.workspaceId, workspaceId)))
       .limit(1);
     if (!team) throw new NotFoundException('Coding Executors team not found.');
+    if (team.deletedAt) throw new BadRequestException('This Coding Executors team has been deleted and is no longer available for dispatch.');
     if (request.targetRole === 'team-manager') {
       throw new BadRequestException('Team Manager is not an active work role in new Runs.');
     }
@@ -1082,35 +1084,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       }).onConflictDoNothing().run();
     }
 
-    const [applicationTeam] = await this.db.select().from(agentTeams)
-      .where(and(eq(agentTeams.id, APPLICATION_AGENT_TEAM_ID), eq(agentTeams.workspaceId, 'workspace_personal')))
-      .limit(1);
-    if (!applicationTeam) {
-      const roles = (Object.keys(AGENT_TEAM_ROLE_INSTRUCTIONS) as AgentTeamRuntimeRole[])
-        .filter((role) => role !== 'team-manager')
-        .map((role) => defaultRoleConfiguration(role));
-      await this.db.insert(agentTeams).values({
-        id: APPLICATION_AGENT_TEAM_ID,
-        workspaceId: 'workspace_personal',
-        name: 'Application Development',
-        description: 'Built-in team for planning and developing complete applications.',
-        processId: AGENT_TEAM_PROCESS_ID,
-        processVersion: AGENT_TEAM_PROCESS_VERSION,
-        roles,
-        workingPractice: 'Build the application around the user goal and keep product decisions, architecture choices, and current iteration context in this Team.',
-        projectGitPolicy: DEFAULT_APPLICATION_GIT_POLICY,
-      }).onConflictDoNothing().run();
-    } else {
-      const roles = ensureBuiltInTeamRoles(applicationTeam.roles);
-      const name = applicationTeam.name === 'Application Development Team' ? 'Application Development' : applicationTeam.name;
-      const projectGitPolicy = applicationTeam.projectGitPolicy.trim() || DEFAULT_APPLICATION_GIT_POLICY;
-      if (JSON.stringify(roles) !== JSON.stringify(applicationTeam.roles)
-        || name !== applicationTeam.name || projectGitPolicy !== applicationTeam.projectGitPolicy) {
-        await this.db.update(agentTeams).set({ roles, name, projectGitPolicy, updatedAt: new Date() })
-          .where(eq(agentTeams.id, applicationTeam.id)).run();
-      }
-    }
-
     const [directTeam] = await this.db.select().from(agentTeams)
       .where(and(eq(agentTeams.id, DIRECT_AGENT_TEAM_ID), eq(agentTeams.workspaceId, 'workspace_personal')))
       .limit(1);
@@ -1145,6 +1118,39 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         projectGitPolicy: DEFAULT_DIRECT_GIT_POLICY,
       }).onConflictDoNothing().run();
     }
+
+    // Retire the Application Development team if it exists without active Runs
+    await this.retireApplicationTeam();
+  }
+
+  private async retireApplicationTeam(): Promise<void> {
+    const [applicationTeam] = await this.db.select().from(agentTeams)
+      .where(and(eq(agentTeams.id, APPLICATION_AGENT_TEAM_ID), eq(agentTeams.workspaceId, 'workspace_personal')))
+      .limit(1);
+    if (!applicationTeam) return;
+    if (applicationTeam.deletedAt) return; // Already deleted
+
+    // Check for active runs
+    const ACTIVE_RUN_STATUSES = ['queued', 'running', 'waiting_for_input', 'paused'] as const;
+    const [activeRunCount] = await this.db.select({ count: agentTeamRuns.id }).from(agentTeamRuns)
+      .where(and(
+        eq(agentTeamRuns.teamId, APPLICATION_AGENT_TEAM_ID),
+        eq(agentTeamRuns.workspaceId, 'workspace_personal'),
+        inArray(agentTeamRuns.status, [...ACTIVE_RUN_STATUSES]),
+      ))
+      .limit(1);
+    if (activeRunCount && activeRunCount.count) {
+      console.warn(`Application Development team has ${activeRunCount.count} active run(s); will retry on next startup.`);
+      return;
+    }
+
+    // Perform soft delete
+    const deletedAt = new Date();
+    await this.db.update(agentTeams)
+      .set({ deletedAt, updatedAt: deletedAt })
+      .where(eq(agentTeams.id, APPLICATION_AGENT_TEAM_ID))
+      .run();
+    console.log('Application Development team retired (soft deleted).');
   }
 
   private async createVersionSnapshot(

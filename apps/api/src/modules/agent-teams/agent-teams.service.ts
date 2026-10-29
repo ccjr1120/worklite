@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import type { Request } from 'express';
 import type {
   AgentTeamRoleConfiguration,
@@ -35,14 +35,16 @@ export class AgentTeamsService {
 
   async get(request: Request, workspaceSlug: string, teamId: string): Promise<AgentTeamView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    return toTeamView(await this.configuration.getTeam(workspace.id, teamId));
+    const team = await this.configuration.getTeam(workspace.id, teamId);
+    if (team.deletedAt) throw new NotFoundException('This Coding Executors team has been deleted.');
+    return toTeamView(team);
   }
 
   async list(request: Request, workspaceSlug: string): Promise<AgentTeamView[]> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     await this.configuration.reconcileSkills(workspace.id);
     const rows = await this.db.select().from(agentTeams)
-      .where(eq(agentTeams.workspaceId, workspace.id)).orderBy(asc(agentTeams.name));
+      .where(and(eq(agentTeams.workspaceId, workspace.id), isNull(agentTeams.deletedAt))).orderBy(asc(agentTeams.name));
     return rows.map(toTeamView);
   }
 
@@ -170,6 +172,15 @@ export class AgentTeamsService {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     await this.runtime.getRunView(runId, workspace.id);
     return this.runtime.retry(runId, taskKey);
+  }
+
+  async delete(request: Request, workspaceSlug: string, teamId: string, confirmTeamId: string): Promise<{ teamId: string; deletedAt: string }> {
+    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const result = await this.configuration.deleteTeam(workspace.id, teamId, confirmTeamId);
+    return {
+      teamId: result.teamId,
+      deletedAt: result.deletedAt.toISOString(),
+    };
   }
 
   private async getTeam(teamId: string, workspaceId: string): Promise<AgentTeam> {

@@ -56,18 +56,18 @@ function run(id: string, status: AgentTeamRunSummary['status'], intent = `Goal $
 }
 
 const teams = [
-  team('agent_team_application', 'Application Development', 'Built-in team for planning and developing complete applications.', 2),
   team('agent_team_bmad_tea', 'Company Project', 'Built-in BMAD and TEA team for company projects and requirements.', 3),
+  team('agent_team_direct', 'Direct', 'Built-in two-step team: a Planner plans, then a project Executor implements.', 3),
 ];
 
 const runsByTeam: Record<string, AgentTeamRunSummary[]> = {
-  agent_team_application: [run('run_app', 'queued')],
   agent_team_bmad_tea: [
     run('run_old', 'succeeded', 'Old release', '2026-10-01T08:00:00.000Z'),
     run('run_new', 'running', '## Ship the **login** flow\n\nLong body that must not reach the list row.', '2026-10-21T09:00:00.000Z'),
     run('run_mid', 'failed', 'Fix billing export', '2026-10-10T08:00:00.000Z'),
     run('run_q', 'queued', 'Queued cleanup', '2026-10-15T08:00:00.000Z'),
   ],
+  agent_team_direct: [],
 };
 
 function mockQueries(records = runsByTeam, state: { isPending?: boolean } = {}) {
@@ -164,25 +164,25 @@ describe('TeamRecords', () => {
 
   it('does not offer a Team switch on the Run list; that belongs to the configuration view', () => {
     mockQueries();
-    render(<TeamRecords teamId="agent_team_application" />);
+    render(<TeamRecords teamId="agent_team_bmad_tea" />);
     expect(screen.queryByRole('navigation', { name: '选择执行器分类' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Company Project' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Direct' })).not.toBeInTheDocument();
   });
 
   it('names the selected Team and renders only its Runs', () => {
     mockQueries();
-    render(<TeamRecords teamId="agent_team_application" />);
+    render(<TeamRecords teamId="agent_team_bmad_tea" />);
 
     expect(screen.getByRole('heading', { level: 1, name: 'Coding' })).toBeInTheDocument();
-    expect(screen.getByTestId('crumbs')).toHaveTextContent('Coding / Application Development');
-    expect(screen.getByRole('link', { name: /Goal run_app/ })).toHaveAttribute('href', '/agent-team-runs/run_app');
-    expect(screen.queryByText('Ship the login flow')).not.toBeInTheDocument();
+    expect(screen.getByTestId('crumbs')).toHaveTextContent('Coding / Company Project');
+    expect(screen.getByRole('link', { name: /Goal run_old/ })).toHaveAttribute('href', '/agent-team-runs/run_old');
+    expect(screen.queryByText('Goal run_app')).not.toBeInTheDocument();
   });
 
   it('puts the configuration entry in the page header for the selected Team', () => {
     mockQueries();
-    render(<TeamRecords teamId="agent_team_application" />);
-    expect(screen.getByRole('link', { name: '查看配置' })).toHaveAttribute('href', '/agent-teams/agent_team_application/config');
+    render(<TeamRecords teamId="agent_team_bmad_tea" />);
+    expect(screen.getByRole('link', { name: '查看配置' })).toHaveAttribute('href', '/agent-teams/agent_team_bmad_tea/config');
   });
 
   it('opens the default Company Project team from /agent-teams', () => {
@@ -201,16 +201,15 @@ describe('TeamSwitcher (configuration view)', () => {
 
     const switcher = screen.getByRole('navigation', { name: '选择执行器分类' });
     const company = within(switcher).getByRole('link', { name: /Company Project/ });
-    const application = within(switcher).getByRole('link', { name: /Application Development/ });
+    const direct = within(switcher).getByRole('link', { name: /Direct/ });
 
     expect(company).toHaveAttribute('aria-current', 'page');
-    expect(application).toHaveAttribute('href', '/agent-teams/agent_team_application/config');
+    expect(direct).toHaveAttribute('href', '/agent-teams/agent_team_direct/config');
     expect(within(company).getByText('面向已有公司仓库')).toBeInTheDocument();
-    expect(within(application).getByText('面向全新应用开发')).toBeInTheDocument();
+    expect(within(direct).getByText('两步流程：计划与执行')).toBeInTheDocument();
     expect(within(company).getByText('并发上限').nextSibling).toHaveTextContent('3');
     // running is active; queued is counted separately; terminal Runs are neither.
     expect(within(company).getByText('运行中').nextSibling).toHaveTextContent('1');
     expect(within(company).getByText('排队中').nextSibling).toHaveTextContent('1');
-    expect(within(application).getByText('排队中').nextSibling).toHaveTextContent('1');
   });
 });
