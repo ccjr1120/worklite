@@ -57,7 +57,7 @@ function baseRequest(overrides: Record<string, unknown> = {}) {
 }
 
 describe('IsolatedAgentInvocationService Skill loading', () => {
-  it('injects an Agent Team role Skill and advertises each reference', async () => {
+  it('injects a Coding Executors team role Skill and advertises each reference', async () => {
     let captured: { systemPrompt: string; builtinTools: Array<{ name: string }> } | undefined;
     gateway.runWorkflowAgent.mockImplementation(async (request: { systemPrompt: string; builtinTools: Array<{ name: string }> }) => {
       captured = request;

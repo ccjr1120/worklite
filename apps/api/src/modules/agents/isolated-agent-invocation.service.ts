@@ -418,7 +418,7 @@ export class IsolatedAgentInvocationService {
 
     if (call.toolName === 'skill_script') {
       if (request.role && request.projectDirectory) {
-        throw new BadRequestException('Executable Skill scripts are unavailable for Agent Team invocations.');
+        throw new BadRequestException('Executable Skill scripts are unavailable for Coding Executors team invocations.');
       }
       const skill = assignedSkills.find((item) => item.id === call.skillId);
       const script = skill?.files.find((file) => file.path === call.scriptPath && file.path.startsWith('scripts/') && file.content.startsWith('#!'));

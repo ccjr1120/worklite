@@ -176,7 +176,7 @@ export class AgentTeamsService {
     const [team] = await this.db.select().from(agentTeams)
       .where(and(eq(agentTeams.id, teamId), eq(agentTeams.workspaceId, workspaceId)))
       .limit(1);
-    if (!team) throw new NotFoundException('Agent Team not found.');
+    if (!team) throw new NotFoundException('Coding Executors team not found.');
     return team;
   }
 

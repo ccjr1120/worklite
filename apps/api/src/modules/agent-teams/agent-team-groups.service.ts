@@ -191,7 +191,7 @@ export class AgentTeamGroupsService {
     if (!body) throw new BadRequestException('A group message is required.');
     const recipientRole = this.requireRole(input?.recipientRole);
     const team = await this.getTeam(group.teamId, workspace.id);
-    if (!team.roles.some((role) => role.role === recipientRole)) throw new BadRequestException('Select an active role in this Agent Team.');
+    if (!team.roles.some((role) => role.role === recipientRole)) throw new BadRequestException('Select an active role in this Coding Executors team.');
     const submissionId = input?.submissionId?.trim();
     if (!submissionId) throw new BadRequestException('A message submission id is required.');
     const repositories = await this.db.select().from(agentTeamGroupRepositories)
@@ -312,7 +312,7 @@ export class AgentTeamGroupsService {
   async control(request: Request, workspaceSlug: string, groupId: string, input: AgentTeamGroupControlRequest) {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const group = await this.getGroup(groupId, workspace.id);
-    if (input?.operation !== 'reexecute') throw new BadRequestException('Only Chat re-execution is available for Agent Team groups.');
+    if (input?.operation !== 'reexecute') throw new BadRequestException('Only Chat re-execution is available for Coding Executors team groups.');
     const runIds = [...new Set(input?.runIds ?? [])];
     if (!runIds.length) throw new BadRequestException('Select at least one Run to re-execute.');
     const runs = await this.db.select().from(agentTeamRuns)
@@ -382,7 +382,7 @@ export class AgentTeamGroupsService {
     if (!repositoryId) return;
     const [repository] = await this.db.select({ id: agentTeamRepositories.id }).from(agentTeamRepositories)
       .where(and(eq(agentTeamRepositories.id, repositoryId), eq(agentTeamRepositories.teamId, teamId), eq(agentTeamRepositories.workspaceId, workspaceId))).limit(1);
-    if (!repository) throw new BadRequestException('The memory repository is not available for this Agent Team.');
+    if (!repository) throw new BadRequestException('The memory repository is not available for this Coding Executors team.');
   }
 
   private async assertMemorySource(workspaceId: string, teamId: string, sourceMessageId: string | null | undefined): Promise<void> {
@@ -394,7 +394,7 @@ export class AgentTeamGroupsService {
         eq(agentTeamGroupMessages.workspaceId, workspaceId),
         eq(agentTeamGroups.teamId, teamId),
       )).limit(1);
-    if (!message) throw new BadRequestException('The memory source must be a message from this Agent Team.');
+    if (!message) throw new BadRequestException('The memory source must be a message from this Coding Executors team.');
   }
 
   async createMemory(request: Request, workspaceSlug: string, teamId: string, input: CreateAgentTeamMemoryRequest): Promise<AgentTeamMemoryView> {
@@ -428,7 +428,7 @@ export class AgentTeamGroupsService {
     await this.getTeam(teamId, workspace.id);
     const [existing] = await this.db.select().from(agentTeamMemories)
       .where(and(eq(agentTeamMemories.id, memoryId), eq(agentTeamMemories.teamId, teamId), eq(agentTeamMemories.workspaceId, workspace.id))).limit(1);
-    if (!existing) throw new NotFoundException('Agent Team memory not found.');
+    if (!existing) throw new NotFoundException('Coding Executors team memory not found.');
     const content = input.content === undefined ? existing.content : input.content.trim();
     if (!content) throw new BadRequestException('Memory content is required.');
     await this.assertMemoryScope(workspace.id, teamId, input.repositoryId === undefined ? existing.repositoryId : input.repositoryId);
@@ -452,20 +452,20 @@ export class AgentTeamGroupsService {
     const deleted = await this.db.delete(agentTeamMemories).where(and(
       eq(agentTeamMemories.id, memoryId), eq(agentTeamMemories.teamId, teamId), eq(agentTeamMemories.workspaceId, workspace.id),
     )).returning({ id: agentTeamMemories.id });
-    if (!deleted.length) throw new NotFoundException('Agent Team memory not found.');
+    if (!deleted.length) throw new NotFoundException('Coding Executors team memory not found.');
   }
 
   private async getGroup(groupId: string, workspaceId: string) {
     const [group] = await this.db.select().from(agentTeamGroups)
       .where(and(eq(agentTeamGroups.id, groupId), eq(agentTeamGroups.workspaceId, workspaceId))).limit(1);
-    if (!group) throw new NotFoundException('Agent Team group not found.');
+    if (!group) throw new NotFoundException('Coding Executors team group not found.');
     return group;
   }
 
   private async getTeam(teamId: string, workspaceId: string) {
     const [team] = await this.db.select().from(agentTeams)
       .where(and(eq(agentTeams.id, teamId), eq(agentTeams.workspaceId, workspaceId))).limit(1);
-    if (!team) throw new NotFoundException('Agent Team not found.');
+    if (!team) throw new NotFoundException('Coding Executors team not found.');
     return team;
   }
 
@@ -503,7 +503,7 @@ export class AgentTeamGroupsService {
   }
 
   private requireRole(value: unknown): AgentTeamRoleId {
-    if (!isValidAgentTeamRoleId(value)) throw new BadRequestException('Select a supported Agent Team role.');
+    if (!isValidAgentTeamRoleId(value)) throw new BadRequestException('Select a supported Coding Executors team role.');
     return value;
   }
 }

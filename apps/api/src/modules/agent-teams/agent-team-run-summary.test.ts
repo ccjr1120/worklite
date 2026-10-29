@@ -35,7 +35,7 @@ function attempt(overrides: Partial<AgentTeamTaskAttemptView>): AgentTeamTaskAtt
   };
 }
 
-describe('Agent Team Run summary derivation', () => {
+describe('Coding Executors team Run summary derivation', () => {
   it('reports the configured role model before any fallback', () => {
     expect(effectiveTaskModel(snapshot(), { role: 'planner', developerId: null }, 'team-default')).toBe('gpt-planner');
   });

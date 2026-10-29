@@ -39,7 +39,7 @@ export class AgentTeamConfigurationService {
     await this.resources.reconcileWorkspaceSkills(workspaceId);
     const [team] = await this.db.select().from(agentTeams)
       .where(and(eq(agentTeams.id, teamId), eq(agentTeams.workspaceId, workspaceId))).limit(1);
-    if (!team) throw new NotFoundException('Agent Team not found.');
+    if (!team) throw new NotFoundException('Coding Executors team not found.');
     return team;
   }
 
@@ -51,10 +51,10 @@ export class AgentTeamConfigurationService {
     const team = await this.getTeam(workspaceId, teamId);
     if (!input || typeof input !== 'object' || Array.isArray(input)
       || Object.keys(input).some((key) => !['roles', 'maxConcurrentRuns', 'workingPractice', 'projectGitPolicy'].includes(key))) {
-      throw new BadRequestException('Only Agent Team roles, working practice, project Git policy and concurrency can be changed.');
+      throw new BadRequestException('Only Coding Executors team roles, working practice, project Git policy and concurrency can be changed.');
     }
     if (input.roles === undefined && input.maxConcurrentRuns === undefined && input.workingPractice === undefined && input.projectGitPolicy === undefined) {
-      throw new BadRequestException('At least one Agent Team setting is required.');
+      throw new BadRequestException('At least one Coding Executors team setting is required.');
     }
     const roles = input.roles === undefined ? team.roles : await this.resolveRoles(workspaceId, input.roles, teamId);
     if (input.maxConcurrentRuns !== undefined && (!Number.isInteger(input.maxConcurrentRuns) || input.maxConcurrentRuns < 1)) {
@@ -73,7 +73,7 @@ export class AgentTeamConfigurationService {
       ...(input.projectGitPolicy === undefined ? {} : { projectGitPolicy: input.projectGitPolicy.trim() }),
       updatedAt: new Date(),
     }).where(and(eq(agentTeams.id, team.id), eq(agentTeams.workspaceId, workspaceId))).returning();
-    if (!updated) throw new NotFoundException('Agent Team not found.');
+    if (!updated) throw new NotFoundException('Coding Executors team not found.');
     return updated;
   }
 
@@ -92,7 +92,7 @@ export class AgentTeamConfigurationService {
   ): Promise<AgentTeam> {
     const team = await this.getTeam(workspaceId, teamId);
     const target = team.roles.find((role) => role.role === roleId);
-    if (!target) throw new NotFoundException('Agent Team role not found.');
+    if (!target) throw new NotFoundException('Coding Executors team role not found.');
     const updated = { ...toPublicRole(target), ...changes, role: roleId };
     return this.update(workspaceId, teamId, {
       roles: team.roles.map((role) => role.role === roleId ? updated : toPublicRole(role)),
@@ -101,7 +101,7 @@ export class AgentTeamConfigurationService {
 
   async deleteRole(workspaceId: string, teamId: string, roleId: string): Promise<AgentTeam> {
     const team = await this.getTeam(workspaceId, teamId);
-    if (!team.roles.some((role) => role.role === roleId)) throw new NotFoundException('Agent Team role not found.');
+    if (!team.roles.some((role) => role.role === roleId)) throw new NotFoundException('Coding Executors team role not found.');
     // The Direct Team has no Dispatcher; its Planner is the required entry role instead.
     if (teamId === DIRECT_AGENT_TEAM_ID) {
       if (roleId === 'planner') throw new BadRequestException('The Planner role is required and cannot be deleted.');
@@ -112,12 +112,12 @@ export class AgentTeamConfigurationService {
   }
 
   private async resolveRoles(workspaceId: string, values: AgentTeamRoleConfiguration[], teamId?: string): Promise<StoredAgentTeamRoleConfiguration[]> {
-    if (!Array.isArray(values) || values.length < 1) throw new BadRequestException('At least one Agent Team role is required.');
+    if (!Array.isArray(values) || values.length < 1) throw new BadRequestException('At least one Coding Executors team role is required.');
     const byRole = new Map<AgentTeamRoleId, AgentTeamRoleConfiguration>();
     for (const value of values) {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BadRequestException('Every Agent Team role configuration must be an object.');
-      if (Object.keys(value).some((key) => !(ROLE_CONFIGURATION_KEYS as readonly string[]).includes(key))) throw new BadRequestException('An Agent Team role configuration contains an unsupported field.');
-      if (!isValidAgentTeamRoleId(value.role) || byRole.has(value.role)) throw new BadRequestException('Agent Team role ids must be unique lowercase identifiers.');
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BadRequestException('Every Coding Executors team role configuration must be an object.');
+      if (Object.keys(value).some((key) => !(ROLE_CONFIGURATION_KEYS as readonly string[]).includes(key))) throw new BadRequestException('A Coding Executors team role configuration contains an unsupported field.');
+      if (!isValidAgentTeamRoleId(value.role) || byRole.has(value.role)) throw new BadRequestException('Coding Executors team role ids must be unique lowercase identifiers.');
       byRole.set(value.role, value);
     }
     if (byRole.has('team-manager')) throw new BadRequestException('Team Manager is not an active work role.');
@@ -131,13 +131,13 @@ export class AgentTeamConfigurationService {
     const normalized: Array<Omit<StoredAgentTeamRoleConfiguration, 'skills' | 'mcpServers'>> = [];
     for (const [role, value] of byRole) {
       if (typeof value.publicModelId !== 'string' && (!Array.isArray(value.publicModelId) || value.publicModelId.some((id) => typeof id !== 'string'))) {
-        throw new BadRequestException(`A public model id for Agent Team role ${role} must be a string or an array of strings.`);
+        throw new BadRequestException(`A public model id for Coding Executors team role ${role} must be a string or an array of strings.`);
       }
       const publicModelIds = normalizePublicModelList(value.publicModelId);
       // A single empty string keeps the historical "use the Team/executor default" meaning; an
       // array is always a declared fallback list, with its first candidate taking that role.
       const publicModelId: string | string[] = Array.isArray(value.publicModelId) ? publicModelIds : (publicModelIds[0] ?? '');
-      if (value.executor !== undefined && value.executor !== null && value.executor !== 'claude' && value.executor !== 'codex') throw new BadRequestException(`The executor for Agent Team role ${role} must be claude or codex.`);
+      if (value.executor !== undefined && value.executor !== null && value.executor !== 'claude' && value.executor !== 'codex') throw new BadRequestException(`The executor for Coding Executors team role ${role} must be claude or codex.`);
       const executor = role === 'developer' ? value.executor ?? 'claude' : value.executor ?? undefined;
       // A role's publicModelId is always a Gateway public id, so every declared candidate must speak a
       // protocol its executor can reach through the Gateway (Claude Code: anthropic/messages, Codex:
@@ -149,26 +149,26 @@ export class AgentTeamConfigurationService {
           throw new BadRequestException(`The ${role} model must use ${protocols.join(' or ')} for the ${executor} executor.`);
         }
       }
-      if (typeof value.instructions !== 'string' || !value.instructions.trim()) throw new BadRequestException(`Instructions for Agent Team role ${role} are required.`);
+      if (typeof value.instructions !== 'string' || !value.instructions.trim()) throw new BadRequestException(`Instructions for Coding Executors team role ${role} are required.`);
       const displayName = value.displayName === undefined ? undefined : value.displayName.trim();
-      if (displayName !== undefined && !displayName) throw new BadRequestException(`The display name for Agent Team role ${role} is required.`);
+      if (displayName !== undefined && !displayName) throw new BadRequestException(`The display name for Coding Executors team role ${role} is required.`);
       const builtIn = AGENT_TEAM_ROLE_TOOL_NAMES[role];
-      if (!builtIn && !displayName) throw new BadRequestException(`A display name is required for custom Agent Team role ${role}.`);
-      const entryPoints = normalizeStrings(value.entryPoints, `entry points for Agent Team role ${role}`);
+      if (!builtIn && !displayName) throw new BadRequestException(`A display name is required for custom Coding Executors team role ${role}.`);
+      const entryPoints = normalizeStrings(value.entryPoints, `entry points for Coding Executors team role ${role}`);
       const allowedEntryPoints = agentTeamEntryPoints(role);
-      if (entryPoints.some((entryPoint) => !allowedEntryPoints.includes(entryPoint))) throw new BadRequestException(`An entry point is not supported for Agent Team role ${role}.`);
-      const toolNames = normalizeStrings(value.toolNames, `tool names for Agent Team role ${role}`);
+      if (entryPoints.some((entryPoint) => !allowedEntryPoints.includes(entryPoint))) throw new BadRequestException(`An entry point is not supported for Coding Executors team role ${role}.`);
+      const toolNames = normalizeStrings(value.toolNames, `tool names for Coding Executors team role ${role}`);
       const allowedToolNames = builtIn ?? CUSTOM_ROLE_TOOL_NAMES;
-      if (toolNames.some((toolName) => !allowedToolNames.includes(toolName as never))) throw new BadRequestException(`A tool is not supported for Agent Team role ${role}.`);
+      if (toolNames.some((toolName) => !allowedToolNames.includes(toolName as never))) throw new BadRequestException(`A tool is not supported for Coding Executors team role ${role}.`);
       normalized.push({ role, ...(displayName ? { displayName } : {}), publicModelId, instructions: value.instructions.trim(), entryPoints, toolNames, ...(executor ? { executor } : {}) });
     }
 
-    const skillIds = new Set(values.flatMap((value) => uniqueStrings(value.skillIds, `Skill ids for Agent Team role ${value.role}`)));
-    const mcpServerIds = new Set(values.flatMap((value) => uniqueStrings(value.mcpServerIds, `MCP server ids for Agent Team role ${value.role}`)));
+    const skillIds = new Set(values.flatMap((value) => uniqueStrings(value.skillIds, `Skill ids for Coding Executors team role ${value.role}`)));
+    const mcpServerIds = new Set(values.flatMap((value) => uniqueStrings(value.mcpServerIds, `MCP server ids for Coding Executors team role ${value.role}`)));
     const skillSnapshots = await this.resolveSkills(workspaceId, skillIds);
     const mcpSnapshots = await this.resolveMcpServers(workspaceId, mcpServerIds);
-    const skillsByRole = new Map(values.map((value) => [value.role, uniqueStrings(value.skillIds, `Skill ids for Agent Team role ${value.role}`)]));
-    const mcpByRole = new Map(values.map((value) => [value.role, uniqueStrings(value.mcpServerIds, `MCP server ids for Agent Team role ${value.role}`)]));
+    const skillsByRole = new Map(values.map((value) => [value.role, uniqueStrings(value.skillIds, `Skill ids for Coding Executors team role ${value.role}`)]));
+    const mcpByRole = new Map(values.map((value) => [value.role, uniqueStrings(value.mcpServerIds, `MCP server ids for Coding Executors team role ${value.role}`)]));
     return normalized.map((role) => ({
       ...role,
       skills: skillsByRole.get(role.role)?.flatMap((id) => skillSnapshots.get(id) ? [skillSnapshots.get(id)!] : []) ?? [],

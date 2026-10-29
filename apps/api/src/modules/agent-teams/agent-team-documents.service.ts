@@ -51,7 +51,7 @@ export class AgentTeamDocumentsService {
         eq(agentTeamRuns.workspaceId, workspaceId),
       ))
       .limit(1);
-    if (!row) throw new NotFoundException('Agent Team document not found.');
+    if (!row) throw new NotFoundException('Coding Executors team document not found.');
     return row.document;
   }
 

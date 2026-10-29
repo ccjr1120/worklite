@@ -61,7 +61,7 @@ describe('groupRolePromptAddition v10 compatibility', () => {
     );
 
     expect(addition).toBe([
-      'This is the initially addressed role for a Chat-dispatched Agent Team Run. Use the captured Team context to guide this request.',
+      'This is the initially addressed role for a Chat-dispatched Coding Executors team Run. Use the captured Team context to guide this request.',
       'Team working practice:\nPrefer small reviewed changes.',
       'Team memories:\n- Deploy with the release script.',
       'Team settings, roles and memories are managed by Chat through protected platform operations. Do not claim to read or change Team memories or settings yourself.',

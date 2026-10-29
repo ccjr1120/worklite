@@ -28,7 +28,7 @@ const definitions: GatewayToolDefinition[] = [
   { name: 'write', description: 'Write UTF-8 text to a file.', inputSchema: { type: 'object', additionalProperties: false, required: ['path', 'content'], properties: { path: { type: 'string' }, content: { type: 'string' } } } },
   { name: 'glob', description: 'Find files matching a glob pattern.', inputSchema: { type: 'object', additionalProperties: false, required: ['pattern'], properties: { pattern: { type: 'string' } } } },
   { name: 'grep', description: 'Search files with a regular expression.', inputSchema: { type: 'object', additionalProperties: false, required: ['pattern'], properties: { pattern: { type: 'string' }, path: { type: 'string' } } } },
-  { name: 'process_reference', description: 'Read a file from the pinned Agent Team process package.', inputSchema: { type: 'object', additionalProperties: false, required: ['path'], properties: { path: { type: 'string' } } } },
+  { name: 'process_reference', description: 'Read a file from the pinned Coding Executors team process package.', inputSchema: { type: 'object', additionalProperties: false, required: ['path'], properties: { path: { type: 'string' } } } },
   { name: 'read_team_document', description: 'Read an exact immutable Team document version that was explicitly handed to this task.', inputSchema: { type: 'object', additionalProperties: false, required: ['documentId', 'revision'], properties: { documentId: { type: 'string' }, revision: { type: 'integer', minimum: 1 } } } },
 ];
 

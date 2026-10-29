@@ -229,7 +229,7 @@ export class TeamMemoryService {
       eq(agentTeamMemories.workspaceId, context.workspaceId),
       eq(agentTeamMemories.teamId, context.teamId),
     )).limit(1);
-    if (!row) throw new NotFoundException('Agent Team memory not found.');
+    if (!row) throw new NotFoundException('Coding Executors team memory not found.');
     if (row.repositoryId && context.allowedRepositoryIds && !context.allowedRepositoryIds.includes(row.repositoryId)) {
       throw new BadRequestException('The Team memory is outside this Run repository scope.');
     }
@@ -246,7 +246,7 @@ export class TeamMemoryService {
       eq(agentTeamRepositories.workspaceId, context.workspaceId),
       eq(agentTeamRepositories.teamId, context.teamId),
     )).limit(1);
-    if (!repository) throw new BadRequestException('The memory repository is not available for this Agent Team.');
+    if (!repository) throw new BadRequestException('The memory repository is not available for this Coding Executors team.');
   }
 
   private async repository(repositoryId: string): Promise<{ name: string; directory: string } | undefined> {

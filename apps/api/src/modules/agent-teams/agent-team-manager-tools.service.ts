@@ -18,7 +18,7 @@ const string = { type: 'string' };
 const strings = { type: 'array', items: string };
 
 const definitions: GatewayToolDefinition[] = [
-  { name: 'team_get_configuration', description: 'Read current Agent Team settings, every active role configuration, and canonical repository ids and names for memory scope. Project directory paths are not returned.', inputSchema: emptyObject },
+  { name: 'team_get_configuration', description: 'Read current Coding Executors team settings, every active role configuration, and canonical repository ids and names for memory scope. Project directory paths are not returned.', inputSchema: emptyObject },
   { name: 'team_update_settings', description: 'Update the Team Manager workingPractice and/or maxConcurrentRuns for future Runs.', inputSchema: { type: 'object', additionalProperties: false, properties: { workingPractice: { type: 'string', description: 'Team Manager working-practice text captured by future group Runs and injected into the Manager turns.' }, maxConcurrentRuns: { type: 'integer', minimum: 1, description: 'Maximum concurrent Runs; additional Runs queue FIFO.' } } } },
   { name: 'team_create_role', description: 'Create a configured Team work role. The server assigns its stable role id; provide a human-readable displayName. An empty publicModelId uses the Team default. New roles affect future Runs.', inputSchema: { type: 'object', additionalProperties: false, required: ['displayName', 'publicModelId', 'instructions'], properties: { displayName: string, publicModelId: { type: 'string', description: 'Gateway public model id, or an empty string to use the Team default.' }, instructions: string, entryPoints: { ...strings, description: 'Supported BMAD/TEA process entry points for this role.' }, skillIds: { ...strings, description: 'Current workspace Skill ids to capture for this role.' }, mcpServerIds: { ...strings, description: 'Current workspace MCP server ids to capture for this role.' }, toolNames: { ...strings, description: 'Allowed built-in tool names for this role.' }, executor: { type: 'string', enum: ['claude', 'codex'], description: 'Optional project executor; omit to use the WorkLite Agent.' } } } },
   { name: 'team_update_role', description: 'Update one active work role. Use its role id from team_get_configuration. Team Manager is protected and cannot be changed through this tool. Set executor to null to remove a project executor from a non-Developer role; Developer always uses Claude Code or Codex.', inputSchema: { type: 'object', additionalProperties: false, required: ['role'], properties: { role: { type: 'string', description: 'Active work-role id from team_get_configuration.' }, displayName: string, publicModelId: string, instructions: string, entryPoints: strings, skillIds: strings, mcpServerIds: strings, toolNames: strings, executor: { type: ['string', 'null'], enum: ['claude', 'codex', null], description: 'Set null to remove the project executor from a non-Developer role. Developer always remains project-executor-backed and defaults to Claude Code.' } } } },
@@ -124,7 +124,7 @@ export class AgentTeamManagerToolsService {
         const [existing] = await this.db.select().from(agentTeamMemories).where(and(
           eq(agentTeamMemories.id, memoryId), eq(agentTeamMemories.teamId, team.id), eq(agentTeamMemories.workspaceId, input.workspaceId),
         )).limit(1);
-        if (!existing) throw new NotFoundException('Agent Team memory not found.');
+        if (!existing) throw new NotFoundException('Coding Executors team memory not found.');
         const content = args?.content === undefined ? existing.content : requiredString(args.content, 'content');
         const repositoryId = args?.repositoryId === undefined ? existing.repositoryId : optionalString(args.repositoryId, 'repositoryId') ?? null;
         await this.assertMemoryScope(input.workspaceId, team.id, repositoryId);
@@ -138,7 +138,7 @@ export class AgentTeamManagerToolsService {
         const deleted = await this.db.delete(agentTeamMemories).where(and(
           eq(agentTeamMemories.id, memoryId), eq(agentTeamMemories.teamId, team.id), eq(agentTeamMemories.workspaceId, input.workspaceId),
         )).returning({ id: agentTeamMemories.id });
-        if (!deleted.length) throw new NotFoundException('Agent Team memory not found.');
+        if (!deleted.length) throw new NotFoundException('Coding Executors team memory not found.');
         await this.appendMemoryEvent(input.groupId, { memoryId, operation: 'deleted' });
         return JSON.stringify({ deleted: memoryId });
       }
@@ -152,7 +152,7 @@ export class AgentTeamManagerToolsService {
       const [repository] = await this.db.select({ id: agentTeamRepositories.id }).from(agentTeamRepositories).where(and(
         eq(agentTeamRepositories.id, repositoryId), eq(agentTeamRepositories.teamId, teamId), eq(agentTeamRepositories.workspaceId, workspaceId),
       )).limit(1);
-      if (!repository) throw new BadRequestException('The memory repository is not available for this Agent Team.');
+      if (!repository) throw new BadRequestException('The memory repository is not available for this Coding Executors team.');
     }
   }
 

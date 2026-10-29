@@ -15,7 +15,7 @@ const upsertKey = {
 const definitions: GatewayToolDefinition[] = [
   {
     name: 'team_memory_search',
-    description: 'Search this Agent Team’s long-term memories by keywords. Team memories are separate from Chat memory. Results carry titles and excerpts; use team_memory_read for full text.',
+    description: 'Search this Coding Executors team’s long-term memories by keywords. Team memories are separate from Chat memory. Results carry titles and excerpts; use team_memory_read for full text.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -118,7 +118,7 @@ export class AgentTeamMemoryToolsService {
         return JSON.stringify({ id: result.memory.id, repositoryId: result.memory.repositoryId, operation: result.operation, content: result.memory.content });
       }
       default:
-        throw new BadRequestException('The Agent Team role requested an unavailable Team memory tool.');
+        throw new BadRequestException('The Coding Executors team role requested an unavailable Team memory tool.');
     }
   }
 }
