@@ -92,9 +92,6 @@ async function prepare(directory: string, request: ProjectExecutorRequest): Prom
     pluginDirectory,
     systemPrompt: [
       request.systemPrompt.trim(),
-      request.executorContext?.trim()
-        ? `WorkLite-managed shared executor context (applies equally to Codex and Claude Code):\n${request.executorContext.trim()}\n\nUse it as persistent supplemental guidance; follow the explicit requirements of the current task when they conflict.`
-        : '',
       references.length ? `Pinned read-only process reference files:\n${references.join('\n')}` : '',
       imageLines.length
         ? `The user supplied ${imageLines.length === 1 ? 'this image' : 'these images'} with the task; ${imageLines.length === 1 ? 'it is' : 'they are'} already saved as read-only local file${imageLines.length === 1 ? '' : 's'} outside the project:\n${imageLines.join('\n')}\nOpen each path with your own image-reading tool (Claude Code: the Read tool; Codex: view_image) before acting on any instruction that refers to a picture, screenshot or design. Treat them as task input, not as something you produced, and do not copy them into the project.`

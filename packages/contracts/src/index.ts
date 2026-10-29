@@ -261,8 +261,7 @@ export type PluginTestResult = {
 };
 
 export type AgentView = {
-  // Each declared executor default is one model id, or an ordered list of fallback candidates.
-  chatConfiguration?: { revision: number; extensionPrompt: string; executorContext: string; summarizePrompt: string; defaultExecutor: ProjectExecutor; defaultExecutorModels: Partial<Record<ProjectExecutor, string | string[]>>; projectTaskMcpServerIds: string[]; turnNotificationsEnabled: boolean; turnNotificationSound: string; skillIds: string[] };
+  chatConfiguration?: { revision: number; extensionPrompt: string; summarizePrompt: string; turnNotificationsEnabled: boolean; turnNotificationSound: string; skillIds: string[] };
   id: string;
   workspaceSlug: string;
   kind: 'system' | 'custom';
@@ -528,16 +527,8 @@ export type CreateAgentVersionRequest = Record<string, never>;
 export type UpdateAgentRequest = Partial<CreateAgentRequest> & {
   providerId?: string | null;
   extensionPrompt?: string;
-  // WorkLite-managed persistent context injected into both Codex and Claude Code project tasks.
-  executorContext?: string;
   // Custom prompt for /summarize; an omitted key keeps it, an empty string restores the built-in default.
   summarizePrompt?: string;
-  defaultExecutor?: ProjectExecutor;
-  // Declared default Gateway public model per executor: one model id or an ordered list of
-  // fallback candidates sets it, null clears it, an omitted key keeps it.
-  defaultExecutorModels?: Partial<Record<ProjectExecutor, string | string[] | null>>;
-  // Workspace MCP servers injected into Claude Code project tasks; an omitted key keeps the declaration.
-  projectTaskMcpServerIds?: string[];
   // macOS host notification for a settled Chat conversation turn, and its system sound name; an
   // empty sound name delivers the notification silently.
   turnNotificationsEnabled?: boolean;
@@ -1195,12 +1186,11 @@ export type McpServerView = {
 // Every place a workspace MCP server is referenced, reported when its deletion
 // is rejected. Drafts and active Team role configuration are mutable and can be
 // cleaned by a force deletion; published WorkflowVersions and captured
-// TeamVersions are immutable history and are never rewritten; Chat and legacy
-// Agent references always block deletion until cleared by their owner.
+// TeamVersions are immutable history and are never rewritten; active Chat turn and
+// legacy Agent references always block deletion until cleared by their owner.
 export type McpServerReferenceReport = {
   agents: Array<{ agentId: string; agentName: string }>;
   activeChatTurns: boolean;
-  chatConfiguration: boolean;
   workflowDrafts: Array<{ workflowId: string; workflowName: string; nodeIds: string[] }>;
   workflowVersions: Array<{ workflowId: string; workflowName: string; version: number; nodeIds: string[] }>;
   agentTeamRoles: Array<{ teamId: string; teamName: string; role: string; displayName: string | null }>;

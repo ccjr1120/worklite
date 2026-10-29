@@ -7,7 +7,6 @@ import {
   agentTeamVersions,
   agentTeams,
   agents,
-  chatConfigurations,
   createDb,
   initializeDatabase,
   mcpServers,
@@ -209,17 +208,6 @@ describe('WorkspaceResourcesService.deleteMcpServer', () => {
     expect((versionNode.config as { mcpServerIds: string[] }).mcpServerIds).toEqual([SERVER_ID, 'mcp_other']);
     const [teamVersion] = db!.select().from(agentTeamVersions).where(eq(agentTeamVersions.id, 'teamv_1')).all();
     expect(teamVersion.snapshot.roles[0]!.mcpServers.map((server) => server.id)).toEqual([SERVER_ID]);
-  });
-
-  it('rejects deletion under force when the latest Chat configuration declares the server', async () => {
-    const { resources } = await setup();
-    // Revision 1 is seeded by initializeDatabase; only the latest revision blocks.
-    db!.insert(chatConfigurations).values({ workspaceId: WORKSPACE_ID, revision: 2, model: 'GLM/glm-5.3', skillIds: [], mcpServerIds: [], projectTaskMcpServerIds: [SERVER_ID] }).run();
-
-    const error = await resources.deleteMcpServer(request, 'personal', SERVER_ID, { force: true }).catch((caught: unknown) => caught);
-    const references = badRequestReferences(error);
-    expect(references.chatConfiguration).toBe(true);
-    expect(db!.select().from(mcpServers).where(eq(mcpServers.id, SERVER_ID)).all()).toHaveLength(1);
   });
 
   it('rejects deletion under force when a non-Chat Agent is assigned the server', async () => {

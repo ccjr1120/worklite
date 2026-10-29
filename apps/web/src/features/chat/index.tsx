@@ -1,8 +1,8 @@
 import { useNavigate, useRouterState } from '@tanstack/react-router';
-import { Brain, ChevronRight, Cpu, List, Plus, Radio, ScrollText, Settings, ShieldAlert, SlidersHorizontal } from 'lucide-react';
+import { Brain, ChevronRight, List, Plus, Radio, ScrollText, Settings, ShieldAlert, SlidersHorizontal } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type CompositionEvent as ReactCompositionEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AgentExecutionView, AgentToolCallView, ChatAttachmentView, ChatConversationView, ChatSubmissionView, DispatchChatRequest, ProjectExecutor, RunView, WorkflowView } from '@worklite/contracts';
+import type { AgentExecutionView, AgentToolCallView, ChatAttachmentView, ChatConversationView, ChatSubmissionView, DispatchChatRequest, RunView, WorkflowView } from '@worklite/contracts';
 import { ApiError, api, parseAgentExecutionEvent } from '@/api/client';
 import { chatConversationsQueryKey, useAgentQuery, useModelProvidersQuery, useSkillsQuery, useWorkflowsQuery } from '@/api/queries';
 import { Conversation, ConversationContent } from '@/components/ai-elements/conversation';
@@ -16,7 +16,6 @@ import { cn } from '@/lib/utils';
 import { Composer, SLASH_COMMANDS, type SlashCommand } from './composer';
 import { clearNewConversationDraft, readChatDraft, writeChatDraft } from './draft-storage';
 import { Configuration } from './configuration';
-import { ExecutorsConfiguration } from './executors-configuration';
 import { Memories } from './memories';
 import { downloadExecutionLog } from './execution-log';
 import { ConversationList } from './conversation-list';
@@ -40,16 +39,6 @@ const RESTARTED_AGENT_ERROR = 'The API restarted before this Chat turn completed
 type QueuedMessage = { id: string; text: string };
 type ActiveWorkflowRun = { workflow: WorkflowView; run: RunView; input: string };
 type PendingReceipt = ChatConversationView['pendingReceipts'][number];
-// A declared executor default is one model id, an ordered fallback list, or absent; the editor
-// represents both forms as one comma-separated text field.
-function modelListToText(value: string | string[] | undefined): string {
-  return Array.isArray(value) ? value.join(', ') : value ?? '';
-}
-function textToModelList(value: string): string | string[] | null {
-  const entries = value.split(',').map((entry) => entry.trim()).filter(Boolean);
-  if (entries.length === 0) return null;
-  return entries.length === 1 ? entries[0]! : entries;
-}
 const conversationDrafts = new Map<string, { draft: string; queued: QueuedMessage[]; paused: boolean; attachments: ChatAttachmentView[] }>();
 // Attachment ids are embedded in the sent message as Markdown images; the server then hands the same
 // images to whatever project task the turn dispatches.
@@ -63,12 +52,11 @@ const NO_RECEIPTS: PendingReceipt[] = [];
 // long conversation does not mount its whole history at once.
 const RECENT_TIMELINE_COUNT = 30;
 
-type SettingsSection = 'channels' | 'configuration' | 'executors' | 'memories';
+type SettingsSection = 'channels' | 'configuration' | 'memories';
 // The settings Dialog switches sections through a slim left rail rather than top tabs;
 // each entry keeps its validated `view=` deep link of the same name.
 const SETTINGS_SECTIONS: { value: SettingsSection; icon: typeof SlidersHorizontal }[] = [
   { value: 'configuration', icon: SlidersHorizontal },
-  { value: 'executors', icon: Cpu },
   { value: 'channels', icon: Radio },
   { value: 'memories', icon: Brain },
 ];
@@ -130,17 +118,11 @@ function ChatWorkspace() {
   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowView | null>(null);
   const [workflowRun, setWorkflowRun] = useState<ActiveWorkflowRun | null>(null);
   const [draft, setDraft] = useState(() => readChatDraft(selectedConversationId) ?? conversationDrafts.get(selectedConversationId ?? 'new')?.draft ?? '');
-  const [settingsOpen, setSettingsOpen] = useState(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'executors' || locationSearch.view === 'memories');
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'executors' || locationSearch.view === 'memories' ? locationSearch.view : 'configuration');
+  const [settingsOpen, setSettingsOpen] = useState(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories' ? locationSearch.view : 'configuration');
   const [configSelection, setConfigSelection] = useState('');
-  const [defaultExecutor, setDefaultExecutor] = useState<ProjectExecutor>('claude');
-  // '' means the executor's own local default; a non-empty comma-separated list declares one model
-  // or an ordered list of fallback candidates (first entry tried first).
-  const [executorModels, setExecutorModels] = useState<Record<ProjectExecutor, string>>({ claude: '', codex: '' });
   const [configSaving, setConfigSaving] = useState(false);
   const [extensionPrompt, setExtensionPrompt] = useState('');
-  const [executorContext, setExecutorContext] = useState('');
-  const [projectTaskMcpServerIds, setProjectTaskMcpServerIds] = useState<string[]>([]);
   const [summarizePrompt, setSummarizePrompt] = useState('');
   const [turnNotificationsEnabled, setTurnNotificationsEnabled] = useState(true);
   const [turnNotificationSound, setTurnNotificationSound] = useState(CHAT_TURN_NOTIFICATION_DEFAULT_SOUND);
@@ -178,21 +160,14 @@ function ChatWorkspace() {
   useEffect(() => {
     if (!agentQuery.data) return;
     setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
-    setDefaultExecutor(agentQuery.data.chatConfiguration?.defaultExecutor ?? 'claude');
     setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
-    setExecutorContext(agentQuery.data.chatConfiguration?.executorContext ?? '');
-    setProjectTaskMcpServerIds(agentQuery.data.chatConfiguration?.projectTaskMcpServerIds ?? []);
     setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
     setTurnNotificationsEnabled(agentQuery.data.chatConfiguration?.turnNotificationsEnabled ?? true);
     setTurnNotificationSound(agentQuery.data.chatConfiguration?.turnNotificationSound ?? CHAT_TURN_NOTIFICATION_DEFAULT_SOUND);
     setChatSkillIds(agentQuery.data.chatConfiguration?.skillIds ?? []);
-    setExecutorModels({
-      claude: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.claude),
-      codex: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.codex),
-    });
   }, [agentQuery.data]);
 
-  const saveConfiguration = async (selection: string, prompt = extensionPrompt, models = executorModels, summarize = summarizePrompt, skillIds?: string[], sharedExecutorContext = executorContext, executor = defaultExecutor, mcpServerIds?: string[], notifications = { enabled: turnNotificationsEnabled, sound: turnNotificationSound }) => {
+  const saveConfiguration = async (selection: string, prompt = extensionPrompt, summarize = summarizePrompt, skillIds?: string[], notifications = { enabled: turnNotificationsEnabled, sound: turnNotificationSound }) => {
     if (configSaving) return;
     const separator = selection.indexOf('::');
     setConfigSaving(true);
@@ -201,11 +176,8 @@ function ChatWorkspace() {
       const saved = await api.updateAgent(workspaceSlug, CHAT_AGENT_ID, {
         providerId: separator >= 0 ? selection.slice(0, separator) : null,
         model: separator >= 0 ? selection.slice(separator + 2) : '',
-        extensionPrompt: prompt, executorContext: sharedExecutorContext, summarizePrompt: summarize, defaultExecutor: executor, expectedConfigurationRevision: agentQuery.data?.chatConfiguration?.revision,
+        extensionPrompt: prompt, summarizePrompt: summarize, expectedConfigurationRevision: agentQuery.data?.chatConfiguration?.revision,
         turnNotificationsEnabled: notifications.enabled, turnNotificationSound: notifications.sound,
-        // Both declarations are current state; selecting the default only turns the chosen one into null.
-        defaultExecutorModels: { claude: textToModelList(models.claude), codex: textToModelList(models.codex) },
-        ...(mcpServerIds === undefined ? {} : { projectTaskMcpServerIds: mcpServerIds }),
         ...(skillIds === undefined ? {} : { skillIds }),
       });
       queryClient.setQueryData(['agent', CHAT_AGENT_ID], saved);
@@ -213,46 +185,19 @@ function ChatWorkspace() {
       setConfigError(apiErrorMessage(cause, t('assistant:configuration.saveFailed')));
       if (agentQuery.data) {
         setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
-        setDefaultExecutor(agentQuery.data.chatConfiguration?.defaultExecutor ?? 'claude');
         setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
-        setExecutorContext(agentQuery.data.chatConfiguration?.executorContext ?? '');
-        setProjectTaskMcpServerIds(agentQuery.data.chatConfiguration?.projectTaskMcpServerIds ?? []);
         setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
         setTurnNotificationsEnabled(agentQuery.data.chatConfiguration?.turnNotificationsEnabled ?? true);
         setTurnNotificationSound(agentQuery.data.chatConfiguration?.turnNotificationSound ?? CHAT_TURN_NOTIFICATION_DEFAULT_SOUND);
         setChatSkillIds(agentQuery.data.chatConfiguration?.skillIds ?? []);
-        setExecutorModels({
-          claude: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.claude),
-          codex: modelListToText(agentQuery.data.chatConfiguration?.defaultExecutorModels?.codex),
-        });
       }
     } finally { setConfigSaving(false); }
   };
 
-  function changeExecutorModel(executor: ProjectExecutor, value: string) {
-    const nextModels = { ...executorModels, [executor]: value };
-    setExecutorModels(nextModels);
-    if (value !== modelListToText(agentQuery.data?.chatConfiguration?.defaultExecutorModels?.[executor])) {
-      void saveConfiguration(configSelection, extensionPrompt, nextModels);
-    }
-  }
-
-  function changeDefaultExecutor(executor: ProjectExecutor) {
-    setDefaultExecutor(executor);
-    if (executor !== (agentQuery.data?.chatConfiguration?.defaultExecutor ?? 'claude')) {
-      void saveConfiguration(configSelection, extensionPrompt, executorModels, summarizePrompt, undefined, executorContext, executor);
-    }
-  }
-
   function changeTurnNotifications(enabled: boolean, sound: string) {
     setTurnNotificationsEnabled(enabled);
     setTurnNotificationSound(sound);
-    void saveConfiguration(configSelection, extensionPrompt, executorModels, summarizePrompt, undefined, executorContext, defaultExecutor, undefined, { enabled, sound });
-  }
-
-  function changeProjectTaskMcpServerIds(ids: string[]) {
-    setProjectTaskMcpServerIds(ids);
-    void saveConfiguration(configSelection, extensionPrompt, executorModels, summarizePrompt, undefined, executorContext, defaultExecutor, ids);
+    void saveConfiguration(configSelection, extensionPrompt, summarizePrompt, undefined, { enabled, sound });
   }
 
   function openSettings(section: SettingsSection) {
@@ -338,7 +283,7 @@ function ChatWorkspace() {
   useEffect(() => {
     const id = typeof locationSearch.conversation === 'string' ? locationSearch.conversation : null;
     if (id && id !== selectedConversationId) selectConversation(id);
-    if (locationSearch.view === 'configuration' || locationSearch.view === 'executors' || locationSearch.view === 'channels' || locationSearch.view === 'memories') {
+    if (locationSearch.view === 'configuration' || locationSearch.view === 'channels' || locationSearch.view === 'memories') {
       setSettingsSection(locationSearch.view);
       setSettingsOpen(true);
     } else setSettingsOpen(false);
@@ -1063,7 +1008,7 @@ function ChatWorkspace() {
               {settingsSection === 'channels' ? <ChannelConfiguration /> : null}
               {settingsSection === 'configuration' ? (
                 <Configuration providers={providersQuery.data ?? []} skills={skillsQuery.data ?? []} selectedSkillIds={chatSkillIds}
-                  onSkillIdsChange={(ids) => { setChatSkillIds(ids); void saveConfiguration(configSelection, extensionPrompt, executorModels, summarizePrompt, ids); }}
+                  onSkillIdsChange={(ids) => { setChatSkillIds(ids); void saveConfiguration(configSelection, extensionPrompt, summarizePrompt, ids); }}
                   skillsLoading={skillsQuery.isLoading} skillsLoadFailed={skillsQuery.isError}
                   selection={configSelection}
                   onSelectionChange={(value) => { setConfigSelection(value); void saveConfiguration(value); }}
@@ -1073,16 +1018,6 @@ function ChatWorkspace() {
                   saving={configSaving} error={configError} loading={agentQuery.isLoading}
                   loadFailed={agentQuery.isError} providersLoading={providersQuery.isLoading} providersLoadFailed={providersQuery.isError}
                   onReload={() => { void agentQuery.refetch(); void providersQuery.refetch(); void skillsQuery.refetch(); }} />
-              ) : null}
-              {settingsSection === 'executors' ? (
-                <ExecutorsConfiguration providers={providersQuery.data ?? []}
-                  defaultExecutor={defaultExecutor} onDefaultExecutorChange={changeDefaultExecutor}
-                  executorModels={executorModels} onExecutorModelChange={changeExecutorModel}
-                  executorContext={executorContext} onExecutorContextChange={setExecutorContext} onExecutorContextSave={() => { if (executorContext !== (agentQuery.data?.chatConfiguration?.executorContext ?? '')) void saveConfiguration(configSelection, extensionPrompt, executorModels, summarizePrompt, undefined, executorContext); }}
-                  projectTaskMcpServerIds={projectTaskMcpServerIds} onProjectTaskMcpServerIdsChange={changeProjectTaskMcpServerIds}
-                  saving={configSaving} error={configError} loading={agentQuery.isLoading}
-                  loadFailed={agentQuery.isError} providersLoading={providersQuery.isLoading} providersLoadFailed={providersQuery.isError}
-                  onReload={() => { void agentQuery.refetch(); void providersQuery.refetch(); }} />
               ) : null}
               {settingsSection === 'memories' ? <Memories /> : null}
             </div>

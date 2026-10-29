@@ -4,12 +4,10 @@ import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { AgentVersionView, AgentView, CreateAgentRequest, ModelProviderView, UpdateAgentRequest } from '@worklite/contracts';
 import { CHAT_TURN_NOTIFICATION_DEFAULT_SOUND, CHAT_TURN_NOTIFICATION_SOUNDS, WORKLITE_PLATFORM_SKILL_NAME } from '@worklite/contracts';
-import { agentExecutions, chatConfigurations, agentMcpServers, agentVersions, agents, agentSkills, mcpServers, scheduledAgentTasks, skills, type Database, type StoredProjectExecutor } from '@worklite/db';
-import { normalizePublicModelList } from '@worklite/model-gateway';
+import { agentExecutions, chatConfigurations, agentMcpServers, agentVersions, agents, agentSkills, mcpServers, scheduledAgentTasks, skills, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { WorkspaceService } from '../teams/teams.service';
-import { PROJECT_EXECUTOR_PROTOCOLS, isGatewayPublicModel } from './project-executor.types';
 
 const CHAT_AGENT_ID = 'agt_system_helper_chat';
 const CODEX_CLI_AGENT_ID = 'agt_codex_cli_chat';
@@ -59,7 +57,7 @@ export class AgentsService {
     const view = this.toView(row.agent, workspaceSlug, row.agent.providerId ? gatewayNames.get(row.agent.providerId) ?? null : null, assignments, latest);
     if (agentId === CHAT_AGENT_ID) {
       const [configuration] = await this.db.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
-      if (configuration) view.chatConfiguration = { revision: configuration.revision, extensionPrompt: configuration.extensionPrompt, executorContext: configuration.executorContext, summarizePrompt: configuration.summarizePrompt, defaultExecutor: configuration.defaultExecutor, defaultExecutorModels: configuration.defaultExecutorModels, projectTaskMcpServerIds: configuration.projectTaskMcpServerIds, turnNotificationsEnabled: configuration.turnNotificationsEnabled, turnNotificationSound: configuration.turnNotificationSound, skillIds: configuration.skillIds };
+      if (configuration) view.chatConfiguration = { revision: configuration.revision, extensionPrompt: configuration.extensionPrompt, summarizePrompt: configuration.summarizePrompt, turnNotificationsEnabled: configuration.turnNotificationsEnabled, turnNotificationSound: configuration.turnNotificationSound, skillIds: configuration.skillIds };
     }
     return view;
   }
@@ -143,7 +141,7 @@ export class AgentsService {
 
       const isChat = existing.id === CHAT_AGENT_ID;
         // Chat Skills are captured from its revisioned configuration. User MCP servers remain unavailable to Chat.
-        const fields = ['providerId', 'model', ...(isChat ? ['skillIds', 'extensionPrompt', 'executorContext', 'summarizePrompt', 'defaultExecutor', 'defaultExecutorModels', 'projectTaskMcpServerIds', 'turnNotificationsEnabled', 'turnNotificationSound', 'expectedConfigurationRevision'] : ['mcpServerIds'])];
+        const fields = ['providerId', 'model', ...(isChat ? ['skillIds', 'extensionPrompt', 'summarizePrompt', 'turnNotificationsEnabled', 'turnNotificationSound', 'expectedConfigurationRevision'] : ['mcpServerIds'])];
         if (isChat && 'mcpServerIds' in input) throw new BadRequestException('Chat does not accept user MCP server selections.');
       if (Object.keys(input).some((key) => !fields.includes(key))) throw new BadRequestException('Unsupported built-in Agent configuration field.');
       const nextProviderId = input.providerId === undefined ? existing.providerId : input.providerId;
@@ -152,43 +150,13 @@ export class AgentsService {
       if (provider && requestedModel && !provider.models.includes(requestedModel)) throw new BadRequestException('The selected model is not configured for this provider.');
       const model = provider ? requestedModel || provider.models[0] || '' : '';
       if (input.extensionPrompt !== undefined && typeof input.extensionPrompt !== 'string') throw new BadRequestException('An extension prompt must be text.');
-      if (input.executorContext !== undefined && typeof input.executorContext !== 'string') throw new BadRequestException('The executor context must be text.');
       if (input.summarizePrompt !== undefined && typeof input.summarizePrompt !== 'string') throw new BadRequestException('A summarize prompt must be text.');
-      if (input.defaultExecutor !== undefined && input.defaultExecutor !== 'claude' && input.defaultExecutor !== 'codex') throw new BadRequestException('The default executor must be claude or codex.');
       if (input.turnNotificationsEnabled !== undefined && typeof input.turnNotificationsEnabled !== 'boolean') throw new BadRequestException('The conversation notification switch must be true or false.');
       // A sound name reaches the macOS notification command as a quoted literal; only the names macOS
       // accepts are stored, and an empty name means a silent notification.
       if (input.turnNotificationSound !== undefined && (typeof input.turnNotificationSound !== 'string' || (input.turnNotificationSound.trim() !== '' && !CHAT_TURN_NOTIFICATION_SOUNDS.includes(input.turnNotificationSound.trim())))) throw new BadRequestException(`A conversation notification sound must be empty or one of: ${CHAT_TURN_NOTIFICATION_SOUNDS.join(', ')}.`);
-      // Declared per-executor default models merge into the stored declarations; every declared model must
-      // speak the protocol its executor supports, including declarations kept from the previous revision.
-      const executorModelsPatch = input.defaultExecutorModels === undefined ? undefined : parseExecutorModelsPatch(input.defaultExecutorModels);
-      let mergedExecutorModels: Partial<Record<StoredProjectExecutor, string | string[]>> | undefined;
-      if (executorModelsPatch !== undefined) {
-        const [latest] = await this.db.select({ models: chatConfigurations.defaultExecutorModels }).from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
-        mergedExecutorModels = mergeExecutorModels(latest?.models, executorModelsPatch);
-        // A native Codex designation is left to the operator's own Codex configuration; every declared
-        // Gateway public model candidate must exist and speak a protocol the executor can reach through
-        // the Gateway.
-        for (const executor of ['claude', 'codex'] as const) {
-          const declared = mergedExecutorModels[executor];
-          if (!declared) continue;
-          for (const candidateModelId of normalizePublicModelList(declared)) {
-            if (executor === 'codex' && !isGatewayPublicModel(candidateModelId)) continue;
-            const runtime = await this.resources.publicModelRuntime(team.id, candidateModelId);
-            const protocols = PROJECT_EXECUTOR_PROTOCOLS[executor]!;
-            if (!protocols.includes(runtime.protocol)) {
-              const label = executor === 'codex' ? 'Codex' : 'Claude Code';
-              throw new BadRequestException(`${label} 需要 ${protocols.join(' 或 ')} 协议的 Gateway 模型。`);
-            }
-          }
-        }
-      }
         const selections = await this.validateAssignments(team.id, isChat ? input.skillIds : undefined, input.mcpServerIds, true);
         const chatSkillIds = isChat ? selections.skillIds : undefined;
-      // MCP servers declared for Claude Code project tasks are validated against the workspace like any selection.
-      const projectTaskMcpServerIds = isChat && input.projectTaskMcpServerIds !== undefined
-        ? (await this.validateAssignments(team.id, undefined, input.projectTaskMcpServerIds)).mcpServerIds
-        : undefined;
       this.db.transaction((transaction) => {
         const [previous] = transaction.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1).all();
         if (isChat && input.expectedConfigurationRevision !== undefined && input.expectedConfigurationRevision !== previous?.revision) throw new ConflictException('Chat configuration changed; inspect the current revision before updating.');
@@ -200,11 +168,7 @@ export class AgentsService {
         if (isChat) transaction.insert(chatConfigurations).values({
           workspaceId: team.id, revision: (previous?.revision ?? 0) + 1,
           extensionPrompt: input.extensionPrompt === undefined ? previous?.extensionPrompt ?? '' : input.extensionPrompt,
-          executorContext: input.executorContext === undefined ? previous?.executorContext ?? '' : input.executorContext,
           summarizePrompt: input.summarizePrompt === undefined ? previous?.summarizePrompt ?? '' : input.summarizePrompt,
-          defaultExecutor: input.defaultExecutor ?? previous?.defaultExecutor ?? 'claude',
-          defaultExecutorModels: executorModelsPatch === undefined ? previous?.defaultExecutorModels ?? {} : mergeExecutorModels(previous?.defaultExecutorModels, executorModelsPatch),
-          projectTaskMcpServerIds: projectTaskMcpServerIds ?? previous?.projectTaskMcpServerIds ?? [],
           turnNotificationsEnabled: input.turnNotificationsEnabled ?? previous?.turnNotificationsEnabled ?? true,
           turnNotificationSound: input.turnNotificationSound === undefined ? previous?.turnNotificationSound ?? CHAT_TURN_NOTIFICATION_DEFAULT_SOUND : input.turnNotificationSound.trim(),
           providerId: nextProviderId ?? null, model,
@@ -364,30 +328,6 @@ function normalizeResourceIds(input: unknown, resourceName: string): string[] {
   if (input === undefined) return [];
   if (!Array.isArray(input) || input.some((value) => typeof value !== 'string')) throw new BadRequestException(`${resourceName} selections must be an array of identifiers.`);
   return [...new Set(input.map((value) => value.trim()).filter(Boolean))];
-}
-
-// A string declares one model, an array declares an ordered list of fallback candidates, null
-// or an empty string clears the declaration; other keys are rejected.
-function parseExecutorModelsPatch(input: unknown): Partial<Record<StoredProjectExecutor, string | string[] | null>> {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new BadRequestException('Default executor models must be an object keyed by executor.');
-  const patch: Partial<Record<StoredProjectExecutor, string | string[] | null>> = {};
-  for (const [key, value] of Object.entries(input)) {
-    if (key !== 'claude' && key !== 'codex') throw new BadRequestException('Default executor models must be keyed by claude or codex.');
-    if (value === null || (typeof value === 'string' && !value.trim())) patch[key] = null;
-    else if (typeof value === 'string') patch[key] = value.trim();
-    else if (Array.isArray(value) && value.length > 0 && value.every((entry) => typeof entry === 'string' && entry.trim())) patch[key] = value.map((entry) => entry.trim());
-    else throw new BadRequestException('A default executor model must be a Gateway public model id, a non-empty array of them, or null.');
-  }
-  return patch;
-}
-
-function mergeExecutorModels(current: Partial<Record<StoredProjectExecutor, string | string[]>> | undefined, patch: Partial<Record<StoredProjectExecutor, string | string[] | null>>): Partial<Record<StoredProjectExecutor, string | string[]>> {
-  const merged: Partial<Record<StoredProjectExecutor, string | string[]>> = { ...(current ?? {}) };
-  for (const [executor, model] of Object.entries(patch) as Array<[StoredProjectExecutor, string | string[] | null]>) {
-    if (model === null) delete merged[executor];
-    else merged[executor] = model;
-  }
-  return merged;
 }
 
 function toAgentVersionView(row: typeof agentVersions.$inferSelect): AgentVersionView {

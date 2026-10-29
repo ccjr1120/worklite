@@ -6,7 +6,6 @@ import { describe, expect, it, afterEach } from 'vitest';
 import { createDb, type Database } from '@worklite/db';
 import { ChatProjectTasksService, extractTaskResult, settleChatProjectTask } from './chat-project-tasks.service';
 import type { ProjectExecutorService } from './project-executor.service';
-import type { WorkspaceResourcesService } from '../teams/team-resources.service';
 import type { ChatAttachmentsService } from './chat-attachments.service';
 
 // No test here sends a pasted image, so the attachment store only has to exist as a collaborator.
@@ -181,8 +180,7 @@ describe('ChatProjectTasksService.capture workspace behavior', () => {
     const executors = {
       captureLaunch: async () => ({ executor: 'claude' as const, commandArguments: [], baseUrl: 'http://127.0.0.1:23392', model: null }),
     };
-    const resources = { workflowMcpRuntimes: async () => [] } as unknown as WorkspaceResourcesService;
-    return { service: new ChatProjectTasksService(db, executors as unknown as ProjectExecutorService, resources, noAttachments), repository };
+    return { service: new ChatProjectTasksService(db, executors as unknown as ProjectExecutorService, noAttachments), repository };
   }
 
   function gitBranches(repository: string): string {
@@ -265,8 +263,7 @@ describe('ChatProjectTasksService.capture workspace behavior', () => {
         return '{"status":"succeeded","summary":"done"}';
       },
     };
-    const resources = { workflowMcpRuntimes: async () => [] } as unknown as WorkspaceResourcesService;
-    const service = new ChatProjectTasksService(db, executors as unknown as ProjectExecutorService, resources, noAttachments);
+    const service = new ChatProjectTasksService(db, executors as unknown as ProjectExecutorService, noAttachments);
     const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_live', { goal: '调查并修复问题', projectDirectory: repository });
 
     const completion = service.run(task.id, async () => undefined);
@@ -309,8 +306,7 @@ describe('ChatProjectTasksService.capture workspace behavior', () => {
         return '{"status":"succeeded","summary":"second round done"}';
       },
     };
-    const resources = { workflowMcpRuntimes: async () => [] } as unknown as WorkspaceResourcesService;
-    const service = new ChatProjectTasksService(db, executors as unknown as ProjectExecutorService, resources, noAttachments);
+    const service = new ChatProjectTasksService(db, executors as unknown as ProjectExecutorService, noAttachments);
     const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_claude', { goal: '调查并修复问题', projectDirectory: repository });
 
     const completion = service.run(task.id, async () => undefined);
@@ -346,8 +342,7 @@ describe('ChatProjectTasksService.capture workspace behavior', () => {
       captureLaunch: async () => ({ executor: 'claude' as const, commandArguments: [], baseUrl: 'http://127.0.0.1:23392', model: null }),
       execute,
     };
-    const resources = { workflowMcpRuntimes: async () => [] } as unknown as WorkspaceResourcesService;
-    return { db, service: new ChatProjectTasksService(db, executors as unknown as ProjectExecutorService, resources, noAttachments) };
+    return { db, service: new ChatProjectTasksService(db, executors as unknown as ProjectExecutorService, noAttachments) };
   }
   const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
   const done = (summary: string) => JSON.stringify({ status: 'succeeded', summary });

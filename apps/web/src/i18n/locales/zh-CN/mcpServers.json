@@ -55,7 +55,6 @@
     "references": {
       "title": "该服务器仍被以下位置引用：",
       "agent": "Agent「{{name}}」",
-      "chatConfiguration": "当前 Chat 配置",
       "activeChatTurns": "进行中的 Chat 会话",
       "workflowDraft": "Workflow「{{name}}」草稿（节点：{{nodes}}）",
       "workflowVersion": "已发布的 Workflow「{{name}}」v{{version}}（节点：{{nodes}}）",

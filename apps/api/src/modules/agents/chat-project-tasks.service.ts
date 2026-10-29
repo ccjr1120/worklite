@@ -3,11 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
-import { agentExecutions, agentToolCalls, chatConfigurations, chatProjectOperations, chatProjectTasks, chatProjectTaskSubscriptions, type Database, type StoredProjectExecutor, type StoredProjectExecutorLaunch, type StoredProjectExecutorModelSource, type StoredProjectTaskSteerInstruction } from '@worklite/db';
+import { agentExecutions, agentToolCalls, chatProjectOperations, chatProjectTasks, chatProjectTaskSubscriptions, type Database, type StoredProjectExecutor, type StoredProjectExecutorLaunch, type StoredProjectExecutorModelSource, type StoredProjectTaskSteerInstruction } from '@worklite/db';
 import { splitChatAttachmentImages, type AnswerAgentQuestionRequest, type ChatProjectOperationDetailView, type ChatProjectTaskView } from '@worklite/contracts';
-import { normalizePublicModelList } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
-import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { ChatAttachmentsService } from './chat-attachments.service';
 import { ClaudeCodeError } from './claude-code.service';
 import { CodexAppServerError } from './codex-app-server.service';
@@ -64,7 +62,6 @@ export class ChatProjectTasksService {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     private readonly executors: ProjectExecutorService,
-    private readonly resources: WorkspaceResourcesService,
     private readonly attachments: ChatAttachmentsService,
   ) {}
 
@@ -110,16 +107,13 @@ export class ChatProjectTasksService {
       throw new BadRequestException('A redeploy-after-success task must use the managed WorkLite project root.');
     }
     if (!execution?.capabilitySnapshot) throw new ConflictException('This Chat turn has no captured capabilities; start a new turn.');
-    const executor: StoredProjectExecutor = (value.executor as StoredProjectExecutor | undefined) ?? execution.capabilitySnapshot.defaultExecutor ?? 'claude';
-    // Model precedence: task parameter, then the Chat configuration's declared default for this
-    // executor, then the executor's own local default. The launch records the effective model and its
-    // source. A project executor launches one native process with no Gateway-level fallback loop, so a
-    // declared fallback list here only ever uses its first (primary) candidate.
-    const declaredModel = normalizePublicModelList(execution.capabilitySnapshot.defaultExecutorModels?.[executor] ?? '')[0] ?? null;
-    const model = requestedModel ?? declaredModel;
+    const executor: StoredProjectExecutor = (value.executor as StoredProjectExecutor | undefined) ?? 'claude';
+    // Model precedence: task parameter, then the executor's own local default. The launch records the
+    // effective model and its source.
+    const model = requestedModel;
     const launch = await this.executors.captureLaunch(executor, model);
     if (model) await this.executors.requireModel(workspaceId, executor, model);
-    const modelSource: StoredProjectExecutorModelSource = requestedModel ? 'task' : declaredModel ? 'configuration' : 'executor';
+    const modelSource: StoredProjectExecutorModelSource = requestedModel ? 'task' : 'executor';
     const capturedLaunch: StoredProjectExecutorLaunch = { ...launch, model, modelSource };
     // Images the user attached to the request that produced this call. Only the turn's own user
     // message is read, so an image pasted in an earlier turn never leaks into an unrelated task.
@@ -368,7 +362,6 @@ export class ChatProjectTasksService {
     try {
       const launch = task.snapshot.launch;
       if (!launch || !('executor' in launch)) throw new BadRequestException('此旧任务未记录执行器；请创建新任务，已有记录仍保留。');
-      const capabilities = task.snapshot.capabilities;
       // Historical tasks with a captured WorkLite worktree keep their recorded merge path.
       // New tasks run from the supplied workspace root, and readOnly remains an instruction.
       const workingDirectory = task.worktreePath ?? task.projectDirectory;
@@ -381,14 +374,7 @@ export class ChatProjectTasksService {
       const redeployInstruction = task.snapshot.redeployAfterSuccess
         ? 'The current user explicitly requested both this WorkLite code change and redeployment. Apply every change directly in the exact supplied managed project root checkout; do not create or switch to a separate branch or worktree because the managed runner snapshots this checkout after you report success. Do not ask for another confirmation. Do not run installation, deployment, upgrade-runner or service-replacement commands yourself; after your task reaches succeeded, the WorkLite API starts the managed runner automatically. Perform the requested non-deployment verification and report its result.'
         : '';
-      const configuration = this.db.select({ executorContext: chatConfigurations.executorContext, projectTaskMcpServerIds: chatConfigurations.projectTaskMcpServerIds }).from(chatConfigurations)
-        .where(and(eq(chatConfigurations.workspaceId, task.workspaceId), eq(chatConfigurations.revision, capabilities.revision))).get();
-      // Chat hands no Skills to its executor, including from snapshots captured before selection was removed.
-      // MCP servers declared in the Chat configuration are injected into Claude Code tasks only, through the
-      // shared per-task handover; their credentials are resolved in server memory and never enter the prompt.
-      const declaredMcpServers = launch.executor === 'claude' && configuration?.projectTaskMcpServerIds.length
-        ? await this.resources.workflowMcpRuntimes(task.workspaceId, configuration.projectTaskMcpServerIds)
-        : [];
+      // Chat hands no Skills or MCP servers to its executor, including from snapshots captured before selection was removed.
       const steerPort: ProjectExecutorSteerPort = {};
       this.steerPorts.set(taskId, steerPort);
       const inboundImages = await this.loadInboundImages(task);
@@ -399,8 +385,7 @@ export class ChatProjectTasksService {
         correlation: { surface: 'chat_project_task', conversationId: task.executionId, projectTaskId: task.id, executor: launch.executor },
         projectDirectory: workingDirectory,
         skills: [],
-        mcpServers: declaredMcpServers,
-        executorContext: configuration?.executorContext,
+        mcpServers: [],
         systemPrompt: [
           `Execute this Chat-owned project task independently of Coding Executors. The supplied working directory is a workspace root: it may contain multiple projects or repositories and need not itself be a Git repository. Inspect the relevant project directories, their applicable instructions, actual working trees and prior task effects before changing files or taking over interrupted work. Decide independently for each relevant project whether to use its current branch, switch to or create a feature branch, or create a worktree for that project, unless a captured redeployAfterSuccess request requires the exact supplied checkout. Do not assume every project needs a worktree, and do not create one around the entire workspace. WorkLite does not create branches or worktrees, merge branches, or clean up Git state for new tasks; you own any Git operations you choose and should report the project paths, strategy, branch or worktree paths, and outcome in your summary. Follow captured workspace-root instructions in the pinned reference files and discover additional applicable project instructions. Follow project instructions for code conventions and useful verification, but the current user's explicit requested scope takes priority; do not add a confirmation step for a clearly requested change. Keep work within the user task. Use supplied review findings and user-requested scope to check affected code without repeating the complete review. Explain concrete progress as work proceeds.${redeployInstruction} Do not perform WorkLite installation, deployment, upgrade-runner or service replacement commands yourself; the managed runner owns that lifecycle.${legacyWorktreeInstruction}${readOnlyInstruction} The user may submit a mid-run correction while you are working; if your input carries userCorrections, the user is redirecting or adjusting the task itself (not answering a question you asked), so weigh them as the current instruction over the original goal where they conflict and continue the same task without starting over or discarding unrelated completed work. Return JSON: {"status":"succeeded","summary":"..."} or {"status":"waiting_for_input","pendingInput":{"question":"..."}}. Ask only for material missing information and follow the user’s task and corrections.`,
           'To show an image such as a screenshot in your report, upload the file as the raw request body to attachmentUploadUrl from the input with its image media type, for example `curl -sS --data-binary @shot.png -H \'Content-Type: image/png\' "<attachmentUploadUrl>&fileName=shot.png"`. Only PNG, JPEG, GIF and WebP up to 10 MB are accepted. Put the returned `markdown` value, such as ![shot.png](/api/chat/attachments/att_…), in the summary exactly as returned; never reference local file paths or file:// URLs as images. Uploaded images expire with the request logs.',

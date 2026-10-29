@@ -17,7 +17,7 @@ type McpServerDeleteDialogProps = {
 };
 
 function hasHardBlocks(references: McpServerReferenceReport) {
-  return references.agents.length > 0 || references.activeChatTurns || references.chatConfiguration;
+  return references.agents.length > 0 || references.activeChatTurns;
 }
 
 function hasReferences(references: McpServerReferenceReport) {
@@ -99,7 +99,6 @@ function McpServerDeleteDialog({ open, onOpenChange, serverId, name, onDeleted }
               {references.agents.map((agent) => (
                 <li key={agent.agentId}>{t('delete.references.agent', { name: agent.agentName })}</li>
               ))}
-              {references.chatConfiguration ? <li>{t('delete.references.chatConfiguration')}</li> : null}
               {references.activeChatTurns ? <li>{t('delete.references.activeChatTurns')}</li> : null}
               {references.workflowDrafts.map((draft) => (
                 <li key={`draft-${draft.workflowId}`}>

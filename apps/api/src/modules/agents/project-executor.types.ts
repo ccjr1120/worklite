@@ -41,8 +41,6 @@ export type ProjectExecutorRequest = {
   // Public Gateway model id; null keeps the executor's own configured default.
   model: string | null;
   systemPrompt: string;
-  // WorkLite-managed shared guidance; prepare() attaches it once for both executor adapters.
-  executorContext?: string;
   input: string;
   projectDirectory: string;
   skills: readonly ProjectExecutorSkill[];
