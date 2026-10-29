@@ -154,7 +154,8 @@ export function TeamConfig({ teamId }: { teamId: string }) {
   const skillsQuery = useSkillsQuery('personal');
   const notSet = t('config.notSet');
   const recordsPath = `/agent-teams/${encodeURIComponent(teamId)}`;
-  const crumbs = [{ label: t('title') }, ...(teamQuery.data ? [{ label: teamQuery.data.name, to: recordsPath }] : []), { label: t('config.title') }];
+  const categoryName = t(`focus.${teamId}` as never, { defaultValue: teamQuery.data?.name });
+  const crumbs = [{ label: 'Coding' }, ...(teamQuery.data ? [{ label: categoryName, to: recordsPath }] : []), { label: t('config.title') }];
 
   if (teamQuery.isPending) {
     return (

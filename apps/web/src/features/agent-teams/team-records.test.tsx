@@ -155,7 +155,7 @@ describe('TeamRecords', () => {
     mockQueries(runsByTeam, { isPending: true });
     render(<TeamRecords teamId="agent_team_bmad_tea" />);
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Company Project' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Coding' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: '按标题搜索' })).toBeDisabled();
     const rows = [...screen.getByRole('status').querySelectorAll('li')];
     expect(rows).toHaveLength(8);
