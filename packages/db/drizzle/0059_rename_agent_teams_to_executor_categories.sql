@@ -173,4 +173,3 @@ WHERE json_extract(outcome, '$.surface') = 'team_project_task';
 UPDATE executor_runs
 SET outcome = json_replace(outcome, '$.surface', 'executor_category')
 WHERE json_extract(outcome, '$.surface') = 'team';
---> statement-breakpoint
