@@ -1065,14 +1065,14 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (existing) {
       const roles: StoredAgentTeamRoleConfiguration[] = [...existing.roles];
       const activeRoles = ensureBuiltInTeamRoles(roles);
-      const name = existing.name === 'WorkLite Software Team' || existing.name === 'Company Project Team'
-        ? 'Company Project' : existing.name;
-      const description = existing.description === 'Built-in BMAD and TEA software development team.'
-        ? 'Built-in BMAD and TEA team for company projects and requirements.' : existing.description;
+      // Built-in executors are matched by their stable id only. Their name is user-editable,
+      // so re-seeding never rewrites it.
+      const description = existing.description === 'Built-in BMAD and TEA software development team.' || existing.description === 'Built-in BMAD and TEA team for company projects and requirements.'
+        ? 'Built-in BMAD and TEA executor for company projects and requirements.' : existing.description;
       const projectGitPolicy = existing.projectGitPolicy.trim() || DEFAULT_COMPANY_PROJECT_GIT_POLICY;
       if (JSON.stringify(roles) !== JSON.stringify(activeRoles)
-        || name !== existing.name || description !== existing.description || projectGitPolicy !== existing.projectGitPolicy) {
-        await this.db.update(executorCategories).set({ roles: activeRoles, name, description, projectGitPolicy, updatedAt: new Date() })
+        || description !== existing.description || projectGitPolicy !== existing.projectGitPolicy) {
+        await this.db.update(executorCategories).set({ roles: activeRoles, description, projectGitPolicy, updatedAt: new Date() })
           .where(eq(executorCategories.id, existing.id)).run();
       }
     } else {
@@ -1083,7 +1083,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         id: BUILT_IN_EXECUTOR_CATEGORY_ID,
         workspaceId: 'workspace_personal',
         name: 'Company Project',
-        description: 'Built-in BMAD and TEA team for company projects and requirements.',
+        description: 'Built-in BMAD and TEA executor for company projects and requirements.',
         processId: EXECUTOR_CATEGORY_PROCESS_ID,
         processVersion: EXECUTOR_CATEGORY_PROCESS_VERSION,
         roles,
