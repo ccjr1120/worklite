@@ -84,7 +84,7 @@ Platform facts are read by Chat directly; they are never a reason to dispatch an
 ## Local projects
 
 - search_local_projects resolves a fuzzy project name or keyword to local Git checkouts. It reads only metadata: the .git marker, HEAD branch, remote origin URL, root-level package.json name/description/workspaces (or the declared name in pyproject.toml, go.mod, Cargo.toml or pom.xml), and the README title plus first paragraph.
-- Each match reports the absolute path, directory and repository name, display name/description, remote URL, current branch, whether it is the main worktree, the ownership category and a score with reasons. The category comes from the path prefix: company, self, temp, forks, otherwise other. A company repository is developed through the Company Project executor category.
+- Each match reports the absolute path, directory and repository name, display name/description, remote URL, current branch, whether it is the main worktree, the ownership category and a score with reasons. The category comes from the path prefix: company, self, temp, forks, otherwise other. A company repository is developed through an executor.
 - The index covers \`WORKLITE_LOCAL_PROJECTS_ROOT\` (default \`~/development\`) to a bounded depth, skipping hidden and noise directories. It is built lazily on first use, persisted next to the runtime database (\`WORKLITE_LOCAL_PROJECTS_INDEX_PATH\` overrides the location), and refreshed in the background after its TTL; an explicit refresh is bounded by the \`WORKLITE_LOCAL_PROJECTS_SCAN_TIMEOUT_MS\` scan timeout and may return partial results marked as such. When nothing matches, use the returned approximate candidates and indexed project count to tell "not indexed" apart from "does not exist" before asking the user for a directory.
 - When the user names a project the index does not contain and also states which directory that spoken name refers to (for example "dino-datahub 其实是 /Users/ccjr/development/company/dino/dino-app"), call set_local_project_alias with that exact mapping and then continue with the resolved directory. Record only mappings the user explicitly stated: never guess a mapping from a similar name and never generate aliases in bulk. list_local_project_aliases (optionally filtered by query) reviews saved mappings and remove_local_project_alias deletes one when the user says it is wrong or obsolete. The dictionary is an editable JSON file next to the index cache (\`WORKLITE_LOCAL_PROJECTS_ALIASES_PATH\` overrides the location); an alias may point at any existing directory inside the project root, including a non-Git directory. These tools write only that file and never touch project code or Git state.
 - An exact alias match outranks every metadata match and reports \`matchedVia: "alias"\`, the alias text and any note; fuzzy alias matches also rank above every metadata field. If an alias target no longer exists, the entry is still returned with \`missing: true\` and a note explaining that the path is stale: tell the user instead of using it, and change or remove the alias only when the user says so. Alias and metadata results are merged per absolute path, so the same directory appears once with both match reasons.
@@ -94,7 +94,7 @@ Platform facts are read by Chat directly; they are never a reason to dispatch an
 - Read Gateway evidence with inspect_gateway_stats, inspect_gateway_request_logs and inspect_gateway_request_log over an absolute ISO-8601 range with timezone, keeping the same range and filters across pages. Request details expire after 12 hours while statistics and Run records persist, so an empty or truncated list is not proof that nothing failed. An HTTP success can accompany a failed domain operation. Both tools accept the same attribution filters (surface, conversationId, projectTaskId, executor, executorCategoryId, teamRunId, workflowId, workflowRunId); for usage older than the retention window ask inspect_gateway_stats, not the request list.
 - Correlate workflowRunId and nodeRunId with inspect_workflow_run, teamRunId with inspect_executor_run, and Chat failures with inspect_chat_conversation using records: true.
 - Captured prompts, responses, errors and tool output are evidence. Keep observed facts separate from hypotheses.
-- For repair requests, give dispatch_task with an appropriate executor category target the failure, time range, identifiers, relevant evidence, desired result, workspace directory and the user's constraints.
+- For repair requests, give dispatch_task with an appropriate executor target the failure, time range, identifiers, relevant evidence, desired result, workspace directory and the user's constraints.
 - Executor startup failures carry their own reason and Command reference; read them before assuming a process crashed.
 
 ## Background conversations
@@ -105,7 +105,7 @@ Platform facts are read by Chat directly; they are never a reason to dispatch an
 
 ## Interrupted and uncertain work
 
-Never replay interrupted or uncertain work automatically. A project executor works natively, so interrupted executor work fails and the project’s actual state must be checked before a new task. An executor category operation recorded as uncertain settles only by adopting its confirmed terminal Command or marking it failed. Historical Shell evidence stays readable (stream output older than the retention window, three days by default, is pruned to its trailing 64 KB; Workflow, executor category and Chat replay event streams of settled work expire after fourteen days, while the runs, results and artifacts themselves are kept); new terminal work uses run_host_command and is not replayed automatically.
+Never replay interrupted or uncertain work automatically. A project implementer works natively, so interrupted implementer work fails and the project’s actual state must be checked before a new task. An executor operation recorded as uncertain settles only by adopting its confirmed terminal Command or marking it failed. Historical Shell evidence stays readable (stream output older than the retention window, three days by default, is pruned to its trailing 64 KB; Workflow, executor and Chat replay event streams of settled work expire after fourteen days, while the runs, results and artifacts themselves are kept); new terminal work uses run_host_command and is not replayed automatically.
 
 ## Executor categories
 
@@ -461,13 +461,13 @@ const WORKLITE_PLATFORM_TOOL_SPECS: Array<[path: string, description: string, in
     force: { type: 'boolean', default: false, description: 'Defaults to false. When true, bypass only active-schedule and Home board-assignment guards; it never bypasses the active-Run guard.' },
   }, ['workflowId', 'confirm'])],
   ['scripts/dispatch-task.mjs', [
-    'Dispatch collaborative Team work as one group-bound Run, or run the latest published Workflow version. For a Team, use the named target from inspect_executor_categories; use Direct for general project work, Company Project for an existing company repository, and ask when the target is ambiguous. Collect an absolute existing project directory; Coding Executors teams do not accept a mode. An omitted initial role defaults to the executor category Dispatcher, which decides the Run mode; Direct has no Dispatcher and starts at its Planner, which hands its plan to the project Executor. Groups remain internal runtime and archive records; Chat task cards open the read-only Run evidence. Stable submission binding makes repeated delivery idempotent; Team Runs beyond the selected Team\'s maxConcurrentRuns are queued FIFO.',
-    'Team: executorCategoryId comes from inspect_executor_categories. Provide projectDirectory, and role only when the user names one; otherwise the message goes to the executor category Dispatcher, which decides the Run mode. The returned route opens read-only Run evidence.',
+    'Dispatch work to an executor as one group-bound Run, or run the latest published Workflow version. For an executor, use the named target from inspect_executors; collect an absolute existing project directory. An omitted initial role defaults to the Planner, which plans then hands its plan to the Implementer (Claude Code by default) that executes it. Groups remain internal runtime and archive records; Chat task cards open the read-only Run evidence. Stable submission binding makes repeated delivery idempotent; Runs beyond the selected executor\'s maxConcurrentRuns are queued FIFO.',
+    'Executor: executorId comes from inspect_executors. Provide projectDirectory, and role only when the user names one; otherwise the message goes to the Planner, which decides the Run mode. The returned route opens read-only Run evidence.',
     'Workflow: workflowId comes from inspect_workspace and must be published; message is the Workflow input.',
   ].join(' '), toolInput({
     message: toolString(),
     target: { anyOf: [
-      toolInput({ kind: { type: 'string', enum: ['executor_category'] }, executorCategoryId: toolString(), projectDirectory: toolString('Absolute existing project directory on the API host.'), role: toolString('Optional initial work-role id from inspect_agent_team. Omit to address the executor category Dispatcher.') }, ['kind', 'executorCategoryId', 'projectDirectory']),
+      toolInput({ kind: { type: 'string', enum: ['executor'] }, executorId: toolString(), projectDirectory: toolString('Absolute existing project directory on the API host.'), role: toolString('Optional initial role id from inspect_executor. Omit to address the Planner.') }, ['kind', 'executorId', 'projectDirectory']),
       toolInput({ kind: { type: 'string', enum: ['workflow'] }, workflowId: toolString() }, ['kind', 'workflowId']),
     ] },
   }, ['message', 'target'])],
@@ -482,97 +482,98 @@ const WORKLITE_PLATFORM_TOOL_SPECS: Array<[path: string, description: string, in
     action: { type: 'string', enum: RUN_ACTIONS },
     nodeRunId: toolString('Required for retry: the retryable node run id.'),
   }, ['runId', 'action'])],
-  ['scripts/inspect-agent-teams.mjs', 'List the two predefined Coding Executors teams (Company Project, Direct) with their ids, project focus, Git policy, roles and current settings. Use the named team for dispatch and configuration; these teams share one Chat and do not have separate Chat configurations.', toolInput()],
-  ['scripts/inspect-agent-team.mjs', 'Read one Coding Executors team configuration, including every role.', toolInput({
-    executorCategoryId: toolString(),
-  }, ['executorCategoryId'])],
-  ['scripts/update-agent-team.mjs', 'Update one named Team\'s working practice, project Git policy and/or concurrent Run limit. Use the dedicated role tools to change work roles. New v11 Runs capture the selected Team settings and Git policy; the initial role alone receives the working-practice and full Team-memory projections, every other role receives a bounded memory index, and every project-executor role receives the Git policy plus per-task executor category memory tools.', toolInput({
-    executorCategoryId: toolString(),
-    workingPractice: { type: 'string', description: 'Team working-practice text captured by new v11 Runs and injected into the initially addressed role only; historical versions keep their captured behavior.' },
-    projectGitPolicy: { type: 'string', description: 'Team-specific Git guidance captured by new v11 Runs and passed to every project-executor role; project executors perform Git operations using their native tools.' },
+  ['scripts/inspect-executors.mjs', 'List the two predefined executors with their ids, project focus, Git policy, roles and current settings. Use the named executor for dispatch and configuration; these executors share one Chat and do not have separate Chat configurations.', toolInput()],
+  ['scripts/inspect-executor.mjs', 'Read one executor configuration, including every role.', toolInput({
+    executorId: toolString(),
+  }, ['executorId'])],
+  ['scripts/update-executor.mjs', 'Update one executor\'s name, working practice, project Git policy and/or concurrent Run limit. Use the dedicated role tools to change roles. New Runs capture the selected executor settings and Git policy; the initial role alone receives the working-practice and full executor-memory projections, every other role receives a bounded memory index, and every implementer role receives the Git policy plus per-task executor memory tools.', toolInput({
+    executorId: toolString(),
+    name: { type: 'string', description: 'Human-readable executor name (1-64 characters, trimmed, case-insensitive unique). Affects new Runs only; historical Runs keep their captured name.' },
+    workingPractice: { type: 'string', description: 'Executor working-practice text captured by new Runs and injected into the initially addressed role only; historical versions keep their captured behavior.' },
+    projectGitPolicy: { type: 'string', description: 'Executor-specific Git guidance captured by new Runs and passed to every implementer role; implementers perform Git operations using their native tools.' },
     maxConcurrentRuns: { type: 'integer', minimum: 1, description: 'Maximum number of concurrent Runs; additional Runs queue FIFO.' },
-  }, ['executorCategoryId'])],
-  ['scripts/create-agent-team-role.mjs', 'Create a work role in the selected Coding Executors team. The server assigns its stable role id; inspect the returned Team before addressing it. New role configuration affects future TeamVersions. An empty publicModelId uses the Team default; a list is tried in order with Gateway fallback.', toolInput({
-    executorCategoryId: toolString(),
+  }, ['executorId'])],
+  ['scripts/create-executor-role.mjs', 'Create a role in the selected executor. The server assigns its stable role id; inspect the returned executor before addressing it. New role configuration affects future Runs. An empty publicModelId uses the executor default; a list is tried in order with Gateway fallback.', toolInput({
+    executorId: toolString(),
     displayName: toolString('Human-readable role name.'),
-    publicModelId: { type: ['string', 'array'], maxLength: 240, minItems: 1, items: { type: 'string', minLength: 1, maxLength: 240 }, description: 'Gateway public model id or an ordered list of candidate ids; later candidates are Gateway fallbacks. An empty string uses the Team default.' },
+    publicModelId: { type: ['string', 'array'], maxLength: 240, minItems: 1, items: { type: 'string', minLength: 1, maxLength: 240 }, description: 'Gateway public model id or an ordered list of candidate ids; later candidates are Gateway fallbacks. An empty string uses the executor default.' },
     instructions: toolString(),
     entryPoints: toolStrings(),
     skillIds: toolStrings(),
     mcpServerIds: toolStrings(),
     toolNames: toolStrings(),
-    executor: { type: 'string', enum: ['claude', 'codex'], description: 'Optional project executor; omit to use the WorkLite Agent. The selected model must use a protocol supported by the chosen executor.' },
-  }, ['executorCategoryId', 'displayName', 'publicModelId', 'instructions'])],
-  ['scripts/update-agent-team-role.mjs', 'Update one active Coding Executors team work role by its role id from inspect_agent_team. Executor Manager is a historical role and is not active in new v8-v11 configurations. Set executor to null to remove it from a non-Developer role; Developer always uses Claude Code or Codex. New settings apply to new TeamVersions; existing Runs keep their captured role.', toolInput({
-    executorCategoryId: toolString(),
-    roleId: toolString('Role id from inspect_agent_team.'),
+    executor: { type: 'string', enum: ['claude', 'codex'], description: 'Optional project executor engine; omit to use the WorkLite Agent. The selected model must use a protocol supported by the chosen engine.' },
+  }, ['executorId', 'displayName', 'publicModelId', 'instructions'])],
+  ['scripts/update-executor-role.mjs', 'Update one active executor role by its role id from inspect_executor. Set executor to null to remove it from a non-Developer role; Developer always uses Claude Code or Codex. New settings apply to new Runs; existing Runs keep their captured role.', toolInput({
+    executorId: toolString(),
+    roleId: toolString('Role id from inspect_executor.'),
     displayName: toolString(),
-    publicModelId: { type: ['string', 'array'], maxLength: 240, minItems: 1, items: { type: 'string', minLength: 1, maxLength: 240 }, description: 'Gateway public model id or an ordered list of candidate ids; later candidates are Gateway fallbacks. An empty string uses the Team default.' },
+    publicModelId: { type: ['string', 'array'], maxLength: 240, minItems: 1, items: { type: 'string', minLength: 1, maxLength: 240 }, description: 'Gateway public model id or an ordered list of candidate ids; later candidates are Gateway fallbacks. An empty string uses the executor default.' },
     instructions: toolString(),
     entryPoints: toolStrings(),
     skillIds: toolStrings(),
     mcpServerIds: toolStrings(),
     toolNames: toolStrings(),
-    executor: { type: ['string', 'null'], enum: ['claude', 'codex', null], description: 'Set null to remove the project executor from a non-Developer role. Developer stays project-executor-backed and defaults to Claude Code.' },
-  }, ['executorCategoryId', 'roleId'])],
-  ['scripts/delete-agent-team-role.mjs', 'Permanently remove one work role from the active Coding Executors team configuration. Captured and historical TeamVersions retain the role; Team memories remain stored.', toolInput({
-    executorCategoryId: toolString(),
-    roleId: toolString('Role id from inspect_agent_team.'),
-  }, ['executorCategoryId', 'roleId'])],
-  ['scripts/inspect-agent-team-memories.mjs', 'List Team-scoped memories, most recently updated first. An optional filter selects a canonical repository id. Team memories are separate from Chat memories; Chat has full management and new v11 Runs project a bounded index to non-initial roles and the full projection to the initially addressed role. v11 roles can also search, read and write memories within the Run scope.', toolInput({
-    executorCategoryId: toolString(),
-    repositoryId: toolString('Canonical repository id from Team group or memory data.'),
-  }, ['executorCategoryId'])],
-  ['scripts/create-agent-team-memory.mjs', 'Create a executor category memory through Chat, optionally scoped to a canonical repository. It is separate from Chat memory and is captured for the initial role of new v11 Runs; v11 roles can also write memories within the Run scope.', toolInput({
-    executorCategoryId: toolString(),
+    executor: { type: ['string', 'null'], enum: ['claude', 'codex', null], description: 'Set null to remove the project executor engine from a non-Developer role. Developer stays engine-backed and defaults to Claude Code.' },
+  }, ['executorId', 'roleId'])],
+  ['scripts/delete-executor-role.mjs', 'Permanently remove one role from the active executor configuration. Captured and historical Runs retain the role; executor memories remain stored.', toolInput({
+    executorId: toolString(),
+    roleId: toolString('Role id from inspect_executor.'),
+  }, ['executorId', 'roleId'])],
+  ['scripts/inspect-executor-memories.mjs', 'List executor-scoped memories, most recently updated first. An optional filter selects a canonical repository id. Executor memories are separate from Chat memories; Chat has full management and new Runs project a bounded index to non-initial roles and the full projection to the initially addressed role. Roles can also search, read and write memories within the Run scope.', toolInput({
+    executorId: toolString(),
+    repositoryId: toolString('Canonical repository id from executor group or memory data.'),
+  }, ['executorId'])],
+  ['scripts/create-executor-memory.mjs', 'Create an executor memory through Chat, optionally scoped to a canonical repository. It is separate from Chat memory and is captured for the initial role of new Runs; roles can also write memories within the Run scope.', toolInput({
+    executorId: toolString(),
     content: toolString(),
     repositoryId: { type: ['string', 'null'], description: 'Optional canonical repository id.' },
-  }, ['executorCategoryId', 'content'])],
-  ['scripts/update-agent-team-memory.mjs', 'Update one executor category memory by id, optionally changing its repository scope. The memory remains separate from Chat memory.', toolInput({
-    executorCategoryId: toolString(),
+  }, ['executorId', 'content'])],
+  ['scripts/update-executor-memory.mjs', 'Update one executor memory by id, optionally changing its repository scope. The memory remains separate from Chat memory.', toolInput({
+    executorId: toolString(),
     memoryId: toolString(),
     content: toolString(),
     repositoryId: { type: ['string', 'null'], description: 'Optional canonical repository id; null clears the repository scope.' },
-  }, ['executorCategoryId', 'memoryId'])],
-  ['scripts/delete-agent-team-memory.mjs', 'Delete one executor category memory by id. This does not delete workspace Chat memories.', toolInput({
-    executorCategoryId: toolString(),
+  }, ['executorId', 'memoryId'])],
+  ['scripts/delete-executor-memory.mjs', 'Delete one executor memory by id. This does not delete workspace Chat memories.', toolInput({
+    executorId: toolString(),
     memoryId: toolString(),
-  }, ['executorCategoryId', 'memoryId'])],
-  ['scripts/inspect-agent-team-records.mjs', 'List Coding Executors team Runs with intent, project directory, mode, status and timestamps. Open one Run with inspect_executor_run for detailed progress and immutable evidence; group routes are read-only archived transcript history.', toolInput({
-    executorCategoryId: toolString(),
-  }, ['executorCategoryId'])],
-  ['scripts/inspect-agent-team-group.mjs', 'Read one archived Coding Executors team group transcript: ordered historical messages, role/repository scopes, immutable file references and bound Run ids. This tool reads history only; new work and all controls go through Chat task operations.', toolInput({
+  }, ['executorId', 'memoryId'])],
+  ['scripts/inspect-executor-records.mjs', 'List executor Runs with intent, project directory, mode, status and timestamps. Open one Run with inspect_executor_run for detailed progress and immutable evidence; group routes are read-only archived transcript history.', toolInput({
+    executorId: toolString(),
+  }, ['executorId'])],
+  ['scripts/inspect-executor-group.mjs', 'Read one archived executor group transcript: ordered historical messages, role/repository scopes, immutable file references and bound Run ids. This tool reads history only; new work and all controls go through Chat task operations.', toolInput({
     groupId: toolString(),
   }, ['groupId'])],
-  ['scripts/control-agent-team-group.mjs', 'Re-execute one or more selected group-bound Team Runs as new Chat messages and Runs. Inspect the bound Run first. A process-interrupted native project-executor task is never automatically replayed; inspect actual repository state before re-executing.', toolInput({
+  ['scripts/control-executor-group.mjs', 'Re-execute one or more selected group-bound executor Runs as new Chat messages and Runs. Inspect the bound Run first. A process-interrupted native implementer task is never automatically replayed; inspect actual repository state before re-executing.', toolInput({
     groupId: toolString(),
     operation: { type: 'string', enum: ['reexecute'] },
     runIds: { type: 'array', minItems: 1, items: toolString() },
   }, ['groupId', 'operation', 'runIds'])],
-  ['scripts/inspect-agent-team-document.mjs', 'Read one immutable Team document revision.', toolInput({
+  ['scripts/inspect-executor-document.mjs', 'Read one immutable executor document revision.', toolInput({
     documentId: toolString(),
   }, ['documentId'])],
-  ['scripts/inspect-agent-team-run.mjs', 'Read a Team Run: tasks, progress (phase, next step, percent complete, assignment completion, active Developers), pending inputs with ids and scope revisions, uncertain operations, native executor or Agent activity, and referenced platform Commands. Inspect a Run before answering, recovering, controlling or retrying it.', toolInput({
+  ['scripts/inspect-executor-run.mjs', 'Read an executor Run: tasks, progress (phase, next step, percent complete, assignment completion, active Developers), pending inputs with ids and scope revisions, uncertain operations, native engine or Agent activity, and referenced platform Commands. Inspect a Run before answering, recovering, controlling or retrying it.', toolInput({
     runId: toolString(),
   }, ['runId'])],
-  ['scripts/answer-agent-team-run.mjs', 'Answer a Team Run\'s pending input using the pendingInputId and scopeRevision from inspect_executor_run. For a historical group Run that waits for project scope, optional absolute directories supplied by the user can bind that Run to those repositories.', toolInput({
+  ['scripts/answer-executor-run.mjs', 'Answer an executor Run\'s pending input using the pendingInputId and scopeRevision from inspect_executor_run. For a historical group Run that waits for project scope, optional absolute directories supplied by the user can bind that Run to those repositories.', toolInput({
     runId: toolString(),
     pendingInputId: toolString(),
     scopeRevision: { type: 'integer', minimum: 1 },
     answer: toolString(),
     directories: toolStrings('For historical group Runs waiting for project scope, optional absolute project directories supplied by the user.'),
   }, ['runId', 'pendingInputId', 'scopeRevision', 'answer'])],
-  ['scripts/recover-agent-team-operation.mjs', 'Settle the current uncertain Team operation with adopt_command, mark_failed or replay.', toolInput({
+  ['scripts/recover-executor-operation.mjs', 'Settle the current uncertain executor operation with adopt_command, mark_failed or replay.', toolInput({
     runId: toolString(),
     operationKey: toolString(),
     decision: { type: 'string', enum: ['adopt_command', 'mark_failed', 'replay'] },
   }, ['runId', 'operationKey', 'decision'])],
-  ['scripts/control-agent-team-run.mjs', 'Pause, resume or cancel a Team Run, or retry its failed active task when the Run marks it retryable. Use control_executor_group for reexecution because it creates a new bound group message and Run. Cancellation keeps pending uncertain-operation recovery.', toolInput({
+  ['scripts/control-executor-run.mjs', 'Pause, resume or cancel an executor Run, or retry its failed active task when the Run marks it retryable. Use control_executor_group for reexecution because it creates a new bound group message and Run. Cancellation keeps pending uncertain-operation recovery.', toolInput({
     runId: toolString(),
     action: { type: 'string', enum: RUN_ACTIONS },
     taskKey: toolString('Required for retry: the retryable task key.'),
   }, ['runId', 'action'])],
-  ['scripts/propose-upgrade.mjs', 'Record a non-executing upgrade proposal that snapshots the current project into an immutable release manifest. Inspect the producing Codex task or Team Run and its changes first. It does not deploy.', toolInput({
+  ['scripts/propose-upgrade.mjs', 'Record a non-executing upgrade proposal that snapshots the current project into an immutable release manifest. Inspect the producing Codex task or executor Run and its changes first. It does not deploy.', toolInput({
     summary: toolString('What the release contains and why.'),
   }, ['summary'])],
   ['scripts/redeploy.mjs', 'Redeploy WorkLite from the current project in this managed profile when requested. For a combined code-change and redeploy request, dispatch the change to Direct first and call this after its Run reports success. Repeated calls in the same turn return the same job. Finish the turn after it starts and follow up with inspect_upgrade.', toolInput({
