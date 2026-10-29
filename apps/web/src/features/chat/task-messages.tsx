@@ -177,6 +177,7 @@ function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissio
   const progressLine = current?.progressText.trim() ? toSingleLine(current.progressText) : current?.assignmentTitle ?? null;
   const assignments = run && live && run.progress.totalAssignments > 0 ? tTeams('progress.assignments', { completed: run.progress.completedAssignments, total: run.progress.totalAssignments }) : null;
   const meta = [
+    run?.executorName ?? null,
     current ? teamCurrentLabel(t, tTeams, current) : run && live ? t('teamRun.betweenRoles') : null,
     current ? current.model || t('teamRun.defaultModel') : null,
     roleElapsed ? t('teamRun.roleElapsed', { duration: roleElapsed }) : null,
@@ -213,7 +214,7 @@ function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissio
     </button>
     <div className="flex min-h-9 flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-1.5">
       <p className="flex min-w-0 flex-1 items-center gap-1.5 text-[11px] text-muted-foreground">
-        {meta.map((part, index) => <span key={index} className={cn('flex min-w-0 items-center gap-1.5', index > 1 && 'shrink-0')}>{index ? <span aria-hidden="true">·</span> : null}<TruncatedText text={part} /></span>)}
+        {meta.map((part, index) => <span key={index} className={cn('flex min-w-0 items-center gap-1.5', index > 2 && 'shrink-0')}>{index ? <span aria-hidden="true">·</span> : null}<TruncatedText text={part} /></span>)}
         {!run && query.isPending ? <span role="status">{t('records.taskLoading')}</span> : null}
       </p>
       {run ? <TeamRunActions run={run} groupId={groupId} onRunUpdate={onRunUpdate} /> : null}

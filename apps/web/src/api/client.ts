@@ -88,7 +88,7 @@ import type {
 } from '@worklite/contracts';
 
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string, public readonly requestLogId?: string, public readonly testInput?: SystemOneTestInput, public readonly references?: McpServerReferenceReport) {
+  constructor(public readonly status: number, message: string, public readonly requestLogId?: string, public readonly testInput?: SystemOneTestInput, public readonly references?: McpServerReferenceReport, public readonly code?: string) {
     super(message);
     this.name = 'ApiError';
   }
@@ -108,16 +108,18 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
     let requestLogId: string | undefined;
     let testInput: SystemOneTestInput | undefined;
     let references: McpServerReferenceReport | undefined;
+    let code: string | undefined;
     try {
-      const body = (await response.json()) as { message?: string | string[]; requestLogId?: string; testInput?: SystemOneTestInput; references?: McpServerReferenceReport };
+      const body = (await response.json()) as { message?: string | string[]; requestLogId?: string; testInput?: SystemOneTestInput; references?: McpServerReferenceReport; code?: string };
       if (body.message) message = Array.isArray(body.message) ? body.message.join(', ') : body.message;
       requestLogId = body.requestLogId;
       testInput = body.testInput;
       references = body.references;
+      code = typeof body.code === 'string' ? body.code : undefined;
     } catch {
       // Keep the status-based error when the server does not return JSON.
     }
-    throw new ApiError(response.status, message, requestLogId, testInput, references);
+    throw new ApiError(response.status, message, requestLogId, testInput, references, code);
   }
   if (response.status === 204 || response.headers.get('content-length') === '0') return undefined as T;
   const text = await response.text();

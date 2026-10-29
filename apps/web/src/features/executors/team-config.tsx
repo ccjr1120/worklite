@@ -3,12 +3,13 @@ import { Link } from '@tanstack/react-router';
 import { ChevronDown, LoaderCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import type { AgentTeamRoleConfiguration, SkillView } from '@worklite/contracts';
-import { api } from '@/api/client';
+import type { AgentTeamRoleConfiguration, AgentTeamView, SkillView } from '@worklite/contracts';
+import { api, ApiError } from '@/api/client';
 import { useAgentTeamMemoriesQuery, useAgentTeamQuery, useMcpServersQuery, useSkillsQuery } from '@/api/queries';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import { queryClient } from '@/lib/query-client';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
@@ -145,6 +146,82 @@ function RoleCard({ executorCategoryId, role, skills, mcpServerNames }: { execut
   );
 }
 
+const EXECUTOR_NAME_MAX_LENGTH = 64;
+
+// Inline executor rename. The request carries the revision it was read at, so a concurrent change
+// is rejected instead of overwritten; a duplicate name is shown next to the field.
+function ExecutorNameField({ team }: { team: AgentTeamView }) {
+  const { t } = useTranslation('executors');
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(team.name);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!editing) setName(team.name);
+  }, [editing, team.name]);
+
+  const trimmed = name.trim();
+  // eslint-disable-next-line no-control-regex
+  const invalid = !trimmed || [...trimmed].length > EXECUTOR_NAME_MAX_LENGTH || /[\u0000-\u001F\u007F]/.test(trimmed);
+
+  async function save() {
+    if (saving) return;
+    if (invalid) { setError(t('config.overview.nameInvalid')); return; }
+    if (trimmed === team.name) { setEditing(false); setError(''); return; }
+    setSaving(true);
+    setError('');
+    try {
+      const updated = await api.updateExecutor(team.id, { name: trimmed, expectedRevision: team.revision });
+      queryClient.setQueryData(['executor', team.id], updated);
+      await queryClient.invalidateQueries({ queryKey: ['executors'] });
+      setEditing(false);
+      toast.success(t('config.overview.nameSaved'));
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.code === 'EXECUTOR_NAME_CONFLICT') setError(t('config.overview.nameConflict'));
+      else if (cause instanceof ApiError && cause.code === 'EXECUTOR_REVISION_CONFLICT') {
+        setError(t('config.overview.nameStale'));
+        void queryClient.invalidateQueries({ queryKey: ['executor', team.id] });
+      } else setError(cause instanceof Error ? cause.message : t('config.overview.nameSaveFailed'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div className="mt-1 flex flex-wrap items-center gap-2">
+        <span className="break-words">{team.name}</span>
+        <Button type="button" size="compact" variant="ghost" onClick={() => { setName(team.name); setError(''); setEditing(true); }}>{t('config.overview.editName')}</Button>
+      </div>
+    );
+  }
+
+  return (
+    <form className="mt-1 space-y-1.5" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+      <Input
+        value={name}
+        maxLength={EXECUTOR_NAME_MAX_LENGTH}
+        aria-label={t('config.overview.name')}
+        aria-invalid={Boolean(error) || undefined}
+        aria-describedby={`executor-name-hint-${team.id}`}
+        onChange={(event) => { setName(event.target.value); setError(''); }}
+        disabled={saving}
+        autoFocus
+      />
+      <p id={`executor-name-hint-${team.id}`} className="text-xs text-muted-foreground">{t('config.overview.nameHint')}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="submit" size="compact" disabled={saving || invalid}>
+          {saving ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}
+          {t('config.overview.saveName')}
+        </Button>
+        <Button type="button" size="compact" variant="ghost" onClick={() => { setEditing(false); setError(''); }} disabled={saving}>{t('config.overview.cancelName')}</Button>
+      </div>
+      {error ? <p role="alert" className="text-xs text-danger">{error}</p> : null}
+    </form>
+  );
+}
+
 export function TeamConfig({ executorId: executorCategoryId }: { executorId: string }) {
   const { t } = useTranslation('executors');
   const { locale } = useLocale();
@@ -192,7 +269,7 @@ export function TeamConfig({ executorId: executorCategoryId }: { executorId: str
       <section className="rounded-xl border border-border bg-surface p-4 shadow-xs">
         <h2 className="text-sm font-semibold">{t('config.overview.title')}</h2>
         <dl className="mt-3 grid gap-4 text-[13px] md:grid-cols-2">
-          <div><dt className="text-muted-foreground">{t('config.overview.name')}</dt><dd className="mt-1 break-words">{team.name || <NotSet label={notSet} />}</dd></div>
+          <div><dt className="text-muted-foreground">{t('config.overview.name')}</dt><dd><ExecutorNameField team={team} /></dd></div>
           <div><dt className="text-muted-foreground">{t('config.overview.description')}</dt><dd className="mt-1 break-words">{team.description || <NotSet label={notSet} />}</dd></div>
           <div><dt className="text-muted-foreground">{t('config.overview.processId')}</dt><dd className="mt-1 font-mono break-all">{team.processId || <NotSet label={notSet} />}</dd></div>
           <div><dt className="text-muted-foreground">{t('config.overview.processVersion')}</dt><dd className="mt-1 font-mono">{team.processVersion || <NotSet label={notSet} />}</dd></div>

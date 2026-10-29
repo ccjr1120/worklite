@@ -39,6 +39,7 @@ function team(id: string, name: string, description: string, maxConcurrentRuns: 
   return {
     id,
     name,
+    revision: 0,
     description,
     processId: 'bmad-tea',
     processVersion: '1',

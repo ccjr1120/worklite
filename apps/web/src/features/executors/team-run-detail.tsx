@@ -95,6 +95,7 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
         <h2 className="text-sm font-semibold">{t('metadata.title')}</h2>
         <div className="mt-3 flex flex-wrap items-center gap-3"><StatusBadge status={toStatusKey(run.status)} label={t(`run.status.${run.status}`)} /><CopyableId value={run.id} /><span className="text-xs text-muted-foreground">v{run.teamVersion.version} · {formatDateTime(run.createdAt, locale)}</span></div>
         <dl className="mt-4 grid gap-4 text-[13px] md:grid-cols-2">
+          <div><dt className="text-muted-foreground">{t('records.executorName')}</dt><dd className="mt-1 break-words">{run.executorName}</dd></div>
           <div><dt className="text-muted-foreground">{t('run.version')}</dt><dd className="mt-1 font-mono">v{run.teamVersion.version} · {run.teamVersion.orchestrationVersion ? `v${run.teamVersion.orchestrationVersion}` : t('run.versionUnknown')}</dd></div>
           <div><dt className="text-muted-foreground">{t('run.mode')}</dt><dd className="mt-1">{runModeLabel(t, run.mode, run.teamVersion.orchestrationVersion ?? 1, run.modeDecidedAt)}</dd></div>
           {run.modeRationale ? <div className="md:col-span-2"><dt className="text-muted-foreground">{t('run.modeRationale')}</dt><dd className="mt-1 whitespace-pre-wrap break-words">{run.modeRationale}</dd></div> : null}

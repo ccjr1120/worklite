@@ -229,9 +229,9 @@ export function TeamRecords({ executorId: executorCategoryId }: { executorId: st
                       params={{ runId: run.id }}
                       className={`${rowGrid} rounded-lg hover:bg-muted ${focusRing}`}
                     >
-                      {/* Executor name - shown in smaller screens as first field */}
+                      {/* Executor name captured when the Run was dispatched */}
                       <span className="hidden sm:flex text-xs font-medium text-foreground truncate">
-                        {run.teamName}
+                        {run.executorName}
                       </span>
                       {/* Status and intent */}
                       <div className="flex min-w-0 flex-col gap-0.5">

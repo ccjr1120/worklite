@@ -38,6 +38,7 @@ afterEach(cleanup);
 const team: AgentTeamView = {
   id: 'team_1',
   name: 'Delivery',
+  revision: 0,
   description: '',
   processId: 'proc_delivery',
   processVersion: '3',
