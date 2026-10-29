@@ -99,10 +99,8 @@ import {
   EXECUTOR_CATEGORY_ROLE_INSTRUCTIONS,
   EXECUTOR_CATEGORY_ROLE_TOOL_NAMES,
   BUILT_IN_EXECUTOR_CATEGORY_ID,
-  APPLICATION_EXECUTOR_CATEGORY_ID,
   DIRECT_EXECUTOR_CATEGORY_ID,
   DEFAULT_MAX_CONCURRENT_RUNS,
-  DEFAULT_APPLICATION_GIT_POLICY,
   DEFAULT_COMPANY_PROJECT_GIT_POLICY,
   DEFAULT_DIRECT_GIT_POLICY,
   agentTeamContractRole,
@@ -1125,39 +1123,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         projectGitPolicy: DEFAULT_DIRECT_GIT_POLICY,
       }).onConflictDoNothing().run();
     }
-
-    // Retire the Application Development team if it exists without active Runs
-    await this.retireApplicationTeam();
-  }
-
-  private async retireApplicationTeam(): Promise<void> {
-    const [applicationTeam] = await this.db.select().from(executorCategories)
-      .where(and(eq(executorCategories.id, APPLICATION_EXECUTOR_CATEGORY_ID), eq(executorCategories.workspaceId, 'workspace_personal')))
-      .limit(1);
-    if (!applicationTeam) return;
-    if (applicationTeam.deletedAt) return; // Already deleted
-
-    // Check for active runs
-    const ACTIVE_RUN_STATUSES = ['queued', 'running', 'waiting_for_input', 'paused'] as const;
-    const [activeRunCount] = await this.db.select({ count: executorRuns.id }).from(executorRuns)
-      .where(and(
-        eq(executorRuns.executorCategoryId, APPLICATION_EXECUTOR_CATEGORY_ID),
-        eq(executorRuns.workspaceId, 'workspace_personal'),
-        inArray(executorRuns.status, [...ACTIVE_RUN_STATUSES]),
-      ))
-      .limit(1);
-    if (activeRunCount && activeRunCount.count) {
-      console.warn(`Application Development team has ${activeRunCount.count} active run(s); will retry on next startup.`);
-      return;
-    }
-
-    // Perform soft delete
-    const deletedAt = new Date();
-    await this.db.update(executorCategories)
-      .set({ deletedAt, updatedAt: deletedAt })
-      .where(eq(executorCategories.id, APPLICATION_EXECUTOR_CATEGORY_ID))
-      .run();
-    console.log('Application Development team retired (soft deleted).');
   }
 
   private async createVersionSnapshot(

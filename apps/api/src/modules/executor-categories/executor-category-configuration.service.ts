@@ -20,6 +20,7 @@ import {
   EXECUTOR_CATEGORY_ROLE_TOOL_NAMES,
   EXECUTOR_CATEGORY_DISPATCHER_ROLE,
   DIRECT_EXECUTOR_CATEGORY_ID,
+  RETIRED_AGENT_TEAM_IDS,
   agentTeamEntryPoints,
   isValidAgentTeamRoleId,
 } from './agent-team-configuration';
@@ -37,11 +38,18 @@ export class AgentTeamConfigurationService {
   ) {}
 
   async getTeam(workspaceId: string, executorCategoryId: string): Promise<AgentTeam> {
+    this.validateNotRetiredTeamId(executorCategoryId);
     await this.resources.reconcileWorkspaceSkills(workspaceId);
     const [team] = await this.db.select().from(executorCategories)
       .where(and(eq(executorCategories.id, executorCategoryId), eq(executorCategories.workspaceId, workspaceId))).limit(1);
     if (!team) throw new NotFoundException('Coding Executors team not found.');
     return team;
+  }
+
+  private validateNotRetiredTeamId(executorCategoryId: string): void {
+    if ((RETIRED_AGENT_TEAM_IDS as readonly string[]).includes(executorCategoryId)) {
+      throw new BadRequestException(`This Coding Executors team (${executorCategoryId}) has been retired and is no longer available.`);
+    }
   }
 
   async reconcileSkills(workspaceId: string): Promise<void> {

@@ -362,7 +362,7 @@ const WORKLITE_PLATFORM_TOOL_SPECS: Array<[path: string, description: string, in
   ['scripts/inspect-gateway-stats.mjs', 'Read Gateway request statistics for an absolute time range. Statistics are retained indefinitely, so they answer usage questions after request details have expired. The result always carries an attribution breakdown grouped by platform surface (groupBy defaults to surface), alongside the provider/model breakdown. Only traffic that passes through the Gateway is counted: a Codex task with no declared Gateway model runs on local configuration and contributes no tokens here.', toolInput({
     from: toolString(ABSOLUTE_INSTANT),
     to: toolString(ABSOLUTE_INSTANT),
-    groupBy: 'executorCategory' and workflow count only requests carrying that identifier.' },
+    groupBy: { type: 'string', enum: ['surface', 'conversation', 'executor', 'executorCategory', 'workflow'], description: 'Group results by surface or executor context; defaults to surface.' },
     ...GATEWAY_ATTRIBUTION_TOOL_FILTERS,
   }, ['from', 'to'])],
   ['scripts/inspect-gateway-request-logs.mjs', 'List captured Gateway request logs for an absolute time range. Request details expire after 12 hours, so the result reports retainedFrom and retentionHours; read them before concluding that no failure occurred. Each item carries its attribution surface and identifiers. Keep the same range and filters when following nextCursor. For usage beyond the retention window use inspect_gateway_stats instead.', toolInput({

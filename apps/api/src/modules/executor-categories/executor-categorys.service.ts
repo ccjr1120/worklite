@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import type { Request } from 'express';
 import type {
@@ -75,7 +75,17 @@ export class AgentTeamsService {
 
   async records(request: Request, workspaceSlug: string, executorCategoryId: string): Promise<AgentTeamRunSummary[]> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    await this.configuration.getTeam(workspace.id, executorCategoryId);
+    // Allow reading records for retired categories, but validate the category exists or is retired
+    try {
+      await this.configuration.getTeam(workspace.id, executorCategoryId);
+    } catch (error) {
+      // If the team is not found because it's retired, allow reading the records anyway
+      // The getTeam will throw BadRequestException for retired IDs, so we need to check that
+      if (!(error instanceof BadRequestException)) {
+        throw error;
+      }
+      // For retired IDs, fall through to query the records anyway
+    }
     const rows = await this.db.select({ id: executorRuns.id, intent: executorRuns.intent,
       projectDirectory: executorRuns.projectDirectory, mode: executorRuns.mode,
       modeRationale: executorRuns.modeRationale, modeDecidedAt: executorRuns.modeDecidedAt, snapshot: agentTeamVersions.snapshot,

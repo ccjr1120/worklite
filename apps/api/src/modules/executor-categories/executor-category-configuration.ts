@@ -2,13 +2,14 @@ import type { AgentTeamMode, AgentTeamRole, AgentTeamRoleId } from '@worklite/co
 import { getBmadTeaProcessManifest } from '@worklite/team-runtime';
 
 export const BUILT_IN_EXECUTOR_CATEGORY_ID = 'agent_team_bmad_tea';
-export const APPLICATION_EXECUTOR_CATEGORY_ID = 'agent_team_application';
 export const DIRECT_EXECUTOR_CATEGORY_ID = 'agent_team_direct';
 export const EXECUTOR_CATEGORY_PROCESS_ID = 'bmad-tea';
 export const EXECUTOR_CATEGORY_PROCESS_VERSION = '1';
 
+// Retired executor category IDs for backward compatibility with historical data
+export const RETIRED_AGENT_TEAM_IDS = ['agent_team_application'] as const;
+
 export const DEFAULT_COMPANY_PROJECT_GIT_POLICY = 'Follow the target project instructions and the user\'s named company branch and review workflow. Preserve protected base-branch rules; do not bypass review or integrate into a base branch unless the request requires it.';
-export const DEFAULT_APPLICATION_GIT_POLICY = 'For isolated serial work, prefer the current branch. When work overlaps or runs in parallel, choose branch or worktree isolation per project when it helps coordination. Inspect each project\'s instructions and current state before acting.';
 export const DEFAULT_DIRECT_GIT_POLICY = 'Follow the target project\'s own Git instructions and current branch state. Prefer the current branch for isolated serial work; do not bypass review or integrate into a protected base branch unless the request requires it.';
 
 export const DEFAULT_MAX_CONCURRENT_RUNS = 3;
