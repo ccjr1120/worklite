@@ -13,7 +13,7 @@ export type DatabaseMaintenanceSettings = {
   /** Command stdout/stderr older than this keeps only its trailing tail. */
   commandStreamRetentionMs: number;
   commandStreamTailBytes: number;
-  /** Replay event streams of terminal Workflow Runs, Team Runs and Chat executions older than this are removed. */
+  /** Replay event streams of terminal Workflow Runs, executor Runs and Chat executions older than this are removed. */
   eventStreamRetentionMs: number;
   /** Upper bound the WAL file is truncated back to whenever a checkpoint resets it. */
   walSizeLimitBytes: number;

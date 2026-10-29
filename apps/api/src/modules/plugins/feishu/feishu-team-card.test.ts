@@ -17,7 +17,7 @@ const current = {
 };
 const now = Date.parse('2026-10-23T01:25:00.000Z');
 
-describe('Feishu Team Run card summary', () => {
+describe('Feishu executor Run card summary', () => {
   it('shows the current role, its model, role elapsed and Run total', () => {
     expect(teamRunMeta(run({ current }), now)).toBe('Reviewer · gpt-review · 本角色 1 小时 5 分钟 · 总耗时 1 小时 25 分钟');
   });
@@ -35,7 +35,7 @@ describe('Feishu Team Run card summary', () => {
   });
 
   it('keeps task details in the default-collapsed panel', () => {
-    const { card } = renderCard('sub_1', { title: 'Chat · Coding Executors', status: '正在执行', meta: 'Reviewer · gpt-review', content: '目标', details: '- review', buttons: [] });
+    const { card } = renderCard('sub_1', { title: 'Chat · executors', status: '正在执行', meta: 'Reviewer · gpt-review', content: '目标', details: '- review', buttons: [] });
     const elements = card.body.elements;
     expect(elements.find((element) => element.element_id === 'meta')).toMatchObject({ text: { content: 'Reviewer · gpt-review' } });
     expect(elements.find((element) => element.element_id === 'details')).toMatchObject({ tag: 'collapsible_panel', expanded: false });

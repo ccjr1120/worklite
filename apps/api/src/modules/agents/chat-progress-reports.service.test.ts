@@ -3,7 +3,7 @@ import type { ConfigService } from '@nestjs/config';
 import { createDb, type Database } from '@worklite/db';
 import { activeWorkSignature, buildActiveWorkNote, ChatProgressReportsService, DEFAULT_PROGRESS_NOTE_INTERVAL_SECONDS, type ActiveWorkItem } from './chat-progress-reports.service';
 import type { AgentExecutionsService } from './agent-executions.service';
-import type { AgentTeamRuntimeService } from '../executor-categories/executor-category-runtime.service';
+import type { AgentTeamRuntimeService } from '../executors/executor-runtime.service';
 
 const WORKSPACE_ID = 'workspace_personal';
 const EXECUTION_ID = 'aex_progress_test';
@@ -137,7 +137,7 @@ describe('ChatProgressReportsService', () => {
     expect(note).toContain('正在编写服务代码');
   });
 
-  it('reports Chat-dispatched active Team and Workflow Runs', async () => {
+  it('reports Chat-dispatched active executor and Workflow Runs', async () => {
     const { db, tick, reportActiveWorkProgress, getRunProgress } = setup();
     insertTeamRun(db, 'running');
     insertWorkflowRun(db, 'running');

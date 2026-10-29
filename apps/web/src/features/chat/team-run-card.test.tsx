@@ -34,7 +34,7 @@ function attempt(overrides: Partial<AgentTeamTaskAttemptView>): AgentTeamTaskAtt
 function teamRun(overrides: Partial<AgentTeamRunView> = {}): AgentTeamRunView {
   const reviewer = attempt({ id: 'attempt_review', taskKey: 'review', role: 'reviewer', status: 'running', model: 'gpt-review', progressText: '核对接口改动\n更多细节', startedAt: '2026-10-23T00:20:00.000Z', finishedAt: null });
   return {
-    id: 'atr_1', executorCategoryId: 'team_1', groupId: null, targetRole: null, repositoryIds: [],
+    id: 'atr_1', executorCategoryId: 'team_1', executorName: 'General project', groupId: null, targetRole: null, repositoryIds: [],
     teamVersion: { id: 'atv_1', version: 1, createdAt: '2026-10-23T00:00:00.000Z', orchestrationVersion: 11 },
     status: 'running', intent: '实现登录页', projectDirectory: '/tmp/project', mode: 'implement_and_validate', modeRationale: null, modeDecidedAt: null,
     authorizedCommands: [], scopeRevision: 0, desiredControlState: 'none',
@@ -56,7 +56,7 @@ function mockRun(run: AgentTeamRunView) {
   vi.mocked(useAgentTeamRunQuery).mockReturnValue({ data: run, isPending: false, isError: false } as ReturnType<typeof useAgentTeamRunQuery>);
 }
 
-describe('Chat Team Run card', () => {
+describe('Chat executor Run card', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(NOW);

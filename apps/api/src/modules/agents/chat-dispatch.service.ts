@@ -7,7 +7,7 @@ import { agentExecutionEvents, agentExecutions, chatSubmissions, workflowVersion
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from './agent-executions.service';
-import { AgentTeamGroupsService } from '../executor-categories/executor-groups.service';
+import { AgentTeamGroupsService } from '../executors/executor-groups.service';
 import { RunsService } from '../runs/runs.service';
 
 export const CHAT_AGENT_ID = 'agt_system_helper_chat';
@@ -90,7 +90,7 @@ export class ChatDispatchService {
         const runId = `atrun_chat_${digest}`;
         const groupId = `atgroup_chat_${digest}`;
         // Agent Teams decide their own Run mode; older callers may still send one.
-        if (target.mode !== undefined) this.logger.warn(`Ignoring deprecated Coding Executors team mode "${String(target.mode)}" for Chat submission ${submission.id}.`);
+        if (target.mode !== undefined) this.logger.warn(`Ignoring deprecated executor mode "${String(target.mode)}" for Chat submission ${submission.id}.`);
         const dispatched = await this.teamGroups.dispatchFromChat(request, 'personal', target.executorCategoryId, {
           message: input.message,
           projectDirectory: target.projectDirectory,
@@ -98,7 +98,7 @@ export class ChatDispatchService {
           submissionId: submission.id,
           runId,
         }, { runId, accept: (transaction, id) => bind(transaction, { kind: 'executor_category', executorCategoryId: target.executorCategoryId, runId: id, groupId }) });
-        if (dispatched.id !== groupId) throw new Error('Chat Team group id did not match its idempotent submission.');
+        if (dispatched.id !== groupId) throw new Error('Chat executor group id did not match its idempotent submission.');
       }
       const [accepted] = await this.db.select().from(chatSubmissions).where(eq(chatSubmissions.id, submission.id)).limit(1);
       if (!accepted.reference) throw new Error('Conversation dispatch did not commit a task reference.');

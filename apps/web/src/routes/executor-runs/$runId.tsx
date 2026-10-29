@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { TeamRunDetailPage } from '@/features/executor-categories/team-run-detail';
+import { TeamRunDetailPage } from '@/features/executors/team-run-detail';
 
 export const Route = createFileRoute('/executor-runs/$runId')({
   component: AgentTeamRunDetailRoute,

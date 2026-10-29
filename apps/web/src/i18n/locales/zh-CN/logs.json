@@ -55,8 +55,8 @@
       "surface": "功能",
       "conversationId": "对话",
       "projectTaskId": "项目任务",
-      "executor": "执行器",
-      "teamId": "执行器分类",
+      "executor": "执行引擎",
+      "executorCategoryId": "执行器",
       "teamRunId": "执行记录",
       "workflowId": "Workflow",
       "workflowRunId": "Workflow 运行"
@@ -106,8 +106,8 @@
     "groupBys": {
       "surface": "按功能",
       "conversation": "按对话",
-      "executor": "按执行器",
-      "team": "按执行器分类",
+      "executor": "按执行引擎",
+      "executor_category": "按执行器",
       "workflow": "按 Workflow"
     },
     "surfaces": {
@@ -115,8 +115,8 @@
       "chat_project_task": "Chat 项目任务",
       "agent": "独立 Agent",
       "workflow": "Workflow 节点",
-      "team": "执行器角色",
-      "team_project_task": "执行器",
+      "executor_category": "执行器角色",
+      "executor_category_project_task": "执行器角色（执行引擎）",
       "provider_test": "供应商连接测试",
       "external": "外部直连",
       "unattributed": "未归因"
@@ -126,8 +126,8 @@
       "detail": {
         "surface": "说明",
         "conversation": "对话 ID",
-        "executor": "执行器",
-        "team": "运行 ID",
+        "executor": "执行引擎",
+        "executor_category": "运行 ID",
         "workflow": "运行 ID"
       }
     },
@@ -136,6 +136,6 @@
     "failed": "失败",
     "withUsage": "含用量数据",
     "emptyTitle": "该时间范围内没有可归因的用量",
-    "emptyDescription": "切换分组维度或扩大时间范围；按对话、执行器、执行器分类、Workflow 分组只统计带有对应标识的请求。"
+    "emptyDescription": "切换分组维度或扩大时间范围；按对话、执行引擎、执行器、Workflow 分组只统计带有对应标识的请求。"
   }
 }

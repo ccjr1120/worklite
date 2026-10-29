@@ -6,7 +6,7 @@ import { isLiveStatus, StatusDot, toStatusKey } from '@/components/status-badge'
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
 import { TruncatedText } from '@/components/ui/truncated-text';
 import { cn } from '@/lib/utils';
-import { isSettledTeamRun, teamCurrentLabel } from '@/features/executor-categories/team-run-summary';
+import { isSettledTeamRun, teamCurrentLabel } from '@/features/executors/team-run-summary';
 
 type PinTracking = {
   track: (id: string) => (element: HTMLElement | null) => void;
@@ -165,7 +165,7 @@ function firstLine(value: string): string {
 // Each kind reads its status from the same queries its card already uses, so the bar adds no request.
 function usePinnedRowState(candidate: PinCandidate): RowState {
   const { t } = useTranslation('assistant');
-  const { t: tTeams } = useTranslation('executorCategories');
+  const { t: tTeams } = useTranslation('executors');
   const reference = candidate.kind === 'submission' ? candidate.submission.reference : null;
   const workflow = useRunQuery('personal', reference?.kind === 'workflow' ? reference.runId : '', reference?.kind === 'workflow');
   const teamRun = useAgentTeamRunQuery('personal', reference?.kind === 'executor_category' ? reference.runId : '');

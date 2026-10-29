@@ -57,7 +57,7 @@ function baseRequest(overrides: Record<string, unknown> = {}) {
 }
 
 describe('IsolatedAgentInvocationService Skill loading', () => {
-  it('injects a Coding Executors team role Skill and advertises each reference', async () => {
+  it('injects an executor role Skill and advertises each reference', async () => {
     let captured: { systemPrompt: string; builtinTools: Array<{ name: string }> } | undefined;
     gateway.runWorkflowAgent.mockImplementation(async (request: { systemPrompt: string; builtinTools: Array<{ name: string }> }) => {
       captured = request;
@@ -98,7 +98,7 @@ describe('IsolatedAgentInvocationService Skill loading', () => {
     await expect(service().execute(baseRequest())).rejects.toThrow('unavailable Skill reference');
   });
 
-  it('keeps Workflow Agent node Skill injection unchanged without adding Team-only tools', async () => {
+  it('keeps Workflow Agent node Skill injection unchanged without adding executor-only tools', async () => {
     let captured: { systemPrompt: string; builtinTools: Array<{ name: string }> } | undefined;
     gateway.runWorkflowAgent.mockImplementation(async (request: { systemPrompt: string; builtinTools: Array<{ name: string }> }) => {
       captured = request;

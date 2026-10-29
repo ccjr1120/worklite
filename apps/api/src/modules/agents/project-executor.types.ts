@@ -85,7 +85,7 @@ export function isGatewayPublicModel(model: string | null | undefined): boolean 
   return separator > 0 && separator < model.length - 1;
 }
 
-// Chat and Team executors run on the same host as this API; the Gateway sidecar owns this port.
+// Chat and executors run on the same host as this API; the Gateway sidecar owns this port.
 export function localGatewayBaseUrl(): string {
   return `http://127.0.0.1:${Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392)}`;
 }

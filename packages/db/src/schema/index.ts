@@ -639,7 +639,7 @@ export type StoredAgentTeamOperationRecoveryDecision =
 export type StoredAgentTeamSkillSnapshot = {
   id: string;
   name: string;
-  // The Skill's captured instruction text (normally its SKILL.md) so a Team role
+  // The Skill's captured instruction text (normally its SKILL.md) so an executor role
   // receives the same instructions a Workflow Agent node receives.
   instructions?: string;
   files: Array<{ path: string; content: string }>;
@@ -660,7 +660,7 @@ export type StoredAgentTeamDeveloperInstanceConfiguration = {
   developerId: string;
   label: string;
   // One declared model id, or an ordered list of fallback candidates; an empty string keeps the
-  // historical "use the Team/executor default" meaning.
+  // historical "use the role/executor default" meaning.
   publicModelId: string | string[];
   instructions: string;
   entryPoints: string[];
@@ -675,7 +675,7 @@ export type StoredAgentTeamRoleConfiguration = {
   role: StoredAgentTeamRole;
   displayName?: string;
   // One declared model id, or an ordered list of fallback candidates; an empty string keeps the
-  // historical "use the Team/executor default" meaning.
+  // historical "use the role/executor default" meaning.
   publicModelId: string | string[];
   instructions: string;
   entryPoints: string[];
@@ -700,6 +700,9 @@ export type StoredAgentTeamVersionSnapshot = {
   developerExecutions?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
   projectExecutorLaunches?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
   orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+  // Executor display name captured by value at dispatch; versions written before
+  // executor renaming were backfilled by migration 0060.
+  executorName?: string;
   workingPractice?: string;
   projectGitPolicy?: string;
   roles: StoredAgentTeamRoleConfiguration[];
@@ -717,13 +720,18 @@ export const executorCategories = sqliteTable('executor_categories', {
   roles: text('roles', { mode: 'json' }).$type<StoredAgentTeamRoleConfiguration[]>().notNull().default([]),
   workingPractice: text('working_practice').notNull().default(''),
   projectGitPolicy: text('project_git_policy').notNull().default(''),
-  // Maximum number of simultaneously active Runs for this Team; dispatches
+  // Maximum number of simultaneously active Runs for this executor; dispatches
   // beyond it persist as queued Runs and start FIFO when a slot frees.
   maxConcurrentRuns: integer('max_concurrent_runs').notNull().default(3),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
   deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),
-}, (table) => [unique().on(table.workspaceId, table.name)]);
+}, (table) => [
+  // Names are editable and unique among non-deleted executors, ignoring case.
+  uniqueIndex('executor_categories_workspace_active_name_unique')
+    .on(table.workspaceId, sql`lower(${table.name})`)
+    .where(sql`${table.deletedAt} IS NULL`),
+]);
 
 export const executorCategoryRepositories = sqliteTable('executor_category_repositories', {
   id: text('id').primaryKey(),
@@ -908,7 +916,7 @@ export const executorRuns = sqliteTable('executor_runs', {
   // placeholder until its Dispatcher commits the decision and rationale.
   modeRationale: text('mode_rationale'),
   modeDecidedAt: integer('mode_decided_at', { mode: 'timestamp_ms' }),
-  // Retired grant model, retained as read-only historical evidence: Team work roles now
+  // Retired grant model, retained as read-only historical evidence: Executor work roles now
   // execute commands directly, so new Runs never write this column.
   authorizedCommands: text('authorized_commands', { mode: 'json' }).$type<string[]>().notNull().default([]),
   scopeRevision: integer('scope_revision').notNull().default(1),

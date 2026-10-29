@@ -9,7 +9,7 @@ import { ClaudeCodeService } from './claude-code.service';
 import { CodexAppServerService } from './codex-app-server.service';
 import { PROJECT_EXECUTOR_PROTOCOLS, isGatewayPublicModel, type PreparedProjectExecution, type ProjectExecutorRequest, type ProjectExecutorSkill } from './project-executor.types';
 
-// Chat project tasks and the Team developer role share this boundary. Executors run natively in the project
+// Chat project tasks and the executor developer role share this boundary. Executors run natively in the project
 // directory; Codex App Server and Claude Code receive the same prepared prompt plus selected resources.
 @Injectable()
 export class ProjectExecutorService {

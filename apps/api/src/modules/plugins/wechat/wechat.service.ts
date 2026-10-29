@@ -11,7 +11,7 @@ import { assertRuntimeAdmission, runtimeAdmissionClosed, runtimeWritesFrozen, up
 import { AgentExecutionsService } from '../../agents/agent-executions.service';
 import { CHAT_AGENT_ID, ChatDispatchService } from '../../agents/chat-dispatch.service';
 import { ChatAttachmentsService, detachAttachmentImages } from '../../agents/chat-attachments.service';
-import { AgentTeamsService } from '../../executor-categories/executor-categories.service';
+import { ExecutorsService } from '../../executors/executors.service';
 import { RunsService } from '../../runs/runs.service';
 import { UpgradesService } from '../../upgrades/upgrades.service';
 import { encryptSecret, PluginsService } from '../plugins.service';
@@ -20,7 +20,7 @@ import { fetchBotQrCode, fetchTypingTicket, getUpdates, ILINK_DEFAULT_BASE_URL, 
 
 type Json = Record<string, unknown>;
 type Submission = typeof chatSubmissions.$inferSelect;
-// WeChat plain-text answers only bind to Chat conversation questions; Team/Workflow controls
+// WeChat plain-text answers only bind to Chat conversation questions; executor/Workflow controls
 // stay on their authoritative surfaces and are announced as text notifications.
 type WechatAction = { kind: 'agent_answer'; executionId: string; questionId: string; answer?: string; newConversation?: boolean; recoveryDecision?: 'adopt_command' | 'mark_failed' };
 type LoginSession = {
@@ -111,7 +111,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
     private readonly plugins: PluginsService,
     private readonly dispatches: ChatDispatchService,
     private readonly executions: AgentExecutionsService,
-    private readonly teams: AgentTeamsService,
+    private readonly teams: ExecutorsService,
     private readonly runs: RunsService,
     private readonly upgrades: UpgradesService,
     private readonly attachments: ChatAttachmentsService,
@@ -608,12 +608,12 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
       terminal = ['succeeded', 'failed', 'cancelled'].includes(run.status);
       const pending = run.pendingInputs.find((item) => item.status === 'pending');
       if (terminal) {
-        text = `【Coding Executors】任务${statusText[run.status] ?? run.status}\n${run.intent}`;
+        text = `【executors】任务${statusText[run.status] ?? run.status}\n${run.intent}`;
         if (run.outcome) text += `\n\n${run.outcome.summary}${run.outcome.unresolvedIssues.length ? `\n\n待解决：\n${run.outcome.unresolvedIssues.map((issue) => `- ${issue}`).join('\n')}` : ''}`;
       } else if (pending) {
-        text = `【Coding Executors】任务等待你的输入\n${pending.question}\n\n请前往 WorkLite 处理该问题。`;
+        text = `【executors】任务等待你的输入\n${pending.question}\n\n请前往 WorkLite 处理该问题。`;
       } else {
-        text = `【Coding Executors】任务已开始执行\n${run.intent}`;
+        text = `【executors】任务已开始执行\n${run.intent}`;
       }
     } else if (reference?.kind === 'workflow') {
       let run = await this.runs.get(request, 'personal', reference.runId);

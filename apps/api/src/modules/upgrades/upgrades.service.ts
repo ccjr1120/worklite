@@ -9,7 +9,7 @@ import { agentExecutions, executorRuns, agentToolCalls, chatSubmissions, command
 import type { WorkliteUpgradeView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { upgradeStateDirectory } from '../../infrastructure/runtime-upgrade-state';
-import { AgentTeamRuntimeService } from '../executor-categories/executor-category-runtime.service';
+import { AgentTeamRuntimeService } from '../executors/executor-runtime.service';
 import { AgentExecutionsService } from '../agents/agent-executions.service';
 import { CommandsService } from '../commands/commands.service';
 import { RunsService } from '../runs/runs.service';

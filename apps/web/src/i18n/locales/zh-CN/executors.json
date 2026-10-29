@@ -1,0 +1,238 @@
+{
+  "title": "执行记录",
+  "run": {
+    "loadFailed": "无法加载执行记录",
+    "mode": "执行模式",
+    "modeValue": {
+      "plan_only": "仅计划",
+      "validate_existing": "验证现有实现",
+      "implement_and_validate": "实现并验证"
+    },
+    "modeDecided": "本次判定：{{mode}}",
+    "modePending": "调度中，尚未判定模式",
+    "modeRationale": "判定理由",
+    "status": {
+      "queued": "排队中",
+      "running": "运行中",
+      "waiting_for_input": "等待输入",
+      "waiting_for_recovery": "等待操作恢复",
+      "paused": "已暂停",
+      "succeeded": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消",
+      "reserved": "已预留",
+      "completed": "已完成",
+      "uncertain": "结果不确定",
+      "cancelling": "取消中",
+      "pending": "待投递",
+      "delivered": "已投递"
+    },
+    "version": "执行器版本",
+    "versionUnknown": "编排版本未知",
+    "project": "项目目录",
+    "worktreeBasePath": "基础 Worktree",
+    "runBranch": "Run 分支",
+    "intent": "任务目标",
+    "commands": "历史命令授权（已停用）",
+    "scopeRevision": "授权范围版本",
+    "detail": {
+      "title": "执行记录"
+    },
+    "continueInChat": "在 Chat 中处理任务",
+    "inputInChat": "问题和恢复操作由 Chat 任务卡片处理。",
+    "openArchive": "查看历史对话",
+    "executors": "捕获的执行引擎"
+  },
+  "tasks": {
+    "title": "任务",
+    "empty": "暂无任务记录。",
+    "retryTask": "重试 {{taskKey}}"
+  },
+  "progress": {
+    "title": "执行进度",
+    "phase": "当前阶段",
+    "phaseValue": {
+      "planning": "规划中",
+      "test_design": "测试设计中",
+      "development": "开发中",
+      "test_authoring": "测试编写中",
+      "test_execution": "测试执行中",
+      "review": "审查中",
+      "repair": "修复中",
+      "waiting": "等待输入",
+      "terminal": "已结束"
+    },
+    "nextStep": "下一步",
+    "nextStepValue": {
+      "dispatch_assignments": "派发开发任务",
+      "await_assignment_completion": "等待开发任务完成",
+      "answer_question": "回答待处理问题",
+      "test_authoring": "编写测试",
+      "test_execution": "执行测试",
+      "review": "审查",
+      "finish": "结束"
+    },
+    "assignments": "开发任务 {{completed}}/{{total}}",
+    "percent": "{{percent}}%",
+    "activeDevelopers": "进行中的 Developer",
+    "waitingReason": {
+      "user_input": "等待用户输入",
+      "pause_boundary": "在暂停边界等待"
+    }
+  },
+  "input": {
+    "title": "等待回答",
+    "answer": "提交回答",
+    "answering": "正在提交回答",
+    "answerFailed": "无法提交回答",
+    "answerPlaceholder": "输入完整回答…"
+  },
+  "recovery": {
+    "title": "操作恢复",
+    "adopt_command": "采用已结束命令",
+    "mark_failed": "标记为失败",
+    "replay": "重新执行",
+    "submit": "提交恢复决策",
+    "failed": "无法提交恢复决策",
+    "decision": "恢复决策"
+  },
+  "documents": {
+    "title": "执行文档",
+    "empty": "暂无执行文档。"
+  },
+  "operations": {
+    "title": "操作与命令证据",
+    "empty": "暂无操作记录。",
+    "command": "命令",
+    "exitCode": "退出码",
+    "output": "命令输出",
+    "loadFailed": "无法加载命令证据。",
+    "noCommand": "未关联命令"
+  },
+  "output": {
+    "empty": "暂无输出。"
+  },
+  "outcome": {
+    "title": "执行结果",
+    "summary": "总结",
+    "unresolved": "未解决问题",
+    "noUnresolved": "没有未解决问题。",
+    "criteria": "验收评估",
+    "assessment": {
+      "met": "已满足",
+      "unmet": "未满足",
+      "not_verified": "未验证"
+    },
+    "empty": "执行尚未产生结果。",
+    "noEvidence": "没有证据。"
+  },
+  "events": {
+    "title": "持久化活动",
+    "empty": "暂无活动记录。"
+  },
+  "controls": {
+    "pause": "暂停",
+    "resume": "继续",
+    "cancel": "取消执行",
+    "failed": "无法更新执行状态",
+    "reexecute": "重新执行原始请求"
+  },
+  "role": {
+    "planner": "Planner",
+    "test_designer": "Test Designer",
+    "developer": "Developer",
+    "test_author": "Test Author",
+    "test_runner": "Test Runner",
+    "reviewer": "Reviewer",
+    "worktree_manager": "Worktree Manager",
+    "team_manager": "执行管理",
+    "executor": "实施者"
+  },
+  "metadata": {
+    "title": "执行信息",
+    "taskKey": "任务键"
+  },
+  "switcher": {
+    "label": "选择执行器",
+    "current": "当前",
+    "maxConcurrentRuns": "并发上限",
+    "activeRuns": "运行中",
+    "queuedRuns": "排队中"
+  },
+  "focus": {
+    "agent_team_bmad_tea": "面向已有公司仓库",
+    "agent_team_direct": "两步流程：计划与执行"
+  },
+  "records": {
+    "title": "执行记录",
+    "description": "查看由 Chat 发起的执行记录及其进度。",
+    "empty": "暂无执行记录。",
+    "openChat": "在 Chat 中发起任务",
+    "finishedAt": "结束时间",
+    "loadFailed": "无法加载工作记录",
+    "loading": "加载中…",
+    "loadMore": "加载更多",
+    "total": "共 {{count}} 条",
+    "filters": {
+      "label": "筛选运行记录",
+      "keyword": "按标题搜索",
+      "status": "按状态筛选",
+      "allStatuses": "全部状态",
+      "executor": "执行器",
+      "clearAll": "清空"
+    },
+    "noMatch": "没有符合筛选条件的记录。",
+    "executorName": "执行器"
+  },
+  "config": {
+    "title": "执行器配置",
+    "description": "查看执行器的基本信息、角色与记忆，修改执行器名称，并勾选角色使用的 Skill；其他配置修改在 Chat 中进行。",
+    "viewConfig": "查看配置",
+    "backToRecords": "返回记录",
+    "loadFailed": "无法加载执行器配置。",
+    "notSet": "未设置",
+    "overview": {
+      "title": "基本信息",
+      "name": "名称",
+      "description": "描述",
+      "processId": "流程 ID",
+      "processVersion": "流程版本",
+      "maxConcurrentRuns": "最大并发执行数",
+      "workingPractice": "工作惯例",
+      "createdAt": "创建时间",
+      "updatedAt": "更新时间",
+      "nameHint": "名称在未删除的执行器中唯一（不区分大小写），1-64 个字符；改名只影响之后发起的 Run。",
+      "editName": "修改名称",
+      "saveName": "保存名称",
+      "cancelName": "取消",
+      "nameSaved": "执行器名称已保存，将用于之后发起的 Run。",
+      "nameSaveFailed": "无法保存执行器名称。",
+      "nameConflict": "已有同名执行器，请换一个名称。",
+      "nameStale": "执行器配置已被其他操作修改，请刷新后重试。",
+      "nameInvalid": "名称需为 1-64 个字符，且不能包含控制字符。"
+    },
+    "roles": {
+      "title": "角色",
+      "empty": "未配置角色。",
+      "model": "模型",
+      "executor": "执行引擎",
+      "entryPoints": "入口点",
+      "skills": "技能",
+      "saveSkills": "保存技能选择",
+      "cancelSkills": "取消",
+      "skillsSaved": "技能选择已保存，将在下一次 Run 生效。",
+      "skillsSaveFailed": "无法保存技能选择。",
+      "skillsApplyNextRun": "保存后在下一次 Run 生效。",
+      "mcpServers": "MCP 服务器",
+      "tools": "工具",
+      "showInstructions": "展开指令",
+      "hideInstructions": "收起指令"
+    },
+    "memories": {
+      "title": "执行器记忆",
+      "empty": "暂无执行器记忆。",
+      "loadFailed": "无法加载执行器记忆。",
+      "allRoles": "全部角色"
+    }
+  }
+}

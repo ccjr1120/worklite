@@ -50,7 +50,7 @@ export function hostNotificationScript(notification: HostNotification): string {
 // Posts a macOS system notification on the WorkLite host through osascript. It is a side channel for
 // work the user has to come back to: delivery is best effort, bounded by a timeout, and never reported
 // as an error to the caller. Reusable by any producer of a settled unit of work (Chat turns today;
-// project tasks, Team Runs and Workflow Runs can call the same service).
+// project tasks, executor Runs and Workflow Runs can call the same service).
 @Injectable()
 export class HostNotificationsService {
   private readonly logger = new Logger(HostNotificationsService.name);

@@ -8,6 +8,7 @@ import type {
   AgentTeamRunEvent,
   AgentTeamView,
   AgentTeamRoleConfiguration,
+  UpdateAgentTeamRequest,
   AnswerAgentTeamRunRequest,
   RecoverAgentTeamOperationRequest,
   AgentTeamRunActionResponse,
@@ -87,7 +88,7 @@ import type {
 } from '@worklite/contracts';
 
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string, public readonly requestLogId?: string, public readonly testInput?: SystemOneTestInput, public readonly references?: McpServerReferenceReport) {
+  constructor(public readonly status: number, message: string, public readonly requestLogId?: string, public readonly testInput?: SystemOneTestInput, public readonly references?: McpServerReferenceReport, public readonly code?: string) {
     super(message);
     this.name = 'ApiError';
   }
@@ -107,16 +108,18 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
     let requestLogId: string | undefined;
     let testInput: SystemOneTestInput | undefined;
     let references: McpServerReferenceReport | undefined;
+    let code: string | undefined;
     try {
-      const body = (await response.json()) as { message?: string | string[]; requestLogId?: string; testInput?: SystemOneTestInput; references?: McpServerReferenceReport };
+      const body = (await response.json()) as { message?: string | string[]; requestLogId?: string; testInput?: SystemOneTestInput; references?: McpServerReferenceReport; code?: string };
       if (body.message) message = Array.isArray(body.message) ? body.message.join(', ') : body.message;
       requestLogId = body.requestLogId;
       testInput = body.testInput;
       references = body.references;
+      code = typeof body.code === 'string' ? body.code : undefined;
     } catch {
       // Keep the status-based error when the server does not return JSON.
     }
-    throw new ApiError(response.status, message, requestLogId, testInput, references);
+    throw new ApiError(response.status, message, requestLogId, testInput, references, code);
   }
   if (response.status === 204 || response.headers.get('content-length') === '0') return undefined as T;
   const text = await response.text();
@@ -296,28 +299,29 @@ export const api = {
     return apiGet<GatewayRequestLogList>(`/api/portkey-gateway/request-logs${suffix}`);
   },
   gatewayRequestLog: (requestLogId: string) => apiGet<GatewayRequestLogDetail>(`/api/portkey-gateway/request-logs/${encodeURIComponent(requestLogId)}`),
-  executorCategories: () => apiGet<AgentTeamView[]>('/api/executor-categories'),
-  agentTeamRecords: (executorCategoryId: string) => apiGet<AgentTeamRunSummary[]>(`/api/executor-categories/${encodeURIComponent(executorCategoryId)}/runs`),
+  executors: () => apiGet<AgentTeamView[]>('/api/executors'),
+  executorRecords: (executorId: string) => apiGet<AgentTeamRunSummary[]>(`/api/executors/${encodeURIComponent(executorId)}/runs`),
   agentTeamRunList: (query: { executorCategoryIds?: string[]; cursor?: string; limit?: number }) => {
     const search = new URLSearchParams();
     if (query.executorCategoryIds?.length) {
-      query.executorCategoryIds.forEach(id => search.append('executorCategoryId', id));
+      query.executorCategoryIds.forEach(id => search.append('executorId', id));
     }
     if (query.cursor?.trim()) search.set('cursor', query.cursor.trim());
     if (query.limit) search.set('limit', String(query.limit));
     const suffix = search.size > 0 ? `?${search.toString()}` : '';
     return apiGet<AgentTeamRunListPage>(`/api/executor-runs${suffix}`);
   },
-  agentTeam: (executorCategoryId: string) => apiGet<AgentTeamView>(`/api/executor-categories/${encodeURIComponent(executorCategoryId)}`),
-  updateAgentTeamRole: (executorCategoryId: string, roleId: string, input: Partial<Omit<AgentTeamRoleConfiguration, 'role'>>) =>
-    apiPatch<AgentTeamView>(`/api/executor-categories/${encodeURIComponent(executorCategoryId)}/roles/${encodeURIComponent(roleId)}`, input),
-  executorCategoryMemories: (executorCategoryId: string) => apiGet<AgentTeamMemoryView[]>(`/api/executor-categories/${encodeURIComponent(executorCategoryId)}/memories`),
+  executor: (executorId: string) => apiGet<AgentTeamView>(`/api/executors/${encodeURIComponent(executorId)}`),
+  updateExecutor: (executorId: string, input: UpdateAgentTeamRequest) => apiPatch<AgentTeamView>(`/api/executors/${encodeURIComponent(executorId)}`, input),
+  updateExecutorRole: (executorId: string, roleId: string, input: Partial<Omit<AgentTeamRoleConfiguration, 'role'>>) =>
+    apiPatch<AgentTeamView>(`/api/executors/${encodeURIComponent(executorId)}/roles/${encodeURIComponent(roleId)}`, input),
+  executorMemories: (executorId: string) => apiGet<AgentTeamMemoryView[]>(`/api/executors/${encodeURIComponent(executorId)}/memories`),
   agentTeamGroup: (groupId: string) => apiGet<AgentTeamGroupView>(`/api/executor-groups/${encodeURIComponent(groupId)}`),
   controlAgentTeamGroup: (groupId: string, input: { operation: 'reexecute'; runIds: string[] }) => apiPost<AgentTeamGroupView>(`/api/executor-groups/${encodeURIComponent(groupId)}/controls`, input),
   executorGroupEventsUrl: (groupId: string) => `/api/executor-groups/${encodeURIComponent(groupId)}/events`,
-  agentTeamDocument: (documentId: string) => apiGet<AgentTeamDocumentView>(`/api/agent-team-documents/${encodeURIComponent(documentId)}`),
-  downloadAgentTeamDocument: async (documentId: string): Promise<Blob> => {
-    const response = await fetch(`/api/agent-team-documents/${encodeURIComponent(documentId)}/download`, {
+  executorDocument: (documentId: string) => apiGet<AgentTeamDocumentView>(`/api/executor-documents/${encodeURIComponent(documentId)}`),
+  downloadExecutorDocument: async (documentId: string): Promise<Blob> => {
+    const response = await fetch(`/api/executor-documents/${encodeURIComponent(documentId)}/download`, {
       credentials: 'include',
     });
     if (!response.ok) {
@@ -377,7 +381,7 @@ export function parseAgentTeamRunEvent(value: string): AgentTeamRunEvent {
     || typeof event.payload !== 'object'
     || typeof event.createdAt !== 'string'
   ) {
-    throw new Error('The Coding Executors run event stream returned an invalid event.');
+    throw new Error('The executor Run event stream returned an invalid event.');
   }
   return event as AgentTeamRunEvent;
 }

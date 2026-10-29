@@ -58,7 +58,7 @@
       "activeChatTurns": "进行中的 Chat 会话",
       "workflowDraft": "Workflow「{{name}}」草稿（节点：{{nodes}}）",
       "workflowVersion": "已发布的 Workflow「{{name}}」v{{version}}（节点：{{nodes}}）",
-      "agentTeamRole": "执行器分类「{{team}}」的角色 {{role}}",
+      "agentTeamRole": "执行器「{{team}}」的角色 {{role}}",
       "agentTeamVersion": "已捕获的执行器版本 v{{version}}（角色：{{roles}}）"
     },
     "force": {
