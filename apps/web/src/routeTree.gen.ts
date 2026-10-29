@@ -18,9 +18,9 @@ import { Route as ModelProvidersRouteImport } from './routes/model-providers'
 import { Route as SettingsRouteRouteImport } from './routes/settings/route'
 import { Route as ArtifactsIndexRouteImport } from './routes/artifacts/index'
 import { Route as ArtifactsArtifactIdRouteImport } from './routes/artifacts/$artifactId'
+import { Route as ExecutorRunsRunIdRouteImport } from './routes/executor-runs/$runId'
 import { Route as ExecutorsIndexRouteImport } from './routes/executors/index'
 import { Route as ExecutorsExecutorIdRouteImport } from './routes/executors/$executorId'
-import { Route as ExecutorRunsRunIdRouteImport } from './routes/executor-runs/$runId'
 import { Route as McpServersIndexRouteImport } from './routes/mcp-servers/index'
 import { Route as McpServersServerIdRouteImport } from './routes/mcp-servers/$serverId'
 import { Route as PluginsIndexRouteImport } from './routes/plugins/index'
@@ -83,20 +83,19 @@ const ArtifactsArtifactIdRoute = ArtifactsArtifactIdRouteImport.update({
   path: '/$artifactId',
   getParentRoute: () => ArtifactsRoute,
 } as any)
+const ExecutorRunsRunIdRoute = ExecutorRunsRunIdRouteImport.update({
+  id: '/executor-runs/$runId',
+  path: '/executor-runs/$runId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ExecutorsIndexRoute = ExecutorsIndexRouteImport.update({
   id: '/executors/',
   path: '/executors/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ExecutorsExecutorIdRoute =
-  ExecutorsExecutorIdRouteImport.update({
-    id: '/executors/$executorId',
-    path: '/executors/$executorId',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ExecutorRunsRunIdRoute = ExecutorRunsRunIdRouteImport.update({
-  id: '/executor-runs/$runId',
-  path: '/executor-runs/$runId',
+const ExecutorsExecutorIdRoute = ExecutorsExecutorIdRouteImport.update({
+  id: '/executors/$executorId',
+  path: '/executors/$executorId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const McpServersIndexRoute = McpServersIndexRouteImport.update({
@@ -192,8 +191,8 @@ export interface FileRoutesByFullPath {
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
-  '/executors/$executorId': typeof ExecutorsExecutorIdRouteWithChildren
   '/executor-runs/$runId': typeof ExecutorRunsRunIdRoute
+  '/executors/$executorId': typeof ExecutorsExecutorIdRouteWithChildren
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -250,8 +249,8 @@ export interface FileRoutesById {
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
-  '/executors/$executorId': typeof ExecutorsExecutorIdRouteWithChildren
   '/executor-runs/$runId': typeof ExecutorRunsRunIdRoute
+  '/executors/$executorId': typeof ExecutorsExecutorIdRouteWithChildren
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -282,8 +281,8 @@ export interface FileRouteTypes {
     | '/logs'
     | '/model-providers'
     | '/artifacts/$artifactId'
-    | '/executors/$executorId'
     | '/executor-runs/$runId'
+    | '/executors/$executorId'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
     | '/runs/$runId'
@@ -339,8 +338,8 @@ export interface FileRouteTypes {
     | '/logs'
     | '/model-providers'
     | '/artifacts/$artifactId'
-    | '/executors/$executorId'
     | '/executor-runs/$runId'
+    | '/executors/$executorId'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
     | '/runs/$runId'
@@ -369,8 +368,8 @@ export interface RootRouteChildren {
   HomeRoute: typeof HomeRoute
   LogsRoute: typeof LogsRoute
   ModelProvidersRoute: typeof ModelProvidersRoute
-  ExecutorsExecutorIdRoute: typeof ExecutorsExecutorIdRouteWithChildren
   ExecutorRunsRunIdRoute: typeof ExecutorRunsRunIdRoute
+  ExecutorsExecutorIdRoute: typeof ExecutorsExecutorIdRouteWithChildren
   McpServersServerIdRoute: typeof McpServersServerIdRoute
   PluginsPluginIdRoute: typeof PluginsPluginIdRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
@@ -448,6 +447,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ArtifactsArtifactIdRouteImport
       parentRoute: typeof ArtifactsRoute
     }
+    '/executor-runs/$runId': {
+      id: '/executor-runs/$runId'
+      path: '/executor-runs/$runId'
+      fullPath: '/executor-runs/$runId'
+      preLoaderRoute: typeof ExecutorRunsRunIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/executors/': {
       id: '/executors/'
       path: '/executors'
@@ -460,13 +466,6 @@ declare module '@tanstack/react-router' {
       path: '/executors/$executorId'
       fullPath: '/executors/$executorId'
       preLoaderRoute: typeof ExecutorsExecutorIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/executor-runs/$runId': {
-      id: '/executor-runs/$runId'
-      path: '/executor-runs/$runId'
-      fullPath: '/executor-runs/$runId'
-      preLoaderRoute: typeof ExecutorRunsRunIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/mcp-servers/': {
@@ -621,18 +620,13 @@ interface ExecutorsExecutorIdRouteChildren {
   ExecutorsExecutorIdIndexRoute: typeof ExecutorsExecutorIdIndexRoute
 }
 
-const ExecutorsExecutorIdRouteChildren: ExecutorsExecutorIdRouteChildren =
-  {
-    ExecutorsExecutorIdConfigRoute:
-      ExecutorsExecutorIdConfigRoute,
-    ExecutorsExecutorIdIndexRoute:
-      ExecutorsExecutorIdIndexRoute,
-  }
+const ExecutorsExecutorIdRouteChildren: ExecutorsExecutorIdRouteChildren = {
+  ExecutorsExecutorIdConfigRoute: ExecutorsExecutorIdConfigRoute,
+  ExecutorsExecutorIdIndexRoute: ExecutorsExecutorIdIndexRoute,
+}
 
 const ExecutorsExecutorIdRouteWithChildren =
-  ExecutorsExecutorIdRoute._addFileChildren(
-    ExecutorsExecutorIdRouteChildren,
-  )
+  ExecutorsExecutorIdRoute._addFileChildren(ExecutorsExecutorIdRouteChildren)
 
 interface WorkflowsWorkflowIdRouteChildren {
   WorkflowsWorkflowIdVersionsRoute: typeof WorkflowsWorkflowIdVersionsRoute
@@ -653,9 +647,8 @@ const rootRouteChildren: RootRouteChildren = {
   HomeRoute: HomeRoute,
   LogsRoute: LogsRoute,
   ModelProvidersRoute: ModelProvidersRoute,
-  ExecutorsExecutorIdRoute:
-    ExecutorsExecutorIdRouteWithChildren,
   ExecutorRunsRunIdRoute: ExecutorRunsRunIdRoute,
+  ExecutorsExecutorIdRoute: ExecutorsExecutorIdRouteWithChildren,
   McpServersServerIdRoute: McpServersServerIdRoute,
   PluginsPluginIdRoute: PluginsPluginIdRoute,
   RunsRunIdRoute: RunsRunIdRoute,

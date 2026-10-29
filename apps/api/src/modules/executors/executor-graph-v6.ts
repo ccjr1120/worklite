@@ -26,6 +26,10 @@ export type AgentTeamGroupGraphInitial = {
   groupContext: AgentTeamGroupRunContext;
   // Optional for historical callers/tests; v10 enables Dispatcher routing.
   orchestrationVersion?: 6 | 7 | 8 | 9 | 10 | 11;
+  // The captured role id that actually executes code (role.executor is set), e.g.
+  // 'developer' for Company Project or 'executor' for Direct. Parallel development
+  // assignments fan out to this role regardless of its literal name.
+  implementationRoleId?: AgentTeamRoleId;
 };
 
 type GroupGraphState = {
@@ -92,6 +96,7 @@ export function createAgentTeamGroupGraph(
   initial: AgentTeamGroupGraphInitial,
 ) {
   const orchestrationVersion = initial.orchestrationVersion ?? 9;
+  const implementationRoleId = initial.implementationRoleId ?? 'developer';
   const runRole = async (state: GroupGraphState): Promise<Partial<GroupGraphState>> => {
     const nextStep = state.step + 1;
     const common = {
@@ -119,8 +124,8 @@ export function createAgentTeamGroupGraph(
       pendingInputId: state.taskPendingInputIds[`group_${state.step}_${state.currentRole}`],
       answer: state.taskAnswers[`group_${state.step}_${state.currentRole}`],
     } satisfies Omit<AgentTeamTaskRequest, 'projectDirectory'> & { projectDirectory: string };
-    const execution = state.currentRole === 'developer' && state.assignments.length > 0
-      ? await runDeveloperAssignments(delegate, state, common)
+    const execution = state.currentRole === implementationRoleId && state.assignments.length > 0
+      ? await runDeveloperAssignments(delegate, state, common, implementationRoleId)
       : {
         result: await delegate.executeTask(await withRepositoryScope(common, state.selectedRepositoryIds, state.groupContext)),
         pendingTaskKey: undefined,
@@ -204,7 +209,7 @@ export function createAgentTeamGroupGraph(
     const repositoryIds = handoff.repositoryIds?.length ? handoff.repositoryIds : [...scopeSelectedIds];
     const scopedIds = new Set(scopeContext.repositories.map((repository) => repository.id));
     if (repositoryIds.some((id) => !scopedIds.has(id))) throw new Error('A role handoff requested a repository outside this Run scope.');
-    const assignments = handoff.role === 'developer' && result.developmentAssignments?.length
+    const assignments = handoff.role === implementationRoleId && result.developmentAssignments?.length
       ? normalizeDynamicDevelopmentAssignments(result.developmentAssignments, DEVELOPER_LANE_IDS)
         .map((assignment, index) => ({
           ...assignment,
@@ -303,17 +308,18 @@ async function runDeveloperAssignments(
   delegate: AgentTeamGroupGraphDelegate,
   state: GroupGraphState,
   base: Omit<AgentTeamTaskRequest, 'projectDirectory'> & { projectDirectory: string },
+  implementationRoleId: AgentTeamRoleId,
 ): Promise<{ result: AgentTeamTaskResult; pendingTaskKey?: string; pendingInputIds: Record<string, string>; fileReferences: Array<{ documentId: string; revision: number; title: string }> }> {
   const assignments = state.assignments;
   const results = await Promise.all(assignments.map(async (assignment) => {
-    const taskKey = `group_${state.step}_developer_${assignment.developerId}`;
+    const taskKey = `group_${state.step}_${implementationRoleId}_${assignment.developerId}`;
     const request = await withRepositoryScope({
       ...base,
       intent: assignment.scopeSummary,
       groupMessage: assignment.scopeSummary,
       assignment,
       developerId: assignment.developerId,
-      taskDefinition: { ...base.taskDefinition, taskKey, role: 'developer', goal: assignment.scopeSummary },
+      taskDefinition: { ...base.taskDefinition, taskKey, role: implementationRoleId, goal: assignment.scopeSummary },
       pendingInputId: state.taskPendingInputIds[taskKey],
       answer: state.taskAnswers[taskKey],
     }, assignment.repositoryIds?.length ? assignment.repositoryIds : state.selectedRepositoryIds, state.groupContext);

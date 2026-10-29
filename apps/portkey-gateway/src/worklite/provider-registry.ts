@@ -745,7 +745,7 @@ const GROUP_BY_FIELDS: Record<GatewayStatsGroupBy, Array<keyof typeof GROUP_FIEL
   // surface stays in the key: one row for its model loop, one for its project tasks.
   conversation: ['surface', 'conversationId'],
   executor: ['surface', 'executor'],
-  team: ['executorCategoryId', 'teamRunId'],
+  executor_category: ['executorCategoryId', 'teamRunId'],
   workflow: ['workflowId', 'workflowRunId'],
 };
 
@@ -769,7 +769,7 @@ const GROUP_BY_SCOPE: Record<GatewayStatsGroupBy, string | null> = {
   surface: null,
   conversation: 'conversation_id IS NOT NULL',
   executor: 'executor IS NOT NULL',
-  team: 'executor_category_id IS NOT NULL',
+  executor_category: 'executor_category_id IS NOT NULL',
   workflow: 'workflow_id IS NOT NULL',
 };
 

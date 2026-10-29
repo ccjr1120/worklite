@@ -1537,6 +1537,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         projectInstructions: run.projectInstructions,
         groupContext: run.groupContext as AgentTeamGroupRunContext,
         orchestrationVersion,
+        implementationRoleId: snapshot.roles.find((role) => role.executor)?.role,
       };
       return createAgentTeamGroupGraph({
         executeTask: async (request) => this.executeTask(run.workspaceId, version, request),
@@ -3198,9 +3199,14 @@ function rolePromptAddition(
     return [
       'This is a message addressed to your one configured executor role. Complete the stated goal or ask one specific question when blocked.',
       `To pass work onward, include a handoff object with a role id captured by this executor version and a specific goal. Omit handoff when your work is complete or you are waiting for the user.`,
-      role === 'developer'
-        ? 'When implementation should split safely, return up to four developmentAssignments with non-overlapping ownedPaths and optional repositoryIds, and hand off to developer. WorkLite runs those assignments in parallel using this same captured Developer configuration.'
-        : 'Use developmentAssignments only when assigning implementation work to the single configured Developer role; each assignment must state its repository scope and non-overlapping paths.',
+      (() => {
+        const implementationRole = snapshot.roles.find((item) => item.executor)?.role;
+        return role === implementationRole
+          ? `When implementation should split safely, return up to four developmentAssignments with non-overlapping ownedPaths and optional repositoryIds, and hand off to ${implementationRole}. WorkLite runs those assignments in parallel using this same captured ${implementationRole} configuration.`
+          : implementationRole
+            ? `Use developmentAssignments only when assigning implementation work to the single configured ${implementationRole} role; each assignment must state its repository scope and non-overlapping paths.`
+            : '';
+      })(),
       request?.projectDirectory?.trim()
         ? ''
         : 'This task has no bound project directory yet. Identify the absolute project directory from the message, the executor\'s known repositories listed in the task context, executor memories, or working practice, and return identified directories as "repositoryDirectories":["/absolute/path"] in the completed response; WorkLite registers them as group repositories and binds them to this Run. If you cannot determine the directory, return waiting_for_input with one specific question asking the user for the absolute project directory.',
@@ -4040,10 +4046,12 @@ function deriveRunProgress(
     : 0;
   const percent = terminal ? 100 : Math.min(99, Math.round((100 * (phaseIndex + fraction)) / PHASE_ORDER.length));
 
+  // developerId is only ever set on lane-based task attempts (any implementation role,
+  // not just one literally named 'developer'), so this filters correctly for Direct too.
   const activeDeveloperIds = terminal
     ? []
     : [...new Set(inFlight
-      .filter((row) => row.role === 'developer')
+      .filter((row) => row.developerId !== null)
       .map((row) => row.developerId ?? RESERVED_DEVELOPER_ID))]
       .sort((left, right) => left === RESERVED_DEVELOPER_ID ? -1 : right === RESERVED_DEVELOPER_ID ? 1 : left.localeCompare(right));
 

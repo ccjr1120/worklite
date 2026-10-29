@@ -10,7 +10,7 @@ import {
 } from '@worklite/db';
 import type { GatewayToolDefinition, WorkflowAgentToolCall } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
-import { AgentTeamConfigurationService } from './executor-configuration.service';
+import { AgentTeamConfigurationService, executorRevision } from './executor-configuration.service';
 import { BUILT_IN_EXECUTOR_CATEGORY_ID } from './executor-configuration';
 
 const emptyObject = { type: 'object', additionalProperties: false, properties: {} };
@@ -167,7 +167,7 @@ export class AgentTeamManagerToolsService {
 
 function toTeamView(team: Awaited<ReturnType<AgentTeamConfigurationService['getTeam']>>): AgentTeamView {
   return {
-    id: team.id, name: team.name, description: team.description, processId: team.processId, processVersion: team.processVersion,
+    id: team.id, name: team.name, revision: executorRevision(team), description: team.description, processId: team.processId, processVersion: team.processVersion,
     maxConcurrentRuns: team.maxConcurrentRuns, workingPractice: team.workingPractice, projectGitPolicy: team.projectGitPolicy,
     roles: team.roles.map((role) => ({
       role: role.role, ...(role.displayName ? { displayName: role.displayName } : {}), publicModelId: role.publicModelId,
