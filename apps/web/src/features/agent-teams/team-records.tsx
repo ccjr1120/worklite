@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { Search, Settings } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AgentTeamRunStatus, AgentTeamRunSummary } from '@worklite/contracts';
@@ -16,6 +16,7 @@ import { useLocale } from '@/components/locale-provider';
 import { formatDateTime } from '@/i18n/format';
 import { focusRing } from '@/components/ui/interaction';
 import { toSingleLine } from '@/lib/single-line';
+import { Button } from '@/components/ui/button';
 
 const RUN_STATUSES: AgentTeamRunStatus[] = ['running', 'waiting_for_input', 'queued', 'paused', 'succeeded', 'failed', 'cancelled'];
 const SKELETON_ROWS = 8;
@@ -46,22 +47,40 @@ function RunListSkeleton() {
 export function TeamRecords({ teamId }: { teamId: string }) {
   const { t } = useTranslation('agentTeams');
   const { locale } = useLocale();
+  const navigate = useNavigate();
   const query = useAgentTeamRecordsQuery(teamId);
-  const teamName = useAgentTeamsQuery().data?.find((team) => team.id === teamId)?.name;
+  const teamsData = useAgentTeamsQuery().data ?? [];
+  const currentTeam = teamsData.find((team) => team.id === teamId);
+  const categoryName = t(`focus.${teamId}` as never, { defaultValue: currentTeam?.name });
   const [status, setStatus] = useState<StatusFilter>('all');
   const [keyword, setKeyword] = useState('');
   const runs = useMemo(() => filterRuns(query.data ?? [], status, keyword), [query.data, status, keyword]);
-  const crumbs = [{ label: t('title') }, ...(teamName ? [{ label: teamName }] : [])];
+  const crumbs = [{ label: 'Coding' }];
   const loading = query.isPending;
 
   return (
     <PageContainer width="detail">
       <WorkspaceChrome crumbs={crumbs} />
       <PageHeading
-        title={teamName ?? t('title')}
+        title="Coding"
         description={t('records.description')}
         actions={<Link to="/agent-teams/$teamId/config" params={{ teamId }} className={`inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-border px-3 text-sm font-medium hover:bg-muted ${focusRing}`}><Settings className="size-4" aria-hidden="true" />{t('config.viewConfig')}</Link>}
       />
+      <div className="flex flex-wrap gap-2">
+        {teamsData.map((team) => {
+          const teamCategoryName = t(`focus.${team.id}` as never, { defaultValue: team.name });
+          return (
+            <Button
+              key={team.id}
+              variant={team.id === teamId ? 'primary' : 'secondary'}
+              onClick={() => void navigate({ to: '/agent-teams/$teamId', params: { teamId: team.id } })}
+              aria-current={team.id === teamId ? 'page' : undefined}
+            >
+              {teamCategoryName}
+            </Button>
+          );
+        })}
+      </div>
       <div className="flex flex-col gap-2 sm:flex-row" role="search" aria-label={t('records.filters.label')}>
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />

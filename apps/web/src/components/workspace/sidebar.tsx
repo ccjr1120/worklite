@@ -1,6 +1,7 @@
 import { Link, useRouterState } from '@tanstack/react-router';
 import {
   Blocks,
+  Code2,
   FileText,
   KeyRound,
   MessageSquareText,
@@ -10,7 +11,6 @@ import {
   ScrollText,
   Server,
   Settings,
-  UsersRound,
   Workflow,
 } from 'lucide-react';
 import { useLayoutEffect, useRef, useState } from 'react';
@@ -32,7 +32,7 @@ const navigationGroups = [
     items: [
       { id: 'chat', labelKey: 'nav.chat', to: '/chat', icon: MessageSquareText },
       { id: 'workflows', labelKey: 'nav.workflows', to: '/workflows', icon: Workflow },
-      { id: 'agentTeam', labelKey: 'nav.agentTeam', to: '/agent-teams', icon: UsersRound },
+      { id: 'agentTeam', labelKey: 'nav.agentTeam', to: '/agent-teams', icon: Code2 },
     ],
   },
   {
@@ -83,7 +83,7 @@ function Sidebar({
   function primaryActive(id: NavItem['id'], to: string) {
     if (id === 'settings') return pathname.startsWith('/settings');
     if (id === 'workflows') return ['/workflows', '/runs'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
-    if (id === 'agentTeam') return ['/agent-teams', '/agent-team-runs', '/agent-team-groups'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+    if (id === 'agentTeam') return ['/agent-teams', '/agent-team-runs'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
     return pathname === to || pathname.startsWith(`${to}/`);
   }
 

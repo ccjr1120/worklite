@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router';
-import { Blocks, FileText, KeyRound, MessageSquareText, Plus, Puzzle, ScrollText, Server, UsersRound, Workflow } from 'lucide-react';
+import { Blocks, Code2, FileText, KeyRound, MessageSquareText, Plus, Puzzle, ScrollText, Server, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   CommandDialog,
@@ -33,7 +33,7 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
             <Workflow className="size-4" /> {t('nav.workflows')}
           </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/agent-teams' }))}>
-            <UsersRound className="size-4" /> {t('nav.agentTeam')}
+            <Code2 className="size-4" /> {t('nav.agentTeam')}
           </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/model-providers' }))}>
             <KeyRound className="size-4" /> {t('nav.modelProviders')}

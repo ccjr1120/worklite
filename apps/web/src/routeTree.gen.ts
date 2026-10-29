@@ -17,7 +17,6 @@ import { Route as HomeRouteImport } from './routes/home'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as ModelProvidersRouteImport } from './routes/model-providers'
 import { Route as SettingsRouteRouteImport } from './routes/settings/route'
-import { Route as AgentTeamGroupsGroupIdRouteImport } from './routes/agent-team-groups/$groupId'
 import { Route as AgentTeamRunsRunIdRouteImport } from './routes/agent-team-runs/$runId'
 import { Route as AgentTeamsIndexRouteImport } from './routes/agent-teams/index'
 import { Route as AgentTeamsTeamIdRouteImport } from './routes/agent-teams/$teamId'
@@ -78,11 +77,6 @@ const ModelProvidersRoute = ModelProvidersRouteImport.update({
 const SettingsRouteRoute = SettingsRouteRouteImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AgentTeamGroupsGroupIdRoute = AgentTeamGroupsGroupIdRouteImport.update({
-  id: '/agent-team-groups/$groupId',
-  path: '/agent-team-groups/$groupId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentTeamRunsRunIdRoute = AgentTeamRunsRunIdRouteImport.update({
@@ -201,7 +195,6 @@ export interface FileRoutesByFullPath {
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
-  '/agent-team-groups/$groupId': typeof AgentTeamGroupsGroupIdRoute
   '/agent-team-runs/$runId': typeof AgentTeamRunsRunIdRoute
   '/agent-teams/$teamId': typeof AgentTeamsTeamIdRouteWithChildren
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
@@ -231,7 +224,6 @@ export interface FileRoutesByTo {
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
-  '/agent-team-groups/$groupId': typeof AgentTeamGroupsGroupIdRoute
   '/agent-team-runs/$runId': typeof AgentTeamRunsRunIdRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
@@ -263,7 +255,6 @@ export interface FileRoutesById {
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
-  '/agent-team-groups/$groupId': typeof AgentTeamGroupsGroupIdRoute
   '/agent-team-runs/$runId': typeof AgentTeamRunsRunIdRoute
   '/agent-teams/$teamId': typeof AgentTeamsTeamIdRouteWithChildren
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
@@ -297,7 +288,6 @@ export interface FileRouteTypes {
     | '/home'
     | '/logs'
     | '/model-providers'
-    | '/agent-team-groups/$groupId'
     | '/agent-team-runs/$runId'
     | '/agent-teams/$teamId'
     | '/artifacts/$artifactId'
@@ -327,7 +317,6 @@ export interface FileRouteTypes {
     | '/home'
     | '/logs'
     | '/model-providers'
-    | '/agent-team-groups/$groupId'
     | '/agent-team-runs/$runId'
     | '/artifacts/$artifactId'
     | '/mcp-servers/$serverId'
@@ -358,7 +347,6 @@ export interface FileRouteTypes {
     | '/home'
     | '/logs'
     | '/model-providers'
-    | '/agent-team-groups/$groupId'
     | '/agent-team-runs/$runId'
     | '/agent-teams/$teamId'
     | '/artifacts/$artifactId'
@@ -391,7 +379,6 @@ export interface RootRouteChildren {
   HomeRoute: typeof HomeRoute
   LogsRoute: typeof LogsRoute
   ModelProvidersRoute: typeof ModelProvidersRoute
-  AgentTeamGroupsGroupIdRoute: typeof AgentTeamGroupsGroupIdRoute
   AgentTeamRunsRunIdRoute: typeof AgentTeamRunsRunIdRoute
   AgentTeamsTeamIdRoute: typeof AgentTeamsTeamIdRouteWithChildren
   McpServersServerIdRoute: typeof McpServersServerIdRoute
@@ -462,13 +449,6 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/agent-team-groups/$groupId': {
-      id: '/agent-team-groups/$groupId'
-      path: '/agent-team-groups/$groupId'
-      fullPath: '/agent-team-groups/$groupId'
-      preLoaderRoute: typeof AgentTeamGroupsGroupIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agent-team-runs/$runId': {
@@ -686,7 +666,6 @@ const rootRouteChildren: RootRouteChildren = {
   HomeRoute: HomeRoute,
   LogsRoute: LogsRoute,
   ModelProvidersRoute: ModelProvidersRoute,
-  AgentTeamGroupsGroupIdRoute: AgentTeamGroupsGroupIdRoute,
   AgentTeamRunsRunIdRoute: AgentTeamRunsRunIdRoute,
   AgentTeamsTeamIdRoute: AgentTeamsTeamIdRouteWithChildren,
   McpServersServerIdRoute: McpServersServerIdRoute,

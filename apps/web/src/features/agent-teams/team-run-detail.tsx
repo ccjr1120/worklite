@@ -79,21 +79,21 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
     return () => events.close();
   }, [runId, queryClient]);
 
-  if (query.isPending) return <PageContainer width="detail"><WorkspaceChrome crumbs={[{ label: t('title') }, { label: t('run.detail.title') }]} /><div className="space-y-3" role="status"><Skeleton className="h-8 w-72" /><Skeleton className="h-28 w-full" /><Skeleton className="h-56 w-full" /></div></PageContainer>;
-  if (query.isError || !query.data) return <PageContainer width="detail"><WorkspaceChrome crumbs={[{ label: t('title') }, { label: t('run.detail.title') }]} /><ErrorState title={t('run.detail.title')} description={t('run.loadFailed')} onAction={() => void query.refetch()} /></PageContainer>;
+  if (query.isPending) return <PageContainer width="detail"><WorkspaceChrome crumbs={[{ label: 'Coding' }, { label: t('run.detail.title') }]} /><div className="space-y-3" role="status"><Skeleton className="h-8 w-72" /><Skeleton className="h-28 w-full" /><Skeleton className="h-56 w-full" /></div></PageContainer>;
+  if (query.isError || !query.data) return <PageContainer width="detail"><WorkspaceChrome crumbs={[{ label: 'Coding' }, { label: t('run.detail.title') }]} /><ErrorState title={t('run.detail.title')} description={t('run.loadFailed')} onAction={() => void query.refetch()} /></PageContainer>;
 
   const run: AgentTeamRunView = query.data;
   const questions = run.pendingInputs.filter((input) => input.status === 'pending');
   return (
     <PageContainer width="detail">
-      <WorkspaceChrome crumbs={[{ label: t('title'), to: `/agent-teams/${run.teamId}` }, { label: t('run.detail.title') }]} />
+      <WorkspaceChrome crumbs={[{ label: 'Coding', to: `/agent-teams/${run.teamId}` }, { label: t('run.detail.title') }]} />
       <PageHeading title={t('run.detail.title')} description={run.intent} actions={<Link to="/chat" className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">{t('run.continueInChat')}</Link>} />
 
       {run.progress ? <section className="rounded-xl border border-border bg-surface p-4 shadow-xs"><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">{t('progress.title')}</h2><span className="text-sm tabular-nums">{t('progress.percent', { percent: run.progress.percent })}</span></div><Progress value={run.progress.percent} className="mt-3" /><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-muted-foreground"><span>{t('progress.phase')}: {t(`progress.phaseValue.${run.progress.phase}`)}</span><span>{t('progress.nextStep')}: {t(`progress.nextStepValue.${run.progress.nextStep}`)}</span>{run.progress.totalAssignments > 0 ? <span>{t('progress.assignments', { completed: run.progress.completedAssignments, total: run.progress.totalAssignments })}</span> : null}{run.progress.activeDeveloperIds.length ? <span>{t('progress.activeDevelopers')}: {run.progress.activeDeveloperIds.join(', ')}</span> : null}{run.progress.waitingReason ? <span>{t(`progress.waitingReason.${run.progress.waitingReason}`)}</span> : null}</div></section> : null}
 
       <section className="rounded-xl border border-border bg-surface p-4 shadow-xs">
         <h2 className="text-sm font-semibold">{t('metadata.title')}</h2>
-        <div className="mt-3 flex flex-wrap items-center gap-3"><StatusBadge status={toStatusKey(run.status)} label={t(`run.status.${run.status}`)} /><CopyableId value={run.id} /><span className="text-xs text-muted-foreground">v{run.teamVersion.version} · {formatDateTime(run.createdAt, locale)}</span>{run.groupId ? <Link to="/agent-team-groups/$groupId" params={{ groupId: run.groupId }} className="text-[13px] text-brand-text underline underline-offset-4">{t('run.openArchive')}</Link> : null}</div>
+        <div className="mt-3 flex flex-wrap items-center gap-3"><StatusBadge status={toStatusKey(run.status)} label={t(`run.status.${run.status}`)} /><CopyableId value={run.id} /><span className="text-xs text-muted-foreground">v{run.teamVersion.version} · {formatDateTime(run.createdAt, locale)}</span></div>
         <dl className="mt-4 grid gap-4 text-[13px] md:grid-cols-2">
           <div><dt className="text-muted-foreground">{t('run.version')}</dt><dd className="mt-1 font-mono">v{run.teamVersion.version} · {run.teamVersion.orchestrationVersion ? `v${run.teamVersion.orchestrationVersion}` : t('run.versionUnknown')}</dd></div>
           <div><dt className="text-muted-foreground">{t('run.mode')}</dt><dd className="mt-1">{runModeLabel(t, run.mode, run.teamVersion.orchestrationVersion ?? 1, run.modeDecidedAt)}</dd></div>

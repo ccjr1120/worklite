@@ -88,6 +88,9 @@ const localDinoSkill: SkillView = {
   metadata: { bins: ['dino-cli'] },
   files: [{ path: 'SKILL.md', content: '# dino-account' }],
   updatedAt: '2026-10-10T08:00:00.000Z',
+  root: 'platform',
+  rootPath: '/path/to/skill',
+  directory: 'dino-account',
 };
 
 function mockQueries(options: { team?: AgentTeamView; memories?: AgentTeamMemoryView[]; mcpServers?: Array<Pick<McpServerView, 'id' | 'name'>>; skills?: SkillView[] } = {}) {

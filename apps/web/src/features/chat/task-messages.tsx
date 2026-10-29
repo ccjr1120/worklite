@@ -113,7 +113,7 @@ function TeamRunActions({ run, groupId, onRunUpdate }: { run: AgentTeamRunView; 
       </> : null}
       {groupId && ['succeeded', 'failed', 'cancelled'].includes(run.status) && !reexecutedRunId ? <Button type="button" variant="secondary" size="compact" disabled={Boolean(busy)} onClick={() => void reexecute()}><RefreshCw className="size-3.5" aria-hidden="true" />{t('controls.reexecute')}</Button> : null}
     {run.tasks.filter((task) => task.status === 'failed' && task.retryable).map((task) => <Button key={task.taskKey} type="button" variant="secondary" size="compact" disabled={Boolean(busy)} onClick={() => void perform(`retry:${task.taskKey}`, () => api.retryAgentTeamTask(run.id, task.taskKey))}><RotateCcw className="size-3.5" aria-hidden="true" />{t('tasks.retryTask', { taskKey: task.taskKey })}</Button>)}
-    {reexecutedRunId ? <Link to="/agent-team-runs/$runId" params={{ runId: reexecutedRunId }} className="text-[13px] text-brand-text underline underline-offset-4">{t('group.openRun')}</Link> : null}
+    {reexecutedRunId ? <Link to="/agent-team-runs/$runId" params={{ runId: reexecutedRunId }} className="text-[13px] text-brand-text underline underline-offset-4">{t('run.detail.title')}</Link> : null}
     {error ? <p className="basis-full text-right text-[13px] text-danger" role="alert">{error}</p> : null}
   </div>;
 }

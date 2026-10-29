@@ -106,7 +106,7 @@ function RoleCard({ teamId, role, skills, mcpServerNames }: { teamId: string; ro
                       aria-label={skill.name}
                     />
                     <span className="min-w-0 flex-1 truncate text-[13px]">{skill.name}</span>
-                    <Badge variant="neutral">{t(`skills:root.${skill.root}` as never)}</Badge>
+                    {'root' in skill ? <Badge variant="neutral">{t(`skills:root.${skill.root}` as never)}</Badge> : null}
                   </label>
                 ))}
               </div>

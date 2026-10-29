@@ -1,7 +1,7 @@
 {
-  "title": "Coding Executors",
+  "title": "执行记录",
   "run": {
-    "loadFailed": "无法加载 Coding Executors 执行",
+    "loadFailed": "无法加载执行记录",
     "mode": "执行模式",
     "modeValue": {
       "plan_only": "仅计划",
@@ -27,7 +27,7 @@
       "pending": "待投递",
       "delivered": "已投递"
     },
-    "version": "团队版本",
+    "version": "执行器版本",
     "versionUnknown": "编排版本未知",
     "project": "项目目录",
     "worktreeBasePath": "基础 Worktree",
@@ -36,7 +36,7 @@
     "commands": "历史命令授权（已停用）",
     "scopeRevision": "授权范围版本",
     "detail": {
-      "title": "Coding Executors 执行"
+      "title": "执行记录"
     },
     "continueInChat": "在 Chat 中处理任务",
     "inputInChat": "问题和恢复操作由 Chat 任务卡片处理。",
@@ -97,8 +97,8 @@
     "decision": "恢复决策"
   },
   "documents": {
-    "title": "团队文档",
-    "empty": "暂无团队文档。"
+    "title": "执行文档",
+    "empty": "暂无执行文档。"
   },
   "operations": {
     "title": "操作与命令证据",
@@ -145,7 +145,7 @@
     "test_runner": "Test Runner",
     "reviewer": "Reviewer",
     "worktree_manager": "Worktree Manager",
-    "team_manager": "Team Manager",
+    "team_manager": "执行管理",
     "executor": "Executor"
   },
   "metadata": {
@@ -153,7 +153,7 @@
     "taskKey": "任务键"
   },
   "switcher": {
-    "label": "选择 Coding Executor 团队",
+    "label": "选择执行器分类",
     "current": "当前",
     "maxConcurrentRuns": "并发上限",
     "activeRuns": "运行中",
@@ -165,8 +165,8 @@
     "agent_team_direct": "面向单次直接执行"
   },
   "records": {
-    "title": "Coding Executors 执行记录",
-    "description": "这里查看由 Chat 发起的协作执行及其进度。",
+    "title": "执行记录",
+    "description": "这里按执行器分类查看由 Chat 发起的执行记录及其进度。",
     "empty": "暂无执行记录。",
     "openChat": "在 Chat 中发起任务",
     "finishedAt": "结束时间",
@@ -180,11 +180,11 @@
     "noMatch": "没有符合筛选条件的记录。"
   },
   "config": {
-    "title": "Team 配置",
-    "description": "查看 Team 的基本信息、角色与记忆，并勾选角色使用的 Skill；其他配置修改在 Chat 中进行。",
+    "title": "执行器配置",
+    "description": "查看执行器分类的基本信息、角色与记忆，并勾选角色使用的 Skill；其他配置修改在 Chat 中进行。",
     "viewConfig": "查看配置",
     "backToRecords": "返回记录",
-    "loadFailed": "无法加载 Team 配置。",
+    "loadFailed": "无法加载执行器配置。",
     "notSet": "未设置",
     "overview": {
       "title": "基本信息",
@@ -215,26 +215,10 @@
       "hideInstructions": "收起指令"
     },
     "memories": {
-      "title": "Team 记忆",
-      "empty": "暂无 Team 记忆。",
-      "loadFailed": "无法加载 Team 记忆。",
+      "title": "执行器记忆",
+      "empty": "暂无执行器记忆。",
+      "loadFailed": "无法加载执行器记忆。",
       "allRoles": "全部角色"
     }
-  },
-  "group": {
-    "untitled": "未命名工作记录",
-    "archive": "历史对话",
-    "archiveDescription": "此页面保留历史对话记录；新任务、问题回答和执行操作都在 Chat 中处理。",
-    "archiveEmpty": "此记录尚无对话内容。",
-    "transcript": "对话记录",
-    "loadFailed": "无法加载历史对话。",
-    "openChat": "打开 Chat",
-    "openRun": "查看执行证据",
-    "boundRuns": "关联执行",
-    "noRuns": "没有关联执行。",
-    "unspecifiedRole": "未指定角色",
-    "recipientLabel": "发送给 {{role}}",
-    "you": "你",
-    "system": "系统"
   }
 }
