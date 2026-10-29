@@ -111,7 +111,7 @@ function McpServerDeleteDialog({ open, onOpenChange, serverId, name, onDeleted }
                 </li>
               ))}
               {references.agentTeamRoles.map((role) => (
-                <li key={`role-${role.teamId}-${role.role}`}>
+                <li key={`role-${role.executorCategoryId}-${role.role}`}>
                   {t('delete.references.agentTeamRole', { team: role.teamName, role: role.displayName ?? role.role })}
                 </li>
               ))}

@@ -68,7 +68,7 @@ export const workflowsQueryKey = () => ['workflows'] as const;
 export const runsQueryKey = () => ['runs'] as const;
 export const mcpServersQueryKey = () => ['mcp-servers'] as const;
 export const artifactsQueryKey = () => ['artifacts'] as const;
-export const agentTeamRecordsQueryKey = (teamId: string) => ['agent-team-records', teamId] as const;
+export const agentTeamRecordsQueryKey = (executorCategoryId: string) => ['agent-team-records', executorCategoryId] as const;
 export const agentTeamGroupQueryKey = (groupId: string) => ['agent-team-group', groupId] as const;
 export const agentTeamRunQueryKey = (runId: string) => ['agent-team-run', runId] as const;
 const agentTeamDocumentQueryKey = (documentId: string) => ['agent-team-document', documentId] as const;
@@ -163,19 +163,19 @@ export function useSkillQuery(workspace: string | undefined, skillId: string) {
 }
 
 export function useAgentTeamsQuery() {
-  return useQuery({ queryKey: ['agent-teams'] as const, queryFn: () => api.agentTeams() });
+  return useQuery({ queryKey: ['executor-categories'] as const, queryFn: () => api.executorCategories() });
 }
 
-export function useAgentTeamRecordsQuery(teamId: string) {
-  return useQuery({ queryKey: agentTeamRecordsQueryKey(teamId), queryFn: () => api.agentTeamRecords(teamId), enabled: Boolean(teamId), refetchInterval: 5_000 });
+export function useAgentTeamRecordsQuery(executorCategoryId: string) {
+  return useQuery({ queryKey: agentTeamRecordsQueryKey(executorCategoryId), queryFn: () => api.agentTeamRecords(executorCategoryId), enabled: Boolean(executorCategoryId), refetchInterval: 5_000 });
 }
 
-export function useAgentTeamQuery(teamId: string) {
-  return useQuery({ queryKey: ['agent-team', teamId] as const, queryFn: () => api.agentTeam(teamId), enabled: Boolean(teamId) });
+export function useAgentTeamQuery(executorCategoryId: string) {
+  return useQuery({ queryKey: ['agent-team', executorCategoryId] as const, queryFn: () => api.agentTeam(executorCategoryId), enabled: Boolean(executorCategoryId) });
 }
 
-export function useAgentTeamMemoriesQuery(teamId: string) {
-  return useQuery({ queryKey: ['agent-team-memories', teamId] as const, queryFn: () => api.agentTeamMemories(teamId), enabled: Boolean(teamId) });
+export function useAgentTeamMemoriesQuery(executorCategoryId: string) {
+  return useQuery({ queryKey: ['agent-team-memories', executorCategoryId] as const, queryFn: () => api.executorCategoryMemories(executorCategoryId), enabled: Boolean(executorCategoryId) });
 }
 
 export function useAgentTeamGroupQuery(groupId: string) {
@@ -202,16 +202,16 @@ export function useAgentTeamRunQuery(workspace: string | undefined, runId: strin
   });
 }
 
-export function agentTeamRunListQueryKey(teamIds?: string[]) {
-  const sorted = teamIds ? [...teamIds].sort() : [];
+export function agentTeamRunListQueryKey(executorCategoryIds?: string[]) {
+  const sorted = executorCategoryIds ? [...executorCategoryIds].sort() : [];
   return ['agent-team-run-list', ...sorted] as const;
 }
 
-export function useAgentTeamRunListQuery(teamIds?: string[]) {
+export function useAgentTeamRunListQuery(executorCategoryIds?: string[]) {
   return useInfiniteQuery({
-    queryKey: agentTeamRunListQueryKey(teamIds),
+    queryKey: agentTeamRunListQueryKey(executorCategoryIds),
     initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) => api.agentTeamRunList({ teamIds, cursor: pageParam }),
+    queryFn: ({ pageParam }) => api.agentTeamRunList({ executorCategoryIds, cursor: pageParam }),
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     refetchInterval: 5_000,
   });
@@ -243,8 +243,8 @@ export function useCodexAccountUsagesQuery(enabled: boolean) {
 
 // Attribution filters are part of the question, so they are part of the cache key;
 // leaving them out would serve a Chat-only answer for a Team-only request.
-function attributionKey(query: { surface?: string; conversationId?: string; projectTaskId?: string; executor?: string; teamId?: string; teamRunId?: string; workflowId?: string; workflowRunId?: string }) {
-  return [query.surface ?? '', query.conversationId ?? '', query.projectTaskId ?? '', query.executor ?? '', query.teamId ?? '', query.teamRunId ?? '', query.workflowId ?? '', query.workflowRunId ?? ''] as const;
+function attributionKey(query: { surface?: string; conversationId?: string; projectTaskId?: string; executor?: string; executorCategoryId?: string; teamRunId?: string; workflowId?: string; workflowRunId?: string }) {
+  return [query.surface ?? '', query.conversationId ?? '', query.projectTaskId ?? '', query.executor ?? '', query.executorCategoryId ?? '', query.teamRunId ?? '', query.workflowId ?? '', query.workflowRunId ?? ''] as const;
 }
 
 export function usePortkeyGatewayStatsQuery(query: PortkeyGatewayStatsQuery) {

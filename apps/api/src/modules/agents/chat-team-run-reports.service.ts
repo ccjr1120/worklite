@@ -1,8 +1,8 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { and, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
-import { agentTeamRuns, chatSubmissions, type Database } from '@worklite/db';
+import { executorRuns, chatSubmissions, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
-import { AgentTeamRuntimeService } from '../agent-teams/agent-team-runtime.service';
+import { AgentTeamRuntimeService } from '../executor-categories/agent-team-runtime.service';
 import { AgentExecutionsService } from './agent-executions.service';
 
 const REPORT_DEFER_MS = 15_000;
@@ -40,16 +40,16 @@ export class ChatTeamRunReportsService implements OnModuleInit {
   }
 
   private async sweepSettledRuns(): Promise<void> {
-    const rows = await this.db.select({ runId: agentTeamRuns.id })
+    const rows = await this.db.select({ runId: executorRuns.id })
       .from(chatSubmissions)
-      .innerJoin(agentTeamRuns, sql`${agentTeamRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
+      .innerJoin(executorRuns, sql`${executorRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
       .where(and(
         // reportedAt alone cannot gate a report: a retried Run settles again after the
         // first report, so only a settle newer than the last report counts as unreported.
-        or(isNull(chatSubmissions.reportedAt), gt(agentTeamRuns.finishedAt, chatSubmissions.reportedAt)),
+        or(isNull(chatSubmissions.reportedAt), gt(executorRuns.finishedAt, chatSubmissions.reportedAt)),
         isNotNull(chatSubmissions.executionId),
-        inArray(agentTeamRuns.status, ['succeeded', 'failed']),
-        sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'team'`,
+        inArray(executorRuns.status, ['succeeded', 'failed']),
+        sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'executor_category'`,
       ));
     for (const row of rows) await this.scheduleForRun(row.runId, 0);
   }
@@ -61,14 +61,14 @@ export class ChatTeamRunReportsService implements OnModuleInit {
       executionId: chatSubmissions.executionId,
       reportedAt: chatSubmissions.reportedAt,
       reference: chatSubmissions.reference,
-      runStatus: agentTeamRuns.status,
-      runFinishedAt: agentTeamRuns.finishedAt,
+      runStatus: executorRuns.status,
+      runFinishedAt: executorRuns.finishedAt,
     })
       .from(chatSubmissions)
-      .innerJoin(agentTeamRuns, sql`${agentTeamRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
-      .where(and(eq(agentTeamRuns.id, runId), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'team'`))
+      .innerJoin(executorRuns, sql`${executorRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
+      .where(and(eq(executorRuns.id, runId), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'executor_category'`))
       .limit(1);
-    if (!row || !row.executionId || row.reference?.kind !== 'team') return;
+    if (!row || !row.executionId || row.reference?.kind !== 'executor_category') return;
     if (row.runStatus !== 'succeeded' && row.runStatus !== 'failed') return;
     // A Run retried after an earlier report settles again with a newer finishedAt; that
     // outcome has not been reported yet even though reportedAt is already set.
@@ -94,13 +94,13 @@ export class ChatTeamRunReportsService implements OnModuleInit {
     if (view.status !== 'succeeded' && view.status !== 'failed') return;
     const finishedAt = view.finishedAt ? new Date(view.finishedAt) : null;
     if (submission.reportedAt && (!finishedAt || finishedAt <= submission.reportedAt)) return;
-    const groupContext = view.groupId ? `历史对话 ${view.groupId} 可通过 inspect_agent_team_group 查看。` : '';
+    const groupContext = view.groupId ? `历史对话 ${view.groupId} 可通过 inspect_executor_group 查看。` : '';
     const note = view.status === 'succeeded'
       ? `[后台团队任务提醒] 团队执行任务 ${view.id}（目录 ${view.projectDirectory}）已完成。${groupContext}结果摘要：${view.outcome?.summary ?? '无'}。请用简短回复向用户汇报该结果；不要向用户复述本提醒本身。`
       : (() => {
         const failedTask = [...view.tasks].reverse().find((task) => task.status === 'failed');
         const retryHint = failedTask?.retryable
-          ? '该失败任务标记为可重试，你可以使用 control_agent_team_run 重试它，无需重新派发整个任务。'
+          ? '该失败任务标记为可重试，你可以使用 control_executor_run 重试它，无需重新派发整个任务。'
           : '该失败任务不可重试，请在确认原因后通过 dispatch_task 重新派发。';
         return `[后台团队任务提醒] 团队执行任务 ${view.id}（目录 ${view.projectDirectory}）失败。${groupContext}失败任务 ${failedTask?.taskKey ?? '未知'}：${failedTask?.error ?? '未知错误'}。${retryHint}请用简短回复向用户汇报失败原因与建议的下一步；不要向用户复述本提醒本身。`;
       })();

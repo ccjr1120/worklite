@@ -3,7 +3,7 @@ ALTER TABLE `agent_teams` ADD `working_practice` text DEFAULT '' NOT NULL;
 CREATE TABLE `agent_team_groups` (
   `id` text PRIMARY KEY NOT NULL,
   `workspace_id` text NOT NULL REFERENCES `workspaces`(`id`) ON DELETE CASCADE,
-  `team_id` text NOT NULL REFERENCES `agent_teams`(`id`) ON DELETE CASCADE,
+  `executor_category_id` text NOT NULL REFERENCES `agent_teams`(`id`) ON DELETE CASCADE,
   `title` text DEFAULT '' NOT NULL,
   `mode` text DEFAULT 'implement_and_validate' NOT NULL,
   `created_at` integer DEFAULT (unixepoch() * 1000) NOT NULL,
@@ -15,14 +15,14 @@ CREATE INDEX `agent_team_groups_workspace_updated_idx` ON `agent_team_groups` (`
 CREATE TABLE `agent_team_repositories` (
   `id` text PRIMARY KEY NOT NULL,
   `workspace_id` text NOT NULL REFERENCES `workspaces`(`id`) ON DELETE CASCADE,
-  `team_id` text NOT NULL REFERENCES `agent_teams`(`id`) ON DELETE CASCADE,
+  `executor_category_id` text NOT NULL REFERENCES `agent_teams`(`id`) ON DELETE CASCADE,
   `name` text NOT NULL,
   `directory` text NOT NULL,
   `created_at` integer DEFAULT (unixepoch() * 1000) NOT NULL,
   `updated_at` integer DEFAULT (unixepoch() * 1000) NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `agent_team_repositories_team_directory_idx` ON `agent_team_repositories` (`team_id`, `directory`);
+CREATE UNIQUE INDEX `agent_team_repositories_team_directory_idx` ON `agent_team_repositories` (`executor_category_id`, `directory`);
 --> statement-breakpoint
 CREATE TABLE `agent_team_group_repositories` (
   `id` text PRIMARY KEY NOT NULL,
@@ -77,7 +77,7 @@ CREATE TABLE `agent_team_group_events` (
 CREATE TABLE `agent_team_memories` (
   `id` text PRIMARY KEY NOT NULL,
   `workspace_id` text NOT NULL REFERENCES `workspaces`(`id`) ON DELETE CASCADE,
-  `team_id` text NOT NULL REFERENCES `agent_teams`(`id`) ON DELETE CASCADE,
+  `executor_category_id` text NOT NULL REFERENCES `agent_teams`(`id`) ON DELETE CASCADE,
   `repository_id` text REFERENCES `agent_team_repositories`(`id`) ON DELETE CASCADE,
   `role` text,
   `content` text NOT NULL,
@@ -86,7 +86,7 @@ CREATE TABLE `agent_team_memories` (
   `updated_at` integer DEFAULT (unixepoch() * 1000) NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX `agent_team_memories_scope_idx` ON `agent_team_memories` (`team_id`, `repository_id`, `role`, `updated_at`);
+CREATE INDEX `agent_team_memories_scope_idx` ON `agent_team_memories` (`executor_category_id`, `repository_id`, `role`, `updated_at`);
 --> statement-breakpoint
 ALTER TABLE `agent_team_runs` ADD `group_id` text REFERENCES `agent_team_groups`(`id`) ON DELETE SET NULL;
 --> statement-breakpoint

@@ -21,7 +21,7 @@ function appendAttributionFilters(search: URLSearchParams, filters: GatewayAttri
     ['conversationId', filters.conversationId],
     ['projectTaskId', filters.projectTaskId],
     ['executor', filters.executor],
-    ['teamId', filters.teamId],
+    ['executorCategoryId', filters.executorCategoryId],
     ['teamRunId', filters.teamRunId],
     ['workflowId', filters.workflowId],
     ['workflowRunId', filters.workflowRunId],

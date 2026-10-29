@@ -21,7 +21,7 @@ import type { RequestLogFilters } from './request-logs';
 function groupLabel(group: GatewayAttributionGroup, groupBy: GatewayStatsGroupBy, surfaceLabel: (surface: GatewaySurface | null) => string): { title: string; detail: string | null } {
   if (groupBy === 'conversation') return { title: surfaceLabel(group.surface), detail: group.conversationId };
   if (groupBy === 'executor') return { title: surfaceLabel(group.surface), detail: group.executor };
-  if (groupBy === 'team') return { title: group.teamId ?? '', detail: group.teamRunId };
+  if (groupBy: 'executorCategory'RunId };
   if (groupBy === 'workflow') return { title: group.workflowId ?? '', detail: group.workflowRunId };
   return { title: surfaceLabel(group.surface), detail: null };
 }
@@ -30,7 +30,7 @@ function groupLabel(group: GatewayAttributionGroup, groupBy: GatewayStatsGroupBy
 function groupRequestFilters(group: GatewayAttributionGroup, groupBy: GatewayStatsGroupBy): RequestLogFilters {
   if (groupBy === 'conversation') return { surface: group.surface ?? undefined, conversationId: group.conversationId ?? undefined };
   if (groupBy === 'executor') return { surface: group.surface ?? undefined, executor: group.executor ?? undefined };
-  if (groupBy === 'team') return { teamId: group.teamId ?? undefined, teamRunId: group.teamRunId ?? undefined };
+  if (groupBy: 'executorCategory'RunId ?? undefined };
   if (groupBy === 'workflow') return { workflowId: group.workflowId ?? undefined, workflowRunId: group.workflowRunId ?? undefined };
   return { surface: group.surface ?? undefined };
 }

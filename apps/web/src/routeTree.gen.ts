@@ -17,9 +17,9 @@ import { Route as HomeRouteImport } from './routes/home'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as ModelProvidersRouteImport } from './routes/model-providers'
 import { Route as SettingsRouteRouteImport } from './routes/settings/route'
-import { Route as AgentTeamRunsRunIdRouteImport } from './routes/agent-team-runs/$runId'
-import { Route as AgentTeamsIndexRouteImport } from './routes/agent-teams/index'
-import { Route as AgentTeamsTeamIdRouteImport } from './routes/agent-teams/$teamId'
+import { Route as AgentTeamRunsRunIdRouteImport } from './routes/executor-runs/$runId'
+import { Route as AgentTeamsIndexRouteImport } from './routes/executor-categories/index'
+import { Route as AgentTeamsTeamIdRouteImport } from './routes/executor-categories/$executorCategoryId'
 import { Route as ArtifactsIndexRouteImport } from './routes/artifacts/index'
 import { Route as ArtifactsArtifactIdRouteImport } from './routes/artifacts/$artifactId'
 import { Route as McpServersIndexRouteImport } from './routes/mcp-servers/index'
@@ -35,8 +35,8 @@ import { Route as SkillsIndexRouteImport } from './routes/skills/index'
 import { Route as SkillsSkillIdRouteImport } from './routes/skills/$skillId'
 import { Route as WorkflowsIndexRouteImport } from './routes/workflows/index'
 import { Route as WorkflowsWorkflowIdRouteImport } from './routes/workflows/$workflowId'
-import { Route as AgentTeamsTeamIdIndexRouteImport } from './routes/agent-teams/$teamId.index'
-import { Route as AgentTeamsTeamIdConfigRouteImport } from './routes/agent-teams/$teamId.config'
+import { Route as AgentTeamsTeamIdIndexRouteImport } from './routes/executor-categories/$executorCategoryId.index'
+import { Route as AgentTeamsTeamIdConfigRouteImport } from './routes/executor-categories/$executorCategoryId.config'
 import { Route as WorkflowsWorkflowIdVersionsRouteImport } from './routes/workflows/$workflowId.versions'
 
 const IndexRoute = IndexRouteImport.update({
@@ -80,18 +80,18 @@ const SettingsRouteRoute = SettingsRouteRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentTeamRunsRunIdRoute = AgentTeamRunsRunIdRouteImport.update({
-  id: '/agent-team-runs/$runId',
-  path: '/agent-team-runs/$runId',
+  id: '/executor-runs/$runId',
+  path: '/executor-runs/$runId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentTeamsIndexRoute = AgentTeamsIndexRouteImport.update({
-  id: '/agent-teams/',
-  path: '/agent-teams/',
+  id: '/executor-categories/',
+  path: '/executor-categories/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentTeamsTeamIdRoute = AgentTeamsTeamIdRouteImport.update({
-  id: '/agent-teams/$teamId',
-  path: '/agent-teams/$teamId',
+  id: '/executor-categories/$executorCategoryId',
+  path: '/executor-categories/$executorCategoryId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ArtifactsIndexRoute = ArtifactsIndexRouteImport.update({
@@ -195,8 +195,8 @@ export interface FileRoutesByFullPath {
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
-  '/agent-team-runs/$runId': typeof AgentTeamRunsRunIdRoute
-  '/agent-teams/$teamId': typeof AgentTeamsTeamIdRouteWithChildren
+  '/executor-runs/$runId': typeof AgentTeamRunsRunIdRoute
+  '/executor-categories/$executorCategoryId': typeof AgentTeamsTeamIdRouteWithChildren
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
@@ -206,16 +206,16 @@ export interface FileRoutesByFullPath {
   '/settings/usage': typeof SettingsUsageRoute
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
-  '/agent-teams/': typeof AgentTeamsIndexRoute
+  '/executor-categories/': typeof AgentTeamsIndexRoute
   '/artifacts/': typeof ArtifactsIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/plugins/': typeof PluginsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/skills/': typeof SkillsIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
-  '/agent-teams/$teamId/config': typeof AgentTeamsTeamIdConfigRoute
+  '/executor-categories/$executorCategoryId/config': typeof AgentTeamsTeamIdConfigRoute
   '/workflows/$workflowId/versions': typeof WorkflowsWorkflowIdVersionsRoute
-  '/agent-teams/$teamId/': typeof AgentTeamsTeamIdIndexRoute
+  '/executor-categories/$executorCategoryId/': typeof AgentTeamsTeamIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -224,7 +224,7 @@ export interface FileRoutesByTo {
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
-  '/agent-team-runs/$runId': typeof AgentTeamRunsRunIdRoute
+  '/executor-runs/$runId': typeof AgentTeamRunsRunIdRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
@@ -234,16 +234,16 @@ export interface FileRoutesByTo {
   '/settings/usage': typeof SettingsUsageRoute
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
-  '/agent-teams': typeof AgentTeamsIndexRoute
+  '/executor-categories': typeof AgentTeamsIndexRoute
   '/artifacts': typeof ArtifactsIndexRoute
   '/mcp-servers': typeof McpServersIndexRoute
   '/plugins': typeof PluginsIndexRoute
   '/settings': typeof SettingsIndexRoute
   '/skills': typeof SkillsIndexRoute
   '/workflows': typeof WorkflowsIndexRoute
-  '/agent-teams/$teamId/config': typeof AgentTeamsTeamIdConfigRoute
+  '/executor-categories/$executorCategoryId/config': typeof AgentTeamsTeamIdConfigRoute
   '/workflows/$workflowId/versions': typeof WorkflowsWorkflowIdVersionsRoute
-  '/agent-teams/$teamId': typeof AgentTeamsTeamIdIndexRoute
+  '/executor-categories/$executorCategoryId': typeof AgentTeamsTeamIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -255,8 +255,8 @@ export interface FileRoutesById {
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
-  '/agent-team-runs/$runId': typeof AgentTeamRunsRunIdRoute
-  '/agent-teams/$teamId': typeof AgentTeamsTeamIdRouteWithChildren
+  '/executor-runs/$runId': typeof AgentTeamRunsRunIdRoute
+  '/executor-categories/$executorCategoryId': typeof AgentTeamsTeamIdRouteWithChildren
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
@@ -266,16 +266,16 @@ export interface FileRoutesById {
   '/settings/usage': typeof SettingsUsageRoute
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
-  '/agent-teams/': typeof AgentTeamsIndexRoute
+  '/executor-categories/': typeof AgentTeamsIndexRoute
   '/artifacts/': typeof ArtifactsIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/plugins/': typeof PluginsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/skills/': typeof SkillsIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
-  '/agent-teams/$teamId/config': typeof AgentTeamsTeamIdConfigRoute
+  '/executor-categories/$executorCategoryId/config': typeof AgentTeamsTeamIdConfigRoute
   '/workflows/$workflowId/versions': typeof WorkflowsWorkflowIdVersionsRoute
-  '/agent-teams/$teamId/': typeof AgentTeamsTeamIdIndexRoute
+  '/executor-categories/$executorCategoryId/': typeof AgentTeamsTeamIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -288,8 +288,8 @@ export interface FileRouteTypes {
     | '/home'
     | '/logs'
     | '/model-providers'
-    | '/agent-team-runs/$runId'
-    | '/agent-teams/$teamId'
+    | '/executor-runs/$runId'
+    | '/executor-categories/$executorCategoryId'
     | '/artifacts/$artifactId'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
@@ -299,16 +299,16 @@ export interface FileRouteTypes {
     | '/settings/usage'
     | '/skills/$skillId'
     | '/workflows/$workflowId'
-    | '/agent-teams/'
+    | '/executor-categories/'
     | '/artifacts/'
     | '/mcp-servers/'
     | '/plugins/'
     | '/settings/'
     | '/skills/'
     | '/workflows/'
-    | '/agent-teams/$teamId/config'
+    | '/executor-categories/$executorCategoryId/config'
     | '/workflows/$workflowId/versions'
-    | '/agent-teams/$teamId/'
+    | '/executor-categories/$executorCategoryId/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -317,7 +317,7 @@ export interface FileRouteTypes {
     | '/home'
     | '/logs'
     | '/model-providers'
-    | '/agent-team-runs/$runId'
+    | '/executor-runs/$runId'
     | '/artifacts/$artifactId'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
@@ -327,16 +327,16 @@ export interface FileRouteTypes {
     | '/settings/usage'
     | '/skills/$skillId'
     | '/workflows/$workflowId'
-    | '/agent-teams'
+    | '/executor-categories'
     | '/artifacts'
     | '/mcp-servers'
     | '/plugins'
     | '/settings'
     | '/skills'
     | '/workflows'
-    | '/agent-teams/$teamId/config'
+    | '/executor-categories/$executorCategoryId/config'
     | '/workflows/$workflowId/versions'
-    | '/agent-teams/$teamId'
+    | '/executor-categories/$executorCategoryId'
   id:
     | '__root__'
     | '/'
@@ -347,8 +347,8 @@ export interface FileRouteTypes {
     | '/home'
     | '/logs'
     | '/model-providers'
-    | '/agent-team-runs/$runId'
-    | '/agent-teams/$teamId'
+    | '/executor-runs/$runId'
+    | '/executor-categories/$executorCategoryId'
     | '/artifacts/$artifactId'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
@@ -358,16 +358,16 @@ export interface FileRouteTypes {
     | '/settings/usage'
     | '/skills/$skillId'
     | '/workflows/$workflowId'
-    | '/agent-teams/'
+    | '/executor-categories/'
     | '/artifacts/'
     | '/mcp-servers/'
     | '/plugins/'
     | '/settings/'
     | '/skills/'
     | '/workflows/'
-    | '/agent-teams/$teamId/config'
+    | '/executor-categories/$executorCategoryId/config'
     | '/workflows/$workflowId/versions'
-    | '/agent-teams/$teamId/'
+    | '/executor-categories/$executorCategoryId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -451,24 +451,24 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/agent-team-runs/$runId': {
-      id: '/agent-team-runs/$runId'
-      path: '/agent-team-runs/$runId'
-      fullPath: '/agent-team-runs/$runId'
+    '/executor-runs/$runId': {
+      id: '/executor-runs/$runId'
+      path: '/executor-runs/$runId'
+      fullPath: '/executor-runs/$runId'
       preLoaderRoute: typeof AgentTeamRunsRunIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/agent-teams/': {
-      id: '/agent-teams/'
-      path: '/agent-teams'
-      fullPath: '/agent-teams/'
+    '/executor-categories/': {
+      id: '/executor-categories/'
+      path: '/executor-categories'
+      fullPath: '/executor-categories/'
       preLoaderRoute: typeof AgentTeamsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/agent-teams/$teamId': {
-      id: '/agent-teams/$teamId'
-      path: '/agent-teams/$teamId'
-      fullPath: '/agent-teams/$teamId'
+    '/executor-categories/$executorCategoryId': {
+      id: '/executor-categories/$executorCategoryId'
+      path: '/executor-categories/$executorCategoryId'
+      fullPath: '/executor-categories/$executorCategoryId'
       preLoaderRoute: typeof AgentTeamsTeamIdRouteImport
       parentRoute: typeof rootRouteImport
     }
@@ -577,17 +577,17 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkflowsWorkflowIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/agent-teams/$teamId/': {
-      id: '/agent-teams/$teamId/'
+    '/executor-categories/$executorCategoryId/': {
+      id: '/executor-categories/$executorCategoryId/'
       path: '/'
-      fullPath: '/agent-teams/$teamId/'
+      fullPath: '/executor-categories/$executorCategoryId/'
       preLoaderRoute: typeof AgentTeamsTeamIdIndexRouteImport
       parentRoute: typeof AgentTeamsTeamIdRoute
     }
-    '/agent-teams/$teamId/config': {
-      id: '/agent-teams/$teamId/config'
+    '/executor-categories/$executorCategoryId/config': {
+      id: '/executor-categories/$executorCategoryId/config'
       path: '/config'
-      fullPath: '/agent-teams/$teamId/config'
+      fullPath: '/executor-categories/$executorCategoryId/config'
       preLoaderRoute: typeof AgentTeamsTeamIdConfigRouteImport
       parentRoute: typeof AgentTeamsTeamIdRoute
     }

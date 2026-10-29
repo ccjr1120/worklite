@@ -45,7 +45,7 @@ function ConversationUsage({ conversationId }: { conversationId: string }) {
 export function TaskLink({ reference }: { reference: ChatTaskReference | null }) {
   const { t } = useTranslation('assistant');
   if (reference?.kind === 'workflow') return <Link className="text-[13px] text-brand-text underline underline-offset-4" to="/runs/$runId" params={{ runId: reference.runId }}>{t('records.openTask')}</Link>;
-  if (reference?.kind === 'team') return <Link className="text-[13px] text-brand-text underline underline-offset-4" to="/agent-team-runs/$runId" params={{ runId: reference.runId }}>{t('records.openTask')}</Link>;
+  if (reference?.kind === 'executor_category') return <Link className="text-[13px] text-brand-text underline underline-offset-4" to="/executor-runs/$runId" params={{ runId: reference.runId }}>{t('records.openTask')}</Link>;
   return null;
 }
 

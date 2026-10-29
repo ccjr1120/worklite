@@ -1,7 +1,7 @@
 import { forwardRef, Module } from '@nestjs/common';
 import { AgentsModule } from './agents.module';
 import { WorkspaceModule } from '../teams/teams.module';
-import { AgentTeamsModule } from '../agent-teams/agent-teams.module';
+import { AgentTeamsModule } from '../executor-categories/executor-categories.module';
 import { RunsModule } from '../runs/runs.module';
 import { ChatDispatchService } from './chat-dispatch.service';
 import { ChatDispatchController } from './chat-dispatch.controller';

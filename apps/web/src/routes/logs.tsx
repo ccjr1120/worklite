@@ -29,7 +29,7 @@ type LogsSearch = {
   conversationId?: string;
   projectTaskId?: string;
   executor?: string;
-  teamId?: string;
+  executorCategoryId?: string;
   teamRunId?: string;
   workflowId?: string;
   workflowRunId?: string;
@@ -73,7 +73,7 @@ export const Route = createFileRoute('/logs')({
       conversationId: tab === 'requests' ? optionalSearchText(search.conversationId) : undefined,
       projectTaskId: tab === 'requests' ? optionalSearchText(search.projectTaskId) : undefined,
       executor: tab === 'requests' ? optionalSearchText(search.executor) : undefined,
-      teamId: tab === 'requests' ? optionalSearchText(search.teamId) : undefined,
+      executorCategoryId: tab === 'requests' ? optionalSearchText(search.executorCategoryId) : undefined,
       teamRunId: tab === 'requests' ? optionalSearchText(search.teamRunId) : undefined,
       workflowId: tab === 'requests' ? optionalSearchText(search.workflowId) : undefined,
       workflowRunId: tab === 'requests' ? optionalSearchText(search.workflowRunId) : undefined,
@@ -122,7 +122,7 @@ function LogsPage() {
         conversationId: next.conversationId,
         projectTaskId: next.projectTaskId,
         executor: next.executor,
-        teamId: next.teamId,
+        executorCategoryId: next.executorCategoryId,
         teamRunId: next.teamRunId,
         workflowId: next.workflowId,
         workflowRunId: next.workflowRunId,
@@ -192,7 +192,7 @@ function LogsPage() {
               conversationId: search.conversationId,
               projectTaskId: search.projectTaskId,
               executor: search.executor,
-              teamId: search.teamId,
+              executorCategoryId: search.executorCategoryId,
               teamRunId: search.teamRunId,
               workflowId: search.workflowId,
               workflowRunId: search.workflowRunId,

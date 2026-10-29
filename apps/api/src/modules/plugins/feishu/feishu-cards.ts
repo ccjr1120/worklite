@@ -5,7 +5,7 @@ import type { AgentTeamRunView, ChatProjectTaskView } from '@worklite/contracts'
 export type FeishuAction =
   | { kind: 'answer'; runId: string; pendingInputId: string; scopeRevision: number }
   | { kind: 'agent_answer'; executionId: string; questionId: string; answer?: string; recoveryDecision?: 'adopt_command' | 'mark_failed'; newConversation?: boolean }
-  | { kind: 'control'; domain: 'team' | 'workflow' | 'conversation'; runId: string; action: 'pause' | 'resume' | 'cancel' | 'retry'; taskKey?: string }
+  | { kind: 'control'; domain: 'executor_category' | 'workflow' | 'conversation'; runId: string; action: 'pause' | 'resume' | 'cancel' | 'retry'; taskKey?: string }
   | { kind: 'project_task_answer'; taskId: string; questionId: string; answer?: string }
   | { kind: 'project_task_control'; taskId: string; action: 'cancel' }
   | { kind: 'recovery'; runId: string; operationKey: string; decision: 'adopt_command' | 'mark_failed' | 'replay' }
@@ -189,7 +189,7 @@ export function renderTaskCard(submissionId: string, task: ChatProjectTaskView):
 
 const TEAM_ROLE_NAMES: Record<string, string> = {
   planner: 'Planner', 'test-designer': 'Test Designer', developer: 'Developer', 'test-author': 'Test Author',
-  'test-runner': 'Test Runner', reviewer: 'Reviewer', 'worktree-manager': 'Worktree Manager', 'team-manager': 'Team Manager',
+  'test-runner': 'Test Runner', reviewer: 'Reviewer', 'worktree-manager': 'Worktree Manager', 'executor-manager': 'Executor Manager',
 };
 
 export function teamRoleName(task: { role: string; roleName: string | null }): string {

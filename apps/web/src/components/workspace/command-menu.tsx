@@ -32,7 +32,7 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/workflows' }))}>
             <Workflow className="size-4" /> {t('nav.workflows')}
           </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/agent-teams' }))}>
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/executor-categories' }))}>
             <Code2 className="size-4" /> {t('nav.agentTeam')}
           </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/model-providers' }))}>

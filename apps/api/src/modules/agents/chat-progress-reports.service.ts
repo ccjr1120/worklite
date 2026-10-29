@@ -1,10 +1,10 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
-import { agentTeamRuns, chatProjectTasks, chatSubmissions, workflowRuns, workflows, type Database } from '@worklite/db';
+import { executorRuns, chatProjectTasks, chatSubmissions, workflowRuns, workflows, type Database } from '@worklite/db';
 import type { AgentTeamRunProgress } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
-import { AgentTeamRuntimeService } from '../agent-teams/agent-team-runtime.service';
+import { AgentTeamRuntimeService } from '../executor-categories/agent-team-runtime.service';
 import { AgentExecutionsService } from './agent-executions.service';
 import { deriveTaskStage } from './chat-project-tasks.service';
 
@@ -15,7 +15,7 @@ const PROGRESS_TEXT_LIMIT = 160;
 
 export type ActiveWorkItem =
   | { kind: 'task'; id: string; goal: string; stage: string; activityCount: number; progressText: string; updatedAt?: string }
-  | { kind: 'team'; id: string; intent: string; status: string; progress: AgentTeamRunProgress | null; updatedAt?: string }
+  | { kind: 'executor_category'; id: string; intent: string; status: string; progress: AgentTeamRunProgress | null; updatedAt?: string }
   | { kind: 'workflow'; id: string; workflowName: string; status: string; currentNodeId: string | null; updatedAt?: string };
 
 type ConversationTarget = { executionId: string; workspaceId: string };
@@ -27,7 +27,7 @@ const truncate = (value: string, limit: number) => value.length > limit ? `${val
 export function activeWorkSignature(items: ActiveWorkItem[]): string {
   return JSON.stringify(items.map((item) => item.kind === 'task'
     ? [item.kind, item.id, item.stage, item.activityCount, item.progressText]
-    : item.kind === 'team'
+    : item.kind === 'executor_category'
       ? [item.kind, item.id, item.status, item.progress?.phase ?? null, item.progress?.percent ?? null, item.progress?.completedAssignments ?? null]
       : [item.kind, item.id, item.status, item.currentNodeId]));
 }
@@ -40,7 +40,7 @@ export function buildActiveWorkNote(items: ActiveWorkItem[], intervalSeconds = D
       const progress = item.progressText ? `，最新进展：${truncate(item.progressText, PROGRESS_TEXT_LIMIT)}` : '';
       return `${index + 1}. 项目任务 ${item.id}（${truncate(item.goal, TITLE_LIMIT)}）：运行中，阶段 ${item.stage}${progress}`;
     }
-    if (item.kind === 'team') {
+    if (item.kind === 'executor_category') {
       const progress = item.progress ? `，进度 ${item.progress.percent}%（阶段 ${item.progress.phase}，${item.progress.completedAssignments}/${item.progress.totalAssignments} 项开发任务完成）` : '';
       return `${index + 1}. 团队执行任务 ${item.id}（${truncate(item.intent, TITLE_LIMIT)}）：${item.status}${progress}`;
     }
@@ -107,8 +107,8 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
         .from(chatProjectTasks).where(eq(chatProjectTasks.status, 'running')),
       this.db.select({ executionId: chatSubmissions.executionId, workspaceId: chatSubmissions.workspaceId })
         .from(chatSubmissions)
-        .innerJoin(agentTeamRuns, sql`${agentTeamRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
-        .where(and(isNotNull(chatSubmissions.executionId), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'team'`, inArray(agentTeamRuns.status, [...ACTIVE_RUN_STATUSES]))),
+        .innerJoin(executorRuns, sql`${executorRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
+        .where(and(isNotNull(chatSubmissions.executionId), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'executor_category'`, inArray(executorRuns.status, [...ACTIVE_RUN_STATUSES]))),
       this.db.select({ executionId: chatSubmissions.executionId, workspaceId: chatSubmissions.workspaceId })
         .from(chatSubmissions)
         .innerJoin(workflowRuns, sql`${workflowRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
@@ -133,12 +133,12 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
       items: items.map((item) => ({
         kind: item.kind,
         id: item.id,
-        title: item.kind === 'task' ? truncate(item.goal, TITLE_LIMIT) : item.kind === 'team' ? truncate(item.intent, TITLE_LIMIT) : item.workflowName,
+        title: item.kind === 'task' ? truncate(item.goal, TITLE_LIMIT) : item.kind === 'executor_category' ? truncate(item.intent, TITLE_LIMIT) : item.workflowName,
         status: item.kind === 'task' ? 'running' : item.status,
-        stage: item.kind === 'task' ? item.stage : item.kind === 'team' ? item.progress?.phase ?? undefined : item.currentNodeId ?? undefined,
+        stage: item.kind === 'task' ? item.stage : item.kind === 'executor_category' ? item.progress?.phase ?? undefined : item.currentNodeId ?? undefined,
         progress: item.kind === 'task'
           ? truncate(item.progressText, PROGRESS_TEXT_LIMIT) || undefined
-          : item.kind === 'team' && item.progress
+          : item.kind === 'executor_category' && item.progress
             ? `${item.progress.percent}% · ${item.progress.completedAssignments}/${item.progress.totalAssignments}`
             : undefined,
         updatedAt: item.updatedAt,
@@ -154,10 +154,10 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
     const [tasks, teamRows, workflowRows] = await Promise.all([
       this.db.select().from(chatProjectTasks)
         .where(and(eq(chatProjectTasks.executionId, target.executionId), eq(chatProjectTasks.status, 'running'))),
-      this.db.select({ runId: agentTeamRuns.id, intent: agentTeamRuns.intent, status: agentTeamRuns.status, updatedAt: agentTeamRuns.updatedAt })
+      this.db.select({ runId: executorRuns.id, intent: executorRuns.intent, status: executorRuns.status, updatedAt: executorRuns.updatedAt })
         .from(chatSubmissions)
-        .innerJoin(agentTeamRuns, sql`${agentTeamRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
-        .where(and(eq(chatSubmissions.executionId, target.executionId), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'team'`, inArray(agentTeamRuns.status, [...ACTIVE_RUN_STATUSES]))),
+        .innerJoin(executorRuns, sql`${executorRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
+        .where(and(eq(chatSubmissions.executionId, target.executionId), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'executor_category'`, inArray(executorRuns.status, [...ACTIVE_RUN_STATUSES]))),
       this.db.select({ runId: workflowRuns.id, status: workflowRuns.status, currentNodeId: workflowRuns.currentNodeId, workflowName: workflows.name, updatedAt: workflowRuns.updatedAt })
         .from(chatSubmissions)
         .innerJoin(workflowRuns, sql`${workflowRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
@@ -176,7 +176,7 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
     for (const row of teamRows) {
       const progress = await this.runtime.getRunProgress(row.runId)
         .catch(() => null);
-      items.push({ kind: 'team', id: row.runId, intent: row.intent, status: row.status, progress, updatedAt: row.updatedAt.toISOString() });
+      items.push({ kind: 'executor_category', id: row.runId, intent: row.intent, status: row.status, progress, updatedAt: row.updatedAt.toISOString() });
     }
     for (const row of workflowRows) {
       items.push({ kind: 'workflow', id: row.runId, workflowName: row.workflowName, status: row.status, currentNodeId: row.currentNodeId, updatedAt: row.updatedAt.toISOString() });

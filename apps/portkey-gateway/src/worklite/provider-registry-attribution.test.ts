@@ -73,7 +73,7 @@ describe('gateway usage attribution', () => {
       'x-worklite-executor': 'claude',
     }, 400);
     stat({
-      'x-worklite-surface': 'team',
+      'x-worklite-surface': 'executor_category',
       'x-worklite-team-id': 'team_one',
       'x-worklite-team-run-id': 'atrun_one',
       'x-worklite-team-role': 'developer',
@@ -87,7 +87,7 @@ describe('gateway usage attribution', () => {
   });
 
   it('resolves a surface from the legacy source header and falls back to unattributed', () => {
-    expect(attribution({ 'x-worklite-log-source': 'team' }).surface).toBe('team');
+    expect(attribution({ 'x-worklite-log-source': 'executor_category' }).surface).toBe('executor_category');
     expect(attribution({ 'x-worklite-log-source': 'proxy' }).surface).toBe('external');
     // An explicit surface wins over a coarser legacy source that cannot express it.
     expect(attribution({ 'x-worklite-log-source': 'chat', 'x-worklite-surface': 'chat_project_task' }).surface).toBe('chat_project_task');
@@ -100,7 +100,7 @@ describe('gateway usage attribution', () => {
     const bySurface = new Map(stats.attribution.groups.map((group) => [group.surface, group]));
     expect(bySurface.get('chat')).toEqual(expect.objectContaining({ requests: 2, totalTokens: 300 }));
     expect(bySurface.get('chat_project_task')).toEqual(expect.objectContaining({ requests: 1, totalTokens: 400 }));
-    expect(bySurface.get('team')).toEqual(expect.objectContaining({ requests: 1, totalTokens: 800 }));
+    expect(bySurface.get('executor_category')).toEqual(expect.objectContaining({ requests: 1, totalTokens: 800 }));
     expect(bySurface.get('unattributed')).toEqual(expect.objectContaining({ requests: 1, totalTokens: 12 }));
     // Surface grouping is total, so its requests add up to the unfiltered summary.
     expect(stats.attribution.groups.reduce((sum, group) => sum + group.requests, 0)).toBe(stats.summary.requests);
@@ -130,9 +130,9 @@ describe('gateway usage attribution', () => {
   });
 
   it('groups Team and executor usage only where that identifier is present', () => {
-    const byTeam = requestStats({ from, to, groupBy: 'team' });
+    const byTeam = requestStats({ from, to, groupBy: 'executor_category' });
     expect(byTeam.attribution.groups).toEqual([
-      expect.objectContaining({ teamId: 'team_one', teamRunId: 'atrun_one', requests: 1, totalTokens: 800 }),
+      expect.objectContaining({ executorCategoryId: 'team_one', teamRunId: 'atrun_one', requests: 1, totalTokens: 800 }),
     ]);
 
     const byExecutor = requestStats({ from, to, groupBy: 'executor' });

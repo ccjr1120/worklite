@@ -297,7 +297,7 @@ class CodexAppServerSession {
  */
 export function attributionHeaders(request: ProjectExecutorRequest): Record<string, string> {
   const correlation = request.correlation
-    ?? { surface: request.owner === 'team' ? 'team_project_task' as const : 'chat_project_task' as const, executor: 'codex' as const };
+    ?? { surface: request.owner === 'executor_category' ? 'executor_category_project_task' as const : 'chat_project_task' as const, executor: 'codex' as const };
   return gatewayAttributionHeaders(correlation);
 }
 
