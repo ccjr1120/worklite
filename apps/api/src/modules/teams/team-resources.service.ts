@@ -407,6 +407,41 @@ async function writeSkillDirectory(rootDirectory: string, directory: string, fil
   }
 }
 
+// WorkLite owns this directory's content outright (unlike the user Agent skill
+// root), so a stale copy left over from an older release is replaced in place
+// rather than treated as a fixed, write-once seed.
+async function replaceSkillDirectory(rootDirectory: string, directory: string, files: PackageFile[]): Promise<void> {
+  await mkdir(rootDirectory, { recursive: true });
+  const target = join(rootDirectory, directory);
+  const temporary = await mkdtemp(join(rootDirectory, '.skill-write-'));
+  try {
+    for (const file of files) {
+      const path = join(temporary, ...file.path.split('/'));
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, file.content, 'utf8');
+    }
+    const backup = `${target}.skill-replace-${randomUUID()}`;
+    await rename(target, backup);
+    try {
+      await rename(temporary, target);
+    } catch (error) {
+      await rm(target, { recursive: true, force: true }).catch(() => {});
+      await rename(backup, target);
+      throw error;
+    }
+    await rm(backup, { recursive: true, force: true });
+  } catch (error) {
+    await rm(temporary, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+function samePlatformSkillFiles(current: PackageFile[], desired: PackageFile[]): boolean {
+  if (current.length !== desired.length) return false;
+  const byPath = new Map(current.map((file) => [file.path, file.content]));
+  return desired.every((file) => byPath.get(file.path) === file.content);
+}
+
 function providerHeaders(value: string | null): Record<string, string> | undefined {
   if (!value) return undefined;
   const parsed = JSON.parse(decryptSecret(value)) as unknown;
@@ -675,7 +710,15 @@ export class WorkspaceResourcesService {
     const [deleted] = await this.db.select({ id: auditLogs.id }).from(auditLogs)
       .where(and(eq(auditLogs.workspaceId, workspaceId), eq(auditLogs.action, 'skill.deleted'), eq(auditLogs.resource, coreSkillId))).limit(1);
     if (deleted) return;
-    await writeSkillDirectory(platformSkillRootDirectory(), skillDirectoryName(WORKLITE_PLATFORM_SKILL_NAME), platformSkillPackageFiles());
+    const platformRoot = platformSkillRootDirectory();
+    const directory = skillDirectoryName(WORKLITE_PLATFORM_SKILL_NAME);
+    const desiredFiles = platformSkillPackageFiles();
+    const written = await writeSkillDirectory(platformRoot, directory, desiredFiles);
+    if (written === 'created') return;
+    const current = await scanLocalSkillRoot(platformRoot, 'platform');
+    const currentPackage = current.packages.find((skillPackage) => skillPackage.directory === directory);
+    if (currentPackage && samePlatformSkillFiles(currentPackage.files, desiredFiles)) return;
+    await replaceSkillDirectory(platformRoot, directory, desiredFiles);
   }
 
   private async migrateLegacySkills(workspaceId: string): Promise<Map<string, { currentId: string; name: string }>> {
