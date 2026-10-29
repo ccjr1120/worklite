@@ -7,6 +7,13 @@ const IN_FLIGHT_STATUSES: ReadonlySet<AgentTeamTaskAttemptView['status']> = new 
 
 type AttemptIdentity = { role: string; developerId: string | null };
 
+// Display name of the executor that ran a Run: the name captured by value at dispatch
+// (in the bound executor version), falling back to the executor's current name only when
+// that version predates name capture and was not backfilled.
+export function capturedExecutorName(snapshot: Pick<StoredAgentTeamVersionSnapshot, 'executorName'>, currentName: string): string {
+  return snapshot.executorName?.trim() || currentName;
+}
+
 export function taskRoleName(snapshot: StoredAgentTeamVersionSnapshot, role: string): string | null {
   return snapshot.roles.find((item) => item.role === role)?.displayName?.trim() || null;
 }

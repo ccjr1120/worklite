@@ -37,8 +37,8 @@ describe('ExecutorsService.listRuns', () => {
         createdAt: new Date('2024-01-02'),
         finishedAt: new Date('2024-01-02T01:00:00'),
         executorCategoryId: 'team-1',
-        teamName: 'Executor A',
-        snapshot: { orchestrationVersion: 11 },
+        currentExecutorName: 'Renamed Executor',
+        snapshot: { orchestrationVersion: 11, executorName: 'Executor A' },
       },
       {
         id: 'run-2',
@@ -51,7 +51,7 @@ describe('ExecutorsService.listRuns', () => {
         createdAt: new Date('2024-01-01'),
         finishedAt: null,
         executorCategoryId: 'team-1',
-        teamName: 'Executor A',
+        currentExecutorName: 'Executor A',
         snapshot: { orchestrationVersion: 11 },
       },
     ];
@@ -82,7 +82,7 @@ describe('ExecutorsService.listRuns', () => {
           createdAt: '2024-01-02T00:00:00.000Z',
           finishedAt: '2024-01-02T01:00:00.000Z',
           executorCategoryId: 'team-1',
-          teamName: 'Executor A',
+          executorName: 'Executor A',
         },
         {
           id: 'run-2',
@@ -96,7 +96,7 @@ describe('ExecutorsService.listRuns', () => {
           createdAt: '2024-01-01T00:00:00.000Z',
           finishedAt: null,
           executorCategoryId: 'team-1',
-          teamName: 'Executor A',
+          executorName: 'Executor A',
         },
       ],
       nextCursor: expect.any(String),

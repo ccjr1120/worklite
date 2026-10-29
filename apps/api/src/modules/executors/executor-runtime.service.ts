@@ -118,7 +118,7 @@ import {
 } from './executor-graph-v4';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { normalizePublicModelList } from '@worklite/model-gateway';
-import { deriveRunCurrent, effectiveTaskModel, taskRoleName } from './executor-run-summary';
+import { capturedExecutorName, deriveRunCurrent, effectiveTaskModel, taskRoleName } from './executor-run-summary';
 import { CommandsService } from '../commands/commands.service';
 import { createAgentTeamGroupGraph, type AgentTeamGroupGraphInitial, type AgentTeamGroupGraphState } from './executor-graph-v6';
 
@@ -262,7 +262,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (!team) throw new NotFoundException('The built-in executor was not found.');
     if (team.deletedAt) throw new BadRequestException('This executor has been deleted and is no longer available for dispatch.');
 
-    const snapshot = await this.createVersionSnapshot(team.roles, team.workingPractice, 5);
+    const snapshot = await this.createVersionSnapshot(team.roles, team.workingPractice, 5, '', team.name);
     const now = new Date();
     await this.transaction((transaction) => {
       const [latest] = transaction.select({ version: agentTeamVersions.version })
@@ -337,7 +337,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     }
     const runId = acceptance.runId;
     const versionId = `atver_${randomUUID()}`;
-    const snapshot = await this.createVersionSnapshot(team.roles, team.workingPractice, CURRENT_GROUP_ORCHESTRATION_VERSION, team.projectGitPolicy);
+    const snapshot = await this.createVersionSnapshot(team.roles, team.workingPractice, CURRENT_GROUP_ORCHESTRATION_VERSION, team.projectGitPolicy, team.name);
     const primary = repositories[0];
     const now = new Date();
     // Determine mode based on targetRole.
@@ -626,15 +626,19 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       roleName: taskRoleName(version.snapshot, row.role),
       model: effectiveTaskModel(version.snapshot, row, teamDefaultModel),
     }));
+    const [executor] = version.snapshot.executorName?.trim() ? [] : await this.db.select({ name: executorCategories.name })
+      .from(executorCategories).where(eq(executorCategories.id, run.executorCategoryId)).limit(1);
     return {
       id: run.id,
       executorCategoryId: run.executorCategoryId,
+      executorName: capturedExecutorName(version.snapshot, executor?.name ?? run.executorCategoryId),
       groupId: run.groupId,
       targetRole: run.targetRole,
       repositoryIds: run.repositoryIds,
       teamVersion: {
         id: version.id,
         version: version.version,
+        ...(version.snapshot.executorName ? { executorName: version.snapshot.executorName } : {}),
         createdAt: version.createdAt.toISOString(),
         developerExecution: version.snapshot.developerExecution,
         developerExecutions: version.snapshot.developerExecutions,
@@ -1147,6 +1151,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     workingPractice = '',
     orchestrationVersion: 5 | 6 | 7 | 8 | 9 | 10 | 11 = 5,
     projectGitPolicy = '',
+    executorName?: string,
   ): Promise<StoredAgentTeamVersionSnapshot> {
     const manifest = getBmadTeaProcessManifest();
     const processFiles = await Promise.all(manifest.files.map(async (file) => ({
@@ -1172,6 +1177,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       ...(projectExecutorLaunches ? { projectExecutorLaunches } : {}),
       // v5 remains the ordinary fixed workflow; v6-v10 start from a persisted group message.
       orchestrationVersion,
+      // The executor name is captured by value so a later rename only affects new Runs.
+      ...(executorName ? { executorName } : {}),
       workingPractice,
       ...(orchestrationVersion === 9 || orchestrationVersion === 10 || orchestrationVersion === 11 ? { projectGitPolicy } : {}),
       roles: await Promise.all(configuredRoles.filter((role) => (orchestrationVersion !== 8 && orchestrationVersion !== 9 && orchestrationVersion !== 10 && orchestrationVersion !== 11) || role.role !== 'executor-manager').map(async (role) => {

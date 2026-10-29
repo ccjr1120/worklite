@@ -700,6 +700,9 @@ export type StoredAgentTeamVersionSnapshot = {
   developerExecutions?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
   projectExecutorLaunches?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
   orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+  // Executor display name captured by value at dispatch; versions written before
+  // executor renaming were backfilled by migration 0060.
+  executorName?: string;
   workingPractice?: string;
   projectGitPolicy?: string;
   roles: StoredAgentTeamRoleConfiguration[];
@@ -723,7 +726,12 @@ export const executorCategories = sqliteTable('executor_categories', {
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
   deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),
-}, (table) => [unique().on(table.workspaceId, table.name)]);
+}, (table) => [
+  // Names are editable and unique among non-deleted executors, ignoring case.
+  uniqueIndex('executor_categories_workspace_active_name_unique')
+    .on(table.workspaceId, sql`lower(${table.name})`)
+    .where(sql`${table.deletedAt} IS NULL`),
+]);
 
 export const executorCategoryRepositories = sqliteTable('executor_category_repositories', {
   id: text('id').primaryKey(),

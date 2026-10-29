@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, asc, count, eq, inArray, isNull, notInArray } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNull, ne, notInArray, sql } from 'drizzle-orm';
 import type { AgentTeamRoleId, AgentTeamRoleConfiguration, UpdateAgentTeamRequest } from '@worklite/contracts';
 import {
   executorCategories,
@@ -60,12 +60,18 @@ export class AgentTeamConfigurationService {
     const team = await this.getTeam(workspaceId, executorCategoryId);
     if (team.deletedAt) throw new ConflictException('This executor has been deleted.');
     if (!input || typeof input !== 'object' || Array.isArray(input)
-      || Object.keys(input).some((key) => !['roles', 'maxConcurrentRuns', 'workingPractice', 'projectGitPolicy'].includes(key))) {
-      throw new BadRequestException('Only executor roles, working practice, project Git policy and concurrency can be changed.');
+      || Object.keys(input).some((key) => !['name', 'expectedRevision', 'roles', 'maxConcurrentRuns', 'workingPractice', 'projectGitPolicy'].includes(key))) {
+      throw new BadRequestException('Only the executor name, roles, working practice, project Git policy and concurrency can be changed.');
     }
-    if (input.roles === undefined && input.maxConcurrentRuns === undefined && input.workingPractice === undefined && input.projectGitPolicy === undefined) {
+    if (input.name === undefined && input.roles === undefined && input.maxConcurrentRuns === undefined && input.workingPractice === undefined && input.projectGitPolicy === undefined) {
       throw new BadRequestException('At least one executor setting is required.');
     }
+    if (input.expectedRevision !== undefined && (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) {
+      throw new BadRequestException('expectedRevision must be the non-negative integer revision from the executor view.');
+    }
+    if (input.expectedRevision !== undefined && input.expectedRevision !== executorRevision(team)) throw executorRevisionConflict();
+    const name = input.name === undefined ? undefined : normalizeExecutorName(input.name);
+    if (name !== undefined && name !== team.name) await this.assertExecutorNameAvailable(workspaceId, team.id, name);
     const roles = input.roles === undefined ? team.roles : await this.resolveRoles(workspaceId, input.roles, executorCategoryId);
     if (input.maxConcurrentRuns !== undefined && (!Number.isInteger(input.maxConcurrentRuns) || input.maxConcurrentRuns < 1)) {
       throw new BadRequestException('Maximum concurrent executor Runs must be an integer of at least 1.');
@@ -76,15 +82,44 @@ export class AgentTeamConfigurationService {
     if (input.projectGitPolicy !== undefined && typeof input.projectGitPolicy !== 'string') {
       throw new BadRequestException('Executor project Git policy must be text.');
     }
-    const [updated] = await this.db.update(executorCategories).set({
-      roles,
-      ...(input.maxConcurrentRuns === undefined ? {} : { maxConcurrentRuns: input.maxConcurrentRuns }),
-      ...(input.workingPractice === undefined ? {} : { workingPractice: input.workingPractice.trim() }),
-      ...(input.projectGitPolicy === undefined ? {} : { projectGitPolicy: input.projectGitPolicy.trim() }),
-      updatedAt: new Date(),
-    }).where(and(eq(executorCategories.id, team.id), eq(executorCategories.workspaceId, workspaceId))).returning();
-    if (!updated) throw new NotFoundException('Executor not found.');
+    let updated: AgentTeam | undefined;
+    try {
+      [updated] = await this.db.update(executorCategories).set({
+        roles,
+        ...(name === undefined ? {} : { name }),
+        ...(input.maxConcurrentRuns === undefined ? {} : { maxConcurrentRuns: input.maxConcurrentRuns }),
+        ...(input.workingPractice === undefined ? {} : { workingPractice: input.workingPractice.trim() }),
+        ...(input.projectGitPolicy === undefined ? {} : { projectGitPolicy: input.projectGitPolicy.trim() }),
+        // The revision is updatedAt in milliseconds, so every write must move it forward.
+        updatedAt: new Date(Math.max(Date.now(), executorRevision(team) + 1)),
+      }).where(and(
+        eq(executorCategories.id, team.id),
+        eq(executorCategories.workspaceId, workspaceId),
+        // Compare-and-set on the revision read above, so a concurrent write is never overwritten.
+        eq(executorCategories.updatedAt, team.updatedAt),
+      )).returning();
+    } catch (error) {
+      if (isUniqueConstraintError(error)) throw executorNameConflict(name ?? team.name);
+      throw error;
+    }
+    if (!updated) {
+      const [current] = await this.db.select({ id: executorCategories.id }).from(executorCategories)
+        .where(and(eq(executorCategories.id, team.id), eq(executorCategories.workspaceId, workspaceId))).limit(1);
+      if (!current) throw new NotFoundException('Executor not found.');
+      throw executorRevisionConflict();
+    }
     return updated;
+  }
+
+  private async assertExecutorNameAvailable(workspaceId: string, executorId: string, name: string): Promise<void> {
+    const [duplicate] = await this.db.select({ id: executorCategories.id }).from(executorCategories)
+      .where(and(
+        eq(executorCategories.workspaceId, workspaceId),
+        isNull(executorCategories.deletedAt),
+        ne(executorCategories.id, executorId),
+        sql`lower(${executorCategories.name}) = lower(${name})`,
+      )).limit(1);
+    if (duplicate) throw executorNameConflict(name);
   }
 
   async createRole(workspaceId: string, executorCategoryId: string, input: Omit<AgentTeamRoleConfiguration, 'role'>, roleId?: string): Promise<AgentTeam> {
@@ -322,4 +357,34 @@ function uniqueStrings(value: unknown, label: string): string[] {
 
 function normalizeStrings(value: unknown, label: string): string[] {
   return uniqueStrings(value, label);
+}
+
+const EXECUTOR_NAME_MAX_LENGTH = 64;
+
+export function executorRevision(team: Pick<AgentTeam, 'updatedAt'>): number {
+  return team.updatedAt.getTime();
+}
+
+// Executor names are display labels: trimmed, 1-64 characters, no control characters.
+function normalizeExecutorName(value: unknown): string {
+  if (typeof value !== 'string') throw new BadRequestException('The executor name must be text.');
+  const name = value.trim();
+  if (!name || [...name].length > EXECUTOR_NAME_MAX_LENGTH) {
+    throw new BadRequestException(`The executor name must be 1-${EXECUTOR_NAME_MAX_LENGTH} characters after trimming.`);
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001F\u007F]/.test(name)) throw new BadRequestException('The executor name cannot contain control characters.');
+  return name;
+}
+
+function executorNameConflict(name: string): ConflictException {
+  return new ConflictException({ statusCode: 409, code: 'EXECUTOR_NAME_CONFLICT', message: `Another executor is already named "${name}" (names are compared ignoring case).` });
+}
+
+function executorRevisionConflict(): ConflictException {
+  return new ConflictException({ statusCode: 409, code: 'EXECUTOR_REVISION_CONFLICT', message: 'The executor changed since it was read. Reload it and try again.' });
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && (error as { code?: unknown }).code === 'SQLITE_CONSTRAINT_UNIQUE';
 }

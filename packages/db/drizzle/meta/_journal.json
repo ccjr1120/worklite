@@ -414,6 +414,13 @@
       "when": 1793300000000,
       "tag": "0059_rename_agent_teams_to_executor_categories",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1793400000000,
+      "tag": "0060_executor_name_snapshot",
+      "breakpoints": true
     }
   ]
 }

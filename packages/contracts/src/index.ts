@@ -1610,6 +1610,8 @@ export type AgentTeamRunProgress = {
 export type AgentTeamView = {
   id: string;
   name: string;
+  // Optimistic-lock token for PATCH /executors/:executorId (the executor's updatedAt in milliseconds).
+  revision: number;
   description: string;
   processId: string;
   processVersion: string;
@@ -1625,6 +1627,7 @@ export type AgentTeamView = {
 export type AgentTeamVersionMetadata = {
   id: string;
   version: number;
+  executorName?: string;
   createdAt: string;
   developerExecution?: ProjectExecutorLaunchView | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
@@ -1814,7 +1817,8 @@ export type AgentTeamRunSummary = {
 
 export type AgentTeamRunListItem = AgentTeamRunSummary & {
   executorCategoryId: string;
-  teamName: string;
+  // Executor name captured when the Run was dispatched; falls back to the current name.
+  executorName: string;
 };
 
 export type AgentTeamRunListQuery = {
@@ -1921,6 +1925,8 @@ export type AgentTeamGroupEvent = {
 export type AgentTeamRunView = {
   id: string;
   executorCategoryId: string;
+  // Executor name captured when the Run was dispatched; falls back to the current name.
+  executorName: string;
   groupId: string | null;
   targetRole: AgentTeamRoleId | null;
   repositoryIds: string[];
@@ -1984,6 +1990,11 @@ export type AgentTeamDocumentDownloadView = {
 };
 
 export type UpdateAgentTeamRequest = {
+  // Display name: 1-64 characters after trimming, no control characters, unique among
+  // non-deleted executors ignoring case. A rename affects only Runs dispatched afterwards.
+  name?: string;
+  // Optional precondition: the revision from the executor view. A stale value is rejected with 409.
+  expectedRevision?: number;
   roles?: AgentTeamRoleConfiguration[];
   maxConcurrentRuns?: number;
   workingPractice?: string;

@@ -23,7 +23,8 @@ import {
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentTeamRuntimeService } from './executor-runtime.service';
-import { AgentTeamConfigurationService } from './executor-configuration.service';
+import { AgentTeamConfigurationService, executorRevision } from './executor-configuration.service';
+import { capturedExecutorName } from './executor-run-summary';
 import { RETIRED_AGENT_TEAM_IDS } from './executor-configuration';
 
 @Injectable()
@@ -134,7 +135,7 @@ export class ExecutorsService {
       createdAt: executorRuns.createdAt,
       finishedAt: executorRuns.finishedAt,
       executorCategoryId: executorRuns.executorCategoryId,
-      teamName: executorCategories.name,
+      currentExecutorName: executorCategories.name,
       snapshot: agentTeamVersions.snapshot,
       total: sql<number>`count(*) over()`,
     }).from(executorRuns)
@@ -147,8 +148,9 @@ export class ExecutorsService {
     const pageRows = rows.slice(0, pageLimit);
     const last = pageRows.at(-1);
     return {
-      items: pageRows.map(({ snapshot, total: _total, ...row }) => ({
+      items: pageRows.map(({ snapshot, total: _total, currentExecutorName, ...row }) => ({
         ...row,
+        executorName: capturedExecutorName(snapshot, currentExecutorName),
         modeDecidedAt: row.modeDecidedAt?.toISOString() ?? null,
         orchestrationVersion: snapshot.orchestrationVersion ?? 1,
         createdAt: row.createdAt.toISOString(),
@@ -285,6 +287,7 @@ function toTeamView(row: AgentTeam): AgentTeamView {
   return {
     id: row.id,
     name: row.name,
+    revision: executorRevision(row),
     description: row.description,
     processId: row.processId,
     processVersion: row.processVersion,
