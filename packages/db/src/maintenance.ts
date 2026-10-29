@@ -195,7 +195,7 @@ type EventStreamTable = { events: string; parentKey: string; parents: string; te
 // never the run itself.
 const EVENT_STREAM_TABLES: EventStreamTable[] = [
   { events: 'workflow_run_events', parentKey: 'run_id', parents: 'workflow_runs', terminalStatuses: ['succeeded', 'failed', 'cancelled', 'timed_out'], settledAt: 'COALESCE(finished_at, updated_at, created_at)' },
-  { events: 'executor__run_events', parentKey: 'run_id', parents: 'executor__runs', terminalStatuses: ['succeeded', 'failed', 'cancelled'], settledAt: 'COALESCE(finished_at, updated_at, created_at)' },
+  { events: 'executor_run_events', parentKey: 'run_id', parents: 'executor_runs', terminalStatuses: ['succeeded', 'failed', 'cancelled'], settledAt: 'COALESCE(finished_at, updated_at, created_at)' },
   { events: 'agent_execution_events', parentKey: 'execution_id', parents: 'agent_executions', terminalStatuses: ['completed', 'failed', 'cancelled'], settledAt: 'COALESCE(updated_at, created_at)' },
 ];
 
