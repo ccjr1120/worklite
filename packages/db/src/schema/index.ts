@@ -749,7 +749,7 @@ export const executorGroupRepositories = sqliteTable('executor_group_repositorie
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   groupId: text('group_id').notNull().references(() => executorGroups.id, { onDelete: 'cascade' }),
-  teamRepositoryId: text('team_repository_id').notNull().references(() => executorCategoryRepositories.id, { onDelete: 'cascade' }),
+  teamRepositoryId: text('executor_category_repository_id').notNull().references(() => executorCategoryRepositories.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   directory: text('directory').notNull(),
   createdAt: timestamp('created_at'),
@@ -795,7 +795,7 @@ export const executorCategoryMemories = sqliteTable('executor_category_memories'
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   executorCategoryId: text('executor_category_id').notNull().references(() => executorCategories.id, { onDelete: 'cascade' }),
-  repositoryId: text('repository_id').references(() => executorCategoryRepositories.id, { onDelete: 'cascade' }),
+  repositoryId: text('executor_category_repository_id').references(() => executorCategoryRepositories.id, { onDelete: 'cascade' }),
   // Legacy role-scoped memories are retained but never injected into prompts.
   role: text('role').$type<StoredAgentTeamRole>(),
   content: text('content').notNull(),
