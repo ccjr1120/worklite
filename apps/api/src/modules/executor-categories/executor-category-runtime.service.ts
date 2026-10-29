@@ -103,6 +103,7 @@ import {
   DEFAULT_MAX_CONCURRENT_RUNS,
   DEFAULT_COMPANY_PROJECT_GIT_POLICY,
   DEFAULT_DIRECT_GIT_POLICY,
+  DIRECT_PLANNER_INSTRUCTIONS,
   agentTeamContractRole,
   initialAgentTeamModeForRole,
   type AgentTeamRuntimeRole,
@@ -1092,7 +1093,20 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const [directTeam] = await this.db.select().from(executorCategories)
       .where(and(eq(executorCategories.id, DIRECT_EXECUTOR_CATEGORY_ID), eq(executorCategories.workspaceId, 'workspace_personal')))
       .limit(1);
-    if (!directTeam) {
+    if (directTeam) {
+      // Keep the live Planner instructions in step with the source constant, the same
+      // way Company Project's built-in role text is re-synced above. Without this, an
+      // instruction fix here never reaches a team row created by an earlier release.
+      const roles: StoredAgentTeamRoleConfiguration[] = directTeam.roles.map((role) => (
+        role.role === 'planner' && role.instructions !== DIRECT_PLANNER_INSTRUCTIONS
+          ? { ...role, instructions: DIRECT_PLANNER_INSTRUCTIONS }
+          : role
+      ));
+      if (JSON.stringify(roles) !== JSON.stringify(directTeam.roles)) {
+        await this.db.update(executorCategories).set({ roles, updatedAt: new Date() })
+          .where(eq(executorCategories.id, directTeam.id)).run();
+      }
+    } else {
       // Direct has no Dispatcher and no Worktree Manager: it is a fixed
       // Planner -> Executor pair, so it never passes through ensureBuiltInTeamRoles.
       const roles: StoredAgentTeamRoleConfiguration[] = [
@@ -1101,7 +1115,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           // Direct's Planner is a single lightweight step, not the BMAD/TEA process;
           // it carries no BMAD entry-point skill content.
           entryPoints: [],
-          instructions: 'Understand the requested goal and preserve user intent. Clarify only material missing information. Inspect the authorized project read-only without editing code, then produce a concrete execution plan for the Executor. You may ask for plan confirmation using the existing waiting_for_input question mechanism before handing off. Hand off to role executor with a specific, actionable goal describing the plan to implement.',
+          instructions: DIRECT_PLANNER_INSTRUCTIONS,
         },
         {
           ...defaultRoleConfiguration('executor'),
@@ -1629,7 +1643,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           }
         }
         const laneNote = laneWorktree ? `You work in your lane's dedicated git worktree (${laneWorktree.worktreePath}) on branch ${laneWorktree.worktreeBranch}; stay inside it and commit your finished changes on that branch before returning.` : null;
-        const promptAddition = [developerPromptAddition(request), rolePromptAddition('developer', version.snapshot, request), groupRolePromptAddition(version.snapshot, request), laneNote].filter(Boolean).join('\n\n') || undefined;
+        const promptAddition = [developerPromptAddition(request), rolePromptAddition(taskRole, version.snapshot, request), groupRolePromptAddition(version.snapshot, request), laneNote].filter(Boolean).join('\n\n') || undefined;
         const references = await Promise.all([
           ...(developerRole.processReferences ?? []).map(async (path) => ({ path, content: await this.readCapturedProcessFile(version, path) })),
           ...(request.groupContext ? request.fileReferences ?? [] : []).map(async (reference) => ({

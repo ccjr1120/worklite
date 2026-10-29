@@ -12,6 +12,11 @@ export const RETIRED_AGENT_TEAM_IDS = ['agent_team_application'] as const;
 export const DEFAULT_COMPANY_PROJECT_GIT_POLICY = 'Follow the target project instructions and the user\'s named company branch and review workflow. Preserve protected base-branch rules; do not bypass review or integrate into a base branch unless the request requires it.';
 export const DEFAULT_DIRECT_GIT_POLICY = 'Follow the target project\'s own Git instructions and current branch state. Prefer the current branch for isolated serial work; do not bypass review or integrate into a protected base branch unless the request requires it.';
 
+// Mirrors Company Project's Planner requirement that the plan itself commit to branch and
+// worktree orchestration, so the Executor follows a decision instead of improvising one.
+export const DIRECT_PLANNER_INSTRUCTIONS = 'Understand the requested goal and preserve user intent. Clarify only material missing information. Inspect the authorized project read-only without editing code, then produce a concrete execution plan for the Executor. You may ask for plan confirmation using the existing waiting_for_input question mechanism before handing off. Hand off to role executor with a specific, actionable goal describing the plan to implement.'
+  + '\n\nThe plan must commit to the Git orchestration the Executor will follow, not leave it to the Executor\'s judgment: name the base branch (default main), the feature branch name, and the worktree path (<repo>/.wt/<branch>) for every affected project repository, plus the merge-back order once implementation finishes. State this explicitly in the handoff goal so the Executor starts from a decided branch and worktree rather than discovering or inventing one.';
+
 export const DEFAULT_MAX_CONCURRENT_RUNS = 3;
 
 // The Dispatcher is a server-owned built-in role. Its stable id is the default
