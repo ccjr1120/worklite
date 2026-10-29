@@ -468,7 +468,7 @@
     "imageSummary": "[{{count}} 张图片]"
   },
   "teamRun": {
-    "panel": "Agent Team 任务",
+    "panel": "Coding Executors 任务",
     "expand": "展开团队任务详情",
     "collapse": "收起团队任务详情",
     "activeRoles": "{{count}} 个角色进行中",
@@ -492,8 +492,8 @@
       "chat_project_task": "Chat 项目任务",
       "agent": "独立 Agent",
       "workflow": "Workflow 节点",
-      "team": "Agent Team 角色",
-      "team_project_task": "Agent Team 执行器",
+      "team": "Coding Executors 角色",
+      "team_project_task": "Coding Executors 执行器",
       "provider_test": "供应商连接测试",
       "external": "外部直连",
       "unattributed": "未归因"

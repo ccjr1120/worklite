@@ -172,7 +172,7 @@ describe('TeamConfig', () => {
   it('shows the Team switcher below the heading with links to each Team\'s configuration', () => {
     mockQueries();
     render(<TeamConfig teamId="team_1" />);
-    const switcher = screen.getByRole('navigation', { name: '选择 Agent Team' });
+    const switcher = screen.getByRole('navigation', { name: '选择 Coding Executor 团队' });
     expect(within(switcher).getByRole('link', { name: /Delivery/ })).toHaveAttribute('aria-current', 'page');
     expect(within(switcher).getByRole('link', { name: /Applications/ })).toHaveAttribute('href', '/agent-teams/team_2/config');
   });

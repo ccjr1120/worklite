@@ -1054,7 +1054,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (existing) {
       const roles: StoredAgentTeamRoleConfiguration[] = [...existing.roles];
       const activeRoles = ensureBuiltInTeamRoles(roles);
-      const name = existing.name === 'WorkLite Software Team' ? 'Company Project Team' : existing.name;
+      const name = existing.name === 'WorkLite Software Team' || existing.name === 'Company Project Team'
+        ? 'Company Project' : existing.name;
       const description = existing.description === 'Built-in BMAD and TEA software development team.'
         ? 'Built-in BMAD and TEA team for company projects and requirements.' : existing.description;
       const projectGitPolicy = existing.projectGitPolicy.trim() || DEFAULT_COMPANY_PROJECT_GIT_POLICY;
@@ -1070,7 +1071,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       await this.db.insert(agentTeams).values({
         id: BUILT_IN_AGENT_TEAM_ID,
         workspaceId: 'workspace_personal',
-        name: 'Company Project Team',
+        name: 'Company Project',
         description: 'Built-in BMAD and TEA team for company projects and requirements.',
         processId: AGENT_TEAM_PROCESS_ID,
         processVersion: AGENT_TEAM_PROCESS_VERSION,
@@ -1089,7 +1090,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       await this.db.insert(agentTeams).values({
         id: APPLICATION_AGENT_TEAM_ID,
         workspaceId: 'workspace_personal',
-        name: 'Application Development Team',
+        name: 'Application Development',
         description: 'Built-in team for planning and developing complete applications.',
         processId: AGENT_TEAM_PROCESS_ID,
         processVersion: AGENT_TEAM_PROCESS_VERSION,
@@ -1099,9 +1100,11 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       }).onConflictDoNothing().run();
     } else {
       const roles = ensureBuiltInTeamRoles(applicationTeam.roles);
+      const name = applicationTeam.name === 'Application Development Team' ? 'Application Development' : applicationTeam.name;
       const projectGitPolicy = applicationTeam.projectGitPolicy.trim() || DEFAULT_APPLICATION_GIT_POLICY;
-      if (JSON.stringify(roles) !== JSON.stringify(applicationTeam.roles) || projectGitPolicy !== applicationTeam.projectGitPolicy) {
-        await this.db.update(agentTeams).set({ roles, projectGitPolicy, updatedAt: new Date() })
+      if (JSON.stringify(roles) !== JSON.stringify(applicationTeam.roles)
+        || name !== applicationTeam.name || projectGitPolicy !== applicationTeam.projectGitPolicy) {
+        await this.db.update(agentTeams).set({ roles, name, projectGitPolicy, updatedAt: new Date() })
           .where(eq(agentTeams.id, applicationTeam.id)).run();
       }
     }

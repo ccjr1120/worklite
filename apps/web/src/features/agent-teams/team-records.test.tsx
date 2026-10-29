@@ -56,8 +56,8 @@ function run(id: string, status: AgentTeamRunSummary['status'], intent = `Goal $
 }
 
 const teams = [
-  team('agent_team_application', 'Application Development Team', 'Built-in team for planning and developing complete applications.', 2),
-  team('agent_team_bmad_tea', 'Company Project Team', 'Built-in BMAD and TEA team for company projects and requirements.', 3),
+  team('agent_team_application', 'Application Development', 'Built-in team for planning and developing complete applications.', 2),
+  team('agent_team_bmad_tea', 'Company Project', 'Built-in BMAD and TEA team for company projects and requirements.', 3),
 ];
 
 const runsByTeam: Record<string, AgentTeamRunSummary[]> = {
@@ -155,7 +155,7 @@ describe('TeamRecords', () => {
     mockQueries(runsByTeam, { isPending: true });
     render(<TeamRecords teamId="agent_team_bmad_tea" />);
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Company Project Team' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Company Project' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: '按标题搜索' })).toBeDisabled();
     const rows = [...screen.getByRole('status').querySelectorAll('li')];
     expect(rows).toHaveLength(8);
@@ -165,16 +165,16 @@ describe('TeamRecords', () => {
   it('does not offer a Team switch on the Run list; that belongs to the configuration view', () => {
     mockQueries();
     render(<TeamRecords teamId="agent_team_application" />);
-    expect(screen.queryByRole('navigation', { name: '选择 Agent Team' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Company Project Team' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: '选择 Coding Executor 团队' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Company Project' })).not.toBeInTheDocument();
   });
 
   it('names the selected Team and renders only its Runs', () => {
     mockQueries();
     render(<TeamRecords teamId="agent_team_application" />);
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Application Development Team' })).toBeInTheDocument();
-    expect(screen.getByTestId('crumbs')).toHaveTextContent('Agent Team / Application Development Team');
+    expect(screen.getByRole('heading', { level: 1, name: 'Application Development' })).toBeInTheDocument();
+    expect(screen.getByTestId('crumbs')).toHaveTextContent('Coding Executors / Application Development');
     expect(screen.getByRole('link', { name: /Goal run_app/ })).toHaveAttribute('href', '/agent-team-runs/run_app');
     expect(screen.queryByText('Ship the login flow')).not.toBeInTheDocument();
   });
@@ -185,7 +185,7 @@ describe('TeamRecords', () => {
     expect(screen.getByRole('link', { name: '查看配置' })).toHaveAttribute('href', '/agent-teams/agent_team_application/config');
   });
 
-  it('opens the default Company Project Team from /agent-teams', () => {
+  it('opens the default Company Project team from /agent-teams', () => {
     expect(AgentTeamsIndexRoute.path).toBe('/agent-teams/');
     const Component = AgentTeamsIndexRoute.options.component as React.ComponentType;
     render(<Component />);
@@ -199,9 +199,9 @@ describe('TeamSwitcher (configuration view)', () => {
     mockQueries();
     render(<TeamSwitcher teamId="agent_team_bmad_tea" />);
 
-    const switcher = screen.getByRole('navigation', { name: '选择 Agent Team' });
-    const company = within(switcher).getByRole('link', { name: /Company Project Team/ });
-    const application = within(switcher).getByRole('link', { name: /Application Development Team/ });
+    const switcher = screen.getByRole('navigation', { name: '选择 Coding Executor 团队' });
+    const company = within(switcher).getByRole('link', { name: /Company Project/ });
+    const application = within(switcher).getByRole('link', { name: /Application Development/ });
 
     expect(company).toHaveAttribute('aria-current', 'page');
     expect(application).toHaveAttribute('href', '/agent-teams/agent_team_application/config');

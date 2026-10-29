@@ -27,7 +27,7 @@ async function setup() {
   database.insert(agentTeams).values({
     id: 'agent_team_bmad_tea',
     workspaceId: 'workspace_personal',
-    name: 'Company Project Team',
+    name: 'Company Project',
     description: '',
     processId: 'bmad-tea',
     processVersion: '1',

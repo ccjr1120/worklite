@@ -6,7 +6,7 @@ import { focusRing } from '@/components/ui/interaction';
 import { TruncatedText } from '@/components/ui/truncated-text';
 import { cn } from '@/lib/utils';
 
-// `/agent-teams` and the legacy `/agent-team-config` path open the existing Company Project Team.
+// `/agent-teams` and the legacy `/agent-team-config` path open the existing Company Project team.
 export const DEFAULT_AGENT_TEAM_ID = 'agent_team_bmad_tea';
 
 const ACTIVE_RUN_STATUSES: AgentTeamRunStatus[] = ['running', 'waiting_for_input', 'paused'];

@@ -115,8 +115,8 @@
       "chat_project_task": "Chat 项目任务",
       "agent": "独立 Agent",
       "workflow": "Workflow 节点",
-      "team": "Agent Team 角色",
-      "team_project_task": "Agent Team 执行器",
+      "team": "Coding Executors 角色",
+      "team_project_task": "Coding Executors 执行器",
       "provider_test": "供应商连接测试",
       "external": "外部直连",
       "unattributed": "未归因"
