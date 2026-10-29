@@ -145,7 +145,8 @@
     "test_runner": "Test Runner",
     "reviewer": "Reviewer",
     "worktree_manager": "Worktree Manager",
-    "team_manager": "Team Manager"
+    "team_manager": "Team Manager",
+    "executor": "Executor"
   },
   "metadata": {
     "title": "执行信息",
@@ -160,7 +161,8 @@
   },
   "focus": {
     "agent_team_bmad_tea": "面向已有公司仓库",
-    "agent_team_application": "面向全新应用开发"
+    "agent_team_application": "面向全新应用开发",
+    "agent_team_direct": "面向单次直接执行"
   },
   "records": {
     "title": "Coding Executors 执行记录",

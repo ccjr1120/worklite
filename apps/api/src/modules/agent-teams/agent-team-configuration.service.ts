@@ -18,6 +18,7 @@ import { PROJECT_EXECUTOR_PROTOCOLS } from '../agents/project-executor.types';
 import {
   AGENT_TEAM_ROLE_TOOL_NAMES,
   AGENT_TEAM_DISPATCHER_ROLE,
+  DIRECT_AGENT_TEAM_ID,
   agentTeamEntryPoints,
   isValidAgentTeamRoleId,
 } from './agent-team-configuration';
@@ -55,7 +56,7 @@ export class AgentTeamConfigurationService {
     if (input.roles === undefined && input.maxConcurrentRuns === undefined && input.workingPractice === undefined && input.projectGitPolicy === undefined) {
       throw new BadRequestException('At least one Agent Team setting is required.');
     }
-    const roles = input.roles === undefined ? team.roles : await this.resolveRoles(workspaceId, input.roles);
+    const roles = input.roles === undefined ? team.roles : await this.resolveRoles(workspaceId, input.roles, teamId);
     if (input.maxConcurrentRuns !== undefined && (!Number.isInteger(input.maxConcurrentRuns) || input.maxConcurrentRuns < 1)) {
       throw new BadRequestException('Maximum concurrent Team Runs must be an integer of at least 1.');
     }
@@ -101,11 +102,16 @@ export class AgentTeamConfigurationService {
   async deleteRole(workspaceId: string, teamId: string, roleId: string): Promise<AgentTeam> {
     const team = await this.getTeam(workspaceId, teamId);
     if (!team.roles.some((role) => role.role === roleId)) throw new NotFoundException('Agent Team role not found.');
-    if (roleId === AGENT_TEAM_DISPATCHER_ROLE) throw new BadRequestException('The Dispatcher role is required and cannot be deleted.');
+    // The Direct Team has no Dispatcher; its Planner is the required entry role instead.
+    if (teamId === DIRECT_AGENT_TEAM_ID) {
+      if (roleId === 'planner') throw new BadRequestException('The Planner role is required and cannot be deleted.');
+    } else if (roleId === AGENT_TEAM_DISPATCHER_ROLE) {
+      throw new BadRequestException('The Dispatcher role is required and cannot be deleted.');
+    }
     return this.update(workspaceId, teamId, { roles: team.roles.filter((role) => role.role !== roleId).map(toPublicRole) });
   }
 
-  private async resolveRoles(workspaceId: string, values: AgentTeamRoleConfiguration[]): Promise<StoredAgentTeamRoleConfiguration[]> {
+  private async resolveRoles(workspaceId: string, values: AgentTeamRoleConfiguration[], teamId?: string): Promise<StoredAgentTeamRoleConfiguration[]> {
     if (!Array.isArray(values) || values.length < 1) throw new BadRequestException('At least one Agent Team role is required.');
     const byRole = new Map<AgentTeamRoleId, AgentTeamRoleConfiguration>();
     for (const value of values) {
@@ -115,7 +121,12 @@ export class AgentTeamConfigurationService {
       byRole.set(value.role, value);
     }
     if (byRole.has('team-manager')) throw new BadRequestException('Team Manager is not an active work role.');
-    if (!byRole.has(AGENT_TEAM_DISPATCHER_ROLE)) throw new BadRequestException('The Dispatcher role is required.');
+    // The Direct Team has no Dispatcher; it requires a Planner as its entry role instead.
+    if (teamId === DIRECT_AGENT_TEAM_ID) {
+      if (!byRole.has('planner')) throw new BadRequestException('The Planner role is required.');
+    } else if (!byRole.has(AGENT_TEAM_DISPATCHER_ROLE)) {
+      throw new BadRequestException('The Dispatcher role is required.');
+    }
 
     const normalized: Array<Omit<StoredAgentTeamRoleConfiguration, 'skills' | 'mcpServers'>> = [];
     for (const [role, value] of byRole) {

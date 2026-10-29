@@ -100,9 +100,11 @@ import {
   AGENT_TEAM_ROLE_TOOL_NAMES,
   BUILT_IN_AGENT_TEAM_ID,
   APPLICATION_AGENT_TEAM_ID,
+  DIRECT_AGENT_TEAM_ID,
   DEFAULT_MAX_CONCURRENT_RUNS,
   DEFAULT_APPLICATION_GIT_POLICY,
   DEFAULT_COMPANY_PROJECT_GIT_POLICY,
+  DEFAULT_DIRECT_GIT_POLICY,
   agentTeamContractRole,
   initialAgentTeamModeForRole,
   type AgentTeamRuntimeRole,
@@ -1107,6 +1109,41 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         await this.db.update(agentTeams).set({ roles, name, projectGitPolicy, updatedAt: new Date() })
           .where(eq(agentTeams.id, applicationTeam.id)).run();
       }
+    }
+
+    const [directTeam] = await this.db.select().from(agentTeams)
+      .where(and(eq(agentTeams.id, DIRECT_AGENT_TEAM_ID), eq(agentTeams.workspaceId, 'workspace_personal')))
+      .limit(1);
+    if (!directTeam) {
+      // Direct has no Dispatcher and no Worktree Manager: it is a fixed
+      // Planner -> Executor pair, so it never passes through ensureBuiltInTeamRoles.
+      const roles: StoredAgentTeamRoleConfiguration[] = [
+        {
+          ...defaultRoleConfiguration('planner'),
+          // Direct's Planner is a single lightweight step, not the BMAD/TEA process;
+          // it carries no BMAD entry-point skill content.
+          entryPoints: [],
+          instructions: 'Understand the requested goal and preserve user intent. Clarify only material missing information. Inspect the authorized project read-only without editing code, then produce a concrete execution plan for the Executor. You may ask for plan confirmation using the existing waiting_for_input question mechanism before handing off. Hand off to role executor with a specific, actionable goal describing the plan to implement.',
+        },
+        {
+          ...defaultRoleConfiguration('executor'),
+          displayName: 'Executor',
+          entryPoints: [],
+          // Direct's Executor is a project executor (see produceOutput), not a chat-completed role.
+          executor: 'claude',
+        },
+      ];
+      await this.db.insert(agentTeams).values({
+        id: DIRECT_AGENT_TEAM_ID,
+        workspaceId: 'workspace_personal',
+        name: 'Direct',
+        description: 'Built-in two-step team: a Planner plans, then a project Executor implements.',
+        processId: AGENT_TEAM_PROCESS_ID,
+        processVersion: AGENT_TEAM_PROCESS_VERSION,
+        roles,
+        workingPractice: 'Keep this Team to a single Planner -> Executor handoff per Run: plan first, then implement without a Dispatcher or mode selection.',
+        projectGitPolicy: DEFAULT_DIRECT_GIT_POLICY,
+      }).onConflictDoNothing().run();
     }
   }
 

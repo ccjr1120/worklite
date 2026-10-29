@@ -3,11 +3,13 @@ import { getBmadTeaProcessManifest } from '@worklite/team-runtime';
 
 export const BUILT_IN_AGENT_TEAM_ID = 'agent_team_bmad_tea';
 export const APPLICATION_AGENT_TEAM_ID = 'agent_team_application';
+export const DIRECT_AGENT_TEAM_ID = 'agent_team_direct';
 export const AGENT_TEAM_PROCESS_ID = 'bmad-tea';
 export const AGENT_TEAM_PROCESS_VERSION = '1';
 
 export const DEFAULT_COMPANY_PROJECT_GIT_POLICY = 'Follow the target project instructions and the user\'s named company branch and review workflow. Preserve protected base-branch rules; do not bypass review or integrate into a base branch unless the request requires it.';
 export const DEFAULT_APPLICATION_GIT_POLICY = 'For isolated serial work, prefer the current branch. When work overlaps or runs in parallel, choose branch or worktree isolation per project when it helps coordination. Inspect each project\'s instructions and current state before acting.';
+export const DEFAULT_DIRECT_GIT_POLICY = 'Follow the target project\'s own Git instructions and current branch state. Prefer the current branch for isolated serial work; do not bypass review or integrate into a protected base branch unless the request requires it.';
 
 export const DEFAULT_MAX_CONCURRENT_RUNS = 3;
 
@@ -44,6 +46,8 @@ export const AGENT_TEAM_ROLE_TOOL_NAMES: Partial<Record<string, readonly string[
   reviewer: ['bash', 'read', 'glob', 'grep', 'process_reference'],
   // The v5-v9 Worktree Manager plans and reports; project executors choose Git operations.
   'worktree-manager': ['read', 'glob', 'grep', 'process_reference'],
+  // Direct team's Executor mirrors the Developer's tool access.
+  executor: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference'],
 };
 
 export const AGENT_TEAM_ROLE_INSTRUCTIONS: Partial<Record<string, string>> = {
@@ -55,7 +59,15 @@ export const AGENT_TEAM_ROLE_INSTRUCTIONS: Partial<Record<string, string>> = {
   test_runner: 'Execute the declared checks through the available command tool, preserve their exact evidence, and distinguish command success from criterion completion.',
   reviewer: 'Independently assess the implementation and test evidence against the original intent. Request scoped repair only when concrete evidence shows a defect.',
   'worktree-manager': 'For v4 Runs, follow the captured worktree setup and teardown instructions. For v5–v9 work, provide advisory per-project Git strategy recommendations only; project executors inspect the actual repository state and choose their own Git operations.',
+  // Direct team only: a project executor implements the Planner's handed-off plan.
+  executor: 'Implement the Planner\'s handed-off plan in the authorized project. Follow the project\'s own repository instructions and the Team Git policy. Report the changes you made and any gaps between the plan and what you could complete.',
 };
+
+// The Direct team has no Dispatcher; its Run starts at the Planner. Every
+// other built-in and custom Team still starts at the server-owned Dispatcher.
+export function teamEntryRole(teamId: string): AgentTeamRoleId {
+  return teamId === DIRECT_AGENT_TEAM_ID ? 'planner' : AGENT_TEAM_DISPATCHER_ROLE;
+}
 
 // A directly addressed role bypasses the Dispatcher. Validation roles stay on
 // the validation path; any other named role keeps the v9 free handoff chain.

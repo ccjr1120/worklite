@@ -30,7 +30,7 @@ import {
 } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
-import { AGENT_TEAM_DISPATCHER_ROLE, isValidAgentTeamRoleId } from './agent-team-configuration';
+import { isValidAgentTeamRoleId, teamEntryRole } from './agent-team-configuration';
 import { AgentTeamRuntimeService } from './agent-team-runtime.service';
 
 @Injectable()
@@ -70,8 +70,9 @@ export class AgentTeamGroupsService {
     if (!repository) throw new BadRequestException('The Chat project directory was not attached to its task group.');
     return this.sendMessage(request, workspaceSlug, groupId, {
       body: input.message,
-      // The Team Dispatcher decides the Run mode unless the user named a role.
-      recipientRole: input.role ?? AGENT_TEAM_DISPATCHER_ROLE,
+      // The Team Dispatcher decides the Run mode unless the user named a role;
+      // the Direct Team has no Dispatcher and enters at its Planner instead.
+      recipientRole: input.role ?? teamEntryRole(teamId),
       repositoryIds: [repository.id],
       submissionId: `chat_${input.submissionId}`,
     }, acceptance);
