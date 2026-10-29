@@ -3,7 +3,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
-import { dirname, join, resolve, relative } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync, lstatSync, readlinkSync, symlinkSync, chmodSync, rmSync, openSync, closeSync, writeSync, statSync } from 'node:fs';
 import { gatewayFingerprint } from './gateway-fingerprint.mjs';
@@ -253,6 +253,21 @@ function processGroup(pid) {
   return Number(execFileSync('ps', ['-p', String(pid), '-o', 'pgid='], { encoding: 'utf8' }).trim());
 }
 
+function processCwd(pid) {
+  try {
+    const line = execFileSync('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], { encoding: 'utf8' }).split(/\r?\n/).find((entry) => entry.startsWith('n'));
+    return line ? line.slice(1) : null;
+  } catch {
+    return null;
+  }
+}
+
+function isWithin(parent, child) {
+  if (!child) return false;
+  const path = relative(resolve(parent), resolve(child));
+  return path === '' || (!isAbsolute(path) && path !== '..' && !path.startsWith(`..${sep}`));
+}
+
 function processGroupPids(pgid) {
   return execFileSync('ps', ['-axo', 'pid=,pgid='], { encoding: 'utf8' }).trim().split(/\r?\n/)
     .map((line) => line.trim().split(/\s+/).map(Number))
@@ -357,7 +372,9 @@ function assertCurrentOwnership(runtime) {
     for (const pid of listeners(port)) {
       const command = execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' }).trim();
       const gatewayChild = index === 2 && command.includes('build/start-server.js');
-      if (!expectedGroup || processGroup(pid) !== expectedGroup || !command.includes(expectedRoot) || (index === 2 && !gatewayChild)) {
+      // vite preview reports a relative command line, so its working directory identifies the release instead.
+      const ownedPath = command.includes(expectedRoot) || isWithin(expectedRoot, processCwd(pid));
+      if (!expectedGroup || processGroup(pid) !== expectedGroup || !ownedPath || (index === 2 && !gatewayChild)) {
         throw new Error(`Deployment port ${port} has a listener outside the recorded managed runtime; it was left untouched.`);
       }
     }
