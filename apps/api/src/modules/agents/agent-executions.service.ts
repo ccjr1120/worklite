@@ -683,7 +683,7 @@ export class AgentExecutionsService implements OnModuleInit {
         await this.resumeAfterToolCalls(request, workspaceSlug, workspace.id, execution.agentId, executionId);
       }
       if (turnUpdated && runningCallIds.length > 0) {
-        // Run a batch in request order. Platform scripts such as update_executor_category_role
+        // Run a batch in request order. Platform scripts such as update_executor_role
         // read-modify-write the same executor record, so parallel calls would silently drop updates.
         void (async () => {
           for (const callId of runningCallIds) await this.executeToolCall(request, workspaceSlug, workspace.id, execution.agentId, executionId, callId);
@@ -1633,7 +1633,7 @@ function parseWorkliteScriptResult(output: string): WorkliteScriptResult | null 
   const wrapper = asRecord(parsed);
   const result = asRecord(wrapper?.worklite);
   if (!result || typeof result.type !== 'string') return null;
-  if (result.type === 'dispatch' && typeof result.submissionId === 'string' && typeof result.route === 'string' && /^\/(agent-team-runs|workflows)\/[A-Za-z0-9_-]+$/.test(result.route)) return { type: 'dispatch', submissionId: result.submissionId, route: result.route };
+  if (result.type === 'dispatch' && typeof result.submissionId === 'string' && typeof result.route === 'string' && /^\/(executor-runs|workflows)\/[A-Za-z0-9_-]+$/.test(result.route)) return { type: 'dispatch', submissionId: result.submissionId, route: result.route };
   if (['executors', 'executor', 'executor-records', 'executor-memories', 'executor-memory', 'executor-group', 'executor-document', 'executor-run', 'executor-run-action'].includes(result.type)) return { type: 'snapshot' };
   if (result.type === 'snapshot') return Object.keys(result).length === 1 ? { type: 'snapshot' } : null;
   if (result.type === 'settings') {
