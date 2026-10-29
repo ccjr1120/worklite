@@ -11,7 +11,7 @@ export const DEFAULT_EXECUTOR_CATEGORY_ID = 'agent_team_bmad_tea';
 
 const ACTIVE_RUN_STATUSES: AgentTeamRunStatus[] = ['running', 'waiting_for_input', 'paused'];
 
-/** Team cards for the configuration view; each links to the same configuration page of that Team. */
+/** Executor cards for the configuration view; each links to the same configuration page of that executor. */
 export function TeamSwitcher({ executorCategoryId }: { executorCategoryId: string }) {
   const { t } = useTranslation('executorCategories');
   const query = useAgentTeamsQuery();
@@ -26,7 +26,7 @@ export function TeamSwitcher({ executorCategoryId }: { executorCategoryId: strin
 
 function TeamCard({ team, selected }: { team: AgentTeamView; selected: boolean }) {
   const { t } = useTranslation('executorCategories');
-  // Each card reuses the per-Team Run-summary query, so the selected Team's counts share the records request.
+  // Each card reuses the per-executor Run-summary query, so the selected executor's counts share the records request.
   const runs = useAgentTeamRecordsQuery(team.id);
   const count = (statuses: AgentTeamRunStatus[]) => runs.data ? runs.data.filter((run) => statuses.includes(run.status)).length : '–';
   const focus = t(`focus.${team.id}` as never, { defaultValue: '' });

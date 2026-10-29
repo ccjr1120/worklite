@@ -428,7 +428,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
         state.streaming = false;
       }
     } else if (reference?.kind === 'executor_category') {
-      state.title = 'Chat · Coding Executors';
+      state.title = 'Chat · executors';
       const run = await this.teams.getRun(request, 'personal', reference.runId);
       const phaseText: Record<string, string> = { planning: '规划中', test_design: '测试设计中', development: '开发中', test_authoring: '测试编写中', test_execution: '测试执行中', review: '审查中', repair: '修复中', waiting: '等待输入', terminal: '已结束' };
       state.status = statusText[run.status] ?? run.status;

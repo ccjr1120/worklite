@@ -137,7 +137,7 @@ describe('ChatProgressReportsService', () => {
     expect(note).toContain('正在编写服务代码');
   });
 
-  it('reports Chat-dispatched active Team and Workflow Runs', async () => {
+  it('reports Chat-dispatched active executor and Workflow Runs', async () => {
     const { db, tick, reportActiveWorkProgress, getRunProgress } = setup();
     insertTeamRun(db, 'running');
     insertWorkflowRun(db, 'running');

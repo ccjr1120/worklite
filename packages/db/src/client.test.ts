@@ -179,19 +179,19 @@ describe('initializeDatabase restart recovery', () => {
     expect(script.content).toContain("'mode', 'role'");
     expect(script.content).not.toContain("oneOf(target.mode");
     const [skill] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'SKILL.md'))).limit(1);
-    expect(chat.systemPrompt).toContain('Coding Executors teams do not accept a mode');
+    expect(chat.systemPrompt).toContain('Executors do not accept a mode');
     expect(chat.systemPrompt).not.toContain('supported mode');
     expect(skill.content).toContain('Never ask the user to choose a mode');
     expect(skill.content).not.toContain('supported mode');
   });
 
-  it('routes Chat project work through Coding Executors instead of project_task', async () => {
+  it('routes Chat project work through executors instead of project_task', async () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
 
     const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
     const [skill] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'SKILL.md'))).limit(1);
-    expect(chat.systemPrompt).toContain('two predefined Coding Executors teams, Company Project and Direct');
+    expect(chat.systemPrompt).toContain('two predefined executors, Company Project and Direct');
     expect(chat.systemPrompt).not.toMatch(/\b(?:answer|steer|cancel)_project_task\b|redeployAfterSuccess|Agent Team/);
     expect(skill.content).not.toMatch(/\b(?:answer|steer|cancel)_project_task\b|redeployAfterSuccess|Agent Team/);
     expect(skill.content).toContain('Direct is the default for general project work');
@@ -261,16 +261,16 @@ describe('initializeDatabase restart recovery', () => {
     expect(terminal.inputSchema.properties.cwd).toMatchObject({ type: 'string', maxLength: 4_096 });
     expect(terminal.inputSchema.properties.timeoutMs).toMatchObject({ type: 'integer', minimum: 100, maximum: 900_000 });
     expect(terminal.description).toContain('no command allow-list');
-    expect(terminal.description).toContain('Coding Executors team');
+    expect(terminal.description).toContain('executor');
     expect(tools['scripts/run-host-command.mjs']).toBeUndefined();
     expect(skill).toContain('Use run_host_command directly');
     expect(skill).toContain('no command allow-list');
-    expect(skill).toContain('Coding Executors team');
+    expect(skill).toContain('executor');
     expect(skill).toContain('ordinary standalone file operations may use run_host_command');
     expect(skill).not.toContain('batch file changes and directory removal belong to a project executor');
     expect(skill).not.toMatch(/whitelist|restricted Chat|no new Shell execution|no direct read|no bash/i);
     expect(chat.systemPrompt).toContain('run_host_command');
-    expect(chat.systemPrompt).toContain('Do not dispatch a Coding Executors team for those operations');
+    expect(chat.systemPrompt).toContain('Do not dispatch an executor for those operations');
     expect(chat.systemPrompt).toContain('delegate writing or changing code, repository-wide investigation, cross-file changes and validation/build/test work');
     expect(chat.systemPrompt).not.toMatch(/whitelist|restricted run_host_command|General read, glob, grep and bash|no bash|no direct read/i);
   });

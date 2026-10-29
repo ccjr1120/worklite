@@ -181,7 +181,7 @@ describe('WorkspaceResourcesService.deleteMcpServer', () => {
     expect(db!.select().from(mcpServers).where(eq(mcpServers.id, SERVER_ID)).all()).toHaveLength(1);
   });
 
-  it('force deletes the server and cleans draft and Team role references in one transaction, leaving published history untouched', async () => {
+  it('force deletes the server and cleans draft and executor role references in one transaction, leaving published history untouched', async () => {
     const { resources } = await setup();
     seedWorkflow([SERVER_ID, 'mcp_other'], { publishedVersion: true });
     seedAgentTeam([SERVER_ID], { capturedVersion: true });

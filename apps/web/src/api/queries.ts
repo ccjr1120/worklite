@@ -242,7 +242,7 @@ export function useCodexAccountUsagesQuery(enabled: boolean) {
 }
 
 // Attribution filters are part of the question, so they are part of the cache key;
-// leaving them out would serve a Chat-only answer for a Team-only request.
+// leaving them out would serve a Chat-only answer for an executor-only request.
 function attributionKey(query: { surface?: string; conversationId?: string; projectTaskId?: string; executor?: string; executorCategoryId?: string; teamRunId?: string; workflowId?: string; workflowRunId?: string }) {
   return [query.surface ?? '', query.conversationId ?? '', query.projectTaskId ?? '', query.executor ?? '', query.executorCategoryId ?? '', query.teamRunId ?? '', query.workflowId ?? '', query.workflowRunId ?? ''] as const;
 }

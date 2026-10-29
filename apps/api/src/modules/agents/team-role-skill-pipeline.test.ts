@@ -6,7 +6,7 @@ import { AgentTeamConfigurationService } from '../executor-categories/executor-c
 import { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
 
 // End-to-end for the supported integration path: import a local Skill as a
-// platform Skill, capture its id on a Team test role, then verify the role's
+// platform Skill, capture its id on an executor test role, then verify the role's
 // runtime context contains the Skill instructions.
 const gateway = vi.hoisted(() => ({ runWorkflowAgent: vi.fn() }));
 vi.mock('@worklite/model-gateway', () => ({
@@ -39,7 +39,7 @@ async function setup() {
   return { resources, configuration };
 }
 
-describe('Team role Skill pipeline', () => {
+describe('Executor role Skill pipeline', () => {
   it('carries an imported platform Skill from role skillIds into the runtime prompt', async () => {
     const { resources, configuration } = await setup();
     const skill = await resources.importSkill({} as Request, 'personal', {

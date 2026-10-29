@@ -12,7 +12,7 @@ import { EXECUTOR_CATEGORY_DISPATCHER_ROLE } from './executor-category-configura
 import type { AgentTeamRuntimeService } from './executor-category-runtime.service';
 import type { WorkspaceService } from '../teams/teams.service';
 
-// Agent Teams no longer accept a mode: Chat dispatch addresses the Team
+// Agent Teams no longer accept a mode: Chat dispatch addresses the executor
 // Dispatcher by default and never forwards a mode to the Run.
 
 let db: Database | undefined;
@@ -35,7 +35,7 @@ async function setup() {
   await db.insert(executorCategories).values({
     id: 'agent_team_test',
     workspaceId: 'workspace_personal',
-    name: 'Test Team',
+    name: 'Test executor',
     description: 'test',
     processId: 'bmad-tea',
     processVersion: '1',
@@ -66,7 +66,7 @@ async function setup() {
 const request = {} as Request;
 
 describe('AgentTeamGroupsService.dispatchFromChat', () => {
-  it('dispatches without a mode and addresses the executor category Dispatcher by default', async () => {
+  it('dispatches without a mode and addresses the executor Dispatcher by default', async () => {
     const { service, created, project } = await setup();
     await service.dispatchFromChat(request, 'personal', 'agent_team_test', {
       message: '帮我看看这个项目', projectDirectory: project, submissionId: 'sub_default', runId: 'atrun_default',

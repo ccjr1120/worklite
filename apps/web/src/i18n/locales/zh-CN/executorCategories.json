@@ -41,7 +41,7 @@
     "continueInChat": "在 Chat 中处理任务",
     "inputInChat": "问题和恢复操作由 Chat 任务卡片处理。",
     "openArchive": "查看历史对话",
-    "executors": "捕获的项目执行器"
+    "executors": "捕获的执行引擎"
   },
   "tasks": {
     "title": "任务",
@@ -146,14 +146,14 @@
     "reviewer": "Reviewer",
     "worktree_manager": "Worktree Manager",
     "team_manager": "执行管理",
-    "executor": "Executor"
+    "executor": "实施者"
   },
   "metadata": {
     "title": "执行信息",
     "taskKey": "任务键"
   },
   "switcher": {
-    "label": "选择执行器分类",
+    "label": "选择执行器",
     "current": "当前",
     "maxConcurrentRuns": "并发上限",
     "activeRuns": "运行中",
@@ -181,11 +181,12 @@
       "executor": "执行器",
       "clearAll": "清空"
     },
-    "noMatch": "没有符合筛选条件的记录。"
+    "noMatch": "没有符合筛选条件的记录。",
+    "executorName": "执行器"
   },
   "config": {
     "title": "执行器配置",
-    "description": "查看执行器分类的基本信息、角色与记忆，并勾选角色使用的 Skill；其他配置修改在 Chat 中进行。",
+    "description": "查看执行器的基本信息、角色与记忆，修改执行器名称，并勾选角色使用的 Skill；其他配置修改在 Chat 中进行。",
     "viewConfig": "查看配置",
     "backToRecords": "返回记录",
     "loadFailed": "无法加载执行器配置。",
@@ -199,13 +200,22 @@
       "maxConcurrentRuns": "最大并发执行数",
       "workingPractice": "工作惯例",
       "createdAt": "创建时间",
-      "updatedAt": "更新时间"
+      "updatedAt": "更新时间",
+      "nameHint": "名称在未删除的执行器中唯一（不区分大小写），1-64 个字符；改名只影响之后发起的 Run。",
+      "editName": "修改名称",
+      "saveName": "保存名称",
+      "cancelName": "取消",
+      "nameSaved": "执行器名称已保存，将用于之后发起的 Run。",
+      "nameSaveFailed": "无法保存执行器名称。",
+      "nameConflict": "已有同名执行器，请换一个名称。",
+      "nameStale": "执行器配置已被其他操作修改，请刷新后重试。",
+      "nameInvalid": "名称需为 1-64 个字符，且不能包含控制字符。"
     },
     "roles": {
       "title": "角色",
       "empty": "未配置角色。",
       "model": "模型",
-      "executor": "执行器",
+      "executor": "执行引擎",
       "entryPoints": "入口点",
       "skills": "技能",
       "saveSkills": "保存技能选择",

@@ -4,7 +4,7 @@ import type { TeamMemoryActorContext } from './team-memory.service';
 
 // Executor MCP credentials live in this API process only. Each project-executor
 // task registers one binding before launch and revokes it in the task's finally
-// block, so a finished or cancelled task cannot keep writing executor category memory.
+// block, so a finished or cancelled task cannot keep writing executor memory.
 const TOKEN_TTL_MS = 6 * 60 * 60 * 1000;
 
 type Binding = { context: TeamMemoryActorContext; expiresAt: number };

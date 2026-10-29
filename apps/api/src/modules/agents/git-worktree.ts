@@ -38,7 +38,7 @@ export async function inspectGitRepository(projectDirectory: string): Promise<Gi
   }
 }
 
-// Serializes merge-back per original checkout and base branch so parallel tasks and Team
+// Serializes merge-back per original checkout and base branch so parallel tasks and executor
 // developer lanes of one repository never merge concurrently. Entries clean up once settled.
 const mergeQueues = new Map<string, Promise<unknown>>();
 
@@ -62,7 +62,7 @@ export async function prepareTaskWorktree(repository: GitRepositoryInfo & { bran
   return { worktreePath, worktreeBranch, baseBranch: repository.branch, baseCommit: repository.commit };
 }
 
-// Idempotent variant for attempts that may resume (Team developer lanes): an existing worktree
+// Idempotent variant for attempts that may resume (executor developer lanes): an existing worktree
 // and branch for the same suffix are reused instead of recreated.
 export async function ensureTaskWorktree(repository: GitRepositoryInfo & { branch: string }, suffix: string): Promise<PreparedTaskWorktree> {
   const worktreeBranch = `worklite/task-${suffix}`;
@@ -75,7 +75,7 @@ export async function ensureTaskWorktree(repository: GitRepositoryInfo & { branc
   return { worktreePath, worktreeBranch, baseBranch: repository.branch, baseCommit: repository.commit };
 }
 
-// Idempotent ensure with explicit path, branch, and start point (Team Run base worktrees and
+// Idempotent ensure with explicit path, branch, and start point (executor Run base worktrees and
 // lane sub-worktrees). An already-registered worktree at the path is reused; a leftover branch
 // without a worktree (interrupted earlier attempt) is attached instead of recreated.
 export async function ensureWorktreeAt(repositoryDirectory: string, worktreePath: string, worktreeBranch: string, startPoint: string): Promise<void> {

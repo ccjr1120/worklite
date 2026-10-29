@@ -23,6 +23,6 @@ describe('formatError', () => {
   });
 
   it('falls back to a generic message for a non-Error value', () => {
-    expect(formatError('boom')).toBe('The Coding Executors team task failed.');
+    expect(formatError('boom')).toBe('The executor task failed.');
   });
 });

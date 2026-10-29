@@ -24,7 +24,7 @@ async function setup() {
   database.insert(executorCategories).values({
     id: 'team_1',
     workspaceId: 'workspace_personal',
-    name: 'Team',
+    name: 'executor',
     description: '',
     processId: 'bmad-tea',
     processVersion: '1',

@@ -16,7 +16,7 @@ export function teamMemoryMcpEndpoint(): string {
 
 /**
  * Synthetic MCP server runtime handed to a project executor. The bearer token binds
- * the endpoint to this Run's Team, attempt, role and repository scope.
+ * the endpoint to this Run's executor, attempt, role and repository scope.
  */
 export function teamMemoryMcpRuntime(authToken: string): {
   id: string;
@@ -27,7 +27,7 @@ export function teamMemoryMcpRuntime(authToken: string): {
 } {
   return {
     id: TEAM_MEMORY_MCP_SERVER_ID,
-    name: 'Team Memory',
+    name: 'Executor Memory',
     endpoint: teamMemoryMcpEndpoint(),
     authToken,
     allowedTools: [...TEAM_MEMORY_MCP_TOOL_NAMES],
@@ -37,7 +37,7 @@ export function teamMemoryMcpRuntime(authToken: string): {
 /**
  * Stateless MCP server for one authenticated executor binding. Every request runs
  * with the context captured in the token; request arguments can never select a
- * different Team, Run or repository scope.
+ * different executor, Run or repository scope.
  */
 export function createTeamMemoryMcpServer(
   tools: AgentTeamMemoryToolsService,
@@ -55,7 +55,7 @@ export function createTeamMemoryMcpServer(
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: definitions }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (!allowed.has(request.params.name)) {
-      return { content: [{ type: 'text' as const, text: `Unknown executor category memory tool: ${request.params.name}` }], isError: true };
+      return { content: [{ type: 'text' as const, text: `Unknown executor memory tool: ${request.params.name}` }], isError: true };
     }
     try {
       const value = await tools.execute({
@@ -66,7 +66,7 @@ export function createTeamMemoryMcpServer(
       return { content: [{ type: 'text' as const, text: value }] };
     } catch (error) {
       return {
-        content: [{ type: 'text' as const, text: error instanceof Error ? error.message : 'The executor category memory tool failed.' }],
+        content: [{ type: 'text' as const, text: error instanceof Error ? error.message : 'The executor memory tool failed.' }],
         isError: true,
       };
     }

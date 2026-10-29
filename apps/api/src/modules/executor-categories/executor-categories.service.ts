@@ -38,7 +38,7 @@ export class AgentTeamsService {
   async get(request: Request, workspaceSlug: string, executorCategoryId: string): Promise<AgentTeamView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const team = await this.configuration.getTeam(workspace.id, executorCategoryId);
-    if (team.deletedAt) throw new NotFoundException('This Coding Executors team has been deleted.');
+    if (team.deletedAt) throw new NotFoundException('This executor has been deleted.');
     return toTeamView(team);
   }
 
@@ -254,7 +254,7 @@ export class AgentTeamsService {
     const [team] = await this.db.select().from(executorCategories)
       .where(and(eq(executorCategories.id, executorCategoryId), eq(executorCategories.workspaceId, workspaceId)))
       .limit(1);
-    if (!team) throw new NotFoundException('Coding Executors team not found.');
+    if (!team) throw new NotFoundException('Executor not found.');
     return team;
   }
 

@@ -83,7 +83,7 @@ function mockQueries(records = runsByTeam, state: { isPending?: boolean } = {}) 
 describe('filterRuns', () => {
   const runs = runsByTeam.agent_team_bmad_tea;
 
-  it('orders Runs newest first across the whole Team', () => {
+  it('orders Runs newest first across the whole executor', () => {
     expect(filterRuns(runs, 'all', '').map((item) => item.id)).toEqual(['run_new', 'run_q', 'run_mid', 'run_old']);
   });
 
@@ -145,7 +145,7 @@ describe('TeamRecords', () => {
     expect(screen.queryByRole('link', { name: /Ship the login flow/ })).not.toBeInTheDocument();
   });
 
-  it('shows a single-line empty state for a Team without Runs', () => {
+  it('shows a single-line empty state for an executor without Runs', () => {
     mockQueries({ agent_team_bmad_tea: [] });
     render(<TeamRecords executorCategoryId="agent_team_bmad_tea" />);
     expect(screen.getByText('暂无执行记录。').parentElement).toHaveClass('h-12');
@@ -162,14 +162,14 @@ describe('TeamRecords', () => {
     expect(rows.every((row) => row.className.includes('h-12'))).toBe(true);
   });
 
-  it('does not offer a Team switch on the Run list; that belongs to the configuration view', () => {
+  it('does not offer an executor switch on the Run list; that belongs to the configuration view', () => {
     mockQueries();
     render(<TeamRecords executorCategoryId="agent_team_bmad_tea" />);
     expect(screen.queryByRole('navigation', { name: '选择执行器分类' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Direct' })).not.toBeInTheDocument();
   });
 
-  it('names the selected Team and renders only its Runs', () => {
+  it('names the selected executor and renders only its Runs', () => {
     mockQueries();
     render(<TeamRecords executorCategoryId="agent_team_bmad_tea" />);
 
@@ -179,7 +179,7 @@ describe('TeamRecords', () => {
     expect(screen.queryByText('Goal run_app')).not.toBeInTheDocument();
   });
 
-  it('puts the configuration entry in the page header for the selected Team', () => {
+  it('puts the configuration entry in the page header for the selected executor', () => {
     mockQueries();
     render(<TeamRecords executorCategoryId="agent_team_bmad_tea" />);
     expect(screen.getByRole('link', { name: '查看配置' })).toHaveAttribute('href', '/executor-categories/agent_team_bmad_tea/config');
@@ -195,7 +195,7 @@ describe('TeamRecords', () => {
 });
 
 describe('TeamSwitcher (configuration view)', () => {
-  it('shows both Teams as cards with focus, concurrency and active/queued counts, linking to their configuration', () => {
+  it('shows both executors as cards with focus, concurrency and active/queued counts, linking to their configuration', () => {
     mockQueries();
     render(<TeamSwitcher executorCategoryId="agent_team_bmad_tea" />);
 

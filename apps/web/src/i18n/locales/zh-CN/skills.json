@@ -71,7 +71,7 @@
   },
   "delete": {
     "title": "删除 {{name}}？",
-    "description": "这会从 {{root}}/{{directory}} 永久删除技能目录，并清理当前 Agent、Chat、Workflow 草稿和 Coding Executors 配置中的引用。历史版本快照不会改写。",
+    "description": "这会从 {{root}}/{{directory}} 永久删除技能目录，并清理当前 Agent、Chat、Workflow 草稿和 执行器配置中的引用。历史版本快照不会改写。",
     "action": "删除 {{name}}",
     "deleting": "正在删除...",
     "success": "技能已删除",

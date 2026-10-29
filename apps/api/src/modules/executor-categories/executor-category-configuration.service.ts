@@ -42,13 +42,13 @@ export class AgentTeamConfigurationService {
     await this.resources.reconcileWorkspaceSkills(workspaceId);
     const [team] = await this.db.select().from(executorCategories)
       .where(and(eq(executorCategories.id, executorCategoryId), eq(executorCategories.workspaceId, workspaceId))).limit(1);
-    if (!team) throw new NotFoundException('Coding Executors team not found.');
+    if (!team) throw new NotFoundException('Executor not found.');
     return team;
   }
 
   private validateNotRetiredTeamId(executorCategoryId: string): void {
     if ((RETIRED_AGENT_TEAM_IDS as readonly string[]).includes(executorCategoryId)) {
-      throw new BadRequestException(`This Coding Executors team (${executorCategoryId}) has been retired and is no longer available.`);
+      throw new BadRequestException(`This executor (${executorCategoryId}) has been retired and is no longer available.`);
     }
   }
 
@@ -58,23 +58,23 @@ export class AgentTeamConfigurationService {
 
   async update(workspaceId: string, executorCategoryId: string, input: UpdateAgentTeamRequest): Promise<AgentTeam> {
     const team = await this.getTeam(workspaceId, executorCategoryId);
-    if (team.deletedAt) throw new ConflictException('This Coding Executors team has been deleted.');
+    if (team.deletedAt) throw new ConflictException('This executor has been deleted.');
     if (!input || typeof input !== 'object' || Array.isArray(input)
       || Object.keys(input).some((key) => !['roles', 'maxConcurrentRuns', 'workingPractice', 'projectGitPolicy'].includes(key))) {
-      throw new BadRequestException('Only Coding Executors team roles, working practice, project Git policy and concurrency can be changed.');
+      throw new BadRequestException('Only executor roles, working practice, project Git policy and concurrency can be changed.');
     }
     if (input.roles === undefined && input.maxConcurrentRuns === undefined && input.workingPractice === undefined && input.projectGitPolicy === undefined) {
-      throw new BadRequestException('At least one Coding Executors team setting is required.');
+      throw new BadRequestException('At least one executor setting is required.');
     }
     const roles = input.roles === undefined ? team.roles : await this.resolveRoles(workspaceId, input.roles, executorCategoryId);
     if (input.maxConcurrentRuns !== undefined && (!Number.isInteger(input.maxConcurrentRuns) || input.maxConcurrentRuns < 1)) {
-      throw new BadRequestException('Maximum concurrent Team Runs must be an integer of at least 1.');
+      throw new BadRequestException('Maximum concurrent executor Runs must be an integer of at least 1.');
     }
     if (input.workingPractice !== undefined && typeof input.workingPractice !== 'string') {
-      throw new BadRequestException('Team working practice must be text.');
+      throw new BadRequestException('Executor working practice must be text.');
     }
     if (input.projectGitPolicy !== undefined && typeof input.projectGitPolicy !== 'string') {
-      throw new BadRequestException('Team project Git policy must be text.');
+      throw new BadRequestException('Executor project Git policy must be text.');
     }
     const [updated] = await this.db.update(executorCategories).set({
       roles,
@@ -83,13 +83,13 @@ export class AgentTeamConfigurationService {
       ...(input.projectGitPolicy === undefined ? {} : { projectGitPolicy: input.projectGitPolicy.trim() }),
       updatedAt: new Date(),
     }).where(and(eq(executorCategories.id, team.id), eq(executorCategories.workspaceId, workspaceId))).returning();
-    if (!updated) throw new NotFoundException('Coding Executors team not found.');
+    if (!updated) throw new NotFoundException('Executor not found.');
     return updated;
   }
 
   async createRole(workspaceId: string, executorCategoryId: string, input: Omit<AgentTeamRoleConfiguration, 'role'>, roleId?: string): Promise<AgentTeam> {
     const team = await this.getTeam(workspaceId, executorCategoryId);
-    if (team.deletedAt) throw new ConflictException('This Coding Executors team has been deleted.');
+    if (team.deletedAt) throw new ConflictException('This executor has been deleted.');
     const role = roleId ?? `role_${randomUUID()}`;
     if (team.roles.some((item) => item.role === role)) return team;
     return this.update(workspaceId, executorCategoryId, { roles: [...toPublicRoles(team.roles), { ...input, role }] });
@@ -102,9 +102,9 @@ export class AgentTeamConfigurationService {
     changes: Partial<Omit<AgentTeamRoleConfiguration, 'role'>>,
   ): Promise<AgentTeam> {
     const team = await this.getTeam(workspaceId, executorCategoryId);
-    if (team.deletedAt) throw new ConflictException('This Coding Executors team has been deleted.');
+    if (team.deletedAt) throw new ConflictException('This executor has been deleted.');
     const target = team.roles.find((role) => role.role === roleId);
-    if (!target) throw new NotFoundException('Coding Executors team role not found.');
+    if (!target) throw new NotFoundException('Executor role not found.');
     const updated = { ...toPublicRole(target), ...changes, role: roleId };
     return this.update(workspaceId, executorCategoryId, {
       roles: team.roles.map((role) => role.role === roleId ? updated : toPublicRole(role)),
@@ -113,9 +113,9 @@ export class AgentTeamConfigurationService {
 
   async deleteRole(workspaceId: string, executorCategoryId: string, roleId: string): Promise<AgentTeam> {
     const team = await this.getTeam(workspaceId, executorCategoryId);
-    if (team.deletedAt) throw new ConflictException('This Coding Executors team has been deleted.');
-    if (!team.roles.some((role) => role.role === roleId)) throw new NotFoundException('Coding Executors team role not found.');
-    // The Direct Team requires its Planner as the entry role.
+    if (team.deletedAt) throw new ConflictException('This executor has been deleted.');
+    if (!team.roles.some((role) => role.role === roleId)) throw new NotFoundException('Executor role not found.');
+    // The general project executor requires its Planner as the entry role.
     // Other teams require either a Dispatcher or Planner as the entry role.
     const remainingRoles = team.roles.filter((role) => role.role !== roleId);
     if (executorCategoryId === DIRECT_EXECUTOR_CATEGORY_ID) {
@@ -124,23 +124,23 @@ export class AgentTeamConfigurationService {
       const hasDispatcher = remainingRoles.some((role) => role.role === EXECUTOR_CATEGORY_DISPATCHER_ROLE);
       const hasPlanner = remainingRoles.some((role) => role.role === 'planner');
       if (!hasDispatcher && !hasPlanner) {
-        throw new BadRequestException('A Dispatcher or Planner role is required as the Team entry role.');
+        throw new BadRequestException('A Dispatcher or Planner role is required as the executor entry role.');
       }
     }
     return this.update(workspaceId, executorCategoryId, { roles: remainingRoles.map(toPublicRole) });
   }
 
   private async resolveRoles(workspaceId: string, values: AgentTeamRoleConfiguration[], executorCategoryId?: string): Promise<StoredAgentTeamRoleConfiguration[]> {
-    if (!Array.isArray(values) || values.length < 1) throw new BadRequestException('At least one Coding Executors team role is required.');
+    if (!Array.isArray(values) || values.length < 1) throw new BadRequestException('At least one executor role is required.');
     const byRole = new Map<AgentTeamRoleId, AgentTeamRoleConfiguration>();
     for (const value of values) {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BadRequestException('Every Coding Executors team role configuration must be an object.');
-      if (Object.keys(value).some((key) => !(ROLE_CONFIGURATION_KEYS as readonly string[]).includes(key))) throw new BadRequestException('A Coding Executors team role configuration contains an unsupported field.');
-      if (!isValidAgentTeamRoleId(value.role) || byRole.has(value.role)) throw new BadRequestException('Coding Executors team role ids must be unique lowercase identifiers.');
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BadRequestException('Every executor role configuration must be an object.');
+      if (Object.keys(value).some((key) => !(ROLE_CONFIGURATION_KEYS as readonly string[]).includes(key))) throw new BadRequestException('An executor role configuration contains an unsupported field.');
+      if (!isValidAgentTeamRoleId(value.role) || byRole.has(value.role)) throw new BadRequestException('Executor role ids must be unique lowercase identifiers.');
       byRole.set(value.role, value);
     }
     if (byRole.has('executor-manager')) throw new BadRequestException('Executor Manager is not an active work role.');
-    // The Direct Team requires a Planner as its entry role.
+    // The general project executor requires a Planner as its entry role.
     // Other teams require either a Dispatcher or Planner as their entry role.
     if (executorCategoryId === DIRECT_EXECUTOR_CATEGORY_ID) {
       if (!byRole.has('planner')) throw new BadRequestException('The Planner role is required.');
@@ -148,20 +148,20 @@ export class AgentTeamConfigurationService {
       const hasDispatcher = byRole.has(EXECUTOR_CATEGORY_DISPATCHER_ROLE);
       const hasPlanner = byRole.has('planner');
       if (!hasDispatcher && !hasPlanner) {
-        throw new BadRequestException('A Dispatcher or Planner role is required as the Team entry role.');
+        throw new BadRequestException('A Dispatcher or Planner role is required as the executor entry role.');
       }
     }
 
     const normalized: Array<Omit<StoredAgentTeamRoleConfiguration, 'skills' | 'mcpServers'>> = [];
     for (const [role, value] of byRole) {
       if (typeof value.publicModelId !== 'string' && (!Array.isArray(value.publicModelId) || value.publicModelId.some((id) => typeof id !== 'string'))) {
-        throw new BadRequestException(`A public model id for Coding Executors team role ${role} must be a string or an array of strings.`);
+        throw new BadRequestException(`A public model id for executor role ${role} must be a string or an array of strings.`);
       }
       const publicModelIds = normalizePublicModelList(value.publicModelId);
-      // A single empty string keeps the historical "use the Team/executor default" meaning; an
+      // A single empty string keeps the historical "use the role/executor default" meaning; an
       // array is always a declared fallback list, with its first candidate taking that role.
       const publicModelId: string | string[] = Array.isArray(value.publicModelId) ? publicModelIds : (publicModelIds[0] ?? '');
-      if (value.executor !== undefined && value.executor !== null && value.executor !== 'claude' && value.executor !== 'codex') throw new BadRequestException(`The executor for Coding Executors team role ${role} must be claude or codex.`);
+      if (value.executor !== undefined && value.executor !== null && value.executor !== 'claude' && value.executor !== 'codex') throw new BadRequestException(`The executor for executor role ${role} must be claude or codex.`);
       const executor = role === 'developer' ? value.executor ?? 'claude' : value.executor ?? undefined;
       // A role's publicModelId is always a Gateway public id, so every declared candidate must speak a
       // protocol its executor can reach through the Gateway (Claude Code: anthropic/messages, Codex:
@@ -173,26 +173,26 @@ export class AgentTeamConfigurationService {
           throw new BadRequestException(`The ${role} model must use ${protocols.join(' or ')} for the ${executor} executor.`);
         }
       }
-      if (typeof value.instructions !== 'string' || !value.instructions.trim()) throw new BadRequestException(`Instructions for Coding Executors team role ${role} are required.`);
+      if (typeof value.instructions !== 'string' || !value.instructions.trim()) throw new BadRequestException(`Instructions for executor role ${role} are required.`);
       const displayName = value.displayName === undefined ? undefined : value.displayName.trim();
-      if (displayName !== undefined && !displayName) throw new BadRequestException(`The display name for Coding Executors team role ${role} is required.`);
+      if (displayName !== undefined && !displayName) throw new BadRequestException(`The display name for executor role ${role} is required.`);
       const builtIn = EXECUTOR_CATEGORY_ROLE_TOOL_NAMES[role];
-      if (!builtIn && !displayName) throw new BadRequestException(`A display name is required for custom Coding Executors team role ${role}.`);
-      const entryPoints = normalizeStrings(value.entryPoints, `entry points for Coding Executors team role ${role}`);
+      if (!builtIn && !displayName) throw new BadRequestException(`A display name is required for custom executor role ${role}.`);
+      const entryPoints = normalizeStrings(value.entryPoints, `entry points for executor role ${role}`);
       const allowedEntryPoints = agentTeamEntryPoints(role);
-      if (entryPoints.some((entryPoint) => !allowedEntryPoints.includes(entryPoint))) throw new BadRequestException(`An entry point is not supported for Coding Executors team role ${role}.`);
-      const toolNames = normalizeStrings(value.toolNames, `tool names for Coding Executors team role ${role}`);
+      if (entryPoints.some((entryPoint) => !allowedEntryPoints.includes(entryPoint))) throw new BadRequestException(`An entry point is not supported for executor role ${role}.`);
+      const toolNames = normalizeStrings(value.toolNames, `tool names for executor role ${role}`);
       const allowedToolNames = builtIn ?? CUSTOM_ROLE_TOOL_NAMES;
-      if (toolNames.some((toolName) => !allowedToolNames.includes(toolName as never))) throw new BadRequestException(`A tool is not supported for Coding Executors team role ${role}.`);
+      if (toolNames.some((toolName) => !allowedToolNames.includes(toolName as never))) throw new BadRequestException(`A tool is not supported for executor role ${role}.`);
       normalized.push({ role, ...(displayName ? { displayName } : {}), publicModelId, instructions: value.instructions.trim(), entryPoints, toolNames, ...(executor ? { executor } : {}) });
     }
 
-    const skillIds = new Set(values.flatMap((value) => uniqueStrings(value.skillIds, `Skill ids for Coding Executors team role ${value.role}`)));
-    const mcpServerIds = new Set(values.flatMap((value) => uniqueStrings(value.mcpServerIds, `MCP server ids for Coding Executors team role ${value.role}`)));
+    const skillIds = new Set(values.flatMap((value) => uniqueStrings(value.skillIds, `Skill ids for executor role ${value.role}`)));
+    const mcpServerIds = new Set(values.flatMap((value) => uniqueStrings(value.mcpServerIds, `MCP server ids for executor role ${value.role}`)));
     const skillSnapshots = await this.resolveSkills(workspaceId, skillIds);
     const mcpSnapshots = await this.resolveMcpServers(workspaceId, mcpServerIds);
-    const skillsByRole = new Map(values.map((value) => [value.role, uniqueStrings(value.skillIds, `Skill ids for Coding Executors team role ${value.role}`)]));
-    const mcpByRole = new Map(values.map((value) => [value.role, uniqueStrings(value.mcpServerIds, `MCP server ids for Coding Executors team role ${value.role}`)]));
+    const skillsByRole = new Map(values.map((value) => [value.role, uniqueStrings(value.skillIds, `Skill ids for executor role ${value.role}`)]));
+    const mcpByRole = new Map(values.map((value) => [value.role, uniqueStrings(value.mcpServerIds, `MCP server ids for executor role ${value.role}`)]));
     return normalized.map((role) => ({
       ...role,
       skills: skillsByRole.get(role.role)?.flatMap((id) => skillSnapshots.get(id) ? [skillSnapshots.get(id)!] : []) ?? [],
@@ -208,7 +208,7 @@ export class AgentTeamConfigurationService {
     const files = rows.length === 0 ? [] : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, rows.map((row) => row.id))).orderBy(asc(skillFiles.path));
     // Carry the stored instruction text alongside the package files, matching the
     // Workflow Agent node path, so a Skill whose instructions are not only in
-    // SKILL.md still reaches the Team role verbatim.
+    // SKILL.md still reaches the executor role verbatim.
     return new Map(rows.map((row) => [row.id, {
       id: row.id,
       name: row.name,
@@ -235,8 +235,8 @@ export class AgentTeamConfigurationService {
     const [team] = await this.db.select().from(executorCategories)
       .where(and(eq(executorCategories.id, executorCategoryId), eq(executorCategories.workspaceId, workspaceId)))
       .limit(1);
-    if (!team) throw new NotFoundException('Coding Executors team not found.');
-    if (team.deletedAt) throw new ConflictException('This Coding Executors team has already been deleted.');
+    if (!team) throw new NotFoundException('Executor not found.');
+    if (team.deletedAt) throw new ConflictException('This executor has already been deleted.');
 
     // Check for active runs using active statuses: queued, running, waiting_for_input, paused
     const ACTIVE_RUN_STATUSES = ['queued', 'running', 'waiting_for_input', 'paused'] as const;
@@ -263,7 +263,7 @@ export class AgentTeamConfigurationService {
         ))
         .limit(5) : [];
       throw new ConflictException(
-        `Cannot delete this Coding Executors team: it has ${activeRunCount.count} active run(s). ` +
+        `Cannot delete this executor: it has ${activeRunCount.count} active run(s). ` +
         `Active run ids: ${activeIds.map((r) => r.id).join(', ')}. ` +
         `Please cancel or wait for these runs to complete before deleting.`,
       );
@@ -278,7 +278,7 @@ export class AgentTeamConfigurationService {
       ))
       .limit(1);
     if (!nonDeletedCount || nonDeletedCount.count <= 1) {
-      throw new ConflictException('Cannot delete the last Coding Executors team. At least one team must remain available.');
+      throw new ConflictException('Cannot delete the last executor. At least one team must remain available.');
     }
 
     // Perform soft delete in a transaction

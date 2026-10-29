@@ -377,7 +377,7 @@ export function parseAgentTeamRunEvent(value: string): AgentTeamRunEvent {
     || typeof event.payload !== 'object'
     || typeof event.createdAt !== 'string'
   ) {
-    throw new Error('The Coding Executors run event stream returned an invalid event.');
+    throw new Error('The executor Run event stream returned an invalid event.');
   }
   return event as AgentTeamRunEvent;
 }

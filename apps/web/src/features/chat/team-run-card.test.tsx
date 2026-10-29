@@ -56,7 +56,7 @@ function mockRun(run: AgentTeamRunView) {
   vi.mocked(useAgentTeamRunQuery).mockReturnValue({ data: run, isPending: false, isError: false } as ReturnType<typeof useAgentTeamRunQuery>);
 }
 
-describe('Chat Team Run card', () => {
+describe('Chat executor Run card', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(NOW);

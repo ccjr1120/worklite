@@ -33,7 +33,7 @@ export class AgentTeamDocumentsService {
       document = await this.getDocumentRow(documentId, workspace.id);
     }
     if (document.deliveryStatus !== 'delivered') {
-      throw new NotFoundException('The Team document file is not available.');
+      throw new NotFoundException('The executor document file is not available.');
     }
     return {
       fileName: agentTeamDocumentFileName(document.key, document.revision),
@@ -51,7 +51,7 @@ export class AgentTeamDocumentsService {
         eq(executorRuns.workspaceId, workspaceId),
       ))
       .limit(1);
-    if (!row) throw new NotFoundException('Coding Executors team document not found.');
+    if (!row) throw new NotFoundException('Executor document not found.');
     return row.document;
   }
 

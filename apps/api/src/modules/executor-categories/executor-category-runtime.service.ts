@@ -103,6 +103,7 @@ import {
   DEFAULT_MAX_CONCURRENT_RUNS,
   DEFAULT_COMPANY_PROJECT_GIT_POLICY,
   DEFAULT_DIRECT_GIT_POLICY,
+  DIRECT_IMPLEMENTER_DISPLAY_NAME,
   DIRECT_PLANNER_INSTRUCTIONS,
   agentTeamContractRole,
   initialAgentTeamModeForRole,
@@ -258,8 +259,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const [team] = await this.db.select().from(executorCategories)
       .where(and(eq(executorCategories.id, BUILT_IN_EXECUTOR_CATEGORY_ID), eq(executorCategories.workspaceId, workspaceId)))
       .limit(1);
-    if (!team) throw new NotFoundException('The built-in Coding Executors team was not found.');
-    if (team.deletedAt) throw new BadRequestException('This Coding Executors team has been deleted and is no longer available for dispatch.');
+    if (!team) throw new NotFoundException('The built-in executor was not found.');
+    if (team.deletedAt) throw new BadRequestException('This executor has been deleted and is no longer available for dispatch.');
 
     const snapshot = await this.createVersionSnapshot(team.roles, team.workingPractice, 5);
     const now = new Date();
@@ -309,7 +310,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const intent = request?.intent?.trim();
     if (!intent) throw new BadRequestException('A group role task needs a message.');
     if (!request.executorCategoryId || !request.groupId || !request.groupMessageId || !request.targetRole || request.groupContext.groupId !== request.groupId) {
-      throw new BadRequestException('The Coding Executors team group context is incomplete.');
+      throw new BadRequestException('The executor group context is incomplete.');
     }
     const repositories = request.groupContext.repositories.filter((repository) => request.repositoryIds.includes(repository.id));
     // An empty selection is a valid empty-scope Run: the addressed role identifies the
@@ -326,13 +327,13 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const [team] = await this.db.select().from(executorCategories)
       .where(and(eq(executorCategories.id, request.executorCategoryId), eq(executorCategories.workspaceId, workspaceId)))
       .limit(1);
-    if (!team) throw new NotFoundException('Coding Executors team not found.');
-    if (team.deletedAt) throw new BadRequestException('This Coding Executors team has been deleted and is no longer available for dispatch.');
+    if (!team) throw new NotFoundException('Executor not found.');
+    if (team.deletedAt) throw new BadRequestException('This executor has been deleted and is no longer available for dispatch.');
     if (request.targetRole === 'executor-manager') {
       throw new BadRequestException('Executor Manager is not an active work role in new Runs.');
     }
     if (!team.roles.some((role) => role.role === request.targetRole)) {
-      throw new BadRequestException('Select an active role in this Coding Executors team.');
+      throw new BadRequestException('Select an active role in this executor.');
     }
     const runId = acceptance.runId;
     const versionId = `atver_${randomUUID()}`;
@@ -350,7 +351,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       : initialAgentTeamModeForRole(request.targetRole);
     const modeRationale = request.targetRole === EXECUTOR_CATEGORY_DISPATCHER_ROLE
       ? null
-      : (isDefaultEntry && !hasDispatcher ? `Team has no Dispatcher; the Run entered at its Planner with ${mode} (default entry).` : directRoleModeRationale(request.targetRole));
+      : (isDefaultEntry && !hasDispatcher ? `Executor has no Dispatcher; the Run entered at its Planner with ${mode} (default entry).` : directRoleModeRationale(request.targetRole));
     await this.transaction((transaction) => {
       const [latest] = transaction.select({ version: agentTeamVersions.version })
         .from(agentTeamVersions).where(eq(agentTeamVersions.executorCategoryId, team.id))
@@ -410,7 +411,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   }
 
   // Explicit directory binding: directories named by a user answer or identified by a role
-  // register as group repositories under the canonical Team identity and extend the Run's
+  // register as group repositories under the canonical executor identity and extend the Run's
   // captured scope in one transaction, with the source recorded as group evidence.
   async bindGroupDirectories(
     runId: string,
@@ -419,7 +420,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   ): Promise<NonNullable<AgentTeamRun['groupContext']>['repositories']> {
     const run = await this.getRun(runId);
     if (!run.groupId || !run.groupContext) {
-      throw new BadRequestException('Only a Coding Executors team group Run can bind project directories.');
+      throw new BadRequestException('Only an executor group Run can bind project directories.');
     }
     const prepared = await this.normalizeBindingDirectories(directories);
     if (!prepared.length) return [];
@@ -432,7 +433,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     await this.transaction((transaction) => {
       const [current] = transaction.select().from(executorRuns).where(eq(executorRuns.id, runId)).limit(1).all();
       if (!current?.groupId || !current.groupContext) {
-        throw new BadRequestException('Only a Coding Executors team group Run can bind project directories.');
+        throw new BadRequestException('Only an executor group Run can bind project directories.');
       }
       const now = new Date();
       const nextRepositoryIds = [...current.repositoryIds];
@@ -529,14 +530,14 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     allowed: readonly { documentId: string; revision: number; title: string }[],
   ): Promise<{ title: string; content: string }> {
     if (!allowed.some((reference) => reference.documentId === documentId && reference.revision === revision)) {
-      throw new BadRequestException('The requested Team document version was not handed to this task.');
+      throw new BadRequestException('The requested executor document version was not handed to this task.');
     }
     const [document] = await this.db.select().from(executorDocuments)
       .where(and(eq(executorDocuments.id, documentId), eq(executorDocuments.revision, revision))).limit(1);
-    if (!document) throw new NotFoundException('The Team document version was not found.');
+    if (!document) throw new NotFoundException('The executor document version was not found.');
     const [sourceRun] = await this.db.select({ groupId: executorRuns.groupId }).from(executorRuns)
       .where(eq(executorRuns.id, document.runId)).limit(1);
-    if (sourceRun?.groupId !== groupId) throw new BadRequestException('The Team document belongs to another task group.');
+    if (sourceRun?.groupId !== groupId) throw new BadRequestException('The executor document belongs to another task group.');
     return { title: document.title, content: document.content };
   }
 
@@ -593,7 +594,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const [version] = await this.db.select().from(agentTeamVersions)
       .where(eq(agentTeamVersions.id, run.executorCategoryVersionId))
       .limit(1);
-    if (!version) throw new NotFoundException('The Coding Executors team version was not found.');
+    if (!version) throw new NotFoundException('The executor version was not found.');
     const [taskRows, documentRows, pendingRows, operationRows, activityRows] = await Promise.all([
       this.db.select().from(executorTaskAttempts)
         .where(eq(executorTaskAttempts.runId, runId))
@@ -650,7 +651,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       // operator can resolve manually. Surfaced until the contracts lane adds the fields.
       worktreeBasePath: worktree.worktreeBasePath ?? null,
       runBranch: worktree.runBranch ?? null,
-      // Historical evidence: only Runs from before direct Team command execution carry
+      // Historical evidence: only Runs from before direct executor command execution carry
       // granted command strings. New Runs always report an empty list.
       authorizedCommands: run.authorizedCommands,
       scopeRevision: run.scopeRevision,
@@ -703,7 +704,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   async answer(runId: string, request: AnswerAgentTeamRunRequest): Promise<AgentTeamRunView> {
     const run = await this.getRun(runId);
-    if (run.status !== 'waiting_for_input') throw new BadRequestException('The Coding Executors team run is not waiting for input.');
+    if (run.status !== 'waiting_for_input') throw new BadRequestException('The executor run is not waiting for input.');
     if (request?.pendingInputId !== request?.pendingInputId?.trim() || !request.pendingInputId) {
       throw new BadRequestException('A pending input id is required.');
     }
@@ -791,7 +792,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   async recover(runId: string, request: RecoverAgentTeamOperationRequest): Promise<AgentTeamRunView> {
     const operationKey = request?.operationKey?.trim();
     if (!operationKey || request.operationKey !== operationKey) {
-      throw new BadRequestException('A stable Coding Executors team operation key is required.');
+      throw new BadRequestException('A stable executor operation key is required.');
     }
     const decision = request?.decision;
     if (decision !== 'adopt_command' && decision !== 'mark_failed' && decision !== 'replay') {
@@ -800,7 +801,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
     const run = await this.getRun(runId);
     if (run.status !== 'waiting_for_input') {
-      throw new BadRequestException('The Coding Executors team run is not waiting for operation recovery.');
+      throw new BadRequestException('The executor run is not waiting for operation recovery.');
     }
     const [operation] = await this.db.select().from(executorOperations)
       .where(and(
@@ -809,7 +810,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       ))
       .limit(1);
     if (!operation || operation.status !== 'uncertain' || operation.recoveryDecision) {
-      throw new BadRequestException('The Coding Executors team operation is not awaiting recovery.');
+      throw new BadRequestException('The executor operation is not awaiting recovery.');
     }
     const [pendingInput] = await this.db.select().from(executorPendingInputs)
       .where(and(
@@ -868,7 +869,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         eq(executorRuns.id, runId),
         eq(executorRuns.status, 'waiting_for_input'),
       )).returning().all();
-      if (updatedRun.length === 0) throw new BadRequestException('The Coding Executors team run is no longer waiting for input.');
+      if (updatedRun.length === 0) throw new BadRequestException('The executor run is no longer waiting for input.');
 
       const updatedOperation = transaction.update(executorOperations).set({
         ...(decision === 'adopt_command'
@@ -885,7 +886,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         eq(executorOperations.status, 'uncertain'),
         isNull(executorOperations.recoveryDecision),
       )).returning().all();
-      if (updatedOperation.length === 0) throw new BadRequestException('The Coding Executors team operation is no longer awaiting recovery.');
+      if (updatedOperation.length === 0) throw new BadRequestException('The executor operation is no longer awaiting recovery.');
 
       const answeredInput = transaction.update(executorPendingInputs).set({
         status: 'answered',
@@ -952,14 +953,14 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     } else if (run.status === 'queued' || run.status === 'running') {
       await this.requestPause(runId);
     } else {
-      throw new BadRequestException('A completed Coding Executors team run cannot be paused.');
+      throw new BadRequestException('A completed executor run cannot be paused.');
     }
     return this.getRunView(runId);
   }
 
   async resume(runId: string): Promise<AgentTeamRunView> {
     const run = await this.getRun(runId);
-    if (run.status !== 'paused') throw new BadRequestException('Only a paused Coding Executors team run can be resumed.');
+    if (run.status !== 'paused') throw new BadRequestException('Only a paused executor run can be resumed.');
     if (await this.hasPendingOperationRecovery(runId)) {
       await this.setRunStatus(runId, 'waiting_for_input');
       return this.getRunView(runId);
@@ -998,7 +999,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
     this.abortControllers.get(runId)?.abort();
     if (!this.executions.has(runId) && !(await this.hasPendingOperationRecovery(runId))) {
-      await this.failActiveAttempts(runId, 'cancelled', 'The Coding Executors team run was cancelled.');
+      await this.failActiveAttempts(runId, 'cancelled', 'The executor run was cancelled.');
       await this.finishCancelledRun(runId);
     }
     return this.getRunView(runId);
@@ -1006,7 +1007,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   async retry(runId: string, taskKey: string): Promise<AgentTeamRunView> {
     const run = await this.getRun(runId);
-    if (run.status !== 'failed') throw new BadRequestException('Only a failed Coding Executors team run can be retried.');
+    if (run.status !== 'failed') throw new BadRequestException('Only a failed executor run can be retried.');
     const [failed] = await this.db.select().from(executorTaskAttempts)
       .where(and(
         eq(executorTaskAttempts.runId, runId),
@@ -1016,7 +1017,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       ))
       .orderBy(desc(executorTaskAttempts.attemptIndex))
       .limit(1);
-    if (!failed) throw new BadRequestException('The failed active Coding Executors team task was not found.');
+    if (!failed) throw new BadRequestException('The failed active executor task was not found.');
 
     // A failed Developer lane retries its whole fan-out: successful sibling lanes keep their
     // results, and the dispatcher re-dispatches every lane that has none.
@@ -1095,33 +1096,35 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       .limit(1);
     if (directTeam) {
       // Keep the live Planner instructions in step with the source constant, the same
-      // way Company Project's built-in role text is re-synced above. Without this, an
+      // way the company project executor's built-in role text is re-synced above. Without this, an
       // instruction fix here never reaches a team row created by an earlier release.
-      const roles: StoredAgentTeamRoleConfiguration[] = directTeam.roles.map((role) => (
-        role.role === 'planner' && role.instructions !== DIRECT_PLANNER_INSTRUCTIONS
-          ? { ...role, instructions: DIRECT_PLANNER_INSTRUCTIONS }
-          : role
-      ));
+      // The Implementer role keeps its stable role id `executor`; only the built-in
+      // display name moved from "Executor" to "Implementer".
+      const roles: StoredAgentTeamRoleConfiguration[] = directTeam.roles.map((role) => {
+        if (role.role === 'planner' && role.instructions !== DIRECT_PLANNER_INSTRUCTIONS) return { ...role, instructions: DIRECT_PLANNER_INSTRUCTIONS };
+        if (role.role === 'executor' && role.displayName === 'Executor') return { ...role, displayName: DIRECT_IMPLEMENTER_DISPLAY_NAME };
+        return role;
+      });
       if (JSON.stringify(roles) !== JSON.stringify(directTeam.roles)) {
         await this.db.update(executorCategories).set({ roles, updatedAt: new Date() })
           .where(eq(executorCategories.id, directTeam.id)).run();
       }
     } else {
-      // Direct has no Dispatcher and no Worktree Manager: it is a fixed
-      // Planner -> Executor pair, so it never passes through ensureBuiltInTeamRoles.
+      // The general project executor has no Dispatcher and no Worktree Manager: it is a fixed
+      // Planner -> Implementer pair, so it never passes through ensureBuiltInTeamRoles.
       const roles: StoredAgentTeamRoleConfiguration[] = [
         {
           ...defaultRoleConfiguration('planner'),
-          // Direct's Planner is a single lightweight step, not the BMAD/TEA process;
+          // Its Planner is a single lightweight step, not the BMAD/TEA process;
           // it carries no BMAD entry-point skill content.
           entryPoints: [],
           instructions: DIRECT_PLANNER_INSTRUCTIONS,
         },
         {
           ...defaultRoleConfiguration('executor'),
-          displayName: 'Executor',
+          displayName: DIRECT_IMPLEMENTER_DISPLAY_NAME,
           entryPoints: [],
-          // Direct's Executor is a project executor (see produceOutput), not a chat-completed role.
+          // Its Implementer runs on an execution engine (see produceOutput), not as a chat-completed role.
           executor: 'claude',
         },
       ];
@@ -1129,11 +1132,11 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         id: DIRECT_EXECUTOR_CATEGORY_ID,
         workspaceId: 'workspace_personal',
         name: 'Direct',
-        description: 'Built-in two-step team: a Planner plans, then a project Executor implements.',
+        description: 'Built-in two-step executor: a Planner plans, then the Implementer implements.',
         processId: EXECUTOR_CATEGORY_PROCESS_ID,
         processVersion: EXECUTOR_CATEGORY_PROCESS_VERSION,
         roles,
-        workingPractice: 'Keep this Team to a single Planner -> Executor handoff per Run: plan first, then implement without a Dispatcher or mode selection.',
+        workingPractice: 'Keep this executor to a single Planner -> Implementer handoff per Run: plan first, then implement without a Dispatcher or mode selection.',
         projectGitPolicy: DEFAULT_DIRECT_GIT_POLICY,
       }).onConflictDoNothing().run();
     }
@@ -1176,8 +1179,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         const processReferences = processReferencePaths(role.role, manifest);
         return {
           ...role,
-          // An empty developer model keeps the executor's own default instead of the Team default model.
-          // role.publicModelId may be one model id or an ordered fallback list; the Team default
+          // An empty developer model keeps the executor's own default instead of the executor default model.
+          // role.publicModelId may be one model id or an ordered fallback list; the executor default
           // (used only for a non-executor, non-Developer role) is always a single declared model.
           publicModelId: normalizePublicModelList(role.publicModelId).length > 0
             ? role.publicModelId
@@ -1196,7 +1199,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       .orderBy(asc(executorRuns.createdAt));
     for (const run of runs) {
       if (run.desiredControlState === 'cancel_requested' && !(await this.findInterruptedOperation(run.id))) {
-        await this.failActiveAttempts(run.id, 'cancelled', 'The Coding Executors team run was cancelled.');
+        await this.failActiveAttempts(run.id, 'cancelled', 'The executor run was cancelled.');
         await this.finishCancelledRun(run.id);
         continue;
       }
@@ -1271,7 +1274,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         await this.exposeOperationRecovery(
           run.id,
           interruptedOperation.key.slice(run.id.length + 1),
-          interruptedOperation.failureReason ?? 'The Coding Executors team process was interrupted before the operation settled.',
+          interruptedOperation.failureReason ?? 'The executor process was interrupted before the operation settled.',
         );
       }
       await this.setRunStatus(run.id, 'paused', undefined, 'none');
@@ -1281,7 +1284,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       await this.exposeOperationRecovery(
         run.id,
         interruptedOperation.key.slice(run.id.length + 1),
-        interruptedOperation.failureReason ?? 'The Coding Executors team process was interrupted before the operation settled.',
+        interruptedOperation.failureReason ?? 'The executor process was interrupted before the operation settled.',
       );
       await this.setRunStatus(run.id, 'waiting_for_input');
       return;
@@ -1300,7 +1303,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       const activeAttempts = await this.db.select({ id: executorTaskAttempts.id }).from(executorTaskAttempts)
         .where(and(eq(executorTaskAttempts.runId, run.id), eq(executorTaskAttempts.active, true), eq(executorTaskAttempts.status, 'running')));
       if (activeAttempts.length > 0) {
-        await this.failStaleAttempts(run.id, 'The Coding Executors team process was interrupted while a role task was active. Inspect repository state before retrying; the task was not replayed.');
+        await this.failStaleAttempts(run.id, 'The executor process was interrupted while a role task was active. Inspect repository state before retrying; the task was not replayed.');
         await this.transaction((transaction) => {
           const [current] = transaction.select({ groupId: executorRuns.groupId, workspaceId: executorRuns.workspaceId })
             .from(executorRuns).where(eq(executorRuns.id, run.id)).limit(1).all();
@@ -1337,7 +1340,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         return;
       }
       if (!validGroupState) {
-        await this.failStaleAttempts(run.id, 'The Coding Executors team checkpoint was missing or empty.');
+        await this.failStaleAttempts(run.id, 'The executor checkpoint was missing or empty.');
         await this.setRunStatus(run.id, 'failed');
         await this.maybeStartQueuedRuns(run.executorCategoryId);
         return;
@@ -1383,7 +1386,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     }
     if (!validState || snapshot.next.length === 0) {
       if (!validState) {
-        await this.failStaleAttempts(run.id, 'The Coding Executors team checkpoint was missing or empty.');
+        await this.failStaleAttempts(run.id, 'The executor checkpoint was missing or empty.');
         await this.setRunStatus(run.id, 'failed');
         await this.maybeStartQueuedRuns(run.executorCategoryId);
         return;
@@ -1392,7 +1395,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    await this.failStaleAttempts(run.id, 'The Coding Executors team process was interrupted before the task settled.');
+    await this.failStaleAttempts(run.id, 'The executor process was interrupted before the task settled.');
     this.scheduleExecution(run.id, null);
   }
 
@@ -1491,7 +1494,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (sawInterrupt) {
       const desiredControlState = await this.getDesiredControlState(runId);
       if (desiredControlState === 'cancel_requested') {
-        await this.failActiveAttempts(runId, 'cancelled', 'The Coding Executors team run was cancelled.');
+        await this.failActiveAttempts(runId, 'cancelled', 'The executor run was cancelled.');
         await this.finishCancelledRun(runId);
         return;
       }
@@ -1516,7 +1519,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const snapshot = version.snapshot;
     const orchestrationVersion: number = snapshot.orchestrationVersion ?? 1;
     if (isGroupOrchestrationVersion(orchestrationVersion)) {
-      if (!run.groupContext) throw new Error('This Coding Executors team group Run has no captured group context. Start a new Run.');
+      if (!run.groupContext) throw new Error('This executor group Run has no captured group context. Start a new Run.');
       const initial: AgentTeamGroupGraphInitial = {
         runId: run.id,
         intent: run.intent,
@@ -1566,7 +1569,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const run = await this.getRun(request.runId);
     const { role: taskRole, taskKey } = request.taskDefinition;
     const role = version.snapshot.roles.find((item) => item.role === taskRole);
-    if (!role) throw new Error(`Coding Executors team role ${taskRole} was not captured by this version.`);
+    if (!role) throw new Error(`Executor role ${taskRole} was not captured by this version.`);
     if (taskRole === 'executor-manager' && (!request.groupContext || version.snapshot.orchestrationVersion !== 7)) {
       throw new Error('Executor Manager is available only in captured historical v7 group Runs.');
     }
@@ -1616,13 +1619,13 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         const execution = roleExecution ?? version.snapshot.developerExecutions?.[developerId]
           ?? (orchestrationVersion === 3 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7 || orchestrationVersion === 8 || orchestrationVersion === 9 || orchestrationVersion === 10 || orchestrationVersion === 11 ? version.snapshot.developerExecutions?.[RESERVED_DEVELOPER_ID] : undefined)
           ?? (developerId === RESERVED_DEVELOPER_ID ? version.snapshot.developerExecution : undefined);
-        if (!execution || !('executor' in execution)) throw new Error('This Team version has no captured developer executor. Start a new Team Run.');
+        if (!execution || !('executor' in execution)) throw new Error('This executor version has no captured developer executor. Start a new executor Run.');
         const sharedLaunch = orchestrationVersion === 3 || orchestrationVersion === 4 || orchestrationVersion === 5 || orchestrationVersion === 6 || orchestrationVersion === 7 || orchestrationVersion === 8 || orchestrationVersion === 9 || orchestrationVersion === 10 || orchestrationVersion === 11;
         const instance = !sharedLaunch && developerId !== RESERVED_DEVELOPER_ID
           ? role.developerInstances?.find((candidate) => candidate.developerId === developerId)
           : undefined;
         if (!sharedLaunch && developerId !== RESERVED_DEVELOPER_ID && !instance) {
-          throw new Error(`Developer instance ${developerId} was not captured by this Team version.`);
+          throw new Error(`Developer instance ${developerId} was not captured by this executor version.`);
         }
         const developerRole = instance ?? role;
         // A project executor launches one native process; it has no Gateway-level fallback loop, so a
@@ -1651,7 +1654,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
             content: (await this.readGroupDocumentForTask(run.groupId!, reference.documentId, reference.revision, request.fileReferences ?? [])).content,
           })),
         ]);
-        // v11 project executors reach executor category memory through a per-task MCP binding. The
+        // v11 project executors reach executor memory through a per-task MCP binding. The
         // token is revoked as soon as the executor returns, fails or is cancelled.
         const memoryToken = orchestrationVersion >= ROLE_MEMORY_TOOLS_VERSION
           ? this.memoryTokens.register(this.memoryActorContext(workspaceId, run, request, attempt.id, taskRole))
@@ -1677,7 +1680,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
             references,
             signal,
             // The developer role runs in a project executor; it is kept apart from the
-            // Team's model-loop traffic by its own surface rather than merged into it.
+            // executor's model-loop traffic by its own surface rather than merged into it.
             correlation: { surface: 'executor_category_project_task', executorCategoryId: run.executorCategoryId, teamRunId: request.runId, teamRole: taskRole, teamTaskAttemptId: attempt.id, executor: execution.executor },
             onEvent: (activity) => {
               commandIds.add(activity.commandExecutionId);
@@ -1741,7 +1744,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           }),
         builtinToolNames: taskRole === 'executor-manager' ? [] : isGroupOrchestrationVersion(orchestrationVersion) ? [...role.toolNames, 'read_executor_document'] : role.toolNames,
         // v11 role memory tools are managed tools: they bypass the built-in role
-        // allowlist and are bound to this Run's Team and repository scope server-side.
+        // allowlist and are bound to this Run's executor and repository scope server-side.
         ...(roleMemoryManagedToolsEnabled(orchestrationVersion, taskRole) ? {
           managedTools: this.memoryTools.toolDefinitions(),
           executeManagedTool: (call) => this.memoryTools.execute({
@@ -2111,7 +2114,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   private async readCapturedProcessFile(version: AgentTeamVersion, path: string): Promise<string> {
     const file = version.snapshot.processFiles.find((candidate) => candidate.path === path);
-    if (!file) throw new Error(`Process reference ${path} was not captured by this Team version.`);
+    if (!file) throw new Error(`Process reference ${path} was not captured by this executor version.`);
     return file.content;
   }
 
@@ -2127,13 +2130,13 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       .limit(1);
     if (existing?.active && existing.status === 'completed') {
       if (existing.inputFingerprint !== inputFingerprint) {
-        throw new Error(`Coding Executors team task ${taskKey} produced a result for different input.`);
+        throw new Error(`Executor task ${taskKey} produced a result for different input.`);
       }
       return { id: existing.id, status: 'completed', result: existing.result };
     }
 
     if (existing?.active && existing.status === 'waiting_for_recovery') {
-      throw new Error(`Coding Executors team task ${taskKey} is waiting for operation recovery.`);
+      throw new Error(`Executor task ${taskKey} is waiting for operation recovery.`);
     }
 
     if (existing?.active && existing.status === 'waiting_for_input' && !request.answer) {
@@ -2156,7 +2159,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       if (resumed) return { id: resumed.id, status: resumed.status, result: resumed.result };
     }
     if (existing?.active && existing.status === 'running') {
-      throw new Error(`Coding Executors team task ${taskKey} is already running.`);
+      throw new Error(`Executor task ${taskKey} is already running.`);
     }
 
     const attemptId = `atask_${randomUUID()}`;
@@ -2207,7 +2210,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         .where(eq(executorRuns.id, request.runId))
         .limit(1).all();
       if (desired?.desiredControlState === 'cancel_requested') {
-        throw new DOMException('The Coding Executors team run was cancelled.', 'AbortError');
+        throw new DOMException('The executor run was cancelled.', 'AbortError');
       }
       const updated = transaction.update(executorTaskAttempts).set({
         status: 'waiting_for_input',
@@ -2217,7 +2220,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         eq(executorTaskAttempts.id, attemptId),
         eq(executorTaskAttempts.status, 'running'),
       )).returning().all();
-      if (updated.length === 0) throw new Error('The Coding Executors team task attempt is no longer running.');
+      if (updated.length === 0) throw new Error('The executor task attempt is no longer running.');
       transaction.insert(executorPendingInputs).values({
         id: pendingInputId,
         workspaceId,
@@ -2278,7 +2281,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         .where(eq(executorRuns.id, request.runId))
         .limit(1).all();
       if (desired?.desiredControlState === 'cancel_requested') {
-        throw new DOMException('The Coding Executors team run was cancelled.', 'AbortError');
+        throw new DOMException('The executor run was cancelled.', 'AbortError');
       }
       const updated = transaction.update(executorTaskAttempts).set({
         status: 'completed',
@@ -2289,7 +2292,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         eq(executorTaskAttempts.id, attemptId),
         eq(executorTaskAttempts.status, 'running'),
       )).returning().all();
-      if (updated.length === 0) throw new Error('The Coding Executors team task attempt is no longer running.');
+      if (updated.length === 0) throw new Error('The executor task attempt is no longer running.');
       if (request.taskDefinition.role === EXECUTOR_CATEGORY_DISPATCHER_ROLE && result.dispatchDecision) {
         transaction.update(executorRuns).set({
           mode: result.dispatchDecision.mode,
@@ -2443,7 +2446,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         eq(executorRuns.id, runId),
         eq(executorRuns.status, 'running'),
       )).returning().all();
-      if (updatedRun.length === 0) throw new Error('The Coding Executors team run is no longer running.');
+      if (updatedRun.length === 0) throw new Error('The executor run is no longer running.');
 
       const updatedOperation = transaction.update(executorOperations).set({
         status: 'uncertain',
@@ -2453,7 +2456,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         eq(executorOperations.key, operation.key),
         isNull(executorOperations.recoveryDecision),
       )).returning().all();
-      if (updatedOperation.length === 0) throw new Error('The Coding Executors team operation was already recovered.');
+      if (updatedOperation.length === 0) throw new Error('The executor operation was already recovered.');
 
       const updatedAttempt = transaction.update(executorTaskAttempts).set({
         status: 'waiting_for_recovery',
@@ -2462,7 +2465,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         eq(executorTaskAttempts.id, operation.taskAttemptId),
         inArray(executorTaskAttempts.status, ['running', 'waiting_for_recovery']),
       )).returning().all();
-      if (updatedAttempt.length === 0) throw new Error('The Coding Executors team task attempt is no longer active.');
+      if (updatedAttempt.length === 0) throw new Error('The executor task attempt is no longer active.');
 
       if (!existingInput) {
         transaction.insert(executorPendingInputs).values({
@@ -2508,12 +2511,12 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       if (await this.exposeOperationRecovery(run.id, error.operationKey, error.reason)) return;
     }
     if (run.desiredControlState === 'cancel_requested') {
-      await this.failActiveAttempts(runId, 'cancelled', 'The Coding Executors team run was cancelled.');
+      await this.failActiveAttempts(runId, 'cancelled', 'The executor run was cancelled.');
       await this.finishCancelledRun(runId);
       return;
     }
     const reason = this.shuttingDown && isAbortError(error)
-      ? 'The Coding Executors team process was interrupted by API shutdown.'
+      ? 'The executor process was interrupted by API shutdown.'
       : formatError(error);
     await this.failActiveAttempts(runId, 'failed', reason);
     await this.setRunStatus(runId, 'failed');
@@ -2632,7 +2635,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     if (await this.getDesiredControlState(runId) !== 'cancel_requested') return;
-    await this.failActiveAttempts(runId, 'cancelled', 'The Coding Executors team run was cancelled.');
+    await this.failActiveAttempts(runId, 'cancelled', 'The executor run was cancelled.');
     await this.finishCancelledRun(runId);
   }
 
@@ -2649,7 +2652,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const outcome: AgentTeamRunOutcome = {
       summary: state.handoffLimitReached
         ? 'Stopped after the automatic handoff limit; the group can continue with a new message.'
-        : 'The addressed Coding Executors team role work completed.',
+        : 'The addressed executor role work completed.',
       unresolvedIssues,
       criterionAssessments: [],
     };
@@ -2683,7 +2686,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     });
     if (committed) await this.maybeStartQueuedRuns((await this.getRun(runId)).executorCategoryId);
     else if (await this.getDesiredControlState(runId) === 'cancel_requested') {
-      await this.failActiveAttempts(runId, 'cancelled', 'The Coding Executors team run was cancelled.');
+      await this.failActiveAttempts(runId, 'cancelled', 'The executor run was cancelled.');
       await this.finishCancelledRun(runId);
     }
   }
@@ -2790,7 +2793,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const [version] = await this.db.select().from(agentTeamVersions)
       .where(eq(agentTeamVersions.id, run.executorCategoryVersionId))
       .limit(1);
-    if (!version) throw new NotFoundException('The Coding Executors team version was not found.');
+    if (!version) throw new NotFoundException('The executor version was not found.');
     return version;
   }
 
@@ -2800,7 +2803,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         ? and(eq(executorRuns.id, runId), eq(executorRuns.workspaceId, workspaceId))
         : eq(executorRuns.id, runId))
       .limit(1);
-    if (!run) throw new NotFoundException('Coding Executors team run not found.');
+    if (!run) throw new NotFoundException('Executor run not found.');
     return run;
   }
 
@@ -3118,14 +3121,14 @@ function versionDeveloperIds(snapshot: StoredAgentTeamVersionSnapshot): string[]
   ];
 }
 
-// Default persisted configuration for one predefined Team role.
+// Default persisted configuration for one predefined executor role.
 function defaultRoleConfiguration(role: AgentTeamRuntimeRole): StoredAgentTeamRoleConfiguration {
   const manifest = getBmadTeaProcessManifest();
   return {
     role: agentTeamContractRole(role) as StoredAgentTeamRoleConfiguration['role'],
     ...(role === 'executor-manager' ? { displayName: 'Executor Manager' } : role === EXECUTOR_CATEGORY_DISPATCHER_ROLE ? { displayName: 'Dispatcher' } : {}),
     publicModelId: '',
-    instructions: EXECUTOR_CATEGORY_ROLE_INSTRUCTIONS[role] ?? `You are the ${role} role in the Coding Executors team. Complete the addressed task and report the result clearly.`,
+    instructions: EXECUTOR_CATEGORY_ROLE_INSTRUCTIONS[role] ?? `You are the ${role} role in the executor. Complete the addressed task and report the result clearly.`,
     entryPoints: manifest.entryPoints[role] ?? [],
     skills: [],
     mcpServers: [],
@@ -3133,7 +3136,7 @@ function defaultRoleConfiguration(role: AgentTeamRuntimeRole): StoredAgentTeamRo
   };
 }
 
-// Existing built-in Teams may lack some default roles. Ensure Planner and Worktree Manager
+// Existing built-in executors may lack some default roles. Ensure Planner and Worktree Manager
 // are present, but do not add Dispatcher back if it has been deleted.
 function ensureBuiltInTeamRoles(roles: readonly StoredAgentTeamRoleConfiguration[]): StoredAgentTeamRoleConfiguration[] {
   const active = roles.filter((role) => role.role !== 'executor-manager');
@@ -3186,16 +3189,16 @@ function rolePromptAddition(
       ? snapshot.projectGitPolicy?.trim()
       : '';
     return [
-      'This is a message addressed to your one configured Coding Executors team role. Complete the stated goal or ask one specific question when blocked.',
-      `To pass work onward, include a handoff object with a role id captured by this Team version and a specific goal. Omit handoff when your work is complete or you are waiting for the user.`,
+      'This is a message addressed to your one configured executor role. Complete the stated goal or ask one specific question when blocked.',
+      `To pass work onward, include a handoff object with a role id captured by this executor version and a specific goal. Omit handoff when your work is complete or you are waiting for the user.`,
       role === 'developer'
         ? 'When implementation should split safely, return up to four developmentAssignments with non-overlapping ownedPaths and optional repositoryIds, and hand off to developer. WorkLite runs those assignments in parallel using this same captured Developer configuration.'
         : 'Use developmentAssignments only when assigning implementation work to the single configured Developer role; each assignment must state its repository scope and non-overlapping paths.',
       request?.projectDirectory?.trim()
         ? ''
-        : 'This task has no bound project directory yet. Identify the absolute project directory from the message, the Team known repositories listed in the task context, Team memories, or working practice, and return identified directories as "repositoryDirectories":["/absolute/path"] in the completed response; WorkLite registers them as group repositories and binds them to this Run. If you cannot determine the directory, return waiting_for_input with one specific question asking the user for the absolute project directory.',
+        : 'This task has no bound project directory yet. Identify the absolute project directory from the message, the executor\'s known repositories listed in the task context, executor memories, or working practice, and return identified directories as "repositoryDirectories":["/absolute/path"] in the completed response; WorkLite registers them as group repositories and binds them to this Run. If you cannot determine the directory, return waiting_for_input with one specific question asking the user for the absolute project directory.',
       'Return a concise user-facing message in the message field. Put complete written deliverables in documents and refer to their file versions; the next role receives file references and can read them on demand with read_executor_document (or through the materialized reference files as Developer).',
-      ...(projectGitPolicy ? [`Team project Git policy:\n${projectGitPolicy}`] : []),
+      ...(projectGitPolicy ? [`Executor project Git policy:\n${projectGitPolicy}`] : []),
       ...(orchestrationVersion >= 10 && role === EXECUTOR_CATEGORY_DISPATCHER_ROLE ? [
         `You are the initial Dispatcher for this Run. Decide its execution mode from the original request and the actual project context; the user does not select a mode. Captured roles: ${snapshot.roles.map((item) => item.role).join(', ')}.`,
         'Allowed modes: plan_only (investigate and plan without changing project files), validate_existing (assess or test existing behavior without implementing changes), implement_and_validate (change project files and verify the result).',
@@ -3208,7 +3211,7 @@ function rolePromptAddition(
   if (orchestrationVersion === 3 || orchestrationVersion === 4 || orchestrationVersion === 5) {
     if (orchestrationVersion === 5 && role === 'planner') {
       return [
-        `This Team Run may use up to ${DEVELOPER_LANE_IDS.length} Developers working in parallel; decide how many the task actually needs.`,
+        `This executor Run may use up to ${DEVELOPER_LANE_IDS.length} Developers working in parallel; decide how many the task actually needs.`,
         'The supplied projectDirectory is a workspace root. It may contain several repositories, project directories, or none at the root; identify the relevant project roots before planning and do not assume the workspace root is one Git repository.',
         'For every development assignment, name the relevant project directory in its title or scopeSummary and use ownedPaths relative to the supplied workspace root, including the project path prefix. Keep ownedPaths non-overlapping across all assignments.',
         'The Worktree Manager will provide an advisory per-project Git strategy. Do not require a branch or worktree for every project.',
@@ -3217,7 +3220,7 @@ function rolePromptAddition(
     }
     if (role === 'planner') {
       return [
-        `This Team Run may use up to ${DEVELOPER_LANE_IDS.length} Developers working in parallel; decide how many the task actually needs.`,
+        `This executor Run may use up to ${DEVELOPER_LANE_IDS.length} Developers working in parallel; decide how many the task actually needs.`,
         'To split the implementation, add "developmentAssignments":[{"title":"...","scopeSummary":"...","ownedPaths":["path/or/prefix"]}] to the completed response. Assignments carry no developerId and map to Developers in order, their ownedPaths must not overlap, and each Developer must receive an independent, self-contained slice. Omit the field when a single Developer suffices.',
       ].join('\n');
     }
@@ -3231,7 +3234,7 @@ function rolePromptAddition(
       return [
         'The supplied projectDirectory is a workspace root and may contain multiple independent repositories. Inspect each assigned project and its local instructions before acting.',
         'Choose per project whether to stay on its current branch, switch to or create a feature branch, or use a worktree. The Worktree Manager document is advice; adjust it when the actual repository state or assigned work calls for a different choice.',
-        'A worktree is scoped to one project, never the whole multi-project workspace. WorkLite does not create or merge worktrees or branches for this Run. Use your native tools for any Git operations you decide to perform. If you select a worktree, decide whether and when to integrate its changes so later Team roles can inspect and test them. Include projectGitDecisions in the completed response, with one entry per affected project: {"projectPath":"workspace-relative/path","strategy":"no_git|current_branch|feature_branch|worktree","branch":"optional","worktreePath":"optional"}. Report the selected strategy, branch or worktree path, and outcome.',
+        'A worktree is scoped to one project, never the whole multi-project workspace. WorkLite does not create or merge worktrees or branches for this Run. Use your native tools for any Git operations you decide to perform. If you select a worktree, decide whether and when to integrate its changes so later executor roles can inspect and test them. Include projectGitDecisions in the completed response, with one entry per affected project: {"projectPath":"workspace-relative/path","strategy":"no_git|current_branch|feature_branch|worktree","branch":"optional","worktreePath":"optional"}. Report the selected strategy, branch or worktree path, and outcome.',
       ].join('\n');
     }
     if (orchestrationVersion === 5 && role === 'worktree-manager' && request?.taskDefinition.taskKey === 'worktree_setup') {
@@ -3246,7 +3249,7 @@ function rolePromptAddition(
   if (developerIds.length < 2) return undefined;
   if (role === 'planner') {
     return [
-      `This Team Run is developed by ${developerIds.length} Developers in parallel: ${developerIds.join(', ')}.`,
+      `This executor Run is developed by ${developerIds.length} Developers in parallel: ${developerIds.join(', ')}.`,
       'Split the implementation into one development assignment per Developer and add "developmentAssignments":[{"developerId":"...","title":"...","scopeSummary":"...","ownedPaths":["path/or/prefix"]}] to the completed response.',
       'Assignments must not overlap: no two assignments may own the same path. Give each Developer an independent, self-contained slice and use every listed Developer exactly once.',
     ].join('\n');
@@ -3289,7 +3292,7 @@ function worktreeManagerPromptAddition(request: AgentTeamTaskRequest): string {
     'A merge conflict, failure, or interruption retains ALL worktrees and branches automatically and reports them as Run evidence; only choose "retain" when the review evidence itself demands it.',
   ].join('\n');
   return [
-    'This Team Run manages its git worktrees through you. You never run git commands: your validated structured output is executed by the runtime.',
+    'This executor Run manages its git worktrees through you. You never run git commands: your validated structured output is executed by the runtime.',
     setup,
     teardown,
   ].join('\n\n');
@@ -3298,7 +3301,7 @@ function worktreeManagerPromptAddition(request: AgentTeamTaskRequest): string {
 function taskSystemPrompt(instructions: string, executor: boolean, addition?: string): string {
   const prompt = `${instructions}
 
-You are executing one WorkLite Coding Executors team task. Use tools only when the captured role configuration and project authorization permit them. Return exactly one JSON object whose "status" is exactly one of: "waiting_for_input", "completed".
+You are executing one WorkLite executor task. Use tools only when the captured role configuration and project authorization permit them. Return exactly one JSON object whose "status" is exactly one of: "waiting_for_input", "completed".
 
 Follow the captured project instructions supplied in the task context, and discover additional applicable AGENTS.md or AGENTS_WORKFLOW.md files before changing or assessing project files. If a project rule or missing user decision requires explicit authorization for an action, return the waiting_for_input response instead of taking that action. ${executor ? 'You run as a project executor in the project directory with your own native tools. WorkLite requires neither proposal confirmation nor exact-command grants. A previous attempt may have changed the project; inspect its actual state rather than assuming earlier work is absent or complete. Read pinned process references from the files listed in the system prompt.' : 'Run whatever shell commands the task needs with bash directly; WorkLite requires no command grant and records every execution as Command evidence. Use process_reference only with one of the exact pinned paths listed in the system prompt.'} Map the process package's project root to projectDirectory and its process output location to outputDirectory. The output directory is managed by WorkLite: return documents in JSON rather than writing planning output there directly.
 
@@ -3314,10 +3317,10 @@ Use an empty changedFiles array when the task changed no project files. Set comp
 
 function teamManagerSystemPrompt(addition?: string): string {
   const prompt = [
-    'You are Executor Manager, a narrowed Chat Agent inside one Coding Executors team group.',
-    'Use only the supplied Team management tools to inspect or change that Team’s configuration, roles, and Team memories.',
+    'You are Executor Manager, a narrowed Chat Agent inside one executor group.',
+    'Use only the supplied executor management tools to inspect or change that executor’s configuration, roles, and executor memories.',
     'You cannot see project paths, read or modify project files, run Commands, use Skills, call MCP servers, use Chat memory, or manage unrelated WorkLite resources.',
-    'The Executor Manager role cannot be deleted. Configuration changes apply to future Runs; this Run keeps its captured Team version.',
+    'The Executor Manager role cannot be deleted. Configuration changes apply to future Runs; this Run keeps its captured executor version.',
     'Return exactly one JSON object whose status is "completed" or "waiting_for_input". For a completed result include message, documents:[], unresolvedIssues:[], changedFiles:[], completedAssignedWork:true, and criterionAssessments:[]. Keep the user-facing message concise and report tool outcomes accurately.',
   ].join('\n');
   return addition ? `${prompt}\n\n${addition}` : prompt;
@@ -3327,7 +3330,7 @@ export function isGroupOrchestrationVersion(version: number | undefined): versio
   return version === 6 || version === 7 || version === 8 || version === 9 || version === 10 || version === 11;
 }
 
-// v10 and older roles have no executor category memory tool surface; v11 gives every ordinary
+// v10 and older roles have no executor memory tool surface; v11 gives every ordinary
 // work role the managed search/read/write/update tools.
 export function roleMemoryManagedToolsEnabled(orchestrationVersion: number | undefined, taskRole: string): boolean {
   return (orchestrationVersion ?? 0) >= ROLE_MEMORY_TOOLS_VERSION && taskRole !== 'executor-manager';
@@ -3342,7 +3345,7 @@ function taskContext(request: AgentTeamTaskRequest, executor: boolean, correctio
       taskGroup: {
         groupId: request.groupContext?.groupId,
         addressedMessage: request.groupMessage ?? request.groupContext?.initialMessage,
-        transcriptPolicy: 'Only this addressed request is model context. Use the Team tools to read Team configuration or memory.',
+        transcriptPolicy: 'Only this addressed request is model context. Use the executor tools to read executor configuration or memory.',
       },
     };
   }
@@ -3404,7 +3407,7 @@ export function groupRolePromptAddition(
 ): string | undefined {
   if (!request.groupContext || !isGroupOrchestrationVersion(snapshot.orchestrationVersion)) return undefined;
   const isInitiallyAddressedRole = request.taskDefinition.taskKey === `group_0_${request.groupContext.targetRole}`;
-  // v11 roles can search, read and write executor category memory. The initially addressed role
+  // v11 roles can search, read and write executor memory. The initially addressed role
   // keeps the full captured projection; every other role gets a bounded index.
   if (snapshot.orchestrationVersion === 11) {
     const workingPractice = snapshot.workingPractice?.trim();
@@ -3420,20 +3423,20 @@ export function groupRolePromptAddition(
     });
     return [
       isInitiallyAddressedRole
-        ? 'This is the initially addressed role for a Chat-dispatched Coding Executors team Run. Use the captured Team context to guide this request.'
-        : 'This is a work role inside a Chat-dispatched Coding Executors team Run. Use the captured Team context to guide this request.',
-      ...(isInitiallyAddressedRole && workingPractice ? [`Team working practice:\n${workingPractice}`] : []),
+        ? 'This is the initially addressed role for a Chat-dispatched executor Run. Use the captured executor context to guide this request.'
+        : 'This is a work role inside a Chat-dispatched executor Run. Use the captured executor context to guide this request.',
+      ...(isInitiallyAddressedRole && workingPractice ? [`Executor working practice:\n${workingPractice}`] : []),
       ...(isInitiallyAddressedRole
         ? [
-          ...(fullProjection ? [`Team memories:\n${fullProjection}`] : []),
-          'executor category memory tools are available: team_memory_search, team_memory_read, team_memory_write and team_memory_update. A memory you save applies immediately to later searches and is projected into the next dispatch.',
-          'Chat retains full Team configuration and memory management; you may search, read and write memories within this Run repository scope.',
+          ...(fullProjection ? [`Executor memories:\n${fullProjection}`] : []),
+          'Executor memory tools are available: team_memory_search, team_memory_read, team_memory_write and team_memory_update. A memory you save applies immediately to later searches and is projected into the next dispatch.',
+          'Chat retains full executor configuration and memory management; you may search, read and write memories within this Run repository scope.',
         ]
         : [
-          `executor category memory index (${index.length} ${index.length === 1 ? 'entry' : 'entries'}):`,
-          ...(index.length ? index : ['- (no Team memories yet)']),
+          `Executor memory index (${index.length} ${index.length === 1 ? 'entry' : 'entries'}):`,
+          ...(index.length ? index : ['- (no executor memories yet)']),
           'This is an index, not the full text. Use team_memory_search to find relevant memories and team_memory_read to read one in full.',
-          'You may save durable Team facts with team_memory_write; Chat retains full Team configuration and memory management.',
+          'You may save durable executor facts with team_memory_write; Chat retains full executor configuration and memory management.',
         ]),
       'Group messages are scoped by recipient and repository. Do not assume another role can see your message or that a visible transcript entry is model input.',
       'Pause, resume, cancel and retry requests are handled by the control service and are never normal task instructions.',
@@ -3447,11 +3450,11 @@ export function groupRolePromptAddition(
     const workingPractice = snapshot.workingPractice?.trim();
     const memories = teamMemoryProjection(request.groupContext?.memories ?? []);
     return [
-      'This is the narrowed Chat inside Coding Executors team. Manage only this Team’s roles, working practice, concurrency setting and Team memories through the provided Team management tools.',
-      ...(workingPractice ? [`Team working practice:\n${workingPractice}`] : []),
-      ...(memories ? [`Team memories:\n${memories}`] : []),
+      'This is the narrowed Chat inside executor. Manage only this executor’s roles, working practice, concurrency setting and executor memories through the provided executor management tools.',
+      ...(workingPractice ? [`Executor working practice:\n${workingPractice}`] : []),
+      ...(memories ? [`Executor memories:\n${memories}`] : []),
       'Do not request or reveal project paths, read or change project files, run Commands, use Skills, call MCP servers, manage Chat memory, or change unrelated workspace resources.',
-      'The Executor Manager role is protected. Changes to Team configuration apply to future Runs; the current Run keeps its captured version. A newly created role can receive work in a later message after it appears in the active role list.',
+      'The Executor Manager role is protected. Changes to executor configuration apply to future Runs; the current Run keeps its captured version. A newly created role can receive work in a later message after it appears in the active role list.',
       `Roles captured by this Run: ${roles}.`,
       'Return a concise user-facing update in the message field. Do not claim a configuration or memory change succeeded unless its tool returned success.',
     ].join('\n');
@@ -3460,15 +3463,15 @@ export function groupRolePromptAddition(
     const workingPractice = snapshot.workingPractice?.trim();
     const memories = teamMemoryProjection(request.groupContext.memories ?? []);
     return [
-      'This is the initially addressed role for a Chat-dispatched Coding Executors team Run. Use the captured Team context to guide this request.',
-      ...(workingPractice ? [`Team working practice:\n${workingPractice}`] : []),
-      ...(memories ? [`Team memories:\n${memories}`] : []),
-      'Team settings, roles and memories are managed by Chat through protected platform operations. Do not claim to read or change Team memories or settings yourself.',
+      'This is the initially addressed role for a Chat-dispatched executor Run. Use the captured executor context to guide this request.',
+      ...(workingPractice ? [`Executor working practice:\n${workingPractice}`] : []),
+      ...(memories ? [`Executor memories:\n${memories}`] : []),
+      'Executor settings, roles and memories are managed by Chat through protected platform operations. Do not claim to read or change executor memories or settings yourself.',
     ].join('\n');
   }
   const memoryRule = snapshot.orchestrationVersion === 8 || snapshot.orchestrationVersion === 9 || snapshot.orchestrationVersion === 10
-    ? 'Team long-term memory is separate from Chat memory and is managed by Chat. Only the initially addressed role in a new v8-v10 Run receives its bounded captured memory projection; handoff roles receive none and no Team role may add, update, or delete memories.'
-    : 'Team long-term memory is separate from Chat memory and belongs to the Executor Manager. Only the Executor Manager receives Team memories and may add, update, or delete them; other roles must not claim to read or save memory.';
+    ? 'Executor long-term memory is separate from Chat memory and is managed by Chat. Only the initially addressed role in a new v8-v10 Run receives its bounded captured memory projection; handoff roles receive none and no executor role may add, update, or delete memories.'
+    : 'Executor long-term memory is separate from Chat memory and belongs to the Executor Manager. Only the Executor Manager receives executor memories and may add, update, or delete them; other roles must not claim to read or save memory.';
   return [
     'Group messages are scoped by recipient and repository. Do not assume another role can see your message or that a visible transcript entry is model input.',
     'Pause, resume, cancel and retry requests are handled by the control service and are never normal task instructions.',
@@ -3480,7 +3483,7 @@ export function groupRolePromptAddition(
 }
 
 // v8-v10 initially addressed roles and historical v7 Executor Manager turns receive a bounded
-// projection of captured Team/repository-scoped memories. Legacy role-scoped entries
+// projection of captured executor/repository-scoped memories. Legacy role-scoped entries
 // are never injected.
 const TEAM_MEMORY_PROMPT_ENTRIES = 50;
 const TEAM_MEMORY_PROMPT_CHARS = 6000;
@@ -3581,23 +3584,23 @@ function parseTaskOutputUnsafe(output: string, taskKey: string, supportedRoleIds
   try {
     value = JSON.parse(output) as RawTaskOutput;
   } catch {
-    throw new Error('The Coding Executors team role returned invalid JSON.');
+    throw new Error('The executor role returned invalid JSON.');
   }
   if (value?.status === 'waiting_for_input') {
     const question = typeof (value.pendingInput as { question?: unknown } | undefined)?.question === 'string'
       ? ((value.pendingInput as { question: string }).question).trim()
       : undefined;
-    if (!question) throw new Error('The Coding Executors team input request has no question.');
+    if (!question) throw new Error('The executor input request has no question.');
     return {
       status: 'waiting_for_input',
       pendingInput: { id: `placeholder_${randomUUID()}`, question, scopeRevision: 0 },
     };
   }
   if (value?.status !== 'completed') {
-    throw new Error(`The Coding Executors team role returned an unsupported task status: ${JSON.stringify(value?.status)}.`);
+    throw new Error(`The executor role returned an unsupported task status: ${JSON.stringify(value?.status)}.`);
   }
   if (typeof value.completedAssignedWork !== 'boolean') {
-    throw new Error('The Coding Executors team role did not report assigned-work completion.');
+    throw new Error('The executor role did not report assigned-work completion.');
   }
   const developmentAssignments = parseDevelopmentAssignments(value.developmentAssignments);
   const projectGitDecisions = parseProjectGitDecisions(value.projectGitDecisions);
@@ -3606,7 +3609,7 @@ function parseTaskOutputUnsafe(output: string, taskKey: string, supportedRoleIds
   const worktreeTeardown = parseWorktreeTeardownDecision(value.worktreeTeardown);
   const message = typeof value.message === 'string' ? value.message.trim() : undefined;
   if (value.message !== undefined && typeof value.message !== 'string') {
-    throw new Error('The Coding Executors team role message must be text.');
+    throw new Error('The executor role message must be text.');
   }
   const handoff = parseRoleHandoff(value.handoff, supportedRoleIds);
   const dispatchDecision = parseDispatchDecision(value.dispatchDecision);
@@ -3662,7 +3665,7 @@ function parseRoleHandoff(value: unknown, supportedRoleIds: readonly string[]): 
   if (value === undefined || value === null) return undefined;
   const handoff = value as { role?: unknown; goal?: unknown; repositoryIds?: unknown };
   if (typeof handoff.role !== 'string' || !supportedRoleIds.includes(handoff.role)) {
-    throw new Error('A role handoff needs a role captured by this Team version.');
+    throw new Error('A role handoff needs a role captured by this executor version.');
   }
   if (typeof handoff.goal !== 'string' || !handoff.goal.trim()) {
     throw new Error('A role handoff needs a specific goal.');
@@ -3744,12 +3747,12 @@ function parseWorktreeTeardownDecision(value: unknown): WorktreeTeardownDecision
 }
 
 function parseDocuments(value: unknown, taskKey: string): AgentTeamDocument[] {
-  if (!Array.isArray(value)) throw new Error('The Coding Executors team role returned no document list.');
+  if (!Array.isArray(value)) throw new Error('The executor role returned no document list.');
   return value.map((item) => {
     const document = item as Partial<AgentTeamDocument>;
-    if (typeof document.key !== 'string' || !document.key.trim()) throw new Error('A Team document key is required.');
-    if (typeof document.title !== 'string' || !document.title.trim()) throw new Error('A Team document title is required.');
-    if (typeof document.content !== 'string') throw new Error('Team document content must be text.');
+    if (typeof document.key !== 'string' || !document.key.trim()) throw new Error('An executor document key is required.');
+    if (typeof document.title !== 'string' || !document.title.trim()) throw new Error('An executor document title is required.');
+    if (typeof document.content !== 'string') throw new Error('Executor document content must be text.');
     return {
       key: document.key.trim(),
       title: document.title.trim(),
@@ -3770,18 +3773,18 @@ function validateUpstreamDocuments(
   for (const document of documents) {
     const missingKey = document.upstreamDocumentKeys.find((key) => !availableKeys.has(key));
     if (missingKey) {
-      throw new Error(`Team document ${document.key} references unknown upstream document ${missingKey}.`);
+      throw new Error(`Executor document ${document.key} references unknown upstream document ${missingKey}.`);
     }
   }
 }
 
 function parseStrings(value: unknown, field: string): string[] {
-  if (!Array.isArray(value)) throw new Error(`The Coding Executors team role returned no ${field} list.`);
+  if (!Array.isArray(value)) throw new Error(`The executor role returned no ${field} list.`);
   return value.filter((item): item is string => typeof item === 'string');
 }
 
 function parseAssessments(value: unknown): AgentTeamCriterionAssessment[] {
-  if (!Array.isArray(value)) throw new Error('The Coding Executors team role returned no criterion assessment list.');
+  if (!Array.isArray(value)) throw new Error('The executor role returned no criterion assessment list.');
   return value.map((item) => {
     const assessment = item as Partial<AgentTeamCriterionAssessment>;
     if (typeof assessment.criterion !== 'string' || !assessment.criterion.trim()) {
@@ -4117,9 +4120,9 @@ export function formatError(error: unknown): string {
   // LangGraph's EmptyInputError surfaces its internal channel key (e.g. "__start__") rather
   // than a reason a user can act on; translate it into a readable orchestration-start failure.
   if (error instanceof Error && error.name === 'EmptyInputError') {
-    return `The Coding Executors team run could not start: the orchestration engine received no input for its entry node (${error.message}). Retry the dispatch; if this recurs, it indicates an orchestration bug rather than a model or task failure.`;
+    return `The executor run could not start: the orchestration engine received no input for its entry node (${error.message}). Retry the dispatch; if this recurs, it indicates an orchestration bug rather than a model or task failure.`;
   }
-  return error instanceof Error ? error.message : 'The Coding Executors team task failed.';
+  return error instanceof Error ? error.message : 'The executor task failed.';
 }
 
 function boundedToolResult(value: string, maxChars: number): string {

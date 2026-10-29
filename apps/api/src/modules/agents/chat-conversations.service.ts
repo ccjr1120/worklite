@@ -51,7 +51,7 @@ export class ChatConversationsService {
       channelConversationId: row.chatId, status: row.status,
       createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
     }));
-    // A conversation with active background work (a project task, or a dispatched Team
+    // A conversation with active background work (a project task, or a dispatched executor
     // Run / Workflow Run that has not settled) reads as in progress even though its turn settled.
     const activeBackground = await this.activeBackgroundExecutionIds(workspace.id);
     for (const item of items) {
@@ -213,7 +213,7 @@ export class ChatConversationsService {
   }
 
   // Execution ids whose conversation owns background work that is still active: a running
-  // or waiting project task, or a dispatched Team Run / Workflow Run that has not settled.
+  // or waiting project task, or a dispatched executor Run / Workflow Run that has not settled.
   private async activeBackgroundExecutionIds(workspaceId: string): Promise<Set<string>> {
     const tasks = await this.db.select({ executionId: chatProjectTasks.executionId }).from(chatProjectTasks)
       .where(and(eq(chatProjectTasks.workspaceId, workspaceId), inArray(chatProjectTasks.status, ['running', 'waiting_for_input'])));

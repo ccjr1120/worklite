@@ -406,7 +406,7 @@ export class IsolatedAgentInvocationService {
     }
 
     if (call.toolName === 'read_executor_document') {
-      if (!request.readTeamDocument) throw new BadRequestException('No Team document was handed to this Agent task.');
+      if (!request.readTeamDocument) throw new BadRequestException('No executor document was handed to this Agent task.');
       const input = call.input as { documentId?: unknown; revision?: unknown } | null;
       const documentId = requiredString(input?.documentId, 'documentId');
       if (!Number.isInteger(input?.revision) || (input!.revision as number) < 1) {
@@ -418,7 +418,7 @@ export class IsolatedAgentInvocationService {
 
     if (call.toolName === 'skill_script') {
       if (request.role && request.projectDirectory) {
-        throw new BadRequestException('Executable Skill scripts are unavailable for Coding Executors team invocations.');
+        throw new BadRequestException('Executable Skill scripts are unavailable for executor invocations.');
       }
       const skill = assignedSkills.find((item) => item.id === call.skillId);
       const script = skill?.files.find((file) => file.path === call.scriptPath && file.path.startsWith('scripts/') && file.content.startsWith('#!'));

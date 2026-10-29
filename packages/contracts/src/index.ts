@@ -117,7 +117,7 @@ export type UpdatePluginRequest = {
 export type ChatTarget =
   | { kind: 'conversation' }
   // `mode` remains accepted only for older callers. Current dispatch ignores it
-  // and the executor category Dispatcher chooses the Run mode.
+  // and the executor Dispatcher chooses the Run mode.
   | { kind: 'executor_category'; executorCategoryId: string; projectDirectory: string; role?: AgentTeamRoleId; mode?: 'plan_only' | 'validate_existing' | 'implement_and_validate' }
   | { kind: 'workflow'; workflowId: string };
 
@@ -1184,7 +1184,7 @@ export type McpServerView = {
 };
 
 // Every place a workspace MCP server is referenced, reported when its deletion
-// is rejected. Drafts and active Team role configuration are mutable and can be
+// is rejected. Drafts and active executor role configuration are mutable and can be
 // cleaned by a force deletion; published WorkflowVersions and captured
 // TeamVersions are immutable history and are never rewritten; active Chat turn and
 // legacy Agent references always block deletion until cleared by their owner.
@@ -1546,7 +1546,7 @@ export type AgentTeamRoleConfiguration = {
   role: AgentTeamRoleId;
   displayName?: string;
   // One declared model id, or an ordered list of fallback candidates; an empty string keeps the
-  // "use the Team/executor default" meaning.
+  // "use the role/executor default" meaning.
   publicModelId: string | string[];
   instructions: string;
   entryPoints: string[];
@@ -1653,8 +1653,8 @@ export type AgentTeamTaskAttemptView = {
   developerId: string | null;
   assignmentTitle: string | null;
   progressText: string;
-  // Derived from the captured Team version: the role's display name (null for built-in roles
-  // without one) and the public model id the attempt runs on (the role's model, else the Team
+  // Derived from the captured executor version: the role's display name (null for built-in roles
+  // without one) and the public model id the attempt runs on (the role's model, else the executor
   // default for WorkLite Agent roles, else the captured executor launch model).
   roleName: string | null;
   model: string | null;
@@ -1931,7 +1931,7 @@ export type AgentTeamRunView = {
   mode: AgentTeamMode;
   modeRationale: string | null;
   modeDecidedAt: string | null;
-  // Historical evidence only: Runs recorded before Team roles gained direct command
+  // Historical evidence only: Runs recorded before executor roles gained direct command
   // execution keep the exact command strings the user had granted. Never written again.
   authorizedCommands: string[];
   scopeRevision: number;

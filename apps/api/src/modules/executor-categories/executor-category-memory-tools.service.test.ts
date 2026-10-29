@@ -12,7 +12,7 @@ import { AgentTeamMemoryToolsService } from './executor-category-memory-tools.se
 import { roleMemoryManagedToolsEnabled } from './executor-category-runtime.service';
 import { TeamMemoryService } from './team-memory.service';
 
-// The managed memory tools are available to ordinary v11 roles only. Their Team,
+// The managed memory tools are available to ordinary v11 roles only. Their executor,
 // Run, attempt, role and repository scope come from the runtime closure; tool input
 // can choose content, an in-scope repository and an upsert key, nothing else.
 
@@ -25,8 +25,8 @@ beforeEach(async () => {
   const now = new Date();
   await db.insert(workspaces).values({ id: 'workspace_a', slug: 'a', name: 'A', createdAt: now, updatedAt: now });
   await db.insert(executorCategories).values([
-    { id: 'team_a', workspaceId: 'workspace_a', name: 'Team A', description: '', processId: 'bmad-tea', processVersion: '1', createdAt: now, updatedAt: now },
-    { id: 'team_b', workspaceId: 'workspace_a', name: 'Team B', description: '', processId: 'bmad-tea', processVersion: '1', createdAt: now, updatedAt: now },
+    { id: 'team_a', workspaceId: 'workspace_a', name: 'Executor A', description: '', processId: 'bmad-tea', processVersion: '1', createdAt: now, updatedAt: now },
+    { id: 'team_b', workspaceId: 'workspace_a', name: 'Executor B', description: '', processId: 'bmad-tea', processVersion: '1', createdAt: now, updatedAt: now },
   ]);
   await db.insert(executorCategoryRepositories).values({
     id: 'repo_a1', workspaceId: 'workspace_a', executorCategoryId: 'team_a', name: 'api', directory: '/projects/api', createdAt: now, updatedAt: now,
@@ -53,7 +53,7 @@ describe('roleMemoryManagedToolsEnabled', () => {
     expect(roleMemoryManagedToolsEnabled(11, 'planner')).toBe(true);
   });
 
-  it('keeps v10 and earlier roles without executor category memory tools', () => {
+  it('keeps v10 and earlier roles without executor memory tools', () => {
     expect(roleMemoryManagedToolsEnabled(10, 'developer')).toBe(false);
     expect(roleMemoryManagedToolsEnabled(9, 'developer')).toBe(false);
     expect(roleMemoryManagedToolsEnabled(undefined, 'developer')).toBe(false);
@@ -74,7 +74,7 @@ describe('AgentTeamMemoryToolsService', () => {
     ]);
   });
 
-  it('writes with the closure Team even when tool input names another Team', async () => {
+  it('writes with the closure executor even when tool input names another executor', async () => {
     const response = await tools.execute({
       context,
       taskKey: 'group_0_developer',
@@ -109,7 +109,7 @@ describe('AgentTeamMemoryToolsService', () => {
     const written = JSON.parse(await tools.execute({
       context,
       taskKey: 'group_0_developer',
-      call: { toolName: 'team_memory_write', input: { content: 'Searchable Team decision.', repositoryId: 'repo_a1' } },
+      call: { toolName: 'team_memory_write', input: { content: 'Searchable executor decision.', repositoryId: 'repo_a1' } },
     })) as { id: string };
 
     const results = JSON.parse(await tools.execute({
@@ -124,7 +124,7 @@ describe('AgentTeamMemoryToolsService', () => {
       taskKey: 'group_0_developer',
       call: { toolName: 'team_memory_read', input: { memoryId: written.id } },
     })) as { content: string };
-    expect(read.content).toBe('Searchable Team decision.');
+    expect(read.content).toBe('Searchable executor decision.');
   });
 
   it('updates an existing memory by id', async () => {

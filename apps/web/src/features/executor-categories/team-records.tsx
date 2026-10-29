@@ -229,7 +229,7 @@ export function TeamRecords({ executorCategoryId }: { executorCategoryId: string
                       params={{ runId: run.id }}
                       className={`${rowGrid} rounded-lg hover:bg-muted ${focusRing}`}
                     >
-                      {/* Team name - shown in smaller screens as first field */}
+                      {/* Executor name - shown in smaller screens as first field */}
                       <span className="hidden sm:flex text-xs font-medium text-foreground truncate">
                         {run.teamName}
                       </span>

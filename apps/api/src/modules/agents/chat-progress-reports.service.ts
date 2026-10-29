@@ -42,7 +42,7 @@ export function buildActiveWorkNote(items: ActiveWorkItem[], intervalSeconds = D
     }
     if (item.kind === 'executor_category') {
       const progress = item.progress ? `，进度 ${item.progress.percent}%（阶段 ${item.progress.phase}，${item.progress.completedAssignments}/${item.progress.totalAssignments} 项开发任务完成）` : '';
-      return `${index + 1}. 团队执行任务 ${item.id}（${truncate(item.intent, TITLE_LIMIT)}）：${item.status}${progress}`;
+      return `${index + 1}. 执行器任务 ${item.id}（${truncate(item.intent, TITLE_LIMIT)}）：${item.status}${progress}`;
     }
     return `${index + 1}. 工作流运行 ${item.id}（${item.workflowName}）：${item.status}${item.currentNodeId ? `，当前节点 ${item.currentNodeId}` : ''}`;
   });
@@ -50,7 +50,7 @@ export function buildActiveWorkNote(items: ActiveWorkItem[], intervalSeconds = D
 }
 
 // Periodic progress reports for conversations with active background work: a running project
-// task, or a queued/running/paused Team or Workflow Run dispatched from that conversation.
+// task, or a queued/running/paused executor or Workflow Run dispatched from that conversation.
 // waiting_for_input work is excluded — its question already reached the user through the
 // settlement report. The recurring tick replaces the one-shot settlement reports' deferral:
 // a busy conversation simply retries on the next tick, and a conversation whose summary is

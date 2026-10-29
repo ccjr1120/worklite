@@ -6,22 +6,25 @@ export const DIRECT_EXECUTOR_CATEGORY_ID = 'agent_team_direct';
 export const EXECUTOR_CATEGORY_PROCESS_ID = 'bmad-tea';
 export const EXECUTOR_CATEGORY_PROCESS_VERSION = '1';
 
-// Retired executor category IDs for backward compatibility with historical data
+// Retired executor IDs for backward compatibility with historical data
 export const RETIRED_AGENT_TEAM_IDS = ['agent_team_application'] as const;
 
 export const DEFAULT_COMPANY_PROJECT_GIT_POLICY = 'Follow the target project instructions and the user\'s named company branch and review workflow. Preserve protected base-branch rules; do not bypass review or integrate into a base branch unless the request requires it.';
 export const DEFAULT_DIRECT_GIT_POLICY = 'Follow the target project\'s own Git instructions and current branch state. Prefer the current branch for isolated serial work; do not bypass review or integrate into a protected base branch unless the request requires it.';
 
-// Mirrors Company Project's Planner requirement that the plan itself commit to branch and
-// worktree orchestration, so the Executor follows a decision instead of improvising one.
-export const DIRECT_PLANNER_INSTRUCTIONS = 'Understand the requested goal and preserve user intent. Clarify only material missing information. Inspect the authorized project read-only without editing code, then produce a concrete execution plan for the Executor. You may ask for plan confirmation using the existing waiting_for_input question mechanism before handing off. Hand off to role executor with a specific, actionable goal describing the plan to implement.'
-  + '\n\nThe plan must commit to the Git orchestration the Executor will follow, not leave it to the Executor\'s judgment: name the base branch (default main), the feature branch name, and the worktree path (<repo>/.wt/<branch>) for every affected project repository, plus the merge-back order once implementation finishes. State this explicitly in the handoff goal so the Executor starts from a decided branch and worktree rather than discovering or inventing one.';
+// Mirrors the company project executor's Planner requirement that the plan itself commit to branch and
+// worktree orchestration, so the Implementer follows a decision instead of improvising one.
+// Display name of the general project executor's implementation role; its role id stays `executor`.
+export const DIRECT_IMPLEMENTER_DISPLAY_NAME = 'Implementer';
+
+export const DIRECT_PLANNER_INSTRUCTIONS = 'Understand the requested goal and preserve user intent. Clarify only material missing information. Inspect the authorized project read-only without editing code, then produce a concrete execution plan for the Implementer. You may ask for plan confirmation using the existing waiting_for_input question mechanism before handing off. Hand off to role executor (the Implementer) with a specific, actionable goal describing the plan to implement.'
+  + '\n\nThe plan must commit to the Git orchestration the Implementer will follow, not leave it to the Implementer\'s judgment: name the base branch (default main), the feature branch name, and the worktree path (<repo>/.wt/<branch>) for every affected project repository, plus the merge-back order once implementation finishes. State this explicitly in the handoff goal so the Implementer starts from a decided branch and worktree rather than discovering or inventing one.';
 
 export const DEFAULT_MAX_CONCURRENT_RUNS = 3;
 
 // The Dispatcher is a server-owned built-in role. Its stable id is the default
 // v10 Run recipient; Chat never invents or selects this id.
-// The Dispatcher is an optional role. Teams may include it as the default entry point.
+// The Dispatcher is an optional role. Executors may include it as the default entry point.
 // If absent, the Planner becomes the entry point.
 export const EXECUTOR_CATEGORY_DISPATCHER_ROLE = 'dispatcher';
 
@@ -53,7 +56,7 @@ export const EXECUTOR_CATEGORY_ROLE_TOOL_NAMES: Partial<Record<string, readonly 
   reviewer: ['bash', 'read', 'glob', 'grep', 'process_reference'],
   // The v5-v9 Worktree Manager plans and reports; project executors choose Git operations.
   'worktree-manager': ['read', 'glob', 'grep', 'process_reference'],
-  // Direct team's Executor mirrors the Developer's tool access.
+  // The general project executor's Implementer mirrors the Developer's tool access.
   executor: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference'],
 };
 
@@ -66,8 +69,8 @@ export const EXECUTOR_CATEGORY_ROLE_INSTRUCTIONS: Partial<Record<string, string>
   test_runner: 'Execute the declared checks through the available command tool, preserve their exact evidence, and distinguish command success from criterion completion.',
   reviewer: 'Independently assess the implementation and test evidence against the original intent. Request scoped repair only when concrete evidence shows a defect.',
   'worktree-manager': 'For v4 Runs, follow the captured worktree setup and teardown instructions. For v5–v9 work, provide advisory per-project Git strategy recommendations only; project executors inspect the actual repository state and choose their own Git operations.',
-  // Direct team only: a project executor implements the Planner's handed-off plan.
-  executor: 'Implement the Planner\'s handed-off plan in the authorized project. Follow the project\'s own repository instructions and the executor category Git policy. Report the changes you made and any gaps between the plan and what you could complete.',
+  // General project executor only: the engine-backed Implementer carries out the Planner's handed-off plan.
+  executor: 'Implement the Planner\'s handed-off plan in the authorized project. Follow the project\'s own repository instructions and the executor Git policy. Report the changes you made and any gaps between the plan and what you could complete.',
 };
 
 // Determine a team's entry role based on its configured roles. The Dispatcher is the default
@@ -80,7 +83,7 @@ export function teamEntryRole(team: { id: string; roles: ReadonlyArray<{ role: s
     return 'planner';
   }
   // This should not happen if schema validation is correct, but fail fast if it does.
-  throw new Error(`Team ${team.id} has no Dispatcher or Planner role; cannot determine entry role.`);
+  throw new Error(`executor ${team.id} has no Dispatcher or Planner role; cannot determine entry role.`);
 }
 
 // A directly addressed role bypasses the Dispatcher. Validation roles stay on

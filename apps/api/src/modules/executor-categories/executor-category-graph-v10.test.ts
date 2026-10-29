@@ -8,7 +8,7 @@ import { createSqliteCheckpointer } from '@worklite/team-runtime';
 import { createAgentTeamGroupGraph, type AgentTeamGroupGraphInitial } from './executor-category-graph-v6';
 import { EXECUTOR_CATEGORY_DISPATCHER_ROLE, initialAgentTeamModeForRole } from './executor-category-configuration';
 
-// Orchestration v10 starts at the executor category Dispatcher, which decides the Run mode.
+// Orchestration v10 starts at the executor Dispatcher, which decides the Run mode.
 // The graph enforces that decision regardless of the handoffs roles attempt.
 
 const directories: string[] = [];

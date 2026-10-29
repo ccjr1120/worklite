@@ -18,7 +18,7 @@ import { TeamMemoryMcpTokenService } from './team-memory-mcp-token.service';
 import { TeamMemoryService, type TeamMemoryActorContext } from './team-memory.service';
 
 // The executor MCP endpoint trusts only the per-task bearer token. An invalid,
-// missing or revoked token is a 401 and never reaches executor category memory.
+// missing or revoked token is a 401 and never reaches executor memory.
 
 let db: Database;
 let tokens: TeamMemoryMcpTokenService;
@@ -40,7 +40,7 @@ beforeEach(async () => {
   const now = new Date();
   await db.insert(workspaces).values({ id: 'workspace_a', slug: 'a', name: 'A', createdAt: now, updatedAt: now });
   await db.insert(executorCategories).values({
-    id: 'team_a', workspaceId: 'workspace_a', name: 'Team A', description: '', processId: 'bmad-tea', processVersion: '1', createdAt: now, updatedAt: now,
+    id: 'team_a', workspaceId: 'workspace_a', name: 'Executor A', description: '', processId: 'bmad-tea', processVersion: '1', createdAt: now, updatedAt: now,
   });
   await db.insert(executorCategoryRepositories).values({
     id: 'repo_a1', workspaceId: 'workspace_a', executorCategoryId: 'team_a', name: 'api', directory: '/projects/api', createdAt: now, updatedAt: now,
@@ -94,7 +94,7 @@ describe('TeamMemoryMcpController authentication', () => {
     const response = responseSpy();
     await controller.handle({ headers: { authorization: `Bearer ${token}` } } as Request, response);
     expect(response.status).toHaveBeenCalledWith(401);
-    expect(response.json).toHaveBeenCalledWith({ message: 'A valid executor category memory MCP token is required.' });
+    expect(response.json).toHaveBeenCalledWith({ message: 'A valid executor memory MCP token is required.' });
   });
 
   it('expires stale bindings instead of resolving them', () => {
@@ -106,7 +106,7 @@ describe('TeamMemoryMcpController authentication', () => {
   });
 });
 
-describe('executor category memory MCP server', () => {
+describe('Executor memory MCP server', () => {
   it('lists exactly the executor-facing tools', async () => {
     const { client, close } = await mcpClient(context);
     try {
@@ -118,7 +118,7 @@ describe('executor category memory MCP server', () => {
     }
   });
 
-  it('writes with the token-bound Team and rejects an out-of-scope repository', async () => {
+  it('writes with the token-bound executor and rejects an out-of-scope repository', async () => {
     const { client, close } = await mcpClient(context);
     try {
       const written = await client.callTool({
@@ -154,7 +154,7 @@ describe('executor category memory MCP server', () => {
 describe('teamMemoryMcpRuntime', () => {
   it('builds the stable worklite_team_memory server identity', () => {
     const runtime = teamMemoryMcpRuntime('wtm_token');
-    expect(runtime).toMatchObject({ id: 'team_memory', name: 'Team Memory', authToken: 'wtm_token' });
+    expect(runtime).toMatchObject({ id: 'team_memory', name: 'Executor Memory', authToken: 'wtm_token' });
     expect(runtime.endpoint).toMatch(/\/api\/internal\/team-memory-mcp$/);
     expect(runtime.allowedTools).toEqual([...TEAM_MEMORY_MCP_TOOL_NAMES]);
   });

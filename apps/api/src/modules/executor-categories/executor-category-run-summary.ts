@@ -13,7 +13,7 @@ export function taskRoleName(snapshot: StoredAgentTeamVersionSnapshot, role: str
 
 // Mirrors the runtime's model resolution for one attempt so the Run view reports the model the
 // attempt actually launched with, without storing it again. Project-executor roles with no model
-// keep the captured launch model; WorkLite Agent roles fall back to the Team default.
+// keep the captured launch model; WorkLite Agent roles fall back to the executor default.
 export function effectiveTaskModel(snapshot: StoredAgentTeamVersionSnapshot, task: AttemptIdentity, teamDefaultModel = ''): string | null {
   const role = snapshot.roles.find((item) => item.role === task.role);
   const developerId = task.developerId ?? RESERVED_DEVELOPER_ID;

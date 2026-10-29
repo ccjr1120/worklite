@@ -19,7 +19,7 @@ export class TeamMemoryMcpController {
     const token = bearerToken(request.headers.authorization);
     const context = this.tokens.resolve(token);
     if (!context) {
-      response.status(401).json({ message: 'A valid executor category memory MCP token is required.' });
+      response.status(401).json({ message: 'A valid executor memory MCP token is required.' });
       return;
     }
     const server = createTeamMemoryMcpServer(this.tools, context);

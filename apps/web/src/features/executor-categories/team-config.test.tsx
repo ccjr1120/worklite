@@ -166,13 +166,13 @@ describe('TeamConfig', () => {
     expect(screen.getByText('Implement the assigned scope.')).toBeInTheDocument();
   });
 
-  it('links back to the same Team\'s Run records page', () => {
+  it('links back to the same executor\'s Run records page', () => {
     mockQueries();
     render(<TeamConfig executorCategoryId="team_1" />);
     expect(screen.getByRole('link', { name: '返回记录' })).toHaveAttribute('href', '/executor-categories/team_1');
   });
 
-  it('shows the Team switcher below the heading with links to each Team\'s configuration', () => {
+  it('shows the executor switcher below the heading with links to each executor\'s configuration', () => {
     mockQueries();
     render(<TeamConfig executorCategoryId="team_1" />);
     const switcher = screen.getByRole('navigation', { name: '选择执行器分类' });
@@ -180,7 +180,7 @@ describe('TeamConfig', () => {
     expect(within(switcher).getByRole('link', { name: /Applications/ })).toHaveAttribute('href', '/executor-categories/team_2/config');
   });
 
-  it('is served per Team at /executor-categories/:executorCategoryId/config', () => {
+  it('is served per executor at /executor-categories/:executorCategoryId/config', () => {
     expect(AgentTeamConfigRoute.path).toBe('/executor-categories/$executorCategoryId/config');
     mockQueries();
     const Component = AgentTeamConfigRoute.options.component as React.ComponentType;
@@ -188,7 +188,7 @@ describe('TeamConfig', () => {
     expect(vi.mocked(useAgentTeamQuery)).toHaveBeenLastCalledWith('team_1');
   });
 
-  it('redirects the legacy /agent-team-config path to the default Team configuration', () => {
+  it('redirects the legacy /agent-team-config path to the default executor configuration', () => {
     expect(LegacyAgentTeamConfigRoute.path).toBe('/agent-team-config');
     const Component = LegacyAgentTeamConfigRoute.options.component as React.ComponentType;
     render(<Component />);

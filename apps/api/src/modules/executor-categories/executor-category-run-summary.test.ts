@@ -35,12 +35,12 @@ function attempt(overrides: Partial<AgentTeamTaskAttemptView>): AgentTeamTaskAtt
   };
 }
 
-describe('Coding Executors team Run summary derivation', () => {
+describe('Executor Run summary derivation', () => {
   it('reports the configured role model before any fallback', () => {
     expect(effectiveTaskModel(snapshot(), { role: 'planner', developerId: null }, 'team-default')).toBe('gpt-planner');
   });
 
-  it('falls back to the Team default model for WorkLite Agent roles without a model', () => {
+  it('falls back to the executor default model for WorkLite Agent roles without a model', () => {
     expect(effectiveTaskModel(snapshot(), { role: 'reviewer', developerId: null }, 'team-default')).toBe('team-default');
     expect(effectiveTaskModel(snapshot(), { role: 'reviewer', developerId: null }, '')).toBeNull();
   });

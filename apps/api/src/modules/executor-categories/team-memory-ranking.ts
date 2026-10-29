@@ -1,4 +1,4 @@
-// Lexical Team-memory ranking shared by the projection prompt and the role memory
+// Lexical executor-memory ranking shared by the projection prompt and the role memory
 // tools. It intentionally stays deterministic and dependency-free: no embeddings,
 // no model calls, and the same input always ranks the same way.
 
@@ -100,7 +100,7 @@ export function buildTeamMemoryIndex(
       ? options.repositories?.find((repository) => repository.memoryRepositoryId === memory.repositoryId)?.name
       : undefined;
     const title = memory.title || memory.id;
-    const line = `- ${repositoryName ? `[${repositoryName}] ` : '[Team] '}${title}`;
+    const line = `- ${repositoryName ? `[${repositoryName}] ` : '[executor] '}${title}`;
     if (total + line.length > TEAM_MEMORY_INDEX_CHARS) break;
     lines.push(line);
     total += line.length + 1;

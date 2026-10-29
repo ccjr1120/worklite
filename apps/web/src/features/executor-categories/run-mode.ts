@@ -1,7 +1,7 @@
 import type { TFunction } from 'i18next';
 import type { AgentTeamRunView } from '@worklite/contracts';
 
-// v10 Runs hold a placeholder mode until the executor category Dispatcher decides; v1-v9
+// v10 Runs hold a placeholder mode until the executor Dispatcher decides; v1-v9
 // Runs show the mode captured at dispatch.
 export function runModeLabel(t: TFunction<'executorCategories'>, mode: AgentTeamRunView['mode'], orchestrationVersion: number, modeDecidedAt: string | null): string {
   if (orchestrationVersion < 10) return t(`run.modeValue.${mode}`);

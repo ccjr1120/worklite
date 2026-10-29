@@ -10,8 +10,8 @@ import {
 import { DATABASE } from '../../infrastructure/database.module';
 import { rankTeamMemories, memoryTitle } from './team-memory-ranking';
 
-// Who is acting on executor category memory. `allowedRepositoryIds` is the Run's captured
-// repository scope (canonical Team repository ids); it never comes from model input.
+// Who is acting on executor memory. `allowedRepositoryIds` is the Run's captured
+// repository scope (canonical executor repository ids); it never comes from model input.
 export type TeamMemoryActorContext = {
   workspaceId: string;
   executorCategoryId: string;
@@ -103,8 +103,8 @@ export class TeamMemoryService {
   }
 
   /**
-   * Writes a memory for the acting role. The default scope is the Team; an explicit
-   * repositoryId must belong to the Team and to the Run's captured repository scope.
+   * Writes a memory for the acting role. The default scope is the executor; an explicit
+   * repositoryId must belong to the executor and to the Run's captured repository scope.
    * A stable upsertKey or a same-scope normalized duplicate updates the existing
    * entry instead of adding a near-copy.
    */
@@ -161,7 +161,7 @@ export class TeamMemoryService {
         eq(executorCategoryMemories.executorCategoryId, context.executorCategoryId),
       )).limit(1) : [];
       const memory = byId ?? existing;
-      if (!memory) throw new BadRequestException('The executor category memory could not be saved.');
+      if (!memory) throw new BadRequestException('The executor memory could not be saved.');
       return { memory, operation: 'unchanged' };
     }
     await this.appendEvent(context, { memoryId: inserted.id, operation: 'created' });
@@ -229,9 +229,9 @@ export class TeamMemoryService {
       eq(executorCategoryMemories.workspaceId, context.workspaceId),
       eq(executorCategoryMemories.executorCategoryId, context.executorCategoryId),
     )).limit(1);
-    if (!row) throw new NotFoundException('Coding Executors team memory not found.');
+    if (!row) throw new NotFoundException('Executor memory not found.');
     if (row.repositoryId && context.allowedRepositoryIds && !context.allowedRepositoryIds.includes(row.repositoryId)) {
-      throw new BadRequestException('The executor category memory is outside this Run repository scope.');
+      throw new BadRequestException('The executor memory is outside this Run repository scope.');
     }
     return row;
   }
@@ -246,7 +246,7 @@ export class TeamMemoryService {
       eq(executorCategoryRepositories.workspaceId, context.workspaceId),
       eq(executorCategoryRepositories.executorCategoryId, context.executorCategoryId),
     )).limit(1);
-    if (!repository) throw new BadRequestException('The memory repository is not available for this Coding Executors team.');
+    if (!repository) throw new BadRequestException('The memory repository is not available for this executor.');
   }
 
   private async repository(repositoryId: string): Promise<{ name: string; directory: string } | undefined> {

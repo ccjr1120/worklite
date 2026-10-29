@@ -10,7 +10,7 @@ import {
 } from '@worklite/db';
 import { TeamMemoryService, type TeamMemoryActorContext } from './team-memory.service';
 
-// Roles write into one Team's memory and must never see another Team's rows, even
+// Roles write into one executor's memory and must never see another executor's rows, even
 // with the same workspace. Every scope value is server-owned except content,
 // repositoryId and upsertKey.
 
@@ -26,9 +26,9 @@ beforeEach(async () => {
     { id: 'workspace_b', slug: 'b', name: 'B', createdAt: now, updatedAt: now },
   ]);
   await db.insert(executorCategories).values([
-    { id: 'team_a', workspaceId: 'workspace_a', name: 'Team A', description: '', processId: 'bmad-tea', processVersion: '1', createdAt: now, updatedAt: now },
-    { id: 'team_b', workspaceId: 'workspace_a', name: 'Team B', description: '', processId: 'bmad-tea', processVersion: '1', createdAt: now, updatedAt: now },
-    { id: 'team_c', workspaceId: 'workspace_b', name: 'Team C', description: '', processId: 'bmad-tea', processVersion: '1', createdAt: now, updatedAt: now },
+    { id: 'team_a', workspaceId: 'workspace_a', name: 'Executor A', description: '', processId: 'bmad-tea', processVersion: '1', createdAt: now, updatedAt: now },
+    { id: 'team_b', workspaceId: 'workspace_a', name: 'Executor B', description: '', processId: 'bmad-tea', processVersion: '1', createdAt: now, updatedAt: now },
+    { id: 'team_c', workspaceId: 'workspace_b', name: 'Executor C', description: '', processId: 'bmad-tea', processVersion: '1', createdAt: now, updatedAt: now },
   ]);
   await db.insert(executorCategoryRepositories).values([
     { id: 'repo_a1', workspaceId: 'workspace_a', executorCategoryId: 'team_a', name: 'api', directory: '/projects/api', createdAt: now, updatedAt: now },
@@ -57,9 +57,9 @@ function actor(overrides: Partial<TeamMemoryActorContext> = {}): TeamMemoryActor
 }
 
 describe('TeamMemoryService scope isolation', () => {
-  it('keeps two Teams in one workspace apart', async () => {
-    const written = await service.write(actor(), { content: 'Team A uses pnpm.' });
-    await service.write(actor({ executorCategoryId: 'team_b', runId: 'atrun_b' }), { content: 'Team B uses npm.' });
+  it('keeps two executors in one workspace apart', async () => {
+    const written = await service.write(actor(), { content: 'Executor A uses pnpm.' });
+    await service.write(actor({ executorCategoryId: 'team_b', runId: 'atrun_b' }), { content: 'Executor B uses npm.' });
 
     const results = await service.search(actor(), { query: 'uses' });
     expect(results.map((result) => result.id)).toEqual([written.memory.id]);
@@ -68,15 +68,15 @@ describe('TeamMemoryService scope isolation', () => {
       .rejects.toMatchObject({ status: 404 });
   });
 
-  it('keeps two Runs of the same Team in the same shared executor category memory', async () => {
-    const first = await service.write(actor({ runId: 'atrun_a' }), { content: 'Shared Team fact.' });
+  it('keeps two Runs of the same executor in the same shared executor memory', async () => {
+    const first = await service.write(actor({ runId: 'atrun_a' }), { content: 'Shared executor fact.' });
     const second = await service.write(actor({ runId: 'atrun_other' }), { content: 'Another Run fact.' });
 
     const results = await service.search(actor({ runId: 'atrun_other' }), { query: 'fact' });
     expect(results.map((result) => result.id).sort()).toEqual([first.memory.id, second.memory.id].sort());
   });
 
-  it('rejects a repository from another Team or outside the Run scope', async () => {
+  it('rejects a repository from another executor or outside the Run scope', async () => {
     await expect(service.write(actor(), { content: 'Wrong repo.', repositoryId: 'repo_b1' }))
       .rejects.toMatchObject({ status: 400 });
     await expect(service.write(actor(), { content: 'Wrong run scope.', repositoryId: 'repo_a2' }))
@@ -85,10 +85,10 @@ describe('TeamMemoryService scope isolation', () => {
       .rejects.toMatchObject({ status: 400 });
   });
 
-  it('does not read another Team’s repository memory by id', async () => {
+  it('does not read another executor’s repository memory by id', async () => {
     const teamB = await service.write(
       actor({ executorCategoryId: 'team_b', runId: 'atrun_b', allowedRepositoryIds: ['repo_b1'] }),
-      { content: 'Team B repo fact.', repositoryId: 'repo_b1' },
+      { content: 'Executor B repo fact.', repositoryId: 'repo_b1' },
     );
     await expect(service.read(actor(), teamB.memory.id)).rejects.toMatchObject({ status: 404 });
   });
@@ -115,8 +115,8 @@ describe('TeamMemoryService write semantics', () => {
     expect(await db.select().from(executorCategoryMemories)).toHaveLength(1);
   });
 
-  it('updates the same scope by upsertKey but keeps Team and repository scopes separate', async () => {
-    const teamLevel = await service.write(actor(), { content: 'Team-level standard.', upsertKey: 'standard' });
+  it('updates the same scope by upsertKey but keeps executor and repository scopes separate', async () => {
+    const teamLevel = await service.write(actor(), { content: 'Executor-level standard.', upsertKey: 'standard' });
     const repoLevel = await service.write(actor(), { content: 'Repository standard.', repositoryId: 'repo_a1', upsertKey: 'standard' });
     const corrected = await service.write(actor(), { content: 'Corrected repository standard.', repositoryId: 'repo_a1', upsertKey: 'standard' });
 

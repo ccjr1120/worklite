@@ -124,7 +124,7 @@ const mcpLogger = new Logger('ClaudeCodeMcp');
 /**
  * Writes the owner-only mcp.json and returns the Claude Code argv fragment. A server
  * whose discovery fails is skipped rather than injected unvetted, but the failure is
- * logged: silently dropping the WorkLite executor category memory server would hide its tools.
+ * logged: silently dropping the WorkLite executor memory server would hide its tools.
  */
 export async function writeClaudeMcpConfiguration(
   directory: string,
@@ -325,7 +325,7 @@ class ClaudeCodeSession {
  * Claude Code sends these with every request it makes to its configured Anthropic base
  * URL, which is the WorkLite Gateway. Without them the executor's traffic reaches the
  * Gateway with no attribution and lands in the 'unattributed' group, so the full
- * correlation is rendered here rather than only the Team fields.
+ * correlation is rendered here rather than only the executor fields.
  */
 function correlationHeaders(request: ProjectExecutorRequest): string {
   const correlation = request.correlation

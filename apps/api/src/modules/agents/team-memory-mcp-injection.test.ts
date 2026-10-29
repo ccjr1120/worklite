@@ -8,7 +8,7 @@ import { codexMcpServers } from './codex-app-server.service';
 import type { PreparedProjectExecution } from './project-executor.types';
 import { teamMemoryMcpRuntime } from '../executor-categories/team-memory-mcp';
 
-// A v11 project executor receives the executor category memory MCP server like any other MCP
+// A v11 project executor receives the executor memory MCP server like any other MCP
 // server: Claude Code through the owner-only mcp.json and Codex through
 // mcp_servers.<key>. Discovery failures are logged, not silently dropped.
 
@@ -31,8 +31,8 @@ function preparedTeamMemory(): PreparedProjectExecution {
   };
 }
 
-describe('executor category memory MCP injection', () => {
-  it('adds the executor category memory server to the Claude mcp.json', async () => {
+describe('Executor memory MCP injection', () => {
+  it('adds the executor memory server to the Claude mcp.json', async () => {
     const prepared = preparedTeamMemory();
     const argv = await writeClaudeMcpConfiguration(prepared.directory, prepared.mcpServers, async () => [
       { name: 'team_memory_search' },

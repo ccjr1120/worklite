@@ -115,7 +115,7 @@ export class AgentTeamOperationJournalService {
       })
       .where(operationScopeFilter(scope, operationKey))
       .returning().all();
-    if (!row) throw new NotFoundException(`Coding Executors team operation ${operationKey} was not found.`);
+    if (!row) throw new NotFoundException(`Executor operation ${operationKey} was not found.`);
     return toRecord(row, operationKey);
   }
 
@@ -135,7 +135,7 @@ export class AgentTeamOperationJournalService {
       })
       .where(operationScopeFilter(scope, operationKey))
       .returning().all();
-    if (!row) throw new NotFoundException(`Coding Executors team operation ${operationKey} was not found.`);
+    if (!row) throw new NotFoundException(`Executor operation ${operationKey} was not found.`);
     return toRecord(row, operationKey);
   }
 
@@ -152,7 +152,7 @@ export class AgentTeamOperationJournalService {
         eq(executorOperations.status, 'reserved'),
       ))
       .returning().all();
-    if (!row) throw new NotFoundException(`Coding Executors team operation ${operationKey} was not found.`);
+    if (!row) throw new NotFoundException(`Executor operation ${operationKey} was not found.`);
     return toRecord(row, operationKey);
   }
 }

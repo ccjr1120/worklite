@@ -61,14 +61,14 @@ describe('groupRolePromptAddition v10 compatibility', () => {
     );
 
     expect(addition).toBe([
-      'This is the initially addressed role for a Chat-dispatched Coding Executors team Run. Use the captured Team context to guide this request.',
-      'Team working practice:\nPrefer small reviewed changes.',
-      'Team memories:\n- Deploy with the release script.',
-      'Team settings, roles and memories are managed by Chat through protected platform operations. Do not claim to read or change Team memories or settings yourself.',
+      'This is the initially addressed role for a Chat-dispatched executor Run. Use the captured executor context to guide this request.',
+      'Executor working practice:\nPrefer small reviewed changes.',
+      'Executor memories:\n- Deploy with the release script.',
+      'Executor settings, roles and memories are managed by Chat through protected platform operations. Do not claim to read or change executor memories or settings yourself.',
     ].join('\n'));
   });
 
-  it('keeps v10 handoff roles without executor category memory access', () => {
+  it('keeps v10 handoff roles without executor memory access', () => {
     const addition = groupRolePromptAddition(
       snapshot(10),
       request('group_1_developer', 'developer', [{ id: 'memory_1', repositoryId: null, role: null, content: 'Deploy with the release script.' }]),
@@ -86,10 +86,10 @@ describe('groupRolePromptAddition v11', () => {
       request('group_0_planner', 'planner', [{ id: 'memory_1', repositoryId: null, role: null, content: 'Deploy with the release script.' }]),
     );
 
-    expect(addition).toContain('Team memories:\n- Deploy with the release script.');
+    expect(addition).toContain('Executor memories:\n- Deploy with the release script.');
     expect(addition).toContain('team_memory_search');
     expect(addition).toContain('team_memory_write');
-    expect(addition).not.toContain('executor category memory index');
+    expect(addition).not.toContain('Executor memory index');
   });
 
   it('gives handoff roles a bounded title-only index', () => {
@@ -107,7 +107,7 @@ describe('groupRolePromptAddition v11', () => {
     expect(indexText.reduce((total, line) => total + line.length + 1, 0)).toBeLessThanOrEqual(TEAM_MEMORY_INDEX_CHARS);
     expect(addition).not.toContain('Detailed body');
     expect(addition).toContain('[api] Authentication decision');
-    expect(addition).not.toContain('Team working practice:');
+    expect(addition).not.toContain('Executor working practice:');
   });
 
   it('ranks memories matching the goal ahead of unrelated ones', () => {
@@ -128,11 +128,11 @@ describe('groupRolePromptAddition v11', () => {
       snapshot(11),
       request('group_1_developer', 'developer', [
         { id: 'legacy', repositoryId: null, role: 'developer', content: 'Legacy role-only fact.' },
-        { id: 'current', repositoryId: null, role: null, content: 'Current Team fact.' },
+        { id: 'current', repositoryId: null, role: null, content: 'Current executor fact.' },
       ]),
     )!;
 
-    expect(addition).toContain('Current Team fact.');
+    expect(addition).toContain('Current executor fact.');
     expect(addition).not.toContain('Legacy role-only fact.');
   });
 });
