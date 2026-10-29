@@ -43,12 +43,10 @@ ALTER TABLE agent_team_operations RENAME TO executor_operations;
 -- No column renames needed in this table - the primary key structure is unchanged
 
 -- Rename columns in executor_category_repositories (was agent_team_repositories)
-ALTER TABLE executor_category_repositories RENAME COLUMN team_id TO executor_category_id;
---> statement-breakpoint
+-- No column rename needed: this table was created with executor_category_id already (0041).
 
 -- Rename columns in executor_groups (was agent_team_groups)
-ALTER TABLE executor_groups RENAME COLUMN team_id TO executor_category_id;
---> statement-breakpoint
+-- No column rename needed: this table was created with executor_category_id already (0041).
 
 -- Rename index for executor_groups
 DROP INDEX agent_team_groups_workspace_updated_idx;
@@ -74,8 +72,7 @@ CREATE INDEX executor_group_messages_run_idx ON executor_group_messages(run_id);
 --> statement-breakpoint
 
 -- Rename columns in executor_category_memories (was agent_team_memories)
-ALTER TABLE executor_category_memories RENAME COLUMN team_id TO executor_category_id;
---> statement-breakpoint
+-- team_id already exists as executor_category_id (0041); only repository_id needs renaming.
 ALTER TABLE executor_category_memories RENAME COLUMN repository_id TO executor_category_repository_id;
 --> statement-breakpoint
 
@@ -96,8 +93,7 @@ CREATE INDEX executor_category_memories_source_run_idx ON executor_category_memo
 --> statement-breakpoint
 
 -- Rename columns in executor_conversations (was agent_team_conversations)
-ALTER TABLE executor_conversations RENAME COLUMN team_id TO executor_category_id;
---> statement-breakpoint
+-- No column rename needed: this table was created with executor_category_id already (0020).
 
 -- Rename columns in executor_intakes (was agent_team_intakes)
 -- No team_id columns need renaming, already references conversation_id
@@ -116,14 +112,11 @@ CREATE INDEX executor_conversation_messages_run_idx ON executor_conversation_mes
 --> statement-breakpoint
 
 -- Rename columns in executor_category_versions (was agent_team_versions)
-ALTER TABLE executor_category_versions RENAME COLUMN team_id TO executor_category_id;
---> statement-breakpoint
+-- No column rename needed: this table was created with executor_category_id already (0016).
 
 -- Rename columns in executor_runs (was agent_team_runs)
-ALTER TABLE executor_runs RENAME COLUMN team_id TO executor_category_id;
---> statement-breakpoint
-ALTER TABLE executor_runs RENAME COLUMN team_version_id TO executor_category_version_id;
---> statement-breakpoint
+-- No column rename needed: this table was created with executor_category_id and
+-- executor_category_version_id already (0016).
 
 -- Rename index for executor_runs
 DROP INDEX agent_team_runs_workspace_created_idx;
