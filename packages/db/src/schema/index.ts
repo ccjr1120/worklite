@@ -707,7 +707,7 @@ export type StoredAgentTeamVersionSnapshot = {
   recipeDefaults: StoredAgentTeamRecipeDefaults;
 };
 
-export const executorCategories = sqliteTable('agent_teams', {
+export const executorCategories = sqliteTable('executor_categories', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
@@ -725,7 +725,7 @@ export const executorCategories = sqliteTable('agent_teams', {
   deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),
 }, (table) => [unique().on(table.workspaceId, table.name)]);
 
-export const executorCategoryRepositories = sqliteTable('agent_team_repositories', {
+export const executorCategoryRepositories = sqliteTable('executor_category_repositories', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   executorCategoryId: text('executor_category_id').notNull().references(() => executorCategories.id, { onDelete: 'cascade' }),
@@ -735,7 +735,7 @@ export const executorCategoryRepositories = sqliteTable('agent_team_repositories
   updatedAt: timestamp('updated_at'),
 }, (table) => [unique().on(table.executorCategoryId, table.directory)]);
 
-export const executorGroups = sqliteTable('agent_team_groups', {
+export const executorGroups = sqliteTable('executor_groups', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   executorCategoryId: text('executor_category_id').notNull().references(() => executorCategories.id, { onDelete: 'cascade' }),
@@ -743,9 +743,9 @@ export const executorGroups = sqliteTable('agent_team_groups', {
   mode: text('mode').$type<StoredAgentTeamMode>().notNull().default('implement_and_validate'),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
-}, (table) => [index('agent_team_groups_workspace_updated_idx').on(table.workspaceId, table.updatedAt)]);
+}, (table) => [index('executor_groups_workspace_updated_idx').on(table.workspaceId, table.updatedAt)]);
 
-export const executorGroupRepositories = sqliteTable('agent_team_group_repositories', {
+export const executorGroupRepositories = sqliteTable('executor_group_repositories', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   groupId: text('group_id').notNull().references(() => executorGroups.id, { onDelete: 'cascade' }),
@@ -753,11 +753,11 @@ export const executorGroupRepositories = sqliteTable('agent_team_group_repositor
   name: text('name').notNull(),
   directory: text('directory').notNull(),
   createdAt: timestamp('created_at'),
-}, (table) => [unique().on(table.groupId, table.directory), index('agent_team_group_repositories_group_idx').on(table.groupId)]);
+}, (table) => [unique().on(table.groupId, table.directory), index('executor_group_repositories_group_idx').on(table.groupId)]);
 
 export type StoredAgentTeamGroupMessageKind = 'text' | 'question' | 'handoff' | 'control' | 'status' | 'file';
 
-export const executorGroupMessages = sqliteTable('agent_team_group_messages', {
+export const executorGroupMessages = sqliteTable('executor_group_messages', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   groupId: text('group_id').notNull().references(() => executorGroups.id, { onDelete: 'cascade' }),
@@ -778,10 +778,10 @@ export const executorGroupMessages = sqliteTable('agent_team_group_messages', {
   unique().on(table.groupId, table.sequence),
   unique().on(table.groupId, table.submissionId),
   unique().on(table.taskAttemptId),
-  index('agent_team_group_messages_run_idx').on(table.runId),
+  index('executor_group_messages_run_idx').on(table.runId),
 ]);
 
-export const executorGroupEvents = sqliteTable('agent_team_group_events', {
+export const executorGroupEvents = sqliteTable('executor_group_events', {
   groupId: text('group_id').notNull().references(() => executorGroups.id, { onDelete: 'cascade' }),
   sequence: integer('sequence').notNull(),
   type: text('type').$type<'message' | 'repository.updated' | 'run.updated' | 'memory.updated'>().notNull(),
@@ -791,7 +791,7 @@ export const executorGroupEvents = sqliteTable('agent_team_group_events', {
 
 export type StoredAgentTeamMemoryAuthor = 'chat' | 'role';
 
-export const executorCategoryMemories = sqliteTable('agent_team_memories', {
+export const executorCategoryMemories = sqliteTable('executor_category_memories', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   executorCategoryId: text('executor_category_id').notNull().references(() => executorCategories.id, { onDelete: 'cascade' }),
@@ -810,15 +810,15 @@ export const executorCategoryMemories = sqliteTable('agent_team_memories', {
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 }, (table) => [
-  index('agent_team_memories_scope_idx').on(table.executorCategoryId, table.repositoryId, table.role, table.updatedAt),
-  unique('agent_team_memories_upsert_idx').on(table.executorCategoryId, table.repositoryId, table.upsertKey),
-  index('agent_team_memories_source_run_idx').on(table.sourceRunId),
+  index('executor_category_memories_scope_idx').on(table.executorCategoryId, table.repositoryId, table.role, table.updatedAt),
+  unique('executor_category_memories_upsert_idx').on(table.executorCategoryId, table.repositoryId, table.upsertKey),
+  index('executor_category_memories_source_run_idx').on(table.sourceRunId),
 ]);
 
 
 export type StoredAgentTeamIntakeStatus = 'queued' | 'collecting' | 'starting' | 'started' | 'failed';
 
-export const executorConversations = sqliteTable('agent_team_conversations', {
+export const executorConversations = sqliteTable('executor_conversations', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   executorCategoryId: text('executor_category_id').notNull().references(() => executorCategories.id, { onDelete: 'cascade' }),
@@ -827,7 +827,7 @@ export const executorConversations = sqliteTable('agent_team_conversations', {
   updatedAt: timestamp('updated_at'),
 }, (table) => [unique().on(table.workspaceId, table.executorCategoryId)]);
 
-export const executorIntakes = sqliteTable('agent_team_intakes', {
+export const executorIntakes = sqliteTable('executor_intakes', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   conversationId: text('conversation_id').notNull().references(() => executorConversations.id, { onDelete: 'cascade' }),
@@ -842,10 +842,10 @@ export const executorIntakes = sqliteTable('agent_team_intakes', {
   updatedAt: timestamp('updated_at'),
 }, (table) => [
   unique().on(table.conversationId, table.submissionId),
-  index('agent_team_intakes_conversation_status_idx').on(table.conversationId, table.status),
+  index('executor_intakes_conversation_status_idx').on(table.conversationId, table.status),
 ]);
 
-export const executorConversationMessages = sqliteTable('agent_team_conversation_messages', {
+export const executorConversationMessages = sqliteTable('executor_conversation_messages', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   conversationId: text('conversation_id').notNull().references(() => executorConversations.id, { onDelete: 'cascade' }),
@@ -860,10 +860,10 @@ export const executorConversationMessages = sqliteTable('agent_team_conversation
 }, (table) => [
   primaryKey({ columns: [table.conversationId, table.sequence] }),
   unique().on(table.conversationId, table.deduplicationKey),
-  index('agent_team_conversation_messages_run_idx').on(table.runId),
+  index('executor_conversation_messages_run_idx').on(table.runId),
 ]);
 
-export const executorConversationEvents = sqliteTable('agent_team_conversation_events', {
+export const executorConversationEvents = sqliteTable('executor_conversation_events', {
   conversationId: text('conversation_id').notNull().references(() => executorConversations.id, { onDelete: 'cascade' }),
   sequence: integer('sequence').notNull(),
   type: text('type').$type<'message' | 'intake.updated' | 'run.state'>().notNull(),
@@ -871,7 +871,7 @@ export const executorConversationEvents = sqliteTable('agent_team_conversation_e
   createdAt: timestamp('created_at'),
 }, (table) => [primaryKey({ columns: [table.conversationId, table.sequence] })]);
 
-export const agentTeamVersions = sqliteTable('agent_team_versions', {
+export const agentTeamVersions = sqliteTable('executor_category_versions', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   executorCategoryId: text('executor_category_id').notNull().references(() => executorCategories.id, { onDelete: 'restrict' }),
@@ -880,7 +880,7 @@ export const agentTeamVersions = sqliteTable('agent_team_versions', {
   createdAt: timestamp('created_at'),
 }, (table) => [unique().on(table.executorCategoryId, table.version)]);
 
-export const executorRuns = sqliteTable('agent_team_runs', {
+export const executorRuns = sqliteTable('executor_runs', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   executorCategoryId: text('executor_category_id').notNull().references(() => executorCategories.id, { onDelete: 'restrict' }),
@@ -922,9 +922,9 @@ export const executorRuns = sqliteTable('agent_team_runs', {
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
   finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
-}, (table) => [index('agent_team_runs_workspace_created_idx').on(table.workspaceId, table.createdAt)]);
+}, (table) => [index('executor_runs_workspace_created_idx').on(table.workspaceId, table.createdAt)]);
 
-export const executorTaskAttempts = sqliteTable('agent_team_task_attempts', {
+export const executorTaskAttempts = sqliteTable('executor_task_attempts', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   runId: text('run_id').notNull().references(() => executorRuns.id, { onDelete: 'cascade' }),
@@ -944,10 +944,10 @@ export const executorTaskAttempts = sqliteTable('agent_team_task_attempts', {
   finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
 }, (table) => [
   unique().on(table.runId, table.taskKey, table.attemptIndex),
-  index('agent_team_task_attempts_run_task_idx').on(table.runId, table.taskKey),
+  index('executor_task_attempts_run_task_idx').on(table.runId, table.taskKey),
 ]);
 
-export const executorDocuments = sqliteTable('agent_team_documents', {
+export const executorDocuments = sqliteTable('executor_documents', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   runId: text('run_id').notNull().references(() => executorRuns.id, { onDelete: 'cascade' }),
@@ -965,7 +965,7 @@ export const executorDocuments = sqliteTable('agent_team_documents', {
   index('agent_team_documents_run_idx').on(table.runId, table.createdAt),
 ]);
 
-export const executorRunEvents = sqliteTable('agent_team_run_events', {
+export const executorRunEvents = sqliteTable('executor_run_events', {
   runId: text('run_id').notNull().references(() => executorRuns.id, { onDelete: 'cascade' }),
   sequence: integer('sequence').notNull(),
   type: text('type').$type<'run.status' | 'task.started' | 'task.activity' | 'task.delta' | 'task.waiting' | 'task.completed' | 'task.failed' | 'document.committed' | 'document.delivered' | 'document.delivery_failed' | 'operation.updated' | 'input.requested' | 'input.answered' | 'run.outcome' | 'run.progress'>().notNull(),
@@ -973,7 +973,7 @@ export const executorRunEvents = sqliteTable('agent_team_run_events', {
   createdAt: timestamp('created_at'),
 }, (table) => [primaryKey({ columns: [table.runId, table.sequence] })]);
 
-export const executorPendingInputs = sqliteTable('agent_team_pending_inputs', {
+export const executorPendingInputs = sqliteTable('executor_pending_inputs', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   runId: text('run_id').notNull().references(() => executorRuns.id, { onDelete: 'cascade' }),
@@ -989,7 +989,7 @@ export const executorPendingInputs = sqliteTable('agent_team_pending_inputs', {
   updatedAt: timestamp('updated_at'),
 }, (table) => [index('agent_team_pending_inputs_run_status_idx').on(table.runId, table.status)]);
 
-export const executorOperations = sqliteTable('agent_team_operations', {
+export const executorOperations = sqliteTable('executor_operations', {
   key: text('key').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   runId: text('run_id').notNull().references(() => executorRuns.id, { onDelete: 'cascade' }),
