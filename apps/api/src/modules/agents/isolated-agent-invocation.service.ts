@@ -139,6 +139,7 @@ type ToolEffectResult = {
 };
 
 const MAX_TOOL_ROUNDS = 20;
+const MAX_ALLOWED_TOOL_ROUNDS = 100;
 
 @Injectable()
 export class IsolatedAgentInvocationService {
@@ -211,7 +212,7 @@ export class IsolatedAgentInvocationService {
     const mcpTools = await this.mcpRuntime.discover(request.mcpRuntimes, request.signal);
     const candidates = await this.resources.publicModelCandidates(request.workspaceId, request.publicModelId);
     const contextText = typeof request.context === 'string' ? request.context : JSON.stringify(request.context);
-    const maxRounds = Math.min(request.limits?.maxToolRounds ?? MAX_TOOL_ROUNDS, MAX_TOOL_ROUNDS);
+    const maxRounds = Math.min(request.limits?.maxToolRounds ?? MAX_TOOL_ROUNDS, MAX_ALLOWED_TOOL_ROUNDS);
     const skillReferenceTool: GatewayToolDefinition = {
       name: 'skill_reference',
       description: 'Read a reference file from a Skill assigned to this role.',

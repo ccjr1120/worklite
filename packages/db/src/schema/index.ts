@@ -785,7 +785,7 @@ export const executorGroupMessages = sqliteTable('executor_group_messages', {
 }, (table) => [
   unique().on(table.groupId, table.sequence),
   unique().on(table.groupId, table.submissionId),
-  unique().on(table.taskAttemptId),
+  uniqueIndex('executor_group_messages_attempt_completion_idx').on(table.taskAttemptId).where(sql`${table.kind} IN ('text', 'handoff')`),
   index('executor_group_messages_run_idx').on(table.runId),
 ]);
 

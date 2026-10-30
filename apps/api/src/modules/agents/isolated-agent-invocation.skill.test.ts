@@ -57,6 +57,15 @@ function baseRequest(overrides: Record<string, unknown> = {}) {
 }
 
 describe('IsolatedAgentInvocationService Skill loading', () => {
+  it('uses the default budget and permits a bounded larger investigation budget', async () => {
+    gateway.runWorkflowAgent.mockResolvedValue({ text: 'ok' });
+    await service().execute(baseRequest());
+    expect(gateway.runWorkflowAgent.mock.lastCall?.[0].maxToolRounds).toBe(20);
+    await service().execute(baseRequest({ limits: { maxToolRounds: 60 } }));
+    expect(gateway.runWorkflowAgent.mock.lastCall?.[0].maxToolRounds).toBe(60);
+    await service().execute(baseRequest({ limits: { maxToolRounds: 1000 } }));
+    expect(gateway.runWorkflowAgent.mock.lastCall?.[0].maxToolRounds).toBe(100);
+  });
   it('injects an executor role Skill and advertises each reference', async () => {
     let captured: { systemPrompt: string; builtinTools: Array<{ name: string }> } | undefined;
     gateway.runWorkflowAgent.mockImplementation(async (request: { systemPrompt: string; builtinTools: Array<{ name: string }> }) => {

@@ -1763,7 +1763,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         // tokens) stalled for 70-120s and then failed. Bound each tool result and the rolling
         // context so a long tool loop stays well inside that window; the oldest tool
         // exchanges are dropped first and the task context message is always kept.
-        limits: { maxToolResultChars: 30_000, maxContextTokens: 30_000 },
+        limits: { maxToolResultChars: 30_000, maxContextTokens: 30_000, ...(taskRole === 'planner' ? { maxToolRounds: 60 } : {}) },
         operation: { taskKey, journal: operationJournal },
         onTextDelta: (delta) => this.appendEvent(this.db, request.runId, 'task.delta', {
           taskAttemptId: attempt.id,
