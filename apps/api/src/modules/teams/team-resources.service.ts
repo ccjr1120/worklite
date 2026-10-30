@@ -35,8 +35,8 @@ import { GATEWAY_STATS_GROUP_BYS, GATEWAY_SURFACES, WORKLITE_PLATFORM_SKILL_NAME
 import {
   agentExecutions,
   agentMcpServers,
-  executorCategories,
-  agentTeamVersions,
+  coders,
+  coderVersions,
   artifacts,
   agentSkills,
   agents,
@@ -81,7 +81,7 @@ import {
 import { McpClientService } from '../mcp-servers/mcp-client.service';
 import { getArtifactDetail, listArtifacts } from '../artifacts/artifacts-query';
 import { ArtifactStorageService } from '../artifacts/artifact-storage.service';
-import { EXECUTOR_CATEGORY_ROLES } from '../executors/executor-configuration';
+import { CODER_ROLES } from '../coders/coder-configuration';
 import { isWorkliteNavigationTarget, resolveWorkliteNavigationRoute } from './worklite-navigation';
 
 function maskSecret(value: string): string {
@@ -187,7 +187,7 @@ const MAX_SKILL_PACKAGE_BYTES = 1 * 1_024 * 1_024;
 
 const GATEWAY_PROVIDER_ID = 'gateway-provider';
 const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392);
-const GATEWAY_ATTRIBUTION_FILTERS = ['surface', 'conversationId', 'projectTaskId', 'executor', 'executorCategoryId', 'teamRunId', 'workflowId', 'workflowRunId', 'nodeRunId'] as const;
+const GATEWAY_ATTRIBUTION_FILTERS = ['surface', 'conversationId', 'projectTaskId', 'executor', 'coderId', 'teamRunId', 'workflowId', 'workflowRunId', 'nodeRunId'] as const;
 const GATEWAY_PROVIDER_URL = `http://127.0.0.1:${GATEWAY_PORT}/worklite/providers`;
 
 function validatePackageFiles(input: unknown): PackageFile[] {
@@ -828,7 +828,7 @@ export class WorkspaceResourcesService {
         instructions: skill.instructions,
         files: currentFiles.filter((file) => file.skillId === skill.id).map(({ path, content }) => ({ path, content })),
       });
-      const teams = transaction.select().from(executorCategories).where(eq(executorCategories.workspaceId, workspaceId)).all();
+      const teams = transaction.select().from(coders).where(eq(coders.workspaceId, workspaceId)).all();
       for (const team of teams) {
         let changed = false;
         const roles = team.roles.map((role) => {
@@ -836,7 +836,7 @@ export class WorkspaceResourcesService {
           if (next) changed = true;
           return next ?? role;
         });
-        if (changed) transaction.update(executorCategories).set({ roles, updatedAt: new Date() }).where(eq(executorCategories.id, team.id)).run();
+        if (changed) transaction.update(coders).set({ roles, updatedAt: new Date() }).where(eq(coders.id, team.id)).run();
       }
 
       for (const [oldSkillId, alias] of aliases) {
@@ -885,21 +885,21 @@ export class WorkspaceResourcesService {
         cleanup.workflowDrafts.push({ workflowId: draft.workflowId, nodeIds });
       }
 
-      const teams = transaction.select().from(executorCategories).where(eq(executorCategories.workspaceId, workspaceId)).all();
+      const teams = transaction.select().from(coders).where(eq(coders.workspaceId, workspaceId)).all();
       for (const team of teams) {
         let changed = false;
         const roles = team.roles.map((role) => {
           const next = rewriteRoleSkillIds(role, removeMapping, true);
           if (!next) return role;
           changed = true;
-          cleanup.agentTeamRoles.push({ executorCategoryId: team.id, role: role.role });
+          cleanup.agentTeamRoles.push({ coderId: team.id, role: role.role });
           for (const instance of next.developerInstances ?? []) {
             const previous = role.developerInstances?.find((candidate) => candidate.developerId === instance.developerId);
-            if (previous && previous.skills.length !== instance.skills.length) cleanup.agentTeamDeveloperInstances.push({ executorCategoryId: team.id, role: role.role, developerId: instance.developerId });
+            if (previous && previous.skills.length !== instance.skills.length) cleanup.agentTeamDeveloperInstances.push({ coderId: team.id, role: role.role, developerId: instance.developerId });
           }
           return next;
         });
-        if (changed) transaction.update(executorCategories).set({ roles, updatedAt: new Date() }).where(eq(executorCategories.id, team.id)).run();
+        if (changed) transaction.update(coders).set({ roles, updatedAt: new Date() }).where(eq(coders.id, team.id)).run();
       }
 
       for (const skillId of ids) transaction.insert(auditLogs).values({
@@ -1163,14 +1163,14 @@ export class WorkspaceResourcesService {
           transaction.update(workflowDrafts).set({ currentRevisionId: revisionId, definition: next, updatedAt: new Date() }).where(eq(workflowDrafts.id, draft.id)).run();
           workflowDraftCount += 1;
         }
-        const teamRows = transaction.select({ team: executorCategories }).from(executorCategories).where(eq(executorCategories.workspaceId, team.id)).all();
+        const teamRows = transaction.select({ team: coders }).from(coders).where(eq(coders.workspaceId, team.id)).all();
         for (const { team: agentTeam } of teamRows) {
           if (!agentTeam.roles.some((role) => role.mcpServers.some((server) => server.id === serverId))) continue;
           agentTeamRoleCount += agentTeam.roles.filter((role) => role.mcpServers.some((server) => server.id === serverId)).length;
-          transaction.update(executorCategories).set({
+          transaction.update(coders).set({
             roles: agentTeam.roles.map((role) => ({ ...role, mcpServers: role.mcpServers.filter((server) => server.id !== serverId) })),
             updatedAt: new Date(),
-          }).where(eq(executorCategories.id, agentTeam.id)).run();
+          }).where(eq(coders.id, agentTeam.id)).run();
         }
       }
       transaction.delete(mcpServers).where(and(eq(mcpServers.id, serverId), eq(mcpServers.workspaceId, team.id))).run();
@@ -1193,8 +1193,8 @@ export class WorkspaceResourcesService {
       this.db.select({ version: workflowVersions, workflowName: workflows.name }).from(workflowVersions)
         .innerJoin(workflows, eq(workflowVersions.workflowId, workflows.id))
         .where(eq(workflowVersions.workspaceId, workspaceId)),
-      this.db.select().from(executorCategories).where(eq(executorCategories.workspaceId, workspaceId)),
-      this.db.select().from(agentTeamVersions).where(eq(agentTeamVersions.workspaceId, workspaceId)),
+      this.db.select().from(coders).where(eq(coders.workspaceId, workspaceId)),
+      this.db.select().from(coderVersions).where(eq(coderVersions.workspaceId, workspaceId)),
     ]);
     return {
       agents: agentRows.map((row) => ({ agentId: row.agentId, agentName: row.agentName })),
@@ -1208,11 +1208,11 @@ export class WorkspaceResourcesService {
         return nodeIds.length ? [{ workflowId: version.workflowId, workflowName, version: version.version, nodeIds }] : [];
       }),
       agentTeamRoles: teamRows.flatMap((row) => row.roles.flatMap((role) => role.mcpServers.some((server) => server.id === serverId)
-        ? [{ executorCategoryId: row.id, teamName: row.name, role: role.role, displayName: role.displayName ?? null }]
+        ? [{ coderId: row.id, teamName: row.name, role: role.role, displayName: role.displayName ?? null }]
         : [])),
       agentTeamVersions: teamVersionRows.flatMap((row) => {
         const roles = row.snapshot.roles.filter((role) => role.mcpServers.some((server) => server.id === serverId)).map((role) => role.role);
-        return roles.length ? [{ executorCategoryId: row.executorCategoryId, versionId: row.id, version: row.version, roles }] : [];
+        return roles.length ? [{ coderId: row.coderId, versionId: row.id, version: row.version, roles }] : [];
       }),
     };
   }
@@ -1324,7 +1324,7 @@ export class WorkspaceResourcesService {
       this.db.select().from(skills).where(eq(skills.workspaceId, workspace.id)).orderBy(skills.name),
       this.db.select().from(mcpServers).where(eq(mcpServers.workspaceId, workspace.id)).orderBy(mcpServers.name),
       this.db.select().from(workflows).where(eq(workflows.workspaceId, workspace.id)).orderBy(workflows.name),
-      this.db.select().from(executorCategories).where(eq(executorCategories.workspaceId, workspace.id)).orderBy(executorCategories.name),
+      this.db.select().from(coders).where(eq(coders.workspaceId, workspace.id)).orderBy(coders.name),
       this.db.select().from(workflowSchedules).where(eq(workflowSchedules.workspaceId, workspace.id)),
       this.db.select().from(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspace.id)).limit(1),
       this.db.select({ id: wechatOfficialAccounts.id, displayName: wechatOfficialAccounts.displayName, status: wechatOfficialAccounts.status }).from(wechatOfficialAccounts).where(eq(wechatOfficialAccounts.workspaceId, workspace.id)),
@@ -1340,15 +1340,15 @@ export class WorkspaceResourcesService {
       capabilities: {
         troubleshooting: {
           evidenceOwner: 'Chat',
-          repairOwner: 'Executor Run dispatched by Chat',
+          repairOwner: 'Coder Run dispatched by Chat',
           chatHostTools: ['run_host_command'],
           chatDirectTools: ['update_plan', 'ask_user', 'run_host_command'],
-          chatProjectTaskDispatch: 'Chat creates no project tasks; project work goes through dispatch_task to an executor, and historical Chat project tasks stay readable',
+          chatProjectTaskDispatch: 'Chat creates no project tasks; project work goes through dispatch_task to a Coder, and historical Chat project tasks stay readable',
           chatPlatformTools: 'one typed tool per protected worklite-platform script, declared in scripts/tools.json, plus the runtime run_host_command terminal tool',
           chatCustomSkillsAndMcp: 'not selectable; neither the Chat model loop nor its project executors receive custom Skills or MCP servers',
           repairDispatchTool: 'dispatch_task',
           repairDispatchRoute: 'POST /chat/dispatch',
-          repairDispatch: 'Chat dispatch_task creates an executor group chat and binds its first role task to a Run; choose an executor by its current configuration and the task',
+          repairDispatch: 'Chat dispatch_task creates a Coder group chat and binds its first role task to a Run; choose a Coder by its current configuration and the task',
           inspectionAuthorizesRepair: false,
           gatewayLogs: {
             statistics: { tool: 'inspect_gateway_stats', route: 'GET /portkey-gateway/stats', retention: 'indefinite', filters: ['from', 'to', 'groupBy', ...GATEWAY_ATTRIBUTION_FILTERS] },
@@ -1357,16 +1357,16 @@ export class WorkspaceResourcesService {
             timeRange: 'explicit absolute from/to ISO-8601 instants',
             requestRetentionHours: 12,
             retentionMetadata: ['from', 'to', 'retainedFrom', 'retentionHours'],
-            correlation: ['surface', 'conversationId', 'projectTaskId', 'executor', 'workflowId', 'workflowRunId', 'nodeRunId', 'executorCategoryId', 'teamRunId', 'teamRole', 'teamTaskAttemptId', 'teamOperationKey'],
+            correlation: ['surface', 'conversationId', 'projectTaskId', 'executor', 'workflowId', 'workflowRunId', 'nodeRunId', 'coderId', 'teamRunId', 'teamRole', 'teamTaskAttemptId', 'teamOperationKey'],
             usageAttribution: {
               surfaces: [...GATEWAY_SURFACES],
               groupBy: [...GATEWAY_STATS_GROUP_BYS],
               defaultGroupBy: 'surface',
-              scope: 'conversation, executor, executor_category, workflow and team_run groupings count only requests carrying that identifier; node_run covers Run and Workflow traffic and reports a Run\'s traffic recorded before node attribution as one row with a null nodeRunId; surface covers every request',
-              nodeAttribution: 'nodeRunId is one executor role task attempt (parallel Developers and retries are separate nodes) or one Workflow node run; statistics recorded before node attribution carry no nodeRunId and are not backfilled',
+              scope: 'conversation, executor, coder, workflow and team_run groupings count only requests carrying that identifier; node_run covers Run and Workflow traffic and reports a Run\'s traffic recorded before node attribution as one row with a null nodeRunId; surface covers every request',
+              nodeAttribution: 'nodeRunId is one Coder role task attempt (parallel Developers and retries are separate nodes) or one Workflow node run; statistics recorded before node attribution carry no nodeRunId and are not backfilled',
               idLists: 'teamRunId and nodeRunId accept a comma-separated list of ids',
               persistence: 'attribution is written to the permanent statistics as well as the 12-hour request details',
-              coverage: 'only traffic that passes through the Gateway; a Codex task with no declared Gateway model runs on local configuration and contributes no tokens, so executor token usage is never complete',
+              coverage: 'only traffic that passes through the Gateway; a Codex task with no declared Gateway model runs on local configuration and contributes no tokens, so Coder token usage is never complete',
             },
             profile: 'server-owned WORKLITE_API_URL; no URL or profile override',
           },
@@ -1378,7 +1378,7 @@ export class WorkspaceResourcesService {
           persistedStateRetention: {
             maintenance: 'enabled by default without configuration: both SQLite databases run a periodic pass that expires history, reclaims free pages and truncates the WAL (SQLITE_MAINTENANCE_INTERVAL_MINUTES, default 15 minutes; SQLITE_WAL_SIZE_LIMIT_MEGABYTES; SQLITE_INCREMENTAL_VACUUM_PAGES). Each pass is bounded; while a backlog remains passes run about once a minute with four times the per-pass bounds, then return to the normal interval',
             commandStreams: 'COMMAND_STREAM_RETENTION_DAYS, default 3 days, then only COMMAND_STREAM_TAIL_KILOBYTES of trailing output is kept',
-            runEventStreams: 'RUN_EVENT_RETENTION_DAYS, default 14 days for the replay stream of a settled Workflow Run, executor Run or Chat execution; the runs, node records, results and artifacts themselves are never pruned. 0 disables the pruner',
+            runEventStreams: 'RUN_EVENT_RETENTION_DAYS, default 14 days for the replay stream of a settled Workflow Run, Coder Run or Chat execution; the runs, node records, results and artifacts themselves are never pruned. 0 disables the pruner',
             gatewayRequestLogs: '12 hours; statistics are indefinite',
             releases: 'WORKLITE_RELEASE_RETENTION, default 3 newest unreferenced release directories under runtime/releases; pruned on every deployment and upgrade attempt, including the ones that fail',
             upgradeRecords: 'WORKLITE_UPGRADE_RECORD_RETENTION_DAYS, default 30 days for terminal upgrade job records and deployment logs',
@@ -1401,7 +1401,7 @@ export class WorkspaceResourcesService {
           uncertainRecovery: ['adopt_command', 'mark_failed'],
           automaticReplay: false,
         },
-        projectExecutors: { tool: 'Executor project-executor roles', executors: { codex: { pluginId: 'codex-cli-chat', transport: 'App Server stdio JSON-RPC', launch: "configured command word (e.g. cxo, cx, codex) run through the operator's own interactive login shell, exactly like a manual terminal invocation; resolves the operator's own ~/.zshrc aliases, functions and PATH, so a native Codex model uses whichever local Codex configuration that resolution selects; a declared Gateway public model is served through a per-run model_providers.worklite Responses Provider", minimumVersion: '0.157.1', modelProtocols: 'a native Codex model needs no Gateway protocol; a declared Gateway public model requires openai/responses or codex/responses and is served through the Gateway', skills: 'skills/extraRoots/set', mcp: '-c mcp_servers with enabled_tools and env bearer token' }, claude: { pluginId: 'claude-code', transport: 'claude -p stream-json control protocol', configuration: '~/.claude for native defaults, or a per-task --settings override for a declared Gateway model', minimumVersion: '2.1.259', modelProtocols: ['anthropic/messages'], skills: '--plugin-dir', mcp: 'owner-only --mcp-config file plus --disallowedTools' } }, defaultExecutor: 'Executor developer role executor; claude when none is named', defaultModels: "precedence is the task or executor role model, then the executor local default; a Claude Code model must be a Gateway public model on an anthropic/messages Provider, while a Codex model may be a native model or a Gateway public model on openai/responses or codex/responses", gateway: 'both executors use the WorkLite Gateway for a declared Gateway model; a native Codex model uses its local configuration', nativeTools: true, worklitePlatformToolsForExecutors: false, localConfiguration: 'complete operator configuration', approvals: 'none; executors run without approvals', operationJournal: false, uncertainRecovery: false, interruption: 'task fails without replay; inspect the project state', evidence: 'Executor event stream activity, public reply text and process Command', progressText: 'latest complete public executor message; retained after cancellation or failure', chatTaskPrompt: 'task-specific prompt plus immutable user extension; pinned project instructions; previous evidence only on later attempts; active scope changes ask continue unchanged or cancel/create, never steer; replacement waits for persisted cancelled status', capturedLaunch: true, olderSnapshots: 'new task or Run required', readRoute: 'GET /chat/project-tasks/:id', listRoute: 'GET /chat/project-tasks (workspace-wide, across conversations)', subscribeRoute: 'POST /chat/project-tasks/:id/subscribe (one-shot settlement report into the subscribing conversation)', answerRoute: 'POST /chat/project-tasks/:id/answer', cancelRoute: 'POST /chat/project-tasks/:id/cancel', historicalOperationRoute: 'GET /chat/project-tasks/:id?operationKey=:operationKey', inspectTool: 'inspect_project_task', crossConversationTools: ['list_project_tasks', 'subscribe_project_task', 'wait_project_task'], taskOwner: 'Chat conversation', execution: 'background dispatch-and-return; the turn settles at dispatch and settlement or a task question triggers one automatic report turn when the conversation idles', concurrency: 'unlimited parallel tasks per workspace when dispatched separately; each model response may contain at most one project_task call; each new task starts at its workspace root and the executor chooses a Git strategy per project; WorkLite does not create worktrees, merge branches or clean up executor-managed Git state; historical tasks retain their captured worktree behavior', worktree: 'new tasks may use a project-specific worktree when the executor chooses it; no worktree or merge is required; historical WorkLite-managed worktrees keep their captured merge behavior', controlTools: ['answer_project_task', 'cancel_project_task'], taskQuestions: 'read-only on the task card; user answers in Chat through answer_project_task', taskCardSummary: ['goal', 'elapsed duration', 'current progress or terminal status'], taskCardCancellation: 'explicit confirmation with local busy and error feedback', taskScopeChanges: 'ask_user to continue captured task unchanged or cancel-and-create; verify cancelled before replacement dispatch', chatSteering: false, independentOfTeam: true, authorization: 'direct execution; no WorkLite proposal confirmation or command grants', automaticReplay: false, cancellation: 'Chat turn cancellation also cancels the conversation active background tasks' },
+        projectExecutors: { tool: 'Executor project-executor roles', executors: { codex: { pluginId: 'codex-cli-chat', transport: 'App Server stdio JSON-RPC', launch: "configured command word (e.g. cxo, cx, codex) run through the operator's own interactive login shell, exactly like a manual terminal invocation; resolves the operator's own ~/.zshrc aliases, functions and PATH, so a native Codex model uses whichever local Codex configuration that resolution selects; a declared Gateway public model is served through a per-run model_providers.worklite Responses Provider", minimumVersion: '0.157.1', modelProtocols: 'a native Codex model needs no Gateway protocol; a declared Gateway public model requires openai/responses or codex/responses and is served through the Gateway', skills: 'skills/extraRoots/set', mcp: '-c mcp_servers with enabled_tools and env bearer token' }, claude: { pluginId: 'claude-code', transport: 'claude -p stream-json control protocol', configuration: '~/.claude for native defaults, or a per-task --settings override for a declared Gateway model', minimumVersion: '2.1.259', modelProtocols: ['anthropic/messages'], skills: '--plugin-dir', mcp: 'owner-only --mcp-config file plus --disallowedTools' } }, defaultExecutor: 'Coder developer role executor; claude when none is named', defaultModels: "precedence is the task or executor role model, then the executor local default; a Claude Code model must be a Gateway public model on an anthropic/messages Provider, while a Codex model may be a native model or a Gateway public model on openai/responses or codex/responses", gateway: 'both executors use the WorkLite Gateway for a declared Gateway model; a native Codex model uses its local configuration', nativeTools: true, worklitePlatformToolsForCoders: false, localConfiguration: 'complete operator configuration', approvals: 'none; executors run without approvals', operationJournal: false, uncertainRecovery: false, interruption: 'task fails without replay; inspect the project state', evidence: 'Coder event stream activity, public reply text and process Command', progressText: 'latest complete public executor message; retained after cancellation or failure', chatTaskPrompt: 'task-specific prompt plus immutable user extension; pinned project instructions; previous evidence only on later attempts; active scope changes ask continue unchanged or cancel/create, never steer; replacement waits for persisted cancelled status', capturedLaunch: true, olderSnapshots: 'new task or Run required', readRoute: 'GET /chat/project-tasks/:id', listRoute: 'GET /chat/project-tasks (workspace-wide, across conversations)', subscribeRoute: 'POST /chat/project-tasks/:id/subscribe (one-shot settlement report into the subscribing conversation)', answerRoute: 'POST /chat/project-tasks/:id/answer', cancelRoute: 'POST /chat/project-tasks/:id/cancel', historicalOperationRoute: 'GET /chat/project-tasks/:id?operationKey=:operationKey', inspectTool: 'inspect_project_task', crossConversationTools: ['list_project_tasks', 'subscribe_project_task', 'wait_project_task'], taskOwner: 'Chat conversation', execution: 'background dispatch-and-return; the turn settles at dispatch and settlement or a task question triggers one automatic report turn when the conversation idles', concurrency: 'unlimited parallel tasks per workspace when dispatched separately; each model response may contain at most one project_task call; each new task starts at its workspace root and the executor chooses a Git strategy per project; WorkLite does not create worktrees, merge branches or clean up executor-managed Git state; historical tasks retain their captured worktree behavior', worktree: 'new tasks may use a project-specific worktree when the executor chooses it; no worktree or merge is required; historical WorkLite-managed worktrees keep their captured merge behavior', controlTools: ['answer_project_task', 'cancel_project_task'], taskQuestions: 'read-only on the task card; user answers in Chat through answer_project_task', taskCardSummary: ['goal', 'elapsed duration', 'current progress or terminal status'], taskCardCancellation: 'explicit confirmation with local busy and error feedback', taskScopeChanges: 'ask_user to continue captured task unchanged or cancel-and-create; verify cancelled before replacement dispatch', chatSteering: false, independentOfTeam: true, authorization: 'direct execution; no WorkLite proposal confirmation or command grants', automaticReplay: false, cancellation: 'Chat turn cancellation also cancels the conversation active background tasks' },
         chatCapabilities: {
           cancellation: { route: 'POST /agents/agt_system_helper_chat/executions/:executionId/cancel', states: ['running', 'waiting_for_input'], retained: ['messages', 'draft', 'execution evidence'], uncertainEffects: 'structured recovery; no automatic replay' },
           orchestration: {
@@ -1409,10 +1409,10 @@ export class WorkspaceResourcesService {
             customSkillExecution: false,
             directMcpCalls: false,
             platformTools: 'typed protected worklite-platform tools plus the runtime run_host_command terminal tool',
-            executorCapabilities: 'Chat receives selected Skill instructions and files in its turn snapshot; worklite-platform enables run_host_command. Arbitrary Skill scripts and direct user MCP calls stay unavailable. Project executors use native tools, receive no Skills from Chat, and Claude Code tasks receive the MCP servers declared in Chat configuration.',
-            codingTarget: 'dispatch_task to an executor (the general project executor by default)',
-            localCommandTarget: 'run_host_command for everyday installs, system/version/CLI queries, ordinary file management and short local scripts; dispatch_task to an executor for writing or changing code, repository-wide investigation, cross-file changes, validation/build/test and deployment',
-            collaborationTarget: 'Chat-dispatched executor Run operated from its Chat task card',
+            coderCapabilities: 'Chat receives selected Skill instructions and files in its turn snapshot; worklite-platform enables run_host_command. Arbitrary Skill scripts and direct user MCP calls stay unavailable. Project executors use native tools, receive no Skills from Chat, and Claude Code tasks receive the MCP servers declared in Chat configuration.',
+            codingTarget: 'dispatch_task to a Coder (QuickCoder by default)',
+            localCommandTarget: 'run_host_command for everyday installs, system/version/CLI queries, ordinary file management and short local scripts; dispatch_task to a Coder for writing or changing code, repository-wide investigation, cross-file changes, validation/build/test and deployment',
+            collaborationTarget: 'Chat-dispatched Coder Run operated from its Chat task card',
             automationTarget: 'published Workflow',
           },
           localProjects: {
@@ -1431,30 +1431,30 @@ export class WorkspaceResourcesService {
           configureRoute: 'PATCH /agents/agt_system_helper_chat',
           memory: { store: 'workspace-level chat_memories rows with content, category, source conversation and timestamps', categories: ['rule', 'preference', 'project', 'project_state', 'workflow', 'other'], categoryMetadata: '@worklite/contracts CHAT_MEMORY_CATEGORY_META is the single source for which categories are always injected (rule, preference) versus on-demand', tools: ['list_memories', 'save_memory', 'update_memory', 'delete_memory'], routes: ['GET /chat/memories', 'GET /chat/memories/:id', 'POST /chat/memories', 'PATCH /chat/memories/:id', 'DELETE /chat/memories/:id'], injection: 'bounded projection captured per accepted turn into the capability snapshot system prompt: rule and preference categories inject full content, other categories inject only an id/category/summary catalog for on-demand reads through list_memories', bounds: { contentChars: 2000, entries: 100, promptEntries: 50, promptChars: 6000, catalogEntries: 50, catalogChars: 2000 }, management: 'Web Chat settings dialog, grouped and filterable by category' },
         },
-        upgrades: { operatorDeploymentVersion: { command: 'pnpm deploy:local', source: 'apps/web/package.json', bump: 'patch before compilation on every invocation', initialBaseline: 'builds in the project root before starting managed services', laterDeployment: 'installs dependencies and builds in the project root while current services keep running; after success, verifies port ownership, then restarts API, Web and Gateway from project-root build outputs', legacyTakeover: 'reads old current.json release fields and verifies the recorded process paths, groups and target listeners before stopping them', unknownListeners: 'left untouched; deployment fails', failedAttempt: 'consumes source version; build failure leaves current processes untouched; startup failure leaves current.json at the last successful deployment and does not restore the stopped program or data', webVersion: 'version from the last successful deployment', gitMutations: false, databaseBackups: false, automaticRollback: false, releaseSnapshots: false }, proposeRoute: 'POST /upgrades', redeployRoute: 'POST /upgrades/redeploy', redeployTool: 'redeploy', inspectRoute: 'GET /upgrades/:id', authorization: 'explicit current Chat user request; no second confirmation', authorizationBinding: 'persisted user message and immutable release', combinedRepairRedeploy: 'dispatch the change to the general project executor, then Chat calls redeploy after the Run reports success', deduplication: 'one job per execution and user message', profile: 'current managed runtime only; no model override', progress: 'original conversation; automatic observation after reconnect', requiresManagedBaseline: true, projectRoot: process.env.WORKLITE_PROJECT_ROOT ?? null, phases: ['proposed', 'authorized', 'preflighting', 'draining', 'frozen', 'switching', 'recovering', 'succeeded', 'rolled_back', 'failed'], uninterruptedIngress: false, interruptionPolicy: 'cancel active Agent, executor, Workflow and Command work after isolated preflight; never automatically resume' },
-        chat: { workspaceRoute: '/chat', channelsRoute: 'GET /chat/channels', conversationsRoute: 'GET /chat/conversations', conversationRoute: 'GET /chat/conversations/:id', recordsRoute: 'GET /chat/conversations/:id/records', recordsSnapshots: 'latest snapshot plus all non-snapshot events', maxSkillScriptOutputChars: 60000, diagnosticTool: { name: 'inspect_chat_conversation', records: 'current evidence and status/receipt metadata; repeated snapshots and cards referenced', fullToolOutputInput: 'toolCallId', completeEvidence: 'fullRecordsRoute', inferenceHistory: 'raw replay snapshots replaced with explicit retained-evidence references; original history unchanged' }, channels: [{ id: 'web', builtIn: true, presentation: ['streaming', 'markdown', 'questions'] }, { id: 'feishu', builtIn: false, presentation: ['native streamed cards', 'collapsed task details', 'forms', 'QR images', 'files'] }, { id: 'wechat', builtIn: false, presentation: ['text messages', 'QR images', 'Chat attachment images'] }], histories: 'server-persisted; unrelated conversations remain separate', backgroundConversations: { start: 'start_chat_conversation', monitor: ['wait_chat_conversation', 'inspect_chat_conversation'], reply: 'message_chat_conversation', userActivation: false, origin: 'first user message names the starting conversation', messaging: 'only conversations started from the current conversation', nesting: false, recoveryQuestions: 'user only' }, masterAgentId: 'agt_system_helper_chat', dispatchRoute: 'POST /chat/dispatch', taskFeedback: 'task state is independent of Chat turn; executor questions, failures and failed dispatches remain visible', executorDispatch: { owner: 'Chat Agent', recordsRoute: 'GET /executors/:executorId/runs', groupRoute: 'read-only archive at /executor-groups/:groupId', runRoute: 'read-only evidence at /executor-runs/:runId', requires: ['executorId', 'goal', 'absolute existing projectDirectory'], initialRole: 'executor entry role unless the user names an active role', nameSnapshot: 'the Run captures the executor name at dispatch', submissionReference: ['groupId', 'runId'], entry: 'dispatch_task creates a hidden persistent group and bound Run; Chat owns the task card and all follow-up actions', controls: ['answer', 'pause', 'resume', 'cancel', 'retry', 'reexecute', 'recover'], roleControl: 'Chat task card controls the bound Run; reexecution creates a new group message and Run', commandAuthorization: 'none; every executor role executes its commands directly on any channel through its configured tool surface, and WorkLite records command text, exit code, output and Command references as evidence', contextIsolation: ['initially addressed role', 'selected repositories', 'working practice and the full executor memory projection go only to the initially addressed role', 'project Git policy goes to every engine-backed role'], handoffs: 'summary and immutable file references; recipients read document content on demand', busyExecutor: 'queue the bound Run when maxConcurrentRuns is reached; start queued Runs FIFO when an active slot opens' }, targets: ['conversation', 'executor_category', 'workflow'], workflowVersions: 'published only', externalPluginId: 'feishu-bot', mergeHistories: false, webAccess: 'inspect and continue selected persisted conversation', feishu: { privateChat: true, defaultTarget: 'conversation', persistentTargetSelection: false, choices: 'current pending Agent question; plan not required', replyProgress: 'separate queued, thinking, responding and processing component in the same CardKit entity', cardPresentation: { transport: 'CardKit JSON 2.0 entity', requiredPermission: 'cardkit:card:write', replyAnimation: 'native fast typewriter', updates: 'component-local; full card for structural transitions', progressIcon: 'neutral native loading icon; no custom animation', taskDetails: 'default-collapsed executor task attempts and Workflow node execution statuses', visibleContext: ['current task or step', 'outcome', 'questions', 'failures', 'QR images', 'answer forms', 'controls'], streamingLifecycle: 'model output only; close for tools, questions and terminal states; renew platform window', persistedDelivery: ['cardId', 'sequence', 'last delivered card', 'streaming start', 'pending idempotent UUID and exact payload'], legacyCardConversion: false }, completedDialogue: 'content without task header or completion label', taskAnswers: 'reply to the task card or submit its form', groupChat: false, inbound: ['text', 'card actions'], outbound: ['updated response cards', 'task questions and controls', 'QR images', 'Executor documents', 'Workflow Artifacts'], configurationRoute: '/chat?view=channels', applicationRegistration: { available: true, archetype: 'PersonalAgent', startRoute: 'POST /plugins/feishu-bot/feishu/registration', cancelRoute: 'DELETE /plugins/feishu-bot/feishu/registration', operator: 'user through Web configuration', automaticCredentialPersistence: true, userBinding: 'automatic when returned, otherwise manual', resumable: true, manualExistingApplication: true, platformSetup: ['bot capability', 'IM permissions', 'long-connection message and card subscriptions', 'publication'], userOAuth: false, runtimeCompatibility: 'requires authorized real integration' }, wechat: { pluginId: 'wechat-bot', protocol: 'Tencent iLink bot long-poll', login: { startRoute: 'POST /plugins/wechat-bot/wechat/login', cancelRoute: 'DELETE /plugins/wechat-bot/wechat/login', mechanism: 'QR scan; scanning user becomes the allowed user', credentialStorage: 'encrypted bot token in the plugin row' }, privateChat: true, groupChat: false, inbound: ['text'], outbound: ['whole text replies', 'conversation question prompts', 'task status notifications', 'Workflow QR images', 'Chat attachment images'], streaming: false, cards: false, media: 'images outbound only', defaultTarget: 'conversation', questionAnswers: 'plain text answers to Chat pending questions; Chat Agent handles executor actions', disconnectRoute: 'POST /plugins/wechat-bot/wechat/disconnect', configurationRoute: '/chat?view=channels', staleToken: 'status error; user re-logins by QR' } } },
+        upgrades: { operatorDeploymentVersion: { command: 'pnpm deploy:local', source: 'apps/web/package.json', bump: 'patch before compilation on every invocation', initialBaseline: 'builds in the project root before starting managed services', laterDeployment: 'installs dependencies and builds in the project root while current services keep running; after success, verifies port ownership, then restarts API, Web and Gateway from project-root build outputs', legacyTakeover: 'reads old current.json release fields and verifies the recorded process paths, groups and target listeners before stopping them', unknownListeners: 'left untouched; deployment fails', failedAttempt: 'consumes source version; build failure leaves current processes untouched; startup failure leaves current.json at the last successful deployment and does not restore the stopped program or data', webVersion: 'version from the last successful deployment', gitMutations: false, databaseBackups: false, automaticRollback: false, releaseSnapshots: false }, proposeRoute: 'POST /upgrades', redeployRoute: 'POST /upgrades/redeploy', redeployTool: 'redeploy', inspectRoute: 'GET /upgrades/:id', authorization: 'explicit current Chat user request; no second confirmation', authorizationBinding: 'persisted user message and immutable release', combinedRepairRedeploy: 'dispatch the change to QuickCoder, then Chat calls redeploy after the Run reports success', deduplication: 'one job per execution and user message', profile: 'current managed runtime only; no model override', progress: 'original conversation; automatic observation after reconnect', requiresManagedBaseline: true, projectRoot: process.env.WORKLITE_PROJECT_ROOT ?? null, phases: ['proposed', 'authorized', 'preflighting', 'draining', 'frozen', 'switching', 'recovering', 'succeeded', 'rolled_back', 'failed'], uninterruptedIngress: false, interruptionPolicy: 'cancel active Agent, Coder, Workflow and Command work after isolated preflight; never automatically resume' },
+        chat: { workspaceRoute: '/chat', channelsRoute: 'GET /chat/channels', conversationsRoute: 'GET /chat/conversations', conversationRoute: 'GET /chat/conversations/:id', recordsRoute: 'GET /chat/conversations/:id/records', recordsSnapshots: 'latest snapshot plus all non-snapshot events', maxSkillScriptOutputChars: 60000, diagnosticTool: { name: 'inspect_chat_conversation', records: 'current evidence and status/receipt metadata; repeated snapshots and cards referenced', fullToolOutputInput: 'toolCallId', completeEvidence: 'fullRecordsRoute', inferenceHistory: 'raw replay snapshots replaced with explicit retained-evidence references; original history unchanged' }, channels: [{ id: 'web', builtIn: true, presentation: ['streaming', 'markdown', 'questions'] }, { id: 'feishu', builtIn: false, presentation: ['native streamed cards', 'collapsed task details', 'forms', 'QR images', 'files'] }, { id: 'wechat', builtIn: false, presentation: ['text messages', 'QR images', 'Chat attachment images'] }], histories: 'server-persisted; unrelated conversations remain separate', backgroundConversations: { start: 'start_chat_conversation', monitor: ['wait_chat_conversation', 'inspect_chat_conversation'], reply: 'message_chat_conversation', userActivation: false, origin: 'first user message names the starting conversation', messaging: 'only conversations started from the current conversation', nesting: false, recoveryQuestions: 'user only' }, masterAgentId: 'agt_system_helper_chat', dispatchRoute: 'POST /chat/dispatch', taskFeedback: 'task state is independent of Chat turn; Coder questions, failures and failed dispatches remain visible', coderDispatch: { owner: 'Chat Agent', recordsRoute: 'GET /coders/:coderId/runs', groupRoute: 'read-only archive at /coder-groups/:groupId', runRoute: 'read-only evidence at /coder-runs/:runId', requires: ['coderId', 'goal', 'absolute existing projectDirectory'], initialRole: 'Coder entry role unless the user names an active role', nameSnapshot: 'the Run captures the Coder name at dispatch', submissionReference: ['groupId', 'runId'], entry: 'dispatch_task creates a hidden persistent group and bound Run; Chat owns the task card and all follow-up actions', controls: ['answer', 'pause', 'resume', 'cancel', 'retry', 'reexecute', 'recover'], roleControl: 'Chat task card controls the bound Run; reexecution creates a new group message and Run', commandAuthorization: 'none; every Coder role executes its commands directly on any channel through its configured tool surface, and WorkLite records command text, exit code, output and Command references as evidence', contextIsolation: ['initially addressed role', 'selected repositories', 'working practice and the full Coder memory projection go only to the initially addressed role', 'project Git policy goes to every engine-backed role'], handoffs: 'summary and immutable file references; recipients read document content on demand', busyCoder: 'queue the bound Run when maxConcurrentRuns is reached; start queued Runs FIFO when an active slot opens' }, targets: ['conversation', 'coder', 'workflow'], workflowVersions: 'published only', externalPluginId: 'feishu-bot', mergeHistories: false, webAccess: 'inspect and continue selected persisted conversation', feishu: { privateChat: true, defaultTarget: 'conversation', persistentTargetSelection: false, choices: 'current pending Agent question; plan not required', replyProgress: 'separate queued, thinking, responding and processing component in the same CardKit entity', cardPresentation: { transport: 'CardKit JSON 2.0 entity', requiredPermission: 'cardkit:card:write', replyAnimation: 'native fast typewriter', updates: 'component-local; full card for structural transitions', progressIcon: 'neutral native loading icon; no custom animation', taskDetails: 'default-collapsed Coder task attempts and Workflow node execution statuses', visibleContext: ['current task or step', 'outcome', 'questions', 'failures', 'QR images', 'answer forms', 'controls'], streamingLifecycle: 'model output only; close for tools, questions and terminal states; renew platform window', persistedDelivery: ['cardId', 'sequence', 'last delivered card', 'streaming start', 'pending idempotent UUID and exact payload'], legacyCardConversion: false }, completedDialogue: 'content without task header or completion label', taskAnswers: 'reply to the task card or submit its form', groupChat: false, inbound: ['text', 'card actions'], outbound: ['updated response cards', 'task questions and controls', 'QR images', 'Coder documents', 'Workflow Artifacts'], configurationRoute: '/chat?view=channels', applicationRegistration: { available: true, archetype: 'PersonalAgent', startRoute: 'POST /plugins/feishu-bot/feishu/registration', cancelRoute: 'DELETE /plugins/feishu-bot/feishu/registration', operator: 'user through Web configuration', automaticCredentialPersistence: true, userBinding: 'automatic when returned, otherwise manual', resumable: true, manualExistingApplication: true, platformSetup: ['bot capability', 'IM permissions', 'long-connection message and card subscriptions', 'publication'], userOAuth: false, runtimeCompatibility: 'requires authorized real integration' }, wechat: { pluginId: 'wechat-bot', protocol: 'Tencent iLink bot long-poll', login: { startRoute: 'POST /plugins/wechat-bot/wechat/login', cancelRoute: 'DELETE /plugins/wechat-bot/wechat/login', mechanism: 'QR scan; scanning user becomes the allowed user', credentialStorage: 'encrypted bot token in the plugin row' }, privateChat: true, groupChat: false, inbound: ['text'], outbound: ['whole text replies', 'conversation question prompts', 'task status notifications', 'Workflow QR images', 'Chat attachment images'], streaming: false, cards: false, media: 'images outbound only', defaultTarget: 'conversation', questionAnswers: 'plain text answers to Chat pending questions; Chat Agent handles Coder actions', disconnectRoute: 'POST /plugins/wechat-bot/wechat/disconnect', configurationRoute: '/chat?view=channels', staleToken: 'status error; user re-logins by QR' } } },
         supportedResourceOperations: [
           'inspect Gateway statistics and request logs',
-          'delegate independent project work to an executor whose roles run on the Codex or Claude Code execution engine',
+          'delegate independent project work to a Coder whose roles run on the Codex or Claude Code execution engine',
           'install or manage Skills and perform ordinary local terminal work through the general run_host_command tool',
           'inspect Chat project task activity',
-          'dispatch repair to an executor',
+          'dispatch repair to a Coder',
           'inspect Chat conversations and full saved records',
           'start, monitor and answer a background Chat conversation',
           'inspect and update Chat capabilities',
           'save, update, list and delete workspace long-term memories',
           'propose and inspect managed upgrades',
-          'redeploy WorkLite on explicit user request, directly or after a successful general project executor Run',
+          'redeploy WorkLite on explicit user request, directly or after a successful QuickCoder Run',
           'inspect workspace resources',
           'read one Workflow draft graph, published versions, schedule and recent Runs directly with inspect_workflow',
           'read other platform records through the bounded read-only query_platform tool',
           'locate local projects from the read-only metadata index',
           'inspect Workflow capabilities',
-          'inspect, rename and configure executors by stable id',
-          'inspect executor Run records, archived group transcripts, Runs and documents',
-          'manage executor/repository-scoped memories and working practice through Chat',
-          'answer, control, recover and retry executor Runs from Chat',
-          'dispatch Chat-owned executor Runs and published Workflow tasks',
+          'inspect, rename and configure Coders by stable id',
+          'inspect Coder Run records, archived group transcripts, Runs and documents',
+          'manage Coder/repository-scoped memories and working practice through Chat',
+          'answer, control, recover and retry Coder Runs from Chat',
+          'dispatch Chat-owned Coder Runs and published Workflow tasks',
           'navigate to known WorkLite pages and a Workflow editor by name or id',
           'create non-secret model Provider draft',
           'create Skill package',
@@ -1501,41 +1501,41 @@ export class WorkspaceResourcesService {
             imageEdits: false,
           },
         },
-        executors: {
+        coders: {
           available: true,
-          executorCreation: true,
-          createRoute: 'POST /executors',
-          listRoute: 'GET /executors',
-          selection: 'Chat selects an executor by stable executorId and purpose, never by display name; read current names and ids with inspect_executors',
-          currentExecutors: agentTeamRows.filter((team) => !team.deletedAt).map((team) => ({ id: team.id, name: team.name })),
-          rename: { tool: 'update_executor', route: 'PATCH /executors/:executorId', field: 'name', rules: 'trimmed 1-64 characters, no control characters, unique among non-deleted executors ignoring case', conflict: 'HTTP 409 EXECUTOR_NAME_CONFLICT', concurrency: 'optional expectedRevision precondition (the revision from GET /executors/:executorId); a stale value returns HTTP 409 EXECUTOR_REVISION_CONFLICT', affects: 'new Runs only; every Run keeps the executor name captured at dispatch (executorNameSnapshot), falling back to the bound executor version name, then the current name' },
-          webRoute: '/executor-runs',
-          recordsRoute: 'GET /executors/:executorId/runs',
-          runListRoute: 'GET /executor-runs',
+          coderCreation: true,
+          createRoute: 'POST /coders',
+          listRoute: 'GET /coders',
+          selection: 'Chat selects a Coder by stable coderId and purpose, never by display name; read current names and ids with inspect_coders',
+          currentCoders: agentTeamRows.filter((team) => !team.deletedAt).map((team) => ({ id: team.id, name: team.name })),
+          rename: { tool: 'update_coder', route: 'PATCH /coders/:coderId', field: 'name', rules: 'trimmed 1-64 characters, no control characters, unique among non-deleted Coders ignoring case', conflict: 'HTTP 409 CODER_NAME_CONFLICT', concurrency: 'optional expectedRevision precondition (the revision from GET /coders/:coderId); a stale value returns HTTP 409 CODER_REVISION_CONFLICT', affects: 'new Runs only; every Run keeps the executor name captured at dispatch (coderNameSnapshot), falling back to the bound executor version name, then the current name' },
+          webRoute: '/coding',
+          recordsRoute: 'GET /coders/:coderId/runs',
+          runListRoute: 'GET /coder-runs',
           runListOverview: 'each list item carries overview: totalTokens (TokenAttribution), durationMs, and currentNode (name, role and latest action) while the Run is in progress',
-          runNodesRoute: 'GET /executor-runs/nodes?runIds=a,b (read-only, at most 50 Runs): per Run, one node per role task attempt with status, duration, TokenAttribution tokens, latest activity and its steps (step/activity/tool_call)',
+          runNodesRoute: 'GET /coder-runs/nodes?runIds=a,b (read-only, at most 50 Runs): per Run, one node per role task attempt with status, duration, TokenAttribution tokens, latest activity and its steps (step/activity/tool_call)',
           tokenAttribution: 'tokens with source exact (Gateway statistics), estimated (step share by request start time, from 12-hour request logs) or unavailable (tokens null, never 0, with a reason)',
           webGroupCreation: false,
           chatAgentDispatchOnly: true,
           dispatchRoute: 'POST /chat/dispatch',
-          dispatchRequires: ['executorId', 'goal in message', 'absolute existing projectDirectory'],
-          initialRole: 'the executor entry role: its Dispatcher when present, otherwise its Planner; a user-named active role bypasses it',
+          dispatchRequires: ['coderId', 'goal in message', 'absolute existing projectDirectory'],
+          initialRole: 'the Coder entry role: its Dispatcher when present, otherwise its Planner; a user-named active role bypasses it',
           busyDispatch: 'persist as queued when maxConcurrentRuns is reached; start queued Runs FIFO when an active slot opens',
           maxConcurrentRuns: { configurable: true, minimum: 1, default: 3 },
           submissionBinding: 'stable submission id atomically binds groupId and runId; repeated delivery is idempotent',
           groupRoutes: {
             persistence: 'groups bind Chat submissions and preserve transcript and repository context for captured Runs',
-            archive: 'GET /executor-groups/:groupId is read-only history; no user-facing composer, answer, repository mutation or controls',
+            archive: 'GET /coder-groups/:groupId is read-only history; no user-facing composer, answer, repository mutation or controls',
             operations: 'Chat dispatch and protected Chat platform tools own user-requested actions',
           },
-          memory: { routes: 'GET/POST/PATCH/DELETE /executors/:executorId/memories through protected Chat platform tools', scope: ['executor', 'canonical repository'], injection: 'the initially addressed role receives the full captured projection and every other role a bounded index', roleTools: ['executor_memory_search', 'executor_memory_read', 'executor_memory_write', 'executor_memory_update'], writeOwner: 'Chat has full management; roles may search, read and write executor memories within the Run repository scope through managed tools or the per-task executor memory MCP endpoint' },
+          memory: { routes: 'GET/POST/PATCH/DELETE /coders/:coderId/memories through protected Chat platform tools', scope: ['coder', 'canonical repository'], injection: 'the initially addressed role receives the full captured projection and every other role a bounded index', roleTools: ['coder_memory_search', 'coder_memory_read', 'coder_memory_write', 'coder_memory_update'], writeOwner: 'Chat has full management; roles may search, read and write executor memories within the Run repository scope through managed tools or the per-task executor memory MCP endpoint' },
           workingPractice: 'captured by each new group Run and injected into the initially addressed role only',
-          projectGitPolicy: { perExecutor: true, editableThrough: 'update_executor with executorId', capturedBy: 'new executor version', injection: 'every engine-backed role in the captured Run', enforcement: 'guidance for execution engines; WorkLite does not create, merge, or clean Git branches or worktrees' },
-          deletion: { tool: 'delete_executor', deleteRoute: 'DELETE /executors/:executorId', deleteRequires: 'path executorId and body confirmTeamId matching', softDelete: true, deletedExecutorsExcludedFrom: ['executor list', 'inspect_executor', 'update_executor', 'role CRUD', 'dispatch targets'], deletedExecutorsPreserve: ['historical Run data', 'executor version snapshots', 'executor memories', 'group archives', 'role directory'], beforeDelete: 'ask_user for confirmation; prevent if active Runs exist' },
-          runWebRoute: '/executor-runs/:runId',
-          roles: [...EXECUTOR_CATEGORY_ROLES],
+          projectGitPolicy: { perCoder: true, editableThrough: 'update_coder with coderId', capturedBy: 'new Coder version', injection: 'every engine-backed role in the captured Run', enforcement: 'guidance for execution engines; WorkLite does not create, merge, or clean Git branches or worktrees' },
+          deletion: { tool: 'delete_coder', deleteRoute: 'DELETE /coders/:coderId', deleteRequires: 'path coderId and body confirmTeamId matching', softDelete: true, deletedCodersExcludedFrom: ['Coder list', 'inspect_coder', 'update_coder', 'role CRUD', 'dispatch targets'], deletedCodersPreserve: ['historical Run data', 'executor version snapshots', 'executor memories', 'group archives', 'role directory'], beforeDelete: 'ask_user for confirmation; prevent if active Runs exist' },
+          runWebRoute: '/coding/runs/:runId',
+          roles: [...CODER_ROLES],
           roleDisplayNames: { executor: 'Implementer' },
-          dynamicRoleDirectory: { customIds: 'server-assigned stable opaque ids', roleCrud: ['POST /executors/:executorId/roles', 'PATCH /executors/:executorId/roles/:roleId', 'DELETE /executors/:executorId/roles/:roleId'] },
+          dynamicRoleDirectory: { customIds: 'server-assigned stable opaque ids', roleCrud: ['POST /coders/:coderId/roles', 'PATCH /coders/:coderId/roles/:roleId', 'DELETE /coders/:coderId/roles/:roleId'] },
           developerExecution: {
             engines: ['claude', 'codex'],
             roleField: 'developer defaults to claude; new Runs capture execution engine launches for configured roles with an executor engine',
@@ -1557,31 +1557,31 @@ export class WorkspaceResourcesService {
           },
           modes: ['plan_only', 'validate_existing', 'implement_and_validate'],
           modeSelection: 'Executors do not accept a mode on dispatch. An executor without a Dispatcher starts at its Planner; otherwise the Dispatcher decides it and records modeRationale and modeDecidedAt on the Run. Historical Runs keep their captured mode.',
-          executorRoutes: {
-            create: 'POST /executors (name, optional description and templateExecutorId)',
-            detail: 'GET /executors/:executorId',
-            update: 'PATCH /executors/:executorId (name, description, workingPractice, projectGitPolicy, maxConcurrentRuns)',
-            delete: 'DELETE /executors/:executorId',
-            createRole: 'POST /executors/:executorId/roles (server assigns stable role id)',
-            updateRole: 'PATCH /executors/:executorId/roles/:roleId',
-            deleteRole: 'DELETE /executors/:executorId/roles/:roleId',
-            records: 'GET /executors/:executorId/runs (read-only Run summaries)',
-            archive: 'GET /executor-groups/:groupId (read-only transcript)',
-            memories: 'GET/POST/PATCH/DELETE /executors/:executorId/memories',
+          coderRoutes: {
+            create: 'POST /coders (name, optional description and templateCoderId)',
+            detail: 'GET /coders/:coderId',
+            update: 'PATCH /coders/:coderId (name, description, workingPractice, projectGitPolicy, maxConcurrentRuns)',
+            delete: 'DELETE /coders/:coderId',
+            createRole: 'POST /coders/:coderId/roles (server assigns stable role id)',
+            updateRole: 'PATCH /coders/:coderId/roles/:roleId',
+            deleteRole: 'DELETE /coders/:coderId/roles/:roleId',
+            records: 'GET /coders/:coderId/runs (read-only Run summaries)',
+            archive: 'GET /coder-groups/:groupId (read-only transcript)',
+            memories: 'GET/POST/PATCH/DELETE /coders/:coderId/memories',
           },
           documentRoutes: {
-            detail: 'GET /executor-documents/:documentId',
-            download: 'GET /executor-documents/:documentId/download',
+            detail: 'GET /coder-documents/:documentId',
+            download: 'GET /coder-documents/:documentId/download',
           },
           runRoutes: {
-            detail: 'GET /executor-runs/:runId',
-            events: 'GET /executor-runs/:runId/events',
-            answer: 'POST /executor-runs/:runId/answer',
-            recoverOperation: 'POST /executor-runs/:runId/operations/:operationKey/recovery',
-            pause: 'POST /executor-runs/:runId/pause',
-            resume: 'POST /executor-runs/:runId/resume',
-            cancel: 'POST /executor-runs/:runId/cancel',
-            retryTask: 'POST /executor-runs/:runId/tasks/:taskKey/retry',
+            detail: 'GET /coder-runs/:runId',
+            events: 'GET /coder-runs/:runId/events',
+            answer: 'POST /coder-runs/:runId/answer',
+            recoverOperation: 'POST /coder-runs/:runId/operations/:operationKey/recovery',
+            pause: 'POST /coder-runs/:runId/pause',
+            resume: 'POST /coder-runs/:runId/resume',
+            cancel: 'POST /coder-runs/:runId/cancel',
+            retryTask: 'POST /coder-runs/:runId/tasks/:taskKey/retry',
           },
           events: { persisted: true, replay: 'Last-Event-ID', live: 'server-sent events', taskActivity: 'developer executor process, session or thread, and command, file and tool activity' },
           directRunCreationApi: false,
@@ -1659,7 +1659,7 @@ export class WorkspaceResourcesService {
         allowedToolCount: server.allowedTools,
         version: server.version,
       })),
-      executorCategories: agentTeamRows.map((team) => ({
+      coders: agentTeamRows.map((team) => ({
         id: team.id,
         name: team.name,
         description: team.description,
@@ -1883,8 +1883,8 @@ export class WorkspaceResourcesService {
     resourceId: string,
   ): Promise<boolean> {
     const [teamRows, versionRows] = await Promise.all([
-      this.db.select({ roles: executorCategories.roles }).from(executorCategories).where(eq(executorCategories.workspaceId, workspaceId)),
-      this.db.select({ snapshot: agentTeamVersions.snapshot }).from(agentTeamVersions).where(eq(agentTeamVersions.workspaceId, workspaceId)),
+      this.db.select({ roles: coders.roles }).from(coders).where(eq(coders.workspaceId, workspaceId)),
+      this.db.select({ snapshot: coderVersions.snapshot }).from(coderVersions).where(eq(coderVersions.workspaceId, workspaceId)),
     ]);
     return [...teamRows, ...versionRows.map((row) => ({ roles: row.snapshot.roles }))]
       .some(({ roles }) => roles.some((role) => role[field].some((resource) => resource.id === resourceId)));

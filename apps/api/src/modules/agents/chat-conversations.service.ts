@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { and, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import { CHAT_AGENT_ID, type AgentExecutionEventData, type AgentExecutionView, type ChatChannelView, type ChatConversationList, type ChatConversationRecords, type ChatConversationSummary, type ChatConversationView, type ChatSubmissionView } from '@worklite/contracts';
-import { agentExecutionEvents, agentExecutions, executorRuns, agentToolCalls, agents, chatConfigurations, chatProjectTasks, chatSubmissions, externalChats, feishuDeliveries, feishuEvents, plugins, wechatEvents, workflowRuns, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
+import { agentExecutionEvents, agentExecutions, coderRuns, agentToolCalls, agents, chatConfigurations, chatProjectTasks, chatSubmissions, externalChats, feishuDeliveries, feishuEvents, plugins, wechatEvents, workflowRuns, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
 import { createModelGateway } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
@@ -51,7 +51,7 @@ export class ChatConversationsService {
       channelConversationId: row.chatId, status: row.status,
       createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
     }));
-    // A conversation with active background work (a project task, or a dispatched executor
+    // A conversation with active background work (a project task, or a dispatched Coder
     // Run / Workflow Run that has not settled) reads as in progress even though its turn settled.
     const activeBackground = await this.activeBackgroundExecutionIds(workspace.id);
     for (const item of items) {
@@ -213,14 +213,14 @@ export class ChatConversationsService {
   }
 
   // Execution ids whose conversation owns background work that is still active: a running
-  // or waiting project task, or a dispatched executor Run / Workflow Run that has not settled.
+  // or waiting project task, or a dispatched Coder Run / Workflow Run that has not settled.
   private async activeBackgroundExecutionIds(workspaceId: string): Promise<Set<string>> {
     const tasks = await this.db.select({ executionId: chatProjectTasks.executionId }).from(chatProjectTasks)
       .where(and(eq(chatProjectTasks.workspaceId, workspaceId), inArray(chatProjectTasks.status, ['running', 'waiting_for_input'])));
     const teamRuns = await this.db.select({ executionId: chatSubmissions.executionId }).from(chatSubmissions)
-      .innerJoin(executorRuns, sql`${executorRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
+      .innerJoin(coderRuns, sql`${coderRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
       .where(and(eq(chatSubmissions.workspaceId, workspaceId), isNotNull(chatSubmissions.executionId),
-        notInArray(executorRuns.status, ['succeeded', 'failed', 'cancelled'])));
+        notInArray(coderRuns.status, ['succeeded', 'failed', 'cancelled'])));
     const workflows = await this.db.select({ executionId: chatSubmissions.executionId }).from(chatSubmissions)
       .innerJoin(workflowRuns, sql`${workflowRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
       .where(and(eq(chatSubmissions.workspaceId, workspaceId), isNotNull(chatSubmissions.executionId),

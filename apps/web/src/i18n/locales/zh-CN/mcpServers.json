@@ -58,13 +58,13 @@
       "activeChatTurns": "进行中的 Chat 会话",
       "workflowDraft": "Workflow「{{name}}」草稿（节点：{{nodes}}）",
       "workflowVersion": "已发布的 Workflow「{{name}}」v{{version}}（节点：{{nodes}}）",
-      "agentTeamRole": "执行器「{{team}}」的角色 {{role}}",
-      "agentTeamVersion": "已捕获的执行器版本 v{{version}}（角色：{{roles}}）"
+      "agentTeamRole": "Coder「{{team}}」的角色 {{role}}",
+      "agentTeamVersion": "已捕获的 Coder 版本 v{{version}}（角色：{{roles}}）"
     },
     "force": {
-      "label": "同时移除 Workflow 草稿和执行器角色中的引用，并强制删除",
+      "label": "同时移除 Workflow 草稿和Coder 角色中的引用，并强制删除",
       "immutableLabel": "确认强制删除",
-      "immutableNote": "已发布的 Workflow 版本与已捕获的执行器版本保留历史引用，重跑时将报告该服务器不可用。",
+      "immutableNote": "已发布的 Workflow 版本与已捕获的 Coder 版本保留历史引用，重跑时将报告该服务器不可用。",
       "blockedNote": "以上引用无法通过强制删除清理，请先在对应位置移除引用。"
     }
   },

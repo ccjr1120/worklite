@@ -5,7 +5,7 @@ import type { AgentTeamRunView, ChatProjectTaskView } from '@worklite/contracts'
 export type FeishuAction =
   | { kind: 'answer'; runId: string; pendingInputId: string; scopeRevision: number }
   | { kind: 'agent_answer'; executionId: string; questionId: string; answer?: string; recoveryDecision?: 'adopt_command' | 'mark_failed'; newConversation?: boolean }
-  | { kind: 'control'; domain: 'executor_category' | 'workflow' | 'conversation'; runId: string; action: 'pause' | 'resume' | 'cancel' | 'retry'; taskKey?: string }
+  | { kind: 'control'; domain: 'coder' | 'workflow' | 'conversation'; runId: string; action: 'pause' | 'resume' | 'cancel' | 'retry'; taskKey?: string }
   | { kind: 'project_task_answer'; taskId: string; questionId: string; answer?: string }
   | { kind: 'project_task_control'; taskId: string; action: 'cancel' }
   | { kind: 'recovery'; runId: string; operationKey: string; decision: 'adopt_command' | 'mark_failed' | 'replay' }
@@ -15,7 +15,7 @@ export type CardButton = { label: string; action: FeishuAction };
 export type CardState = {
   title: string;
   status: string;
-  // Secondary notation line under the status, e.g. an executor Run's current role, model and elapsed time.
+  // Secondary notation line under the status, e.g. a Coder Run's current role, model and elapsed time.
   meta?: string;
   content: string;
   replyContent?: string;
@@ -206,7 +206,7 @@ export function formatElapsed(fromIso: string | null, toMs: number): string | nu
   return `${Math.floor(minutes / (24 * 60))} 天 ${Math.floor((minutes % (24 * 60)) / 60)} 小时`;
 }
 
-// The executor card's one-line summary, matching the Web card: current role (or the in-flight count
+// The Coder card's one-line summary, matching the Web card: current role (or the in-flight count
 // when Developer lanes run in parallel), its model, the role's elapsed time and the Run total.
 export function teamRunMeta(run: AgentTeamRunView, now = Date.now()): string {
   const settled = ['succeeded', 'failed', 'cancelled'].includes(run.status);

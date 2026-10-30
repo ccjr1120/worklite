@@ -38,7 +38,7 @@ export async function inspectGitRepository(projectDirectory: string): Promise<Gi
   }
 }
 
-// Serializes merge-back per original checkout and base branch so parallel tasks and executor
+// Serializes merge-back per original checkout and base branch so parallel tasks and Coder
 // developer lanes of one repository never merge concurrently. Entries clean up once settled.
 const mergeQueues = new Map<string, Promise<unknown>>();
 
@@ -62,7 +62,7 @@ export async function prepareTaskWorktree(repository: GitRepositoryInfo & { bran
   return { worktreePath, worktreeBranch, baseBranch: repository.branch, baseCommit: repository.commit };
 }
 
-// Idempotent variant for attempts that may resume (executor developer lanes): an existing worktree
+// Idempotent variant for attempts that may resume (Coder developer lanes): an existing worktree
 // and branch for the same suffix are reused instead of recreated.
 export async function ensureTaskWorktree(repository: GitRepositoryInfo & { branch: string }, suffix: string): Promise<PreparedTaskWorktree> {
   const worktreeBranch = `worklite/task-${suffix}`;
@@ -75,7 +75,7 @@ export async function ensureTaskWorktree(repository: GitRepositoryInfo & { branc
   return { worktreePath, worktreeBranch, baseBranch: repository.branch, baseCommit: repository.commit };
 }
 
-// Idempotent ensure with explicit path, branch, and start point (executor Run base worktrees and
+// Idempotent ensure with explicit path, branch, and start point (Coder Run base worktrees and
 // lane sub-worktrees). An already-registered worktree at the path is reused; a leftover branch
 // without a worktree (interrupted earlier attempt) is attached instead of recreated.
 export async function ensureWorktreeAt(repositoryDirectory: string, worktreePath: string, worktreeBranch: string, startPoint: string): Promise<void> {
@@ -101,7 +101,7 @@ export async function mergeTaskWorktree(task: { projectDirectory: string; worktr
   if (currentBranch !== task.baseBranch) {
     return { status: 'conflict', error: `原工作区当前在分支 ${currentBranch || '(detached HEAD)'}，已不在任务捕获时的分支 ${task.baseBranch}，未执行自动合并；任务分支 ${task.worktreeBranch} 与 worktree ${task.worktreePath} 已保留，请手动合并。` };
   }
-  // Merge only integrates committed work, so commit whatever the executor left uncommitted in
+  // Merge only integrates committed work, so commit whatever the Coder left uncommitted in
   // its worktree first; the worktree is the task's own workspace, so this touches nothing else.
   const dirty = await git(task.worktreePath, ['status', '--porcelain']);
   if (dirty) {

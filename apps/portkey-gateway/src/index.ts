@@ -133,7 +133,7 @@ const attributionQuery = (c: Context) => ({
   conversationId: c.req.query('conversationId'),
   projectTaskId: c.req.query('projectTaskId'),
   executor: c.req.query('executor'),
-  executorCategoryId: c.req.query('executorCategoryId'),
+  coderId: c.req.query('coderId'),
   teamRunId: c.req.query('teamRunId'),
   workflowId: c.req.query('workflowId'),
   workflowRunId: c.req.query('workflowRunId'),

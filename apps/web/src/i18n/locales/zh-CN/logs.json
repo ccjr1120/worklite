@@ -56,7 +56,7 @@
       "conversationId": "对话",
       "projectTaskId": "项目任务",
       "executor": "执行引擎",
-      "executorCategoryId": "执行器",
+      "coderId": "Coder",
       "teamRunId": "执行记录",
       "workflowId": "Workflow",
       "workflowRunId": "Workflow 运行",
@@ -103,13 +103,13 @@
   "usage": {
     "title": "按功能/来源的用量",
     "description": "统计数据长期保留，因此这里的 token 与请求数在请求明细过期后依然可查。",
-    "executorCaveat": "口径说明：仅统计经过 Gateway 的调用。未指定模型的 Codex 任务走本机 Codex 配置、完全不经 Gateway，其 token 无法被采集，因此执行器用量并不完整。「未归因」表示该请求到达 Gateway 时没有携带归因信息，不会被并入其他功能。",
+    "executorCaveat": "口径说明：仅统计经过 Gateway 的调用。未指定模型的 Codex 任务走本机 Codex 配置、完全不经 Gateway，其 token 无法被采集，因此 Coder 用量并不完整。「未归因」表示该请求到达 Gateway 时没有携带归因信息，不会被并入其他功能。",
     "groupBy": "分组维度",
     "groupBys": {
       "surface": "按功能",
       "conversation": "按对话",
       "executor": "按执行引擎",
-      "executor_category": "按执行器",
+      "coder": "按 Coder",
       "workflow": "按 Workflow",
       "team_run": "按执行记录",
       "node_run": "按节点"
@@ -119,8 +119,8 @@
       "chat_project_task": "Chat 项目任务",
       "agent": "独立 Agent",
       "workflow": "Workflow 节点",
-      "executor_category": "执行器角色",
-      "executor_category_project_task": "执行器角色（执行引擎）",
+      "coder": "Coder 角色",
+      "coder_project_task": "Coder 角色（执行引擎）",
       "provider_test": "供应商连接测试",
       "external": "外部直连",
       "unattributed": "未归因"
@@ -131,7 +131,7 @@
         "surface": "说明",
         "conversation": "对话 ID",
         "executor": "执行引擎",
-        "executor_category": "运行 ID",
+        "coder": "运行 ID",
         "workflow": "运行 ID",
         "team_run": "说明",
         "node_run": "节点 ID"
@@ -142,6 +142,6 @@
     "failed": "失败",
     "withUsage": "含用量数据",
     "emptyTitle": "该时间范围内没有可归因的用量",
-    "emptyDescription": "切换分组维度或扩大时间范围；按对话、执行引擎、执行器、Workflow 分组只统计带有对应标识的请求。"
+    "emptyDescription": "切换分组维度或扩大时间范围；按对话、执行引擎、Coder、Workflow 分组只统计带有对应标识的请求。"
   }
 }

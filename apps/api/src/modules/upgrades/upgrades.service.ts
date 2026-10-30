@@ -5,11 +5,11 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, openSync, closeSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { and, eq, inArray } from 'drizzle-orm';
-import { agentExecutions, executorRuns, agentToolCalls, chatSubmissions, commandExecutions, externalChats, workflowRuns, type Database } from '@worklite/db';
+import { agentExecutions, coderRuns, agentToolCalls, chatSubmissions, commandExecutions, externalChats, workflowRuns, type Database } from '@worklite/db';
 import type { WorkliteUpgradeView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { upgradeStateDirectory } from '../../infrastructure/runtime-upgrade-state';
-import { AgentTeamRuntimeService } from '../executors/executor-runtime.service';
+import { AgentTeamRuntimeService } from '../coders/coder-runtime.service';
 import { AgentExecutionsService } from '../agents/agent-executions.service';
 import { CommandsService } from '../commands/commands.service';
 import { RunsService } from '../runs/runs.service';
@@ -164,7 +164,7 @@ export class UpgradesService implements OnModuleInit {
   private async interruptActiveWork(id: string) {
     const job = this.load(id);
     const activeAgents = await this.db.select({ id: agentExecutions.id, agentId: agentExecutions.agentId }).from(agentExecutions).where(inArray(agentExecutions.status, ['running', 'waiting_for_input']));
-    const activeTeams = await this.db.select({ id: executorRuns.id }).from(executorRuns).where(inArray(executorRuns.status, ['queued', 'running', 'waiting_for_input', 'paused']));
+    const activeTeams = await this.db.select({ id: coderRuns.id }).from(coderRuns).where(inArray(coderRuns.status, ['queued', 'running', 'waiting_for_input', 'paused']));
     const activeWorkflows = await this.db.select({ id: workflowRuns.id }).from(workflowRuns).where(inArray(workflowRuns.status, ['queued', 'running', 'waiting_for_input', 'paused']));
     const activeCommands = await this.db.select({ id: commandExecutions.id }).from(commandExecutions).where(inArray(commandExecutions.status, ['queued', 'running', 'cancelling']));
     const interruptedWork = {

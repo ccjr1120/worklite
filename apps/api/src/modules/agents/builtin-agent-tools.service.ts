@@ -12,13 +12,13 @@ type StartOptions = { cwd?: string; reserveCommand?: CommandReservation; outputL
 
 const READ_ONLY_TOOL_NAMES = ['read', 'glob', 'grep', 'process_reference'];
 const ROLE_ALLOWED_TOOL_NAMES: Partial<Record<string, readonly string[]>> = {
-  planner: [...READ_ONLY_TOOL_NAMES, 'read_executor_document'],
-  'worktree-manager': [...READ_ONLY_TOOL_NAMES, 'read_executor_document'],
-  test_designer: [...READ_ONLY_TOOL_NAMES, 'read_executor_document'],
-  developer: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference', 'read_executor_document'],
-  test_author: ['read', 'write', 'glob', 'grep', 'process_reference', 'read_executor_document'],
-  test_runner: ['bash', 'read', 'write', 'glob', 'grep', 'read_executor_document'],
-  reviewer: ['bash', ...READ_ONLY_TOOL_NAMES, 'read_executor_document'],
+  planner: [...READ_ONLY_TOOL_NAMES, 'read_coder_document'],
+  'worktree-manager': [...READ_ONLY_TOOL_NAMES, 'read_coder_document'],
+  test_designer: [...READ_ONLY_TOOL_NAMES, 'read_coder_document'],
+  developer: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference', 'read_coder_document'],
+  test_author: ['read', 'write', 'glob', 'grep', 'process_reference', 'read_coder_document'],
+  test_runner: ['bash', 'read', 'write', 'glob', 'grep', 'read_coder_document'],
+  reviewer: ['bash', ...READ_ONLY_TOOL_NAMES, 'read_coder_document'],
 };
 
 export function selectBuiltinToolNames(role: AgentTeamRoleId, requestedToolNames: readonly string[]): string[] {
@@ -32,8 +32,8 @@ const definitions: GatewayToolDefinition[] = [
   { name: 'write', description: 'Write UTF-8 text to a file.', inputSchema: { type: 'object', additionalProperties: false, required: ['path', 'content'], properties: { path: { type: 'string' }, content: { type: 'string' } } } },
   { name: 'glob', description: 'Find files matching a project-relative glob pattern. Includes hidden files, respects ignore rules, and excludes .git.', inputSchema: { type: 'object', additionalProperties: false, required: ['pattern'], properties: { pattern: { type: 'string' } } } },
   { name: 'grep', description: 'Search files with a regular expression. Combine independent patterns for the same path with regex alternation (e.g. foo|bar) in one search; narrow the path to limit output.', inputSchema: { type: 'object', additionalProperties: false, required: ['pattern'], properties: { pattern: { type: 'string' }, path: { type: 'string' } } } },
-  { name: 'process_reference', description: 'Read a file from the pinned executor process package.', inputSchema: { type: 'object', additionalProperties: false, required: ['path'], properties: { path: { type: 'string' } } } },
-  { name: 'read_executor_document', description: 'Read an exact immutable executor document version that was explicitly handed to this task.', inputSchema: { type: 'object', additionalProperties: false, required: ['documentId', 'revision'], properties: { documentId: { type: 'string' }, revision: { type: 'integer', minimum: 1 } } } },
+  { name: 'process_reference', description: 'Read a file from the pinned Coder process package.', inputSchema: { type: 'object', additionalProperties: false, required: ['path'], properties: { path: { type: 'string' } } } },
+  { name: 'read_coder_document', description: 'Read an exact immutable Coder document version that was explicitly handed to this task.', inputSchema: { type: 'object', additionalProperties: false, required: ['documentId', 'revision'], properties: { documentId: { type: 'string' }, revision: { type: 'integer', minimum: 1 } } } },
 ];
 
 @Injectable()

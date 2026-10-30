@@ -1,7 +1,7 @@
 import 'i18next';
 import type zhAssistant from './locales/zh-CN/assistant.json';
 import type zhArtifacts from './locales/zh-CN/artifacts.json';
-import type zhExecutors from './locales/zh-CN/executors.json';
+import type zhCoders from './locales/zh-CN/coders.json';
 import type zhCommon from './locales/zh-CN/common.json';
 import type zhHome from './locales/zh-CN/home.json';
 import type zhLogs from './locales/zh-CN/logs.json';
@@ -18,7 +18,7 @@ declare module 'i18next' {
     defaultNS: 'common';
     resources: {
       common: typeof zhCommon;
-      executors: typeof zhExecutors;
+      coders: typeof zhCoders;
       workspace: typeof zhWorkspace;
       home: typeof zhHome;
       assistant: typeof zhAssistant;

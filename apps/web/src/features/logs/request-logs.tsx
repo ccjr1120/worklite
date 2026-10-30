@@ -22,7 +22,7 @@ type RequestLogFilters = {
   conversationId?: string;
   projectTaskId?: string;
   executor?: string;
-  executorCategoryId?: string;
+  coderId?: string;
   teamRunId?: string;
   workflowId?: string;
   workflowRunId?: string;
@@ -31,7 +31,7 @@ type RequestLogFilters = {
 
 // The attribution part of a filter, as chips: these are set by following a usage row
 // rather than typed, so they are shown and cleared rather than offered as pickers.
-const ATTRIBUTION_FILTER_KEYS = ['surface', 'conversationId', 'projectTaskId', 'executor', 'executorCategoryId', 'teamRunId', 'workflowId', 'workflowRunId', 'nodeRunId'] as const;
+const ATTRIBUTION_FILTER_KEYS = ['surface', 'conversationId', 'projectTaskId', 'executor', 'coderId', 'teamRunId', 'workflowId', 'workflowRunId', 'nodeRunId'] as const;
 
 function capturedBodyText(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -175,7 +175,7 @@ function GatewayRequestLogs({ from, to, providers, filters, onFiltersChange, foc
   useEffect(() => {
     setPages([]);
     setExpandedId(null);
-  }, [from, to, filters.provider, filters.model, filters.statusClass, filters.surface, filters.conversationId, filters.projectTaskId, filters.executor, filters.executorCategoryId, filters.teamRunId, filters.workflowId, filters.workflowRunId, filters.nodeRunId]);
+  }, [from, to, filters.provider, filters.model, filters.statusClass, filters.surface, filters.conversationId, filters.projectTaskId, filters.executor, filters.coderId, filters.teamRunId, filters.workflowId, filters.workflowRunId, filters.nodeRunId]);
 
   useEffect(() => {
     setExpandedId(focusedRequestId ?? null);

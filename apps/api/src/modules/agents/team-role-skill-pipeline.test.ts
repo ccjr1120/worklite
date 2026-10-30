@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Request } from 'express';
-import { executorCategories, createDb, initializeDatabase, type Database } from '@worklite/db';
+import { coders, createDb, initializeDatabase, type Database } from '@worklite/db';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
-import { AgentTeamConfigurationService } from '../executors/executor-configuration.service';
+import { AgentTeamConfigurationService } from '../coders/coder-configuration.service';
 import { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
 
 // End-to-end for the supported integration path: import a local Skill as a
@@ -24,8 +24,8 @@ async function setup() {
   const database = createDb(':memory:');
   db = database;
   await initializeDatabase(database);
-  database.insert(executorCategories).values({
-    id: 'agent_team_bmad_tea',
+  database.insert(coders).values({
+    id: 'company_coder',
     workspaceId: 'workspace_personal',
     name: 'Company Project',
     description: '',
@@ -50,7 +50,7 @@ describe('Executor role Skill pipeline', () => {
       ],
     });
 
-    const team = await configuration.update('workspace_personal', 'agent_team_bmad_tea', {
+    const team = await configuration.update('workspace_personal', 'company_coder', {
       roles: [
         {
           role: 'dispatcher',

@@ -83,7 +83,7 @@ function Sidebar({
   function primaryActive(id: NavItem['id'], to: string) {
     if (id === 'settings') return pathname.startsWith('/settings');
     if (id === 'workflows') return ['/workflows', '/runs'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
-    if (id === 'agentTeam') return ['/coding', '/executor-runs'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+    if (id === 'agentTeam') return ['/coding'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
     return pathname === to || pathname.startsWith(`${to}/`);
   }
 

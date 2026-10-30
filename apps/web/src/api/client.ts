@@ -136,7 +136,7 @@ function appendGatewayAttribution(search: URLSearchParams, filters: GatewayAttri
     ['conversationId', filters.conversationId],
     ['projectTaskId', filters.projectTaskId],
     ['executor', filters.executor],
-    ['executorCategoryId', filters.executorCategoryId],
+    ['coderId', filters.coderId],
     ['teamRunId', filters.teamRunId],
     ['workflowId', filters.workflowId],
     ['workflowRunId', filters.workflowRunId],
@@ -301,30 +301,30 @@ export const api = {
     return apiGet<GatewayRequestLogList>(`/api/portkey-gateway/request-logs${suffix}`);
   },
   gatewayRequestLog: (requestLogId: string) => apiGet<GatewayRequestLogDetail>(`/api/portkey-gateway/request-logs/${encodeURIComponent(requestLogId)}`),
-  executors: () => apiGet<AgentTeamView[]>('/api/executors'),
-  executorRecords: (executorId: string) => apiGet<AgentTeamRunSummary[]>(`/api/executors/${encodeURIComponent(executorId)}/runs`),
-  agentTeamRunList: (query: { executorCategoryIds?: string[]; cursor?: string; limit?: number }) => {
+  executors: () => apiGet<AgentTeamView[]>('/api/coders'),
+  coderRecords: (coderId: string) => apiGet<AgentTeamRunSummary[]>(`/api/coders/${encodeURIComponent(coderId)}/runs`),
+  agentTeamRunList: (query: { coderIds?: string[]; cursor?: string; limit?: number }) => {
     const search = new URLSearchParams();
-    if (query.executorCategoryIds?.length) {
-      query.executorCategoryIds.forEach(id => search.append('executorId', id));
+    if (query.coderIds?.length) {
+      query.coderIds.forEach(id => search.append('coderId', id));
     }
     if (query.cursor?.trim()) search.set('cursor', query.cursor.trim());
     if (query.limit) search.set('limit', String(query.limit));
     const suffix = search.size > 0 ? `?${search.toString()}` : '';
-    return apiGet<AgentTeamRunListPage>(`/api/executor-runs${suffix}`);
+    return apiGet<AgentTeamRunListPage>(`/api/coder-runs${suffix}`);
   },
-  agentTeamRunNodes: (runIds: string[]) => apiGet<AgentTeamRunNodeTree>(`/api/executor-runs/nodes?runIds=${encodeURIComponent(runIds.join(','))}`),
-  executor: (executorId: string) => apiGet<AgentTeamView>(`/api/executors/${encodeURIComponent(executorId)}`),
-  updateExecutor: (executorId: string, input: UpdateAgentTeamRequest) => apiPatch<AgentTeamView>(`/api/executors/${encodeURIComponent(executorId)}`, input),
-  updateExecutorRole: (executorId: string, roleId: string, input: Partial<Omit<AgentTeamRoleConfiguration, 'role'>>) =>
-    apiPatch<AgentTeamView>(`/api/executors/${encodeURIComponent(executorId)}/roles/${encodeURIComponent(roleId)}`, input),
-  executorMemories: (executorId: string) => apiGet<AgentTeamMemoryView[]>(`/api/executors/${encodeURIComponent(executorId)}/memories`),
-  agentTeamGroup: (groupId: string) => apiGet<AgentTeamGroupView>(`/api/executor-groups/${encodeURIComponent(groupId)}`),
-  controlAgentTeamGroup: (groupId: string, input: { operation: 'reexecute'; runIds: string[] }) => apiPost<AgentTeamGroupView>(`/api/executor-groups/${encodeURIComponent(groupId)}/controls`, input),
-  executorGroupEventsUrl: (groupId: string) => `/api/executor-groups/${encodeURIComponent(groupId)}/events`,
-  executorDocument: (documentId: string) => apiGet<AgentTeamDocumentView>(`/api/executor-documents/${encodeURIComponent(documentId)}`),
-  downloadExecutorDocument: async (documentId: string): Promise<Blob> => {
-    const response = await fetch(`/api/executor-documents/${encodeURIComponent(documentId)}/download`, {
+  agentTeamRunNodes: (runIds: string[]) => apiGet<AgentTeamRunNodeTree>(`/api/coder-runs/nodes?runIds=${encodeURIComponent(runIds.join(','))}`),
+  executor: (coderId: string) => apiGet<AgentTeamView>(`/api/coders/${encodeURIComponent(coderId)}`),
+  updateCoder: (coderId: string, input: UpdateAgentTeamRequest) => apiPatch<AgentTeamView>(`/api/coders/${encodeURIComponent(coderId)}`, input),
+  updateCoderRole: (coderId: string, roleId: string, input: Partial<Omit<AgentTeamRoleConfiguration, 'role'>>) =>
+    apiPatch<AgentTeamView>(`/api/coders/${encodeURIComponent(coderId)}/roles/${encodeURIComponent(roleId)}`, input),
+  coderMemories: (coderId: string) => apiGet<AgentTeamMemoryView[]>(`/api/coders/${encodeURIComponent(coderId)}/memories`),
+  agentTeamGroup: (groupId: string) => apiGet<AgentTeamGroupView>(`/api/coder-groups/${encodeURIComponent(groupId)}`),
+  controlAgentTeamGroup: (groupId: string, input: { operation: 'reexecute'; runIds: string[] }) => apiPost<AgentTeamGroupView>(`/api/coder-groups/${encodeURIComponent(groupId)}/controls`, input),
+  coderGroupEventsUrl: (groupId: string) => `/api/coder-groups/${encodeURIComponent(groupId)}/events`,
+  coderDocument: (documentId: string) => apiGet<AgentTeamDocumentView>(`/api/coder-documents/${encodeURIComponent(documentId)}`),
+  downloadCoderDocument: async (documentId: string): Promise<Blob> => {
+    const response = await fetch(`/api/coder-documents/${encodeURIComponent(documentId)}/download`, {
       credentials: 'include',
     });
     if (!response.ok) {
@@ -332,14 +332,14 @@ export const api = {
     }
     return response.blob();
   },
-  agentTeamRun: (runId: string) => apiGet<AgentTeamRunView>(`/api/executor-runs/${encodeURIComponent(runId)}`),
-  executorRunEventsUrl: (runId: string) => `/api/executor-runs/${encodeURIComponent(runId)}/events`,
-  answerAgentTeamRun: (runId: string, input: AnswerAgentTeamRunRequest) => apiPost<AgentTeamRunActionResponse>(`/api/executor-runs/${encodeURIComponent(runId)}/answer`, input),
-  recoverAgentTeamOperation: (runId: string, operationKey: string, input: RecoverAgentTeamOperationRequest) => apiPost<AgentTeamRunActionResponse>(`/api/executor-runs/${encodeURIComponent(runId)}/operations/${encodeURIComponent(operationKey)}/recovery`, input),
-  pauseAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/executor-runs/${encodeURIComponent(runId)}/pause`),
-  resumeAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/executor-runs/${encodeURIComponent(runId)}/resume`),
-  cancelAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/executor-runs/${encodeURIComponent(runId)}/cancel`),
-  retryAgentTeamTask: (runId: string, taskKey: string) => apiPost<AgentTeamRunActionResponse>(`/api/executor-runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskKey)}/retry`),
+  agentTeamRun: (runId: string) => apiGet<AgentTeamRunView>(`/api/coder-runs/${encodeURIComponent(runId)}`),
+  coderRunEventsUrl: (runId: string) => `/api/coder-runs/${encodeURIComponent(runId)}/events`,
+  answerAgentTeamRun: (runId: string, input: AnswerAgentTeamRunRequest) => apiPost<AgentTeamRunActionResponse>(`/api/coder-runs/${encodeURIComponent(runId)}/answer`, input),
+  recoverAgentTeamOperation: (runId: string, operationKey: string, input: RecoverAgentTeamOperationRequest) => apiPost<AgentTeamRunActionResponse>(`/api/coder-runs/${encodeURIComponent(runId)}/operations/${encodeURIComponent(operationKey)}/recovery`, input),
+  pauseAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/coder-runs/${encodeURIComponent(runId)}/pause`),
+  resumeAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/coder-runs/${encodeURIComponent(runId)}/resume`),
+  cancelAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/coder-runs/${encodeURIComponent(runId)}/cancel`),
+  retryAgentTeamTask: (runId: string, taskKey: string) => apiPost<AgentTeamRunActionResponse>(`/api/coder-runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskKey)}/retry`),
   runs: (_workspace?: string) => apiGet<RunView[]>('/api/runs'),
   run: (_workspace: string | undefined, runId: string) => apiGet<RunView>(`/api/runs/${encodeURIComponent(runId)}`),
   runEventsUrl: (runId: string) => `/api/runs/${encodeURIComponent(runId)}/events`,
@@ -384,7 +384,7 @@ export function parseAgentTeamRunEvent(value: string): AgentTeamRunEvent {
     || typeof event.payload !== 'object'
     || typeof event.createdAt !== 'string'
   ) {
-    throw new Error('The executor Run event stream returned an invalid event.');
+    throw new Error('The Coder Run event stream returned an invalid event.');
   }
   return event as AgentTeamRunEvent;
 }

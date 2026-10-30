@@ -4,8 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Request } from 'express';
 import {
   agentMcpServers,
-  agentTeamVersions,
-  executorCategories,
+  coderVersions,
+  coders,
   agents,
   createDb,
   initializeDatabase,
@@ -89,7 +89,7 @@ function seedWorkflow(mcpServerIds: string[], options: { publishedVersion?: bool
 }
 
 function seedAgentTeam(mcpServerIds: string[], options: { capturedVersion?: boolean } = {}) {
-  db!.insert(executorCategories).values({
+  db!.insert(coders).values({
     id: 'team_1',
     workspaceId: WORKSPACE_ID,
     name: 'Delivery',
@@ -99,10 +99,10 @@ function seedAgentTeam(mcpServerIds: string[], options: { capturedVersion?: bool
     roles: [teamRole(mcpServerIds)],
   }).run();
   if (options.capturedVersion) {
-    db!.insert(agentTeamVersions).values({
+    db!.insert(coderVersions).values({
       id: 'teamv_1',
       workspaceId: WORKSPACE_ID,
-      executorCategoryId: 'team_1',
+      coderId: 'team_1',
       version: 1,
       snapshot: {
         processId: 'process',
@@ -173,8 +173,8 @@ describe('WorkspaceResourcesService.deleteMcpServer', () => {
     const references = badRequestReferences(error);
     expect(references.workflowDrafts).toEqual([{ workflowId: 'wf_1', workflowName: 'Research', nodeIds: ['agent-1'] }]);
     expect(references.workflowVersions).toEqual([{ workflowId: 'wf_1', workflowName: 'Research', version: 1, nodeIds: ['agent-1'] }]);
-    expect(references.agentTeamRoles).toEqual([{ executorCategoryId: 'team_1', teamName: 'Delivery', role: 'developer', displayName: null }]);
-    expect(references.agentTeamVersions).toEqual([{ executorCategoryId: 'team_1', versionId: 'teamv_1', version: 1, roles: ['developer'] }]);
+    expect(references.agentTeamRoles).toEqual([{ coderId: 'team_1', teamName: 'Delivery', role: 'developer', displayName: null }]);
+    expect(references.agentTeamVersions).toEqual([{ coderId: 'team_1', versionId: 'teamv_1', version: 1, roles: ['developer'] }]);
     expect((error as BadRequestException).message).toContain('Research');
     expect((error as BadRequestException).message).toContain('Delivery');
     // Nothing was deleted or rewritten.
@@ -199,14 +199,14 @@ describe('WorkspaceResourcesService.deleteMcpServer', () => {
     expect(revision.source).toBe('migration');
     expect(revision.snapshot).toEqual(draft.definition);
 
-    const [team] = db!.select().from(executorCategories).where(eq(executorCategories.id, 'team_1')).all();
+    const [team] = db!.select().from(coders).where(eq(coders.id, 'team_1')).all();
     expect(team.roles[0]!.mcpServers).toEqual([]);
 
     // Immutable history keeps its references.
     const [version] = db!.select().from(workflowVersions).where(eq(workflowVersions.id, 'wfv_1')).all();
     const versionNode = version.definition!.nodes.find((node) => node.id === 'agent-1')!;
     expect((versionNode.config as { mcpServerIds: string[] }).mcpServerIds).toEqual([SERVER_ID, 'mcp_other']);
-    const [teamVersion] = db!.select().from(agentTeamVersions).where(eq(agentTeamVersions.id, 'teamv_1')).all();
+    const [teamVersion] = db!.select().from(coderVersions).where(eq(coderVersions.id, 'teamv_1')).all();
     expect(teamVersion.snapshot.roles[0]!.mcpServers.map((server) => server.id)).toEqual([SERVER_ID]);
   });
 

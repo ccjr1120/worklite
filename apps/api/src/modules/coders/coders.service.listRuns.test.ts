@@ -1,0 +1,156 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type { Request } from 'express';
+import { CodersService } from './coders.service';
+
+describe('CodersService.listRuns', () => {
+  let service: CodersService;
+  let mockDb: Record<string, unknown>;
+  let mockWorkspaces: Record<string, unknown>;
+  let mockConfig: Record<string, unknown>;
+  let mockRuntime: Record<string, unknown>;
+  let mockRequest: Request;
+
+  beforeEach(() => {
+    mockDb = {
+      select: vi.fn(),
+    };
+    mockWorkspaces = {
+      getWorkspace: vi.fn().mockResolvedValue({ id: 'ws-123' }),
+    };
+    mockConfig = {};
+    mockRuntime = {};
+    mockRequest = {} as Request;
+
+    service = new CodersService(mockDb as any, mockWorkspaces as any, mockRuntime as any, mockConfig as any);
+  });
+
+  it('should fetch paginated runs with cursor pagination', async () => {
+    const mockRuns = [
+      {
+        id: 'run-1',
+        intent: 'Test task 1',
+        projectDirectory: '/project1',
+        mode: 'implement_and_validate',
+        modeRationale: null,
+        modeDecidedAt: null,
+        status: 'succeeded',
+        createdAt: new Date('2024-01-02'),
+        finishedAt: new Date('2024-01-02T01:00:00'),
+        coderId: 'team-1',
+        currentCoderName: 'Renamed Executor',
+        snapshot: { orchestrationVersion: 11, coderName: 'Executor A' },
+      },
+      {
+        id: 'run-2',
+        intent: 'Test task 2',
+        projectDirectory: '/project2',
+        mode: 'implement_and_validate',
+        modeRationale: null,
+        modeDecidedAt: null,
+        status: 'running',
+        createdAt: new Date('2024-01-01'),
+        finishedAt: null,
+        coderId: 'team-1',
+        currentCoderName: 'Executor A',
+        snapshot: { orchestrationVersion: 11 },
+      },
+    ];
+
+    const mockQuery = {
+      from: vi.fn().mockReturnThis(),
+      innerJoin: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      orderBy: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue(mockRuns),
+    };
+
+    // The in-progress Run's overview reads its attempts and activity; it has none yet.
+    const emptyQuery = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      orderBy: vi.fn().mockResolvedValue([]),
+    };
+
+    (mockDb.select as any).mockReturnValueOnce(mockQuery).mockReturnValue(emptyQuery);
+
+    const result = await service.listRuns(mockRequest, 'personal', ['team-1'], undefined, 50);
+
+    expect(result).toEqual({
+      items: [
+        {
+          id: 'run-1',
+          intent: 'Test task 1',
+          projectDirectory: '/project1',
+          mode: 'implement_and_validate',
+          modeRationale: null,
+          modeDecidedAt: null,
+          orchestrationVersion: 11,
+          status: 'succeeded',
+          createdAt: '2024-01-02T00:00:00.000Z',
+          finishedAt: '2024-01-02T01:00:00.000Z',
+          coderId: 'team-1',
+          coderName: 'Executor A',
+          // No Gateway is wired in this test, so tokens are unavailable rather than 0.
+          overview: { totalTokens: { tokens: null, source: 'unavailable', reason: 'gateway_unavailable' }, durationMs: expect.any(Number) },
+        },
+        {
+          id: 'run-2',
+          intent: 'Test task 2',
+          projectDirectory: '/project2',
+          mode: 'implement_and_validate',
+          modeRationale: null,
+          modeDecidedAt: null,
+          orchestrationVersion: 11,
+          status: 'running',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          finishedAt: null,
+          coderId: 'team-1',
+          coderName: 'Executor A',
+          // No Gateway is wired in this test, so tokens are unavailable rather than 0.
+          overview: { totalTokens: { tokens: null, source: 'unavailable', reason: 'gateway_unavailable' }, durationMs: expect.any(Number) },
+        },
+      ],
+      nextCursor: expect.any(String),
+      total: 2,
+    });
+  });
+
+  it('should filter by multiple coderIds', async () => {
+    const mockRuns: unknown[] = [];
+    const mockQuery = {
+      from: vi.fn().mockReturnThis(),
+      innerJoin: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      orderBy: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue(mockRuns),
+    };
+
+    (mockDb.select as any).mockReturnValue(mockQuery);
+
+    await service.listRuns(mockRequest, 'personal', ['team-1', 'team-2'], undefined, 50);
+
+    expect(mockDb.select).toHaveBeenCalled();
+    // Verify that query.where was called to filter by teams
+    expect(mockQuery.where).toHaveBeenCalled();
+  });
+
+  it('should respect limit boundaries', async () => {
+    const mockQuery = {
+      from: vi.fn().mockReturnThis(),
+      innerJoin: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      orderBy: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([]),
+    };
+
+    (mockDb.select as any).mockReturnValue(mockQuery);
+
+    // Test max limit
+    await service.listRuns(mockRequest, 'personal', [], undefined, 500);
+    expect(mockQuery.limit).toHaveBeenCalledWith(201); // 200 + 1 for hasNextPage check
+
+    // Test default limit
+    await service.listRuns(mockRequest, 'personal', [], undefined, undefined);
+    expect(mockQuery.limit).toHaveBeenCalledWith(51); // 50 + 1
+  });
+});
