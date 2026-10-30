@@ -13,22 +13,30 @@ import { localSkillId } from '../skills/local-skill-source';
 // Skills, so this walks the whole supported path: scan -> list -> role capture
 // -> runtime prompt and skill_reference.
 const gateway = vi.hoisted(() => ({ runWorkflowAgent: vi.fn() }));
-vi.mock('@worklite/model-gateway', () => ({
+vi.mock('@worklite/model-gateway', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@worklite/model-gateway')>()),
   createModelGateway: () => ({ runWorkflowAgent: gateway.runWorkflowAgent }),
 }));
 
 let db: Database | undefined;
 let root: string | undefined;
+let platformRoot: string | undefined;
 let previousRoot: string | undefined;
+let previousPlatformRoot: string | undefined;
 
 afterEach(async () => {
   db?.$client.close();
   db = undefined;
   if (root) await rm(root, { recursive: true, force: true });
   root = undefined;
+  if (platformRoot) await rm(platformRoot, { recursive: true, force: true });
+  platformRoot = undefined;
   if (previousRoot === undefined) delete process.env.WORKLITE_LOCAL_SKILLS_DIR;
   else process.env.WORKLITE_LOCAL_SKILLS_DIR = previousRoot;
   previousRoot = undefined;
+  if (previousPlatformRoot === undefined) delete process.env.WORKLITE_PLATFORM_SKILLS_DIR;
+  else process.env.WORKLITE_PLATFORM_SKILLS_DIR = previousPlatformRoot;
+  previousPlatformRoot = undefined;
 });
 
 const skillMarkdown = `---
@@ -56,6 +64,10 @@ async function setup() {
 
   previousRoot = process.env.WORKLITE_LOCAL_SKILLS_DIR;
   process.env.WORKLITE_LOCAL_SKILLS_DIR = root;
+  // Sync also writes the WorkLite platform Skill, so the platform root is temporary too.
+  platformRoot = await mkdtemp(join(tmpdir(), 'worklite-platform-pipeline-'));
+  previousPlatformRoot = process.env.WORKLITE_PLATFORM_SKILLS_DIR;
+  process.env.WORKLITE_PLATFORM_SKILLS_DIR = platformRoot;
 
   const database = createDb(':memory:');
   db = database;
@@ -71,7 +83,10 @@ async function setup() {
   }).run();
   const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) };
   const resources = new WorkspaceResourcesService(database, workspaces as never, {} as never, {} as never, {} as never);
-  const configuration = new AgentTeamConfigurationService(database, { publicModelRuntime: async () => ({ protocol: 'anthropic/messages' }) } as never);
+  const configuration = new AgentTeamConfigurationService(database, {
+    publicModelRuntime: async () => ({ protocol: 'anthropic/messages' }),
+    reconcileWorkspaceSkills: (workspaceId: string) => resources.reconcileWorkspaceSkills(workspaceId),
+  } as never);
   return { resources, configuration, root };
 }
 
