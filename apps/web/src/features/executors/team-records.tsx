@@ -128,10 +128,11 @@ function TeamFilterPopover({ selectedTeamIds, onTeamsChange, disabled }: TeamFil
 export function TeamRecords({ executorId: executorCategoryId }: { executorId: string }) {
   const { t } = useTranslation('executors');
   const { locale } = useLocale();
-  const search = useSearch({ from: '/' });
+  const search = useSearch({ strict: false });
 
   // Parse teams filter from URL search params
-  const teamsParam = search.teams as string | undefined;
+  const teamsValue = (search as Record<string, unknown>).teams;
+  const teamsParam = typeof teamsValue === 'string' ? teamsValue : undefined;
   const initialTeamIds = useMemo(() => {
     if (teamsParam) {
       return teamsParam.split(',').filter(Boolean);
