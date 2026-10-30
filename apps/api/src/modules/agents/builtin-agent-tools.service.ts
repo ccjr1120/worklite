@@ -5,7 +5,10 @@ import type { AgentTeamRoleId, CommandExecutionView } from '@worklite/contracts'
 import { CommandsService, type CommandReservation } from '../commands/commands.service';
 
 type BuiltinExecution = { execution: CommandExecutionView; output: string };
-type StartOptions = { cwd?: string; reserveCommand?: CommandReservation };
+// Optional output bounds for investigation roles: an unranged read returns only its first
+// readLines lines, and a grep with more than grepLines matching lines returns per-file counts.
+export type BuiltinOutputLimits = { readLines?: number; grepLines?: number };
+type StartOptions = { cwd?: string; reserveCommand?: CommandReservation; outputLimits?: BuiltinOutputLimits };
 
 const READ_ONLY_TOOL_NAMES = ['read', 'glob', 'grep', 'process_reference'];
 const ROLE_ALLOWED_TOOL_NAMES: Partial<Record<string, readonly string[]>> = {
@@ -68,9 +71,15 @@ export class BuiltinAgentToolsService {
         const start = optionalLine(args?.startLine, 'startLine');
         const end = optionalLine(args?.endLine, 'endLine');
         if (start !== undefined && end !== undefined && end < start) throw new BadRequestException('endLine must be at least startLine.');
+        const readLines = options?.outputLimits?.readLines;
+        if (start === undefined && end === undefined && readLines) {
+          const bounded = "const lines = require('fs').readFileSync(process.argv[1], 'utf8').split('\\n'); if (lines.at(-1) === '') lines.pop(); const limit = Number(process.argv[2]); if (lines.length <= limit) { process.stdout.write(require('fs').readFileSync(process.argv[1], 'utf8')); } else { process.stdout.write(lines.slice(0, limit).map((line, i) => `${i + 1}: ${line}`).join('\\n') + `\\n[Showing lines 1-${limit} of ${lines.length}. Read further with startLine and endLine.]`); }";
+          command = `node -e ${shellQuote(bounded)} ${shellQuote(path)} ${readLines}`;
+          break;
+        }
         const script = start === undefined && end === undefined
           ? "process.stdout.write(require('fs').readFileSync(process.argv[1], 'utf8'))"
-          : "const lines = require('fs').readFileSync(process.argv[1], 'utf8').split('\\n'); if (lines.at(-1) === '') lines.pop(); const start = Number(process.argv[2]); const end = Number(process.argv[3]); process.stdout.write(lines.slice(start - 1, end).map((line, i) => `${start + i}: ${line}`).join('\\n'))";
+          :"const lines = require('fs').readFileSync(process.argv[1], 'utf8').split('\\n'); if (lines.at(-1) === '') lines.pop(); const start = Number(process.argv[2]); const end = Number(process.argv[3]); process.stdout.write(lines.slice(start - 1, end).map((line, i) => `${start + i}: ${line}`).join('\\n'))";
         command = `node -e ${shellQuote(script)} ${shellQuote(path)}${start !== undefined || end !== undefined ? ` ${start ?? 1} ${end ?? Number.MAX_SAFE_INTEGER}` : ''}`;
         break;
       }
@@ -93,7 +102,25 @@ export class BuiltinAgentToolsService {
         command = `rg --files --hidden --glob ${shellQuote(pattern)} --glob '!.git'; glob_exit_code=$?; if [ "$glob_exit_code" -eq 1 ]; then exit 0; else exit "$glob_exit_code"; fi`;
         break;
       }
-      case 'grep': command = `rg --line-number --no-heading -- ${shellQuote(requiredString(args?.pattern, 'pattern'))} ${shellQuote(typeof args?.path === 'string' && args.path.trim() ? args.path.trim() : '.')}`; break;
+      case 'grep': {
+        const searchArgs = `-- ${shellQuote(requiredString(args?.pattern, 'pattern'))} ${shellQuote(typeof args?.path === 'string' && args.path.trim() ? args.path.trim() : '.')}`;
+        const grepLines = options?.outputLimits?.grepLines;
+        if (!grepLines) {
+          command = `rg --line-number --no-heading ${searchArgs}`;
+          break;
+        }
+        // Keeps rg's exit status (1 means no match). An oversized result becomes per-file match
+        // counts so the caller narrows its search instead of receiving a truncated dump.
+        command = [
+          `grep_output=$(rg --line-number --no-heading --max-columns 300 --max-columns-preview ${searchArgs}); grep_exit_code=$?`,
+          'if [ -z "$grep_output" ]; then exit "$grep_exit_code"; fi',
+          'grep_line_count=$(printf \'%s\\n\' "$grep_output" | wc -l | tr -d \' \')',
+          `if [ "$grep_line_count" -le ${grepLines} ]; then printf '%s\\n' "$grep_output"; exit "$grep_exit_code"; fi`,
+          `printf '%s\\n' "[$grep_line_count matching lines exceed the ${grepLines}-line limit. Matches per file follow; narrow the path or pattern.]"`,
+          `rg --count ${searchArgs} | awk -F: '{ print $NF "\\t" $0 }' | sort -nr | cut -f2- | head -n 100`,
+        ].join('\n');
+        break;
+      }
       case 'process_reference': throw new BadRequestException('Process references are read directly by the isolated Agent invocation.');
       default: throw new BadRequestException('Unknown built-in Agent tool.');
     }

@@ -62,6 +62,23 @@ describe('planner investigation guidance', () => {
     expect(addition).toContain('For a request that only asks for read-only investigation or an answer, report the findings directly');
     expect(rolePromptAddition('reviewer', snapshot(11))).not.toContain('Scale investigation to the actual request');
   });
+
+  it('asks the Planner for an executable plan document and the Implementer to follow it without re-investigating', () => {
+    const withImplementer = {
+      ...snapshot(11),
+      roles: [{ role: 'planner' }, { role: 'executor', executor: 'claude' }],
+    } as unknown as StoredAgentTeamVersionSnapshot;
+    const planner = rolePromptAddition('planner', withImplementer, request('group_0_planner', 'planner', []));
+    const implementer = rolePromptAddition('executor', withImplementer, request('group_1_executor', 'executor', []));
+
+    expect(planner).toContain('Issue independent tool calls together in the same round');
+    expect(planner).toContain('do not re-investigate them');
+    expect(planner).toContain('a change list naming each file path');
+    expect(planner).not.toContain('treat it as the decided scope');
+    expect(implementer).toContain('treat it as the decided scope');
+    expect(implementer).toContain('report the mismatch in unresolvedIssues');
+    expect(rolePromptAddition('planner', snapshot(11), request('group_0_planner', 'planner', []))).not.toContain('a change list naming each file path');
+  });
 });
 
 describe('groupRolePromptAddition v10 compatibility', () => {

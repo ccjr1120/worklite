@@ -65,6 +65,8 @@ describe('IsolatedAgentInvocationService Skill loading', () => {
     expect(gateway.runWorkflowAgent.mock.lastCall?.[0].maxToolRounds).toBe(60);
     await service().execute(baseRequest({ limits: { maxToolRounds: 1000 } }));
     expect(gateway.runWorkflowAgent.mock.lastCall?.[0].maxToolRounds).toBe(100);
+    await service().execute(baseRequest({ limits: { maxToolRounds: 30, budgetReminderAtRound: 18 } }));
+    expect(gateway.runWorkflowAgent.mock.lastCall?.[0]).toMatchObject({ maxToolRounds: 30, budgetReminderAtRound: 18 });
   });
   it('injects an executor role Skill and advertises each reference', async () => {
     let captured: { systemPrompt: string; builtinTools: Array<{ name: string }> } | undefined;
