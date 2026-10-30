@@ -125,6 +125,8 @@ export type RunWorkflowAgentRequest = {
   builtinTools?: readonly GatewayToolDefinition[];
   mcpTools: readonly GatewayToolDefinition[];
   maxToolRounds: number;
+  // Tool round at which the loop tells the model how many rounds remain so it converges early.
+  budgetReminderAtRound?: number;
   maxToolCalls?: number;
   maxContextTokens?: number;
   maxOutputTokens?: number;
@@ -315,6 +317,10 @@ export class AiSdkModelGateway implements ModelGateway {
     let contextDropped = 0;
     let toolCallsUsed = 0;
     let budgetMessageAdded = false;
+    // The SDK applies prepared messages to one step only. The reminder is re-inserted at the
+    // history position where it was first sent so later requests keep a stable cached prefix.
+    const reminderRound = request.budgetReminderAtRound;
+    let reminderIndex: number | undefined;
     let toolExecutionError: unknown;
 
     let lastToolTask = Promise.resolve();
@@ -408,7 +414,9 @@ export class AiSdkModelGateway implements ModelGateway {
       stopWhen: isStepCount(maxToolRounds + 1),
       prepareStep: ({ stepNumber, messages }: Parameters<PrepareStepFunction<ToolSet>>[0]) => {
         currentRound = stepNumber;
-        const context = trimAgentMessages(request.systemPrompt, messages as readonly GatewayAgentMessage[], request.maxContextTokens);
+        const reminded = withBudgetReminder(messages as readonly GatewayAgentMessage[], stepNumber, maxToolRounds, reminderRound, reminderIndex);
+        reminderIndex = reminded.reminderIndex;
+        const context = trimAgentMessages(request.systemPrompt, reminded.messages, request.maxContextTokens);
         contextDropped = context.dropped;
         const toolsClosed = stepNumber >= maxToolRounds || toolCallsUsed >= maxToolCalls;
         let nextMessages = context.messages;
@@ -885,6 +893,32 @@ function normalizeAgentToolCall(call: { toolCallId: string; toolName: string; in
 // not degrade gracefully: it silently discards every earlier tool result and the agent then reports
 // work it no longer remembers doing. Callers that need a bound pass one; otherwise only the leading
 // orphan tool messages are removed, which is a structural requirement rather than a size decision.
+// From reminderRound on, inserts one budget reminder at the history position where it was first
+// sent. The caller keeps the returned reminderIndex and passes it back on the next step.
+export function withBudgetReminder(
+  messages: readonly GatewayAgentMessage[],
+  stepNumber: number,
+  maxToolRounds: number,
+  reminderRound: number | undefined,
+  reminderIndex: number | undefined,
+): { messages: readonly GatewayAgentMessage[]; reminderIndex: number | undefined } {
+  if (reminderRound === undefined || reminderRound <= 0 || reminderRound >= maxToolRounds || stepNumber < reminderRound) {
+    return { messages, reminderIndex };
+  }
+  const index = Math.min(reminderIndex ?? messages.length, messages.length);
+  return {
+    messages: [
+      ...messages.slice(0, index),
+      {
+        role: 'user',
+        content: `Tool budget reminder: at most ${maxToolRounds - reminderRound} tool rounds remain. Stop broad exploration, gather only evidence a material decision still needs, issue independent calls together in one round, and then return the final response.`,
+      },
+      ...messages.slice(index),
+    ],
+    reminderIndex: index,
+  };
+}
+
 function trimAgentMessages(systemPrompt: string, messages: readonly GatewayAgentMessage[], maxTokens?: number): { messages: GatewayAgentMessage[]; dropped: number } {
   const result = [...messages];
   const estimate = (value: unknown) => Math.ceil(JSON.stringify(value).length / 4);

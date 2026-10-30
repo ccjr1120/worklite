@@ -13,7 +13,7 @@ import {
 import type { Database } from '@worklite/db';
 import type { AgentMcpRuntime } from '../teams/team-resources.service';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
-import { BuiltinAgentToolsService, selectBuiltinToolNames } from './builtin-agent-tools.service';
+import { BuiltinAgentToolsService, selectBuiltinToolNames, type BuiltinOutputLimits } from './builtin-agent-tools.service';
 import type { CommandReservation } from '../commands/commands.service';
 import { McpRuntimeService, type McpRuntimeTool } from './mcp-runtime.service';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
@@ -108,7 +108,14 @@ type IsolatedAgentInvocationRequest = {
   onBuiltinTool?: (activity: AgentInvocationBuiltinActivity) => void | Promise<void>;
   jsonOutput?: boolean;
   correlation?: GatewayCorrelation;
-  limits?: { maxToolCalls?: number; maxToolRounds?: number; maxToolResultChars?: number; maxContextTokens?: number };
+  limits?: {
+    maxToolCalls?: number;
+    maxToolRounds?: number;
+    budgetReminderAtRound?: number;
+    maxToolResultChars?: number;
+    maxContextTokens?: number;
+    builtinOutput?: BuiltinOutputLimits;
+  };
   operation?: {
     taskKey: string;
     journal: AgentInvocationOperationJournal;
@@ -237,6 +244,7 @@ export class IsolatedAgentInvocationService {
       ],
       mcpTools,
       maxToolRounds: maxRounds,
+      budgetReminderAtRound: request.limits?.budgetReminderAtRound,
       maxToolCalls: request.limits?.maxToolCalls,
       maxContextTokens: request.limits?.maxContextTokens,
       abortSignal: request.signal,
@@ -479,6 +487,7 @@ export class IsolatedAgentInvocationService {
       const started = await this.builtinTools.start(call.toolName, call.input, {
         cwd: request.projectDirectory,
         ...(reserveCommand ? { reserveCommand } : {}),
+        ...(request.limits?.builtinOutput ? { outputLimits: request.limits.builtinOutput } : {}),
       });
       const cancel = () => { void this.builtinTools.cancel(started.id).catch(() => undefined); };
       request.signal.addEventListener('abort', cancel, { once: true });

@@ -123,6 +123,15 @@ import { CommandsService } from '../commands/commands.service';
 import { createAgentTeamGroupGraph, type AgentTeamGroupGraphInitial, type AgentTeamGroupGraphState } from './executor-graph-v6';
 
 const MAX_TOOL_RESULT_CHARS = 100_000;
+// Every Planner round resends its whole history, so input cost grows with rounds times context.
+// These bounds keep each result small and ask the Planner to converge before the hard stop.
+// No context trimming: dropping early messages invalidates the provider's cached prefix.
+export const PLANNER_INVOCATION_LIMITS = {
+  maxToolRounds: 30,
+  budgetReminderAtRound: 18,
+  maxToolResultChars: 12_000,
+  builtinOutput: { readLines: 300, grepLines: 150 },
+} as const;
 const TASK_ROLES: Array<[RegExp, AgentTeamRole]> = [
   [/^repair_test_authoring_/, 'test_author'],
   [/^repair_test_execution_/, 'test_runner'],
@@ -1758,7 +1767,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         signal,
         jsonOutput: true,
         correlation: { surface: 'executor_category', executorCategoryId: run.executorCategoryId, teamRunId: request.runId, teamRole: taskRole, teamTaskAttemptId: attempt.id, nodeRunId: attempt.id },
-        limits: { maxToolResultChars: 30_000, ...(taskRole === 'planner' ? { maxToolRounds: 60 } : {}) },
+        limits: taskRole === 'planner' ? PLANNER_INVOCATION_LIMITS : { maxToolResultChars: 30_000 },
         operation: { taskKey, journal: operationJournal },
         onTextDelta: (delta) => this.appendEvent(this.db, request.runId, 'task.delta', {
           taskAttemptId: attempt.id,
@@ -3163,6 +3172,14 @@ export function rolePromptAddition(
         'Use targeted searches and bounded file excerpts. Combine independent patterns for the same path in one grep using regex alternation; use read startLine/endLine for focused excerpts. Start with likely definitions and callers; narrow by path and symbol before expanding. Avoid repeatedly scanning or reading the same large file when existing evidence already answers the question. If output is truncated, narrow the query rather than assuming absence.',
         'Stop investigating each question when its requested scope is supported by sufficient evidence. Satisfy every explicit requirement, including an explicitly requested exhaustive impact analysis; do not silently narrow the request or claim completeness without evidence. State any remaining uncertainty and its effect.',
         'For a request that only asks for read-only investigation or an answer, report the findings directly and omit implementation handoff, implementation plans, and Git or worktree decisions unless the user requested them. Do not perform changes or validation commands prohibited by the user.',
+        'Issue independent tool calls together in the same round instead of one call per round. Each round resends the whole conversation, so the number of rounds drives cost.',
+        'When the request already states the root cause, the plan, or the exact edits, do not re-investigate them. Confirm at most that the named files and symbols exist, then write the deliverable and hand off.',
+        ...(snapshot.roles.some((item) => item.executor) ? [
+          'When handing implementation to the implementation role, deliver a plan document it can execute without its own investigation: the goal and the decisions with brief reasons; a change list naming each file path, the function, component or symbol, and the intended change; what must not change; risks; and acceptance criteria. Investigate until those decisions and locations are supported, then stop. Do not read whole implementations only to restate them, and do not write complete code or diffs unless the exact edit is itself the decision.',
+        ] : []),
+      ] : []),
+      ...(role === snapshot.roles.find((item) => item.executor)?.role && role !== 'planner' ? [
+        'When a Planner plan document is handed to you, treat it as the decided scope. Read only the files and symbols it names before editing them. Do not search the repository broadly, re-investigate its findings, or re-verify its decisions. If the code differs from the plan, apply the change only when the plan\'s intent at that location is unambiguous; otherwise leave it unchanged and report the mismatch in unresolvedIssues instead of investigating further.',
       ] : []),
       `To pass work onward, include a handoff object with a role id captured by this executor version and a specific goal. Omit handoff when your work is complete or you are waiting for the user.`,
       (() => {
