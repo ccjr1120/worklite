@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useLocale } from '@/components/locale-provider';
-import { formatDateTime, formatNumber } from '@/i18n/format';
+import { formatDateTime, formatNumber, formatTokenCount } from '@/i18n/format';
 import { useGatewayRequestLogQuery, useGatewayRequestLogsQuery } from '@/api/queries';
 import { api } from '@/api/client';
 import type { AppLocale } from '@/i18n/locale';
@@ -88,13 +88,15 @@ function RequestLogRow({ item, expanded, onToggle, locale, onOpenProvider }: { i
   const { t } = useTranslation('logs');
   const detailQuery = useGatewayRequestLogQuery(expanded ? item.id : undefined);
   const detail = detailQuery.data;
-  const tokenMetrics = [
-    item.promptTokens !== null ? `${t('statistics.input')}: ${formatNumber(item.promptTokens, locale)}` : null,
-    item.cacheReadTokens !== null ? `${t('statistics.cacheRead')}: ${formatNumber(item.cacheReadTokens, locale)}` : null,
-    item.cacheCreationTokens !== null ? `${t('statistics.cacheCreation')}: ${formatNumber(item.cacheCreationTokens, locale)}` : null,
-    item.completionTokens !== null ? `${t('statistics.output')}: ${formatNumber(item.completionTokens, locale)}` : null,
-    item.totalTokens !== null ? `${t('statistics.total')}: ${formatNumber(item.totalTokens, locale)}` : null,
+  const tokenParts = (format: typeof formatNumber) => [
+    item.promptTokens !== null ? `${t('statistics.input')}: ${format(item.promptTokens, locale)}` : null,
+    item.cacheReadTokens !== null ? `${t('statistics.cacheRead')}: ${format(item.cacheReadTokens, locale)}` : null,
+    item.cacheCreationTokens !== null ? `${t('statistics.cacheCreation')}: ${format(item.cacheCreationTokens, locale)}` : null,
+    item.completionTokens !== null ? `${t('statistics.output')}: ${format(item.completionTokens, locale)}` : null,
+    item.totalTokens !== null ? `${t('statistics.total')}: ${format(item.totalTokens, locale)}` : null,
   ].filter((value): value is string => value !== null);
+  const tokenMetrics = tokenParts(formatTokenCount);
+  const tokenMetricsExact = tokenParts(formatNumber);
 
   return (
     <li className="rounded-md border border-border bg-surface-subtle">
@@ -125,7 +127,7 @@ function RequestLogRow({ item, expanded, onToggle, locale, onOpenProvider }: { i
             {item.workflowRunId ? <span className="font-mono">{t('requests.correlatedRun', { id: item.workflowRunId })}</span> : null}
             {item.teamRunId ? <span className="font-mono">{t('requests.correlatedTeamRun', { id: item.teamRunId })}</span> : null}
             {item.nodeRunId ? <span className="font-mono">{t('requests.correlatedNode', { id: item.nodeRunId })}</span> : null}
-            {tokenMetrics.length ? <span className="tabular-nums">{tokenMetrics.join(' · ')}</span> : null}
+            {tokenMetrics.length ? <span className="tabular-nums" title={tokenMetricsExact.join(' · ')}>{tokenMetrics.join(' · ')}</span> : null}
             {onOpenProvider ? <Button type="button" variant="ghost" size="compact" className="ml-auto" onClick={() => onOpenProvider(item.provider)}><KeyRound className="size-4" aria-hidden="true" />{t('requests.openProvider')}</Button> : null}
           </div>
           {detailQuery.isLoading ? (

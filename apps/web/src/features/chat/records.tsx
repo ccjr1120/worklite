@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { TeamRunDialog } from '@/features/executors/team-run-detail';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useLocale } from '@/components/locale-provider';
-import { formatDateTime, formatNumber } from '@/i18n/format';
+import { formatDateTime, formatNumber, formatTokenCount } from '@/i18n/format';
 import type { ChatTaskReference, GatewayAttributionGroup } from '@worklite/contracts';
 
 // Gateway statistics are retained indefinitely, so a conversation's lifetime total
@@ -27,17 +27,19 @@ function ConversationUsage({ conversationId }: { conversationId: string }) {
   const counted = groups.map((group) => group.totalTokens).filter((value): value is number => value !== null);
   const tokens = counted.length ? counted.reduce((sum, value) => sum + value, 0) : null;
   const requests = groups.reduce((sum, group) => sum + group.requests, 0);
-  const perSurface = groups.map((group) => `${t(`usage.surfaces.${group.surface ?? 'unattributed'}` as never)}: ${group.totalTokens === null ? t('usage.unavailable') : formatNumber(group.totalTokens, locale)}`);
+  const surfaceParts = (format: typeof formatNumber) => groups.map((group) => `${t(`usage.surfaces.${group.surface ?? 'unattributed'}` as never)}: ${group.totalTokens === null ? t('usage.unavailable') : format(group.totalTokens, locale)}`);
+  const perSurface = surfaceParts(formatTokenCount);
+  const perSurfaceExact = surfaceParts(formatNumber);
   return <section aria-labelledby="chat-conversation-usage" className="rounded-md border border-border bg-surface-subtle p-3">
     <h3 id="chat-conversation-usage" className="text-sm font-medium">{t('usage.title')}</h3>
     {query.isLoading ? <Skeleton className="mt-2 h-12 w-full" /> : query.isError ? (
       <p role="alert" className="mt-2 text-[13px] text-danger">{t('usage.loadFailed')}</p>
     ) : <>
       <dl className="mt-2 grid gap-3 text-[13px] sm:grid-cols-2">
-        <div><dt className="text-muted-foreground">{t('usage.totalTokens')}</dt><dd className="tabular-nums">{tokens === null ? t('usage.unavailable') : formatNumber(tokens, locale)}</dd></div>
+        <div><dt className="text-muted-foreground">{t('usage.totalTokens')}</dt><dd className="tabular-nums" title={tokens === null ? undefined : formatNumber(tokens, locale)}>{tokens === null ? t('usage.unavailable') : formatTokenCount(tokens, locale)}</dd></div>
         <div><dt className="text-muted-foreground">{t('usage.requests')}</dt><dd className="tabular-nums">{formatNumber(requests, locale)}</dd></div>
       </dl>
-      {perSurface.length ? <p className="mt-2 text-[13px] text-muted-foreground">{perSurface.join(' · ')}</p> : null}
+      {perSurface.length ? <p className="mt-2 text-[13px] text-muted-foreground" title={perSurfaceExact.join(' · ')}>{perSurface.join(' · ')}</p> : null}
       <p className="mt-2 text-[13px] text-muted-foreground">{t('usage.caveat')}</p>
     </>}
   </section>;
