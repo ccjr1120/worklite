@@ -6,22 +6,23 @@ import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useLocale } from '@/components/locale-provider';
-import { formatNumber } from '@/i18n/format';
+import { formatNumber, formatTokenCount } from '@/i18n/format';
 import { usePortkeyGatewayStatsQuery } from '@/api/queries';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { AppLocale } from '@/i18n/locale';
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-xl border border-border bg-surface p-3 shadow-xs"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold tabular-nums">{value}</p></div>;
+function Metric({ label, value, title }: { label: string; value: string; title?: string }) {
+  return <div className="rounded-xl border border-border bg-surface p-3 shadow-xs"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold tabular-nums" title={title}>{value}</p></div>;
 }
 
-function Detail({ label, value }: { label: string; value: string }) {
-  return <div><p className="text-xs font-medium text-muted-foreground">{label}</p><p className="mt-1 break-words font-mono text-xs">{value}</p></div>;
+function Detail({ label, value, title }: { label: string; value: string; title?: string }) {
+  return <div><p className="text-xs font-medium text-muted-foreground">{label}</p><p className="mt-1 break-words font-mono text-xs" title={title}>{value}</p></div>;
 }
 
-function BreakdownRow({ row, open, onToggle, onViewRequests, locale, metricValue }: { row: PortkeyGatewayStats['breakdown'][number]; open: boolean; onToggle: () => void; onViewRequests: () => void; locale: AppLocale; metricValue: (value: number | null, suffix?: string) => string }) {
+function BreakdownRow({ row, open, onToggle, onViewRequests, locale, metricValue, tokenValue, tokenExact }: { row: PortkeyGatewayStats['breakdown'][number]; open: boolean; onToggle: () => void; onViewRequests: () => void; locale: AppLocale; metricValue: (value: number | null, suffix?: string) => string; tokenValue: (value: number | null) => string; tokenExact: (value: number | null) => string }) {
   const { t } = useTranslation(['logs', 'common']);
+  const tokenLine = (format: (value: number | null) => string) => `${t('statistics.input')}: ${format(row.promptTokens)} · ${t('statistics.cacheRead')}: ${format(row.cacheReadTokens)} · ${t('statistics.cacheCreation')}: ${format(row.cacheCreationTokens)} · ${t('statistics.output')}: ${format(row.completionTokens)} · ${t('statistics.total')}: ${format(row.totalTokens)}`;
   const rate = row.requests ? Math.round((row.successful / row.requests) * 1000) / 10 : null;
   return (
     <div className="border-b border-border last:border-b-0">
@@ -44,7 +45,7 @@ function BreakdownRow({ row, open, onToggle, onViewRequests, locale, metricValue
         <div className="grid gap-4 border-t border-border bg-surface-subtle px-4 py-4 text-[13px] sm:grid-cols-2 lg:grid-cols-4">
           <Detail label={t('statistics.endpoints')} value={row.endpoints.map((item) => `${item.endpoint} (${item.requests})`).join(', ') || t('statistics.unavailable')} />
           <Detail label={t('statistics.statuses')} value={row.statuses.map((item) => `${item.status} (${item.requests})`).join(', ') || t('statistics.unavailable')} />
-          <Detail label={t('statistics.tokens')} value={`${t('statistics.input')}: ${metricValue(row.promptTokens)} · ${t('statistics.cacheRead')}: ${metricValue(row.cacheReadTokens)} · ${t('statistics.cacheCreation')}: ${metricValue(row.cacheCreationTokens)} · ${t('statistics.output')}: ${metricValue(row.completionTokens)} · ${t('statistics.total')}: ${metricValue(row.totalTokens)}`} />
+          <Detail label={t('statistics.tokens')} value={tokenLine(tokenValue)} title={tokenLine(tokenExact)} />
           <Button type="button" variant="secondary" size="compact" className="w-fit" aria-label={t('statistics.viewRequestsForModel', { provider: row.provider, model: row.model })} onClick={onViewRequests}><ScrollText className="size-4" aria-hidden="true" />{t('statistics.viewRequests')}</Button>
         </div>
       ) : null}
@@ -60,6 +61,8 @@ function GatewayStatistics({ from, to, filters = {}, onFiltersChange, onViewRequ
   const stats = statsQuery.data;
   const summary = stats?.summary;
   const metricValue = (value: number | null, suffix = '') => value === null ? t('statistics.unavailable') : `${formatNumber(value, locale)}${suffix}`;
+  const tokenValue = (value: number | null) => value === null ? t('statistics.unavailable') : formatTokenCount(value, locale);
+  const tokenExact = (value: number | null) => value === null ? t('statistics.unavailable') : formatNumber(value, locale);
   const providers = [...new Set((stats?.breakdown ?? []).map((row) => row.provider))].sort();
   const filteredBreakdown = (stats?.breakdown ?? []).filter((row) => (!filters.provider || row.provider === filters.provider) && (!filters.model || row.model === filters.model));
   const sumKnown = (values: Array<number | null>) => values.some((value) => value !== null) ? values.reduce<number>((total, value) => total + (value ?? 0), 0) : null;
@@ -118,7 +121,7 @@ function GatewayStatistics({ from, to, filters = {}, onFiltersChange, onViewRequ
         <Metric label={t('statistics.requests')} value={formatNumber(scopedSummary?.requests ?? 0, locale)} />
         <Metric label={t('statistics.successRate')} value={scopedSummary?.successRate === null || scopedSummary?.successRate === undefined ? t('statistics.unavailable') : `${scopedSummary.successRate}%`} />
         <Metric label={t('statistics.averageLatency')} value={metricValue(scopedSummary?.averageLatencyMs ?? null, ' ms')} />
-        <Metric label={t('statistics.totalTokens')} value={metricValue(scopedSummary?.totalTokens ?? null)} />
+        <Metric label={t('statistics.totalTokens')} value={tokenValue(scopedSummary?.totalTokens ?? null)} title={tokenExact(scopedSummary?.totalTokens ?? null)} />
       </div>
       <p className="text-xs text-muted-foreground">{t('statistics.tokenDefinition')}</p>
       <div className="overflow-hidden rounded-lg border border-border bg-surface">
@@ -131,7 +134,7 @@ function GatewayStatistics({ from, to, filters = {}, onFiltersChange, onViewRequ
         </div>
         {filteredBreakdown.map((row) => {
           const key = `${row.provider}\u0000${row.model}`;
-          return <BreakdownRow key={key} row={row} open={expanded === key} onToggle={() => setExpanded(expanded === key ? null : key)} onViewRequests={() => onViewRequests?.(row.provider, row.model)} locale={locale} metricValue={metricValue} />;
+          return <BreakdownRow key={key} row={row} open={expanded === key} onToggle={() => setExpanded(expanded === key ? null : key)} onViewRequests={() => onViewRequests?.(row.provider, row.model)} locale={locale} metricValue={metricValue} tokenValue={tokenValue} tokenExact={tokenExact} />;
         })}
       </div>
       </>}

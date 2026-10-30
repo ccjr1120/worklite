@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useLocale } from '@/components/locale-provider';
-import { formatNumber } from '@/i18n/format';
+import { formatNumber, formatTokenCount } from '@/i18n/format';
 import { usePortkeyGatewayStatsQuery } from '@/api/queries';
 import type { AppLocale } from '@/i18n/locale';
 import type { RequestLogFilters } from './request-logs';
@@ -39,7 +39,7 @@ function groupRequestFilters(group: GatewayAttributionGroup, groupBy: GatewaySta
   return { surface: group.surface ?? undefined };
 }
 
-function UsageRow({ group, groupBy, open, onToggle, onViewRequests, locale, metricValue, surfaceLabel }: {
+function UsageRow({ group, groupBy, open, onToggle, onViewRequests, locale, metricValue, tokenValue, tokenExact, surfaceLabel }: {
   group: GatewayAttributionGroup;
   groupBy: GatewayStatsGroupBy;
   open: boolean;
@@ -47,11 +47,14 @@ function UsageRow({ group, groupBy, open, onToggle, onViewRequests, locale, metr
   onViewRequests: () => void;
   locale: AppLocale;
   metricValue: (value: number | null, suffix?: string) => string;
+  tokenValue: (value: number | null) => string;
+  tokenExact: (value: number | null) => string;
   surfaceLabel: (surface: GatewaySurface | null) => string;
 }) {
   const { t } = useTranslation(['logs', 'common']);
   const { title, detail } = groupLabel(group, groupBy, surfaceLabel);
   const rate = group.requests ? Math.round((group.successful / group.requests) * 1000) / 10 : null;
+  const tokenLine = (format: (value: number | null) => string) => `${t('statistics.input')}: ${format(group.promptTokens)} · ${t('statistics.cacheRead')}: ${format(group.cacheReadTokens)} · ${t('statistics.cacheCreation')}: ${format(group.cacheCreationTokens)} · ${t('statistics.output')}: ${format(group.completionTokens)}`;
   return (
     <div className="border-b border-border last:border-b-0">
       <button
@@ -63,7 +66,7 @@ function UsageRow({ group, groupBy, open, onToggle, onViewRequests, locale, metr
         <span className="font-medium">{title}</span>
         <span className="break-all font-mono text-xs text-muted-foreground">{detail ?? t('usage.noDetail')}</span>
         <span className="text-[13px] tabular-nums">{formatNumber(group.requests, locale)}</span>
-        <span className="text-[13px] tabular-nums">{metricValue(group.totalTokens)}</span>
+        <span className="text-[13px] tabular-nums" title={tokenExact(group.totalTokens)}>{tokenValue(group.totalTokens)}</span>
         <span className="text-[13px] tabular-nums text-muted-foreground">
           {rate === null ? t('statistics.unavailable') : `${rate}%`}
           <ChevronDown className={`ml-1 inline size-4 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
@@ -73,8 +76,8 @@ function UsageRow({ group, groupBy, open, onToggle, onViewRequests, locale, metr
         <div className="grid gap-4 border-t border-border bg-surface-subtle px-4 py-4 text-[13px] sm:grid-cols-2 lg:grid-cols-3">
           <div>
             <p className="text-xs font-medium text-muted-foreground">{t('statistics.tokens')}</p>
-            <p className="mt-1 break-words font-mono text-xs">
-              {`${t('statistics.input')}: ${metricValue(group.promptTokens)} · ${t('statistics.cacheRead')}: ${metricValue(group.cacheReadTokens)} · ${t('statistics.cacheCreation')}: ${metricValue(group.cacheCreationTokens)} · ${t('statistics.output')}: ${metricValue(group.completionTokens)}`}
+            <p className="mt-1 break-words font-mono text-xs" title={tokenLine(tokenExact)}>
+              {tokenLine(tokenValue)}
             </p>
           </div>
           <div>
@@ -106,6 +109,8 @@ function GatewayUsage({ from, to, groupBy, onGroupByChange, onViewRequests }: {
   const statsQuery = usePortkeyGatewayStatsQuery({ from, to, groupBy });
   const groups = statsQuery.data?.attribution.groups ?? [];
   const metricValue = (value: number | null, suffix = '') => value === null ? t('statistics.unavailable') : `${formatNumber(value, locale)}${suffix}`;
+  const tokenValue = (value: number | null) => value === null ? t('statistics.unavailable') : formatTokenCount(value, locale);
+  const tokenExact = (value: number | null) => value === null ? t('statistics.unavailable') : formatNumber(value, locale);
   const surfaceLabel = (surface: GatewaySurface | null) => surface ? t(`usage.surfaces.${surface}` as never) : t('usage.surfaces.unattributed');
 
   // A group key identifies a row within one period and grouping only, so changing
@@ -161,6 +166,8 @@ function GatewayUsage({ from, to, groupBy, onGroupByChange, onViewRequests }: {
               onViewRequests={() => onViewRequests(groupRequestFilters(group, groupBy))}
               locale={locale}
               metricValue={metricValue}
+              tokenValue={tokenValue}
+              tokenExact={tokenExact}
               surfaceLabel={surfaceLabel}
             />
           ))}

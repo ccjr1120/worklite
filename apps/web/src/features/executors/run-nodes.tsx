@@ -8,19 +8,22 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TruncatedText } from '@/components/ui/truncated-text';
 import { focusRing } from '@/components/ui/interaction';
-import { formatDuration, formatNumber } from '@/i18n/format';
+import { formatDuration, formatNumber, formatTokenCount } from '@/i18n/format';
 import { teamRoleLabel } from './team-run-summary';
 
 /**
- * A token figure with its source. Exact figures read plainly, estimates carry a "≈" and
- * unavailable figures show a dash, never 0; the reason is in the tooltip.
+ * A token figure with its source. Figures are shortened (12.3k); the tooltip carries the
+ * precise count. Exact figures read plainly, estimates carry a "≈" and unavailable figures
+ * show a dash, never 0; the reason is in the tooltip.
  */
 export function TokenFigure({ value, retentionHours = 12, className = '' }: { value: TokenAttribution; retentionHours?: number; className?: string }) {
   const { t } = useTranslation('executors');
   const { locale } = useLocale();
-  const text = value.tokens === null ? '—' : `${value.source === 'estimated' ? '≈' : ''}${formatNumber(value.tokens, locale)}`;
+  const text = value.tokens === null ? '—' : `${value.source === 'estimated' ? '≈' : ''}${formatTokenCount(value.tokens, locale)}`;
+  const exact = value.tokens === null ? null : formatNumber(value.tokens, locale);
   const source = t(`tokens.source.${value.source}` as never);
-  const hint = value.reason ? `${source}：${t(`tokens.reason.${value.reason}` as never, { hours: retentionHours })}` : source;
+  const sourceHint = value.reason ? `${source}：${t(`tokens.reason.${value.reason}` as never, { hours: retentionHours })}` : source;
+  const hint = [exact, sourceHint].filter(Boolean).join(' · ');
   // The hint is also in screen-reader text, because the figure can sit inside a row
   // button or link where a focusable tooltip trigger would be nested interactive content.
   return (
