@@ -4,6 +4,7 @@ import { Copy, Download } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useChatConversationRecordsQuery, usePortkeyGatewayStatsQuery } from '@/api/queries';
 import { Button } from '@/components/ui/button';
+import { TeamRunDialog } from '@/features/executors/team-run-detail';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useLocale } from '@/components/locale-provider';
 import { formatDateTime, formatNumber } from '@/i18n/format';
@@ -45,7 +46,7 @@ function ConversationUsage({ conversationId }: { conversationId: string }) {
 export function TaskLink({ reference }: { reference: ChatTaskReference | null }) {
   const { t } = useTranslation('assistant');
   if (reference?.kind === 'workflow') return <Link className="text-[13px] text-brand-text underline underline-offset-4" to="/runs/$runId" params={{ runId: reference.runId }}>{t('records.openTask')}</Link>;
-  if (reference?.kind === 'executor_category') return <Link className="text-[13px] text-brand-text underline underline-offset-4" to="/executor-runs/$runId" params={{ runId: reference.runId }}>{t('records.openTask')}</Link>;
+  if (reference?.kind === 'executor_category') return <TeamRunDialog runId={reference.runId}><button type="button" className="text-[13px] text-brand-text underline underline-offset-4">{t('records.openTask')}</button></TeamRunDialog>;
   return null;
 }
 

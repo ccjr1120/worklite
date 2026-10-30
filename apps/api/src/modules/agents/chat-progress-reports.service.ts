@@ -28,7 +28,7 @@ export function activeWorkSignature(items: ActiveWorkItem[]): string {
   return JSON.stringify(items.map((item) => item.kind === 'task'
     ? [item.kind, item.id, item.stage, item.activityCount, item.progressText]
     : item.kind === 'executor_category'
-      ? [item.kind, item.id, item.status, item.progress?.phase ?? null, item.progress?.percent ?? null, item.progress?.completedAssignments ?? null]
+      ? [item.kind, item.id, item.status]
       : [item.kind, item.id, item.status, item.currentNodeId]));
 }
 
@@ -41,8 +41,7 @@ export function buildActiveWorkNote(items: ActiveWorkItem[], intervalSeconds = D
       return `${index + 1}. 项目任务 ${item.id}（${truncate(item.goal, TITLE_LIMIT)}）：运行中，阶段 ${item.stage}${progress}`;
     }
     if (item.kind === 'executor_category') {
-      const progress = item.progress ? `，进度 ${item.progress.percent}%（阶段 ${item.progress.phase}，${item.progress.completedAssignments}/${item.progress.totalAssignments} 项开发任务完成）` : '';
-      return `${index + 1}. 执行器任务 ${item.id}（${truncate(item.intent, TITLE_LIMIT)}）：${item.status}${progress}`;
+      return `${index + 1}. 执行器任务 ${item.id}（${truncate(item.intent, TITLE_LIMIT)}）：${item.status}`;
     }
     return `${index + 1}. 工作流运行 ${item.id}（${item.workflowName}）：${item.status}${item.currentNodeId ? `，当前节点 ${item.currentNodeId}` : ''}`;
   });
@@ -135,12 +134,10 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
         id: item.id,
         title: item.kind === 'task' ? truncate(item.goal, TITLE_LIMIT) : item.kind === 'executor_category' ? truncate(item.intent, TITLE_LIMIT) : item.workflowName,
         status: item.kind === 'task' ? 'running' : item.status,
-        stage: item.kind === 'task' ? item.stage : item.kind === 'executor_category' ? item.progress?.phase ?? undefined : item.currentNodeId ?? undefined,
+        stage: item.kind === 'task' ? item.stage : item.kind === 'executor_category' ? undefined : item.currentNodeId ?? undefined,
         progress: item.kind === 'task'
           ? truncate(item.progressText, PROGRESS_TEXT_LIMIT) || undefined
-          : item.kind === 'executor_category' && item.progress
-            ? `${item.progress.percent}% · ${item.progress.completedAssignments}/${item.progress.totalAssignments}`
-            : undefined,
+          : undefined,
         updatedAt: item.updatedAt,
       })),
     });

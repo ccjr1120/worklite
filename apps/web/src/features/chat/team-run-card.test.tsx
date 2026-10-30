@@ -1,10 +1,12 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n/config';
 import type { AgentTeamRunView, AgentTeamTaskAttemptView, ChatSubmissionView } from '@worklite/contracts';
 import { useAgentTeamRunQuery } from '@/api/queries';
 import { TaskCard } from './task-messages';
+
+vi.mock('@/features/executors/team-run-detail', () => ({ TeamRunDialog: ({ children }: { children: React.ReactNode }) => children }));
 
 vi.mock('@/api/queries', () => ({
   agentTeamGroupQueryKey: (id: string) => ['agent-team-group', id],
@@ -69,7 +71,7 @@ describe('Chat executor Run card', () => {
 
     expect(screen.getByText('实现登录页并补测试')).toBeVisible();
     expect(screen.getByText('执行中')).toBeVisible();
-    expect(screen.getByText('审查中 · 80%')).toBeVisible();
+    expect(screen.queryByText(/80%|审查中/)).not.toBeInTheDocument();
     expect(screen.getByText('核对接口改动')).toBeVisible();
     expect(screen.getByText('Reviewer')).toBeVisible();
     expect(screen.getByText('gpt-review')).toBeVisible();
@@ -77,7 +79,7 @@ describe('Chat executor Run card', () => {
     expect(screen.getByText('总耗时 1 小时 25 分钟')).toBeVisible();
     expect(screen.getByRole('button', { name: '暂停' })).toBeVisible();
     expect(screen.queryByText('角色任务')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '展开执行任务详情' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: '打开任务详情' })).toBeVisible();
   });
 
   it('shows parallel Developer lanes by count with assignment progress', () => {
@@ -92,16 +94,6 @@ describe('Chat executor Run card', () => {
     expect(screen.getByText('gpt-codex')).toBeVisible();
     expect(screen.getByText('开发任务 1/4')).toBeVisible();
     expect(screen.queryByText(/本角色/)).not.toBeInTheDocument();
-  });
-
-  it('lists role tasks with model and elapsed time only after expanding', () => {
-    mockRun(teamRun());
-    render(<TaskCard submission={submission} />);
-    fireEvent.click(screen.getByRole('button', { name: '展开执行任务详情' }));
-
-    expect(screen.getByText('角色任务')).toBeVisible();
-    expect(screen.getByText('Planner · planning · gpt-planner · 10 分钟')).toBeVisible();
-    expect(screen.getByRole('link', { name: '打开任务详情' })).toHaveAttribute('href', '/executor-runs/atr_1');
   });
 
   it('keeps only the total elapsed time once the Run settles', () => {

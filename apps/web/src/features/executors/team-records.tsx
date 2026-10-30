@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { Link, useSearch } from '@tanstack/react-router';
 import { Search, Settings, ChevronDown, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -8,7 +8,6 @@ import { ErrorState } from '@/components/error-state';
 import { PageContainer, PageHeading } from '@/components/page-heading';
 import { StatusDot, toStatusKey } from '@/components/status-badge';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TruncatedText } from '@/components/ui/truncated-text';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
@@ -25,6 +24,7 @@ import {
 } from '@/components/ui/popover';
 import { RunNodeTable, TokenFigure } from './run-nodes';
 import { teamRoleLabel } from './team-run-summary';
+import { TeamRunDialog } from './team-run-detail';
 
 const SKELETON_ROWS = 8;
 const SETTLED_STATUSES: ReadonlySet<AgentTeamRunStatus> = new Set(['succeeded', 'failed', 'cancelled']);
@@ -82,7 +82,7 @@ function TeamFilterPopover({ selectedTeamIds, onTeamsChange, disabled }: TeamFil
     <Popover>
       <PopoverTrigger asChild>
         <Button
-          variant="outline"
+          variant="secondary"
           className="gap-2"
           disabled={disabled}
         >
@@ -154,11 +154,8 @@ function RunRow({ run, expanded, onToggle, nodes, nodesLoading, retentionHours, 
         >
           <ChevronRight className={`size-4 transition-transform ${expanded ? 'rotate-90' : ''}`} aria-hidden="true" />
         </button>
-        <Link
-          to="/executor-runs/$runId"
-          params={{ runId: run.id }}
-          className={`${rowGrid} pl-1 rounded-lg ${focusRing}`}
-        >
+        <TeamRunDialog runId={run.id}>
+        <button type="button" className={`${rowGrid} pl-1 rounded-lg text-left ${focusRing}`}>
           {/* Executor name captured when the Run was dispatched */}
           <span className="hidden sm:flex text-xs font-medium text-foreground truncate">
             {run.executorName}
@@ -206,7 +203,8 @@ function RunRow({ run, expanded, onToggle, nodes, nodesLoading, retentionHours, 
           <div className="text-right text-xs" title={t('records.columns.tokens')}>
             {run.overview ? <TokenFigure value={run.overview.totalTokens} retentionHours={retentionHours} /> : '—'}
           </div>
-        </Link>
+        </button>
+        </TeamRunDialog>
       </div>
       {expanded ? (
         <div id={detailsId} className="mx-4 mb-3 rounded-lg border border-border bg-surface">
@@ -229,8 +227,8 @@ export function TeamRecords({ executorId: executorCategoryId }: { executorId: st
     if (teamsParam) {
       return teamsParam.split(',').filter(Boolean);
     }
-    return [executorCategoryId]; // Default to current team
-  }, [teamsParam, executorCategoryId]);
+    return [];
+  }, [teamsParam]);
 
   const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>(initialTeamIds);
   const [keyword, setKeyword] = useState('');
@@ -249,7 +247,10 @@ export function TeamRecords({ executorId: executorCategoryId }: { executorId: st
   }, []);
 
   const query = useAgentTeamRunListQuery(selectedTeamIds);
-  const teamsData = useAgentTeamsQuery().data ?? [];
+  const { hasNextPage, isFetching, isFetchNextPageError, fetchNextPage } = query;
+  useEffect(() => {
+    if (hasNextPage && !isFetching && !isFetchNextPageError) void fetchNextPage();
+  }, [hasNextPage, isFetching, isFetchNextPageError, fetchNextPage]);
 
   const crumbs = [{ label: 'Coding' }];
   const loading = query.isPending;
@@ -270,7 +271,6 @@ export function TeamRecords({ executorId: executorCategoryId }: { executorId: st
   const nodes = useAgentTeamRunNodesQuery(expandedRuns.map((run) => run.id), expandedRuns.some((run) => !SETTLED_STATUSES.has(run.status)));
 
   const total = query.data?.pages[0]?.total ?? 0;
-  const hasNextPage = query.hasNextPage;
   const isEmpty = !loading && filteredRuns.length === 0;
 
   return (
@@ -312,7 +312,7 @@ export function TeamRecords({ executorId: executorCategoryId }: { executorId: st
           <RunListSkeleton />
         ) : query.isError ? (
           <ErrorState title={t('records.title')} description={t('records.loadFailed')} onAction={() => void query.refetch()} />
-        ) : isEmpty ? (
+        ) : isEmpty && !hasNextPage ? (
           <div className="flex h-24 items-center justify-center rounded-xl border border-dashed border-border px-4 text-sm text-muted-foreground">
             <TruncatedText text={query.data?.pages[0]?.items.length ? t('records.noMatch') : t('records.empty')} />
           </div>
@@ -337,7 +337,7 @@ export function TeamRecords({ executorId: executorCategoryId }: { executorId: st
             {hasNextPage && (
               <div className="flex justify-center pt-4">
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   onClick={() => query.fetchNextPage()}
                   disabled={query.isFetchingNextPage}
                 >

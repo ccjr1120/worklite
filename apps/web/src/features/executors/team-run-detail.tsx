@@ -8,13 +8,13 @@ import { agentTeamRunQueryKey, useAgentTeamRunQuery } from '@/api/queries';
 import { CopyableId } from '@/components/copyable-id';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
-import { PageContainer, PageHeading } from '@/components/page-heading';
 import { Badge } from '@/components/ui/badge';
 import { StreamingMarkdown } from '@/components/ai/streaming-markdown';
 import { StatusBadge, toStatusKey } from '@/components/status-badge';
-import { Progress } from '@/components/ui/progress';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
+import type { ReactElement } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
 import { runModeLabel } from './run-mode';
 import { formatDateTime } from '@/i18n/format';
@@ -66,7 +66,7 @@ function OperationEvidence({ operation }: { operation: AgentTeamOperationView })
   return <article className="rounded-xl border border-border bg-surface p-4 shadow-xs"><div className="flex flex-wrap items-center gap-2"><StatusBadge status={toStatusKey(operation.status)} label={t(`run.status.${operation.status}`)} /><span className="font-mono text-xs break-all">{operation.operationKey}</span><span className="font-mono text-xs text-muted-foreground">{operation.toolName}</span></div><dl className="mt-3 grid gap-3 text-[13px] sm:grid-cols-2"><div><dt className="text-muted-foreground">{t('metadata.taskKey')}</dt><dd className="mt-1 font-mono break-all">{operation.taskKey}</dd></div><div><dt className="text-muted-foreground">{t('operations.command')}</dt><dd className="mt-1 font-mono break-all">{operation.commandId ?? t('operations.noCommand')}</dd></div></dl>{operation.failureReason ? <p className="mt-2 text-[13px] text-danger" role="alert">{operation.failureReason}</p> : null}{operation.commandId ? <CommandEvidence commandId={operation.commandId} /> : null}</article>;
 }
 
-export function TeamRunDetailPage({ runId }: { runId: string }) {
+function TeamRunDetail({ runId }: { runId: string }) {
   const { t } = useTranslation('executors');
   const { locale } = useLocale();
   const queryClient = useQueryClient();
@@ -79,17 +79,15 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
     return () => events.close();
   }, [runId, queryClient]);
 
-  if (query.isPending) return <PageContainer width="detail"><WorkspaceChrome crumbs={[{ label: 'Coding' }, { label: t('run.detail.title') }]} /><div className="space-y-3" role="status"><Skeleton className="h-8 w-72" /><Skeleton className="h-28 w-full" /><Skeleton className="h-56 w-full" /></div></PageContainer>;
-  if (query.isError || !query.data) return <PageContainer width="detail"><WorkspaceChrome crumbs={[{ label: 'Coding' }, { label: t('run.detail.title') }]} /><ErrorState title={t('run.detail.title')} description={t('run.loadFailed')} onAction={() => void query.refetch()} /></PageContainer>;
+  if (query.isPending) return <div className="space-y-3" role="status"><Skeleton className="h-8 w-72" /><Skeleton className="h-28 w-full" /></div>;
+  if (query.isError || !query.data) return <ErrorState title={t('run.detail.title')} description={t('run.loadFailed')} onAction={() => void query.refetch()} />;
 
   const run: AgentTeamRunView = query.data;
   const questions = run.pendingInputs.filter((input) => input.status === 'pending');
   return (
-    <PageContainer width="detail">
-      <WorkspaceChrome crumbs={[{ label: 'Coding', to: `/coding/${run.executorCategoryId}` }, { label: t('run.detail.title') }]} />
-      <PageHeading title={t('run.detail.title')} description={run.intent} actions={<Link to="/chat" className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">{t('run.continueInChat')}</Link>} />
-
-      {run.progress ? <section className="rounded-xl border border-border bg-surface p-4 shadow-xs"><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">{t('progress.title')}</h2><span className="text-sm tabular-nums">{t('progress.percent', { percent: run.progress.percent })}</span></div><Progress value={run.progress.percent} className="mt-3" /><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-muted-foreground"><span>{t('progress.phase')}: {t(`progress.phaseValue.${run.progress.phase}`)}</span><span>{t('progress.nextStep')}: {t(`progress.nextStepValue.${run.progress.nextStep}`)}</span>{run.progress.totalAssignments > 0 ? <span>{t('progress.assignments', { completed: run.progress.completedAssignments, total: run.progress.totalAssignments })}</span> : null}{run.progress.activeDeveloperIds.length ? <span>{t('progress.activeDevelopers')}: {run.progress.activeDeveloperIds.join(', ')}</span> : null}{run.progress.waitingReason ? <span>{t(`progress.waitingReason.${run.progress.waitingReason}`)}</span> : null}</div></section> : null}
+    <div className="space-y-4">
+      <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">{run.intent}</p>
+      <Link to="/chat" className="inline-block rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">{t('run.continueInChat')}</Link>
 
       <section className="rounded-xl border border-border bg-surface p-4 shadow-xs">
         <h2 className="text-sm font-semibold">{t('metadata.title')}</h2>
@@ -122,6 +120,28 @@ export function TeamRunDetailPage({ runId }: { runId: string }) {
       <section className="space-y-3"><h2 className="text-sm font-semibold">{t('events.title')}</h2>{run.activities.length ? <ul className="max-h-[560px] divide-y divide-border overflow-auto rounded-xl border border-border bg-surface px-4">{run.activities.map((event) => <li key={event.sequence} className="py-3"><div className="flex flex-wrap items-center gap-2 text-xs"><span className="font-mono">#{event.sequence}</span><span className="font-medium">{event.type}</span><time className="text-muted-foreground">{formatDateTime(event.createdAt, locale)}</time></div><JsonEvidence value={event.payload} /></li>)}</ul> : <EmptyState title={t('events.title')} description={t('events.empty')} />}</section>
 
       {run.outcome ? <section className="rounded-xl border border-border bg-surface p-4 shadow-xs"><h2 className="text-sm font-semibold">{t('outcome.title')}</h2><StreamingMarkdown content={run.outcome.summary} className="mt-3 text-[13px]" /><h3 className="mt-4 text-xs font-medium text-muted-foreground">{t('outcome.unresolved')}</h3>{run.outcome.unresolvedIssues.length ? <ul className="mt-1 list-disc space-y-1 pl-5 text-[13px]">{run.outcome.unresolvedIssues.map((issue) => <li key={issue} className="whitespace-pre-wrap break-words">{issue}</li>)}</ul> : <p className="mt-1 text-[13px] text-muted-foreground">{t('outcome.noUnresolved')}</p>}<h3 className="mt-4 text-xs font-medium text-muted-foreground">{t('outcome.criteria')}</h3>{run.outcome.criterionAssessments.length ? <ul className="mt-2 space-y-3 text-[13px]">{run.outcome.criterionAssessments.map((assessment) => <li key={`${assessment.criterion}-${assessment.assessment}`}><div className="flex flex-wrap items-center gap-2"><Badge variant={assessment.assessment === 'met' ? 'success' : assessment.assessment === 'unmet' ? 'danger' : 'warning'}>{t(`outcome.assessment.${assessment.assessment}`)}</Badge><span className="whitespace-pre-wrap break-words">{assessment.criterion}</span></div>{assessment.evidence.length ? <ul className="mt-1 list-disc space-y-1 pl-5 text-muted-foreground">{assessment.evidence.map((evidence) => <li key={evidence} className="whitespace-pre-wrap break-words">{evidence}</li>)}</ul> : <p className="mt-1 text-muted-foreground">{t('outcome.noEvidence')}</p>}</li>)}</ul> : <p className="mt-1 text-[13px] text-muted-foreground">{t('outcome.empty')}</p>}</section> : null}
-    </PageContainer>
+    </div>
   );
+}
+
+export function TeamRunDialog({ runId, children }: { runId: string; children: ReactElement }) {
+  const { t } = useTranslation('executors');
+  const [open, setOpen] = useState(false);
+  return <Dialog open={open} onOpenChange={setOpen}>
+    <DialogPrimitive.Trigger asChild>{children}</DialogPrimitive.Trigger>
+    <DialogContent className="max-w-4xl" aria-describedby={undefined}>
+      <DialogTitle>{t('run.detail.title')}</DialogTitle>
+      {open ? <TeamRunDetail runId={runId} /> : null}
+    </DialogContent>
+  </Dialog>;
+}
+
+export function LegacyTeamRunDialog({ runId, onClose }: { runId: string; onClose: () => void }) {
+  const { t } = useTranslation('executors');
+  return <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <DialogContent className="max-w-4xl" aria-describedby={undefined}>
+      <DialogTitle>{t('run.detail.title')}</DialogTitle>
+      <TeamRunDetail runId={runId} />
+    </DialogContent>
+  </Dialog>;
 }

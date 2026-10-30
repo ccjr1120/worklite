@@ -21,7 +21,7 @@ import type { AppLocale } from '@/i18n/locale';
 import { cn } from '@/lib/utils';
 import { toSingleLine } from '@/lib/single-line';
 import { ApiError, api } from '@/api/client';
-import { useChatProjectOperationQuery } from '@/api/queries';
+import { useAgentTeamRunQuery, useChatProjectOperationQuery } from '@/api/queries';
 import { PinTrackingContext } from './pinned-executions';
 import { messagePreview } from './attachment-preview';
 
@@ -196,6 +196,11 @@ const AssistantTurn = memo(function AssistantTurn({ segments, working, markdownE
 // compact default when the conversation changes or the page reloads.
 export const ProgressReportExpansionContext = createContext<{ expanded: boolean; toggle: () => void }>({ expanded: false, toggle: () => undefined });
 
+function ExecutorReportStatus({ runId }: { runId: string }) {
+  const query = useAgentTeamRunQuery('personal', runId);
+  return query.data ? <StatusBadge status={toStatusKey(query.data.status)} className="shrink-0" /> : null;
+}
+
 function ProgressReportCard({ message, report, streaming, markdownEnabled }: {
   message: TranscriptMessage;
   report: NonNullable<TranscriptMessage['progressReport']>;
@@ -235,18 +240,18 @@ function ProgressReportCard({ message, report, streaming, markdownEnabled }: {
             {report.items.map((item) => (
               <li key={`${item.kind}:${item.id}`} className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs text-muted-foreground">{t(`progress.kind.${item.kind}`)}</p>
+                  <p className="text-xs text-muted-foreground">{t(`progress.kind.${item.kind}`, { defaultValue: item.kind })}</p>
                   <p className="break-words text-sm font-medium leading-5">{item.title}</p>
                   <p className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground">{item.id}</p>
-                  {item.stage ? <p className="mt-0.5 text-xs text-muted-foreground">{t('progress.stage', { stage: item.kind === 'task' ? t(`codex.stage.${item.stage}`, { defaultValue: item.stage }) : item.stage })}</p> : null}
-                  {item.progress ? <p className="mt-0.5 break-words text-xs text-muted-foreground">{item.progress}</p> : null}
+                  {item.kind !== 'executor_category' && item.stage ? <p className="mt-0.5 text-xs text-muted-foreground">{t('progress.stage', { stage: item.kind === 'task' ? t(`codex.stage.${item.stage}`, { defaultValue: item.stage }) : item.stage })}</p> : null}
+                  {item.kind !== 'executor_category' && item.progress ? <p className="mt-0.5 break-words text-xs text-muted-foreground">{item.progress}</p> : null}
                 </div>
-                <StatusBadge status={toStatusKey(item.status)} className="shrink-0" />
+                {item.kind === 'executor_category' ? <ExecutorReportStatus runId={item.id} /> : <StatusBadge status={toStatusKey(item.status)} className="shrink-0" />}
               </li>
             ))}
           </ul>
           <div className="mt-3 border-t border-border pt-3">
-            <MessageResponse content={message.content} enabled={markdownEnabled} className={streaming ? 'wl-caret' : undefined} />
+            {report.items.some((item) => item.kind === 'executor_category' && item.progress) ? null : <MessageResponse content={message.content} enabled={markdownEnabled} className={streaming ? 'wl-caret' : undefined} />}
           </div>
         </div>
       ) : null}

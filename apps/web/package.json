@@ -1,6 +1,6 @@
 {
   "name": "@worklite/web",
-  "version": "0.1.106",
+  "version": "0.1.110",
   "private": true,
   "type": "module",
   "scripts": {

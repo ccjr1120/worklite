@@ -40,7 +40,7 @@ const DDL = [
   )`,
   'CREATE TABLE agent_teams (id text PRIMARY KEY NOT NULL)',
   'CREATE TABLE agent_team_versions (id text PRIMARY KEY NOT NULL)',
-  `CREATE TABLE agent_team_runs (
+  `CREATE TABLE executor_runs (
     id text PRIMARY KEY NOT NULL, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     executor_category_id text NOT NULL REFERENCES agent_teams(id) ON DELETE RESTRICT,
     executor_category_version_id text NOT NULL REFERENCES agent_team_versions(id) ON DELETE RESTRICT,
@@ -102,7 +102,7 @@ function insertTask(db: Database, status: string, activities: Array<Record<strin
 function insertTeamRun(db: Database, status: string, runId = 'trun_progress_test') {
   db.$client.prepare('INSERT INTO agent_teams (id) VALUES (?)').run('team_agent');
   db.$client.prepare('INSERT INTO agent_team_versions (id) VALUES (?)').run(`tver_${runId}`);
-  db.$client.prepare(`INSERT INTO agent_team_runs (id, workspace_id, executor_category_id, executor_category_version_id, status, intent, project_directory, mode, lang_graph_thread_id)
+  db.$client.prepare(`INSERT INTO executor_runs (id, workspace_id, executor_category_id, executor_category_version_id, status, intent, project_directory, mode, lang_graph_thread_id)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(runId, WORKSPACE_ID, 'team_agent', `tver_${runId}`, status, '协作开发任务', '/tmp/project', 'implement_and_validate', `thread_${runId}`);
   db.$client.prepare('INSERT INTO chat_submissions (id, workspace_id, execution_id, message, target, reference) VALUES (?, ?, ?, ?, ?, ?)')
@@ -147,7 +147,8 @@ describe('ChatProgressReportsService', () => {
     expect(reportActiveWorkProgress).toHaveBeenCalledTimes(1);
     const note = reportActiveWorkProgress.mock.calls[0]![2] as string;
     expect(note).toContain('trun_progress_test');
-    expect(note).toContain('进度 50%');
+    expect(note).not.toContain('50%');
+    expect(note).not.toContain('development');
     expect(note).toContain('日报工作流');
     expect(note).toContain('node_write');
     expect(getRunProgress).toHaveBeenCalledWith('trun_progress_test');
