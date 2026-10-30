@@ -65,14 +65,27 @@ describe('validateCanvasRenderConfig', () => {
     expect(() => validateCanvasRenderCode('```js\n' + 'x'.repeat(65_536) + '\n```')).toThrow('must not exceed');
   });
 
-  it('leaves incomplete, nested, or mixed Markdown fences unchanged', () => {
+  it('leaves incomplete or nested Markdown fences unchanged', () => {
     const incomplete = '```js\nctx.fillRect(0, 0, 10, 10);';
     const nested = '```js\nconst outer = 1;\n```python\nconst inner = 2;\n```\n';
-    const mixed = 'Here is the script:\n```js\nctx.fillRect(0, 0, 10, 10);\n```';
 
     expect(validateCanvasRenderCode(incomplete)).toBe(incomplete);
     expect(validateCanvasRenderCode(nested)).toBe(nested);
-    expect(validateCanvasRenderCode(mixed)).toBe(mixed);
+  });
+
+  it('takes the one compiling fenced block out of a reply that surrounds it with prose', () => {
+    expect(validateCanvasRenderCode('Here is the script:\n```js\nctx.fillRect(0, 0, 10, 10);\n```\nIt draws a square.')).toBe('ctx.fillRect(0, 0, 10, 10);');
+  });
+
+  it('never cuts unfenced design notes away from a script', () => {
+    // Prose and the first definition share a line, so any line cut would drop BLUE and still compile.
+    const reply = '我设计了一张对比图。\nconst W=1080,H=720;\nbg fill #F6F7F9.\nFinal code below.const BLUE = \'#2F6FA8\';\nctx.fillStyle = BLUE;\nctx.fillRect(0, 0, 10, 10);';
+    expect(validateCanvasRenderCode(reply)).toBe(reply);
+  });
+
+  it('keeps a reply with several compiling fenced blocks unchanged instead of guessing', () => {
+    const reply = 'Option A:\n```js\nctx.fillRect(0, 0, 10, 10);\n```\nOption B:\n```js\nctx.fillRect(5, 5, 10, 10);\n```';
+    expect(validateCanvasRenderCode(reply)).toBe(reply);
   });
 });
 

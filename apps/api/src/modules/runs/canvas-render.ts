@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { Script } from 'node:vm';
 import { Worker } from 'node:worker_threads';
 
 export type CanvasRenderConfig = {
@@ -74,9 +75,33 @@ function stripCompleteMarkdownCodeFence(value: string): string {
   return code;
 }
 
+function compilesAsScriptBody(code: string): boolean {
+  try {
+    // Compiles only; the script runs later inside the sandboxed worker.
+    new Script(`(function () {\n"use strict";\n${code}\n});`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Recovers the script from a reply that wraps one fenced block in prose. Only a whole block
+ * that compiles is taken; unfenced prose is never cut away, because a cut that drops a
+ * definition or a drawing call can still compile and would render a wrong figure. Anything
+ * else is returned unchanged so the render reports the model's real syntax error.
+ */
+function extractFencedScript(value: string): string {
+  if (compilesAsScriptBody(value)) return value;
+  const fenced = [...value.matchAll(/^```(?:js|javascript)?[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm)]
+    .map((match) => match[1]!)
+    .filter(compilesAsScriptBody);
+  return fenced.length === 1 ? fenced[0]! : value;
+}
+
 export function validateCanvasRenderCode(value: unknown): string {
   if (typeof value !== 'string') throw new Error('Canvas Render node requires a non-empty code input.');
-  const code = stripCompleteMarkdownCodeFence(value);
+  const code = extractFencedScript(stripCompleteMarkdownCodeFence(value));
   if (!code.trim()) throw new Error('Canvas Render node requires a non-empty code input.');
   if (code.length > MAX_SCRIPT_LENGTH) throw new Error(`Canvas Render node code must not exceed ${MAX_SCRIPT_LENGTH} characters.`);
   return code;
