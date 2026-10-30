@@ -73,6 +73,9 @@ export type GenerateAgentStepRequest = {
   builtinTools?: readonly GatewayToolDefinition[];
   mcpTools?: readonly GatewayToolDefinition[];
   maxToolRounds?: number;
+  // Keeps the tool definitions the history refers to but forbids new calls, for a final
+  // answer-only step once the caller's tool budget is spent.
+  toolsDisabled?: boolean;
   maxContextTokens?: number;
   maxOutputTokens?: number;
   abortSignal?: AbortSignal;
@@ -285,6 +288,10 @@ export class AiSdkModelGateway implements ModelGateway {
         output: request.jsonOutput ? Output.json({ name: 'response' }) : undefined,
         messages: context.messages as ModelMessage[],
         tools: Object.keys(tools).length > 0 ? tools as never : undefined,
+        // The Anthropic adapter implements 'none' by dropping every tool definition, which the
+        // Messages API rejects when the history holds tool_use blocks; there the caller's
+        // instruction alone asks for a text answer.
+        ...(request.toolsDisabled && Object.keys(tools).length > 0 && candidate.provider.adapter !== 'anthropic' ? { toolChoice: 'none' as const } : {}),
         providerOptions: Object.keys(openaiProviderOptions).length > 0 ? { openai: openaiProviderOptions } : undefined,
         maxOutputTokens: request.maxOutputTokens ?? DEFAULT_AGENT_MAX_OUTPUT_TOKENS,
         abortSignal: request.abortSignal,

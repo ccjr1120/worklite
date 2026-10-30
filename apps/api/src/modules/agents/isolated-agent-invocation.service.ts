@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { AgentTeamOperationRecoveryDecision, AgentTeamRoleId } from '@worklite/contracts';
 import {
@@ -376,6 +376,16 @@ export class IsolatedAgentInvocationService {
       return effect.output;
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'The tool effect has an unknown state.';
+      // A managed tool runs in this process and validates its input before it writes anything,
+      // so a rejected request has no effect to recover: fail the operation and let the model
+      // read the reason, instead of stopping the Run for a human recovery decision.
+      const managedRejection = !commandBackedTool
+        && request.managedTools?.some((definition) => definition.name === call.toolName)
+        && (error instanceof BadRequestException || error instanceof NotFoundException);
+      if (managedRejection) {
+        if (operationReserved) await request.operation.journal.failOperation(dispatchKey, reason);
+        return { type: 'error-text', value: reason };
+      }
       if (effectDispatched) {
         const uncertain = await request.operation.journal.markOperationUncertain(dispatchKey, reason);
         throw new AgentInvocationRecoveryRequiredError(

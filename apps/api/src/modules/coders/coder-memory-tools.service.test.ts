@@ -105,6 +105,15 @@ describe('AgentTeamMemoryToolsService', () => {
     })).rejects.toMatchObject({ status: 400 });
   });
 
+  it('accepts the group repository id shown in the task context for an in-scope repository', async () => {
+    const written = JSON.parse(await tools.execute({
+      context: { ...context, repositoryIdAliases: { group_repo_a1: 'repo_a1' } },
+      taskKey: 'group_0_planner',
+      call: { toolName: 'coder_memory_write', input: { content: 'Group repo fact.', repositoryId: 'group_repo_a1' } },
+    })) as { repositoryId: string | null };
+    expect(written.repositoryId).toBe('repo_a1');
+  });
+
   it('reads back a memory through search and read', async () => {
     const written = JSON.parse(await tools.execute({
       context,

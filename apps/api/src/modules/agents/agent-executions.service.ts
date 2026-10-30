@@ -52,6 +52,8 @@ type WorkflowAgentActivityReporter = (detail: Extract<WorkflowNodeActivityDetail
 // call with an explanatory tool result. Reaching the ceiling is a model mistake the next step can
 // correct; it must never fail the whole turn and strand the conversation.
 const MAX_TOOL_CALLS_PER_STEP = 16;
+// Sent for this one request only, never stored: the turn's history keeps its real messages.
+const TOOL_BUDGET_EXHAUSTED_MESSAGE = 'The tool budget for this turn is exhausted, so no tools are available now. Reply to the user with what you found so far, say plainly what is still unverified, and offer how to continue.';
 const DEFERRED_TOOL_CALL_OUTPUT = 'This tool call was not executed: the model response contained more tool calls than one step allows. Reissue this call in a later step.';
 
 export type ToolCallAdmission = {
@@ -536,7 +538,9 @@ export class AgentExecutionsService implements OnModuleInit {
       : []);
     const priorToolCalls = turnToolCallIds.length === 0 ? [] : await this.db.select({ id: agentToolCalls.id, toolName: agentToolCalls.toolName, mcpToolName: agentToolCalls.mcpToolName }).from(agentToolCalls)
       .where(and(eq(agentToolCalls.executionId, executionId), inArray(agentToolCalls.toolCallId, turnToolCallIds)));
-    if (priorToolCalls.length >= MAX_HELPER_TOOL_ROUNDS) throw new Error('The Agent reached its maximum tool rounds for this turn.');
+    // Past the budget the turn still ends with a reply: the last step runs without tools, so the
+    // model answers from the evidence it already gathered instead of the whole turn failing.
+    const toolBudgetExhausted = priorToolCalls.length >= MAX_HELPER_TOOL_ROUNDS;
     const clarificationAllowed = execution.plan.length > 0
       && execution.plan.some((step) => step.status !== 'completed')
       && priorToolCalls.length === 1
@@ -610,9 +614,10 @@ export class AgentExecutionsService implements OnModuleInit {
       const correlation = agent.id === CHAT_AGENT_ID
         ? { surface: 'chat' as const, conversationId: executionId }
         : { surface: 'agent' as const };
-      const result = await createModelGateway().generateAgentStep({ candidates: [{ provider: runtime.provider, model: runtime.model }], systemPrompt, messages: inferenceMessages, skillScripts: availableSkillScripts, builtinTools: builtinToolDefinitions, mcpTools: availableMcpTools, maxToolRounds: MAX_HELPER_TOOL_ROUNDS, correlation, abortSignal: abortController.signal, onTextDelta: (delta) => this.persistEvent(executionId, { kind: 'message_delta', messageId: streamedMessageId, delta, ...messagePresentation }) });
+      const result = await createModelGateway().generateAgentStep({ candidates: [{ provider: runtime.provider, model: runtime.model }], systemPrompt, messages: toolBudgetExhausted ? [...inferenceMessages, { role: 'user', content: TOOL_BUDGET_EXHAUSTED_MESSAGE }] : inferenceMessages, skillScripts: availableSkillScripts, builtinTools: builtinToolDefinitions, mcpTools: availableMcpTools, maxToolRounds: MAX_HELPER_TOOL_ROUNDS, toolsDisabled: toolBudgetExhausted, correlation, abortSignal: abortController.signal, onTextDelta: (delta) => this.persistEvent(executionId, { kind: 'message_delta', messageId: streamedMessageId, delta, ...messagePresentation }) });
       const responseText = normalizeAssistantMessage(result.text);
       if (!responseText && result.toolCalls.length === 0) throw new Error('Empty Agent response');
+      if (toolBudgetExhausted && result.toolCalls.length > 0) throw new Error('The Agent reached its maximum tool rounds for this turn.');
       const currentExecution = await this.loadExecution(workspace.id, execution.agentId, executionId);
       if (currentExecution.status !== 'running') return this.toView(currentExecution);
       const modelMessages = [...modelMessagesBeforeInference, ...result.responseMessages] as StoredAgentModelMessage[];
