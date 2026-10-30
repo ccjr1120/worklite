@@ -438,8 +438,8 @@ export function normalizeDevelopmentAssignments(
       if (seenPaths.some((previous) => pathsOverlap(previous, path))) {
         throw new Error(`Development assignments overlap on path ${path}.`);
       }
-      seenPaths.push(path);
     }
+    seenPaths.push(...ownedPaths);
     assignments.push({ developerId, title, scopeSummary, ownedPaths });
   }
   return assignments;
@@ -487,8 +487,8 @@ export function normalizeDynamicDevelopmentAssignments(
       })) {
         throw new Error(`Development assignments overlap on path ${path}.`);
       }
-      seenPaths.push({ path, repositoryIds });
     }
+    seenPaths.push(...ownedPaths.map((path) => ({ path, repositoryIds })));
     assignments.push({ developerId, title, scopeSummary, ownedPaths, ...(repositoryIds ? { repositoryIds } : {}) });
   }
   return assignments;

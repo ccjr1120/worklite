@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { isAbsolute, relative } from 'node:path';
 import type { GatewayToolDefinition } from '@worklite/model-gateway';
 import type { AgentTeamRoleId, CommandExecutionView } from '@worklite/contracts';
 import { CommandsService, type CommandReservation } from '../commands/commands.service';
@@ -26,7 +27,7 @@ const definitions: GatewayToolDefinition[] = [
   { name: 'bash', description: 'Run a shell command and return combined output.', inputSchema: { type: 'object', additionalProperties: false, required: ['command'], properties: { command: { type: 'string' } } } },
   { name: 'read', description: 'Read a UTF-8 text file.', inputSchema: { type: 'object', additionalProperties: false, required: ['path'], properties: { path: { type: 'string' } } } },
   { name: 'write', description: 'Write UTF-8 text to a file.', inputSchema: { type: 'object', additionalProperties: false, required: ['path', 'content'], properties: { path: { type: 'string' }, content: { type: 'string' } } } },
-  { name: 'glob', description: 'Find files matching a glob pattern.', inputSchema: { type: 'object', additionalProperties: false, required: ['pattern'], properties: { pattern: { type: 'string' } } } },
+  { name: 'glob', description: 'Find files matching a project-relative glob pattern. Includes hidden files, respects ignore rules, and excludes .git.', inputSchema: { type: 'object', additionalProperties: false, required: ['pattern'], properties: { pattern: { type: 'string' } } } },
   { name: 'grep', description: 'Search files with a regular expression.', inputSchema: { type: 'object', additionalProperties: false, required: ['pattern'], properties: { pattern: { type: 'string' }, path: { type: 'string' } } } },
   { name: 'process_reference', description: 'Read a file from the pinned executor process package.', inputSchema: { type: 'object', additionalProperties: false, required: ['path'], properties: { path: { type: 'string' } } } },
   { name: 'read_executor_document', description: 'Read an exact immutable executor document version that was explicitly handed to this task.', inputSchema: { type: 'object', additionalProperties: false, required: ['documentId', 'revision'], properties: { documentId: { type: 'string' }, revision: { type: 'integer', minimum: 1 } } } },
@@ -68,7 +69,20 @@ export class BuiltinAgentToolsService {
         command = `node -e ${shellQuote("require('fs').writeFileSync(process.argv[1], Buffer.from(process.argv[2], 'base64'))")} ${shellQuote(requiredString(args?.path, 'path'))} ${shellQuote(Buffer.from(args!.content as string, 'utf8').toString('base64'))}`;
         break;
       }
-      case 'glob': command = `find . -type f -name ${shellQuote(requiredString(args?.pattern, 'pattern'))}`; break;
+      case 'glob': {
+        let pattern = requiredString(args?.pattern, 'pattern');
+        if (isAbsolute(pattern)) {
+          if (!options?.cwd) throw new BadRequestException('An absolute glob requires a project directory.');
+          pattern = relative(options.cwd, pattern);
+          if (pattern === '..' || pattern.startsWith('../') || isAbsolute(pattern)) {
+            throw new BadRequestException('The glob pattern must be inside the project directory.');
+          }
+        }
+        pattern = pattern.replace(/^\.\//, '');
+        // ripgrep returns 1 for an empty result; glob historically treats that as success.
+        command = `rg --files --hidden --glob ${shellQuote(pattern)} --glob '!.git'; glob_exit_code=$?; if [ "$glob_exit_code" -eq 1 ]; then exit 0; else exit "$glob_exit_code"; fi`;
+        break;
+      }
       case 'grep': command = `rg --line-number --no-heading -- ${shellQuote(requiredString(args?.pattern, 'pattern'))} ${shellQuote(typeof args?.path === 'string' && args.path.trim() ? args.path.trim() : '.')}`; break;
       case 'process_reference': throw new BadRequestException('Process references are read directly by the isolated Agent invocation.');
       default: throw new BadRequestException('Unknown built-in Agent tool.');
