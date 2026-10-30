@@ -117,7 +117,7 @@ import {
   type AgentTeamWorktreeTaskResult,
 } from './coder-graph-v4';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
-import { normalizePublicModelList } from '@worklite/model-gateway';
+import { AgentJsonOutputError, normalizePublicModelList } from '@worklite/model-gateway';
 import { capturedCoderName, deriveRunCurrent, effectiveTaskModel, taskRoleName } from './coder-run-summary';
 import { CommandsService } from '../commands/commands.service';
 import { createAgentTeamGroupGraph, type AgentTeamGroupGraphInitial, type AgentTeamGroupGraphState } from './coder-graph-v6';
@@ -1789,7 +1789,15 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     let correction: string | undefined;
     for (let parseAttempt = 0; ; parseAttempt += 1) {
       try {
-        const output = await produceOutput(correction);
+        let output: string;
+        try {
+          output = await produceOutput(correction);
+        } catch (error) {
+          // A reply with no JSON at all (for example a Markdown report) earns the same single
+          // correction as a reply whose JSON fails validation.
+          if (error instanceof AgentJsonOutputError) throw new TaskOutputValidationError('The reply contained no JSON object.', error.output);
+          throw error;
+        }
         return await this.finishCoderOutput(request, workspaceId, attempt.id, taskKey, output, commandIds, laneWorktree, laneMergeTarget, orchestrationVersion, version.snapshot.roles.map((item) => item.role));
       } catch (error) {
         if (!(error instanceof TaskOutputValidationError) || parseAttempt >= 1) throw error;

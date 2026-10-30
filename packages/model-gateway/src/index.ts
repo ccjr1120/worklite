@@ -187,6 +187,18 @@ export class ModelGatewayError extends Error {
   }
 }
 
+// A JSON-output Agent ended with text that holds no JSON value. The text is kept so a caller with
+// a correction loop can show the model what it returned instead of failing outright.
+export class AgentJsonOutputError extends Error {
+  readonly output: string;
+
+  constructor(output: string) {
+    super('Agent JSON output requires valid JSON.');
+    this.name = 'AgentJsonOutputError';
+    this.output = output;
+  }
+}
+
 export class AiSdkModelGateway implements ModelGateway {
   streamText(request: StreamTextRequest): ModelStream {
     // No fallback loop here by design, not by omission: ModelStream hands back a synchronous
@@ -622,7 +634,7 @@ function generatedResultToStreamParts(generated: {
   return parts;
 }
 
-function extractJsonText(text: string): string {
+export function extractJsonText(text: string): string {
   const parse = (value: string) => {
     try {
       return JSON.stringify(JSON.parse(value));
@@ -679,7 +691,7 @@ function extractJsonText(text: string): string {
     index = closingIndex + 1;
   }
 
-  throw new Error('Agent JSON output requires valid JSON.');
+  throw new AgentJsonOutputError(text);
 }
 
 function modelFailure(error: unknown, streamCause: unknown): Error {
