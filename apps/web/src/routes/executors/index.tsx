@@ -1,10 +1,8 @@
-import { createFileRoute, Navigate } from '@tanstack/react-router';
-import { DEFAULT_EXECUTOR_CATEGORY_ID } from '@/features/executors/team-switcher';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 
+// Legacy link compatibility: `/executors` moved to `/coding`.
 export const Route = createFileRoute('/executors/')({
-  component: AgentTeamsIndexRoute,
+  beforeLoad: ({ location }) => {
+    throw redirect({ href: `/coding${location.searchStr}`, replace: true });
+  },
 });
-
-function AgentTeamsIndexRoute() {
-  return <Navigate to="/executors/$executorId" params={{ executorId: DEFAULT_EXECUTOR_CATEGORY_ID }} replace />;
-}

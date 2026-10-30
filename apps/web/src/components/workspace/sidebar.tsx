@@ -32,7 +32,7 @@ const navigationGroups = [
     items: [
       { id: 'chat', labelKey: 'nav.chat', to: '/chat', icon: MessageSquareText },
       { id: 'workflows', labelKey: 'nav.workflows', to: '/workflows', icon: Workflow },
-      { id: 'agentTeam', labelKey: 'nav.agentTeam', to: '/executors', icon: Code2 },
+      { id: 'agentTeam', labelKey: 'nav.agentTeam', to: '/coding', icon: Code2 },
     ],
   },
   {
@@ -83,7 +83,7 @@ function Sidebar({
   function primaryActive(id: NavItem['id'], to: string) {
     if (id === 'settings') return pathname.startsWith('/settings');
     if (id === 'workflows') return ['/workflows', '/runs'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
-    if (id === 'agentTeam') return ['/executors', '/executor-runs'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+    if (id === 'agentTeam') return ['/coding', '/executor-runs'].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
     return pathname === to || pathname.startsWith(`${to}/`);
   }
 

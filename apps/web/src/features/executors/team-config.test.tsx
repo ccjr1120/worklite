@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n/config';
 import type { AgentTeamMemoryView, AgentTeamView, McpServerView, SkillView } from '@worklite/contracts';
 import { useAgentTeamMemoriesQuery, useAgentTeamQuery, useAgentTeamRecordsQuery, useAgentTeamsQuery, useMcpServersQuery, useSkillsQuery } from '@/api/queries';
-import { Route as AgentTeamConfigRoute } from '@/routes/executors/$executorId.config';
+import { Route as AgentTeamConfigRoute } from '@/routes/coding/$executorId.config';
 import { TeamConfig } from './team-config';
 
 vi.mock('@/api/queries', () => ({
@@ -169,7 +169,7 @@ describe('TeamConfig', () => {
   it('links back to the same executor\'s Run records page', () => {
     mockQueries();
     render(<TeamConfig executorId="team_1" />);
-    expect(screen.getByRole('link', { name: '返回记录' })).toHaveAttribute('href', '/executors/team_1');
+    expect(screen.getByRole('link', { name: '返回记录' })).toHaveAttribute('href', '/coding/team_1');
   });
 
   it('shows the executor switcher below the heading with links to each executor\'s configuration', () => {
@@ -177,11 +177,11 @@ describe('TeamConfig', () => {
     render(<TeamConfig executorId="team_1" />);
     const switcher = screen.getByRole('navigation', { name: '选择执行器分类' });
     expect(within(switcher).getByRole('link', { name: /Delivery/ })).toHaveAttribute('aria-current', 'page');
-    expect(within(switcher).getByRole('link', { name: /Applications/ })).toHaveAttribute('href', '/executors/team_2/config');
+    expect(within(switcher).getByRole('link', { name: /Applications/ })).toHaveAttribute('href', '/coding/team_2/config');
   });
 
-  it('is served per executor at /executors/:executorId/config', () => {
-    expect(AgentTeamConfigRoute.path).toBe('/executors/$executorId/config');
+  it('is served per executor at /coding/:executorId/config', () => {
+    expect(AgentTeamConfigRoute.path).toBe('/coding/$executorId/config');
     mockQueries();
     const Component = AgentTeamConfigRoute.options.component as React.ComponentType;
     render(<Component />);
