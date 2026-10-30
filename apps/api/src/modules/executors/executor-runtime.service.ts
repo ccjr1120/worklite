@@ -3142,7 +3142,7 @@ function developerPromptAddition(request: AgentTeamTaskRequest): string | undefi
   return sections.length > 0 ? sections.join('\n\n') : undefined;
 }
 
-function rolePromptAddition(
+export function rolePromptAddition(
   role: AgentTeamRuntimeRole,
   snapshot: StoredAgentTeamVersionSnapshot,
   request?: AgentTeamTaskRequest,
@@ -3154,6 +3154,12 @@ function rolePromptAddition(
       : '';
     return [
       'This is a message addressed to your one configured executor role. Complete the stated goal or ask one specific question when blocked.',
+      ...(role === 'planner' ? [
+        'Scale investigation to the actual request. Identify its distinct questions and evidence needed for each; answer a capability question from its defining implementation and relevant entry points before exploring downstream effects. Investigate migration, historical references, or exhaustive impact only to the extent requested or necessary to answer.',
+        'Use targeted searches and bounded file excerpts. Combine independent patterns for the same path in one grep using regex alternation; use read startLine/endLine for focused excerpts. Start with likely definitions and callers; narrow by path and symbol before expanding. Avoid repeatedly scanning or reading the same large file when existing evidence already answers the question. If output is truncated, narrow the query rather than assuming absence.',
+        'Stop investigating each question when its requested scope is supported by sufficient evidence. Satisfy every explicit requirement, including an explicitly requested exhaustive impact analysis; do not silently narrow the request or claim completeness without evidence. State any remaining uncertainty and its effect.',
+        'For a request that only asks for read-only investigation or an answer, report the findings directly and omit implementation handoff, implementation plans, and Git or worktree decisions unless the user requested them. Do not perform changes or validation commands prohibited by the user.',
+      ] : []),
       `To pass work onward, include a handoff object with a role id captured by this executor version and a specific goal. Omit handoff when your work is complete or you are waiting for the user.`,
       (() => {
         const implementationRole = snapshot.roles.find((item) => item.executor)?.role;

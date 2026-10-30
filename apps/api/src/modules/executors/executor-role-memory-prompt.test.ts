@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentTeamTaskRequest } from '@worklite/team-runtime';
 import type { StoredAgentTeamVersionSnapshot } from '@worklite/db';
-import { groupRolePromptAddition } from './executor-runtime.service';
+import { groupRolePromptAddition, rolePromptAddition } from './executor-runtime.service';
 import { TEAM_MEMORY_INDEX_CHARS, TEAM_MEMORY_INDEX_ENTRIES } from './executor-memory-ranking';
 
 // v11 gives the initially addressed role the full captured projection and every other
@@ -52,6 +52,17 @@ function request(taskKey: string, role: string, memories: Array<{ id: string; re
     },
   } as AgentTeamTaskRequest;
 }
+
+describe('planner investigation guidance', () => {
+  it('applies bounded investigation to existing v11 configurations without dropping explicit scope', () => {
+    const addition = rolePromptAddition('planner', snapshot(11), request('group_0_planner', 'planner', []));
+
+    expect(addition).toContain('Stop investigating each question when its requested scope is supported by sufficient evidence');
+    expect(addition).toContain('Satisfy every explicit requirement');
+    expect(addition).toContain('For a request that only asks for read-only investigation or an answer, report the findings directly');
+    expect(rolePromptAddition('reviewer', snapshot(11))).not.toContain('Scale investigation to the actual request');
+  });
+});
 
 describe('groupRolePromptAddition v10 compatibility', () => {
   it('keeps the v10 initially addressed projection byte-for-byte', () => {

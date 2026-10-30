@@ -25,10 +25,10 @@ export function selectBuiltinToolNames(role: AgentTeamRoleId, requestedToolNames
 
 const definitions: GatewayToolDefinition[] = [
   { name: 'bash', description: 'Run a shell command and return combined output.', inputSchema: { type: 'object', additionalProperties: false, required: ['command'], properties: { command: { type: 'string' } } } },
-  { name: 'read', description: 'Read a UTF-8 text file.', inputSchema: { type: 'object', additionalProperties: false, required: ['path'], properties: { path: { type: 'string' } } } },
+  { name: 'read', description: 'Read a UTF-8 text file. For a large file, use 1-based inclusive startLine and endLine to read a focused, line-numbered excerpt.', inputSchema: { type: 'object', additionalProperties: false, required: ['path'], properties: { path: { type: 'string' }, startLine: { type: 'integer', minimum: 1 }, endLine: { type: 'integer', minimum: 1 } } } },
   { name: 'write', description: 'Write UTF-8 text to a file.', inputSchema: { type: 'object', additionalProperties: false, required: ['path', 'content'], properties: { path: { type: 'string' }, content: { type: 'string' } } } },
   { name: 'glob', description: 'Find files matching a project-relative glob pattern. Includes hidden files, respects ignore rules, and excludes .git.', inputSchema: { type: 'object', additionalProperties: false, required: ['pattern'], properties: { pattern: { type: 'string' } } } },
-  { name: 'grep', description: 'Search files with a regular expression.', inputSchema: { type: 'object', additionalProperties: false, required: ['pattern'], properties: { pattern: { type: 'string' }, path: { type: 'string' } } } },
+  { name: 'grep', description: 'Search files with a regular expression. Combine independent patterns for the same path with regex alternation (e.g. foo|bar) in one search; narrow the path to limit output.', inputSchema: { type: 'object', additionalProperties: false, required: ['pattern'], properties: { pattern: { type: 'string' }, path: { type: 'string' } } } },
   { name: 'process_reference', description: 'Read a file from the pinned executor process package.', inputSchema: { type: 'object', additionalProperties: false, required: ['path'], properties: { path: { type: 'string' } } } },
   { name: 'read_executor_document', description: 'Read an exact immutable executor document version that was explicitly handed to this task.', inputSchema: { type: 'object', additionalProperties: false, required: ['documentId', 'revision'], properties: { documentId: { type: 'string' }, revision: { type: 'integer', minimum: 1 } } } },
 ];
@@ -63,7 +63,17 @@ export class BuiltinAgentToolsService {
     let command: string;
     switch (name) {
       case 'bash': command = requiredString(args?.command, 'command'); break;
-      case 'read': command = `node -e ${shellQuote("process.stdout.write(require('fs').readFileSync(process.argv[1], 'utf8'))")} ${shellQuote(requiredString(args?.path, 'path'))}`; break;
+      case 'read': {
+        const path = requiredString(args?.path, 'path');
+        const start = optionalLine(args?.startLine, 'startLine');
+        const end = optionalLine(args?.endLine, 'endLine');
+        if (start !== undefined && end !== undefined && end < start) throw new BadRequestException('endLine must be at least startLine.');
+        const script = start === undefined && end === undefined
+          ? "process.stdout.write(require('fs').readFileSync(process.argv[1], 'utf8'))"
+          : "const lines = require('fs').readFileSync(process.argv[1], 'utf8').split('\\n'); if (lines.at(-1) === '') lines.pop(); const start = Number(process.argv[2]); const end = Number(process.argv[3]); process.stdout.write(lines.slice(start - 1, end).map((line, i) => `${start + i}: ${line}`).join('\\n'))";
+        command = `node -e ${shellQuote(script)} ${shellQuote(path)}${start !== undefined || end !== undefined ? ` ${start ?? 1} ${end ?? Number.MAX_SAFE_INTEGER}` : ''}`;
+        break;
+      }
       case 'write': {
         requiredString(args?.content, 'content');
         command = `node -e ${shellQuote("require('fs').writeFileSync(process.argv[1], Buffer.from(process.argv[2], 'base64'))")} ${shellQuote(requiredString(args?.path, 'path'))} ${shellQuote(Buffer.from(args!.content as string, 'utf8').toString('base64'))}`;
@@ -104,6 +114,12 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function requiredString(value: unknown, field: string): string {
   if (typeof value !== 'string' || !value.trim()) throw new BadRequestException(`${field} is required.`);
   return value.trim();
+}
+
+function optionalLine(value: unknown, field: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || (value as number) < 1) throw new BadRequestException(`${field} must be a positive integer.`);
+  return value as number;
 }
 
 function shellQuote(value: string): string {

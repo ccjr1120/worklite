@@ -31,3 +31,26 @@ describe('built-in glob', () => {
     await expect(service.start('glob', { pattern: '/outside/*.ts' }, { cwd })).rejects.toThrow('inside the project');
   });
 });
+
+describe('built-in read and grep', () => {
+  it('reads inclusive line ranges and combines grep alternatives without changing whole-file reads', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'worklite-read-'));
+    try {
+      writeFileSync(join(cwd, "example's.txt"), 'alpha\nbeta\ngamma\n');
+      const createWithReservation = vi.fn(async (command: string) => ({ command }));
+      const service = new BuiltinAgentToolsService({ createWithReservation } as unknown as CommandsService);
+      const run = async (name: string, input: object) => {
+        await service.start(name, input, { cwd });
+        return execSync(createWithReservation.mock.lastCall![0], { cwd, encoding: 'utf8' });
+      };
+      expect(await run('read', { path: "example's.txt" })).toBe('alpha\nbeta\ngamma\n');
+      expect(await run('read', { path: "example's.txt", startLine: 2, endLine: 3 })).toBe('2: beta\n3: gamma');
+      expect(await run('read', { path: "example's.txt", endLine: 1 })).toBe('1: alpha');
+      expect(await run('grep', { pattern: 'alpha|gamma', path: "example's.txt" })).toBe('1:alpha\n3:gamma\n');
+      await expect(service.start('read', { path: 'x', startLine: 3, endLine: 2 }, { cwd })).rejects.toThrow('endLine');
+      await expect(service.start('read', { path: 'x', startLine: 0 }, { cwd })).rejects.toThrow('startLine');
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
