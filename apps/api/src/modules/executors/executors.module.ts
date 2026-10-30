@@ -2,6 +2,7 @@ import { forwardRef, Module } from '@nestjs/common';
 import { AgentsModule } from '../agents/agents.module';
 import { CommandsModule } from '../commands/commands.module';
 import { WorkspaceModule } from '../teams/teams.module';
+import { ModelProvidersModule } from '../model-providers/model-providers.module';
 import { AgentTeamDocumentsService } from './executor-documents.service';
 import { AgentTeamOperationJournalService } from './executor-operation-journal.service';
 import { AgentTeamConfigurationService } from './executor-configuration.service';
@@ -21,7 +22,7 @@ import {
 import { ExecutorsService } from './executors.service';
 
 @Module({
-  imports: [forwardRef(() => AgentsModule), CommandsModule, WorkspaceModule],
+  imports: [forwardRef(() => AgentsModule), CommandsModule, WorkspaceModule, ModelProvidersModule],
   controllers: [ExecutorsController, ExecutorGroupsController, ExecutorRunsController, ExecutorDocumentsController, TeamMemoryMcpController],
   providers: [
     AgentTeamDocumentsService,

@@ -42,9 +42,12 @@ export type GatewayAttributionQuery = {
   projectTaskId?: string;
   executor?: string;
   executorCategoryId?: string;
+  /** One id, or a comma-separated list of ids so a page of Runs is one query. */
   teamRunId?: string;
   workflowId?: string;
   workflowRunId?: string;
+  /** One id, or a comma-separated list. A node is one Run role task attempt or one Workflow node run. */
+  nodeRunId?: string;
 };
 
 export type GatewayUsageTotals = {
@@ -74,6 +77,7 @@ export type GatewayAttributionGroup = GatewayUsageTotals & {
   teamRunId: string | null;
   workflowId: string | null;
   workflowRunId: string | null;
+  nodeRunId: string | null;
 };
 
 export type GatewayStats = {
@@ -194,7 +198,8 @@ function getDatabase(): BetterSqlite3.Database {
       workflow_run_id TEXT,
       executor_category_id TEXT,
       team_run_id TEXT,
-      team_role TEXT
+      team_role TEXT,
+      node_run_id TEXT
     );
     CREATE INDEX IF NOT EXISTS gateway_request_stats_occurred_idx ON gateway_request_stats(occurred_at);
     CREATE INDEX IF NOT EXISTS gateway_request_stats_provider_model_idx ON gateway_request_stats(provider_name, model);
@@ -253,6 +258,9 @@ const ATTRIBUTION_COLUMNS: Array<[string, string]> = [
   ['executor_category_id', 'TEXT'],
   ['team_run_id', 'TEXT'],
   ['team_role', 'TEXT'],
+  // Statistics recorded before node attribution keep NULL here: they still count
+  // toward their Run, but no node can claim them.
+  ['node_run_id', 'TEXT'],
 ];
 
 function addMissingRequestStatColumns(database: BetterSqlite3.Database): void {
@@ -273,6 +281,8 @@ function addMissingRequestStatColumns(database: BetterSqlite3.Database): void {
     CREATE INDEX IF NOT EXISTS gateway_request_stats_conversation_idx ON gateway_request_stats(conversation_id, occurred_at);
     CREATE INDEX IF NOT EXISTS gateway_request_stats_executor_category_idx ON gateway_request_stats(executor_category_id, occurred_at);
     CREATE INDEX IF NOT EXISTS gateway_request_stats_workflow_idx ON gateway_request_stats(workflow_id, occurred_at);
+    CREATE INDEX IF NOT EXISTS gateway_request_stats_team_run_idx ON gateway_request_stats(team_run_id, occurred_at);
+    CREATE INDEX IF NOT EXISTS gateway_request_stats_node_run_idx ON gateway_request_stats(node_run_id, occurred_at);
   `);
 }
 
@@ -294,6 +304,7 @@ function addMissingRequestLogColumns(database: BetterSqlite3.Database): void {
     CREATE INDEX IF NOT EXISTS gateway_request_logs_team_run_idx ON gateway_request_logs(team_run_id);
     CREATE INDEX IF NOT EXISTS gateway_request_logs_surface_idx ON gateway_request_logs(surface, occurred_at);
     CREATE INDEX IF NOT EXISTS gateway_request_logs_conversation_idx ON gateway_request_logs(conversation_id, occurred_at);
+    CREATE INDEX IF NOT EXISTS gateway_request_logs_node_run_idx ON gateway_request_logs(node_run_id);
   `);
 }
 
@@ -698,7 +709,7 @@ export function recordRequestStat(input: {
   attribution?: GatewayAttribution;
 }): void {
   const attribution = input.attribution;
-  getDatabase().prepare(`INSERT INTO gateway_request_stats (occurred_at, provider_name, model, endpoint, status, duration_ms, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens, surface, conversation_id, project_task_id, executor, workflow_id, workflow_run_id, executor_category_id, team_run_id, team_role) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+  getDatabase().prepare(`INSERT INTO gateway_request_stats (occurred_at, provider_name, model, endpoint, status, duration_ms, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens, surface, conversation_id, project_task_id, executor, workflow_id, workflow_run_id, executor_category_id, team_run_id, team_role, node_run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     Date.now(),
     input.provider || 'Unknown',
     input.model || 'Unknown',
@@ -720,6 +731,7 @@ export function recordRequestStat(input: {
     attribution?.executorCategoryId ?? null,
     attribution?.teamRunId ?? null,
     attribution?.teamRole ?? null,
+    attribution?.nodeRunId ?? null,
   );
 }
 
@@ -747,6 +759,10 @@ const GROUP_BY_FIELDS: Record<GatewayStatsGroupBy, Array<keyof typeof GROUP_FIEL
   executor: ['surface', 'executor'],
   executor_category: ['executorCategoryId', 'teamRunId'],
   workflow: ['workflowId', 'workflowRunId'],
+  team_run: ['teamRunId'],
+  // A node belongs to exactly one Run or one Workflow run, so both stay in the key and
+  // the reader can map a node back to its parent without a second question.
+  node_run: ['teamRunId', 'workflowRunId', 'nodeRunId'],
 };
 
 const GROUP_FIELD_SQL = {
@@ -757,6 +773,7 @@ const GROUP_FIELD_SQL = {
   teamRunId: { column: 'team_run_id', alias: 'team_run_id' },
   workflowId: { column: 'workflow_id', alias: 'workflow_id' },
   workflowRunId: { column: 'workflow_run_id', alias: 'workflow_run_id' },
+  nodeRunId: { column: 'node_run_id', alias: 'node_run_id' },
 } as const;
 
 /**
@@ -771,6 +788,11 @@ const GROUP_BY_SCOPE: Record<GatewayStatsGroupBy, string | null> = {
   executor: 'executor IS NOT NULL',
   executor_category: 'executor_category_id IS NOT NULL',
   workflow: 'workflow_id IS NOT NULL',
+  team_run: 'team_run_id IS NOT NULL',
+  // A Run's traffic recorded before node attribution existed stays visible as one row with
+  // a null nodeRunId under its Run, so a reader can tell "not attributed to a node" apart
+  // from "no traffic".
+  node_run: '(node_run_id IS NOT NULL OR team_run_id IS NOT NULL OR workflow_run_id IS NOT NULL)',
 };
 
 type AttributionGroupRow = {
@@ -781,6 +803,7 @@ type AttributionGroupRow = {
   team_run_id: string | null;
   workflow_id: string | null;
   workflow_run_id: string | null;
+  node_run_id: string | null;
   requests: number;
   successful: number;
   duration_total: number;
@@ -791,6 +814,14 @@ type AttributionGroupRow = {
   total_tokens: number | null;
   usage_requests: number;
 };
+
+// Upper bound on ids in one list filter, well under SQLite's bound-parameter limit.
+const ID_LIST_LIMIT = 500;
+
+function idList(value: string | undefined): string[] {
+  if (!value) return [];
+  return [...new Set(value.split(',').map((id) => id.trim()).filter(Boolean))].slice(0, ID_LIST_LIMIT);
+}
 
 /**
  * Builds the attribution filter clause shared by statistics and request details.
@@ -813,7 +844,6 @@ function attributionConditions(query: GatewayAttributionQuery): { conditions: st
     ['project_task_id', query.projectTaskId],
     ['executor', query.executor],
     ['executor_category_id', query.executorCategoryId],
-    ['team_run_id', query.teamRunId],
     ['workflow_id', query.workflowId],
     ['workflow_run_id', query.workflowRunId],
   ];
@@ -822,6 +852,18 @@ function attributionConditions(query: GatewayAttributionQuery): { conditions: st
     if (!trimmed) continue;
     conditions.push(`${column} = ?`);
     values.push(trimmed);
+  }
+  // Run and node ids accept a comma-separated list, so a page of Runs or the nodes of
+  // several Runs are answered by one query instead of one query per id.
+  const listColumns: Array<[string, string | undefined]> = [
+    ['team_run_id', query.teamRunId],
+    ['node_run_id', query.nodeRunId],
+  ];
+  for (const [column, value] of listColumns) {
+    const ids = idList(value);
+    if (!ids.length) continue;
+    conditions.push(ids.length === 1 ? `${column} = ?` : `${column} IN (${ids.map(() => '?').join(', ')})`);
+    values.push(...ids);
   }
   return { conditions, values };
 }
@@ -869,6 +911,7 @@ function attributionGroups(
     if (field === 'executorCategoryId') return row.executor_category_id;
     if (field === 'teamRunId') return row.team_run_id;
     if (field === 'workflowId') return row.workflow_id;
+    if (field === 'nodeRunId') return row.node_run_id;
     return row.workflow_run_id;
   };
   return rows.map((row) => ({
@@ -880,6 +923,7 @@ function attributionGroups(
     teamRunId: row.team_run_id,
     workflowId: row.workflow_id,
     workflowRunId: row.workflow_run_id,
+    nodeRunId: row.node_run_id,
     requests: row.requests,
     successful: row.successful,
     failed: row.requests - row.successful,
@@ -1176,6 +1220,44 @@ export function requestLogs(query: GatewayTimeRangeQuery & GatewayAttributionQue
   return {
     items: page.map(requestLogListItem),
     nextCursor: rows.length > limit && last ? String(last.occurred_at) : null,
+    retentionHours: REQUEST_LOG_RETENTION_HOURS,
+    from: new Date(fromMs).toISOString(),
+    to: new Date(toMs).toISOString(),
+    retainedFrom: new Date(retainedFromMs).toISOString(),
+  };
+}
+
+// Upper bound on rows one timeline read returns; the newest rows win and the reader is told.
+const REQUEST_LOG_TIMELINE_LIMIT = 20_000;
+
+/**
+ * The compact per-request timeline of selected nodes inside the retention window: when
+ * each request started and what it cost, without bodies or provider details. It lets a
+ * caller spread a node's tokens over the node's steps by request start time in one read.
+ */
+export function requestLogTimeline(query: GatewayTimeRangeQuery & Pick<GatewayAttributionQuery, 'teamRunId' | 'nodeRunId'>) {
+  const database = getDatabase();
+  pruneRequestLogs(database);
+  const { fromMs, toMs } = resolveTimeRange(query);
+  const retainedFromMs = Date.now() - REQUEST_LOG_RETENTION_MS;
+  const servedFromMs = Math.max(fromMs, retainedFromMs);
+  const attribution = attributionConditions({ teamRunId: query.teamRunId, nodeRunId: query.nodeRunId });
+  // Without an id filter the timeline would be every request in the window.
+  if (!attribution.conditions.length) throw new RangeError('A teamRunId or nodeRunId filter is required.');
+  const where = ['occurred_at >= ?', 'occurred_at <= ?', ...attribution.conditions].join(' AND ');
+  const rows = database.prepare(`SELECT node_run_id, team_run_id, occurred_at, duration_ms, total_tokens FROM gateway_request_logs WHERE ${where} ORDER BY occurred_at DESC LIMIT ?`)
+    .all(servedFromMs, toMs, ...attribution.values, REQUEST_LOG_TIMELINE_LIMIT + 1) as Array<{ node_run_id: string | null; team_run_id: string | null; occurred_at: number; duration_ms: number; total_tokens: number | null }>;
+  const truncated = rows.length > REQUEST_LOG_TIMELINE_LIMIT;
+  return {
+    // occurred_at is recorded when the response finished, so the start is derived from it.
+    items: rows.slice(0, REQUEST_LOG_TIMELINE_LIMIT).map((row) => ({
+      nodeRunId: row.node_run_id,
+      teamRunId: row.team_run_id,
+      startedAt: new Date(row.occurred_at - row.duration_ms).toISOString(),
+      occurredAt: new Date(row.occurred_at).toISOString(),
+      totalTokens: row.total_tokens,
+    })),
+    truncated,
     retentionHours: REQUEST_LOG_RETENTION_HOURS,
     from: new Date(fromMs).toISOString(),
     to: new Date(toMs).toISOString(),

@@ -158,6 +158,17 @@ export class ExecutorRunsController {
     return this.teams.listRuns(request, 'personal', executorIdArray, cursor, limit);
   }
 
+  // Read-only node trees for several Runs at once (comma-separated runIds, at most 50).
+  // Declared before :runId so "nodes" is not read as a Run id.
+  @Get('nodes')
+  nodes(@Req() request: Request) {
+    const raw = request.query.runIds;
+    const runIds = (Array.isArray(raw) ? raw : [raw]).flatMap((value) => typeof value === 'string' ? value.split(',') : []);
+    const executorIds = request.query.executorId;
+    const executorIdArray = (Array.isArray(executorIds) ? executorIds : [executorIds]).filter((value): value is string => typeof value === 'string' && Boolean(value.trim()));
+    return this.teams.runNodes(request, 'personal', runIds, executorIdArray);
+  }
+
   @Get(':runId')
   get(@Req() request: Request, @Param('runId') runId: string) {
     return this.teams.getRun(request, 'personal', runId);

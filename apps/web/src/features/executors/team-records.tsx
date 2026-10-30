@@ -1,9 +1,9 @@
 import { useMemo, useState, useCallback } from 'react';
 import { Link, useSearch } from '@tanstack/react-router';
-import { Search, Settings, ChevronDown, X } from 'lucide-react';
+import { Search, Settings, ChevronDown, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { AgentTeamRunStatus } from '@worklite/contracts';
-import { useAgentTeamRunListQuery, useAgentTeamsQuery } from '@/api/queries';
+import type { AgentTeamRunListItem, AgentTeamRunStatus } from '@worklite/contracts';
+import { useAgentTeamRunListQuery, useAgentTeamRunNodesQuery, useAgentTeamsQuery } from '@/api/queries';
 import { ErrorState } from '@/components/error-state';
 import { PageContainer, PageHeading } from '@/components/page-heading';
 import { StatusDot, toStatusKey } from '@/components/status-badge';
@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { TruncatedText } from '@/components/ui/truncated-text';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { useLocale } from '@/components/locale-provider';
+import type { AppLocale } from '@/i18n/locale';
 import { formatDateTime, formatDuration } from '@/i18n/format';
 import { focusRing } from '@/components/ui/interaction';
 import { toSingleLine } from '@/lib/single-line';
@@ -22,17 +23,18 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { RunNodeTable, TokenFigure } from './run-nodes';
+import { teamRoleLabel } from './team-run-summary';
 
-const RUN_STATUSES: AgentTeamRunStatus[] = ['running', 'waiting_for_input', 'queued', 'paused', 'succeeded', 'failed', 'cancelled'];
 const SKELETON_ROWS = 8;
+const SETTLED_STATUSES: ReadonlySet<AgentTeamRunStatus> = new Set(['succeeded', 'failed', 'cancelled']);
 
-// Fixed row geometry for flat list with inline team, intent, status, directory, times, duration
-const rowGrid = 'grid h-14 grid-cols-[minmax(0,1fr)_10rem_8rem_12rem] items-center gap-2 px-4 sm:grid-cols-[8rem_minmax(0,1fr)_8rem_12rem_10rem_12rem_8rem]';
+// Fixed row geometry for the flat list. The first row of a Run is its overview: executor,
+// status with the current node, intent, directory, times, total duration and total tokens.
+const rowGrid = 'grid h-14 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_8rem_4.5rem_5rem] items-center gap-2 pr-4 sm:grid-cols-[8rem_minmax(0,1fr)_8rem_10rem_10rem_4.5rem_5.5rem]';
 
-function formatDurationFromDates(createdAt: string, finishedAt: string | null): string {
-  const start = new Date(createdAt);
-  const end = finishedAt ? new Date(finishedAt) : new Date();
-  const durationMs = end.getTime() - start.getTime();
+function runDuration(run: AgentTeamRunListItem): string {
+  const durationMs = run.overview?.durationMs ?? (run.finishedAt ? Date.parse(run.finishedAt) : Date.now()) - Date.parse(run.createdAt);
   return formatDuration(durationMs);
 }
 
@@ -40,14 +42,14 @@ function RunListSkeleton() {
   return (
     <ul className="divide-y divide-border rounded-xl border border-border bg-surface" role="status" aria-busy="true">
       {Array.from({ length: SKELETON_ROWS }, (_, index) => (
-        <li key={index} className={rowGrid}>
-          <Skeleton className="h-4 w-24" />
-          <Skeleton className="h-4 w-20" />
-          <Skeleton className="h-4 w-16" />
-          <Skeleton className="h-4 w-32" />
+        <li key={index} className={`${rowGrid} pl-4`}>
           <Skeleton className="hidden h-4 w-24 sm:block" />
-          <Skeleton className="hidden h-4 w-28 sm:block" />
-          <Skeleton className="hidden h-4 w-12 sm:block" />
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="hidden h-4 w-16 sm:block" />
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="hidden h-4 w-24 sm:block" />
+          <Skeleton className="h-4 w-12" />
+          <Skeleton className="h-4 w-12" />
         </li>
       ))}
     </ul>
@@ -125,6 +127,96 @@ function TeamFilterPopover({ selectedTeamIds, onTeamsChange, disabled }: TeamFil
   );
 }
 
+function RunRow({ run, expanded, onToggle, nodes, nodesLoading, retentionHours, locale }: {
+  run: AgentTeamRunListItem;
+  expanded: boolean;
+  onToggle: () => void;
+  nodes: Parameters<typeof RunNodeTable>[0]['nodes'];
+  nodesLoading: boolean;
+  retentionHours: number;
+  locale: AppLocale;
+}) {
+  const { t } = useTranslation('executors');
+  const label = t(`run.status.${run.status}`);
+  const current = run.overview?.currentNode;
+  const currentText = current ? `${current.name === teamRoleLabel(t, current) ? current.name : `${teamRoleLabel(t, current)} · ${current.name}`}${current.action ? `：${current.action}` : ''}` : null;
+  const detailsId = `run-nodes-${run.id}`;
+  return (
+    <li>
+      <div className="flex items-center rounded-lg hover:bg-muted">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          aria-controls={detailsId}
+          aria-label={t(expanded ? 'records.collapseNodes' : 'records.expandNodes')}
+          className={`ml-2 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground ${focusRing}`}
+        >
+          <ChevronRight className={`size-4 transition-transform ${expanded ? 'rotate-90' : ''}`} aria-hidden="true" />
+        </button>
+        <Link
+          to="/executor-runs/$runId"
+          params={{ runId: run.id }}
+          className={`${rowGrid} pl-1 rounded-lg ${focusRing}`}
+        >
+          {/* Executor name captured when the Run was dispatched */}
+          <span className="hidden sm:flex text-xs font-medium text-foreground truncate">
+            {run.executorName}
+          </span>
+          {/* Status, current node and what it is doing, and intent */}
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
+              <StatusDot status={toStatusKey(run.status)} />
+              <span className="shrink-0">{label}</span>
+              {currentText ? <TruncatedText text={`· ${currentText}`} title={currentText} className="min-w-0" /> : null}
+            </span>
+            <TruncatedText
+              text={toSingleLine(run.intent) || run.id}
+              title={run.intent}
+              className="text-sm font-medium"
+            />
+          </div>
+          {/* Project directory - truncated */}
+          <div className="hidden sm:block">
+            <TruncatedText
+              text={run.projectDirectory}
+              title={run.projectDirectory}
+              className="text-xs text-muted-foreground"
+            />
+          </div>
+          {/* Created time */}
+          <time
+            dateTime={run.createdAt}
+            className="truncate whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground"
+          >
+            {formatDateTime(run.createdAt, locale)}
+          </time>
+          {/* Finished time - hidden on small screens */}
+          <time
+            dateTime={run.finishedAt ?? undefined}
+            className="hidden sm:block truncate whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground"
+          >
+            {run.finishedAt ? formatDateTime(run.finishedAt, locale) : '—'}
+          </time>
+          {/* Total duration */}
+          <div className="text-right text-xs tabular-nums text-muted-foreground" title={t('records.columns.duration')}>
+            {runDuration(run)}
+          </div>
+          {/* Total tokens with their source */}
+          <div className="text-right text-xs" title={t('records.columns.tokens')}>
+            {run.overview ? <TokenFigure value={run.overview.totalTokens} retentionHours={retentionHours} /> : '—'}
+          </div>
+        </Link>
+      </div>
+      {expanded ? (
+        <div id={detailsId} className="mx-4 mb-3 rounded-lg border border-border bg-surface">
+          <RunNodeTable nodes={nodes} loading={nodesLoading} retentionHours={retentionHours} />
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
 export function TeamRecords({ executorId: executorCategoryId }: { executorId: string }) {
   const { t } = useTranslation('executors');
   const { locale } = useLocale();
@@ -169,6 +261,13 @@ export function TeamRecords({ executorId: executorCategoryId }: { executorId: st
       !needle || toSingleLine(run.intent).toLowerCase().includes(needle)
     ) ?? [];
   }, [query.data?.pages, keyword]);
+
+  // In-progress Runs open by default so their current node is visible; a click overrides it.
+  const [expandedOverrides, setExpandedOverrides] = useState<Record<string, boolean>>({});
+  const isExpanded = useCallback((run: AgentTeamRunListItem) => expandedOverrides[run.id] ?? !SETTLED_STATUSES.has(run.status), [expandedOverrides]);
+  const toggleRun = (run: AgentTeamRunListItem) => setExpandedOverrides((current) => ({ ...current, [run.id]: !isExpanded(run) }));
+  const expandedRuns = filteredRuns.filter(isExpanded);
+  const nodes = useAgentTeamRunNodesQuery(expandedRuns.map((run) => run.id), expandedRuns.some((run) => !SETTLED_STATUSES.has(run.status)));
 
   const total = query.data?.pages[0]?.total ?? 0;
   const hasNextPage = query.hasNextPage;
@@ -220,62 +319,18 @@ export function TeamRecords({ executorId: executorCategoryId }: { executorId: st
         ) : (
           <>
             <ul className="divide-y divide-border rounded-xl border border-border bg-surface">
-              {filteredRuns.map((run) => {
-                const label = t(`run.status.${run.status}`);
-                const duration = formatDurationFromDates(run.createdAt, run.finishedAt);
-                return (
-                  <li key={run.id}>
-                    <Link
-                      to="/executor-runs/$runId"
-                      params={{ runId: run.id }}
-                      className={`${rowGrid} rounded-lg hover:bg-muted ${focusRing}`}
-                    >
-                      {/* Executor name captured when the Run was dispatched */}
-                      <span className="hidden sm:flex text-xs font-medium text-foreground truncate">
-                        {run.executorName}
-                      </span>
-                      {/* Status and intent */}
-                      <div className="flex min-w-0 flex-col gap-0.5">
-                        <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
-                          <StatusDot status={toStatusKey(run.status)} />
-                          <span className="truncate">{label}</span>
-                        </span>
-                        <TruncatedText
-                          text={toSingleLine(run.intent) || run.id}
-                          title={run.intent}
-                          className="text-sm font-medium"
-                        />
-                      </div>
-                      {/* Project directory - truncated */}
-                      <div className="hidden sm:block">
-                        <TruncatedText
-                          text={run.projectDirectory}
-                          title={run.projectDirectory}
-                          className="text-xs text-muted-foreground"
-                        />
-                      </div>
-                      {/* Created time */}
-                      <time
-                        dateTime={run.createdAt}
-                        className="truncate whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground"
-                      >
-                        {formatDateTime(run.createdAt, locale)}
-                      </time>
-                      {/* Finished time - hidden on small screens */}
-                      <time
-                        dateTime={run.finishedAt ?? undefined}
-                        className="hidden sm:block truncate whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground"
-                      >
-                        {run.finishedAt ? formatDateTime(run.finishedAt, locale) : '—'}
-                      </time>
-                      {/* Duration - hidden on small screens */}
-                      <div className="hidden sm:block text-right text-xs tabular-nums text-muted-foreground">
-                        {duration}
-                      </div>
-                    </Link>
-                  </li>
-                );
-              })}
+              {filteredRuns.map((run) => (
+                <RunRow
+                  key={run.id}
+                  run={run}
+                  expanded={isExpanded(run)}
+                  onToggle={() => toggleRun(run)}
+                  nodes={nodes.nodesByRun.get(run.id)}
+                  nodesLoading={nodes.loading}
+                  retentionHours={nodes.retentionHours}
+                  locale={locale}
+                />
+              ))}
             </ul>
 
             {/* Load more button */}

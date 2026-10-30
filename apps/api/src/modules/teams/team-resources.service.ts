@@ -187,7 +187,7 @@ const MAX_SKILL_PACKAGE_BYTES = 1 * 1_024 * 1_024;
 
 const GATEWAY_PROVIDER_ID = 'gateway-provider';
 const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392);
-const GATEWAY_ATTRIBUTION_FILTERS = ['surface', 'conversationId', 'projectTaskId', 'executor', 'executorCategoryId', 'teamRunId', 'workflowId', 'workflowRunId'] as const;
+const GATEWAY_ATTRIBUTION_FILTERS = ['surface', 'conversationId', 'projectTaskId', 'executor', 'executorCategoryId', 'teamRunId', 'workflowId', 'workflowRunId', 'nodeRunId'] as const;
 const GATEWAY_PROVIDER_URL = `http://127.0.0.1:${GATEWAY_PORT}/worklite/providers`;
 
 function validatePackageFiles(input: unknown): PackageFile[] {
@@ -1362,7 +1362,9 @@ export class WorkspaceResourcesService {
               surfaces: [...GATEWAY_SURFACES],
               groupBy: [...GATEWAY_STATS_GROUP_BYS],
               defaultGroupBy: 'surface',
-              scope: 'conversation, executor, team and workflow groupings count only requests carrying that identifier; surface covers every request',
+              scope: 'conversation, executor, executor_category, workflow and team_run groupings count only requests carrying that identifier; node_run covers Run and Workflow traffic and reports a Run\'s traffic recorded before node attribution as one row with a null nodeRunId; surface covers every request',
+              nodeAttribution: 'nodeRunId is one executor role task attempt (parallel Developers and retries are separate nodes) or one Workflow node run; statistics recorded before node attribution carry no nodeRunId and are not backfilled',
+              idLists: 'teamRunId and nodeRunId accept a comma-separated list of ids',
               persistence: 'attribution is written to the permanent statistics as well as the 12-hour request details',
               coverage: 'only traffic that passes through the Gateway; a Codex task with no declared Gateway model runs on local configuration and contributes no tokens, so executor token usage is never complete',
             },
@@ -1514,6 +1516,9 @@ export class WorkspaceResourcesService {
           webRoute: '/executor-runs',
           recordsRoute: 'GET /executors/:executorId/runs',
           runListRoute: 'GET /executor-runs',
+          runListOverview: 'each list item carries overview: totalTokens (TokenAttribution), durationMs, and currentNode (name, role and latest action) while the Run is in progress',
+          runNodesRoute: 'GET /executor-runs/nodes?runIds=a,b (read-only, at most 50 Runs): per Run, one node per role task attempt with status, duration, TokenAttribution tokens, latest activity and its steps (step/activity/tool_call)',
+          tokenAttribution: 'tokens with source exact (Gateway statistics), estimated (step share by request start time, from 12-hour request logs) or unavailable (tokens null, never 0, with a reason)',
           webGroupCreation: false,
           chatAgentDispatchOnly: true,
           dispatchRoute: 'POST /chat/dispatch',

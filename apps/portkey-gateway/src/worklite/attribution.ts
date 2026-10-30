@@ -83,7 +83,7 @@ export function readAttribution(header: HeaderReader): GatewayAttribution {
 }
 
 /** The dimensions `requestStats` can group its attribution breakdown by. */
-const GATEWAY_STATS_GROUP_BYS = ['surface', 'conversation', 'executor', 'executor_category', 'workflow'] as const;
+const GATEWAY_STATS_GROUP_BYS = ['surface', 'conversation', 'executor', 'executor_category', 'workflow', 'team_run', 'node_run'] as const;
 
 export type GatewayStatsGroupBy = (typeof GATEWAY_STATS_GROUP_BYS)[number];
 

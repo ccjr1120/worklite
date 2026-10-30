@@ -35,7 +35,7 @@ import { imageEditsHandler } from './handlers/imageEditsHandler';
 import { messagesCountTokensHandler } from './handlers/messagesCountTokensHandler';
 import { modelsHandler } from './handlers/modelsHandler';
 import modelResponsesHandler from './handlers/modelResponsesHandler';
-import { addProviderModels, createProvider, deleteProvider, getProvider, listProviders, portkeyCustomHost, prepareGatewayDatabase, providerView, requestLog, requestLogs, requestStats, startGatewayDatabaseMaintenance, updateProvider } from './worklite/provider-registry';
+import { addProviderModels, createProvider, deleteProvider, getProvider, listProviders, portkeyCustomHost, prepareGatewayDatabase, providerView, requestLog, requestLogs, requestLogTimeline, requestStats, startGatewayDatabaseMaintenance, updateProvider } from './worklite/provider-registry';
 import { codexAuthStatus, deleteCodexAccount, importCodexAccounts, refreshCodexAccount, startCodexLogin, startCodexOAuthCallbackServer, updateCodexAccount } from './worklite/codex-auth';
 import { codexAccountUsages, codexRateLimits } from './worklite/codex-transport';
 import { isSystemOneProtocol, systemOnePassthrough, systemOneTest } from './worklite/systemone-transport';
@@ -137,6 +137,7 @@ const attributionQuery = (c: Context) => ({
   teamRunId: c.req.query('teamRunId'),
   workflowId: c.req.query('workflowId'),
   workflowRunId: c.req.query('workflowRunId'),
+  nodeRunId: c.req.query('nodeRunId'),
 });
 app.get('/worklite/stats', (c) => {
   try {
@@ -158,6 +159,13 @@ app.get('/worklite/request-logs', (c) => {
       limit: c.req.query('limit') ? Number(c.req.query('limit')) : undefined,
       cursor: c.req.query('cursor'),
     }));
+  } catch (error) {
+    return c.json({ message: error instanceof RangeError ? error.message : 'Request logs are unavailable.' }, 400);
+  }
+});
+app.get('/worklite/request-logs/timeline', (c) => {
+  try {
+    return c.json(requestLogTimeline({ from: c.req.query('from'), to: c.req.query('to'), teamRunId: c.req.query('teamRunId'), nodeRunId: c.req.query('nodeRunId') }));
   } catch (error) {
     return c.json({ message: error instanceof RangeError ? error.message : 'Request logs are unavailable.' }, 400);
   }

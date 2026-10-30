@@ -1689,7 +1689,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
             signal,
             // The developer role runs in a project executor; it is kept apart from the
             // executor's model-loop traffic by its own surface rather than merged into it.
-            correlation: { surface: 'executor_category_project_task', executorCategoryId: run.executorCategoryId, teamRunId: request.runId, teamRole: taskRole, teamTaskAttemptId: attempt.id, executor: execution.executor },
+            correlation: { surface: 'executor_category_project_task', executorCategoryId: run.executorCategoryId, teamRunId: request.runId, teamRole: taskRole, teamTaskAttemptId: attempt.id, nodeRunId: attempt.id, executor: execution.executor },
             onEvent: (activity) => {
               commandIds.add(activity.commandExecutionId);
               this.appendEvent(this.db, request.runId, 'task.activity', {
@@ -1786,7 +1786,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         } : {}),
         signal,
         jsonOutput: true,
-        correlation: { surface: 'executor_category', executorCategoryId: run.executorCategoryId, teamRunId: request.runId, teamRole: taskRole, teamTaskAttemptId: attempt.id },
+        correlation: { surface: 'executor_category', executorCategoryId: run.executorCategoryId, teamRunId: request.runId, teamRole: taskRole, teamTaskAttemptId: attempt.id, nodeRunId: attempt.id },
         // The upstream proxy closes a request that has not produced its first byte within
         // ~120s, and time-to-first-byte grows with the prompt: requests past ~200KB (~70k
         // tokens) stalled for 70-120s and then failed. Bound each tool result and the rolling

@@ -1,8 +1,13 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, isNull, lt, notInArray, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type {
   AgentTeamRunListPage,
+  AgentTeamRunNodeTree,
+  AgentTeamRunOverview,
+  AgentTeamRunStatus,
+  GatewayAttributionGroup,
+  GatewayRequestLogTimeline,
   AgentTeamRoleConfiguration,
   AgentTeamRunEvent,
   AgentTeamRunView,
@@ -16,6 +21,8 @@ import type {
 import {
   executorCategories,
   executorRuns,
+  executorRunEvents,
+  executorTaskAttempts,
   agentTeamVersions,
   type AgentTeam,
   type Database,
@@ -26,6 +33,12 @@ import { AgentTeamRuntimeService } from './executor-runtime.service';
 import { AgentTeamConfigurationService, executorRevision } from './executor-configuration.service';
 import { capturedExecutorName } from './executor-run-summary';
 import { RETIRED_AGENT_TEAM_IDS } from './executor-configuration';
+import { PortkeyGatewayService } from '../model-providers/portkey-gateway.service';
+import { activitiesByAttempt, buildRunNodes, currentRunNode, durationBetween, isRunInProgress, runTotalTokens, timelineByNode, unavailableTokens, type ActivityRow, type AttemptRow } from './executor-run-nodes';
+
+const RUN_NODE_BATCH_LIMIT = 50;
+const RUN_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const REQUEST_LOG_RETENTION_HOURS = 12;
 
 @Injectable()
 export class ExecutorsService {
@@ -34,7 +47,11 @@ export class ExecutorsService {
     private readonly workspaces: WorkspaceService,
     private readonly runtime: AgentTeamRuntimeService,
     private readonly configuration: AgentTeamConfigurationService,
+    // Token figures are read-only Gateway evidence; without the Gateway they are reported unavailable.
+    @Optional() private readonly gateway?: PortkeyGatewayService,
   ) {}
+
+  private readonly logger = new Logger(ExecutorsService.name);
 
   async get(request: Request, workspaceSlug: string, executorCategoryId: string): Promise<AgentTeamView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
@@ -147,10 +164,12 @@ export class ExecutorsService {
 
     const pageRows = rows.slice(0, pageLimit);
     const last = pageRows.at(-1);
+    const overviews = await this.runOverviews(pageRows);
     return {
       items: pageRows.map(({ snapshot, total: _total, currentExecutorName, ...row }) => ({
         ...row,
         executorName: capturedExecutorName(snapshot, currentExecutorName),
+        overview: overviews.get(row.id)!,
         modeDecidedAt: row.modeDecidedAt?.toISOString() ?? null,
         orchestrationVersion: snapshot.orchestrationVersion ?? 1,
         createdAt: row.createdAt.toISOString(),
@@ -158,6 +177,116 @@ export class ExecutorsService {
       })),
       nextCursor: last ? encodeRunListCursor(last.createdAt, last.id) : null,
       total: Number(pageRows[0]?.total ?? rows.length),
+    };
+  }
+
+  /**
+   * Overview columns for one page of Runs with a fixed number of reads: one Gateway
+   * statistics call grouped by team_run for the whole page, and for the in-progress Runs
+   * only, one attempt query and one activity query.
+   */
+  private async runOverviews(rows: ReadonlyArray<{ id: string; status: AgentTeamRunStatus; createdAt: Date; finishedAt: Date | null; snapshot: Parameters<typeof currentRunNode>[0] }>): Promise<Map<string, AgentTeamRunOverview>> {
+    const nowMs = Date.now();
+    const overviews = new Map<string, AgentTeamRunOverview>();
+    if (!rows.length) return overviews;
+    const statsByRun = await this.runStats(rows.map((row) => row.id), rows, 'team_run');
+    const active = rows.filter((row) => isRunInProgress(row.status));
+    const activeIds = active.map((row) => row.id);
+    let attempts: AttemptRow[] = [];
+    let activityRows: ActivityRow[] = [];
+    if (activeIds.length) {
+      [attempts, activityRows] = await Promise.all([
+        this.db.select().from(executorTaskAttempts)
+          .where(inArray(executorTaskAttempts.runId, activeIds))
+          .orderBy(asc(executorTaskAttempts.createdAt), asc(executorTaskAttempts.attemptIndex)),
+        this.db.select({ runId: executorRunEvents.runId, sequence: executorRunEvents.sequence, payload: executorRunEvents.payload, createdAt: executorRunEvents.createdAt })
+          .from(executorRunEvents)
+          .where(and(inArray(executorRunEvents.runId, activeIds), eq(executorRunEvents.type, 'task.activity')))
+          .orderBy(asc(executorRunEvents.sequence)),
+      ]);
+    }
+    const activities = activitiesByAttempt(activityRows);
+    for (const row of rows) {
+      const totalTokens = statsByRun
+        ? runTotalTokens(statsByRun.find((group) => group.teamRunId === row.id))
+        : unavailableTokens('gateway_unavailable');
+      const overview: AgentTeamRunOverview = { totalTokens, durationMs: durationBetween(row.createdAt, row.finishedAt, nowMs) };
+      if (isRunInProgress(row.status)) {
+        const currentNode = currentRunNode(row.snapshot, attempts.filter((attempt) => attempt.runId === row.id), activities);
+        if (currentNode) overview.currentNode = currentNode;
+      }
+      overviews.set(row.id, overview);
+    }
+    return overviews;
+  }
+
+  // One statistics read for a set of Runs, or null when the Gateway cannot answer.
+  private async runStats(runIds: string[], rows: ReadonlyArray<{ createdAt: Date }>, groupBy: 'team_run' | 'node_run'): Promise<GatewayAttributionGroup[] | null> {
+    if (!this.gateway || !runIds.length) return null;
+    const from = new Date(Math.min(...rows.map((row) => row.createdAt.getTime()))).toISOString();
+    try {
+      const stats = await this.gateway.stats({ from, to: new Date().toISOString(), groupBy, teamRunId: runIds.join(',') });
+      return stats.attribution.groups;
+    } catch (error) {
+      this.logger.warn(`Gateway statistics for ${runIds.length} Runs are unavailable: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
+  private async runTimeline(runIds: string[], rows: ReadonlyArray<{ createdAt: Date }>): Promise<GatewayRequestLogTimeline | null> {
+    if (!this.gateway || !runIds.length) return null;
+    const from = new Date(Math.min(...rows.map((row) => row.createdAt.getTime()))).toISOString();
+    try {
+      return await this.gateway.requestLogTimeline({ from, to: new Date().toISOString(), teamRunId: runIds.join(',') });
+    } catch (error) {
+      this.logger.warn(`Gateway request timeline for ${runIds.length} Runs is unavailable: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
+  /**
+   * Read-only node trees for several Runs. The number of reads is fixed regardless of how
+   * many Runs are asked for: the Runs, their attempts, their activity, one Gateway
+   * statistics call grouped by node_run and one request timeline call.
+   */
+  async runNodes(request: Request, workspaceSlug: string, runIds: string[], executorCategoryIds: string[]): Promise<AgentTeamRunNodeTree> {
+    const ids = [...new Set(runIds.map((id) => id.trim()).filter(Boolean))];
+    if (!ids.length) throw new BadRequestException('runIds is required.');
+    if (ids.length > RUN_NODE_BATCH_LIMIT) throw new BadRequestException(`At most ${RUN_NODE_BATCH_LIMIT} runIds are accepted.`);
+    const invalid = ids.find((id) => !RUN_ID_PATTERN.test(id));
+    if (invalid) throw new BadRequestException(`Invalid executor run id ${invalid}.`);
+    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const conditions = [eq(executorRuns.workspaceId, workspace.id), inArray(executorRuns.id, ids)];
+    if (executorCategoryIds.length) conditions.push(inArray(executorRuns.executorCategoryId, executorCategoryIds));
+    const runs = await this.db.select({ id: executorRuns.id, createdAt: executorRuns.createdAt, snapshot: agentTeamVersions.snapshot })
+      .from(executorRuns)
+      .innerJoin(agentTeamVersions, eq(agentTeamVersions.id, executorRuns.executorCategoryVersionId))
+      .where(and(...conditions));
+    if (!runs.length) return { runs: [], requestLogRetentionHours: REQUEST_LOG_RETENTION_HOURS };
+    const foundIds = runs.map((run) => run.id);
+    const [attempts, activityRows, stats, timeline] = await Promise.all([
+      this.db.select().from(executorTaskAttempts)
+        .where(inArray(executorTaskAttempts.runId, foundIds))
+        .orderBy(asc(executorTaskAttempts.createdAt), asc(executorTaskAttempts.attemptIndex)),
+      this.db.select({ runId: executorRunEvents.runId, sequence: executorRunEvents.sequence, payload: executorRunEvents.payload, createdAt: executorRunEvents.createdAt })
+        .from(executorRunEvents)
+        .where(and(inArray(executorRunEvents.runId, foundIds), eq(executorRunEvents.type, 'task.activity')))
+        .orderBy(asc(executorRunEvents.sequence)),
+      this.runStats(foundIds, runs, 'node_run'),
+      this.runTimeline(foundIds, runs),
+    ]);
+    const statsByNode = stats ? new Map(stats.filter((group) => group.nodeRunId).map((group) => [group.nodeRunId!, group])) : null;
+    const runsWithUnattributedTraffic = new Set((stats ?? []).filter((group) => !group.nodeRunId && group.teamRunId).map((group) => group.teamRunId!));
+    const activities = activitiesByAttempt(activityRows);
+    const requestsByNode = timelineByNode(timeline);
+    const nowMs = Date.now();
+    const order = new Map(ids.map((id, index) => [id, index]));
+    return {
+      runs: [...runs].sort((a, b) => order.get(a.id)! - order.get(b.id)!).map((run) => ({
+        runId: run.id,
+        nodes: buildRunNodes(run.id, run.snapshot, attempts.filter((attempt) => attempt.runId === run.id), activities, { statsByNode, runsWithUnattributedTraffic, timeline, requestsByNode }, nowMs),
+      })),
+      requestLogRetentionHours: timeline?.retentionHours ?? REQUEST_LOG_RETENTION_HOURS,
     };
   }
 

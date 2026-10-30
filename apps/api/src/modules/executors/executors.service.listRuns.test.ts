@@ -64,7 +64,14 @@ describe('ExecutorsService.listRuns', () => {
       limit: vi.fn().mockResolvedValue(mockRuns),
     };
 
-    (mockDb.select as any).mockReturnValue(mockQuery);
+    // The in-progress Run's overview reads its attempts and activity; it has none yet.
+    const emptyQuery = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      orderBy: vi.fn().mockResolvedValue([]),
+    };
+
+    (mockDb.select as any).mockReturnValueOnce(mockQuery).mockReturnValue(emptyQuery);
 
     const result = await service.listRuns(mockRequest, 'personal', ['team-1'], undefined, 50);
 
@@ -83,6 +90,8 @@ describe('ExecutorsService.listRuns', () => {
           finishedAt: '2024-01-02T01:00:00.000Z',
           executorCategoryId: 'team-1',
           executorName: 'Executor A',
+          // No Gateway is wired in this test, so tokens are unavailable rather than 0.
+          overview: { totalTokens: { tokens: null, source: 'unavailable', reason: 'gateway_unavailable' }, durationMs: expect.any(Number) },
         },
         {
           id: 'run-2',
@@ -97,6 +106,8 @@ describe('ExecutorsService.listRuns', () => {
           finishedAt: null,
           executorCategoryId: 'team-1',
           executorName: 'Executor A',
+          // No Gateway is wired in this test, so tokens are unavailable rather than 0.
+          overview: { totalTokens: { tokens: null, source: 'unavailable', reason: 'gateway_unavailable' }, durationMs: expect.any(Number) },
         },
       ],
       nextCursor: expect.any(String),

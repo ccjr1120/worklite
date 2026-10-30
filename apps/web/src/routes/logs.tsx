@@ -33,6 +33,7 @@ type LogsSearch = {
   teamRunId?: string;
   workflowId?: string;
   workflowRunId?: string;
+  nodeRunId?: string;
   requestLogId?: string;
 };
 
@@ -77,6 +78,7 @@ export const Route = createFileRoute('/logs')({
       teamRunId: tab === 'requests' ? optionalSearchText(search.teamRunId) : undefined,
       workflowId: tab === 'requests' ? optionalSearchText(search.workflowId) : undefined,
       workflowRunId: tab === 'requests' ? optionalSearchText(search.workflowRunId) : undefined,
+      nodeRunId: tab === 'requests' ? optionalSearchText(search.nodeRunId) : undefined,
       requestLogId: tab === 'requests' ? optionalSearchText(search.requestLogId) : undefined,
     };
   },
@@ -126,6 +128,7 @@ function LogsPage() {
         teamRunId: next.teamRunId,
         workflowId: next.workflowId,
         workflowRunId: next.workflowRunId,
+        nodeRunId: next.nodeRunId,
         requestLogId: undefined,
       },
     });
@@ -196,6 +199,7 @@ function LogsPage() {
               teamRunId: search.teamRunId,
               workflowId: search.workflowId,
               workflowRunId: search.workflowRunId,
+              nodeRunId: search.nodeRunId,
             }}
             onFiltersChange={changeFilters}
             focusedRequestId={search.requestLogId}

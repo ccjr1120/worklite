@@ -182,7 +182,47 @@
       "clearAll": "清空"
     },
     "noMatch": "没有符合筛选条件的记录。",
-    "executorName": "执行器"
+    "executorName": "执行器",
+    "expandNodes": "展开节点明细",
+    "collapseNodes": "收起节点明细",
+    "columns": {
+      "duration": "总时长",
+      "tokens": "总 Token"
+    }
+  },
+  "tokens": {
+    "source": {
+      "exact": "精确值（Gateway 统计）",
+      "estimated": "估算值（按请求开始时间分配到步骤）",
+      "unavailable": "不可用"
+    },
+    "reason": {
+      "no_node_attribution": "历史记录没有节点归因，只有执行记录总量",
+      "no_gateway_traffic": "没有经过 Gateway 的模型请求（例如 Codex 使用本地配置），用量未知，不是 0",
+      "usage_not_reported": "Gateway 记录了请求，但提供商没有返回 Token 用量",
+      "request_logs_expired": "步骤估算依赖请求日志，请求日志只保留 {{hours}} 小时，已过期",
+      "request_logs_truncated": "该节点请求过多，超出单次可读取的请求日志条数",
+      "gateway_unavailable": "暂时无法读取 Gateway 统计"
+    }
+  },
+  "nodes": {
+    "title": "节点明细",
+    "empty": "暂无节点。",
+    "noSteps": "该节点没有上报步骤，步骤级 Token 不可用。",
+    "stepsOmitted": "更早的 {{count}} 个步骤未显示",
+    "attempt": "第 {{index}} 次尝试",
+    "columns": {
+      "node": "节点名 / 角色",
+      "status": "状态",
+      "duration": "耗时",
+      "tokens": "Token",
+      "action": "当前动作"
+    },
+    "stepKind": {
+      "step": "步骤",
+      "activity": "活动",
+      "tool_call": "工具调用"
+    }
   },
   "config": {
     "title": "执行器配置",

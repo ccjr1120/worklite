@@ -140,4 +140,31 @@ describe('gateway usage attribution', () => {
       expect.objectContaining({ surface: 'chat_project_task', executor: 'claude', requests: 1, totalTokens: 400 }),
     ]);
   });
+
+  // Runs here are recorded after the earlier tests so their expectations are unaffected.
+  it('groups by Run and by node, keeps pre-node traffic visible, and filters by id lists', () => {
+    const node = (run: string, nodeRunId: string | null, tokens: number) => stat({
+      'x-worklite-surface': 'executor_category',
+      'x-worklite-team-id': 'team_two',
+      'x-worklite-team-run-id': run,
+      ...(nodeRunId ? { 'x-worklite-node-run-id': nodeRunId } : {}),
+    }, tokens);
+    node('atrun_two', 'atatt_a', 10);
+    node('atrun_two', 'atatt_a', 5);
+    node('atrun_two', 'atatt_b', 20);
+    node('atrun_two', null, 7);
+    node('atrun_three', 'atatt_c', 30);
+
+    const byRun = requestStats({ from, to, groupBy: 'team_run', teamRunId: 'atrun_two,atrun_three' });
+    const runTokens = new Map(byRun.attribution.groups.map((group) => [group.teamRunId, group.totalTokens]));
+    expect(runTokens).toEqual(new Map([['atrun_two', 42], ['atrun_three', 30]]));
+
+    const byNode = requestStats({ from, to, groupBy: 'node_run', teamRunId: 'atrun_two' });
+    const nodeTokens = new Map(byNode.attribution.groups.map((group) => [group.nodeRunId, group.totalTokens]));
+    expect(nodeTokens).toEqual(new Map([['atatt_a', 15], ['atatt_b', 20], [null, 7]]));
+    expect(byNode.attribution.groups.every((group) => group.teamRunId === 'atrun_two')).toBe(true);
+
+    const oneNode = requestStats({ from, to, nodeRunId: 'atatt_b,atatt_c' });
+    expect(oneNode.summary.totalTokens).toBe(50);
+  });
 });
