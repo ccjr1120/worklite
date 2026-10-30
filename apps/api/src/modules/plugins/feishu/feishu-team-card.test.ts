@@ -5,7 +5,7 @@ import { renderCard, teamRunMeta } from './feishu-cards';
 function run(overrides: Partial<AgentTeamRunView>): AgentTeamRunView {
   return {
     status: 'running', createdAt: '2026-10-23T00:00:00.000Z', updatedAt: '2026-10-23T00:00:00.000Z', finishedAt: null,
-    progress: { phase: 'development', nextStep: 'await_assignment_completion', totalAssignments: 0, completedAssignments: 0, activeDeveloperIds: [], waitingReason: null, percent: 40 },
+    progress: { phase: 'development', nextStep: 'await_assignment_completion', totalAssignments: 0, completedAssignments: 0, activeDeveloperIds: [], waitingReason: null },
     current: null,
     ...overrides,
   } as AgentTeamRunView;

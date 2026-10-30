@@ -1552,7 +1552,7 @@ export class WorkspaceResourcesService {
             reservedPrimaryId: 'developer',
             assignments: 'planner-produced non-overlapping ownedPaths mapped to lanes in order; targeted repairRequests per developerId; a role output that fails validation earns exactly one corrective re-invocation',
             retryBarrier: 'one retry resumes all failed assignments in the same fan-out; completed siblings never rerun',
-            progress: 'run.progress events and run progress view: phase, next step, percent, assignment completion, active developerIds; task events carry developerId and assignmentTitle; attempts carry progressText',
+            progress: 'run.progress events and run progress view: phase, next step, assignment completion, active developerIds; task events carry developerId and assignmentTitle; attempts carry progressText',
             pendingInputs: 'Chat task cards list every waiting question; each answer uses its own pendingInputId and scopeRevision',
           },
           modes: ['plan_only', 'validate_existing', 'implement_and_validate'],

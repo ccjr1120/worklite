@@ -41,7 +41,7 @@ function teamRun(overrides: Partial<AgentTeamRunView> = {}): AgentTeamRunView {
     status: 'running', intent: '实现登录页', projectDirectory: '/tmp/project', mode: 'implement_and_validate', modeRationale: null, modeDecidedAt: null,
     authorizedCommands: [], scopeRevision: 0, desiredControlState: 'none',
     tasks: [attempt({}), reviewer], documents: [], pendingInputs: [], operations: [], activities: [],
-    progress: { phase: 'review', nextStep: 'review', totalAssignments: 0, completedAssignments: 0, activeDeveloperIds: [], waitingReason: null, percent: 80 },
+    progress: { phase: 'review', nextStep: 'review', totalAssignments: 0, completedAssignments: 0, activeDeveloperIds: [], waitingReason: null },
     current: { taskAttemptId: reviewer.id, taskKey: reviewer.taskKey, role: reviewer.role, roleName: null, model: reviewer.model, status: reviewer.status, assignmentTitle: null, progressText: reviewer.progressText, startedAt: reviewer.startedAt, activeCount: 1, activeRoleCount: 1 },
     outcome: null, worktreeBasePath: null, runBranch: null,
     createdAt: '2026-10-23T00:00:00.000Z', updatedAt: '2026-10-23T01:00:00.000Z', finishedAt: null,
@@ -97,7 +97,7 @@ describe('Chat executor Run card', () => {
   });
 
   it('keeps only the total elapsed time once the Run settles', () => {
-    mockRun(teamRun({ status: 'succeeded', finishedAt: '2026-10-23T00:42:00.000Z', progress: { ...teamRun().progress, phase: 'terminal', percent: 100 } }));
+    mockRun(teamRun({ status: 'succeeded', finishedAt: '2026-10-23T00:42:00.000Z', progress: { ...teamRun().progress, phase: 'terminal' } }));
     render(<TaskCard submission={submission} />);
 
     expect(screen.getByText('已完成')).toBeVisible();

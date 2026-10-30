@@ -430,9 +430,9 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
     } else if (reference?.kind === 'executor_category') {
       state.title = 'Chat · executors';
       const run = await this.teams.getRun(request, 'personal', reference.runId);
-      const phaseText: Record<string, string> = { planning: '规划中', test_design: '测试设计中', development: '开发中', test_authoring: '测试编写中', test_execution: '测试执行中', review: '审查中', repair: '修复中', waiting: '等待输入', terminal: '已结束' };
+      const phaseText: Record<string, string> = { planning: '规划中', test_design: '测试设计中', development: '开发中', test_authoring: '测试编写中', test_execution: '测试执行中', review: '审查中', repair: '修复中', working: '执行中', waiting: '等待输入', terminal: '已结束' };
       state.status = statusText[run.status] ?? run.status;
-      if (run.progress && !['succeeded', 'failed', 'cancelled'].includes(run.status)) state.status += ` · ${phaseText[run.progress.phase] ?? run.progress.phase} ${run.progress.percent}%`;
+      if (run.progress && !['succeeded', 'failed', 'cancelled'].includes(run.status)) state.status += ` · ${phaseText[run.progress.phase] ?? run.progress.phase}`;
       state.meta = teamRunMeta(run);
       state.details = run.tasks.map((task) => {
         const progressLine = task.progressText.trim().split(/\r?\n/, 1)[0] ?? '';

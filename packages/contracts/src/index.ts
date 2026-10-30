@@ -1619,13 +1619,12 @@ export type AgentTeamDevelopmentAssignment = {
 };
 
 export type AgentTeamRunProgress = {
-  phase: 'planning' | 'test_design' | 'development' | 'test_authoring' | 'test_execution' | 'review' | 'repair' | 'waiting' | 'terminal';
+  phase: 'planning' | 'test_design' | 'development' | 'test_authoring' | 'test_execution' | 'review' | 'repair' | 'working' | 'waiting' | 'terminal';
   nextStep: 'dispatch_assignments' | 'await_assignment_completion' | 'answer_question' | 'test_authoring' | 'test_execution' | 'review' | 'finish';
   totalAssignments: number;
   completedAssignments: number;
   activeDeveloperIds: string[];
   waitingReason: 'user_input' | 'pause_boundary' | null;
-  percent: number;
 };
 
 export type AgentTeamView = {

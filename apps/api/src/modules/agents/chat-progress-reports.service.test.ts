@@ -81,7 +81,7 @@ function setup(options?: { report?: 'reported' | 'busy' | 'unavailable'; env?: R
   const reportActiveWorkProgress = vi.fn(async (_workspaceId: string, _executionId: string, _note: string): Promise<'reported' | 'busy' | 'unavailable'> => options?.report ?? 'reported');
   const getRunProgress = vi.fn(async () => ({
     phase: 'development' as const, nextStep: 'await_assignment_completion' as const,
-    totalAssignments: 2, completedAssignments: 1, activeDeveloperIds: ['developer-1'], waitingReason: null, percent: 50,
+    totalAssignments: 2, completedAssignments: 1, activeDeveloperIds: ['developer-1'], waitingReason: null,
   }));
   const service = new ChatProgressReportsService(
     db,

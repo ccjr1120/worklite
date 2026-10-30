@@ -3919,7 +3919,7 @@ function isTerminalRunStatus(status: AgentTeamRunStatus): boolean {
   return status === 'succeeded' || status === 'failed' || status === 'cancelled';
 }
 
-function deriveRunProgress(
+export function deriveRunProgress(
   run: AgentTeamRun,
   taskRows: ReadonlyArray<typeof executorTaskAttempts.$inferSelect>,
 ): AgentTeamRunProgress {
@@ -3972,6 +3972,14 @@ function deriveRunProgress(
   }
 
   const phaseOfTaskKey = (taskKey: string): AgentTeamRunProgress['phase'] => {
+    const groupRole = /^group_\d+_(.+)$/.exec(taskKey)?.[1];
+    if (groupRole) {
+      const phases: Record<string, AgentTeamRunProgress['phase']> = {
+        planner: 'planning', test_designer: 'test_design', developer: 'development', executor: 'development',
+        test_author: 'test_authoring', test_runner: 'test_execution', reviewer: 'review',
+      };
+      return phases[groupRole] ?? 'working';
+    }
     if (/^repair_test_authoring/.test(taskKey)) return 'test_authoring';
     if (/^repair_test_execution/.test(taskKey)) return 'test_execution';
     if (/^repair_review/.test(taskKey)) return 'review';
@@ -3998,20 +4006,6 @@ function deriveRunProgress(
     phase = latest ? phaseOfTaskKey(latest.taskKey) : 'planning';
   }
 
-  // Percent derives from the coarse phase ladder; a repair round keeps the
-  // development index, and only assignment completion refines the fraction.
-  const PHASE_ORDER: ReadonlyArray<Exclude<AgentTeamRunProgress['phase'], 'terminal' | 'waiting' | 'repair'>> =
-    ['planning', 'test_design', 'development', 'test_authoring', 'test_execution', 'review'];
-  const workPhase = inFlight.length > 0
-    ? phaseOfTaskKey(inFlight[inFlight.length - 1].taskKey)
-    : latest ? phaseOfTaskKey(latest.taskKey) : 'planning';
-  const ladderPhase = workPhase === 'repair' ? 'development' : workPhase;
-  const phaseIndex = Math.max(0, PHASE_ORDER.indexOf(ladderPhase as (typeof PHASE_ORDER)[number]));
-  const fraction = (workPhase === 'development' || workPhase === 'repair') && assignments.length > 0
-    ? completedAssignments / assignments.length
-    : 0;
-  const percent = terminal ? 100 : Math.min(99, Math.round((100 * (phaseIndex + fraction)) / PHASE_ORDER.length));
-
   // developerId is only ever set on lane-based task attempts (any implementation role,
   // not just one literally named 'developer'), so this filters correctly for Direct too.
   const activeDeveloperIds = terminal
@@ -4034,7 +4028,6 @@ function deriveRunProgress(
   return {
     phase,
     nextStep,
-    percent,
     totalAssignments: assignments.length,
     completedAssignments,
     activeDeveloperIds,
