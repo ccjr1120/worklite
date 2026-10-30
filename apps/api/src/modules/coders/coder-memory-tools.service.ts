@@ -5,7 +5,7 @@ import { TeamMemoryService, type TeamMemoryActorContext } from './coder-memory.s
 
 const repositoryId = {
   type: ['string', 'null'],
-  description: 'Canonical Coder repository id from the captured task context. Omit or null for a Coder-level memory.',
+  description: 'A repository id from the captured task context (taskGroup.repositories[].id). Omit or null for a Coder-level memory.',
 };
 const upsertKey = {
   type: 'string',
@@ -60,7 +60,10 @@ const definitions: GatewayToolDefinition[] = [
 
 export type RoleMemoryToolCall = { toolName: string; input: unknown };
 
-export type RoleMemoryToolContext = Omit<TeamMemoryActorContext, 'createdBy'>;
+export type RoleMemoryToolContext = Omit<TeamMemoryActorContext, 'createdBy'> & {
+  // Group repository id shown in the task context -> canonical Coder repository id.
+  repositoryIdAliases?: Readonly<Record<string, string>>;
+};
 
 // Role-facing Coder memory tools. The Coder, Run, attempt, role and repository scope
 // come from the runtime closure on every call; model input can only choose content,
@@ -74,8 +77,11 @@ export class AgentTeamMemoryToolsService {
   }
 
   async execute(input: { context: RoleMemoryToolContext; taskKey: string; call: RoleMemoryToolCall }): Promise<string> {
-    const args = asRecord(input.call.input);
-    const context: TeamMemoryActorContext = { ...input.context, createdBy: 'role' };
+    const { repositoryIdAliases = {}, ...actor } = input.context;
+    const rawArgs = asRecord(input.call.input);
+    const aliasedRepositoryId = typeof rawArgs?.repositoryId === 'string' ? repositoryIdAliases[rawArgs.repositoryId.trim()] : undefined;
+    const args = aliasedRepositoryId ? { ...rawArgs, repositoryId: aliasedRepositoryId } : rawArgs;
+    const context: TeamMemoryActorContext = { ...actor, createdBy: 'role' };
     switch (input.call.toolName) {
       case 'coder_memory_search': {
         const results = await this.memories.search(context, {

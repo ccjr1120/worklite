@@ -1828,6 +1828,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       role,
       sourceMessageId: run.groupMessageId ?? request.groupContext?.initialMessageId ?? null,
       allowedRepositoryIds: request.groupContext?.repositories.map((repository) => repository.memoryRepositoryId) ?? [],
+      // The task context shows each group repository's own id; memory is scoped by the Coder
+      // repository behind it, so a role that passes the id it can see still lands in scope.
+      repositoryIdAliases: Object.fromEntries((request.groupContext?.repositories ?? []).map((repository) => [repository.id, repository.memoryRepositoryId])),
       createdBy: 'role' as const,
     };
   }

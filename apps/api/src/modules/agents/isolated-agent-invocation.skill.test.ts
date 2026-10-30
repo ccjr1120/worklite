@@ -124,3 +124,49 @@ describe('IsolatedAgentInvocationService Skill loading', () => {
     expect(captured?.builtinTools.map((tool) => tool.name)).not.toContain('skill_reference');
   });
 });
+
+describe('IsolatedAgentInvocationService managed tool journaling', () => {
+  // A journal that records every transition; managed tools are journaled like any effect.
+  function journal() {
+    const transitions: string[] = [];
+    return {
+      transitions,
+      findOperation: async () => undefined,
+      findReplayOperation: async () => undefined,
+      reserveOperation: async () => { transitions.push('reserved'); return {} as never; },
+      attachReplayCommand: () => undefined,
+      completeOperation: async () => { transitions.push('completed'); return {} as never; },
+      failOperation: async (_key: string, reason: string) => { transitions.push(`failed: ${reason}`); return {} as never; },
+      markOperationUncertain: async (_key: string, reason: string) => { transitions.push(`uncertain: ${reason}`); return {} as never; },
+    };
+  }
+
+  async function runManagedTool(executeManagedTool: () => Promise<string>) {
+    const operations = journal();
+    let toolResult: unknown;
+    gateway.runWorkflowAgent.mockImplementationOnce(async (request: { executeTool: (call: unknown) => Promise<unknown> }) => {
+      toolResult = await request.executeTool({ toolCallId: 'call_1', toolName: 'coder_memory_write', input: { content: 'A fact.' } });
+      return { text: 'done' };
+    });
+    await service().execute(baseRequest({
+      managedTools: [{ name: 'coder_memory_write', description: '', inputSchema: { type: 'object' } }],
+      executeManagedTool,
+      operation: { taskKey: 'group_0_planner', journal: operations },
+    }));
+    return { toolResult, transitions: operations.transitions };
+  }
+
+  it('returns a rejected managed tool request to the model instead of requiring recovery', async () => {
+    const { BadRequestException } = await import('@nestjs/common');
+    const { toolResult, transitions } = await runManagedTool(async () => {
+      throw new BadRequestException('The memory repository is outside this Run repository scope.');
+    });
+    expect(toolResult).toEqual({ type: 'error-text', value: 'The memory repository is outside this Run repository scope.' });
+    expect(transitions).toEqual(['reserved', 'failed: The memory repository is outside this Run repository scope.']);
+  });
+
+  it('still asks for recovery when a managed tool fails for an unknown reason', async () => {
+    await expect(runManagedTool(async () => { throw new Error('database is locked'); }))
+      .rejects.toThrow('requires a recovery decision before it can continue');
+  });
+});
