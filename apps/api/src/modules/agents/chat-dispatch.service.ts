@@ -7,7 +7,7 @@ import { agentExecutionEvents, agentExecutions, chatSubmissions, workflowVersion
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from './agent-executions.service';
-import { AgentTeamGroupsService } from '../executors/executor-groups.service';
+import { AgentTeamGroupsService } from '../coders/coder-groups.service';
 import { RunsService } from '../runs/runs.service';
 
 export const CHAT_AGENT_ID = 'agt_system_helper_chat';
@@ -37,7 +37,7 @@ export class ChatDispatchService {
   private async accept(request: Request, input: DispatchChatRequest): Promise<DispatchChatResponse> {
     const workspace = await this.workspaces.getWorkspace(request, 'personal');
     if (!input?.submissionId?.trim() || typeof input.message !== 'string' || !input.target) throw new BadRequestException('A stable submission id, message and target are required.');
-    if (!['conversation', 'executor_category', 'workflow'].includes(input.target.kind)) throw new BadRequestException('Unknown conversation target.');
+    if (!['conversation', 'coder', 'workflow'].includes(input.target.kind)) throw new BadRequestException('Unknown conversation target.');
     if (input.executionId) {
       const [execution] = await this.db.select({ id: agentExecutions.id }).from(agentExecutions)
         .where(and(eq(agentExecutions.id, input.executionId), eq(agentExecutions.workspaceId, workspace.id), eq(agentExecutions.agentId, CHAT_AGENT_ID))).limit(1);
@@ -89,15 +89,15 @@ export class ChatDispatchService {
         const digest = createHash('sha256').update(workspace.id + ':' + submission.id).digest('hex');
         const runId = `atrun_chat_${digest}`;
         const groupId = `atgroup_chat_${digest}`;
-        // Agent Teams decide their own Run mode; older callers may still send one.
+        // Coders decide their own Run mode; older callers may still send one.
         if (target.mode !== undefined) this.logger.warn(`Ignoring deprecated executor mode "${String(target.mode)}" for Chat submission ${submission.id}.`);
-        const dispatched = await this.teamGroups.dispatchFromChat(request, 'personal', target.executorCategoryId, {
+        const dispatched = await this.teamGroups.dispatchFromChat(request, 'personal', target.coderId, {
           message: input.message,
           projectDirectory: target.projectDirectory,
           role: target.role,
           submissionId: submission.id,
           runId,
-        }, { runId, accept: (transaction, id) => bind(transaction, { kind: 'executor_category', executorCategoryId: target.executorCategoryId, runId: id, groupId }) });
+        }, { runId, accept: (transaction, id) => bind(transaction, { kind: 'coder', coderId: target.coderId, runId: id, groupId }) });
         if (dispatched.id !== groupId) throw new Error('Chat executor group id did not match its idempotent submission.');
       }
       const [accepted] = await this.db.select().from(chatSubmissions).where(eq(chatSubmissions.id, submission.id)).limit(1);

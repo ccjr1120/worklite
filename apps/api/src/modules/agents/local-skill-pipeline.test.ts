@@ -3,9 +3,9 @@ import type { Request } from 'express';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { executorCategories, createDb, initializeDatabase, type Database } from '@worklite/db';
+import { coders, createDb, initializeDatabase, type Database } from '@worklite/db';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
-import { AgentTeamConfigurationService } from '../executors/executor-configuration.service';
+import { AgentTeamConfigurationService } from '../coders/coder-configuration.service';
 import { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
 import { localSkillId } from '../skills/local-skill-source';
 
@@ -60,8 +60,8 @@ async function setup() {
   const database = createDb(':memory:');
   db = database;
   await initializeDatabase(database);
-  database.insert(executorCategories).values({
-    id: 'agent_team_bmad_tea',
+  database.insert(coders).values({
+    id: 'company_coder',
     workspaceId: 'workspace_personal',
     name: 'Company Project',
     description: '',
@@ -107,7 +107,7 @@ describe('Local directory Skill pipeline', () => {
     const repeated = await resources.skills({} as Request, 'personal');
     expect(repeated.filter((skill) => skill.id === skillId)).toHaveLength(1);
 
-    const team = await configuration.update('workspace_personal', 'agent_team_bmad_tea', {
+    const team = await configuration.update('workspace_personal', 'company_coder', {
       roles: [
         role('dispatcher', []),
         role('test_designer', []),

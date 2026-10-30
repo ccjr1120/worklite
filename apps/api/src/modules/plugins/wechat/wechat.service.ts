@@ -11,7 +11,7 @@ import { assertRuntimeAdmission, runtimeAdmissionClosed, runtimeWritesFrozen, up
 import { AgentExecutionsService } from '../../agents/agent-executions.service';
 import { CHAT_AGENT_ID, ChatDispatchService } from '../../agents/chat-dispatch.service';
 import { ChatAttachmentsService, detachAttachmentImages } from '../../agents/chat-attachments.service';
-import { ExecutorsService } from '../../executors/executors.service';
+import { CodersService } from '../../coders/coders.service';
 import { RunsService } from '../../runs/runs.service';
 import { UpgradesService } from '../../upgrades/upgrades.service';
 import { encryptSecret, PluginsService } from '../plugins.service';
@@ -20,7 +20,7 @@ import { fetchBotQrCode, fetchTypingTicket, getUpdates, ILINK_DEFAULT_BASE_URL, 
 
 type Json = Record<string, unknown>;
 type Submission = typeof chatSubmissions.$inferSelect;
-// WeChat plain-text answers only bind to Chat conversation questions; executor/Workflow controls
+// WeChat plain-text answers only bind to Chat conversation questions; Coder/Workflow controls
 // stay on their authoritative surfaces and are announced as text notifications.
 type WechatAction = { kind: 'agent_answer'; executionId: string; questionId: string; answer?: string; newConversation?: boolean; recoveryDecision?: 'adopt_command' | 'mark_failed' };
 type LoginSession = {
@@ -111,7 +111,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
     private readonly plugins: PluginsService,
     private readonly dispatches: ChatDispatchService,
     private readonly executions: AgentExecutionsService,
-    private readonly teams: ExecutorsService,
+    private readonly teams: CodersService,
     private readonly runs: RunsService,
     private readonly upgrades: UpgradesService,
     private readonly attachments: ChatAttachmentsService,
@@ -124,7 +124,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
         void this.db.update(chatSubmissions).set({ settled: false }).where(sql`json_extract(${chatSubmissions.reference}, '$.runId') = ${event.runId}`).then(() => undefined);
       }),
       this.teams.subscribe((event) => {
-        void this.db.update(chatSubmissions).set({ settled: false }).where(sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'executor_category' and json_extract(${chatSubmissions.reference}, '$.runId') = ${event.runId}`).then(() => undefined);
+        void this.db.update(chatSubmissions).set({ settled: false }).where(sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'coder' and json_extract(${chatSubmissions.reference}, '$.runId') = ${event.runId}`).then(() => undefined);
       }),
     ];
     await this.connect();
@@ -603,17 +603,17 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
           else text += '\n\n请直接回复你的答案。';
         }
       }
-    } else if (reference?.kind === 'executor_category') {
+    } else if (reference?.kind === 'coder') {
       const run = await this.teams.getRun(request, 'personal', reference.runId);
       terminal = ['succeeded', 'failed', 'cancelled'].includes(run.status);
       const pending = run.pendingInputs.find((item) => item.status === 'pending');
       if (terminal) {
-        text = `【executors】任务${statusText[run.status] ?? run.status}\n${run.intent}`;
+        text = `【coders】任务${statusText[run.status] ?? run.status}\n${run.intent}`;
         if (run.outcome) text += `\n\n${run.outcome.summary}${run.outcome.unresolvedIssues.length ? `\n\n待解决：\n${run.outcome.unresolvedIssues.map((issue) => `- ${issue}`).join('\n')}` : ''}`;
       } else if (pending) {
-        text = `【executors】任务等待你的输入\n${pending.question}\n\n请前往 WorkLite 处理该问题。`;
+        text = `【coders】任务等待你的输入\n${pending.question}\n\n请前往 WorkLite 处理该问题。`;
       } else {
-        text = `【executors】任务已开始执行\n${run.intent}`;
+        text = `【coders】任务已开始执行\n${run.intent}`;
       }
     } else if (reference?.kind === 'workflow') {
       let run = await this.runs.get(request, 'personal', reference.runId);

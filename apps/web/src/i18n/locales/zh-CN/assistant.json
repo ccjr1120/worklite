@@ -28,7 +28,7 @@
     "stage": "阶段：{{stage}}",
     "kind": {
       "task": "项目任务",
-      "team": "执行任务",
+      "coder": "执行任务",
       "workflow": "工作流"
     }
   },
@@ -467,8 +467,8 @@
       "chat_project_task": "Chat 项目任务",
       "agent": "独立 Agent",
       "workflow": "Workflow 节点",
-      "executor_category": "执行器角色",
-      "executor_category_project_task": "执行器角色（执行引擎）",
+      "coder": "Coder 角色",
+      "coder_project_task": "Coder 角色（执行引擎）",
       "provider_test": "供应商连接测试",
       "external": "外部直连",
       "unattributed": "未归因"

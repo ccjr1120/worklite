@@ -170,12 +170,12 @@ describe('initializeDatabase restart recovery', () => {
     const [skill] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'SKILL.md'))).limit(1);
     expect(skill.content.match(/## Pages and routes \(UI navigation\)/g)).toHaveLength(1);
     expect(skill.content).toContain('| 工作区 | Coding | `/coding` |');
-    expect(skill.content).toContain('`/coding/:executorId/config`');
-    expect(skill.content).toContain('`/executor-runs/:runId`');
+    expect(skill.content).toContain('`/coding/:coderId/config`');
+    expect(skill.content).toContain('`/coding/runs/:runId`');
     expect(skill.content).toContain('do not call search_local_projects to look for a same-named repository');
     // Route listings live only in the navigation section.
     expect(skill.content).not.toContain('Chat Channels at /chat?view=channels');
-    expect(skill.content).not.toContain('`/coding/:executorId` lists an executor’s Runs');
+    expect(skill.content).not.toContain('`/coding/:coderId` lists an executor’s Runs');
   });
 
   it('registers dispatch_task without an Agent Team mode', async () => {
@@ -210,7 +210,7 @@ describe('initializeDatabase restart recovery', () => {
     expect(chat.systemPrompt).toContain('never by its display name');
     expect(chat.systemPrompt).not.toMatch(/\b(?:answer|steer|cancel)_project_task\b|redeployAfterSuccess|Agent Team/);
     expect(skill.content).not.toMatch(/\b(?:answer|steer|cancel)_project_task\b|redeployAfterSuccess|Agent Team/);
-    expect(skill.content).toContain('The general project executor (id agent_team_direct) is the default for general project work');
+    expect(skill.content).toContain('The general project executor (id quick_coder) is the default for general project work');
   });
 
   it('registers the direct Workflow inspection platform tool', async () => {

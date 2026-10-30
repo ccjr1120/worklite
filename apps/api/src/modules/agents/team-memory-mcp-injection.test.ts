@@ -6,9 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeClaudeMcpConfiguration } from './claude-code.service';
 import { codexMcpServers } from './codex-app-server.service';
 import type { PreparedProjectExecution } from './project-executor.types';
-import { teamMemoryMcpRuntime } from '../executors/executor-memory-mcp';
+import { teamMemoryMcpRuntime } from '../coders/coder-memory-mcp';
 
-// A v11 project executor receives the executor memory MCP server like any other MCP
+// A v11 project executor receives the Coder memory MCP server like any other MCP
 // server: Claude Code through the owner-only mcp.json and Codex through
 // mcp_servers.<key>. Discovery failures are logged, not silently dropped.
 
@@ -23,7 +23,7 @@ afterEach(async () => {
 });
 
 function preparedTeamMemory(): PreparedProjectExecution {
-  const runtime = teamMemoryMcpRuntime('wtm_executor_token');
+  const runtime = teamMemoryMcpRuntime('wtm_coder_token');
   return {
     directory,
     systemPrompt: 'system',
@@ -31,36 +31,36 @@ function preparedTeamMemory(): PreparedProjectExecution {
   };
 }
 
-describe('Executor memory MCP injection', () => {
-  it('adds the executor memory server to the Claude mcp.json', async () => {
+describe('Coder memory MCP injection', () => {
+  it('adds the Coder memory server to the Claude mcp.json', async () => {
     const prepared = preparedTeamMemory();
     const argv = await writeClaudeMcpConfiguration(prepared.directory, prepared.mcpServers, async () => [
-      { name: 'executor_memory_search' },
-      { name: 'executor_memory_read' },
-      { name: 'executor_memory_write' },
+      { name: 'coder_memory_search' },
+      { name: 'coder_memory_read' },
+      { name: 'coder_memory_write' },
     ]);
 
     expect(argv).toEqual(['--mcp-config', join(directory, 'mcp.json')]);
     const config = JSON.parse(await readFile(join(directory, 'mcp.json'), 'utf8')) as {
       mcpServers: Record<string, { type: string; url: string; headers?: Record<string, string> }>;
     };
-    expect(config.mcpServers.worklite_executor_memory).toEqual({
+    expect(config.mcpServers.worklite_coder_memory).toEqual({
       type: 'http',
       url: prepared.mcpServers[0]!.endpoint,
-      headers: { Authorization: 'Bearer wtm_executor_token' },
+      headers: { Authorization: 'Bearer wtm_coder_token' },
     });
   });
 
-  it('adds mcp_servers.worklite_executor_memory for Codex with its bearer environment variable', () => {
+  it('adds mcp_servers.worklite_coder_memory for Codex with its bearer environment variable', () => {
     const prepared = preparedTeamMemory();
     const { config, env } = codexMcpServers(prepared, false);
 
-    expect(config['mcp_servers.worklite_executor_memory']).toEqual({
+    expect(config['mcp_servers.worklite_coder_memory']).toEqual({
       url: prepared.mcpServers[0]!.endpoint,
-      enabled_tools: ['executor_memory_search', 'executor_memory_read', 'executor_memory_write'],
+      enabled_tools: ['coder_memory_search', 'coder_memory_read', 'coder_memory_write'],
       bearer_token_env_var: 'WORKLITE_MCP_TOKEN_0',
     });
-    expect(env.WORKLITE_MCP_TOKEN_0).toBe('wtm_executor_token');
+    expect(env.WORKLITE_MCP_TOKEN_0).toBe('wtm_coder_token');
   });
 
   it('logs a warning when discovery fails instead of injecting an unvetted server silently', async () => {
@@ -72,7 +72,7 @@ describe('Executor memory MCP injection', () => {
       });
 
       expect(argv).toEqual([]);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('worklite_executor_memory'));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('worklite_coder_memory'));
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('ECONNREFUSED'));
     } finally {
       warn.mockRestore();

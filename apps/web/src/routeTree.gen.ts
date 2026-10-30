@@ -19,10 +19,7 @@ import { Route as SettingsRouteRouteImport } from './routes/settings/route'
 import { Route as ArtifactsIndexRouteImport } from './routes/artifacts/index'
 import { Route as ArtifactsArtifactIdRouteImport } from './routes/artifacts/$artifactId'
 import { Route as CodingIndexRouteImport } from './routes/coding/index'
-import { Route as CodingExecutorIdRouteImport } from './routes/coding/$executorId'
-import { Route as ExecutorRunsRunIdRouteImport } from './routes/executor-runs/$runId'
-import { Route as ExecutorsIndexRouteImport } from './routes/executors/index'
-import { Route as ExecutorsSplatRouteImport } from './routes/executors/$'
+import { Route as CodingCoderIdRouteImport } from './routes/coding/$coderId'
 import { Route as McpServersIndexRouteImport } from './routes/mcp-servers/index'
 import { Route as McpServersServerIdRouteImport } from './routes/mcp-servers/$serverId'
 import { Route as PluginsIndexRouteImport } from './routes/plugins/index'
@@ -36,8 +33,9 @@ import { Route as SkillsIndexRouteImport } from './routes/skills/index'
 import { Route as SkillsSkillIdRouteImport } from './routes/skills/$skillId'
 import { Route as WorkflowsIndexRouteImport } from './routes/workflows/index'
 import { Route as WorkflowsWorkflowIdRouteImport } from './routes/workflows/$workflowId'
-import { Route as CodingExecutorIdIndexRouteImport } from './routes/coding/$executorId.index'
-import { Route as CodingExecutorIdConfigRouteImport } from './routes/coding/$executorId.config'
+import { Route as CodingCoderIdIndexRouteImport } from './routes/coding/$coderId.index'
+import { Route as CodingCoderIdConfigRouteImport } from './routes/coding/$coderId.config'
+import { Route as CodingRunsRunIdRouteImport } from './routes/coding/runs/$runId'
 import { Route as WorkflowsWorkflowIdVersionsRouteImport } from './routes/workflows/$workflowId.versions'
 
 const IndexRoute = IndexRouteImport.update({
@@ -90,24 +88,9 @@ const CodingIndexRoute = CodingIndexRouteImport.update({
   path: '/coding/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CodingExecutorIdRoute = CodingExecutorIdRouteImport.update({
-  id: '/coding/$executorId',
-  path: '/coding/$executorId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ExecutorRunsRunIdRoute = ExecutorRunsRunIdRouteImport.update({
-  id: '/executor-runs/$runId',
-  path: '/executor-runs/$runId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ExecutorsIndexRoute = ExecutorsIndexRouteImport.update({
-  id: '/executors/',
-  path: '/executors/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ExecutorsSplatRoute = ExecutorsSplatRouteImport.update({
-  id: '/executors/$',
-  path: '/executors/$',
+const CodingCoderIdRoute = CodingCoderIdRouteImport.update({
+  id: '/coding/$coderId',
+  path: '/coding/$coderId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const McpServersIndexRoute = McpServersIndexRouteImport.update({
@@ -175,15 +158,20 @@ const WorkflowsWorkflowIdRoute = WorkflowsWorkflowIdRouteImport.update({
   path: '/workflows/$workflowId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CodingExecutorIdIndexRoute = CodingExecutorIdIndexRouteImport.update({
+const CodingCoderIdIndexRoute = CodingCoderIdIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => CodingExecutorIdRoute,
+  getParentRoute: () => CodingCoderIdRoute,
 } as any)
-const CodingExecutorIdConfigRoute = CodingExecutorIdConfigRouteImport.update({
+const CodingCoderIdConfigRoute = CodingCoderIdConfigRouteImport.update({
   id: '/config',
   path: '/config',
-  getParentRoute: () => CodingExecutorIdRoute,
+  getParentRoute: () => CodingCoderIdRoute,
+} as any)
+const CodingRunsRunIdRoute = CodingRunsRunIdRouteImport.update({
+  id: '/coding/runs/$runId',
+  path: '/coding/runs/$runId',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const WorkflowsWorkflowIdVersionsRoute =
   WorkflowsWorkflowIdVersionsRouteImport.update({
@@ -201,9 +189,7 @@ export interface FileRoutesByFullPath {
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
-  '/coding/$executorId': typeof CodingExecutorIdRouteWithChildren
-  '/executor-runs/$runId': typeof ExecutorRunsRunIdRoute
-  '/executors/$': typeof ExecutorsSplatRoute
+  '/coding/$coderId': typeof CodingCoderIdRouteWithChildren
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -214,15 +200,15 @@ export interface FileRoutesByFullPath {
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
   '/artifacts/': typeof ArtifactsIndexRoute
   '/coding/': typeof CodingIndexRoute
-  '/executors/': typeof ExecutorsIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/plugins/': typeof PluginsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/skills/': typeof SkillsIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
-  '/coding/$executorId/config': typeof CodingExecutorIdConfigRoute
+  '/coding/$coderId/config': typeof CodingCoderIdConfigRoute
+  '/coding/runs/$runId': typeof CodingRunsRunIdRoute
   '/workflows/$workflowId/versions': typeof WorkflowsWorkflowIdVersionsRoute
-  '/coding/$executorId/': typeof CodingExecutorIdIndexRoute
+  '/coding/$coderId/': typeof CodingCoderIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -231,8 +217,6 @@ export interface FileRoutesByTo {
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
-  '/executor-runs/$runId': typeof ExecutorRunsRunIdRoute
-  '/executors/$': typeof ExecutorsSplatRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -243,15 +227,15 @@ export interface FileRoutesByTo {
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
   '/artifacts': typeof ArtifactsIndexRoute
   '/coding': typeof CodingIndexRoute
-  '/executors': typeof ExecutorsIndexRoute
   '/mcp-servers': typeof McpServersIndexRoute
   '/plugins': typeof PluginsIndexRoute
   '/settings': typeof SettingsIndexRoute
   '/skills': typeof SkillsIndexRoute
   '/workflows': typeof WorkflowsIndexRoute
-  '/coding/$executorId/config': typeof CodingExecutorIdConfigRoute
+  '/coding/$coderId/config': typeof CodingCoderIdConfigRoute
+  '/coding/runs/$runId': typeof CodingRunsRunIdRoute
   '/workflows/$workflowId/versions': typeof WorkflowsWorkflowIdVersionsRoute
-  '/coding/$executorId': typeof CodingExecutorIdIndexRoute
+  '/coding/$coderId': typeof CodingCoderIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -263,9 +247,7 @@ export interface FileRoutesById {
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
-  '/coding/$executorId': typeof CodingExecutorIdRouteWithChildren
-  '/executor-runs/$runId': typeof ExecutorRunsRunIdRoute
-  '/executors/$': typeof ExecutorsSplatRoute
+  '/coding/$coderId': typeof CodingCoderIdRouteWithChildren
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
@@ -276,15 +258,15 @@ export interface FileRoutesById {
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
   '/artifacts/': typeof ArtifactsIndexRoute
   '/coding/': typeof CodingIndexRoute
-  '/executors/': typeof ExecutorsIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
   '/plugins/': typeof PluginsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/skills/': typeof SkillsIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
-  '/coding/$executorId/config': typeof CodingExecutorIdConfigRoute
+  '/coding/$coderId/config': typeof CodingCoderIdConfigRoute
+  '/coding/runs/$runId': typeof CodingRunsRunIdRoute
   '/workflows/$workflowId/versions': typeof WorkflowsWorkflowIdVersionsRoute
-  '/coding/$executorId/': typeof CodingExecutorIdIndexRoute
+  '/coding/$coderId/': typeof CodingCoderIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -297,9 +279,7 @@ export interface FileRouteTypes {
     | '/logs'
     | '/model-providers'
     | '/artifacts/$artifactId'
-    | '/coding/$executorId'
-    | '/executor-runs/$runId'
-    | '/executors/$'
+    | '/coding/$coderId'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
     | '/runs/$runId'
@@ -310,15 +290,15 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId'
     | '/artifacts/'
     | '/coding/'
-    | '/executors/'
     | '/mcp-servers/'
     | '/plugins/'
     | '/settings/'
     | '/skills/'
     | '/workflows/'
-    | '/coding/$executorId/config'
+    | '/coding/$coderId/config'
+    | '/coding/runs/$runId'
     | '/workflows/$workflowId/versions'
-    | '/coding/$executorId/'
+    | '/coding/$coderId/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -327,8 +307,6 @@ export interface FileRouteTypes {
     | '/logs'
     | '/model-providers'
     | '/artifacts/$artifactId'
-    | '/executor-runs/$runId'
-    | '/executors/$'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
     | '/runs/$runId'
@@ -339,15 +317,15 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId'
     | '/artifacts'
     | '/coding'
-    | '/executors'
     | '/mcp-servers'
     | '/plugins'
     | '/settings'
     | '/skills'
     | '/workflows'
-    | '/coding/$executorId/config'
+    | '/coding/$coderId/config'
+    | '/coding/runs/$runId'
     | '/workflows/$workflowId/versions'
-    | '/coding/$executorId'
+    | '/coding/$coderId'
   id:
     | '__root__'
     | '/'
@@ -358,9 +336,7 @@ export interface FileRouteTypes {
     | '/logs'
     | '/model-providers'
     | '/artifacts/$artifactId'
-    | '/coding/$executorId'
-    | '/executor-runs/$runId'
-    | '/executors/$'
+    | '/coding/$coderId'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
     | '/runs/$runId'
@@ -371,15 +347,15 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId'
     | '/artifacts/'
     | '/coding/'
-    | '/executors/'
     | '/mcp-servers/'
     | '/plugins/'
     | '/settings/'
     | '/skills/'
     | '/workflows/'
-    | '/coding/$executorId/config'
+    | '/coding/$coderId/config'
+    | '/coding/runs/$runId'
     | '/workflows/$workflowId/versions'
-    | '/coding/$executorId/'
+    | '/coding/$coderId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -390,20 +366,18 @@ export interface RootRouteChildren {
   HomeRoute: typeof HomeRoute
   LogsRoute: typeof LogsRoute
   ModelProvidersRoute: typeof ModelProvidersRoute
-  CodingExecutorIdRoute: typeof CodingExecutorIdRouteWithChildren
-  ExecutorRunsRunIdRoute: typeof ExecutorRunsRunIdRoute
-  ExecutorsSplatRoute: typeof ExecutorsSplatRoute
+  CodingCoderIdRoute: typeof CodingCoderIdRouteWithChildren
   McpServersServerIdRoute: typeof McpServersServerIdRoute
   PluginsPluginIdRoute: typeof PluginsPluginIdRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
   SkillsSkillIdRoute: typeof SkillsSkillIdRoute
   WorkflowsWorkflowIdRoute: typeof WorkflowsWorkflowIdRouteWithChildren
   CodingIndexRoute: typeof CodingIndexRoute
-  ExecutorsIndexRoute: typeof ExecutorsIndexRoute
   McpServersIndexRoute: typeof McpServersIndexRoute
   PluginsIndexRoute: typeof PluginsIndexRoute
   SkillsIndexRoute: typeof SkillsIndexRoute
   WorkflowsIndexRoute: typeof WorkflowsIndexRoute
+  CodingRunsRunIdRoute: typeof CodingRunsRunIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -478,32 +452,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CodingIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/coding/$executorId': {
-      id: '/coding/$executorId'
-      path: '/coding/$executorId'
-      fullPath: '/coding/$executorId'
-      preLoaderRoute: typeof CodingExecutorIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/executor-runs/$runId': {
-      id: '/executor-runs/$runId'
-      path: '/executor-runs/$runId'
-      fullPath: '/executor-runs/$runId'
-      preLoaderRoute: typeof ExecutorRunsRunIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/executors/': {
-      id: '/executors/'
-      path: '/executors'
-      fullPath: '/executors/'
-      preLoaderRoute: typeof ExecutorsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/executors/$': {
-      id: '/executors/$'
-      path: '/executors/$'
-      fullPath: '/executors/$'
-      preLoaderRoute: typeof ExecutorsSplatRouteImport
+    '/coding/$coderId': {
+      id: '/coding/$coderId'
+      path: '/coding/$coderId'
+      fullPath: '/coding/$coderId'
+      preLoaderRoute: typeof CodingCoderIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/mcp-servers/': {
@@ -597,19 +550,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkflowsWorkflowIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/coding/$executorId/': {
-      id: '/coding/$executorId/'
+    '/coding/$coderId/': {
+      id: '/coding/$coderId/'
       path: '/'
-      fullPath: '/coding/$executorId/'
-      preLoaderRoute: typeof CodingExecutorIdIndexRouteImport
-      parentRoute: typeof CodingExecutorIdRoute
+      fullPath: '/coding/$coderId/'
+      preLoaderRoute: typeof CodingCoderIdIndexRouteImport
+      parentRoute: typeof CodingCoderIdRoute
     }
-    '/coding/$executorId/config': {
-      id: '/coding/$executorId/config'
+    '/coding/$coderId/config': {
+      id: '/coding/$coderId/config'
       path: '/config'
-      fullPath: '/coding/$executorId/config'
-      preLoaderRoute: typeof CodingExecutorIdConfigRouteImport
-      parentRoute: typeof CodingExecutorIdRoute
+      fullPath: '/coding/$coderId/config'
+      preLoaderRoute: typeof CodingCoderIdConfigRouteImport
+      parentRoute: typeof CodingCoderIdRoute
+    }
+    '/coding/runs/$runId': {
+      id: '/coding/runs/$runId'
+      path: '/coding/runs/$runId'
+      fullPath: '/coding/runs/$runId'
+      preLoaderRoute: typeof CodingRunsRunIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/workflows/$workflowId/versions': {
       id: '/workflows/$workflowId/versions'
@@ -653,18 +613,19 @@ const ArtifactsRouteWithChildren = ArtifactsRoute._addFileChildren(
   ArtifactsRouteChildren,
 )
 
-interface CodingExecutorIdRouteChildren {
-  CodingExecutorIdConfigRoute: typeof CodingExecutorIdConfigRoute
-  CodingExecutorIdIndexRoute: typeof CodingExecutorIdIndexRoute
+interface CodingCoderIdRouteChildren {
+  CodingCoderIdConfigRoute: typeof CodingCoderIdConfigRoute
+  CodingCoderIdIndexRoute: typeof CodingCoderIdIndexRoute
 }
 
-const CodingExecutorIdRouteChildren: CodingExecutorIdRouteChildren = {
-  CodingExecutorIdConfigRoute: CodingExecutorIdConfigRoute,
-  CodingExecutorIdIndexRoute: CodingExecutorIdIndexRoute,
+const CodingCoderIdRouteChildren: CodingCoderIdRouteChildren = {
+  CodingCoderIdConfigRoute: CodingCoderIdConfigRoute,
+  CodingCoderIdIndexRoute: CodingCoderIdIndexRoute,
 }
 
-const CodingExecutorIdRouteWithChildren =
-  CodingExecutorIdRoute._addFileChildren(CodingExecutorIdRouteChildren)
+const CodingCoderIdRouteWithChildren = CodingCoderIdRoute._addFileChildren(
+  CodingCoderIdRouteChildren,
+)
 
 interface WorkflowsWorkflowIdRouteChildren {
   WorkflowsWorkflowIdVersionsRoute: typeof WorkflowsWorkflowIdVersionsRoute
@@ -685,20 +646,18 @@ const rootRouteChildren: RootRouteChildren = {
   HomeRoute: HomeRoute,
   LogsRoute: LogsRoute,
   ModelProvidersRoute: ModelProvidersRoute,
-  CodingExecutorIdRoute: CodingExecutorIdRouteWithChildren,
-  ExecutorRunsRunIdRoute: ExecutorRunsRunIdRoute,
-  ExecutorsSplatRoute: ExecutorsSplatRoute,
+  CodingCoderIdRoute: CodingCoderIdRouteWithChildren,
   McpServersServerIdRoute: McpServersServerIdRoute,
   PluginsPluginIdRoute: PluginsPluginIdRoute,
   RunsRunIdRoute: RunsRunIdRoute,
   SkillsSkillIdRoute: SkillsSkillIdRoute,
   WorkflowsWorkflowIdRoute: WorkflowsWorkflowIdRouteWithChildren,
   CodingIndexRoute: CodingIndexRoute,
-  ExecutorsIndexRoute: ExecutorsIndexRoute,
   McpServersIndexRoute: McpServersIndexRoute,
   PluginsIndexRoute: PluginsIndexRoute,
   SkillsIndexRoute: SkillsIndexRoute,
   WorkflowsIndexRoute: WorkflowsIndexRoute,
+  CodingRunsRunIdRoute: CodingRunsRunIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

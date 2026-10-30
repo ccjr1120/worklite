@@ -35,7 +35,7 @@ export type ProjectExecutorMcpServer = {
 export type ProjectExecutorSteerPort = { deliver?: (text: string) => Promise<boolean> };
 
 export type ProjectExecutorRequest = {
-  owner: 'chat' | 'executor_category';
+  owner: 'chat' | 'coder';
   workspaceId: string;
   launch: StoredProjectExecutorLaunch;
   // Public Gateway model id; null keeps the executor's own configured default.

@@ -12,9 +12,9 @@ import type {
   AgentTeamDevelopmentAssignment,
   AgentTeamDevelopmentAssignmentInput,
   AgentTeamDocument,
-  AgentExecutorCategoryGraphDelegate,
-  AgentExecutorCategoryGraphOptions,
-  AgentExecutorCategoryGraphResult,
+  AgentCoderGraphDelegate,
+  AgentCoderGraphOptions,
+  AgentCoderGraphResult,
   AgentTeamPendingInput,
   AgentTeamPendingInputAnswer,
   AgentTeamProjectInstructionFile,
@@ -92,7 +92,7 @@ const teamState = Annotation.Root({
   }),
 });
 
-export type AgentExecutorCategoryGraphState = typeof teamState.State;
+export type AgentCoderGraphState = typeof teamState.State;
 
 const teamV2State = Annotation.Root({
   ...teamState.spec,
@@ -146,9 +146,9 @@ const teamV2State = Annotation.Root({
   }),
 });
 
-export type AgentExecutorCategoryGraphV2State = typeof teamV2State.State;
+export type AgentCoderGraphV2State = typeof teamV2State.State;
 
-function completedResultUpdate(result: Extract<AgentTeamTaskResult, { status: 'completed' }>): Partial<AgentExecutorCategoryGraphState> {
+function completedResultUpdate(result: Extract<AgentTeamTaskResult, { status: 'completed' }>): Partial<AgentCoderGraphState> {
   return {
     documents: result.documents,
     unresolvedIssues: result.unresolvedIssues,
@@ -157,7 +157,7 @@ function completedResultUpdate(result: Extract<AgentTeamTaskResult, { status: 'c
   };
 }
 
-function waitingResultUpdate(result: Extract<AgentTeamTaskResult, { status: 'waiting_for_input' }>, taskKey: string): Partial<AgentExecutorCategoryGraphState> {
+function waitingResultUpdate(result: Extract<AgentTeamTaskResult, { status: 'waiting_for_input' }>, taskKey: string): Partial<AgentCoderGraphState> {
   return {
     pendingInput: result.pendingInput,
     activeTaskKey: taskKey,
@@ -165,7 +165,7 @@ function waitingResultUpdate(result: Extract<AgentTeamTaskResult, { status: 'wai
   };
 }
 
-function taskResultUpdate(result: AgentTeamTaskResult, taskKey: string): Partial<AgentExecutorCategoryGraphState> {
+function taskResultUpdate(result: AgentTeamTaskResult, taskKey: string): Partial<AgentCoderGraphState> {
   if (result.status === 'waiting_for_input') return waitingResultUpdate(result, taskKey);
   return {
     ...completedResultUpdate(result),
@@ -179,7 +179,7 @@ type TaskDefinitionOptions = {
 };
 
 function taskDefinition(
-  state: AgentExecutorCategoryGraphState | AgentExecutorCategoryGraphV2State,
+  state: AgentCoderGraphState | AgentCoderGraphV2State,
   role: AgentTeamRole,
   taskKey: string,
   options: TaskDefinitionOptions = {},
@@ -202,8 +202,8 @@ function taskDefinition(
   };
 }
 
-function repairInstructionFor(state: AgentExecutorCategoryGraphState | AgentExecutorCategoryGraphV2State, taskKey: string): string | null {
-  const v2 = state as AgentExecutorCategoryGraphV2State;
+function repairInstructionFor(state: AgentCoderGraphState | AgentCoderGraphV2State, taskKey: string): string | null {
+  const v2 = state as AgentCoderGraphV2State;
   if (taskKey.startsWith('repair_')) {
     const developerId = developerIdFromRepairTaskKey(taskKey);
     return v2.repairInstructions?.[developerId] ?? state.repairInstruction ?? null;
@@ -267,12 +267,12 @@ function contentFingerprint(content: string): string {
 }
 
 async function executeTask(
-  state: AgentExecutorCategoryGraphState | AgentExecutorCategoryGraphV2State,
-  delegate: AgentExecutorCategoryGraphDelegate,
+  state: AgentCoderGraphState | AgentCoderGraphV2State,
+  delegate: AgentCoderGraphDelegate,
   role: AgentTeamRole,
   taskKey: string,
   developmentTaskKeys?: readonly string[],
-): Promise<Partial<AgentExecutorCategoryGraphState>> {
+): Promise<Partial<AgentCoderGraphState>> {
   const request: AgentTeamTaskRequest = {
     runId: state.runId,
     taskDefinition: taskDefinition(state, role, taskKey, developmentTaskKeys ? { developmentTaskKeys } : {}),
@@ -286,13 +286,13 @@ async function executeTask(
     pendingInputId: state.pendingInput?.id ?? (state.taskAnswers[taskKey] ? state.taskPendingInputIds[taskKey] : undefined),
     answer: state.taskAnswers[taskKey],
     repairInstruction: role === 'developer' && taskKey.startsWith('repair_') ? repairInstructionFor(state, taskKey) ?? undefined : undefined,
-    developmentAssignments: (state as AgentExecutorCategoryGraphV2State).developmentAssignments ?? undefined,
+    developmentAssignments: (state as AgentCoderGraphV2State).developmentAssignments ?? undefined,
   };
   return taskResultUpdate(await delegate.executeTask(request), taskKey);
 }
 
 function inputNode() {
-  return async (state: AgentExecutorCategoryGraphState): Promise<Partial<AgentExecutorCategoryGraphState>> => {
+  return async (state: AgentCoderGraphState): Promise<Partial<AgentCoderGraphState>> => {
     if (!state.pendingInput || !state.activeTaskKey) return {};
     const answer = requestTeamInput(state.pendingInput);
     return {
@@ -303,7 +303,7 @@ function inputNode() {
   };
 }
 
-export function createExecutorCategoryGraph(delegate: AgentExecutorCategoryGraphDelegate, checkpointer: BaseCheckpointSaver | undefined, options: AgentExecutorCategoryGraphOptions = {}) {
+export function createCoderGraph(delegate: AgentCoderGraphDelegate, checkpointer: BaseCheckpointSaver | undefined, options: AgentCoderGraphOptions = {}) {
   if (options.orchestrationVersion === 4) {
     // Version 4 inserts Worktree Manager setup/teardown stages around the
     // developer fan-out. Its topology is not wired yet; fail loudly rather
@@ -314,18 +314,18 @@ export function createExecutorCategoryGraph(delegate: AgentExecutorCategoryGraph
     // Version 3 runs the v2 topology over the fixed lane pool; the Planner's
     // assignment count alone decides how many lanes execute, so dispatch
     // capacity equals the pool size and pending lanes are assignment-driven.
-    return createExecutorCategoryGraphV2(delegate, checkpointer, {
+    return createCoderGraphV2(delegate, checkpointer, {
       ...options,
       developerIds: DEVELOPER_LANE_IDS,
       developerConcurrency: DEVELOPER_LANE_IDS.length,
     });
   }
   return options.orchestrationVersion === 2
-    ? createExecutorCategoryGraphV2(delegate, checkpointer, options)
-    : createExecutorCategoryGraphV1(delegate, checkpointer, options);
+    ? createCoderGraphV2(delegate, checkpointer, options)
+    : createCoderGraphV1(delegate, checkpointer, options);
 }
 
-function createExecutorCategoryGraphV1(delegate: AgentExecutorCategoryGraphDelegate, checkpointer: BaseCheckpointSaver | undefined, options: AgentExecutorCategoryGraphOptions) {
+function createCoderGraphV1(delegate: AgentCoderGraphDelegate, checkpointer: BaseCheckpointSaver | undefined, options: AgentCoderGraphOptions) {
   const maxRepairRounds = options.maxRepairRounds ?? 2;
   const graph = new StateGraph(teamState)
     .addNode('planner', async (state) => executeTask(state, delegate, 'planner', 'planning'))
@@ -520,7 +520,7 @@ function developerResultUpdate(
   developerId: string,
   taskKey: string,
   result: AgentTeamTaskResult,
-): Partial<AgentExecutorCategoryGraphV2State> {
+): Partial<AgentCoderGraphV2State> {
   if (result.status === 'waiting_for_input') {
     return {
       documents: [],
@@ -541,11 +541,11 @@ function developerResultUpdate(
 }
 
 function aggregateDevelopment(
-  state: AgentExecutorCategoryGraphV2State,
+  state: AgentCoderGraphV2State,
   assignments: readonly AgentTeamDevelopmentAssignment[],
   repair: boolean,
   round: number,
-): Partial<AgentExecutorCategoryGraphV2State> {
+): Partial<AgentCoderGraphV2State> {
   const results = assignments.map(
     (assignment) => state.taskResults[repair ? repairTaskKey(round, assignment.developerId) : initialTaskKey(assignment.developerId)],
   );
@@ -585,10 +585,10 @@ function aggregateDevelopment(
  * first, then extra instances in configuration order.
  */
 function dispatchDevelopment(
-  state: AgentExecutorCategoryGraphV2State,
+  state: AgentCoderGraphV2State,
   developerIds: readonly string[],
-): Partial<AgentExecutorCategoryGraphV2State> {
-  const update: Partial<AgentExecutorCategoryGraphV2State> = {};
+): Partial<AgentCoderGraphV2State> {
+  const update: Partial<AgentCoderGraphV2State> = {};
   let round = state.dispatchedRepairRound;
   let assignments = state.currentDevelopmentAssignments;
   if (state.repairRound > round && state.repairRequests?.length) {
@@ -634,10 +634,10 @@ export function requestTeamInput(pendingInput: AgentTeamPendingInput): AgentTeam
   return interrupt<AgentTeamPendingInput, AgentTeamPendingInputAnswer>(pendingInput);
 }
 
-function createExecutorCategoryGraphV2(
-  delegate: AgentExecutorCategoryGraphDelegate,
+function createCoderGraphV2(
+  delegate: AgentCoderGraphDelegate,
   checkpointer: BaseCheckpointSaver | undefined,
-  options: AgentExecutorCategoryGraphOptions,
+  options: AgentCoderGraphOptions,
 ) {
   const maxRepairRounds = options.maxRepairRounds ?? 2;
   const developerIds = options.developerIds?.length ? options.developerIds : [RESERVED_DEVELOPER_ID];
@@ -784,13 +784,13 @@ function createExecutorCategoryGraphV2(
 }
 
 function executeDevelopmentTask(
-  state: AgentExecutorCategoryGraphV2State,
-  delegate: AgentExecutorCategoryGraphDelegate,
+  state: AgentCoderGraphV2State,
+  delegate: AgentCoderGraphDelegate,
   role: AgentTeamRole,
   taskKey: string,
   developerIds: readonly string[],
   dynamicLanes: boolean,
-): Promise<Partial<AgentExecutorCategoryGraphState>> {
+): Promise<Partial<AgentCoderGraphState>> {
   if (role === 'planner') {
     return (async () => {
       const result = await executeTask(state, delegate, role, taskKey);
@@ -812,20 +812,20 @@ function executeDevelopmentTask(
   return executeTask(state, delegate, role, taskKey, currentDevelopmentTaskKeys(state, state.dispatchedRepairRound > 0));
 }
 
-function currentDevelopmentTaskKeys(state: AgentExecutorCategoryGraphV2State, repair: boolean): string[] {
+function currentDevelopmentTaskKeys(state: AgentCoderGraphV2State, repair: boolean): string[] {
   return (state.currentDevelopmentAssignments ?? state.developmentAssignments ?? [])
     .map((assignment) => repair ? repairTaskKey(state.dispatchedRepairRound, assignment.developerId) : initialTaskKey(assignment.developerId));
 }
 
 function siblingResults(
-  state: AgentExecutorCategoryGraphV2State,
+  state: AgentCoderGraphV2State,
   developerId: string,
 ): Readonly<Record<string, Extract<AgentTeamTaskResult, { status: 'completed' }>>> {
   return Object.fromEntries(Object.entries(state.taskResults).filter(([taskKey]) => taskKey !== initialTaskKey(developerId) && taskKey !== repairTaskKey(state.dispatchedRepairRound, developerId)));
 }
 
-export function toGraphResult(state: AgentExecutorCategoryGraphState | AgentExecutorCategoryGraphV2State): AgentExecutorCategoryGraphResult {
-  const v2 = state as AgentExecutorCategoryGraphV2State;
+export function toGraphResult(state: AgentCoderGraphState | AgentCoderGraphV2State): AgentCoderGraphResult {
+  const v2 = state as AgentCoderGraphV2State;
   return {
     runId: state.runId,
     intent: state.intent,

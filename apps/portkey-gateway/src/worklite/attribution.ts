@@ -11,8 +11,8 @@ const GATEWAY_SURFACES = [
   'chat_project_task',
   'agent',
   'workflow',
-  'executor_category',
-  'executor_category_project_task',
+  'coder',
+  'coder_project_task',
   'provider_test',
   'external',
   'unattributed',
@@ -29,7 +29,7 @@ export type GatewayAttribution = {
   workflowId: string | null;
   workflowRunId: string | null;
   nodeRunId: string | null;
-  executorCategoryId: string | null;
+  coderId: string | null;
   teamRunId: string | null;
   teamRole: string | null;
   teamTaskAttemptId: string | null;
@@ -74,7 +74,7 @@ export function readAttribution(header: HeaderReader): GatewayAttribution {
     workflowId: header('x-worklite-workflow-id'),
     workflowRunId: header('x-worklite-workflow-run-id'),
     nodeRunId: header('x-worklite-node-run-id'),
-    executorCategoryId: header('x-worklite-team-id'),
+    coderId: header('x-worklite-team-id'),
     teamRunId: header('x-worklite-team-run-id'),
     teamRole: header('x-worklite-team-role'),
     teamTaskAttemptId: header('x-worklite-team-task-attempt-id'),
@@ -83,7 +83,7 @@ export function readAttribution(header: HeaderReader): GatewayAttribution {
 }
 
 /** The dimensions `requestStats` can group its attribution breakdown by. */
-const GATEWAY_STATS_GROUP_BYS = ['surface', 'conversation', 'executor', 'executor_category', 'workflow', 'team_run', 'node_run'] as const;
+const GATEWAY_STATS_GROUP_BYS = ['surface', 'conversation', 'executor', 'coder', 'workflow', 'team_run', 'node_run'] as const;
 
 export type GatewayStatsGroupBy = (typeof GATEWAY_STATS_GROUP_BYS)[number];
 

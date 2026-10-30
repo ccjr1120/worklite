@@ -13,7 +13,7 @@ export type DatabaseMaintenanceSettings = {
   /** Command stdout/stderr older than this keeps only its trailing tail. */
   commandStreamRetentionMs: number;
   commandStreamTailBytes: number;
-  /** Replay event streams of terminal Workflow Runs, executor Runs and Chat executions older than this are removed. */
+  /** Replay event streams of terminal Workflow Runs, Coder Runs and Chat executions older than this are removed. */
   eventStreamRetentionMs: number;
   /** Upper bound the WAL file is truncated back to whenever a checkpoint resets it. */
   walSizeLimitBytes: number;
@@ -195,7 +195,7 @@ type EventStreamTable = { events: string; parentKey: string; parents: string; te
 // never the run itself.
 const EVENT_STREAM_TABLES: EventStreamTable[] = [
   { events: 'workflow_run_events', parentKey: 'run_id', parents: 'workflow_runs', terminalStatuses: ['succeeded', 'failed', 'cancelled', 'timed_out'], settledAt: 'COALESCE(finished_at, updated_at, created_at)' },
-  { events: 'executor_run_events', parentKey: 'run_id', parents: 'executor_runs', terminalStatuses: ['succeeded', 'failed', 'cancelled'], settledAt: 'COALESCE(finished_at, updated_at, created_at)' },
+  { events: 'coder_run_events', parentKey: 'run_id', parents: 'coder_runs', terminalStatuses: ['succeeded', 'failed', 'cancelled'], settledAt: 'COALESCE(finished_at, updated_at, created_at)' },
   { events: 'agent_execution_events', parentKey: 'execution_id', parents: 'agent_executions', terminalStatuses: ['completed', 'failed', 'cancelled'], settledAt: 'COALESCE(updated_at, created_at)' },
 ];
 

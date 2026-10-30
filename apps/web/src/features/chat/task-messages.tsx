@@ -16,8 +16,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { TruncatedText } from '@/components/ui/truncated-text';
 import { toSingleLine } from '@/lib/single-line';
 import { cn } from '@/lib/utils';
-import { TeamRunDialog } from '@/features/executors/team-run-detail';
-import { formatElapsed, isSettledTeamRun, teamCurrentLabel } from '@/features/executors/team-run-summary';
+import { CoderRunDialog } from '@/features/coders/coder-run-detail';
+import { formatElapsed, isSettledTeamRun, teamCurrentLabel } from '@/features/coders/coder-run-summary';
 
 function WorkflowTask({ submission }: { submission: ChatSubmissionView }) {
   const { t } = useTranslation('assistant');
@@ -43,7 +43,7 @@ function WorkflowTask({ submission }: { submission: ChatSubmissionView }) {
 }
 
 function TeamPendingInput({ run, pendingInput, onRunUpdate }: { run: AgentTeamRunView; pendingInput: AgentTeamPendingInputView; onRunUpdate: (run: AgentTeamRunView) => void }) {
-  const { t: tTeams } = useTranslation('executors');
+  const { t: tTeams } = useTranslation('coders');
   const [answer, setAnswer] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -74,7 +74,7 @@ function TeamPendingInput({ run, pendingInput, onRunUpdate }: { run: AgentTeamRu
 }
 
 function TeamRunActions({ run, groupId, onRunUpdate }: { run: AgentTeamRunView; groupId?: string; onRunUpdate: (run: AgentTeamRunView) => void }) {
-  const { t } = useTranslation('executors');
+  const { t } = useTranslation('coders');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [reexecutedRunId, setReexecutedRunId] = useState('');
@@ -96,7 +96,7 @@ function TeamRunActions({ run, groupId, onRunUpdate }: { run: AgentTeamRunView; 
       const createdRun = [...group.runs].filter((item) => item.id !== run.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
       if (createdRun) setReexecutedRunId(createdRun.id);
       queryClient.setQueryData(agentTeamGroupQueryKey(groupId), group);
-      void queryClient.invalidateQueries({ queryKey: ['agent-team-records', run.executorCategoryId] });
+      void queryClient.invalidateQueries({ queryKey: ['agent-team-records', run.coderId] });
     } catch (cause) { setError(cause instanceof Error ? cause.message : t('controls.failed')); }
     finally { setBusy(''); }
   }
@@ -111,13 +111,13 @@ function TeamRunActions({ run, groupId, onRunUpdate }: { run: AgentTeamRunView; 
       </> : null}
       {groupId && ['succeeded', 'failed', 'cancelled'].includes(run.status) && !reexecutedRunId ? <Button type="button" variant="secondary" size="compact" disabled={Boolean(busy)} onClick={() => void reexecute()}><RefreshCw className="size-3.5" aria-hidden="true" />{t('controls.reexecute')}</Button> : null}
     {run.tasks.filter((task) => task.status === 'failed' && task.retryable).map((task) => <Button key={task.taskKey} type="button" variant="secondary" size="compact" disabled={Boolean(busy)} onClick={() => void perform(`retry:${task.taskKey}`, () => api.retryAgentTeamTask(run.id, task.taskKey))}><RotateCcw className="size-3.5" aria-hidden="true" />{t('tasks.retryTask', { taskKey: task.taskKey })}</Button>)}
-    {reexecutedRunId ? <TeamRunDialog runId={reexecutedRunId}><button type="button" className="text-[13px] text-brand-text underline underline-offset-4">{t('run.detail.title')}</button></TeamRunDialog> : null}
+    {reexecutedRunId ? <CoderRunDialog runId={reexecutedRunId}><button type="button" className="text-[13px] text-brand-text underline underline-offset-4">{t('run.detail.title')}</button></CoderRunDialog> : null}
     {error ? <p className="basis-full text-right text-[13px] text-danger" role="alert">{error}</p> : null}
   </div>;
 }
 
 function TeamOperationRecovery({ run, operation, onRunUpdate }: { run: AgentTeamRunView; operation: AgentTeamRunView['operations'][number]; onRunUpdate: (run: AgentTeamRunView) => void }) {
-  const { t } = useTranslation('executors');
+  const { t } = useTranslation('coders');
   const [decision, setDecision] = useState<'adopt_command' | 'mark_failed' | 'replay'>('adopt_command');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -143,7 +143,7 @@ function TeamOperationRecovery({ run, operation, onRunUpdate }: { run: AgentTeam
 // questions and recovery decisions stay visible because the Run is blocked on them.
 function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissionView; runId: string; groupId?: string }) {
   const { t } = useTranslation('assistant');
-  const { t: tTeams } = useTranslation('executors');
+  const { t: tTeams } = useTranslation('coders');
   const pins = useContext(PinTrackingContext);
   const query = useAgentTeamRunQuery('personal', runId);
   const run = query.data;
@@ -157,7 +157,7 @@ function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissio
   }, [live, runId]);
   function onRunUpdate(updated: AgentTeamRunView) {
     queryClient.setQueryData(agentTeamRunQueryKey(updated.id), updated);
-    void queryClient.invalidateQueries({ queryKey: ['agent-team-records', updated.executorCategoryId] });
+    void queryClient.invalidateQueries({ queryKey: ['agent-team-records', updated.coderId] });
   }
   const failure = run?.status === 'failed' ? [...run.tasks].reverse().find((task) => task.status === 'failed')?.error : null;
   const questions = run?.pendingInputs.filter((input) => input.status === 'pending' && input.kind === 'question') ?? [];
@@ -169,7 +169,7 @@ function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissio
   const progressLine = current?.progressText.trim() ? toSingleLine(current.progressText) : current?.assignmentTitle ?? null;
   const assignments = run && live && run.progress.totalAssignments > 0 ? tTeams('progress.assignments', { completed: run.progress.completedAssignments, total: run.progress.totalAssignments }) : null;
   const meta = [
-    run?.executorName ?? null,
+    run?.coderName ?? null,
     current ? teamCurrentLabel(t, tTeams, current) : run && live ? t('teamRun.betweenRoles') : null,
     current ? current.model || t('teamRun.defaultModel') : null,
     roleElapsed ? t('teamRun.roleElapsed', { duration: roleElapsed }) : null,
@@ -184,7 +184,7 @@ function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissio
     className={cn('wl-enter my-2 overflow-hidden rounded-lg border bg-surface shadow-xs transition-[border-color,box-shadow] duration-[200ms] outline-none', live && run ? 'border-brand/40 wl-live-glow' : statusKey === 'failed' ? 'border-danger/30' : 'border-border')}
     aria-label={t('teamRun.panel')}
   >
-    <TeamRunDialog runId={runId}>
+    <CoderRunDialog runId={runId}>
     <button
       type="button"
       className={cn('flex min-h-11 w-full items-start gap-2.5 px-3 py-2 text-left hover:bg-surface-subtle/70', surfaceInteraction, focusRingInset)}
@@ -199,7 +199,7 @@ function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissio
         </span>
       </span>
     </button>
-    </TeamRunDialog>
+    </CoderRunDialog>
     <div className="flex min-h-9 flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-1.5">
       <p className="flex min-w-0 flex-1 items-center gap-1.5 text-[11px] text-muted-foreground">
         {meta.map((part, index) => <span key={index} className={cn('flex min-w-0 items-center gap-1.5', index > 2 && 'shrink-0')}>{index ? <span aria-hidden="true">·</span> : null}<TruncatedText text={part} /></span>)}
@@ -250,6 +250,6 @@ function UpgradeTask({ jobId }: { jobId: string }) {
 export function TaskCard({ submission }: { submission: ChatSubmissionView }) {
   const { t } = useTranslation('assistant');
   const pins = useContext(PinTrackingContext);
-  if (submission.reference?.kind === 'executor_category') return <TeamRunCard submission={submission} runId={submission.reference.runId} groupId={submission.reference.groupId} />;
+  if (submission.reference?.kind === 'coder') return <TeamRunCard submission={submission} runId={submission.reference.runId} groupId={submission.reference.groupId} />;
   return <section ref={pins?.track(submission.id)} tabIndex={-1} className="wl-enter my-4 space-y-3 rounded-xl border border-border bg-surface p-4 shadow-xs outline-none"><TruncatedText as="p" text={toSingleLine(submission.message)} title={submission.message} className="text-sm" />{submission.error ? <div className="space-y-2"><StatusBadge status="failed" label={t('status.failed')} /><TruncatedText as="p" text={toSingleLine(submission.error)} title={submission.error} className="text-[13px] text-danger" role="alert" /></div> : null}{submission.reference?.kind === 'workflow' ? <WorkflowTask submission={submission} /> : submission.reference?.kind === 'upgrade' ? <UpgradeTask jobId={submission.reference.jobId} /> : typeof submission.renderedCard?.content === 'string' ? <TruncatedText as="p" text={toSingleLine(submission.renderedCard.content)} title={submission.renderedCard.content} className="text-[13px]" /> : null}</section>;
 }

@@ -73,7 +73,7 @@ describe('gateway usage attribution', () => {
       'x-worklite-executor': 'claude',
     }, 400);
     stat({
-      'x-worklite-surface': 'executor_category',
+      'x-worklite-surface': 'coder',
       'x-worklite-team-id': 'team_one',
       'x-worklite-team-run-id': 'atrun_one',
       'x-worklite-team-role': 'developer',
@@ -87,7 +87,7 @@ describe('gateway usage attribution', () => {
   });
 
   it('resolves a surface from the legacy source header and falls back to unattributed', () => {
-    expect(attribution({ 'x-worklite-log-source': 'executor_category' }).surface).toBe('executor_category');
+    expect(attribution({ 'x-worklite-log-source': 'coder' }).surface).toBe('coder');
     expect(attribution({ 'x-worklite-log-source': 'proxy' }).surface).toBe('external');
     // An explicit surface wins over a coarser legacy source that cannot express it.
     expect(attribution({ 'x-worklite-log-source': 'chat', 'x-worklite-surface': 'chat_project_task' }).surface).toBe('chat_project_task');
@@ -100,7 +100,7 @@ describe('gateway usage attribution', () => {
     const bySurface = new Map(stats.attribution.groups.map((group) => [group.surface, group]));
     expect(bySurface.get('chat')).toEqual(expect.objectContaining({ requests: 2, totalTokens: 300 }));
     expect(bySurface.get('chat_project_task')).toEqual(expect.objectContaining({ requests: 1, totalTokens: 400 }));
-    expect(bySurface.get('executor_category')).toEqual(expect.objectContaining({ requests: 1, totalTokens: 800 }));
+    expect(bySurface.get('coder')).toEqual(expect.objectContaining({ requests: 1, totalTokens: 800 }));
     expect(bySurface.get('unattributed')).toEqual(expect.objectContaining({ requests: 1, totalTokens: 12 }));
     // Surface grouping is total, so its requests add up to the unfiltered summary.
     expect(stats.attribution.groups.reduce((sum, group) => sum + group.requests, 0)).toBe(stats.summary.requests);
@@ -130,9 +130,9 @@ describe('gateway usage attribution', () => {
   });
 
   it('groups Team and executor usage only where that identifier is present', () => {
-    const byTeam = requestStats({ from, to, groupBy: 'executor_category' });
+    const byTeam = requestStats({ from, to, groupBy: 'coder' });
     expect(byTeam.attribution.groups).toEqual([
-      expect.objectContaining({ executorCategoryId: 'team_one', teamRunId: 'atrun_one', requests: 1, totalTokens: 800 }),
+      expect.objectContaining({ coderId: 'team_one', teamRunId: 'atrun_one', requests: 1, totalTokens: 800 }),
     ]);
 
     const byExecutor = requestStats({ from, to, groupBy: 'executor' });
@@ -144,7 +144,7 @@ describe('gateway usage attribution', () => {
   // Runs here are recorded after the earlier tests so their expectations are unaffected.
   it('groups by Run and by node, keeps pre-node traffic visible, and filters by id lists', () => {
     const node = (run: string, nodeRunId: string | null, tokens: number) => stat({
-      'x-worklite-surface': 'executor_category',
+      'x-worklite-surface': 'coder',
       'x-worklite-team-id': 'team_two',
       'x-worklite-team-run-id': run,
       ...(nodeRunId ? { 'x-worklite-node-run-id': nodeRunId } : {}),

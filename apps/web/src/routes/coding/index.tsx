@@ -1,15 +1,15 @@
 import { createFileRoute, Navigate } from '@tanstack/react-router';
-import { useAgentTeamsQuery } from '@/api/queries';
+import { useCodersQuery } from '@/api/queries';
 
 export const Route = createFileRoute('/coding/')({
-  component: AgentTeamsIndexRoute,
+  component: CodingIndexRoute,
 });
 
-function AgentTeamsIndexRoute() {
-  const teams = useAgentTeamsQuery();
-  if (teams.isPending) return null;
-  if (teams.isError) return <p>加载执行器失败，请重试。</p>;
-  const first = teams.data?.[0];
-  if (!first) return <p>暂无执行器。可在 Chat 中创建执行器。</p>;
-  return <Navigate to="/coding/$executorId" params={{ executorId: first.id }} replace />;
+function CodingIndexRoute() {
+  const coders = useCodersQuery();
+  if (coders.isPending) return null;
+  if (coders.isError) return <p>加载 Coder 失败，请重试。</p>;
+  const first = coders.data?.[0];
+  if (!first) return <p>暂无 Coder。可在 Chat 中创建 Coder。</p>;
+  return <Navigate to="/coding/$coderId" params={{ coderId: first.id }} replace />;
 }

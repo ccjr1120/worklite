@@ -26,7 +26,7 @@ function attributionFilters(query: RawQuery): GatewayAttributionFilters {
     conversationId: queryText(query.conversationId),
     projectTaskId: queryText(query.projectTaskId),
     executor: queryText(query.executor),
-    executorCategoryId: queryText(query.executorCategoryId),
+    coderId: queryText(query.coderId),
     teamRunId: queryText(query.teamRunId),
     workflowId: queryText(query.workflowId),
     workflowRunId: queryText(query.workflowRunId),

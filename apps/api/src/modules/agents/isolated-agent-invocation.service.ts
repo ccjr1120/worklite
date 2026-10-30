@@ -266,7 +266,7 @@ export class IsolatedAgentInvocationService {
   ): Promise<WorkflowAgentToolResult> {
     request.signal.throwIfAborted();
     this.validateProcessReference(request, call);
-    if (call.toolName === 'read_executor_document' || call.toolName === 'skill_reference') {
+    if (call.toolName === 'read_coder_document' || call.toolName === 'skill_reference') {
       // Both tools only read immutable captured content, so they bypass the command
       // journal: a rejected path carries no uncertain external effect.
       return (await this.runToolEffect(request, assignedSkills, mcpTools, selectedBuiltinToolNames, call)).output;
@@ -414,8 +414,8 @@ export class IsolatedAgentInvocationService {
       return { output: { type: 'text', value: boundedToolResult(value, request.limits?.maxToolResultChars) } };
     }
 
-    if (call.toolName === 'read_executor_document') {
-      if (!request.readTeamDocument) throw new BadRequestException('No executor document was handed to this Agent task.');
+    if (call.toolName === 'read_coder_document') {
+      if (!request.readTeamDocument) throw new BadRequestException('No Coder document was handed to this Agent task.');
       const input = call.input as { documentId?: unknown; revision?: unknown } | null;
       const documentId = requiredString(input?.documentId, 'documentId');
       if (!Number.isInteger(input?.revision) || (input!.revision as number) < 1) {
@@ -427,7 +427,7 @@ export class IsolatedAgentInvocationService {
 
     if (call.toolName === 'skill_script') {
       if (request.role && request.projectDirectory) {
-        throw new BadRequestException('Executable Skill scripts are unavailable for executor invocations.');
+        throw new BadRequestException('Executable Skill scripts are unavailable for Coder invocations.');
       }
       const skill = assignedSkills.find((item) => item.id === call.skillId);
       const script = skill?.files.find((file) => file.path === call.scriptPath && file.path.startsWith('scripts/') && file.content.startsWith('#!'));

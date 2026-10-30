@@ -117,13 +117,13 @@ export type UpdatePluginRequest = {
 export type ChatTarget =
   | { kind: 'conversation' }
   // `mode` remains accepted only for older callers. Current dispatch ignores it
-  // and the executor Dispatcher chooses the Run mode.
-  | { kind: 'executor_category'; executorCategoryId: string; projectDirectory: string; role?: AgentTeamRoleId; mode?: 'plan_only' | 'validate_existing' | 'implement_and_validate' }
+  // and the Coder Dispatcher chooses the Run mode.
+  | { kind: 'coder'; coderId: string; projectDirectory: string; role?: AgentTeamRoleId; mode?: 'plan_only' | 'validate_existing' | 'implement_and_validate' }
   | { kind: 'workflow'; workflowId: string };
 
 export type ChatTaskReference =
   | { kind: 'conversation'; executionId: string; afterMessageId: string | null; afterSequence: number; untilMessageId?: string | null; completionStatus?: string; completionError?: string | null }
-  | { kind: 'executor_category'; executorCategoryId: string; runId: string; groupId?: string }
+  | { kind: 'coder'; coderId: string; runId: string; groupId?: string }
   | { kind: 'workflow'; runId: string; workflowVersionId: string }
   | { kind: 'upgrade'; jobId: string };
 
@@ -325,7 +325,7 @@ export type AgentExecutionErrorCode =
 export type ChatProgressReport = {
   // stage/progress/updatedAt are presentation fields for the collapsible Web card; the reminder
   // text and its dedupe signature do not depend on them.
-  items: Array<{ kind: 'task' | 'executor_category' | 'workflow'; id: string; title: string; status: string; stage?: string; progress?: string; updatedAt?: string }>;
+  items: Array<{ kind: 'task' | 'coder' | 'workflow'; id: string; title: string; status: string; stage?: string; progress?: string; updatedAt?: string }>;
 };
 
 export type AgentExecutionMessage = {
@@ -645,8 +645,8 @@ export const GATEWAY_SURFACES = [
   'chat_project_task',
   'agent',
   'workflow',
-  'executor_category',
-  'executor_category_project_task',
+  'coder',
+  'coder_project_task',
   'provider_test',
   'external',
   'unattributed',
@@ -654,10 +654,10 @@ export const GATEWAY_SURFACES = [
 
 export type GatewaySurface = (typeof GATEWAY_SURFACES)[number];
 
-// team_run groups by executor Run; node_run by node (one executor role task attempt or one
+// team_run groups by Coder Run; node_run by node (one Coder role task attempt or one
 // Workflow node run) and keeps the parent Run id on every row. Under node_run a Run's traffic
 // recorded before node attribution existed is one row with a null nodeRunId.
-export const GATEWAY_STATS_GROUP_BYS = ['surface', 'conversation', 'executor', 'executor_category', 'workflow', 'team_run', 'node_run'] as const;
+export const GATEWAY_STATS_GROUP_BYS = ['surface', 'conversation', 'executor', 'coder', 'workflow', 'team_run', 'node_run'] as const;
 
 export type GatewayStatsGroupBy = (typeof GATEWAY_STATS_GROUP_BYS)[number];
 
@@ -667,12 +667,12 @@ export type GatewayAttributionFilters = {
   conversationId?: string;
   projectTaskId?: string;
   executor?: string;
-  executorCategoryId?: string;
-  /** One executor Run id, or a comma-separated list of ids. */
+  coderId?: string;
+  /** One Coder Run id, or a comma-separated list of ids. */
   teamRunId?: string;
   workflowId?: string;
   workflowRunId?: string;
-  /** One node run id (executor task attempt id or Workflow node run id), or a comma-separated list. */
+  /** One node run id (Coder task attempt id or Workflow node run id), or a comma-separated list. */
   nodeRunId?: string;
 };
 
@@ -682,7 +682,7 @@ export type GatewayAttributionGroup = {
   surface: GatewaySurface | null;
   conversationId: string | null;
   executor: string | null;
-  executorCategoryId: string | null;
+  coderId: string | null;
   teamRunId: string | null;
   workflowId: string | null;
   workflowRunId: string | null;
@@ -1164,8 +1164,8 @@ export type SkillReferenceCleanup = {
   agentIds: string[];
   chatConfigurationRevisions: number[];
   workflowDrafts: Array<{ workflowId: string; nodeIds: string[] }>;
-  agentTeamRoles: Array<{ executorCategoryId: string; role: string }>;
-  agentTeamDeveloperInstances: Array<{ executorCategoryId: string; role: string; developerId: string }>;
+  agentTeamRoles: Array<{ coderId: string; role: string }>;
+  agentTeamDeveloperInstances: Array<{ coderId: string; role: string; developerId: string }>;
 };
 
 export type DeleteSkillResult = {
@@ -1200,8 +1200,8 @@ export type McpServerReferenceReport = {
   activeChatTurns: boolean;
   workflowDrafts: Array<{ workflowId: string; workflowName: string; nodeIds: string[] }>;
   workflowVersions: Array<{ workflowId: string; workflowName: string; version: number; nodeIds: string[] }>;
-  agentTeamRoles: Array<{ executorCategoryId: string; teamName: string; role: string; displayName: string | null }>;
-  agentTeamVersions: Array<{ executorCategoryId: string; versionId: string; version: number; roles: string[] }>;
+  agentTeamRoles: Array<{ coderId: string; teamName: string; role: string; displayName: string | null }>;
+  agentTeamVersions: Array<{ coderId: string; versionId: string; version: number; roles: string[] }>;
 };
 
 export type DeleteMcpServerResult = {
@@ -1289,7 +1289,7 @@ export type TestModelProviderRequest = {
  * The coarse label that predates surfaces. It is kept so readers and filters built on
  * it keep working; `surface` on the same record carries the detail it cannot express.
  */
-export type GatewayRequestLogSource = 'chat' | 'agent' | 'workflow' | 'executor_category' | 'provider_test' | 'external' | 'proxy';
+export type GatewayRequestLogSource = 'chat' | 'agent' | 'workflow' | 'coder' | 'provider_test' | 'external' | 'proxy';
 
 export type GatewayRequestLogStatusClass = 'success' | 'client_error' | 'server_error';
 
@@ -1310,7 +1310,7 @@ export type GatewayRequestLogListItem = {
   workflowId: string | null;
   workflowRunId: string | null;
   nodeRunId: string | null;
-  executorCategoryId: string | null;
+  coderId: string | null;
   teamRunId: string | null;
   teamRole: string | null;
   teamTaskAttemptId: string | null;
@@ -1630,7 +1630,7 @@ export type AgentTeamRunProgress = {
 export type AgentTeamView = {
   id: string;
   name: string;
-  // Optimistic-lock token for PATCH /executors/:executorId (the executor's updatedAt in milliseconds).
+  // Optimistic-lock token for PATCH /executors/:coderId (the executor's updatedAt in milliseconds).
   revision: number;
   description: string;
   processId: string;
@@ -1647,7 +1647,7 @@ export type AgentTeamView = {
 export type AgentTeamVersionMetadata = {
   id: string;
   version: number;
-  executorName?: string;
+  coderName?: string;
   createdAt: string;
   developerExecution?: ProjectExecutorLaunchView | { kind: 'codex_app_server' };
   developerExecutions?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
@@ -1881,9 +1881,9 @@ export type AgentTeamRunOverview = {
 };
 
 export type AgentTeamRunListItem = AgentTeamRunSummary & {
-  executorCategoryId: string;
-  // Executor name captured when the Run was dispatched; falls back to the current name.
-  executorName: string;
+  coderId: string;
+  // Coder name captured when the Run was dispatched; falls back to the current name.
+  coderName: string;
   overview: AgentTeamRunOverview;
 };
 
@@ -1926,7 +1926,7 @@ export type AgentTeamRunNodeTree = {
 };
 
 export type AgentTeamRunListQuery = {
-  executorCategoryIds?: string[];
+  coderIds?: string[];
   cursor?: string;
   limit?: number;
 };
@@ -1980,7 +1980,7 @@ export type AgentTeamGroupSummary = {
 };
 
 export type AgentTeamGroupView = AgentTeamGroupSummary & {
-  executorCategoryId: string;
+  coderId: string;
   workingPractice: string;
   messages: AgentTeamGroupMessage[];
   runs: Array<{ id: string; targetRole: AgentTeamRoleId | null; currentRole: AgentTeamRoleId | null; status: AgentTeamRunStatus; intent: string; repositoryIds: string[]; createdAt: string; finishedAt: string | null; pendingInputs: Array<{ id: string; question: string; scopeRevision: number }> }>;
@@ -2028,9 +2028,9 @@ export type AgentTeamGroupEvent = {
 
 export type AgentTeamRunView = {
   id: string;
-  executorCategoryId: string;
-  // Executor name captured when the Run was dispatched; falls back to the current name.
-  executorName: string;
+  coderId: string;
+  // Coder name captured when the Run was dispatched; falls back to the current name.
+  coderName: string;
   groupId: string | null;
   targetRole: AgentTeamRoleId | null;
   repositoryIds: string[];
@@ -2109,7 +2109,7 @@ export type UpdateAgentTeamRequest = {
 export type CreateAgentTeamRequest = {
   name: string;
   description?: string;
-  templateExecutorId?: string;
+  templateCoderId?: string;
 };
 
 export type CreateAgentTeamRunRequest = {

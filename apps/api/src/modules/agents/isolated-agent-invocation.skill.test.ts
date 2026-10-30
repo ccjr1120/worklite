@@ -68,7 +68,7 @@ describe('IsolatedAgentInvocationService Skill loading', () => {
     await service().execute(baseRequest({ limits: { maxToolRounds: 30, budgetReminderAtRound: 18 } }));
     expect(gateway.runWorkflowAgent.mock.lastCall?.[0]).toMatchObject({ maxToolRounds: 30, budgetReminderAtRound: 18 });
   });
-  it('injects an executor role Skill and advertises each reference', async () => {
+  it('injects a Coder role Skill and advertises each reference', async () => {
     let captured: { systemPrompt: string; builtinTools: Array<{ name: string }> } | undefined;
     gateway.runWorkflowAgent.mockImplementation(async (request: { systemPrompt: string; builtinTools: Array<{ name: string }> }) => {
       captured = request;
@@ -109,7 +109,7 @@ describe('IsolatedAgentInvocationService Skill loading', () => {
     await expect(service().execute(baseRequest())).rejects.toThrow('unavailable Skill reference');
   });
 
-  it('keeps Workflow Agent node Skill injection unchanged without adding executor-only tools', async () => {
+  it('keeps Workflow Agent node Skill injection unchanged without adding Coder-only tools', async () => {
     let captured: { systemPrompt: string; builtinTools: Array<{ name: string }> } | undefined;
     gateway.runWorkflowAgent.mockImplementation(async (request: { systemPrompt: string; builtinTools: Array<{ name: string }> }) => {
       captured = request;

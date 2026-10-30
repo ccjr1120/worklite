@@ -3,7 +3,7 @@ import type { ConfigService } from '@nestjs/config';
 import { createDb, type Database } from '@worklite/db';
 import { activeWorkSignature, buildActiveWorkNote, ChatProgressReportsService, DEFAULT_PROGRESS_NOTE_INTERVAL_SECONDS, type ActiveWorkItem } from './chat-progress-reports.service';
 import type { AgentExecutionsService } from './agent-executions.service';
-import type { AgentTeamRuntimeService } from '../executors/executor-runtime.service';
+import type { AgentTeamRuntimeService } from '../coders/coder-runtime.service';
 
 const WORKSPACE_ID = 'workspace_personal';
 const EXECUTION_ID = 'aex_progress_test';
@@ -38,12 +38,12 @@ const DDL = [
     settled integer DEFAULT 0 NOT NULL, reported_at integer, error text,
     created_at integer DEFAULT (unixepoch() * 1000) NOT NULL, updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL
   )`,
-  'CREATE TABLE agent_teams (id text PRIMARY KEY NOT NULL)',
-  'CREATE TABLE agent_team_versions (id text PRIMARY KEY NOT NULL)',
-  `CREATE TABLE executor_runs (
+  'CREATE TABLE coders (id text PRIMARY KEY NOT NULL)',
+  'CREATE TABLE coder_versions (id text PRIMARY KEY NOT NULL)',
+  `CREATE TABLE coder_runs (
     id text PRIMARY KEY NOT NULL, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    executor_category_id text NOT NULL REFERENCES agent_teams(id) ON DELETE RESTRICT,
-    executor_category_version_id text NOT NULL REFERENCES agent_team_versions(id) ON DELETE RESTRICT,
+    coder_id text NOT NULL REFERENCES coders(id) ON DELETE RESTRICT,
+    coder_version_id text NOT NULL REFERENCES coder_versions(id) ON DELETE RESTRICT,
     status text NOT NULL DEFAULT 'queued', intent text NOT NULL, project_directory text NOT NULL,
     project_instructions text DEFAULT '[]' NOT NULL, mode text NOT NULL,
     authorized_commands text DEFAULT '[]' NOT NULL, scope_revision integer DEFAULT 1 NOT NULL,
@@ -100,13 +100,13 @@ function insertTask(db: Database, status: string, activities: Array<Record<strin
 }
 
 function insertTeamRun(db: Database, status: string, runId = 'trun_progress_test') {
-  db.$client.prepare('INSERT INTO agent_teams (id) VALUES (?)').run('team_agent');
-  db.$client.prepare('INSERT INTO agent_team_versions (id) VALUES (?)').run(`tver_${runId}`);
-  db.$client.prepare(`INSERT INTO executor_runs (id, workspace_id, executor_category_id, executor_category_version_id, status, intent, project_directory, mode, lang_graph_thread_id)
+  db.$client.prepare('INSERT INTO coders (id) VALUES (?)').run('team_agent');
+  db.$client.prepare('INSERT INTO coder_versions (id) VALUES (?)').run(`tver_${runId}`);
+  db.$client.prepare(`INSERT INTO coder_runs (id, workspace_id, coder_id, coder_version_id, status, intent, project_directory, mode, lang_graph_thread_id)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(runId, WORKSPACE_ID, 'team_agent', `tver_${runId}`, status, '协作开发任务', '/tmp/project', 'implement_and_validate', `thread_${runId}`);
   db.$client.prepare('INSERT INTO chat_submissions (id, workspace_id, execution_id, message, target, reference) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(`sub_${runId}`, WORKSPACE_ID, EXECUTION_ID, '协作开发任务', JSON.stringify({ kind: 'executor_category', executorCategoryId: 'team_agent' }), JSON.stringify({ kind: 'executor_category', executorCategoryId: 'team_agent', runId }));
+    .run(`sub_${runId}`, WORKSPACE_ID, EXECUTION_ID, '协作开发任务', JSON.stringify({ kind: 'coder', coderId: 'team_agent' }), JSON.stringify({ kind: 'coder', coderId: 'team_agent', runId }));
 }
 
 function insertWorkflowRun(db: Database, status: string, runId = 'wrun_progress_test') {
@@ -137,7 +137,7 @@ describe('ChatProgressReportsService', () => {
     expect(note).toContain('正在编写服务代码');
   });
 
-  it('reports Chat-dispatched active executor and Workflow Runs', async () => {
+  it('reports Chat-dispatched active Coder and Workflow Runs', async () => {
     const { db, tick, reportActiveWorkProgress, getRunProgress } = setup();
     insertTeamRun(db, 'running');
     insertWorkflowRun(db, 'running');
@@ -251,7 +251,7 @@ describe('ChatProgressReportsService', () => {
 describe('buildActiveWorkNote / activeWorkSignature', () => {
   const items: ActiveWorkItem[] = [
     { kind: 'task', id: 'acall_1', goal: '写代码', stage: 'working', activityCount: 3, progressText: '正在修改服务' },
-    { kind: 'executor_category', id: 'trun_1', intent: '协作任务', status: 'running', progress: null },
+    { kind: 'coder', id: 'trun_1', intent: '协作任务', status: 'running', progress: null },
     { kind: 'workflow', id: 'wrun_1', workflowName: '日报', status: 'paused', currentNodeId: null },
   ];
 
@@ -274,7 +274,7 @@ describe('buildActiveWorkNote / activeWorkSignature', () => {
     expect(activeWorkSignature(items)).toBe(base);
     const progressed = items.map((item) => item.kind === 'task' ? { ...item, activityCount: item.activityCount + 1 } : item);
     expect(activeWorkSignature(progressed)).not.toBe(base);
-    const settled = items.map((item) => item.kind === 'executor_category' ? { ...item, status: 'succeeded' } : item);
+    const settled = items.map((item) => item.kind === 'coder' ? { ...item, status: 'succeeded' } : item);
     expect(activeWorkSignature(settled)).not.toBe(base);
   });
 });

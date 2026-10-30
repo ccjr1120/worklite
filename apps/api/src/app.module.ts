@@ -18,7 +18,7 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { CommandsModule } from './modules/commands/commands.module';
 import { PluginsModule } from './modules/plugins/plugins.module';
 import { UpgradesModule } from './modules/upgrades/upgrades.module';
-import { ExecutorsModule } from './modules/executors/executors.module';
+import { CodersModule } from './modules/coders/coders.module';
 import { LocalProjectsModule } from './modules/local-projects/local-projects.module';
 
 @Module({
@@ -30,7 +30,7 @@ import { LocalProjectsModule } from './modules/local-projects/local-projects.mod
     UpgradesModule,
     CommandsModule,
     PluginsModule,
-    ExecutorsModule,
+    CodersModule,
     LocalProjectsModule,
     WorkspaceModule,
     HomeModule,

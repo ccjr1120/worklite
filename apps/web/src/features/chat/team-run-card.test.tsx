@@ -6,7 +6,7 @@ import type { AgentTeamRunView, AgentTeamTaskAttemptView, ChatSubmissionView } f
 import { useAgentTeamRunQuery } from '@/api/queries';
 import { TaskCard } from './task-messages';
 
-vi.mock('@/features/executors/team-run-detail', () => ({ TeamRunDialog: ({ children }: { children: React.ReactNode }) => children }));
+vi.mock('@/features/coders/coder-run-detail', () => ({ CoderRunDialog: ({ children }: { children: React.ReactNode }) => children }));
 
 vi.mock('@/api/queries', () => ({
   agentTeamGroupQueryKey: (id: string) => ['agent-team-group', id],
@@ -36,7 +36,7 @@ function attempt(overrides: Partial<AgentTeamTaskAttemptView>): AgentTeamTaskAtt
 function teamRun(overrides: Partial<AgentTeamRunView> = {}): AgentTeamRunView {
   const reviewer = attempt({ id: 'attempt_review', taskKey: 'review', role: 'reviewer', status: 'running', model: 'gpt-review', progressText: '核对接口改动\n更多细节', startedAt: '2026-10-23T00:20:00.000Z', finishedAt: null });
   return {
-    id: 'atr_1', executorCategoryId: 'team_1', executorName: 'General project', groupId: null, targetRole: null, repositoryIds: [],
+    id: 'atr_1', coderId: 'team_1', coderName: 'General project', groupId: null, targetRole: null, repositoryIds: [],
     teamVersion: { id: 'atv_1', version: 1, createdAt: '2026-10-23T00:00:00.000Z', orchestrationVersion: 11 },
     status: 'running', intent: '实现登录页', projectDirectory: '/tmp/project', mode: 'implement_and_validate', modeRationale: null, modeDecidedAt: null,
     authorizedCommands: [], scopeRevision: 0, desiredControlState: 'none',
@@ -50,7 +50,7 @@ function teamRun(overrides: Partial<AgentTeamRunView> = {}): AgentTeamRunView {
 }
 
 const submission: ChatSubmissionView = {
-  id: 'sub_team', origin: 'chat', executionId: 'aex_1', message: '实现登录页并补测试', reference: { kind: 'executor_category', runId: 'atr_1' } as ChatSubmissionView['reference'],
+  id: 'sub_team', origin: 'chat', executionId: 'aex_1', message: '实现登录页并补测试', reference: { kind: 'coder', runId: 'atr_1' } as ChatSubmissionView['reference'],
   outputMessageId: null, renderedCard: null, settled: false, error: null, createdAt: '2026-10-23T00:00:00.000Z', updatedAt: '2026-10-23T00:00:00.000Z',
 };
 
