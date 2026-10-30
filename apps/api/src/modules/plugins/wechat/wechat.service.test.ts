@@ -186,6 +186,40 @@ describe('WechatService#deliver typing indicator', () => {
 
     expect(sentTexts).toEqual(['请回复「新对话」开始新对话。']);
   });
+
+  it('settles an answered turn without sending a filler message', async () => {
+    const calls: string[] = [];
+    const fetchImpl: FetchLike = async (input) => {
+      calls.push(String(input).split('/ilink/bot/')[1]);
+      return { ok: true, status: 200, text: async () => '{"ret":0}' };
+    };
+    const updates: Array<Record<string, unknown>> = [];
+    const db = {
+      select: selectFrom([chatRow]),
+      update: () => { const query = { set: (patch: Record<string, unknown>) => { updates.push(patch); return query; }, where: () => Promise.resolve(undefined) }; return query; },
+    };
+    // The turn asked a question, then the user answered, so dispatch froze it as completed with
+    // no assistant reply inside its window.
+    const executions = {
+      get: async () => ({ status: 'running', error: null, pendingQuestion: null, messages: [
+        { id: 'm-question-turn', role: 'user', content: '帮我写一篇' },
+        { id: 'm-answer', role: 'user', content: '好的' },
+      ] }),
+    };
+    const service = new WechatService(db as never, {} as never, {} as never, executions as never, {} as never, {} as never, {} as never, {} as never);
+    (service as unknown as { fetchImpl: FetchLike }).fetchImpl = fetchImpl;
+    (service as unknown as { baseUrl: string }).baseUrl = 'https://ilink.example';
+    (service as unknown as { token: string }).token = 'tok';
+    const submission = {
+      ...baseSubmission,
+      reference: { kind: 'conversation' as const, executionId: 'aex_1', afterMessageId: null, afterSequence: 0, untilMessageId: 'm-question-turn', completionStatus: 'completed', completionError: null },
+    };
+
+    await (service as unknown as { deliver: (s: typeof submission) => Promise<void> }).deliver(submission);
+
+    expect(calls).not.toContain('sendmessage');
+    expect(updates).toEqual([{ settled: true }]);
+  });
 });
 
 describe('WechatService "新对话" command', () => {

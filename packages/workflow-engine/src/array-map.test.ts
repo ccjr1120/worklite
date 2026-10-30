@@ -95,6 +95,44 @@ describe('worklite/map capability', () => {
     expect(output).toEqual(['first', 'second', 'third']);
   });
 
+  it('reruns a failed element from its first node when the subgraph opts into retries', async () => {
+    // The Agent writes a script that does not compile; retrying only the renderer would replay the
+    // same script, so the element reruns and the Agent writes a new one.
+    const script = { ...node('script'), errorPolicy: 'retry' as const };
+    const render = { ...node('render', 'worklite/canvas-render', { width: 1080, height: 720 }), errorPolicy: 'retry' as const };
+    const calls: string[] = [];
+    let scripts = 0;
+    const output = await executeWorkflowMap({
+      itemsValue: ['fig-a'],
+      context: {},
+      config: { subgraph: { nodes: [script, render], edges: [edge('e1', 'script', 'render', 'code')] }, outputNodeId: 'render' },
+      signal: new AbortController().signal,
+      executeNode: async ({ node: current, input }) => {
+        calls.push(current.id);
+        if (current.id === 'script') {
+          scripts += 1;
+          return scripts === 1 ? '我设计了一张对比图。' : 'ctx.fillRect(0, 0, 10, 10);';
+        }
+        if (!String((input as { code?: unknown }).code).startsWith('ctx.')) throw new Error('Invalid or unexpected token');
+        return image('fig-a');
+      },
+    });
+    expect(output).toEqual([image('fig-a')]);
+    expect(calls).toEqual(['script', 'render', 'render', 'script', 'render']);
+  });
+
+  it('does not rerun an element when no subgraph node opts into retries', async () => {
+    let calls = 0;
+    await expect(executeWorkflowMap({
+      itemsValue: ['bad'],
+      context: {},
+      config: { subgraph: { nodes: [node('step')], edges: [] } },
+      signal: new AbortController().signal,
+      executeNode: async () => { calls += 1; throw new Error('element exploded'); },
+    })).rejects.toThrow('Map element 0 failed: element exploded');
+    expect(calls).toBe(1);
+  });
+
   it('fails the whole node on an element failure by default', async () => {
     await expect(executeWorkflowMap({
       itemsValue: ['ok', 'bad', 'later'],

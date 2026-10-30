@@ -1141,6 +1141,10 @@ export async function executeWorkflowMap(request: ExecuteWorkflowMapRequest): Pr
   const bindings = readWorkflowMapBindings(config.bindings);
   const configuredOutputNodeId = typeof config.outputNodeId === 'string' && config.outputNodeId.trim() ? config.outputNodeId.trim() : undefined;
   const entryPort = typeof config.entryPort === 'string' && config.entryPort.trim() ? config.entryPort.trim() : undefined;
+  // A node retry reuses its input, which cannot help when an upstream node produced a bad input
+  // (an Agent's script that does not compile). When the subgraph opts into retries, a failed
+  // element therefore runs once more from its first node so upstream output is regenerated.
+  const elementAttempts = definition.nodes.some((node) => node.errorPolicy === 'retry') ? 2 : 1;
   const results: unknown[] = [];
 
   for (let index = 0; index < itemsValue.length; index += 1) {
@@ -1151,15 +1155,24 @@ export async function executeWorkflowMap(request: ExecuteWorkflowMapRequest): Pr
       context: cloneWorkflowValue(request.context),
     };
     try {
-      results.push(await executeWorkflowMapElement({
-        subgraph: definition,
-        scope,
-        bindings,
-        configuredOutputNodeId,
-        entryPort,
-        executeNode: request.executeNode,
-        signal: request.signal,
-      }));
+      let output: unknown;
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          output = await executeWorkflowMapElement({
+            subgraph: definition,
+            scope: { ...scope, item: cloneWorkflowValue(scope.item), context: cloneWorkflowValue(scope.context) },
+            bindings,
+            configuredOutputNodeId,
+            entryPort,
+            executeNode: request.executeNode,
+            signal: request.signal,
+          });
+          break;
+        } catch (error) {
+          if (request.signal.aborted || attempt + 1 >= elementAttempts) throw error;
+        }
+      }
+      results.push(output);
     } catch (error) {
       if (request.signal.aborted) throw error;
       if (!continueOnError) {

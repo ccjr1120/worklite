@@ -591,7 +591,14 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
         const failure = reference.completionError || (!reference.completionStatus ? execution.error : null);
         if (executionStatus === 'failed') text = `对话失败：${failure ?? '未知错误'}${replies.length ? `\n\n${replies.join('\n\n')}` : ''}`;
         else if (executionStatus === 'cancelled') text = `本轮对话已取消。${replies.length ? `\n\n${replies.join('\n\n')}` : ''}`;
-        else text = replies.join('\n\n') || '本轮对话已结束。';
+        else if (replies.length) text = replies.join('\n\n');
+        else {
+          // A completed turn without a reply is one whose question the user already answered or
+          // whose conversation was replaced by "新对话"; the question was the last thing sent, so
+          // settle quietly instead of sending a filler message.
+          await this.db.update(chatSubmissions).set({ settled: true }).where(eq(chatSubmissions.id, submission.id));
+          return;
+        }
       } else if (execution.status === 'waiting_for_input' && execution.pendingQuestion) {
         const question = execution.pendingQuestion;
         if (question.action === 'new_conversation') {
