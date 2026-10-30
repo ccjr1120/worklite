@@ -208,7 +208,7 @@
   "nodes": {
     "title": "节点明细",
     "empty": "暂无节点。",
-    "noSteps": "该节点没有上报步骤，步骤级 Token 不可用。",
+    "noSteps": "该节点尚未上报步骤。",
     "stepsOmitted": "更早的 {{count}} 个步骤未显示",
     "attempt": "第 {{index}} 次尝试",
     "columns": {

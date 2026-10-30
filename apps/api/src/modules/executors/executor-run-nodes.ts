@@ -9,11 +9,23 @@ import type {
   TokenAttribution,
   TokenAttributionReason,
 } from '@worklite/contracts';
-import type { StoredAgentTeamVersionSnapshot, executorTaskAttempts } from '@worklite/db';
+import type { StoredAgentTeamVersionSnapshot, executorOperations, executorTaskAttempts } from '@worklite/db';
 import { taskRoleName } from './executor-run-summary';
 
 export type AttemptRow = typeof executorTaskAttempts.$inferSelect;
 export type ActivityRow = { runId: string; sequence: number; payload: unknown; createdAt: Date };
+
+/** Isolated roles journal tool operations instead of emitting engine activity events. */
+type OperationActivity = Pick<typeof executorOperations.$inferSelect, 'key' | 'runId' | 'taskAttemptId' | 'toolName' | 'status' | 'createdAt' | 'updatedAt'>;
+export function operationActivities(operations: readonly OperationActivity[]): ActivityRow[] {
+  return operations.flatMap((operation, index) => {
+    const itemId = `operation:${operation.key}`;
+    const payload = { taskAttemptId: operation.taskAttemptId, itemId, itemType: 'tool_call', summary: operation.toolName };
+    const start = { runId: operation.runId, sequence: -(index * 2 + 2), createdAt: operation.createdAt, payload: { ...payload, phase: 'claude.tool_started' } };
+    if (operation.status === 'reserved') return [start];
+    return [start, { runId: operation.runId, sequence: -(index * 2 + 1), createdAt: operation.updatedAt, payload: { ...payload, phase: 'claude.tool_completed' } }];
+  });
+}
 
 const IN_FLIGHT_ATTEMPT_STATUSES: ReadonlySet<AttemptRow['status']> = new Set(['running', 'waiting_for_input', 'waiting_for_recovery']);
 const SETTLED_RUN_STATUSES: ReadonlySet<AgentTeamRunStatus> = new Set(['succeeded', 'failed', 'cancelled']);

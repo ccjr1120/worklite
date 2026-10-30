@@ -24,6 +24,7 @@ import {
   executorRuns,
   executorRunEvents,
   executorTaskAttempts,
+  executorOperations,
   agentTeamVersions,
   type AgentTeam,
   type Database,
@@ -35,7 +36,7 @@ import { AgentTeamConfigurationService, executorRevision } from './executor-conf
 import { capturedExecutorName } from './executor-run-summary';
 import { RETIRED_AGENT_TEAM_IDS } from './executor-configuration';
 import { PortkeyGatewayService } from '../model-providers/portkey-gateway.service';
-import { activitiesByAttempt, buildRunNodes, currentRunNode, durationBetween, isRunInProgress, runTotalTokens, timelineByNode, unavailableTokens, type ActivityRow, type AttemptRow } from './executor-run-nodes';
+import { activitiesByAttempt, buildRunNodes, currentRunNode, durationBetween, isRunInProgress, operationActivities, runTotalTokens, timelineByNode, unavailableTokens, type ActivityRow, type AttemptRow } from './executor-run-nodes';
 
 const RUN_NODE_BATCH_LIMIT = 50;
 const RUN_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -270,7 +271,7 @@ export class ExecutorsService {
       .where(and(...conditions));
     if (!runs.length) return { runs: [], requestLogRetentionHours: REQUEST_LOG_RETENTION_HOURS };
     const foundIds = runs.map((run) => run.id);
-    const [attempts, activityRows, stats, timeline] = await Promise.all([
+    const [attempts, activityRows, operations, stats, timeline] = await Promise.all([
       this.db.select().from(executorTaskAttempts)
         .where(inArray(executorTaskAttempts.runId, foundIds))
         .orderBy(asc(executorTaskAttempts.createdAt), asc(executorTaskAttempts.attemptIndex)),
@@ -278,12 +279,15 @@ export class ExecutorsService {
         .from(executorRunEvents)
         .where(and(inArray(executorRunEvents.runId, foundIds), eq(executorRunEvents.type, 'task.activity')))
         .orderBy(asc(executorRunEvents.sequence)),
+      this.db.select({ key: executorOperations.key, runId: executorOperations.runId, taskAttemptId: executorOperations.taskAttemptId, toolName: executorOperations.toolName, status: executorOperations.status, createdAt: executorOperations.createdAt, updatedAt: executorOperations.updatedAt }).from(executorOperations)
+        .where(inArray(executorOperations.runId, foundIds))
+        .orderBy(asc(executorOperations.createdAt)),
       this.runStats(foundIds, runs, 'node_run'),
       this.runTimeline(foundIds, runs),
     ]);
     const statsByNode = stats ? new Map(stats.filter((group) => group.nodeRunId).map((group) => [group.nodeRunId!, group])) : null;
     const runsWithUnattributedTraffic = new Set((stats ?? []).filter((group) => !group.nodeRunId && group.teamRunId).map((group) => group.teamRunId!));
-    const activities = activitiesByAttempt(activityRows);
+    const activities = activitiesByAttempt([...activityRows, ...operationActivities(operations)]);
     const requestsByNode = timelineByNode(timeline);
     const nowMs = Date.now();
     const order = new Map(ids.map((id, index) => [id, index]));
