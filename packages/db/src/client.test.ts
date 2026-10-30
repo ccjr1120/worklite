@@ -169,13 +169,13 @@ describe('initializeDatabase restart recovery', () => {
 
     const [skill] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'SKILL.md'))).limit(1);
     expect(skill.content.match(/## Pages and routes \(UI navigation\)/g)).toHaveLength(1);
-    expect(skill.content).toContain('| 工作区 | Coding | `/executors` |');
-    expect(skill.content).toContain('`/executors/:executorId/config`');
+    expect(skill.content).toContain('| 工作区 | Coding | `/coding` |');
+    expect(skill.content).toContain('`/coding/:executorId/config`');
     expect(skill.content).toContain('`/executor-runs/:runId`');
     expect(skill.content).toContain('do not call search_local_projects to look for a same-named repository');
     // Route listings live only in the navigation section.
     expect(skill.content).not.toContain('Chat Channels at /chat?view=channels');
-    expect(skill.content).not.toContain('`/executors/:executorId` lists an executor’s Runs');
+    expect(skill.content).not.toContain('`/coding/:executorId` lists an executor’s Runs');
   });
 
   it('registers dispatch_task without an Agent Team mode', async () => {
