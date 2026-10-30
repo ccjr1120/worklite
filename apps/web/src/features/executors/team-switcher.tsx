@@ -6,7 +6,7 @@ import { focusRing } from '@/components/ui/interaction';
 import { TruncatedText } from '@/components/ui/truncated-text';
 import { cn } from '@/lib/utils';
 
-// `/executors` opens the company project executor by its stable id.
+// `/coding` opens the company project executor by its stable id.
 export const DEFAULT_EXECUTOR_CATEGORY_ID = 'agent_team_bmad_tea';
 
 const ACTIVE_RUN_STATUSES: AgentTeamRunStatus[] = ['running', 'waiting_for_input', 'paused'];
@@ -33,7 +33,7 @@ function TeamCard({ team, selected }: { team: AgentTeamView; selected: boolean }
 
   return (
     <Link
-      to="/executors/$executorId/config"
+      to="/coding/$executorId/config"
       params={{ executorId: team.id }}
       aria-current={selected ? 'page' : undefined}
       className={cn(

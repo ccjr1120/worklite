@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { TeamConfig } from '@/features/executors/team-config';
 
-export const Route = createFileRoute('/executors/$executorId/config')({
+export const Route = createFileRoute('/coding/$executorId/config')({
   component: AgentTeamConfigRoute,
 });
 

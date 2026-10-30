@@ -230,7 +230,7 @@ export function TeamConfig({ executorId: executorCategoryId }: { executorId: str
   const mcpServersQuery = useMcpServersQuery('personal');
   const skillsQuery = useSkillsQuery('personal');
   const notSet = t('config.notSet');
-  const recordsPath = `/executors/${encodeURIComponent(executorCategoryId)}`;
+  const recordsPath = `/coding/${encodeURIComponent(executorCategoryId)}`;
   const categoryName = t(`focus.${executorCategoryId}` as never, { defaultValue: teamQuery.data?.name });
   const crumbs = [{ label: 'Coding' }, ...(teamQuery.data ? [{ label: categoryName, to: recordsPath }] : []), { label: t('config.title') }];
 
@@ -262,7 +262,7 @@ export function TeamConfig({ executorId: executorCategoryId }: { executorId: str
       <PageHeading
         title={t('config.title')}
         description={t('config.description')}
-        actions={<Link to="/executors/$executorId" params={{ executorId: executorCategoryId }} className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">{t('config.backToRecords')}</Link>}
+        actions={<Link to="/coding/$executorId" params={{ executorId: executorCategoryId }} className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">{t('config.backToRecords')}</Link>}
       />
       <TeamSwitcher executorCategoryId={executorCategoryId} />
 

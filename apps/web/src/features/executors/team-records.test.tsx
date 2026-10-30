@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n/config';
 import type { AgentTeamRunSummary, AgentTeamView } from '@worklite/contracts';
 import { useAgentTeamRecordsQuery, useAgentTeamsQuery } from '@/api/queries';
-import { Route as AgentTeamsIndexRoute } from '@/routes/executors/index';
+import { Route as AgentTeamsIndexRoute } from '@/routes/coding/index';
 import { filterRuns, TeamRecords } from './team-records';
 import { TeamSwitcher } from './team-switcher';
 
@@ -183,14 +183,14 @@ describe('TeamRecords', () => {
   it('puts the configuration entry in the page header for the selected executor', () => {
     mockQueries();
     render(<TeamRecords executorId="agent_team_bmad_tea" />);
-    expect(screen.getByRole('link', { name: '查看配置' })).toHaveAttribute('href', '/executors/agent_team_bmad_tea/config');
+    expect(screen.getByRole('link', { name: '查看配置' })).toHaveAttribute('href', '/coding/agent_team_bmad_tea/config');
   });
 
-  it('opens the default Company Project team from /executors', () => {
-    expect(AgentTeamsIndexRoute.path).toBe('/executors/');
+  it('opens the default Company Project team from /coding', () => {
+    expect(AgentTeamsIndexRoute.path).toBe('/coding/');
     const Component = AgentTeamsIndexRoute.options.component as React.ComponentType;
     render(<Component />);
-    expect(screen.getByTestId('navigate')).toHaveTextContent('/executors/agent_team_bmad_tea');
+    expect(screen.getByTestId('navigate')).toHaveTextContent('/coding/agent_team_bmad_tea');
     expect(screen.getByTestId('navigate')).toHaveAttribute('data-replace', 'true');
   });
 });
@@ -205,7 +205,7 @@ describe('TeamSwitcher (configuration view)', () => {
     const direct = within(switcher).getByRole('link', { name: /Direct/ });
 
     expect(company).toHaveAttribute('aria-current', 'page');
-    expect(direct).toHaveAttribute('href', '/executors/agent_team_direct/config');
+    expect(direct).toHaveAttribute('href', '/coding/agent_team_direct/config');
     expect(within(company).getByText('面向已有公司仓库')).toBeInTheDocument();
     expect(within(direct).getByText('两步流程：计划与执行')).toBeInTheDocument();
     expect(within(company).getByText('并发上限').nextSibling).toHaveTextContent('3');

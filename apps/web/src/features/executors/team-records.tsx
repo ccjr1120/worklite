@@ -179,7 +179,7 @@ export function TeamRecords({ executorId: executorCategoryId }: { executorId: st
       <PageHeading
         title="Coding"
         description={t('records.description')}
-        actions={<Link to="/executors/$executorId/config" params={{ executorId: executorCategoryId }} className={`inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-border px-3 text-sm font-medium hover:bg-muted ${focusRing}`}><Settings className="size-4" aria-hidden="true" />{t('config.viewConfig')}</Link>}
+        actions={<Link to="/coding/$executorId/config" params={{ executorId: executorCategoryId }} className={`inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-border px-3 text-sm font-medium hover:bg-muted ${focusRing}`}><Settings className="size-4" aria-hidden="true" />{t('config.viewConfig')}</Link>}
       />
       <div className="space-y-4">
         {/* Filters */}
