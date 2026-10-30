@@ -26,11 +26,12 @@ type RequestLogFilters = {
   teamRunId?: string;
   workflowId?: string;
   workflowRunId?: string;
+  nodeRunId?: string;
 };
 
 // The attribution part of a filter, as chips: these are set by following a usage row
 // rather than typed, so they are shown and cleared rather than offered as pickers.
-const ATTRIBUTION_FILTER_KEYS = ['surface', 'conversationId', 'projectTaskId', 'executor', 'executorCategoryId', 'teamRunId', 'workflowId', 'workflowRunId'] as const;
+const ATTRIBUTION_FILTER_KEYS = ['surface', 'conversationId', 'projectTaskId', 'executor', 'executorCategoryId', 'teamRunId', 'workflowId', 'workflowRunId', 'nodeRunId'] as const;
 
 function capturedBodyText(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -123,6 +124,7 @@ function RequestLogRow({ item, expanded, onToggle, locale, onOpenProvider }: { i
             {item.conversationId ? <span className="font-mono">{t('requests.correlatedConversation', { id: item.conversationId })}</span> : null}
             {item.workflowRunId ? <span className="font-mono">{t('requests.correlatedRun', { id: item.workflowRunId })}</span> : null}
             {item.teamRunId ? <span className="font-mono">{t('requests.correlatedTeamRun', { id: item.teamRunId })}</span> : null}
+            {item.nodeRunId ? <span className="font-mono">{t('requests.correlatedNode', { id: item.nodeRunId })}</span> : null}
             {tokenMetrics.length ? <span className="tabular-nums">{tokenMetrics.join(' · ')}</span> : null}
             {onOpenProvider ? <Button type="button" variant="ghost" size="compact" className="ml-auto" onClick={() => onOpenProvider(item.provider)}><KeyRound className="size-4" aria-hidden="true" />{t('requests.openProvider')}</Button> : null}
           </div>
@@ -171,7 +173,7 @@ function GatewayRequestLogs({ from, to, providers, filters, onFiltersChange, foc
   useEffect(() => {
     setPages([]);
     setExpandedId(null);
-  }, [from, to, filters.provider, filters.model, filters.statusClass, filters.surface, filters.conversationId, filters.projectTaskId, filters.executor, filters.executorCategoryId, filters.teamRunId, filters.workflowId, filters.workflowRunId]);
+  }, [from, to, filters.provider, filters.model, filters.statusClass, filters.surface, filters.conversationId, filters.projectTaskId, filters.executor, filters.executorCategoryId, filters.teamRunId, filters.workflowId, filters.workflowRunId, filters.nodeRunId]);
 
   useEffect(() => {
     setExpandedId(focusedRequestId ?? null);

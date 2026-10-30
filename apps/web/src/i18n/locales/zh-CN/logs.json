@@ -59,7 +59,8 @@
       "executorCategoryId": "执行器",
       "teamRunId": "执行记录",
       "workflowId": "Workflow",
-      "workflowRunId": "Workflow 运行"
+      "workflowRunId": "Workflow 运行",
+      "nodeRunId": "节点"
     },
     "statusClass": {
       "all": "所有状态",
@@ -96,7 +97,8 @@
     "error": "无法加载请求日志。",
     "detailError": "无法加载该捕获的请求。",
     "correlatedConversation": "对话 {{id}}",
-    "correlatedTeamRun": "执行记录 {{id}}"
+    "correlatedTeamRun": "执行记录 {{id}}",
+    "correlatedNode": "节点 {{id}}"
   },
   "usage": {
     "title": "按功能/来源的用量",
@@ -108,7 +110,9 @@
       "conversation": "按对话",
       "executor": "按执行引擎",
       "executor_category": "按执行器",
-      "workflow": "按 Workflow"
+      "workflow": "按 Workflow",
+      "team_run": "按执行记录",
+      "node_run": "按节点"
     },
     "surfaces": {
       "chat": "Chat 主对话",
@@ -128,7 +132,9 @@
         "conversation": "对话 ID",
         "executor": "执行引擎",
         "executor_category": "运行 ID",
-        "workflow": "运行 ID"
+        "workflow": "运行 ID",
+        "team_run": "说明",
+        "node_run": "节点 ID"
       }
     },
     "noDetail": "—",

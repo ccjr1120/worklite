@@ -5,6 +5,7 @@ import type {
   AgentTeamRunView,
   AgentTeamRunSummary,
   AgentTeamRunListPage,
+  AgentTeamRunNodeTree,
   AgentTeamRunEvent,
   AgentTeamView,
   AgentTeamRoleConfiguration,
@@ -139,6 +140,7 @@ function appendGatewayAttribution(search: URLSearchParams, filters: GatewayAttri
     ['teamRunId', filters.teamRunId],
     ['workflowId', filters.workflowId],
     ['workflowRunId', filters.workflowRunId],
+    ['nodeRunId', filters.nodeRunId],
   ];
   for (const [name, value] of entries) {
     const trimmed = value?.trim();
@@ -311,6 +313,7 @@ export const api = {
     const suffix = search.size > 0 ? `?${search.toString()}` : '';
     return apiGet<AgentTeamRunListPage>(`/api/executor-runs${suffix}`);
   },
+  agentTeamRunNodes: (runIds: string[]) => apiGet<AgentTeamRunNodeTree>(`/api/executor-runs/nodes?runIds=${encodeURIComponent(runIds.join(','))}`),
   executor: (executorId: string) => apiGet<AgentTeamView>(`/api/executors/${encodeURIComponent(executorId)}`),
   updateExecutor: (executorId: string, input: UpdateAgentTeamRequest) => apiPatch<AgentTeamView>(`/api/executors/${encodeURIComponent(executorId)}`, input),
   updateExecutorRole: (executorId: string, roleId: string, input: Partial<Omit<AgentTeamRoleConfiguration, 'role'>>) =>

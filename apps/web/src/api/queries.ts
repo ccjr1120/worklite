@@ -1,4 +1,4 @@
-import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
 import type { ArtifactListQuery, AssignHomeBoardRequest, CreateHomeBoardCategoryRequest, GatewayRequestLogQuery, PortkeyGatewayStatsQuery, UpdateChatMemoryRequest, UpdateHomeBoardCategoryRequest } from '@worklite/contracts';
 
@@ -217,6 +217,31 @@ export function useAgentTeamRunListQuery(executorCategoryIds?: string[]) {
   });
 }
 
+const RUN_NODES_BATCH_SIZE = 50;
+
+// Batch reads of the node trees for the expanded Runs: one request per 50 Runs (the server
+// limit), so a page of Runs is one request. The ids are sorted so expanding in a different
+// order reuses the cache; trees refresh while any expanded Run is in progress.
+export function useAgentTeamRunNodesQuery(runIds: string[], refresh: boolean) {
+  const sorted = [...new Set(runIds)].sort();
+  const batches: string[][] = [];
+  for (let index = 0; index < sorted.length; index += RUN_NODES_BATCH_SIZE) batches.push(sorted.slice(index, index + RUN_NODES_BATCH_SIZE));
+  return useQueries({
+    queries: batches.map((batch) => ({
+      queryKey: ['agent-team-run-nodes', ...batch] as const,
+      queryFn: () => api.agentTeamRunNodes(batch),
+      placeholderData: keepPreviousData,
+      refetchInterval: refresh ? 5_000 : false as const,
+    })),
+    combine: (results) => ({
+      nodesByRun: new Map(results.flatMap((result) => result.data?.runs.map((run) => [run.runId, run.nodes] as const) ?? [])),
+      retentionHours: results.find((result) => result.data)?.data?.requestLogRetentionHours ?? 12,
+      // Placeholder data is the previous batch, which lacks a newly expanded Run.
+      loading: results.some((result) => result.isPending || result.isPlaceholderData),
+    }),
+  });
+}
+
 export function useMcpServersQuery(workspace?: string) {
   return useQuery({ queryKey: mcpServersQueryKey(), queryFn: () => api.mcpServers(workspace) });
 }
@@ -243,8 +268,8 @@ export function useCodexAccountUsagesQuery(enabled: boolean) {
 
 // Attribution filters are part of the question, so they are part of the cache key;
 // leaving them out would serve a Chat-only answer for an executor-only request.
-function attributionKey(query: { surface?: string; conversationId?: string; projectTaskId?: string; executor?: string; executorCategoryId?: string; teamRunId?: string; workflowId?: string; workflowRunId?: string }) {
-  return [query.surface ?? '', query.conversationId ?? '', query.projectTaskId ?? '', query.executor ?? '', query.executorCategoryId ?? '', query.teamRunId ?? '', query.workflowId ?? '', query.workflowRunId ?? ''] as const;
+function attributionKey(query: { surface?: string; conversationId?: string; projectTaskId?: string; executor?: string; executorCategoryId?: string; teamRunId?: string; workflowId?: string; workflowRunId?: string; nodeRunId?: string }) {
+  return [query.surface ?? '', query.conversationId ?? '', query.projectTaskId ?? '', query.executor ?? '', query.executorCategoryId ?? '', query.teamRunId ?? '', query.workflowId ?? '', query.workflowRunId ?? '', query.nodeRunId ?? ''] as const;
 }
 
 export function usePortkeyGatewayStatsQuery(query: PortkeyGatewayStatsQuery) {

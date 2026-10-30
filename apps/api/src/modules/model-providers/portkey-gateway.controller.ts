@@ -30,6 +30,7 @@ function attributionFilters(query: RawQuery): GatewayAttributionFilters {
     teamRunId: queryText(query.teamRunId),
     workflowId: queryText(query.workflowId),
     workflowRunId: queryText(query.workflowRunId),
+    nodeRunId: queryText(query.nodeRunId),
   };
 }
 

@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { BadRequestException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import type { Request, Response } from 'express';
-import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, GatewayAttributionFilters, GatewayRequestLogDetail, GatewayRequestLogList, GatewayRequestLogQuery, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatsQuery, PortkeyGatewayStatus, PortkeyGatewayView, SystemOneTestInput, SystemOneWorkflowOutput, SystemOneWorkflowRequest, TestModelProviderRequest, UpdateModelProviderModelsRequest, UpdateModelProviderModelsResult, UpdateModelProviderRequest } from '@worklite/contracts';
+import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, GatewayAttributionFilters, GatewayRequestLogDetail, GatewayRequestLogList, GatewayRequestLogQuery, GatewayRequestLogTimeline, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatsQuery, PortkeyGatewayStatus, PortkeyGatewayView, SystemOneTestInput, SystemOneWorkflowOutput, SystemOneWorkflowRequest, TestModelProviderRequest, UpdateModelProviderModelsRequest, UpdateModelProviderModelsResult, UpdateModelProviderRequest } from '@worklite/contracts';
 import { gatewayAttributionHeaders, type GatewayCorrelation, type ModelProviderConfig } from '@worklite/model-gateway';
 import { agents, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
@@ -25,6 +25,7 @@ function appendAttributionFilters(search: URLSearchParams, filters: GatewayAttri
     ['teamRunId', filters.teamRunId],
     ['workflowId', filters.workflowId],
     ['workflowRunId', filters.workflowRunId],
+    ['nodeRunId', filters.nodeRunId],
   ];
   for (const [name, value] of entries) {
     const trimmed = value?.trim();
@@ -196,6 +197,16 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     if (query.cursor?.trim()) search.set('cursor', query.cursor.trim());
     const suffix = search.size > 0 ? `?${search.toString()}` : '';
     return this.gatewayJson<GatewayRequestLogList>(`/worklite/request-logs${suffix}`);
+  }
+
+  // Compact request start times and tokens for the given Runs or nodes; at least one id filter is required.
+  async requestLogTimeline(query: { from?: string; to?: string; teamRunId?: string; nodeRunId?: string }): Promise<GatewayRequestLogTimeline> {
+    await this.ensureGatewayForDiscovery();
+    const search = new URLSearchParams();
+    if (query.from?.trim()) search.set('from', query.from.trim());
+    if (query.to?.trim()) search.set('to', query.to.trim());
+    appendAttributionFilters(search, { teamRunId: query.teamRunId, nodeRunId: query.nodeRunId });
+    return this.gatewayJson<GatewayRequestLogTimeline>(`/worklite/request-logs/timeline?${search.toString()}`);
   }
 
   async requestLog(requestLogId: string): Promise<GatewayRequestLogDetail> {

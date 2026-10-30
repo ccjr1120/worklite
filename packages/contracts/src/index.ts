@@ -654,7 +654,10 @@ export const GATEWAY_SURFACES = [
 
 export type GatewaySurface = (typeof GATEWAY_SURFACES)[number];
 
-export const GATEWAY_STATS_GROUP_BYS = ['surface', 'conversation', 'executor', 'executor_category', 'workflow'] as const;
+// team_run groups by executor Run; node_run by node (one executor role task attempt or one
+// Workflow node run) and keeps the parent Run id on every row. Under node_run a Run's traffic
+// recorded before node attribution existed is one row with a null nodeRunId.
+export const GATEWAY_STATS_GROUP_BYS = ['surface', 'conversation', 'executor', 'executor_category', 'workflow', 'team_run', 'node_run'] as const;
 
 export type GatewayStatsGroupBy = (typeof GATEWAY_STATS_GROUP_BYS)[number];
 
@@ -665,9 +668,12 @@ export type GatewayAttributionFilters = {
   projectTaskId?: string;
   executor?: string;
   executorCategoryId?: string;
+  /** One executor Run id, or a comma-separated list of ids. */
   teamRunId?: string;
   workflowId?: string;
   workflowRunId?: string;
+  /** One node run id (executor task attempt id or Workflow node run id), or a comma-separated list. */
+  nodeRunId?: string;
 };
 
 export type GatewayAttributionGroup = {
@@ -680,6 +686,7 @@ export type GatewayAttributionGroup = {
   teamRunId: string | null;
   workflowId: string | null;
   workflowRunId: string | null;
+  nodeRunId: string | null;
   requests: number;
   successful: number;
   failed: number;
@@ -1326,6 +1333,20 @@ export type GatewayRequestLogDetail = GatewayRequestLogListItem & {
   response: GatewayRequestLogResponseCapture;
 };
 
+/**
+ * Per-request start times and token totals of selected Runs or nodes inside the request-log
+ * retention window, without bodies. Read by the Run node tree to spread a node's tokens over
+ * its steps.
+ */
+export type GatewayRequestLogTimeline = {
+  items: Array<{ nodeRunId: string | null; teamRunId: string | null; startedAt: string; occurredAt: string; totalTokens: number | null }>;
+  truncated: boolean;
+  retentionHours: number;
+  from: string;
+  to: string;
+  retainedFrom: string;
+};
+
 export type GatewayRequestLogQuery = GatewayTimeRange & GatewayAttributionFilters & {
   provider?: string;
   model?: string;
@@ -1815,10 +1836,94 @@ export type AgentTeamRunSummary = {
   finishedAt: string | null;
 };
 
+/**
+ * Where a token figure comes from. `exact` is summed from Gateway statistics for exactly
+ * this Run or node; `estimated` is a share of a node's request logs assigned by request
+ * start time; `unavailable` carries null tokens (never 0) and the reason code.
+ */
+export type TokenAttributionSource = 'exact' | 'estimated' | 'unavailable';
+
+export type TokenAttributionReason =
+  // The Run's Gateway traffic was recorded before node attribution existed.
+  | 'no_node_attribution'
+  // No Gateway traffic was recorded for this Run or node (for example a Codex role on
+  // local configuration, or work that called no model).
+  | 'no_gateway_traffic'
+  // Requests were recorded but the provider reported no token usage.
+  | 'usage_not_reported'
+  // Step shares come from request logs, which expire after the retention window.
+  | 'request_logs_expired'
+  // The node had more requests than one timeline read returns.
+  | 'request_logs_truncated'
+  // Gateway statistics could not be read.
+  | 'gateway_unavailable';
+
+export type TokenAttribution = {
+  tokens: number | null;
+  source: TokenAttributionSource;
+  reason?: TokenAttributionReason;
+};
+
+export type AgentTeamRunCurrentNode = {
+  nodeRunId: string;
+  name: string;
+  role: AgentTeamRoleId;
+  roleName: string | null;
+  /** Latest activity summary of the node, or null when it has reported none yet. */
+  action: string | null;
+};
+
+export type AgentTeamRunOverview = {
+  totalTokens: TokenAttribution;
+  /** (finishedAt ?? now) - createdAt. */
+  durationMs: number | null;
+  /** Present only while the Run is in progress and has an in-flight node. */
+  currentNode?: AgentTeamRunCurrentNode;
+};
+
 export type AgentTeamRunListItem = AgentTeamRunSummary & {
   executorCategoryId: string;
   // Executor name captured when the Run was dispatched; falls back to the current name.
   executorName: string;
+  overview: AgentTeamRunOverview;
+};
+
+export type AgentTeamRunNodeStepKind = 'step' | 'activity' | 'tool_call';
+
+export type AgentTeamRunNodeStep = {
+  id: string;
+  kind: AgentTeamRunNodeStepKind;
+  label: string;
+  startedAt: string;
+  endedAt: string | null;
+  durationMs: number | null;
+  tokens: TokenAttribution;
+};
+
+/** One node of a Run: one role task attempt. Parallel Developers and retries are separate nodes. */
+export type AgentTeamRunNode = {
+  nodeRunId: string;
+  taskKey: string;
+  attemptIndex: number;
+  name: string;
+  role: AgentTeamRoleId;
+  roleName: string | null;
+  developerId: string | null;
+  status: AgentTeamTaskAttemptStatus;
+  startedAt: string | null;
+  endedAt: string | null;
+  durationMs: number | null;
+  tokens: TokenAttribution;
+  latestActivity: string | null;
+  /** The newest steps, oldest first; older ones beyond the per-node limit are counted in stepsOmitted. */
+  steps: AgentTeamRunNodeStep[];
+  stepsOmitted: number;
+};
+
+export type AgentTeamRunNodeTree = {
+  runs: Array<{ runId: string; nodes: AgentTeamRunNode[] }>;
+  /** Request-log retention that bounds step-level estimates. */
+  requestLogRetentionHours: number;
 };
 
 export type AgentTeamRunListQuery = {

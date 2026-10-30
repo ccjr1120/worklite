@@ -23,6 +23,8 @@ function groupLabel(group: GatewayAttributionGroup, groupBy: GatewayStatsGroupBy
   if (groupBy === 'executor') return { title: surfaceLabel(group.surface), detail: group.executor };
   if (groupBy === 'executor_category') return { title: group.executorCategoryId ?? '', detail: group.teamRunId };
   if (groupBy === 'workflow') return { title: group.workflowId ?? '', detail: group.workflowRunId };
+  if (groupBy === 'team_run') return { title: group.teamRunId ?? '', detail: null };
+  if (groupBy === 'node_run') return { title: group.teamRunId ?? group.workflowRunId ?? '', detail: group.nodeRunId };
   return { title: surfaceLabel(group.surface), detail: null };
 }
 
@@ -32,6 +34,8 @@ function groupRequestFilters(group: GatewayAttributionGroup, groupBy: GatewaySta
   if (groupBy === 'executor') return { surface: group.surface ?? undefined, executor: group.executor ?? undefined };
   if (groupBy === 'executor_category') return { executorCategoryId: group.executorCategoryId ?? undefined, teamRunId: group.teamRunId ?? undefined };
   if (groupBy === 'workflow') return { workflowId: group.workflowId ?? undefined, workflowRunId: group.workflowRunId ?? undefined };
+  if (groupBy === 'team_run') return { teamRunId: group.teamRunId ?? undefined };
+  if (groupBy === 'node_run') return { teamRunId: group.teamRunId ?? undefined, workflowRunId: group.workflowRunId ?? undefined, nodeRunId: group.nodeRunId ?? undefined };
   return { surface: group.surface ?? undefined };
 }
 
