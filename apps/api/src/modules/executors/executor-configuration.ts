@@ -9,8 +9,9 @@ export const EXECUTOR_CATEGORY_PROCESS_VERSION = '1';
 // Retired executor IDs for backward compatibility with historical data
 export const RETIRED_AGENT_TEAM_IDS = ['agent_team_application'] as const;
 
-export const DEFAULT_COMPANY_PROJECT_GIT_POLICY = 'Follow the target project instructions and the user\'s named company branch and review workflow. Preserve protected base-branch rules; do not bypass review or integrate into a base branch unless the request requires it.';
-export const DEFAULT_DIRECT_GIT_POLICY = 'Follow the target project\'s own Git instructions and current branch state. Prefer the current branch for isolated serial work; do not bypass review or integrate into a protected base branch unless the request requires it.';
+export const DEFAULT_PROJECT_GIT_POLICY = 'Follow the user\'s explicit instructions and the target repository\'s applicable instructions before team defaults. Inspect the actual branch and worktree state before choosing a strategy. Use the repository\'s required worktree location when one is needed; do not assume main or .wt. Preserve unrelated changes and protected branches. Commit, merge, push, and clean up only when authorized by the request and applicable repository instructions.';
+export const DEFAULT_COMPANY_PROJECT_GIT_POLICY = DEFAULT_PROJECT_GIT_POLICY;
+export const DEFAULT_DIRECT_GIT_POLICY = DEFAULT_PROJECT_GIT_POLICY;
 
 // Mirrors the company project executor's Planner requirement that the plan itself commit to branch and
 // worktree orchestration, so the Implementer follows a decision instead of improvising one.
@@ -18,14 +19,14 @@ export const DEFAULT_DIRECT_GIT_POLICY = 'Follow the target project\'s own Git i
 export const DIRECT_IMPLEMENTER_DISPLAY_NAME = 'Implementer';
 
 export const DEFAULT_PLANNER_EVIDENCE_INSTRUCTIONS = [
-  'You own the investigation needed to make the plan actionable. Do not hand off missing research, unresolved file or code locations, or discovery of the implementation approach to the executor or any downstream role.',
-  'If a material part of the scope cannot be investigated or located after reasonable read-only investigation, do not hand off. Return waiting_for_input. Explain the specific gaps, what you tried, why they matter and the consequences, and ask whether to continue with those gaps or stop.',
-  'On resume, investigate further if requested or given useful information; stop without a handoff if the user declines; proceed with the identified gaps only after an affirmative choice. If their choice is unclear or new material gaps emerge, ask again. Do not invent evidence. Routine implementation choices and immaterial uncertainty do not require approval.',
+  'Scale investigation and plan detail to the request. Identify the decisions and evidence needed, use a relevant available code index for structural discovery when it covers the target, check coverage and freshness, and read the relevant source directly when evidence is missing or stale. Do not repeat unsuccessful index queries or searches that have already answered the question.',
+  'Use bounded searches and excerpts. Stop investigating when there is enough evidence to deliver an actionable result; record non-blocking assumptions and gaps rather than repeatedly searching or asking routine questions. Do not repeatedly write or search memories during the same task. Report progress when investigation is prolonged.',
+  'Do not invent evidence. If a material decision remains blocked after reasonable read-only investigation, explain what is missing, what you tried and its impact; ask a focused question only if the answer is needed. Preserve already granted approvals and continue independent work.',
 ].join('\n');
 
 export const DIRECT_PLANNER_INSTRUCTIONS = 'Understand the requested goal and preserve user intent. Clarify only material missing information. Inspect the authorized project read-only without editing code, then produce a concrete execution plan for the Implementer. You may ask for plan confirmation using the existing waiting_for_input question mechanism before handing off. Hand off to role executor (the Implementer) with a specific, actionable goal describing the plan to implement.'
-  + '\n\nThe plan must commit to the Git orchestration the Implementer will follow, not leave it to the Implementer\'s judgment: name the base branch (default main), the feature branch name, and the worktree path (<repo>/.wt/<branch>) for every affected project repository, plus the merge-back order once implementation finishes. State this explicitly in the handoff goal so the Implementer starts from a decided branch and worktree rather than discovering or inventing one.'
-  + '\n\nWhen the implementation can split safely into independent, non-overlapping pieces of work, decide the split yourself instead of leaving it to the Implementer: return up to four developmentAssignments in the handoff, each with a title, scopeSummary, non-overlapping ownedPaths, its own branch name and worktree path, and optional repositoryIds. WorkLite runs each assignment as its own Implementer process in parallel using this same captured Implementer configuration. Only split when the pieces are truly independent; a single assignment (or none) is correct for most Direct work.'
+  + '\n\nWhen Git orchestration is needed, plan it in accordance with the user\'s instructions, repository rules and actual state. Do not assume a base branch, worktree path, commit or merge is required. Include the necessary decisions in the handoff.'
+  + '\n\nWhen the implementation can split safely into independent, non-overlapping pieces of work, decide the split yourself instead of leaving it to the Implementer: return up to four developmentAssignments in the handoff, each with a title, scopeSummary, non-overlapping ownedPaths and optional repositoryIds; include branch and worktree decisions only when needed and authorized. WorkLite runs each assignment as its own Implementer process in parallel using this same captured Implementer configuration. Only split when the pieces are truly independent; a single assignment (or none) is correct for most Direct work.'
   + `\n\n${DEFAULT_PLANNER_EVIDENCE_INSTRUCTIONS}`;
 
 export const DEFAULT_MAX_CONCURRENT_RUNS = 3;
