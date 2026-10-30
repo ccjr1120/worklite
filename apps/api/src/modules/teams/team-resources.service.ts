@@ -81,7 +81,7 @@ import {
 import { McpClientService } from '../mcp-servers/mcp-client.service';
 import { getArtifactDetail, listArtifacts } from '../artifacts/artifacts-query';
 import { ArtifactStorageService } from '../artifacts/artifact-storage.service';
-import { EXECUTOR_CATEGORY_ROLES, BUILT_IN_EXECUTOR_CATEGORY_ID, DIRECT_EXECUTOR_CATEGORY_ID } from '../executors/executor-configuration';
+import { EXECUTOR_CATEGORY_ROLES } from '../executors/executor-configuration';
 import { isWorkliteNavigationTarget, resolveWorkliteNavigationRoute } from './worklite-navigation';
 
 function maskSecret(value: string): string {
@@ -1348,7 +1348,7 @@ export class WorkspaceResourcesService {
           chatCustomSkillsAndMcp: 'not selectable; neither the Chat model loop nor its project executors receive custom Skills or MCP servers',
           repairDispatchTool: 'dispatch_task',
           repairDispatchRoute: 'POST /chat/dispatch',
-          repairDispatch: 'Chat dispatch_task creates an executor group chat and binds its first role task to a Run; the general project executor (id agent_team_direct) is the default for general repairs',
+          repairDispatch: 'Chat dispatch_task creates an executor group chat and binds its first role task to a Run; choose an executor by its current configuration and the task',
           inspectionAuthorizesRepair: false,
           gatewayLogs: {
             statistics: { tool: 'inspect_gateway_stats', route: 'GET /portkey-gateway/stats', retention: 'indefinite', filters: ['from', 'to', 'groupBy', ...GATEWAY_ATTRIBUTION_FILTERS] },
@@ -1503,13 +1503,9 @@ export class WorkspaceResourcesService {
         },
         executors: {
           available: true,
-          predefinedExecutorCount: 2,
-          executorCreation: false,
+          executorCreation: true,
+          createRoute: 'POST /executors',
           listRoute: 'GET /executors',
-          predefinedExecutors: [
-            { id: DIRECT_EXECUTOR_CATEGORY_ID, purpose: 'general project work, WorkLite code and new applications; Planner then Implementer (role id executor), no Dispatcher; default target' },
-            { id: BUILT_IN_EXECUTOR_CATEGORY_ID, purpose: 'existing company repositories that need the full review process; starts at its Dispatcher' },
-          ],
           selection: 'Chat selects an executor by stable executorId and purpose, never by display name; read current names and ids with inspect_executors',
           currentExecutors: agentTeamRows.filter((team) => !team.deletedAt).map((team) => ({ id: team.id, name: team.name })),
           rename: { tool: 'update_executor', route: 'PATCH /executors/:executorId', field: 'name', rules: 'trimmed 1-64 characters, no control characters, unique among non-deleted executors ignoring case', conflict: 'HTTP 409 EXECUTOR_NAME_CONFLICT', concurrency: 'optional expectedRevision precondition (the revision from GET /executors/:executorId); a stale value returns HTTP 409 EXECUTOR_REVISION_CONFLICT', affects: 'new Runs only; every Run keeps the executor name captured at dispatch (executorNameSnapshot), falling back to the bound executor version name, then the current name' },
@@ -1535,7 +1531,7 @@ export class WorkspaceResourcesService {
           memory: { routes: 'GET/POST/PATCH/DELETE /executors/:executorId/memories through protected Chat platform tools', scope: ['executor', 'canonical repository'], injection: 'the initially addressed role receives the full captured projection and every other role a bounded index', roleTools: ['executor_memory_search', 'executor_memory_read', 'executor_memory_write', 'executor_memory_update'], writeOwner: 'Chat has full management; roles may search, read and write executor memories within the Run repository scope through managed tools or the per-task executor memory MCP endpoint' },
           workingPractice: 'captured by each new group Run and injected into the initially addressed role only',
           projectGitPolicy: { perExecutor: true, editableThrough: 'update_executor with executorId', capturedBy: 'new executor version', injection: 'every engine-backed role in the captured Run', enforcement: 'guidance for execution engines; WorkLite does not create, merge, or clean Git branches or worktrees' },
-          deletion: { tool: 'delete_executor', deleteRoute: 'DELETE /executors/:executorId', deleteRequires: 'path executorId and body confirmTeamId matching', softDelete: true, deletedExecutorsExcludedFrom: ['executor list', 'inspect_executor', 'update_executor', 'role CRUD', 'dispatch targets'], deletedExecutorsPreserve: ['historical Run data', 'executor version snapshots', 'executor memories', 'group archives', 'role directory'], beforeDelete: 'ask_user for confirmation; prevent if active Runs exist or last executor' },
+          deletion: { tool: 'delete_executor', deleteRoute: 'DELETE /executors/:executorId', deleteRequires: 'path executorId and body confirmTeamId matching', softDelete: true, deletedExecutorsExcludedFrom: ['executor list', 'inspect_executor', 'update_executor', 'role CRUD', 'dispatch targets'], deletedExecutorsPreserve: ['historical Run data', 'executor version snapshots', 'executor memories', 'group archives', 'role directory'], beforeDelete: 'ask_user for confirmation; prevent if active Runs exist' },
           runWebRoute: '/executor-runs/:runId',
           roles: [...EXECUTOR_CATEGORY_ROLES],
           roleDisplayNames: { executor: 'Implementer' },
@@ -1562,8 +1558,9 @@ export class WorkspaceResourcesService {
           modes: ['plan_only', 'validate_existing', 'implement_and_validate'],
           modeSelection: 'Executors do not accept a mode on dispatch. An executor without a Dispatcher starts at its Planner; otherwise the Dispatcher decides it and records modeRationale and modeDecidedAt on the Run. Historical Runs keep their captured mode.',
           executorRoutes: {
+            create: 'POST /executors (name, optional description and templateExecutorId)',
             detail: 'GET /executors/:executorId',
-            update: 'PATCH /executors/:executorId (name, workingPractice, projectGitPolicy, maxConcurrentRuns)',
+            update: 'PATCH /executors/:executorId (name, description, workingPractice, projectGitPolicy, maxConcurrentRuns)',
             delete: 'DELETE /executors/:executorId',
             createRole: 'POST /executors/:executorId/roles (server assigns stable role id)',
             updateRole: 'PATCH /executors/:executorId/roles/:roleId',

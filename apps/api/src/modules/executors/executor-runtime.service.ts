@@ -1066,20 +1066,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const [existing] = await this.db.select().from(executorCategories)
       .where(and(eq(executorCategories.id, BUILT_IN_EXECUTOR_CATEGORY_ID), eq(executorCategories.workspaceId, 'workspace_personal')))
       .limit(1);
-    if (existing) {
-      const roles: StoredAgentTeamRoleConfiguration[] = [...existing.roles];
-      const activeRoles = ensureBuiltInTeamRoles(roles);
-      // Built-in executors are matched by their stable id only. Their name is user-editable,
-      // so re-seeding never rewrites it.
-      const description = existing.description === 'Built-in BMAD and TEA software development team.' || existing.description === 'Built-in BMAD and TEA team for company projects and requirements.'
-        ? 'Built-in BMAD and TEA executor for company projects and requirements.' : existing.description;
-      const projectGitPolicy = existing.projectGitPolicy.trim() || DEFAULT_COMPANY_PROJECT_GIT_POLICY;
-      if (JSON.stringify(roles) !== JSON.stringify(activeRoles)
-        || description !== existing.description || projectGitPolicy !== existing.projectGitPolicy) {
-        await this.db.update(executorCategories).set({ roles: activeRoles, description, projectGitPolicy, updatedAt: new Date() })
-          .where(eq(executorCategories.id, existing.id)).run();
-      }
-    } else {
+    if (!existing) {
       const roles = (Object.keys(EXECUTOR_CATEGORY_ROLE_INSTRUCTIONS) as AgentTeamRuntimeRole[])
         .filter((role) => role !== 'executor-manager')
         .map((role) => defaultRoleConfiguration(role));
@@ -1098,24 +1085,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const [directTeam] = await this.db.select().from(executorCategories)
       .where(and(eq(executorCategories.id, DIRECT_EXECUTOR_CATEGORY_ID), eq(executorCategories.workspaceId, 'workspace_personal')))
       .limit(1);
-    if (directTeam) {
-      // Keep the live Planner instructions in step with the source constant, the same
-      // way the company project executor's built-in role text is re-synced above. Without this, an
-      // instruction fix here never reaches a team row created by an earlier release.
-      // The Implementer role keeps its stable role id `executor`; only the built-in
-      // display name moved from "Executor" to "Implementer".
-      const roles: StoredAgentTeamRoleConfiguration[] = directTeam.roles.map((role) => {
-        if (role.role === 'planner' && role.instructions !== DIRECT_PLANNER_INSTRUCTIONS) return { ...role, instructions: DIRECT_PLANNER_INSTRUCTIONS };
-        if (role.role === 'executor' && role.displayName === 'Executor') return { ...role, displayName: DIRECT_IMPLEMENTER_DISPLAY_NAME };
-        return role;
-      });
-      if (JSON.stringify(roles) !== JSON.stringify(directTeam.roles)) {
-        await this.db.update(executorCategories).set({ roles, updatedAt: new Date() })
-          .where(eq(executorCategories.id, directTeam.id)).run();
-      }
-    } else {
-      // The general project executor has no Dispatcher and no Worktree Manager: it is a fixed
-      // Planner -> Implementer pair, so it never passes through ensureBuiltInTeamRoles.
+    if (!directTeam) {
+      // Seed a useful initial Planner -> Implementer configuration for new installations.
       const roles: StoredAgentTeamRoleConfiguration[] = [
         {
           ...defaultRoleConfiguration('planner'),
@@ -3144,16 +3115,6 @@ function defaultRoleConfiguration(role: AgentTeamRuntimeRole): StoredAgentTeamRo
   };
 }
 
-// Existing built-in executors may lack some default roles. Ensure Planner and Worktree Manager
-// are present, but do not add Dispatcher back if it has been deleted.
-function ensureBuiltInTeamRoles(roles: readonly StoredAgentTeamRoleConfiguration[]): StoredAgentTeamRoleConfiguration[] {
-  const active = roles.filter((role) => role.role !== 'executor-manager');
-  if (!active.some((role) => role.role === 'planner')) {
-    active.unshift(defaultRoleConfiguration('planner'));
-  }
-  if (!active.some((role) => role.role === 'worktree-manager')) active.push(defaultRoleConfiguration('worktree-manager'));
-  return active;
-}
 
 function taskAttribution(request: AgentTeamTaskRequest): { developerId?: string; assignmentTitle?: string } {
   return {

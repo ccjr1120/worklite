@@ -2098,12 +2098,19 @@ export type UpdateAgentTeamRequest = {
   // Display name: 1-64 characters after trimming, no control characters, unique among
   // non-deleted executors ignoring case. A rename affects only Runs dispatched afterwards.
   name?: string;
+  description?: string;
   // Optional precondition: the revision from the executor view. A stale value is rejected with 409.
   expectedRevision?: number;
   roles?: AgentTeamRoleConfiguration[];
   maxConcurrentRuns?: number;
   workingPractice?: string;
   projectGitPolicy?: string;
+};
+
+export type CreateAgentTeamRequest = {
+  name: string;
+  description?: string;
+  templateExecutorId?: string;
 };
 
 export type CreateAgentTeamRunRequest = {

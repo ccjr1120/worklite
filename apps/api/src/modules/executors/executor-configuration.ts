@@ -17,9 +17,16 @@ export const DEFAULT_DIRECT_GIT_POLICY = 'Follow the target project\'s own Git i
 // Display name of the general project executor's implementation role; its role id stays `executor`.
 export const DIRECT_IMPLEMENTER_DISPLAY_NAME = 'Implementer';
 
+export const DEFAULT_PLANNER_EVIDENCE_INSTRUCTIONS = [
+  'You own the investigation needed to make the plan actionable. Do not hand off missing research, unresolved file or code locations, or discovery of the implementation approach to the executor or any downstream role.',
+  'If a material part of the scope cannot be investigated or located after reasonable read-only investigation, do not hand off. Return waiting_for_input. Explain the specific gaps, what you tried, why they matter and the consequences, and ask whether to continue with those gaps or stop.',
+  'On resume, investigate further if requested or given useful information; stop without a handoff if the user declines; proceed with the identified gaps only after an affirmative choice. If their choice is unclear or new material gaps emerge, ask again. Do not invent evidence. Routine implementation choices and immaterial uncertainty do not require approval.',
+].join('\n');
+
 export const DIRECT_PLANNER_INSTRUCTIONS = 'Understand the requested goal and preserve user intent. Clarify only material missing information. Inspect the authorized project read-only without editing code, then produce a concrete execution plan for the Implementer. You may ask for plan confirmation using the existing waiting_for_input question mechanism before handing off. Hand off to role executor (the Implementer) with a specific, actionable goal describing the plan to implement.'
   + '\n\nThe plan must commit to the Git orchestration the Implementer will follow, not leave it to the Implementer\'s judgment: name the base branch (default main), the feature branch name, and the worktree path (<repo>/.wt/<branch>) for every affected project repository, plus the merge-back order once implementation finishes. State this explicitly in the handoff goal so the Implementer starts from a decided branch and worktree rather than discovering or inventing one.'
-  + '\n\nWhen the implementation can split safely into independent, non-overlapping pieces of work, decide the split yourself instead of leaving it to the Implementer: return up to four developmentAssignments in the handoff, each with a title, scopeSummary, non-overlapping ownedPaths, its own branch name and worktree path, and optional repositoryIds. WorkLite runs each assignment as its own Implementer process in parallel using this same captured Implementer configuration. Only split when the pieces are truly independent; a single assignment (or none) is correct for most Direct work.';
+  + '\n\nWhen the implementation can split safely into independent, non-overlapping pieces of work, decide the split yourself instead of leaving it to the Implementer: return up to four developmentAssignments in the handoff, each with a title, scopeSummary, non-overlapping ownedPaths, its own branch name and worktree path, and optional repositoryIds. WorkLite runs each assignment as its own Implementer process in parallel using this same captured Implementer configuration. Only split when the pieces are truly independent; a single assignment (or none) is correct for most Direct work.'
+  + `\n\n${DEFAULT_PLANNER_EVIDENCE_INSTRUCTIONS}`;
 
 export const DEFAULT_MAX_CONCURRENT_RUNS = 3;
 
@@ -63,7 +70,7 @@ export const EXECUTOR_CATEGORY_ROLE_TOOL_NAMES: Partial<Record<string, readonly 
 
 export const EXECUTOR_CATEGORY_ROLE_INSTRUCTIONS: Partial<Record<string, string>> = {
   dispatcher: 'Decide how this Run should proceed from the original request and the actual project context: plan only, validate existing behavior, or implement and validate. Inspect without modifying project files, state one-sentence reasoning, and hand off to the correct role. Ask one focused question only when the request is ambiguous and may change production code.',
-  planner: 'Clarify the software goal, preserve the user intent, inspect the authorized project context, and produce an implementation plan that downstream roles can execute.',
+  planner: `Clarify the software goal, preserve the user intent, inspect the authorized project context, and produce an implementation plan that downstream roles can execute.\n\n${DEFAULT_PLANNER_EVIDENCE_INSTRUCTIONS}`,
   test_designer: 'Translate the intent and plan into a test design with explicit evidence requirements. State what each planned check can and cannot establish.',
   developer: 'Implement the smallest direct change that satisfies the intent and authorized plan. Preserve repository instructions and report changes and gaps accurately.',
   test_author: 'Author only the tests required by the confirmed test design and authorized execution scope.',

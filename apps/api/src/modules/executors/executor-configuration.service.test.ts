@@ -35,13 +35,14 @@ async function setup() {
     workspaceId: 'workspace_personal',
     name: 'dino-cli',
     source: 'local',
+    validation: 'valid',
     instructions: '# Dino CLI\nUse dino-cli account current.',
   }).run();
   database.insert(skillFiles).values([
     { skillId: 'sk_dino', path: 'SKILL.md', content: '# Dino CLI\nUse dino-cli account current.' },
     { skillId: 'sk_dino', path: 'references/commands.md', content: 'account login -e <email>' },
   ]).run();
-  const resources = { publicModelRuntime: async () => ({ protocol: 'anthropic/messages' }) };
+  const resources = { publicModelRuntime: async () => ({ protocol: 'anthropic/messages' }), reconcileWorkspaceSkills: async () => undefined };
   return new AgentTeamConfigurationService(database, resources as never);
 }
 
@@ -79,5 +80,31 @@ describe('AgentTeamConfigurationService Skill capture', () => {
 
     await expect(configuration.update('workspace_personal', 'team_1', { roles: [dispatcher(['sk_missing'])] }))
       .rejects.toThrow('A selected Skill was not found in this workspace.');
+  });
+});
+
+describe('executor lifecycle', () => {
+  it('persists created configuration, copies a template and soft deletes independently', async () => {
+    const configuration = await setup();
+    const created = await configuration.create('workspace_personal', { name: 'Research', description: 'Investigate projects' });
+    expect(created.roles.map((role) => role.role)).toEqual(['planner', 'executor']);
+    const changed = await configuration.updateRole('workspace_personal', created.id, 'planner', { instructions: 'Investigate carefully.' });
+    await configuration.update('workspace_personal', created.id, { description: 'Updated purpose' });
+    const copy = await configuration.create('workspace_personal', { name: 'Research copy', templateExecutorId: created.id });
+    expect(copy.id).not.toBe(created.id);
+    expect(copy.description).toBe('Updated purpose');
+    expect(copy.roles[0]?.instructions).toBe('Investigate carefully.');
+    expect((await configuration.getTeam('workspace_personal', created.id)).roles).toEqual(changed.roles);
+    await configuration.deleteTeam('workspace_personal', created.id, created.id);
+    expect((await configuration.getTeam('workspace_personal', created.id)).deletedAt).not.toBeNull();
+    expect((await configuration.getTeam('workspace_personal', copy.id)).deletedAt).toBeNull();
+    await expect(configuration.create('workspace_personal', { name: 'Research copy' })).rejects.toThrow();
+  });
+
+  it('permits deleting the final executor and creating a new one', async () => {
+    const configuration = await setup();
+    await configuration.deleteTeam('workspace_personal', 'team_1', 'team_1');
+    const replacement = await configuration.create('workspace_personal', { name: 'Replacement' });
+    expect(replacement.roles).toHaveLength(2);
   });
 });

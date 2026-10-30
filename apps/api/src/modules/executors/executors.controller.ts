@@ -9,6 +9,7 @@ import type {
   RecoverAgentTeamOperationRequest,
   UpdateAgentTeamRequest,
   AgentTeamRoleConfiguration,
+  CreateAgentTeamRequest,
   UpdateAgentTeamMemoryRequest,
 } from '@worklite/contracts';
 import { AgentTeamDocumentsService } from './executor-documents.service';
@@ -25,6 +26,11 @@ export class ExecutorsController {
   @Get()
   list(@Req() request: Request) {
     return this.teams.list(request, 'personal');
+  }
+
+  @Post()
+  create(@Req() request: Request, @Body() body: CreateAgentTeamRequest) {
+    return this.teams.create(request, 'personal', body);
   }
 
   @Get(':executorId')

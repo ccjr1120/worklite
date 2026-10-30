@@ -13,6 +13,7 @@ import type {
   AgentTeamRunView,
   AgentTeamRunSummary,
   AgentTeamView,
+  CreateAgentTeamRequest,
   AnswerAgentTeamRunRequest,
   CreateAgentTeamRunRequest,
   RecoverAgentTeamOperationRequest,
@@ -70,6 +71,11 @@ export class ExecutorsService {
         notInArray(executorCategories.id, [...RETIRED_AGENT_TEAM_IDS]),
       )).orderBy(asc(executorCategories.name));
     return rows.map(toTeamView);
+  }
+
+  async create(request: Request, workspaceSlug: string, input: CreateAgentTeamRequest): Promise<AgentTeamView> {
+    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    return toTeamView(await this.configuration.create(workspace.id, input));
   }
 
   async update(

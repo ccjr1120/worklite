@@ -6,9 +6,6 @@ import { focusRing } from '@/components/ui/interaction';
 import { TruncatedText } from '@/components/ui/truncated-text';
 import { cn } from '@/lib/utils';
 
-// `/coding` opens the company project executor by its stable id.
-export const DEFAULT_EXECUTOR_CATEGORY_ID = 'agent_team_bmad_tea';
-
 const ACTIVE_RUN_STATUSES: AgentTeamRunStatus[] = ['running', 'waiting_for_input', 'paused'];
 
 /** Executor cards for the configuration view; each links to the same configuration page of that executor. */
