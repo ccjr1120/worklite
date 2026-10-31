@@ -661,6 +661,9 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
     for (const key of ['maxToolCalls', 'maxToolRounds', 'maxToolResultChars']) {
       if (value[key] !== undefined && (typeof value[key] !== 'number' || !Number.isInteger(value[key]) || value[key] < 1)) throw new BadRequestException(`Agent node ${key} must be a positive integer.`);
     }
+    if (value.maxOutputTokens !== undefined && (typeof value.maxOutputTokens !== 'number' || !Number.isInteger(value.maxOutputTokens) || value.maxOutputTokens < 1024 || value.maxOutputTokens > 128_000)) {
+      throw new BadRequestException('Agent node maxOutputTokens must be an integer from 1024 to 128000.');
+    }
     if (value.passthroughKeys !== undefined) {
       if (!Array.isArray(value.passthroughKeys) || !value.passthroughKeys.length || value.passthroughKeys.some((key) => typeof key !== 'string' || !key.trim()) || new Set(value.passthroughKeys).size !== value.passthroughKeys.length) throw new BadRequestException('Agent node passthroughKeys must be unique non-empty key names.');
       if (value.outputFormat !== 'json') throw new BadRequestException('Agent node passthroughKeys requires outputFormat json.');
