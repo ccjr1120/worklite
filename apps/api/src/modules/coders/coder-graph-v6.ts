@@ -196,7 +196,13 @@ export function createAgentTeamGroupGraph(
         ...(scopeContext === state.groupContext ? {} : { groupContext: scopeContext, projectDirectory: scopeProjectDirectory }),
       };
     }
-    const handoff = result.handoff;
+    // developmentAssignments only ever address the implementation role, so a role that returns
+    // them without a handoff has still assigned implementation work; route it there instead of
+    // ending the Run with the work undone.
+    const assignedOnly: typeof result.handoff = !result.handoff && implementationRoleId !== state.currentRole && result.developmentAssignments?.length
+      ? { role: implementationRoleId, goal: result.developmentAssignments.map((assignment) => assignment.scopeSummary || assignment.title).filter(Boolean).join('\n') || state.currentGoal }
+      : undefined;
+    const handoff = result.handoff ?? assignedOnly;
     if (!handoff) return { step: nextStep, finished: true, pendingInput: null, activeTaskKey: null, assignments: [], ...scopeUpdate };
     // v10 enforces the decided mode: validation cannot hand work to an
     // implementation role, and no role may re-enter the Dispatcher.

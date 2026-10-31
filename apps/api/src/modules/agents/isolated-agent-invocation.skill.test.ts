@@ -165,6 +165,25 @@ describe('IsolatedAgentInvocationService managed tool journaling', () => {
     expect(transitions).toEqual(['reserved', 'failed: The memory repository is outside this Run repository scope.']);
   });
 
+  it('returns a built-in tool input rejection to the model when no command was started', async () => {
+    const { BadRequestException } = await import('@nestjs/common');
+    const operations = journal();
+    let toolResult: unknown;
+    gateway.runWorkflowAgent.mockImplementationOnce(async (request: { executeTool: (call: unknown) => Promise<unknown> }) => {
+      toolResult = await request.executeTool({ toolCallId: 'call_1', toolName: 'glob', input: { pattern: '/elsewhere/**' } });
+      return { text: 'done' };
+    });
+    const invocation = new IsolatedAgentInvocationService(
+      { publicModelCandidates: async () => [{ provider: { id: 'provider' }, model: 'model' }] } as never,
+      { start: async () => { throw new BadRequestException('The glob pattern must be inside the project directory.'); } } as never,
+      { discover: async () => [] } as never,
+      { toolDefinitions: (names?: readonly string[]) => (names ?? []).map((name) => ({ name, description: '', inputSchema: { type: 'object' } })), start: async () => { throw new BadRequestException('The glob pattern must be inside the project directory.'); } } as never,
+    );
+    await invocation.execute(baseRequest({ builtinToolNames: ['glob'], operation: { taskKey: 'group_0_planner', journal: operations } }));
+    expect(toolResult).toEqual({ type: 'error-text', value: 'The glob pattern must be inside the project directory.' });
+    expect(operations.transitions).toEqual([]);
+  });
+
   it('still asks for recovery when a managed tool fails for an unknown reason', async () => {
     await expect(runManagedTool(async () => { throw new Error('database is locked'); }))
       .rejects.toThrow('requires a recovery decision before it can continue');

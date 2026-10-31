@@ -1,6 +1,6 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
-import { APICallError, generateText, InvalidToolInputError, isStepCount, JSONParseError, jsonSchema, NoOutputGeneratedError, Output, streamText, ToolLoopAgent, tool, wrapLanguageModel, type LanguageModel, type LanguageModelCallEndEvent, type LanguageModelUsage, type ModelMessage, type PrepareStepFunction, type ToolExecutionEndEvent, type ToolSet } from 'ai';
+import { APICallError, generateText, InvalidToolInputError, isStepCount, JSONParseError, jsonSchema, NoOutputGeneratedError, Output, RetryError, streamText, ToolLoopAgent, tool, wrapLanguageModel, type LanguageModel, type LanguageModelCallEndEvent, type LanguageModelUsage, type ModelMessage, type PrepareStepFunction, type ToolExecutionEndEvent, type ToolSet } from 'ai';
 import { gatewayAttributionHeaders, type GatewayCorrelation } from './attribution.ts';
 
 // The Anthropic protocol requires max_tokens and the AI SDK defaults it to 4096
@@ -705,10 +705,14 @@ function modelFailure(error: unknown, streamCause: unknown): Error {
   if ([error, streamCause].some((value) => value instanceof Error && /context_length_exceeded|Prompt exceeds max length|maximum context length/i.test(value.message))) {
     return new ModelGatewayError('INVALID_REQUEST', 'The model context limit was exceeded. Inspect focused diagnostic records or start a new conversation; complete evidence remains in the execution records.');
   }
-  const cause = APICallError.isInstance(streamCause) ? streamCause : APICallError.isInstance(error) ? error : undefined;
+  // The AI SDK's own retries wrap the provider error in a RetryError; the status lives on its last error.
+  const unwrap = (value: unknown) => RetryError.isInstance(value) ? value.lastError : value;
+  const [providerError, providerStreamCause] = [unwrap(error), unwrap(streamCause)];
+  const cause = APICallError.isInstance(providerStreamCause) ? providerStreamCause : APICallError.isInstance(providerError) ? providerError : undefined;
   const status = cause?.statusCode;
   if (status) {
-    const failure = new ModelGatewayError('PROVIDER_REQUEST_FAILED', `模型服务请求失败（HTTP ${status}），请稍后重试。`);
+    const detail = providerErrorMessage(cause.responseBody);
+    const failure = new ModelGatewayError('PROVIDER_REQUEST_FAILED', `模型服务请求失败（HTTP ${status}）${detail ? `：${detail}` : '，请稍后重试。'}`);
     failure.statusCode = status;
     return failure;
   }
@@ -716,6 +720,22 @@ function modelFailure(error: unknown, streamCause: unknown): Error {
     return new ModelGatewayError('PROVIDER_REQUEST_FAILED', '模型服务未返回可用内容，请检查连接和模型能力后重试。');
   }
   return error instanceof Error ? error : new Error('The model request failed.');
+}
+
+// The provider's own error message (for example an exhausted quota and when it resets), with
+// credentials and request ids left to the Gateway logs. Bounded so it stays one readable line.
+function providerErrorMessage(responseBody: string | undefined): string | null {
+  if (!responseBody) return null;
+  let message: unknown;
+  try {
+    const parsed = JSON.parse(responseBody) as { error?: { message?: unknown } | string; message?: unknown };
+    message = typeof parsed.error === 'string' ? parsed.error : parsed.error?.message ?? parsed.message;
+  } catch {
+    return null;
+  }
+  if (typeof message !== 'string' || !message.trim()) return null;
+  const text = message.replace(/^openai error:\s*/i, '').replace(/\s*Request id:\s*\S+\s*$/i, '').replace(/\s+/g, ' ').trim();
+  return text.length > 300 ? `${text.slice(0, 300)}…` : text;
 }
 
 const FALLBACK_ELIGIBLE_STATUS_CODES = new Set([408, 409, 429, 500, 502, 503, 504]);

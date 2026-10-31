@@ -72,6 +72,25 @@ async function run(start: AgentTeamGroupGraphInitial, replies: Record<string, Ro
   return { roles: calls.map((call) => call.taskDefinition.role), modes: calls.map((call) => call.mode), state: state.values };
 }
 
+describe('Planner development assignments without a handoff', () => {
+  function plannerStart(): AgentTeamGroupGraphInitial {
+    return { ...initial('planner', 'implement_and_validate', 10), implementationRoleId: 'executor' };
+  }
+
+  it('runs the implementation role when the Planner assigns work but omits the handoff', async () => {
+    const { roles, state } = await run(plannerStart(), {
+      planner: { message: 'Plan ready.', developmentAssignments: [{ title: 'Render PNGs', scopeSummary: 'Render the mascot PNGs.', ownedPaths: ['render.mjs'] }] },
+    });
+    expect(roles).toEqual(['planner', 'executor']);
+    expect((state as { finished?: boolean }).finished).toBe(true);
+  });
+
+  it('still finishes after a Planner that answers directly with no assignments', async () => {
+    const { roles } = await run(plannerStart(), { planner: { message: 'Read-only answer.' } });
+    expect(roles).toEqual(['planner']);
+  });
+});
+
 describe('orchestration v10 Dispatcher routing', () => {
   it('ends a plan_only Run after the Planner even when the Planner hands off to Developer', async () => {
     const result = await run(initial(CODER_DISPATCHER_ROLE, 'plan_only', 10), {

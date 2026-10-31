@@ -397,6 +397,11 @@ export class IsolatedAgentInvocationService {
       if (operationReserved) {
         await request.operation.journal.failOperation(dispatchKey, reason);
       }
+      // A built-in tool that refused its input before reserving a command (a glob outside the
+      // project, a missing path) ran nothing, so the model can correct the request itself.
+      if (commandBackedTool && !effectDispatched && error instanceof BadRequestException) {
+        return { type: 'error-text', value: reason };
+      }
       throw error;
     }
   }
