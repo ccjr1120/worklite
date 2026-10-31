@@ -1237,8 +1237,13 @@ export function requestLogs(query: GatewayTimeRangeQuery & GatewayAttributionQue
     values.push(query.provider.trim());
   }
   if (query.model?.trim()) {
-    conditions.push('model = ?');
-    values.push(query.model.trim());
+    // Rows store the provider and the bare model id separately, while the rest of WorkLite
+    // names a model by its public <provider>/<model> id. Accept both spellings so a query
+    // copied from a Workflow or Coder setting does not silently match nothing.
+    const model = query.model.trim();
+    const slash = model.indexOf('/');
+    conditions.push(slash > 0 ? '((provider_name = ? AND model = ?) OR model = ?)' : 'model = ?');
+    values.push(...(slash > 0 ? [model.slice(0, slash), model.slice(slash + 1), model] : [model]));
   }
   const attribution = attributionConditions(query);
   conditions.push(...attribution.conditions);

@@ -8,6 +8,16 @@ import { gatewayAttributionHeaders, type GatewayCorrelation } from './attributio
 // Planner's JSON plan) mid-response. Give Agent loops a larger default budget;
 // callers can still override through maxOutputTokens.
 const DEFAULT_AGENT_MAX_OUTPUT_TOKENS = 32_768;
+// Current Claude models think on every turn (Opus 5.5 cannot disable it) and the thinking
+// tokens count against max_tokens. A long JSON deliverable such as a whole article spent
+// most of 32K on thinking and was cut off before the closing brace, so the Anthropic
+// protocol gets a streaming-sized default. OpenAI-compatible providers keep 32K because
+// several of them reject a larger completion budget.
+const DEFAULT_ANTHROPIC_MAX_OUTPUT_TOKENS = 64_000;
+
+function defaultMaxOutputTokens(provider: ModelProviderConfig): number {
+  return provider.adapter === 'anthropic' ? DEFAULT_ANTHROPIC_MAX_OUTPUT_TOKENS : DEFAULT_AGENT_MAX_OUTPUT_TOKENS;
+}
 
 export type ModelProviderConfig =
   | {
@@ -202,6 +212,20 @@ export class AgentJsonOutputError extends Error {
   }
 }
 
+// The model hit the request's max output tokens before finishing a JSON reply. Retrying the
+// same request reproduces it, so callers report it instead of re-running unchanged.
+export class AgentOutputTruncatedError extends Error {
+  readonly model: string;
+  readonly maxOutputTokens: number;
+
+  constructor(model: string, maxOutputTokens: number) {
+    super(`模型 ${model} 的输出达到单次上限 ${maxOutputTokens} tokens（finishReason=length，思考 token 也计入此上限），JSON 结果被截断。请提高节点的 maxOutputTokens，或缩短要求一次输出的内容。`);
+    this.name = 'AgentOutputTruncatedError';
+    this.model = model;
+    this.maxOutputTokens = maxOutputTokens;
+  }
+}
+
 export class AiSdkModelGateway implements ModelGateway {
   streamText(request: StreamTextRequest): ModelStream {
     // No fallback loop here by design, not by omission: ModelStream hands back a synchronous
@@ -293,7 +317,7 @@ export class AiSdkModelGateway implements ModelGateway {
         // instruction alone asks for a text answer.
         ...(request.toolsDisabled && Object.keys(tools).length > 0 && candidate.provider.adapter !== 'anthropic' ? { toolChoice: 'none' as const } : {}),
         providerOptions: Object.keys(openaiProviderOptions).length > 0 ? { openai: openaiProviderOptions } : undefined,
-        maxOutputTokens: request.maxOutputTokens ?? DEFAULT_AGENT_MAX_OUTPUT_TOKENS,
+        maxOutputTokens: request.maxOutputTokens ?? defaultMaxOutputTokens(candidate.provider),
         abortSignal: request.abortSignal,
       };
 
@@ -420,6 +444,7 @@ export class AiSdkModelGateway implements ModelGateway {
       ...(useResponses ? { strictJsonSchema: false as const } : {}),
       ...(candidate.provider.adapter === 'codex' ? { store: false as const, include: ['reasoning.encrypted_content'] } : {}),
     };
+    const outputBudget = request.maxOutputTokens ?? defaultMaxOutputTokens(candidate.provider);
     const agentSettings = {
       model,
       instructions: request.systemPrompt,
@@ -427,7 +452,7 @@ export class AiSdkModelGateway implements ModelGateway {
       output: request.jsonOutput ? Output.json({ name: 'response' }) : undefined,
       tools: Object.keys(tools).length > 0 ? tools : undefined,
       providerOptions: Object.keys(openaiProviderOptions).length > 0 ? { openai: openaiProviderOptions } : undefined,
-      maxOutputTokens: request.maxOutputTokens ?? DEFAULT_AGENT_MAX_OUTPUT_TOKENS,
+      maxOutputTokens: outputBudget,
       abortSignal: request.abortSignal,
       maxRetries: 0,
       stopWhen: isStepCount(maxToolRounds + 1),
@@ -480,6 +505,10 @@ export class AiSdkModelGateway implements ModelGateway {
     if (streamError) throw streamError;
     if (toolExecutionError) throw toolExecutionError;
     const [text, finalStep] = await Promise.all([result.text, result.finalStep]);
+    // A JSON deliverable cut off by the output budget is never valid JSON, and the tolerant
+    // extractor could otherwise return a nested array from the partial object. Name the
+    // budget so the failure is not mistaken for a model that ignored the output contract.
+    if (request.jsonOutput && finalStep?.finishReason === 'length') throw new AgentOutputTruncatedError(candidate.model, outputBudget);
     const toolCalls = finalStep?.toolCalls ?? [];
     const invalidToolRequest = classifyInvalidToolRequest(toolCalls);
     if (invalidToolRequest) throw invalidToolRequest;

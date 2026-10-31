@@ -118,6 +118,7 @@ import {
 } from './coder-graph-v4';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { AgentJsonOutputError, normalizePublicModelList } from '@worklite/model-gateway';
+import { retryTransientProviderFailure } from './coder-provider-retry';
 import { capturedCoderName, deriveRunCurrent, effectiveTaskModel, taskRoleName } from './coder-run-summary';
 import { CommandsService } from '../commands/commands.service';
 import { createAgentTeamGroupGraph, type AgentTeamGroupGraphInitial, type AgentTeamGroupGraphState } from './coder-graph-v6';
@@ -1591,6 +1592,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     const controller = this.abortControllers.get(request.runId);
     const signal = controller?.signal ?? new AbortController().signal;
     const commandIds = new Set<string>();
+    // Model calls this attempt has finished. Tools run only after a call finishes, so while it is
+    // zero a failed model-loop invocation has had no side effect and can be repeated safely.
+    let modelRoundsCompleted = 0;
     // v1-v3 lanes use the historical runtime-managed worktree and merge paths. v4 lanes
     // receive their worktree from the Worktree Manager setup; v5 delegates Git choices to
     // the Developer executor and starts it in the supplied workspace root.
@@ -1769,6 +1773,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         correlation: { surface: 'coder', coderId: run.coderId, teamRunId: request.runId, teamRole: taskRole, teamTaskAttemptId: attempt.id, nodeRunId: attempt.id },
         limits: taskRole === 'planner' ? PLANNER_INVOCATION_LIMITS : { maxToolResultChars: 30_000 },
         operation: { taskKey, journal: operationJournal },
+        onModelRound: () => {
+          modelRoundsCompleted += 1;
+        },
         onTextDelta: (delta) => this.appendEvent(this.db, request.runId, 'task.delta', {
           taskAttemptId: attempt.id,
           taskKey,
@@ -1791,7 +1798,21 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       try {
         let output: string;
         try {
-          output = await produceOutput(correction);
+          output = await retryTransientProviderFailure({
+            invoke: () => {
+              modelRoundsCompleted = 0;
+              return produceOutput(correction);
+            },
+            nothingRan: () => modelRoundsCompleted === 0,
+            signal,
+            onRetry: ({ retry, delayMs, reason }) => this.appendEvent(this.db, request.runId, 'task.activity', {
+              taskAttemptId: attempt.id,
+              taskKey,
+              ...taskAttribution(request),
+              kind: 'provider_retry',
+              message: `模型服务暂时不可用，${Math.round(delayMs / 1000)} 秒后重试（第 ${retry} 次）：${reason}`,
+            }),
+          });
         } catch (error) {
           // A reply with no JSON at all (for example a Markdown report) earns the same single
           // correction as a reply whose JSON fails validation.

@@ -229,7 +229,7 @@ export class AgentExecutionsService implements OnModuleInit {
     jsonOutput = false,
     activity?: WorkflowAgentActivityReporter,
     correlation?: { workflowId: string; workflowRunId: string; nodeRunId: string },
-    limits?: { maxToolCalls?: number; maxToolRounds?: number; maxToolResultChars?: number },
+    limits?: { maxToolCalls?: number; maxToolRounds?: number; maxToolResultChars?: number; maxOutputTokens?: number },
   ): Promise<string> {
     const selectedSkillIds = await this.resources.resolveSkillIds(workspaceId, requestedSkillIds);
     const skillRows = selectedSkillIds.length === 0

@@ -114,6 +114,8 @@ type IsolatedAgentInvocationRequest = {
     budgetReminderAtRound?: number;
     maxToolResultChars?: number;
     maxContextTokens?: number;
+    // Per-response output ceiling, thinking included; unset keeps the Gateway's per-protocol default.
+    maxOutputTokens?: number;
     builtinOutput?: BuiltinOutputLimits;
   };
   operation?: {
@@ -247,6 +249,7 @@ export class IsolatedAgentInvocationService {
       budgetReminderAtRound: request.limits?.budgetReminderAtRound,
       maxToolCalls: request.limits?.maxToolCalls,
       maxContextTokens: request.limits?.maxContextTokens,
+      maxOutputTokens: request.limits?.maxOutputTokens,
       abortSignal: request.signal,
       onTextDelta: request.onTextDelta,
       onModelRound: request.onModelRound,

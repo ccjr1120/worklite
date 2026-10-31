@@ -158,5 +158,10 @@ describe('gateway usage storage', () => {
         totalTokens: 105,
       })
     );
+
+    // WorkLite names models as <provider>/<model>; the stored row keeps them apart.
+    expect(requestLogs({ from, to, model: 'openai/test-model' }).items.map((item) => item.id)).toEqual(['glog_usage_test']);
+    expect(requestLogs({ from, to, model: 'test-model' }).items.map((item) => item.id)).toEqual(['glog_usage_test']);
+    expect(requestLogs({ from, to, model: 'other/test-model' }).items).toEqual([]);
   });
 });

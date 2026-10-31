@@ -155,7 +155,7 @@ export class RunsService {
           config.outputFormat === 'json',
           (detail) => this.publishActivity(request.context.workflowRunId, request.context.nodeId, request.context.nodeRunId, detail),
           { workflowId: request.context.workflowId, workflowRunId: request.context.workflowRunId, nodeRunId: request.context.nodeRunId },
-          { maxToolCalls: config.maxToolCalls as number | undefined, maxToolRounds: config.maxToolRounds as number | undefined, maxToolResultChars: config.maxToolResultChars as number | undefined },
+          { maxToolCalls: config.maxToolCalls as number | undefined, maxToolRounds: config.maxToolRounds as number | undefined, maxToolResultChars: config.maxToolResultChars as number | undefined, maxOutputTokens: config.maxOutputTokens as number | undefined },
         );
         if (config.outputFormat !== 'json') return { output: response };
         const output = parseWorkflowAgentJson(response);
