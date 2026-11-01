@@ -1892,6 +1892,11 @@ async function insertUploadedMaterialsAndReadOriginalUrls(
   await bodyEditor.waitFor({ state: 'visible', timeout: 20_000 });
   const imageSelector = 'img[data-src], img[data-imgfileid]';
   const previousImageCount = await bodyEditor.locator(imageSelector).count();
+  // An existing draft already holds images, and the editor inserts at the
+  // cursor, so new images are told apart by material id, not by position.
+  const previousIdentities = new Set((await bodyEditor.locator(imageSelector).evaluateAll((images) => images.map((image) => image.getAttribute('data-src') || image.getAttribute('src') || '')))
+    .filter(Boolean)
+    .map(thumbnailIdentity));
   const sources = await pickerItemSources(items);
   const uploadedIndices = uploads.map((upload) => sources.findIndex((source) => thumbnailIdentity(source) === upload.identity));
   if (uploadedIndices.some((index) => index < 0)) throw new Error('A newly uploaded inline image disappeared from the material picker before insertion.');
@@ -1939,9 +1944,11 @@ async function insertUploadedMaterialsAndReadOriginalUrls(
     dataUrl: image.getAttribute('data-url'),
   })));
   const uploadedUrls = new Map<string, string>();
-  for (const image of insertedImages.slice(previousImageCount)) {
+  for (const image of insertedImages) {
     const originalUrl = [image.dataSrc, image.src, image.dataOriginal, image.dataUrl]
       .find((candidate) => Boolean(candidate && materialImageCandidate(candidate) && !isThumbnailMaterialUrl(candidate)));
+    const anyUrl = originalUrl ?? [image.dataSrc, image.src].find(Boolean) ?? '';
+    if (previousIdentities.has(thumbnailIdentity(anyUrl))) continue;
     if (!originalUrl) throw new Error('WeChat did not insert an original material URL into the article body.');
     const identity = thumbnailIdentity(originalUrl);
     const upload = uploads.find((candidate) => candidate.identity === identity);
