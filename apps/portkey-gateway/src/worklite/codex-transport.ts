@@ -14,15 +14,58 @@ type CodexConfig = {
   residency: string;
 };
 
+// Aligned with openai/codex rust-v0.166.0 (6ff1e1ca3b30fc8b914720681fcf5fe62e95f856).
+// Upstream derives client_version from the crate version (models-manager client_version_to_whole) and builds
+// the user agent as "<originator>/<version> (<os> <os version>; <arch>) <terminal>" (login default_client.rs);
+// the OS and terminal part below is a representative value because a gateway has no client terminal.
+const UPSTREAM_CODEX_VERSION = '0.166.0';
+const UPSTREAM_USER_AGENT_PLATFORM = '(Mac OS 15.5.0; arm64) unknown';
+
 function config(): CodexConfig {
+  const clientVersion = process.env.CODEX_CLIENT_VERSION?.trim() || UPSTREAM_CODEX_VERSION;
+  const originator = process.env.CODEX_ORIGINATOR?.trim() || 'codex_cli_rs';
   return {
     upstreamBaseURL: (process.env.CODEX_UPSTREAM_URL?.trim() || 'https://chatgpt.com/backend-api/codex').replace(/\/+$/, ''),
-    clientVersion: process.env.CODEX_CLIENT_VERSION?.trim() || '26.707.31428',
-    userAgent: process.env.CODEX_USER_AGENT?.trim() || 'Codex Desktop/26.707.31428 (win32; x64)',
-    originator: process.env.CODEX_ORIGINATOR?.trim() || 'codex_cli_rs',
+    clientVersion,
+    userAgent: process.env.CODEX_USER_AGENT?.trim() || `${originator}/${clientVersion} ${UPSTREAM_USER_AGENT_PLATFORM}`,
+    originator,
     residency: process.env.CODEX_RESIDENCY?.trim() || 'us',
   };
 }
+
+// Request headers the upstream Codex client attaches to Responses calls (core/src/client.rs,
+// core/src/responses_metadata.rs, codex-api/src/requests/headers.rs); forwarded when the caller sends them.
+const FORWARDED_REQUEST_HEADERS = [
+  'openai-beta',
+  'session-id',
+  'thread-id',
+  'x-codex-turn-state',
+  'x-codex-turn-metadata',
+  'x-codex-window-id',
+  'x-codex-parent-thread-id',
+  'x-codex-beta-features',
+  'x-codex-routing-hint',
+  'x-openai-subagent',
+  'x-openai-memgen-request',
+  'x-openai-internal-codex-responses-lite',
+  'x-oai-attestation',
+];
+
+// Response headers the upstream client reads (codex-api/src/sse/responses.rs, rate_limits.rs, endpoint/images.rs).
+// Every x-codex-* header is also forwarded so per-limit rate-limit families and credits survive the proxy.
+const FORWARDED_RESPONSE_HEADERS = [
+  'content-type',
+  'cache-control',
+  'x-request-id',
+  'x-oai-request-id',
+  'openai-model',
+  'x-openai-model',
+  'x-reasoning-included',
+  'openai-verification-recommendation',
+  'x-ratelimit-limit-requests',
+  'x-ratelimit-remaining-requests',
+  'x-ratelimit-reset-requests',
+];
 
 function unavailable(): Response {
   return json({ error: { message: 'Codex Provider is not configured.', type: 'configuration_error' } }, 503);
@@ -32,7 +75,8 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
 }
 
-function upstreamHeaders(requestHeaders: Record<string, string>, accessToken: string, accountId: string | undefined, accept: string, includeBeta = false): Headers {
+// Default client headers (login/src/auth/default_client.rs default_headers) plus ChatGPT account routing.
+function clientHeaders(accessToken: string, accountId: string | undefined, accept: string): Headers {
   const current = config();
   const headers = new Headers({
     authorization: `Bearer ${accessToken}`,
@@ -40,11 +84,17 @@ function upstreamHeaders(requestHeaders: Record<string, string>, accessToken: st
     'user-agent': current.userAgent,
     originator: current.originator,
     'x-openai-internal-codex-residency': current.residency,
-    'x-client-request-id': requestHeaders['x-client-request-id']?.trim() || `req_${randomUUID()}`,
   });
   if (accountId) headers.set('chatgpt-account-id', accountId);
-  if (includeBeta) headers.set('openai-beta', requestHeaders['openai-beta']?.trim() || 'responses_websockets=2026-02-06');
-  for (const name of ['openai-beta', 'x-codex-turn-state']) {
+  return headers;
+}
+
+function upstreamHeaders(requestHeaders: Record<string, string>, accessToken: string, accountId: string | undefined, accept: string): Headers {
+  const headers = clientHeaders(accessToken, accountId, accept);
+  // Upstream uses the thread id as x-client-request-id; OpenAI-Beta responses_websockets is only sent on the
+  // WebSocket handshake, so the HTTP transport forwards it only when the caller supplies it.
+  headers.set('x-client-request-id', requestHeaders['x-client-request-id']?.trim() || requestHeaders['thread-id']?.trim() || `req_${randomUUID()}`);
+  for (const name of FORWARDED_REQUEST_HEADERS) {
     const value = requestHeaders[name]?.trim();
     if (value) headers.set(name, value);
   }
@@ -53,10 +103,13 @@ function upstreamHeaders(requestHeaders: Record<string, string>, accessToken: st
 
 function copyResponseHeaders(upstream: Response): Headers {
   const headers = new Headers();
-  for (const name of ['content-type', 'cache-control', 'x-request-id', 'x-codex-imagegen-request-id', 'x-ratelimit-limit-requests', 'x-ratelimit-remaining-requests', 'x-ratelimit-reset-requests']) {
+  for (const name of FORWARDED_RESPONSE_HEADERS) {
     const value = upstream.headers.get(name);
     if (value) headers.set(name, value);
   }
+  upstream.headers.forEach((value, name) => {
+    if (name.toLowerCase().startsWith('x-codex-') && value) headers.set(name, value);
+  });
   return headers;
 }
 
@@ -74,8 +127,11 @@ function usageURL(): string {
 function rateLimitWindow(value: unknown): RateLimitWindow | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
-  if (typeof row.used_percent !== 'number' || typeof row.limit_window_seconds !== 'number' || typeof row.reset_at !== 'number') return null;
-  return { usedPercent: row.used_percent, limitWindowSeconds: row.limit_window_seconds, resetsAt: new Date(row.reset_at * 1000).toISOString() };
+  // RateLimitWindowSnapshot: used_percent, limit_window_seconds, reset_after_seconds, reset_at (epoch seconds).
+  if (typeof row.used_percent !== 'number' || typeof row.limit_window_seconds !== 'number') return null;
+  const resetAt = typeof row.reset_at === 'number' ? row.reset_at * 1000 : typeof row.reset_after_seconds === 'number' ? Date.now() + row.reset_after_seconds * 1000 : null;
+  if (resetAt === null) return null;
+  return { usedPercent: row.used_percent, limitWindowSeconds: row.limit_window_seconds, resetsAt: new Date(resetAt).toISOString() };
 }
 
 function rateLimit(value: unknown, id: string, name: string | null) {
@@ -86,8 +142,7 @@ function rateLimit(value: unknown, id: string, name: string | null) {
 
 async function fetchUsage(lease: Awaited<ReturnType<typeof acquireCodexAccountById>>): Promise<{ planType: string | null; primary: RateLimitWindow | null; secondary: RateLimitWindow | null }> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const headers = new Headers({ authorization: `Bearer ${lease.accessToken}`, accept: 'application/json', 'user-agent': config().userAgent });
-    if (lease.accountId) headers.set('chatgpt-account-id', lease.accountId);
+    const headers = clientHeaders(lease.accessToken, lease.accountId, 'application/json');
     const response = await fetch(usageURL(), { headers, signal: AbortSignal.timeout(30_000) });
     if (response.status === 401 && attempt === 0) { lease.accessToken = await lease.refresh(); continue; }
     if (!response.ok) throw new Error(`Codex usage request failed (${response.status}).`);
@@ -126,8 +181,7 @@ export async function codexRateLimits(): Promise<CodexRateLimitSnapshot> {
   const lease = await acquireCodexAccount();
   try {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const headers = new Headers({ authorization: `Bearer ${lease.accessToken}`, accept: 'application/json', 'user-agent': config().userAgent });
-      if (lease.accountId) headers.set('chatgpt-account-id', lease.accountId);
+      const headers = clientHeaders(lease.accessToken, lease.accountId, 'application/json');
       const response = await fetch(usageURL(), { headers, signal: AbortSignal.timeout(30_000) });
       if (response.status === 401 && attempt === 0) { lease.accessToken = await lease.refresh(); continue; }
       if (!response.ok) throw new Error(`Codex rate-limit request failed (${response.status}).`);
@@ -136,8 +190,9 @@ export async function codexRateLimits(): Promise<CodexRateLimitSnapshot> {
       if (Array.isArray(payload.additional_rate_limits)) payload.additional_rate_limits.forEach((item, index) => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return;
         const row = item as Record<string, unknown>;
-        const id = typeof row.metered_limit_name === 'string' ? row.metered_limit_name : typeof row.limit_name === 'string' ? row.limit_name : `additional_${index + 1}`;
-        const name = typeof row.limit_name === 'string' ? row.limit_name : typeof row.metered_limit_name === 'string' ? row.metered_limit_name : null;
+        // AdditionalRateLimitDetails: metered_feature is the limit id, limit_name the display name (backend-client client.rs).
+        const id = [row.metered_feature, row.metered_limit_name, row.limit_name].find((item): item is string => typeof item === 'string' && Boolean(item)) ?? `additional_${index + 1}`;
+        const name = [row.limit_name, row.metered_feature, row.metered_limit_name].find((item): item is string => typeof item === 'string' && Boolean(item)) ?? null;
         limits.push(rateLimit(row.rate_limit, id, name));
       });
       return { planType: typeof payload.plan_type === 'string' ? payload.plan_type : null, limits: limits.filter((limit) => limit.primary || limit.secondary) };
@@ -215,7 +270,7 @@ async function responses(request: Request, requestHeaders: Record<string, string
   try { lease = await acquireCodexAccount(); } catch { return unavailable(); }
   try {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const headers = upstreamHeaders(requestHeaders, lease.accessToken, lease.accountId, compact ? 'application/json' : 'text/event-stream', true);
+      const headers = upstreamHeaders(requestHeaders, lease.accessToken, lease.accountId, compact ? 'application/json' : 'text/event-stream');
       headers.set('content-type', requestHeaders['content-type'] || 'application/json');
       const upstream = await fetch(upstreamURL(compact ? '/responses/compact' : '/responses'), { method: 'POST', headers, body: forwardedBody === undefined ? undefined : JSON.stringify(forwardedBody), signal: request.signal });
       if (upstream.status !== 401 || attempt === 1) return new Response(upstream.body, { status: upstream.status, headers: copyResponseHeaders(upstream) });
