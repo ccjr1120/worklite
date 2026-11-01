@@ -3214,6 +3214,11 @@ export function rolePromptAddition(
         'When a Planner plan document is handed to you, treat it as the decided scope. Read only the files and symbols it names before editing them. Do not search the repository broadly, re-investigate its findings, or re-verify its decisions. If the code differs from the plan, apply the change only when the plan\'s intent at that location is unambiguous; otherwise leave it unchanged and report the mismatch in unresolvedIssues instead of investigating further.',
       ] : []),
       `To pass work onward, include a handoff object with a role id captured by this Coder version and a specific goal. Omit handoff when your work is complete or you are waiting for the user.`,
+      `Captured role ids (use the id exactly in handoff.role, not the display name): ${snapshot.roles.map((item) => {
+        const label = item.displayName?.trim();
+        const tags = [label && label !== item.role ? `display name "${label}"` : '', item.executor ? 'implementation role' : ''].filter(Boolean);
+        return tags.length ? `${item.role} (${tags.join(', ')})` : item.role;
+      }).join('; ')}.`,
       (() => {
         const implementationRole = snapshot.roles.find((item) => item.executor)?.role;
         return role === implementationRole
@@ -3693,7 +3698,8 @@ function parseRoleHandoff(value: unknown, supportedRoleIds: readonly string[]): 
   if (value === undefined || value === null) return undefined;
   const handoff = value as { role?: unknown; goal?: unknown; repositoryIds?: unknown };
   if (typeof handoff.role !== 'string' || !supportedRoleIds.includes(handoff.role)) {
-    throw new Error('A role handoff needs a role captured by this Coder version.');
+    const rejected = typeof handoff.role === 'string' ? `"${handoff.role}"` : 'a missing role';
+    throw new Error(`A role handoff needs a role captured by this Coder version; got ${rejected}. Valid handoff.role values: ${supportedRoleIds.join(', ') || 'none'}.`);
   }
   if (typeof handoff.goal !== 'string' || !handoff.goal.trim()) {
     throw new Error('A role handoff needs a specific goal.');

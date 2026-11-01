@@ -164,3 +164,18 @@ describe('groupRolePromptAddition v11', () => {
     expect(addition).not.toContain('Legacy role-only fact.');
   });
 });
+
+describe('handoff role ids', () => {
+  it('lists the exact captured role ids with display names and the implementation role', () => {
+    const value = {
+      ...snapshot(11),
+      roles: [
+        { role: 'planner' },
+        { role: 'executor', displayName: 'Implementer', executor: 'codex_app_server' },
+      ],
+    } as unknown as StoredAgentTeamVersionSnapshot;
+    const addition = rolePromptAddition('planner', value, request('group_0_planner', 'planner', []));
+
+    expect(addition).toContain('Captured role ids (use the id exactly in handoff.role, not the display name): planner; executor (display name "Implementer", implementation role).');
+  });
+});
