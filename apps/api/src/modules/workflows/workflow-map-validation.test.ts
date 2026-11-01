@@ -19,7 +19,7 @@ async function setup() {
   db = createDb(':memory:');
   await initializeDatabase(db);
   const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) } as unknown as WorkspaceService;
-  const resources = { assertPublicAgentModel: async () => undefined } as unknown as WorkspaceResourcesService;
+  const resources = { assertPublicAgentModel: async () => undefined, reconcileWorkspaceSkills: async () => undefined } as unknown as WorkspaceResourcesService;
   return new WorkflowsService(db, workspaces, {} as WorkflowSchedulesService, resources);
 }
 

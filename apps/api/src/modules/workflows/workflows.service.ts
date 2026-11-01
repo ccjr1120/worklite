@@ -13,7 +13,9 @@ import type {
   WorkflowDashboardElement,
   WorkflowDashboardField,
   WorkflowDetailView,
+  WorkflowEdgeCondition,
   WorkflowEditOperation,
+  WorkflowPatch,
   WorkflowPlan,
   WorkflowVersionView,
   WorkflowView,
@@ -183,10 +185,14 @@ export class WorkflowsService {
   }
 
   async applyOperations(request: Request, workspaceSlug: string, workflowId: string, input: ApplyWorkflowDraftOperationsRequest): Promise<WorkflowDetailView> {
-    if (!input || typeof input.baseRevisionId !== 'string' || (!Array.isArray(input.operations) && !input.plan)) throw new BadRequestException('A base revision and workflow operations or plan are required.');
+    if (!input || typeof input.baseRevisionId !== 'string') throw new BadRequestException('A base revision and workflow operations, plan, or patch are required.');
+    const provided = [input.operations !== undefined, input.plan !== undefined, input.patch !== undefined].filter(Boolean).length;
+    if (provided === 0) throw new BadRequestException('A base revision and workflow operations, plan, or patch are required.');
+    if (provided > 1) throw new BadRequestException('Provide exactly one of workflow operations, plan, or patch.');
+    if (input.operations !== undefined && !Array.isArray(input.operations)) throw new BadRequestException('Workflow operations must be an array.');
     return this.applyDraftOperations(request, workspaceSlug, workflowId, input.baseRevisionId, async (snapshot) => ({
-      operations: (input.plan ? buildPlanOperations(snapshot, input.plan) : input.operations) ?? [],
-      source: input.plan ? 'assistant' : input.source ?? 'manual',
+      operations: (input.plan ? buildPlanOperations(snapshot, input.plan) : input.patch !== undefined ? buildPatchOperations(snapshot, input.patch) : input.operations) ?? [],
+      source: input.plan || input.patch !== undefined ? 'assistant' : input.source ?? 'manual',
       sourceInstruction: input.sourceInstruction,
     }));
   }
@@ -427,10 +433,12 @@ function buildPlanOperations(current: StoredWorkflowDefinition, plan: WorkflowPl
     if (!sourceNodeId || !targetNodeId) throw new BadRequestException('The Workflow Plan references an unavailable node key.');
     const source = nextNodes.find((node) => node.id === sourceNodeId);
     const target = nextNodes.find((node) => node.id === targetNodeId);
-    const sourceCapability = source ? capabilities.get(`${source.type}@${source.typeVersion}`) : undefined;
-    const targetCapability = target ? capabilities.get(`${target.type}@${target.typeVersion}`) : undefined;
-    const sourcePort = edge.sourcePort ?? sourceCapability?.outputs[0]?.name;
-    const targetPort = edge.targetPort ?? targetCapability?.inputs.find((port) => port.required)?.name ?? targetCapability?.inputs[0]?.name;
+    const { sourcePort, targetPort } = resolveDefaultEdgePorts(
+      source ? capabilities.get(`${source.type}@${source.typeVersion}`) : undefined,
+      target ? capabilities.get(`${target.type}@${target.typeVersion}`) : undefined,
+      edge.sourcePort,
+      edge.targetPort,
+    );
     if (!sourcePort || !targetPort) throw new BadRequestException('The Workflow Plan edge must connect declared ports.');
     return {
       id: `we_${randomUUID()}`,
@@ -449,6 +457,146 @@ function buildPlanOperations(current: StoredWorkflowDefinition, plan: WorkflowPl
     ...nextEdges.map((edge) => ({ type: 'addEdge' as const, edge })),
     { type: 'updateSettings' as const, input: plan.input ?? current.input, defaults: plan.defaults ?? current.defaults },
   ];
+}
+
+function resolveDefaultEdgePorts(
+  sourceCapability: WorkflowNodeCapability | undefined,
+  targetCapability: WorkflowNodeCapability | undefined,
+  sourcePort: string | undefined,
+  targetPort: string | undefined,
+): { sourcePort: string | undefined; targetPort: string | undefined } {
+  return {
+    sourcePort: sourcePort ?? sourceCapability?.outputs[0]?.name,
+    targetPort: targetPort ?? targetCapability?.inputs.find((port) => port.required)?.name ?? targetCapability?.inputs[0]?.name,
+  };
+}
+
+/**
+ * Translates an in-place Workflow patch into fine-grained edit operations on the
+ * current draft. Nodes and edges the patch does not mention keep their ids,
+ * positions and configuration; the regular validation and revision path still
+ * runs on the result.
+ */
+function buildPatchOperations(current: StoredWorkflowDefinition, patch: WorkflowPatch): WorkflowEditOperation[] {
+  if (!Array.isArray(patch) || patch.length === 0) throw new BadRequestException('The workflow patch must be a non-empty array.');
+  const capabilities = new Map(listWorkflowNodeCapabilities().map((capability) => [`${capability.id}@${capability.version}`, capability]));
+  const nodes = new Map(current.nodes.map((node) => [node.id, { type: node.type, typeVersion: node.typeVersion, config: node.config }]));
+  const edges = new Map(current.edges.map((edge) => [edge.id, { sourceNodeId: edge.sourceNodeId, targetNodeId: edge.targetNodeId }]));
+  const keys = new Map<string, string>();
+  let nodeCount = current.nodes.length;
+  let nextY = current.nodes.length === 0 ? 80 : Math.max(...current.nodes.map((node) => node.position.y)) + 180;
+  const resolveNode = (reference: unknown, label: string): string => {
+    const value = typeof reference === 'string' ? reference.trim() : '';
+    const id = keys.get(value) ?? (nodes.has(value) ? value : undefined);
+    if (!id) throw new BadRequestException(`The workflow patch ${label} references an unavailable node ${value || '(empty)'}.`);
+    return id;
+  };
+  const readErrorPolicy = (value: unknown): 'stop' | 'retry' | undefined => {
+    if (value === undefined) return undefined;
+    if (value !== 'stop' && value !== 'retry') throw new BadRequestException('The workflow patch errorPolicy must be stop or retry.');
+    return value;
+  };
+  return patch.map((entry, index): WorkflowEditOperation => {
+    if (!isRecord(entry)) throw new BadRequestException(`Workflow patch entry ${index + 1} must be an object.`);
+    switch (entry.op) {
+      case 'updateNode': {
+        const nodeId = resolveNode(entry.nodeId, `entry ${index + 1} updateNode`);
+        const node = nodes.get(nodeId)!;
+        if (entry.config !== undefined && entry.configPatch !== undefined) throw new BadRequestException('A workflow patch updateNode entry accepts config or configPatch, not both.');
+        if (entry.configPatch !== undefined && !isRecord(entry.configPatch)) throw new BadRequestException('A workflow patch configPatch must be an object.');
+        const errorPolicy = readErrorPolicy(entry.errorPolicy);
+        if (entry.config === undefined && entry.configPatch === undefined && errorPolicy === undefined) throw new BadRequestException('A workflow patch updateNode entry must change config, configPatch, or errorPolicy.');
+        const config = entry.config !== undefined
+          ? structuredClone(entry.config)
+          : entry.configPatch !== undefined
+            ? { ...(isRecord(node.config) ? node.config : {}), ...structuredClone(entry.configPatch as Record<string, unknown>) }
+            : undefined;
+        if (config !== undefined) node.config = config;
+        return { type: 'updateNode', nodeId, patch: { ...(config !== undefined ? { config } : {}), ...(errorPolicy ? { errorPolicy } : {}) } };
+      }
+      case 'addNode': {
+        const key = typeof entry.key === 'string' ? entry.key.trim() : '';
+        if (!key || keys.has(key) || nodes.has(key)) throw new BadRequestException(`The workflow patch node key ${key || '(empty)'} is missing, repeated, or matches an existing node id.`);
+        const typeVersion = typeof entry.typeVersion === 'string' ? entry.typeVersion : '1';
+        const capability = capabilities.get(`${String(entry.type)}@${typeVersion}`);
+        if (!capability) throw new BadRequestException(`The node type ${String(entry.type)}@${typeVersion} is not supported.`);
+        let position: { x: number; y: number };
+        if (entry.position !== undefined) {
+          if (!isRecord(entry.position) || !Number.isFinite(entry.position.x) || !Number.isFinite(entry.position.y)) throw new BadRequestException('A workflow patch node position must contain finite x and y numbers.');
+          position = { x: entry.position.x as number, y: entry.position.y as number };
+        } else {
+          position = { x: 80, y: nextY };
+          nextY += 180;
+        }
+        const id = `wn_${randomUUID()}`;
+        const config = structuredClone(entry.config);
+        keys.set(key, id);
+        nodes.set(id, { type: capability.id, typeVersion: capability.version, config });
+        const operation: WorkflowEditOperation = {
+          type: 'addNode',
+          index: nodeCount,
+          node: { id, position, type: capability.id, typeVersion: capability.version, config, errorPolicy: readErrorPolicy(entry.errorPolicy) ?? current.defaults.errorPolicy },
+        };
+        nodeCount += 1;
+        return operation;
+      }
+      case 'removeNode': {
+        const nodeId = resolveNode(entry.nodeId, `entry ${index + 1} removeNode`);
+        nodes.delete(nodeId);
+        for (const [key, id] of keys) if (id === nodeId) keys.delete(key);
+        for (const [edgeId, edge] of edges) if (edge.sourceNodeId === nodeId || edge.targetNodeId === nodeId) edges.delete(edgeId);
+        nodeCount -= 1;
+        return { type: 'removeNode', nodeId };
+      }
+      case 'addEdge': {
+        const sourceNodeId = resolveNode(entry.source, `entry ${index + 1} addEdge source`);
+        const targetNodeId = resolveNode(entry.target, `entry ${index + 1} addEdge target`);
+        const source = nodes.get(sourceNodeId)!;
+        const target = nodes.get(targetNodeId)!;
+        if (entry.sourcePort !== undefined && typeof entry.sourcePort !== 'string') throw new BadRequestException('A workflow patch sourcePort must be a string.');
+        if (entry.targetPort !== undefined && typeof entry.targetPort !== 'string') throw new BadRequestException('A workflow patch targetPort must be a string.');
+        const { sourcePort, targetPort } = resolveDefaultEdgePorts(
+          capabilities.get(`${source.type}@${source.typeVersion}`),
+          capabilities.get(`${target.type}@${target.typeVersion}`),
+          entry.sourcePort as string | undefined,
+          entry.targetPort as string | undefined,
+        );
+        if (!sourcePort || !targetPort) throw new BadRequestException('The workflow patch edge must connect declared ports.');
+        const id = `we_${randomUUID()}`;
+        edges.set(id, { sourceNodeId, targetNodeId });
+        return {
+          type: 'addEdge',
+          edge: {
+            id,
+            sourceNodeId,
+            sourcePort,
+            targetNodeId,
+            targetPort,
+            ...(entry.condition !== undefined ? { condition: structuredClone(entry.condition) as WorkflowEdgeCondition } : {}),
+            ...(entry.maxTraversals !== undefined ? { maxTraversals: entry.maxTraversals as number } : {}),
+          },
+        };
+      }
+      case 'removeEdge': {
+        const edgeId = typeof entry.edgeId === 'string' ? entry.edgeId.trim() : '';
+        if (!edges.has(edgeId)) throw new BadRequestException(`The workflow patch references an unavailable edge ${edgeId || '(empty)'}.`);
+        edges.delete(edgeId);
+        return { type: 'removeEdge', edgeId };
+      }
+      case 'updateSettings': {
+        if (entry.input === undefined && entry.defaults === undefined) throw new BadRequestException('A workflow patch updateSettings entry must change input or defaults.');
+        if (entry.input !== undefined && !isRecord(entry.input)) throw new BadRequestException('A workflow patch input must be an object.');
+        if (entry.defaults !== undefined && (!isRecord(entry.defaults) || readErrorPolicy(entry.defaults.errorPolicy) === undefined)) throw new BadRequestException('A workflow patch defaults must contain errorPolicy stop or retry.');
+        return {
+          type: 'updateSettings',
+          ...(entry.input !== undefined ? { input: structuredClone(entry.input) as { example?: unknown } } : {}),
+          ...(entry.defaults !== undefined ? { defaults: structuredClone(entry.defaults) as { errorPolicy: 'stop' | 'retry' } } : {}),
+        };
+      }
+      default:
+        throw new BadRequestException(`Workflow patch entry ${index + 1} has an unsupported op ${String((entry as Record<string, unknown>).op)}.`);
+    }
+  });
 }
 
 function applyOperations(current: StoredWorkflowDefinition, operations: WorkflowEditOperation[]): StoredWorkflowDefinition {
@@ -544,7 +692,7 @@ function validateDefinition(definition: StoredWorkflowDefinition, requireComplet
     // unconditional.
     if (targetCapability?.aggregation === 'join' && edge.condition !== undefined) throw new BadRequestException('A conditional edge cannot target a Join barrier.');
     if (!isGeneratedImageConnectionAllowed(source, target, edge.sourcePort, edge.targetPort, definition)) throw new BadRequestException('Generated image output may connect only to the WeChat v2 coverImage or images input, a Compose Article image input, a Join input, or an Artifact data input.');
-    if (definition.edges.some((candidate) => candidate.id !== edge.id && candidate.sourceNodeId === edge.sourceNodeId && candidate.sourcePort === edge.sourcePort && candidate.targetNodeId === edge.targetNodeId && candidate.targetPort === edge.targetPort)) throw new BadRequestException('The workflow contains a duplicate connection.');
+    if (definition.edges.some((candidate) => candidate.id !== edge.id && candidate.sourceNodeId === edge.sourceNodeId && candidate.sourcePort === edge.sourcePort && candidate.targetNodeId === edge.targetNodeId && candidate.targetPort === edge.targetPort && sameCondition(candidate.condition, edge.condition) && candidate.maxTraversals === edge.maxTraversals)) throw new BadRequestException('The workflow contains a duplicate connection.');
     validateEdgeControlFlow(edge);
     edgeIds.add(edge.id);
     const portEdges = incomingEdges.get(inputKey) ?? [];
@@ -616,6 +764,27 @@ function validateIncomingEdges(
   }
 }
 
+/**
+ * Two edges between the same ports are duplicates only when they also route on
+ * the same condition; conditional routing legitimately needs several such edges.
+ */
+function sameCondition(left: unknown, right: unknown): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  if (!isRecord(left) || !isRecord(right)) return stableJson(left) === stableJson(right);
+  return left.kind === right.kind
+    && left.path === right.path
+    && left.operator === right.operator
+    && ('value' in left) === ('value' in right)
+    && stableJson(left.value) === stableJson(right.value);
+}
+
+function stableJson(value: unknown): string {
+  if (value === undefined) return 'undefined';
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (isRecord(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
+  return JSON.stringify(value);
+}
+
 function validateEdgeControlFlow(edge: StoredWorkflowDefinition['edges'][number]): void {
   if (edge.maxTraversals !== undefined && (!Number.isInteger(edge.maxTraversals) || edge.maxTraversals < 1)) throw new BadRequestException('Workflow edge maximum traversals must be a positive integer.');
   if (edge.condition === undefined) return;
@@ -667,6 +836,12 @@ function validateNodeConfig(value: unknown, capability: WorkflowNodeCapability, 
     if (value.passthroughKeys !== undefined) {
       if (!Array.isArray(value.passthroughKeys) || !value.passthroughKeys.length || value.passthroughKeys.some((key) => typeof key !== 'string' || !key.trim()) || new Set(value.passthroughKeys).size !== value.passthroughKeys.length) throw new BadRequestException('Agent node passthroughKeys must be unique non-empty key names.');
       if (value.outputFormat !== 'json') throw new BadRequestException('Agent node passthroughKeys requires outputFormat json.');
+    }
+    if (value.requiredSkillIds !== undefined) {
+      if (!Array.isArray(value.requiredSkillIds) || value.requiredSkillIds.some((id) => typeof id !== 'string' || !id.trim()) || new Set(value.requiredSkillIds).size !== value.requiredSkillIds.length) throw new BadRequestException('Agent node requiredSkillIds must be unique non-empty Skill ids.');
+      const attached = new Set(readStringArray(value.skillIds));
+      const missing = (value.requiredSkillIds as string[]).filter((id) => !attached.has(id));
+      if (missing.length > 0) throw new BadRequestException(`Agent node requiredSkillIds must also be listed in skillIds: ${missing.join(', ')}.`);
     }
     if (value.allowEmptyOutputKeys !== undefined) {
       if (!Array.isArray(value.allowEmptyOutputKeys) || value.allowEmptyOutputKeys.some((key) => typeof key !== 'string' || !key.trim()) || new Set(value.allowEmptyOutputKeys).size !== value.allowEmptyOutputKeys.length) throw new BadRequestException('Agent node allowEmptyOutputKeys must be unique non-empty key names.');

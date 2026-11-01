@@ -31,9 +31,9 @@ async function setup() {
   const db = createDb(':memory:');
   await initializeDatabase(db);
   await db.insert(skills).values([
-    { id: 'sk_029f68e6-1b9e-4a65-a230-be02a78e5521', workspaceId: 'workspace_personal', name: 'github-current-popularity', source: 'local' },
-    { id: 'sk_fa6143da-e62d-4a16-bbf8-bd8df148dba2', workspaceId: 'workspace_personal', name: 'zhihu-research', source: 'local' },
-    { id: 'sk_ea37cc32-6f30-47d1-a120-2ebef9321d30', workspaceId: 'workspace_personal', name: 'official-docs-fetch', source: 'local' },
+    { id: 'sk_029f68e6-1b9e-4a65-a230-be02a78e5521', workspaceId: 'workspace_personal', name: 'github-current-popularity', source: 'local', root: 'platform', validation: 'valid' },
+    { id: 'sk_fa6143da-e62d-4a16-bbf8-bd8df148dba2', workspaceId: 'workspace_personal', name: 'zhihu-research', source: 'local', root: 'platform', validation: 'valid' },
+    { id: 'sk_ea37cc32-6f30-47d1-a120-2ebef9321d30', workspaceId: 'workspace_personal', name: 'official-docs-fetch', source: 'local', root: 'platform', validation: 'valid' },
   ]);
   await db.insert(wechatOfficialAccounts).values({
     id: 'wechat_official_account_personal',
@@ -42,7 +42,7 @@ async function setup() {
     status: 'disconnected',
   }).onConflictDoNothing();
   const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) } as unknown as WorkspaceService;
-  const resources = { assertPublicAgentModel: async () => undefined } as unknown as WorkspaceResourcesService;
+  const resources = { assertPublicAgentModel: async () => undefined, reconcileWorkspaceSkills: async () => undefined } as unknown as WorkspaceResourcesService;
   const schedules = { syncPublishedVersion: async () => undefined } as unknown as WorkflowSchedulesService;
   return { db, service: new WorkflowsService(db, workspaces, schedules, resources) };
 }

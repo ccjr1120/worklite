@@ -216,6 +216,11 @@ export class AgentExecutionsService implements OnModuleInit {
     return this.toView(await this.loadExecution(workspace.id, CHAT_AGENT_ID, id));
   }
 
+  /** Canonicalizes Workflow Agent Skill ids the same way executeWorkflowAgent does. */
+  async resolveWorkflowSkillIds(workspaceId: string, skillIds: readonly string[]): Promise<string[]> {
+    return this.resources.resolveSkillIds(workspaceId, skillIds);
+  }
+
   async executeWorkflowAgent(
     workspaceId: string,
     // One declared public model id, or an ordered list of fallback candidates.

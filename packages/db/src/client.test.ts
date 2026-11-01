@@ -1,10 +1,18 @@
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createDb, initializeDatabase } from './client';
+import { createDb, initializeDatabase, platformSkillPackageFiles } from './client';
 import * as schema from './schema';
 import type { Database } from './client';
 
 let db: Database | undefined;
+
+// Platform Skill files are written by workspace Skill reconciliation, not by
+// initializeDatabase, so the packaged source is the authority under test.
+function platformFile(path: string): { content: string } {
+  const file = platformSkillPackageFiles().find((candidate) => candidate.path === path);
+  if (!file) throw new Error(`Platform Skill file ${path} is not packaged.`);
+  return file;
+}
 
 afterEach(() => {
   db?.$client.close();
@@ -70,8 +78,8 @@ describe('initializeDatabase restart recovery', () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
 
-    const [script] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/replace-workflow-agent-models.mjs'))).limit(1);
-    const [manifest] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/tools.json'))).limit(1);
+    const script = platformFile('scripts/replace-workflow-agent-models.mjs');
+    const manifest = platformFile('scripts/tools.json');
     const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
 
     expect(script.content).toContain('/draft/model-replacement');
@@ -81,12 +89,36 @@ describe('initializeDatabase restart recovery', () => {
     expect(chat.systemPrompt).toContain('replace_workflow_agent_models');
   });
 
+  it('registers the in-place Workflow patch platform tool', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+
+    const content = new Map(platformSkillPackageFiles().map((file) => [file.path, file.content]));
+    const tools = JSON.parse(content.get('scripts/tools.json')!) as Record<string, { name: string; description: string; inputSchema: { required: string[]; properties: Record<string, { type?: string; items?: { anyOf?: unknown[] } }> } }>;
+    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
+    const patch = tools['scripts/patch-workflow.mjs'];
+
+    expect(content.get('scripts/patch-workflow.mjs')).toContain('/draft/operations');
+    expect(content.get('scripts/patch-workflow.mjs')).toContain("exactKeys(raw, ['workflowId', 'baseRevisionId', 'sourceInstruction', 'patch'])");
+    expect(content.get('scripts/patch-workflow.mjs')).toContain('patch: raw.patch');
+    expect(patch.name).toBe('patch_workflow');
+    expect(patch.inputSchema.required).toEqual(['workflowId', 'sourceInstruction', 'patch']);
+    expect(patch.inputSchema.properties.patch.type).toBe('array');
+    expect(patch.inputSchema.properties.patch.items?.anyOf).toHaveLength(6);
+    expect(patch.description).toContain('configPatch');
+    expect(patch.description).toContain('requiredSkillIds');
+    // edit_workflow keeps its whole-graph replacement semantics.
+    expect(tools['scripts/edit-workflow.mjs'].inputSchema.required).toEqual(['workflowId', 'sourceInstruction', 'plan']);
+    expect(chat.systemPrompt).toContain('patch_workflow');
+    expect(chat.systemPrompt).toContain('requiredSkillIds');
+  });
+
   it('registers the guarded Workflow deletion platform tool', async () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
 
-    const [script] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/delete-workflow.mjs'))).limit(1);
-    const [manifest] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/tools.json'))).limit(1);
+    const script = platformFile('scripts/delete-workflow.mjs');
+    const manifest = platformFile('scripts/tools.json');
     const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
 
     expect(script.content).toContain("raw.confirm !== true");
@@ -102,7 +134,7 @@ describe('initializeDatabase restart recovery', () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
 
-    const [manifest] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/tools.json'))).limit(1);
+    const manifest = platformFile('scripts/tools.json');
     const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
 
     const categories = ['rule', 'preference', 'project', 'project_state', 'workflow', 'other'];
@@ -119,9 +151,9 @@ describe('initializeDatabase restart recovery', () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
 
-    const [script] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/search-local-projects.mjs'))).limit(1);
-    const [manifest] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/tools.json'))).limit(1);
-    const [skill] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'SKILL.md'))).limit(1);
+    const script = platformFile('scripts/search-local-projects.mjs');
+    const manifest = platformFile('scripts/tools.json');
+    const skill = platformFile('SKILL.md');
     const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
 
     expect(script.content).toContain('/local-projects/search');
@@ -140,7 +172,7 @@ describe('initializeDatabase restart recovery', () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
 
-    const files = await db.select().from(schema.skillFiles).where(eq(schema.skillFiles.skillId, 'sk_worklite_platform'));
+    const files = platformSkillPackageFiles();
     const content = new Map(files.map((file) => [file.path, file.content]));
     const tools = JSON.parse(content.get('scripts/tools.json')!) as Record<string, { name: string; inputSchema: { required?: string[] } }>;
     const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
@@ -167,7 +199,7 @@ describe('initializeDatabase restart recovery', () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
 
-    const [skill] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'SKILL.md'))).limit(1);
+    const skill = platformFile('SKILL.md');
     expect(skill.content.match(/## Pages and routes \(UI navigation\)/g)).toHaveLength(1);
     expect(skill.content).toContain('| 工作区 | Coding | `/coding` |');
     expect(skill.content).toContain('`/coding/:coderId/config`');
@@ -182,8 +214,8 @@ describe('initializeDatabase restart recovery', () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
 
-    const [script] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/dispatch-task.mjs'))).limit(1);
-    const [manifest] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'scripts/tools.json'))).limit(1);
+    const script = platformFile('scripts/dispatch-task.mjs');
+    const manifest = platformFile('scripts/tools.json');
     const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
 
     const tools = JSON.parse(manifest.content) as Record<string, { name: string; inputSchema: unknown }>;
@@ -193,7 +225,7 @@ describe('initializeDatabase restart recovery', () => {
     // Older callers may still send a mode; the script accepts it but never forwards it.
     expect(script.content).toContain("'mode', 'role'");
     expect(script.content).not.toContain("oneOf(target.mode");
-    const [skill] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'SKILL.md'))).limit(1);
+    const skill = platformFile('SKILL.md');
     expect(chat.systemPrompt).toContain('Executors do not accept a mode');
     expect(chat.systemPrompt).not.toContain('supported mode');
     expect(skill.content).toContain('Never ask the user to choose a mode');
@@ -205,7 +237,7 @@ describe('initializeDatabase restart recovery', () => {
     await initializeDatabase(db);
 
     const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
-    const [skill] = await db.select().from(schema.skillFiles).where(and(eq(schema.skillFiles.skillId, 'sk_worklite_platform'), eq(schema.skillFiles.path, 'SKILL.md'))).limit(1);
+    const skill = platformFile('SKILL.md');
     expect(chat.systemPrompt).toContain('two predefined executors');
     expect(chat.systemPrompt).toContain('never by its display name');
     expect(chat.systemPrompt).not.toMatch(/\b(?:answer|steer|cancel)_project_task\b|redeployAfterSuccess|Agent Team/);
@@ -217,7 +249,7 @@ describe('initializeDatabase restart recovery', () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
 
-    const files = await db.select().from(schema.skillFiles).where(eq(schema.skillFiles.skillId, 'sk_worklite_platform'));
+    const files = platformSkillPackageFiles();
     const content = new Map(files.map((file) => [file.path, file.content]));
     const tools = JSON.parse(content.get('scripts/tools.json')!) as Record<string, { name: string; inputSchema: { required?: string[]; properties: Record<string, { enum?: string[]; minimum?: number; maximum?: number }> } }>;
     const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
@@ -239,7 +271,7 @@ describe('initializeDatabase restart recovery', () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
 
-    const files = await db.select().from(schema.skillFiles).where(eq(schema.skillFiles.skillId, 'sk_worklite_platform'));
+    const files = platformSkillPackageFiles();
     const content = new Map(files.map((file) => [file.path, file.content]));
     const tools = JSON.parse(content.get('scripts/tools.json')!) as Record<string, { name: string; inputSchema: { required?: string[]; properties: Record<string, { enum?: string[] }> } }>;
     const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
@@ -259,7 +291,7 @@ describe('initializeDatabase restart recovery', () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
 
-    const files = await db.select().from(schema.skillFiles).where(eq(schema.skillFiles.skillId, 'sk_worklite_platform'));
+    const files = platformSkillPackageFiles();
     const content = new Map(files.map((file) => [file.path, file.content]));
     const tools = JSON.parse(content.get('scripts/tools.json')!) as Record<string, {
       name: string;
@@ -295,7 +327,7 @@ describe('initializeDatabase restart recovery', () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
 
-    const files = await db.select().from(schema.skillFiles).where(eq(schema.skillFiles.skillId, 'sk_worklite_platform'));
+    const files = platformSkillPackageFiles();
     const content = new Map(files.map((file) => [file.path, file.content]));
     const tools = JSON.parse(content.get('scripts/tools.json')!) as Record<string, {
       name: string;
