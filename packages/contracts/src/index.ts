@@ -853,6 +853,47 @@ export type WorkflowPlan = {
   defaults?: { errorPolicy: NodeErrorPolicy };
 };
 
+/**
+ * One in-place edit of the current draft. Untouched nodes and edges keep their
+ * ids, positions and configuration. `key` names a node added by this patch so
+ * later patch entries can connect to it; it is only valid inside one patch.
+ */
+export type WorkflowPatchOperation =
+  | {
+      op: 'updateNode';
+      nodeId: string;
+      /** Replaces the whole node configuration. Mutually exclusive with configPatch. */
+      config?: unknown;
+      /** Shallow merge of top-level configuration keys; nested objects are replaced as a whole. */
+      configPatch?: Record<string, unknown>;
+      errorPolicy?: NodeErrorPolicy;
+    }
+  | {
+      op: 'addNode';
+      key: string;
+      type: string;
+      typeVersion?: string;
+      config: unknown;
+      errorPolicy?: NodeErrorPolicy;
+      position?: WorkflowNodePosition;
+    }
+  | { op: 'removeNode'; nodeId: string }
+  | {
+      op: 'addEdge';
+      /** An existing node id or a key added earlier in this patch. */
+      source: string;
+      /** An existing node id or a key added earlier in this patch. */
+      target: string;
+      sourcePort?: string;
+      targetPort?: string;
+      condition?: WorkflowEdgeCondition;
+      maxTraversals?: number;
+    }
+  | { op: 'removeEdge'; edgeId: string }
+  | { op: 'updateSettings'; input?: { example?: unknown }; defaults?: { errorPolicy: NodeErrorPolicy } };
+
+export type WorkflowPatch = WorkflowPatchOperation[];
+
 export type WorkflowDraftView = {
   id: string;
   workflowId: string;
@@ -947,6 +988,8 @@ export type ApplyWorkflowDraftOperationsRequest = {
   baseRevisionId: string;
   operations?: WorkflowEditOperation[];
   plan?: WorkflowPlan;
+  /** In-place edits translated by the server; exactly one of operations, plan or patch is allowed. */
+  patch?: WorkflowPatch;
   source?: 'manual' | 'assistant';
   sourceInstruction?: string;
 };

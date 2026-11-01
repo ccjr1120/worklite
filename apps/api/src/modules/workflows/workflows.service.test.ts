@@ -58,7 +58,7 @@ async function setup(assertPublicAgentModel = vi.fn<(model: string) => Promise<v
   db = createDb(':memory:');
   await initializeDatabase(db);
   const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) } as unknown as WorkspaceService;
-  const resources = { assertPublicAgentModel } as unknown as WorkspaceResourcesService;
+  const resources = { assertPublicAgentModel, reconcileWorkspaceSkills: async () => undefined } as unknown as WorkspaceResourcesService;
   const workflows = new WorkflowsService(db, workspaces, {} as WorkflowSchedulesService, resources);
   const created = await workflows.create(request, 'personal', { name: 'Model repair', definition: definition() });
   return { workflows, created, assertPublicAgentModel, workspaces };
@@ -236,7 +236,7 @@ describe('WorkflowsService Canvas Sticker node validation', () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
     const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) } as unknown as WorkspaceService;
-    const resources = {} as WorkspaceResourcesService;
+    const resources = { reconcileWorkspaceSkills: async () => undefined } as unknown as WorkspaceResourcesService;
     const workflows = new WorkflowsService(db, workspaces, {} as WorkflowSchedulesService, resources);
     const created = await workflows.create(request, 'personal', { name: 'Sticker cover', definition: canvasStickerDefinition() });
     expect(node(created, 'sticker').type).toBe('worklite/canvas-sticker');
@@ -246,7 +246,7 @@ describe('WorkflowsService Canvas Sticker node validation', () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
     const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) } as unknown as WorkspaceService;
-    const resources = {} as WorkspaceResourcesService;
+    const resources = { reconcileWorkspaceSkills: async () => undefined } as unknown as WorkspaceResourcesService;
     const workflows = new WorkflowsService(db, workspaces, {} as WorkflowSchedulesService, resources);
     await expect(workflows.create(request, 'personal', { name: 'Bad sticker', definition: canvasStickerDefinition({ width: 32 }) })).rejects.toBeInstanceOf(BadRequestException);
   });
@@ -255,7 +255,7 @@ describe('WorkflowsService Canvas Sticker node validation', () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
     const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) } as unknown as WorkspaceService;
-    const resources = {} as WorkspaceResourcesService;
+    const resources = { reconcileWorkspaceSkills: async () => undefined } as unknown as WorkspaceResourcesService;
     const workflows = new WorkflowsService(db, workspaces, {} as WorkflowSchedulesService, resources);
     await expect(workflows.create(request, 'personal', { name: 'Bad shape', definition: canvasStickerDefinition({ shape: 'triangle' }) })).rejects.toBeInstanceOf(BadRequestException);
   });
@@ -264,7 +264,7 @@ describe('WorkflowsService Canvas Sticker node validation', () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
     const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) } as unknown as WorkspaceService;
-    const resources = {} as WorkspaceResourcesService;
+    const resources = { reconcileWorkspaceSkills: async () => undefined } as unknown as WorkspaceResourcesService;
     const workflows = new WorkflowsService(db, workspaces, {} as WorkflowSchedulesService, resources);
     await expect(workflows.create(request, 'personal', { name: 'Bad color', definition: canvasStickerDefinition({ backgroundColor: 'not-a-color' }) })).rejects.toBeInstanceOf(BadRequestException);
   });
@@ -273,7 +273,7 @@ describe('WorkflowsService Canvas Sticker node validation', () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
     const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) } as unknown as WorkspaceService;
-    const resources = {} as WorkspaceResourcesService;
+    const resources = { reconcileWorkspaceSkills: async () => undefined } as unknown as WorkspaceResourcesService;
     const workflows = new WorkflowsService(db, workspaces, {} as WorkflowSchedulesService, resources);
     const invalid = canvasStickerDefinition();
     invalid.nodes[1]!.typeVersion = '1';
@@ -536,7 +536,7 @@ describe('WorkflowsService Canvas Render node validation', () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
     const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) } as unknown as WorkspaceService;
-    const resources = {} as WorkspaceResourcesService;
+    const resources = { reconcileWorkspaceSkills: async () => undefined } as unknown as WorkspaceResourcesService;
     return new WorkflowsService(db, workspaces, {} as WorkflowSchedulesService, resources);
   }
 
@@ -625,5 +625,130 @@ describe('WorkflowsService node label and description validation', () => {
       .rejects.toThrow('label must be a string');
     await expect(workflows.create(request, 'personal', { name: 'Blank description', definition: labeledDefinition('Agent', '   ') }))
       .rejects.toThrow('description must not be empty');
+  });
+});
+
+describe('WorkflowsService conditional connections and in-place patches', () => {
+  function branchDefinition(): StoredWorkflowDefinition {
+    return {
+      schemaVersion: 4,
+      input: {},
+      defaults: { errorPolicy: 'stop' },
+      nodes: [
+        { id: 'input', position: { x: 0, y: 0 }, type: 'worklite/input', typeVersion: '1', config: {}, errorPolicy: 'stop' },
+        { id: 'branch', position: { x: 280, y: 0 }, type: 'worklite/branch', typeVersion: '1', config: {}, errorPolicy: 'stop' },
+        { ...agentNode('writer', 'GLM/glm-5.3', 'write'), position: { x: 560, y: 0 } },
+        { ...agentNode('reviewer', 'GLM/glm-5.3', 'review'), position: { x: 560, y: 180 } },
+      ],
+      edges: [
+        { id: 'edge-input', sourceNodeId: 'input', sourcePort: 'output', targetNodeId: 'branch', targetPort: 'value' },
+        { id: 'edge-review', sourceNodeId: 'branch', sourcePort: 'output', targetNodeId: 'reviewer', targetPort: 'context' },
+      ],
+    };
+  }
+
+  async function service(definition = branchDefinition()) {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+    const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal', slug: 'personal', name: 'Personal' }) } as unknown as WorkspaceService;
+    const resources = { reconcileWorkspaceSkills: async () => undefined } as unknown as WorkspaceResourcesService;
+    const workflows = new WorkflowsService(db, workspaces, {} as WorkflowSchedulesService, resources);
+    const created = await workflows.create(request, 'personal', { name: 'Patch target', definition });
+    return { workflows, created };
+  }
+
+  it('accepts same-port edges whose conditions differ and rejects identical ones', async () => {
+    const conditional = branchDefinition();
+    conditional.edges.push(
+      { id: 'edge-a', sourceNodeId: 'branch', sourcePort: 'output', targetNodeId: 'writer', targetPort: 'context', condition: { kind: 'predicate', path: '$.kind', operator: 'equals', value: 'a' } },
+      { id: 'edge-b', sourceNodeId: 'branch', sourcePort: 'output', targetNodeId: 'writer', targetPort: 'context', condition: { kind: 'predicate', path: '$.kind', operator: 'equals', value: 'b' } },
+    );
+    const { created } = await service(conditional);
+    expect(created.draft.definition.edges.map((edge) => edge.id)).toEqual(['edge-input', 'edge-review', 'edge-a', 'edge-b']);
+
+    const duplicate = branchDefinition();
+    duplicate.edges.push(
+      { id: 'edge-a', sourceNodeId: 'branch', sourcePort: 'output', targetNodeId: 'writer', targetPort: 'context', condition: { kind: 'predicate', path: '$.kind', operator: 'equals', value: { v: 1, w: 2 } } },
+      { id: 'edge-b', sourceNodeId: 'branch', sourcePort: 'output', targetNodeId: 'writer', targetPort: 'context', condition: { kind: 'predicate', path: '$.kind', operator: 'equals', value: { w: 2, v: 1 } } },
+    );
+    const { workflows } = await service();
+    await expect(workflows.create(request, 'personal', { name: 'Duplicate', definition: duplicate })).rejects.toThrow('The workflow contains a duplicate connection.');
+    const plain = branchDefinition();
+    plain.edges.push({ ...plain.edges[1], id: 'edge-review-2' });
+    await expect(workflows.create(request, 'personal', { name: 'Duplicate plain', definition: plain })).rejects.toThrow('The workflow contains a duplicate connection.');
+  });
+
+  it('patches one node config, adds a conditional edge and removes an edge while preserving everything else', async () => {
+    const { workflows, created } = await service();
+    const before = created.draft.definition;
+    const result = await workflows.applyOperations(request, 'personal', created.id, {
+      baseRevisionId: created.draft.revisionId,
+      sourceInstruction: 'Rewrite the writer prompt and route by kind.',
+      patch: [
+        { op: 'updateNode', nodeId: 'writer', configPatch: { systemPrompt: 'follow the plan' } },
+        { op: 'addEdge', source: 'branch', target: 'writer', targetPort: 'context', condition: { kind: 'predicate', path: '$.kind', operator: 'equals', value: 'article' } },
+        { op: 'removeEdge', edgeId: 'edge-review' },
+      ],
+    });
+
+    expect(result.draft.revisionId).not.toBe(created.draft.revisionId);
+    expect(node(result, 'writer').config).toEqual({ ...(node(created, 'writer').config as Record<string, unknown>), systemPrompt: 'follow the plan' });
+    for (const id of ['input', 'branch', 'reviewer']) expect(node(result, id)).toEqual(before.nodes.find((candidate) => candidate.id === id));
+    expect(node(result, 'writer').position).toEqual(node(created, 'writer').position);
+    const edges = result.draft.definition.edges;
+    expect(edges.find((edge) => edge.id === 'edge-input')).toEqual(before.edges[0]);
+    expect(edges.some((edge) => edge.id === 'edge-review')).toBe(false);
+    const added = edges.find((edge) => edge.id !== 'edge-input')!;
+    expect(added).toMatchObject({ sourceNodeId: 'branch', sourcePort: 'output', targetNodeId: 'writer', targetPort: 'context', condition: { kind: 'predicate', path: '$.kind', operator: 'equals', value: 'article' } });
+    expect(added.id).toMatch(/^we_/);
+
+    const [revision] = await db!.select().from(workflowEditRevisions).where(eq(workflowEditRevisions.id, result.draft.revisionId)).limit(1);
+    expect(revision.source).toBe('assistant');
+    expect(revision.operations.map((operation) => operation.type)).toEqual(['updateNode', 'addEdge', 'removeEdge']);
+
+    const undone = await workflows.undo(request, 'personal', created.id);
+    expect(undone.draft.revisionId).toBe(created.draft.revisionId);
+    expect(undone.draft.definition).toEqual(before);
+  });
+
+  it('adds a node by patch-local key and connects it below existing nodes', async () => {
+    const { workflows, created } = await service();
+    const result = await workflows.applyOperations(request, 'personal', created.id, {
+      baseRevisionId: created.draft.revisionId,
+      patch: [
+        { op: 'addNode', key: 'editor', type: 'worklite/agent', config: { model: 'GLM/glm-5.3', systemPrompt: 'edit', skillIds: [], mcpServerIds: [] } },
+        { op: 'addEdge', source: 'reviewer', target: 'editor' },
+      ],
+    });
+    const added = result.draft.definition.nodes.find((candidate) => !['input', 'branch', 'writer', 'reviewer'].includes(candidate.id))!;
+    expect(added.id).toMatch(/^wn_/);
+    expect(added.position.y).toBeGreaterThan(180);
+    expect(added.errorPolicy).toBe('stop');
+    expect(result.draft.definition.edges.some((edge) => edge.sourceNodeId === 'reviewer' && edge.targetNodeId === added.id && edge.targetPort === 'context')).toBe(true);
+  });
+
+  it('rejects unknown references, mixed request shapes and stale revisions without writing', async () => {
+    const { workflows, created } = await service();
+    await expect(workflows.applyOperations(request, 'personal', created.id, { baseRevisionId: created.draft.revisionId, patch: [{ op: 'removeEdge', edgeId: 'missing' }] })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(workflows.applyOperations(request, 'personal', created.id, { baseRevisionId: created.draft.revisionId, patch: [{ op: 'addEdge', source: 'nope', target: 'writer' }] })).rejects.toThrow('unavailable node nope');
+    await expect(workflows.applyOperations(request, 'personal', created.id, { baseRevisionId: created.draft.revisionId, patch: [{ op: 'updateNode', nodeId: 'writer', config: {}, configPatch: {} }] })).rejects.toThrow('config or configPatch');
+    await expect(workflows.applyOperations(request, 'personal', created.id, { baseRevisionId: created.draft.revisionId, operations: [], patch: [{ op: 'removeNode', nodeId: 'writer' }] })).rejects.toThrow('exactly one');
+    const [draftBefore] = await db!.select().from(workflowDrafts).where(eq(workflowDrafts.workflowId, created.id)).limit(1);
+    expect(draftBefore.currentRevisionId).toBe(created.draft.revisionId);
+
+    await workflows.applyOperations(request, 'personal', created.id, { baseRevisionId: created.draft.revisionId, patch: [{ op: 'updateNode', nodeId: 'writer', configPatch: { systemPrompt: 'v2' } }] });
+    await expect(workflows.applyOperations(request, 'personal', created.id, { baseRevisionId: created.draft.revisionId, patch: [{ op: 'updateNode', nodeId: 'writer', configPatch: { systemPrompt: 'v3' } }] })).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('requires requiredSkillIds to be attached Skills', async () => {
+    const { workflows, created } = await service();
+    await expect(workflows.applyOperations(request, 'personal', created.id, {
+      baseRevisionId: created.draft.revisionId,
+      patch: [{ op: 'updateNode', nodeId: 'writer', configPatch: { requiredSkillIds: ['sk_missing'] } }],
+    })).rejects.toThrow('Agent node requiredSkillIds must also be listed in skillIds: sk_missing.');
+    await expect(workflows.applyOperations(request, 'personal', created.id, {
+      baseRevisionId: created.draft.revisionId,
+      patch: [{ op: 'updateNode', nodeId: 'writer', configPatch: { requiredSkillIds: ['', ''] } }],
+    })).rejects.toThrow('unique non-empty Skill ids');
   });
 });

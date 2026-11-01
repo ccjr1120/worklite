@@ -142,7 +142,14 @@ export class RunsService {
         if (!config || !configModel || typeof config.systemPrompt !== 'string') throw new Error('Agent node requires a model and system prompt.');
         if (!Array.isArray(config.skillIds) || config.skillIds.some((id) => typeof id !== 'string')) throw new Error('Agent node requires valid Skill identifiers.');
         if (!Array.isArray(config.mcpServerIds) || config.mcpServerIds.some((id) => typeof id !== 'string')) throw new Error('Agent node requires valid MCP server identifiers.');
+        if (config.requiredSkillIds !== undefined && (!Array.isArray(config.requiredSkillIds) || config.requiredSkillIds.some((id) => typeof id !== 'string' || !id.trim()))) throw new Error('Agent node requiredSkillIds must be Skill identifiers.');
         const context = inputs && Object.prototype.hasOwnProperty.call(inputs, 'context') ? inputs.context : request.context.variables.workflowInput;
+        // Draft Skill ids may be retired aliases; the script activity reports the
+        // canonical id, so the requirement is canonicalized the same way.
+        const requiredSkillIds = Array.isArray(config.requiredSkillIds) && config.requiredSkillIds.length > 0
+          ? await this.agentExecutions.resolveWorkflowSkillIds(request.context.workspaceId, config.requiredSkillIds as string[])
+          : [];
+        const skillScriptCalls: SkillScriptCallRecord[] = [];
         const response = await this.agentExecutions.executeWorkflowAgent(
           request.context.workspaceId,
           configModel,
@@ -153,10 +160,16 @@ export class RunsService {
           request.signal,
           (delta) => { void this.publish(request.context.workflowRunId, 'node.delta', { nodeId: request.context.nodeId, nodeRunId: request.context.nodeRunId, delta }); },
           config.outputFormat === 'json',
-          (detail) => this.publishActivity(request.context.workflowRunId, request.context.nodeId, request.context.nodeRunId, detail),
+          (detail) => {
+            if (detail.phase === 'skill.script') skillScriptCalls.push({ skillId: detail.skillId, skillName: detail.skillName, exitCode: detail.exitCode, status: detail.status });
+            return this.publishActivity(request.context.workflowRunId, request.context.nodeId, request.context.nodeRunId, detail);
+          },
           { workflowId: request.context.workflowId, workflowRunId: request.context.workflowRunId, nodeRunId: request.context.nodeRunId },
           { maxToolCalls: config.maxToolCalls as number | undefined, maxToolRounds: config.maxToolRounds as number | undefined, maxToolResultChars: config.maxToolResultChars as number | undefined, maxOutputTokens: config.maxOutputTokens as number | undefined },
         );
+        // The model's own report is not evidence: every required Skill must have at
+        // least one script call that actually exited 0 during this node attempt.
+        assertRequiredSkillScriptCalls(requiredSkillIds, skillScriptCalls);
         if (config.outputFormat !== 'json') return { output: response };
         const output = parseWorkflowAgentJson(response);
         assertWorkflowAgentOutputContract(output, config.outputContract, config.allowEmptyOutputKeys);
@@ -1068,6 +1081,28 @@ function parseWorkflowAgentJson(value: string): unknown {
   } catch {
     throw new Error('Agent node JSON output requires valid JSON.');
   }
+}
+
+export type SkillScriptCallRecord = { skillId: string; skillName: string; exitCode: number | null; status: 'succeeded' | 'failed' };
+
+/**
+ * Fails an Agent node unless every required Skill has at least one script call
+ * whose process succeeded (exit code 0). A failed call followed by a successful
+ * retry passes; a successful call that found no relevant results also passes,
+ * because the script itself decides that outcome through its exit code.
+ */
+export function assertRequiredSkillScriptCalls(requiredSkillIds: readonly string[], calls: readonly SkillScriptCallRecord[]): void {
+  const missing = requiredSkillIds.filter((skillId) => !calls.some((call) => call.skillId === skillId && call.status === 'succeeded'));
+  if (missing.length === 0) return;
+  const reasons = missing.map((skillId) => {
+    const attempts = calls.filter((call) => call.skillId === skillId);
+    const last = attempts.at(-1);
+    const label = last?.skillName || skillId;
+    return last
+      ? `Required research Skill ${label} has no successful script call (last exit code ${last.exitCode ?? 'unknown'}).`
+      : `Required research Skill ${label} has no successful script call.`;
+  });
+  throw new Error(reasons.join(' '));
 }
 
 // Valid JSON is not the same thing as the node's intended result. Without a declared contract an
