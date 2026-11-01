@@ -20,6 +20,10 @@ describe('findLayoutIssues', () => {
     expect(findLayoutIssues([text(0, '总参数', box(40, 40, 200, 80)), text(1, '激活参数', box(40, 120, 220, 160))], 1080, 720)).toEqual([]);
   });
 
+  it('accepts glyphs that reach slightly past a tight line box', () => {
+    expect(findLayoutIssues([text(0, '标题', box(64, 92, 700, 154), { fontSize: 44, container: box(64, 96, 1016, 151) })], 1080, 720)).toEqual([]);
+  });
+
   it('detects text past the image edge, spilling from its box, overlapping, covered, duplicated and too small', () => {
     const issues = findLayoutIssues([
       text(0, '出界', box(1000, 40, 1120, 80)),

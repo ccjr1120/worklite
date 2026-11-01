@@ -159,9 +159,13 @@ const COLLECT_LAID_OUT_TEXT = String.raw`(() => {
   return result;
 })()`;
 
-function exceeds(inner: Rect, outer: Rect): boolean {
-  return inner.left < outer.left - TOLERANCE_PX || inner.top < outer.top - TOLERANCE_PX
-    || inner.right > outer.right + TOLERANCE_PX || inner.bottom > outer.bottom + TOLERANCE_PX;
+// A text range spans the font's full ascent and descent, which reaches a few
+// pixels past a tight line box without anything visible leaving the box, so
+// the vertical check allows that overshoot.
+function exceeds(inner: Rect, outer: Rect, fontSize: number): boolean {
+  const vertical = Math.max(TOLERANCE_PX, fontSize * 0.2);
+  return inner.left < outer.left - TOLERANCE_PX || inner.top < outer.top - vertical
+    || inner.right > outer.right + TOLERANCE_PX || inner.bottom > outer.bottom + vertical;
 }
 
 function overlapArea(a: Rect, b: Rect): { width: number; height: number } {
@@ -178,11 +182,11 @@ export function findLayoutIssues(texts: LaidOutText[], width: number, height: nu
   const canvas: Rect = { left: 0, top: 0, right: width, bottom: height };
   const minimumFont = MIN_FONT_PX_AT_1080 * (width / ARTICLE_IMAGE_MIN_WIDTH);
   for (const item of texts) {
-    if (item.lines.some((line) => exceeds(line, canvas))) {
+    if (item.lines.some((line) => exceeds(line, canvas, 0))) {
       issues.push({ kind: 'clipped', text: snippet(item.text), detail: 'Text runs past the edge of the image.' });
-    } else if (item.clips.some((clip) => item.lines.some((line) => exceeds(line, clip)))) {
+    } else if (item.clips.some((clip) => item.lines.some((line) => exceeds(line, clip, item.fontSize)))) {
       issues.push({ kind: 'clipped', text: snippet(item.text), detail: 'Text is cut off by a container that hides its overflow.' });
-    } else if (item.lines.some((line) => exceeds(line, item.container))) {
+    } else if (item.lines.some((line) => exceeds(line, item.container, item.fontSize))) {
       issues.push({ kind: 'overflow', text: snippet(item.text), detail: 'Text spills out of its box; enlarge the box, shorten the text or reduce the font size.' });
     }
     if (item.coveredLines > 0) {
