@@ -11,7 +11,7 @@ import { wechatOfficialAccounts, wechatPublications, workflowPendingActions, typ
 import type { WechatOfficialAccountView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { decryptSecret, encryptSecret, WECHAT_OFFICIAL_ACCOUNT_ID } from './plugins.service';
-import { applyInlineImageUrls, findInlineImageReferences, planInlineImageUploads, validateGeneratedInlineImages, type GeneratedInlineImage } from './wechat-article-images';
+import { applyInlineImageUrls, findInlineImageReferences, INLINE_IMAGE_PLACEHOLDER, planInlineImageUploads, validateGeneratedInlineImages, type GeneratedInlineImage } from './wechat-article-images';
 import { inspectQrPng } from './qr-png';
 
 type ActionListener = (actionId: string) => void;
@@ -247,6 +247,144 @@ export class WechatOfficialAccountService {
       await this.closeSession(actionId);
       await this.db.update(wechatPublications).set({ status: 'failed', lastError: errorMessage(error), updatedAt: new Date() }).where(eq(wechatPublications.id, publication.id));
       throw error;
+    }
+  }
+
+  /**
+   * Change the title and selected inline images of a draft this platform saved,
+   * leaving the article text exactly as recorded. Everything before the save
+   * click is checked against the publication record; a mismatch stops the
+   * revision with the draft untouched. Once save is clicked, any failure that
+   * is not an explicit platform rejection is reported as uncertain.
+   */
+  async reviseExistingDraft(input: {
+    revisionId: string;
+    publication: typeof wechatPublications.$inferSelect;
+    title?: string;
+    replacements: ReadonlyMap<string, Buffer>;
+    onSaveClicked: () => Promise<void>;
+    /** Run only the read-only checks against the draft and change nothing. */
+    verifyOnly?: boolean;
+  }): Promise<DraftRevisionOutcome> {
+    const { publication } = input;
+    if (!publication.draftId) throw new DraftRevisionError('failed', 'The publication has no saved draft id.');
+    const actionId = `wechat_revision_${input.revisionId}`;
+    const account = await this.getAccountRow(publication.accountId);
+    if (!account.encryptedStorageState) throw new DraftRevisionError('failed', 'The WeChat Official Account is not signed in. Sign in from the plugin settings first.');
+    this.assertAccountAvailable(actionId);
+    const session = await this.createSession(account.encryptedStorageState);
+    this.sessions.set(actionId, session);
+    this.activeActionId = actionId;
+    const { page } = session;
+    // The editor may persist content on its own. A save the revision did not
+    // request means a later stop can no longer promise the draft is untouched.
+    let unrequestedSaves = 0;
+    let saveClicked = false;
+    const onResponse = (response: Response): void => {
+      if (!saveClicked && response.request().method() === 'POST' && isDraftSaveRequest(response)) unrequestedSaves += 1;
+    };
+    page.on('response', onResponse);
+    const stop = (message: string): never => {
+      throw new DraftRevisionError(unrequestedSaves > 0 ? 'uncertain' : 'failed', unrequestedSaves > 0
+        ? `${message} The editor saved on its own ${unrequestedSaves} time(s) before WorkLite stopped, so the draft may hold partial changes.`
+        : message);
+    };
+    try {
+      await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
+      if (isLoginPage(page)) throw new DraftRevisionError('failed', 'The WeChat Official Account sign-in has expired. Sign in again from the plugin settings first.');
+      const token = new URL(page.url()).searchParams.get('token');
+      if (!token) throw new DraftRevisionError('failed', 'The WeChat Official Account session did not provide an editor token. Sign in again first.');
+      await page.goto(`https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&type=10&appmsgid=${encodeURIComponent(publication.draftId)}&token=${encodeURIComponent(token)}&lang=en_US`, { waitUntil: 'domcontentloaded' });
+      const titleEditor = page.locator('.ProseMirror').first();
+      await titleEditor.waitFor({ state: 'visible', timeout: 20_000 });
+      const bodyEditor = await articleEditor(page);
+      await bodyEditor.waitFor({ state: 'visible', timeout: 20_000 });
+      if (draftIdFromUrl(page.url()) !== publication.draftId) stop(`The editor opened draft ${draftIdFromUrl(page.url()) ?? 'unknown'} instead of ${publication.draftId}; nothing was changed.`);
+
+      const articleBody = articleBodyMarkdown(publication.article);
+      const references = findInlineImageReferences(articleBody);
+      const expectedText = await renderedTextOf(page, markdownToHtml(articleBody));
+      const before = await readArticleBody(bodyEditor);
+      if (before.text !== expectedText) {
+        stop(`The draft body no longer matches the recorded article (${describeTextDifference(expectedText, before.text)}). It may have been edited in the WeChat backend; nothing was changed.`);
+      }
+      if (before.images.length !== references.length) {
+        stop(`The draft holds ${before.images.length} body images but the recorded article has ${references.length} image placeholders; nothing was changed.`);
+      }
+      for (const key of input.replacements.keys()) {
+        if (!references.some((reference) => reference.key === key)) stop(`The recorded article has no image "${key}"; nothing was changed.`);
+      }
+      const currentUrls = new Map<string, string>();
+      references.forEach((reference, index) => {
+        if (!currentUrls.has(reference.key)) currentUrls.set(reference.key, before.images[index]!);
+      });
+      const previousTitle = await titleEditor.innerText().then((value) => value.trim()).catch(() => '');
+      if (input.verifyOnly) {
+        return {
+          draftId: publication.draftId,
+          previousTitle,
+          title: previousTitle,
+          images: references.map((reference, index) => ({ position: index + 1, key: reference.key, url: before.images[index]! })),
+          bodyWrittenThrough: 'none',
+        };
+      }
+
+      // Placeholders that keep their image take the draft's current URL; the
+      // replaced ones are uploaded and resolved by the shared upload path.
+      const pending = articleBody.replace(INLINE_IMAGE_PLACEHOLDER, (raw, alt: string, key: string) => (input.replacements.has(key) ? raw : `![${alt}](${currentUrls.get(key)})`));
+      let renderedArticle = pending;
+      if (input.replacements.size > 0) {
+        await bodyEditor.click();
+        renderedArticle = await uploadInlineArticleImages(page, pending, [...input.replacements].map(([key, png]) => ({ key, b64Json: png.toString('base64') })));
+      }
+      const html = markdownToHtml(renderedArticle);
+      const expectedImages = [...renderedArticle.matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/g)].map((match) => thumbnailIdentity(match[1]!));
+      const bodyWrittenThrough = await setArticleBodyThroughEditorApi(page, html, true) ? 'editor_api' as const : 'paste' as const;
+      if (bodyWrittenThrough === 'paste') await pasteArticleBody(page, bodyEditor, html);
+      if (input.title !== undefined) {
+        await titleEditor.click();
+        await titleEditor.fill(input.title.slice(0, 64));
+      } else {
+        await titleEditor.click();
+      }
+      await assertArticleBody(bodyEditor, renderedArticle, html).catch((error: unknown) => stop(errorMessage(error)));
+      const after = await readArticleBody(bodyEditor);
+      if (after.text !== expectedText) stop(`The revised body text differs from the recorded article (${describeTextDifference(expectedText, after.text)}); the draft was not saved.`);
+      const afterImages = after.images.map(thumbnailIdentity);
+      if (afterImages.join('\n') !== expectedImages.join('\n')) stop(`The revised body images do not match the planned order (${afterImages.length} of ${expectedImages.length}); the draft was not saved.`);
+      if (input.title !== undefined) {
+        const shownTitle = (await titleEditor.innerText()).trim();
+        if (shownTitle !== input.title.slice(0, 64)) stop(`The editor shows the title "${shownTitle}" instead of the requested one; the draft was not saved.`);
+      }
+
+      await input.onSaveClicked();
+      saveClicked = true;
+      let savedDraftId: string;
+      try {
+        savedDraftId = await saveDraft(page);
+      } catch (error) {
+        const message = errorMessage(error);
+        // An explicit platform rejection means nothing was stored.
+        if (message.startsWith('WeChat rejected the draft')) throw new DraftRevisionError('failed', message);
+        throw new DraftRevisionError('uncertain', `Save was clicked but its result is unknown: ${message}`);
+      }
+      if (savedDraftId !== publication.draftId) {
+        throw new DraftRevisionError('uncertain', `Save returned draft ${savedDraftId} instead of ${publication.draftId}; the change may have been stored as a separate draft.`);
+      }
+      return {
+        draftId: savedDraftId,
+        previousTitle,
+        title: input.title ?? previousTitle,
+        images: references.map((reference, index) => ({ position: index + 1, key: reference.key, url: [...renderedArticle.matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/g)][index]?.[1] ?? '' })),
+        bodyWrittenThrough,
+      };
+    } catch (error) {
+      if (error instanceof DraftRevisionError) throw error;
+      if (saveClicked) throw new DraftRevisionError('uncertain', `Save was clicked but its result is unknown: ${errorMessage(error)}`);
+      return stop(errorMessage(error));
+    } finally {
+      page.off('response', onResponse);
+      await this.closeSession(actionId);
     }
   }
 
@@ -793,8 +931,8 @@ async function articleEditor(page: Page): Promise<Locator> {
 // The editor exposes mp_editor_get_isready and mp_editor_set_content on the
 // page, and the content call is only accepted while the editor reports itself
 // as new, which is why the editor is opened with isNew.
-async function setArticleBodyThroughEditorApi(page: Page, html: string): Promise<boolean> {
-  return page.evaluate(async (content: string) => {
+async function setArticleBodyThroughEditorApi(page: Page, html: string, allowExistingDraft = false): Promise<boolean> {
+  return page.evaluate(async ({ content, allowExisting }: { content: string; allowExisting: boolean }) => {
     type EditorApiResult = { ok: boolean; result?: { isReady?: boolean; isNew?: boolean } };
     const api = (globalThis as unknown as { __MP_Editor_JSAPI__?: { invoke?: (options: unknown) => void } }).__MP_Editor_JSAPI__;
     if (!api || typeof api.invoke !== 'function') return false;
@@ -816,13 +954,71 @@ async function setArticleBodyThroughEditorApi(page: Page, html: string): Promise
     while (Date.now() < deadline) {
       const state = await invoke('mp_editor_get_isready', {});
       if (state.ok && state.result?.isReady) {
-        if (!state.result.isNew) return false;
+        if (!state.result.isNew && !allowExisting) return false;
         return (await invoke('mp_editor_set_content', { content })).ok;
       }
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
     return false;
+  }, { content: html, allowExisting: allowExistingDraft });
+}
+
+export type DraftRevisionOutcome = {
+  draftId: string;
+  previousTitle: string;
+  title: string;
+  images: Array<{ position: number; key: string; url: string }>;
+  bodyWrittenThrough: 'editor_api' | 'paste' | 'none';
+};
+
+/** A revision stopped before save (failed) or after it with an unknown result (uncertain). */
+export class DraftRevisionError extends Error {
+  constructor(readonly outcome: 'failed' | 'uncertain', message: string) {
+    super(message);
+    this.name = 'DraftRevisionError';
+  }
+}
+
+/** The article body as the node writes it: the leading H1 is the title, not body text. */
+export function articleBodyMarkdown(article: string): string {
+  return article.replace(/^#\s+.+$/m, '').trim() || article;
+}
+
+/** Text compared between the record and the editor; layout whitespace is not article text. */
+export function comparableArticleText(value: string): string {
+  return value.replace(/[\s\u00a0\u200b-\u200d\u2060\ufeff]+/g, '');
+}
+
+export function describeTextDifference(expected: string, actual: string): string {
+  const limit = Math.min(expected.length, actual.length);
+  let index = 0;
+  while (index < limit && expected[index] === actual[index]) index += 1;
+  const around = (value: string) => JSON.stringify(value.slice(Math.max(0, index - 8), index + 16));
+  return `first difference at character ${index}: expected ${around(expected)}, found ${around(actual)}; lengths ${expected.length} and ${actual.length}`;
+}
+
+// The expected text is read from the same HTML the editor received, through an
+// inert template so no image or script in it loads.
+async function renderedTextOf(page: Page, html: string): Promise<string> {
+  type InertDocument = { createElement(tag: 'template'): { innerHTML: string; content: { textContent: string | null } } };
+  const text = await page.evaluate((content: string) => {
+    const template = (globalThis as unknown as { document: InertDocument }).document.createElement('template');
+    template.innerHTML = content;
+    return template.content.textContent ?? '';
   }, html);
+  return comparableArticleText(text);
+}
+
+type EditorImage = { classList: { contains(name: string): boolean }; getAttribute(name: string): string | null };
+
+async function readArticleBody(bodyEditor: Locator): Promise<{ text: string; images: string[] }> {
+  const body = await bodyEditor.evaluate((element) => ({
+    text: element.textContent ?? '',
+    images: (Array.from(element.querySelectorAll('img')) as unknown as EditorImage[])
+      .filter((image) => !image.classList.contains('ProseMirror-separator'))
+      .map((image) => image.getAttribute('data-src') || image.getAttribute('src') || ''),
+  }));
+  return { text: comparableArticleText(body.text), images: body.images };
 }
 
 async function pasteArticleBody(page: Page, bodyEditor: Locator, html: string): Promise<void> {

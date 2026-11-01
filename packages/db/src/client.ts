@@ -95,6 +95,7 @@ Platform facts are read by Chat directly; they are never a reason to dispatch a 
 - inspect_workflow reads one Workflow by workflowId, or by an exact name that must be unique: state, schedule, Home dashboard projection, the current draft revision and its full graph (nodes with id, type, typeVersion, config, position and errorPolicy; edges with source, target, sourcePort, targetPort, condition and maxTraversals), defaults and input, the published version list with immutable definitions (versions "latest" by default, "all", or "none"), and recent Run summaries. Use it to answer what a Workflow contains, which model a node uses, how it is scheduled, or what ran recently.
 - inspect_workflow_run reads one Workflow Run, including its pendingAction. Never share a QR from this inspection result. For a user-requested WeChat Official Account QR, call refresh_workflow_run_pending_action after inspecting the Run; it refreshes only on demand and returns the updated pendingAction.qrCode.
 - refresh_workflow_run_pending_action explicitly requests a fresh QR for a waiting Workflow Run. Call it only when the user asks for the QR; the returned pendingAction must still be pending and its expiresAt must be in the future before sharing qrCode. Expired Runs stay waiting_for_input until the user requests a new code.
+- To change the title or illustrations of a WeChat draft a Workflow Run already saved, without rewriting the article, use inspect_wechat_draft, render_article_image and revise_wechat_draft with that Run id and draft id; do not rerun the Workflow. The article text and the cover stay unchanged. Draw each replacement as an editorial illustration in HTML and CSS: one idea per image, generous whitespace, a consistent palette, short labels with only verified numbers, and no text that repeats the caption. Look at the returned issues and keep revising the HTML until an image has none; only then pass its Artifact id. Use a new requestKey for each new revision request. When a revision is uncertain, do not retry with another requestKey: ask the user to check the draft in the WeChat backend, then record what they saw with resolve_wechat_draft_revision.
 - query_platform reads internal platform facts when no typed tool covers the route. Large results include a truncation marker with a bounded preview.
 - Never dispatch a Coder Run to read platform state: Workflow definitions, graphs, node models, versions, schedules, Run records, Artifacts, configuration and other platform facts belong to these tools. Coders are for code changes, repository-wide investigation and validation/build work; run_host_command handles daily local terminal work.
 - inspect_workspace remains the workspace-wide snapshot; use it for capabilities and the full configured resource catalog.
@@ -532,6 +533,33 @@ const WORKLITE_PLATFORM_TOOL_SPECS: Array<[path: string, description: string, in
   ['scripts/refresh-workflow-run-pending-action.mjs', 'Only when the user explicitly asks to get or refresh a WeChat Official Account QR, call this for the waiting Workflow Run after inspecting it. It posts to /runs/:runId/pending-action/refresh, returns the updated RunView with pendingAction.qrCode, and rejects a missing, expired or non-PNG code.', toolInput({
     runId: toolString('Workflow Run id from inspect_workflow_run.'),
   }, ['runId'])],
+  ['scripts/inspect-wechat-draft.mjs', 'Read a WeChat Official Account draft that a Workflow Run saved, by its Run id and draft id together: publication status, current title, the article image keys in body order with the Artifact that currently fills each, past revisions and any revision that blocks a new one. With verify: true it also opens the draft in the account (read-only, no edit or save) and checks that its body text and image count still match the recorded article.', toolInput({
+    runId: toolString('Workflow Run id that saved the draft.'),
+    draftId: toolString('WeChat draft id (appmsgid) recorded by that Run.'),
+    verify: { type: 'boolean', description: 'Also open the live draft read-only and compare it with the record. Takes up to a minute.' },
+  }, ['runId', 'draftId'])],
+  ['scripts/render-article-image.mjs', 'Render one replacement illustration for an image key of a saved WeChat draft from self-contained HTML and CSS (inline SVG and data: URIs allowed; JavaScript and network loads are disabled) and store it as a PNG Artifact of that Run. Returns the Artifact id, its content URL and layout issues: text past the image edge or cut off by its container (clipped), text spilling out of its box (overflow), text drawn over other text (overlap) or under another element (covered), the same text block shown twice (duplicate), and text under 20px at 1080px width (small_text). Only an image with no issues can be used by revise_wechat_draft.', toolInput({
+    runId: toolString('Workflow Run id that saved the draft.'),
+    draftId: toolString('WeChat draft id recorded by that Run.'),
+    key: toolString('Image key from inspect_wechat_draft.'),
+    html: toolString('Complete illustration as HTML with inline CSS, laid out for the given width and height.'),
+    width: { type: 'integer', minimum: 1080, maximum: 2160, description: 'Defaults to 1080.' },
+    height: { type: 'integer', minimum: 720, maximum: 2160, description: 'Defaults to 720.' },
+  }, ['runId', 'draftId', 'key', 'html'])],
+  ['scripts/revise-wechat-draft.mjs', 'Change the title and/or selected body images of a WeChat draft that a Workflow Run saved, keeping the article text exactly as recorded and the cover unchanged. WorkLite opens the draft, stops without changing it if its body no longer matches the record, uploads the replacement images, verifies the body text again and saves the same draft. Waits up to about 5 minutes for the result: saved, failed (draft unchanged) or uncertain (save was clicked but the result is unknown). Reusing the same requestKey returns the recorded result and never operates the account again.', toolInput({
+    runId: toolString('Workflow Run id that saved the draft.'),
+    draftId: toolString('WeChat draft id recorded by that Run.'),
+    requestKey: toolString('Unique key for this revision request, 8-120 characters; reuse it only to re-read the same request.'),
+    title: toolString('New title, at most 64 characters. Omit to keep the current title.'),
+    imageReplacements: { type: 'object', additionalProperties: { type: 'string' }, description: 'Map of image key to an issue-free Artifact id from render_article_image.' },
+  }, ['runId', 'draftId', 'requestKey'])],
+  ['scripts/resolve-wechat-draft-revision.mjs', 'Record what the WeChat backend actually shows for a draft revision whose result was uncertain, after the user has checked the draft there. saved also updates the recorded title; not_saved marks it failed. Either one unblocks further revisions of that draft.', toolInput({
+    runId: toolString('Workflow Run id that saved the draft.'),
+    draftId: toolString('WeChat draft id recorded by that Run.'),
+    revisionId: toolString('Uncertain revision id from revise_wechat_draft or inspect_wechat_draft.'),
+    outcome: { type: 'string', enum: ['saved', 'not_saved'] },
+    note: toolString('What the user saw in the WeChat backend.'),
+  }, ['runId', 'draftId', 'revisionId', 'outcome', 'note'])],
   ['scripts/control-workflow-run.mjs', 'Pause a queued or running Workflow Run, resume a paused Run or a cancelled Run whose detail sets resumable: true, cancel it, or retry the one node run it marks retryable. Inspect the Run first.', toolInput({
     runId: toolString(),
     action: { type: 'string', enum: RUN_ACTIONS },
@@ -1490,6 +1518,50 @@ const expiresAt = action && typeof action.expiresAt === 'string' ? Date.parse(ac
 if (!action || action.status !== 'pending' || typeof action.qrCode !== 'string' || !action.qrCode.startsWith('data:image/png;base64,') || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
   throw new Error('The Workflow Run did not return a current scannable QR code.');
 }
+print({ worklite: { type: 'snapshot' }, data });
+`],
+  ['scripts/inspect-wechat-draft.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, print, requiredString } from './lib.mjs';
+const raw = input();
+exactKeys(raw, ['runId', 'draftId', 'verify']);
+if (raw.verify !== undefined && typeof raw.verify !== 'boolean') throw new Error('verify must be a boolean.');
+const base = '/runs/' + encodeURIComponent(requiredString(raw.runId, 'runId', 240)) + '/wechat-drafts/' + encodeURIComponent(requiredString(raw.draftId, 'draftId', 40));
+const data = await call(base);
+if (raw.verify === true) data.liveCheck = await call(base + '/verify', { method: 'POST', body: {} });
+print({ worklite: { type: 'snapshot' }, data });
+`],
+  ['scripts/render-article-image.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, print, requiredString } from './lib.mjs';
+const raw = input();
+exactKeys(raw, ['runId', 'draftId', 'key', 'html', 'width', 'height']);
+const base = '/runs/' + encodeURIComponent(requiredString(raw.runId, 'runId', 240)) + '/wechat-drafts/' + encodeURIComponent(requiredString(raw.draftId, 'draftId', 40));
+if (typeof raw.html !== 'string' || !raw.html.trim()) throw new Error('html is required.');
+for (const field of ['width', 'height']) if (raw[field] !== undefined && !Number.isInteger(raw[field])) throw new Error(field + ' must be an integer.');
+const data = await call(base + '/images', { method: 'POST', body: { key: requiredString(raw.key, 'key', 64), html: raw.html, ...(raw.width === undefined ? {} : { width: raw.width }), ...(raw.height === undefined ? {} : { height: raw.height }) } });
+print({ worklite: { type: 'snapshot' }, data });
+`],
+  ['scripts/revise-wechat-draft.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, print, requiredString } from './lib.mjs';
+const raw = input();
+exactKeys(raw, ['runId', 'draftId', 'requestKey', 'title', 'imageReplacements']);
+const base = '/runs/' + encodeURIComponent(requiredString(raw.runId, 'runId', 240)) + '/wechat-drafts/' + encodeURIComponent(requiredString(raw.draftId, 'draftId', 40));
+if (raw.title !== undefined && typeof raw.title !== 'string') throw new Error('title must be a string.');
+if (raw.imageReplacements !== undefined && (!raw.imageReplacements || typeof raw.imageReplacements !== 'object' || Array.isArray(raw.imageReplacements))) throw new Error('imageReplacements must be an object.');
+let revision = await call(base + '/revisions', { method: 'POST', body: { requestKey: requiredString(raw.requestKey, 'requestKey', 120), ...(raw.title === undefined ? {} : { title: raw.title }), ...(raw.imageReplacements === undefined ? {} : { imageReplacements: raw.imageReplacements }) } });
+const deadline = Date.now() + 300000;
+while (revision.status === 'applying' && Date.now() < deadline) {
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+  revision = await call(base + '/revisions/' + encodeURIComponent(revision.id));
+}
+const note = revision.status === 'applying' ? 'Still applying; read it again later with inspect_wechat_draft. Do not submit a new requestKey.' : revision.status === 'uncertain' ? 'Save was clicked but the result is unknown. Do not retry with a new requestKey; ask the user to check the draft in the WeChat backend, then call resolve_wechat_draft_revision.' : undefined;
+print({ worklite: { type: 'snapshot' }, data: note ? { ...revision, note } : revision });
+`],
+  ['scripts/resolve-wechat-draft-revision.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, oneOf, print, requiredString } from './lib.mjs';
+const raw = input();
+exactKeys(raw, ['runId', 'draftId', 'revisionId', 'outcome', 'note']);
+const base = '/runs/' + encodeURIComponent(requiredString(raw.runId, 'runId', 240)) + '/wechat-drafts/' + encodeURIComponent(requiredString(raw.draftId, 'draftId', 40));
+const data = await call(base + '/revisions/' + encodeURIComponent(requiredString(raw.revisionId, 'revisionId', 120)) + '/resolve', { method: 'POST', body: { outcome: oneOf(raw.outcome, 'outcome', ['saved', 'not_saved']), note: requiredString(raw.note, 'note', 1000) } });
 print({ worklite: { type: 'snapshot' }, data });
 `],
   ['scripts/control-workflow-run.mjs', `#!/usr/bin/env node

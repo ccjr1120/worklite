@@ -328,6 +328,27 @@ export const wechatPublications = sqliteTable('wechat_publications', {
   updatedAt: timestamp('updated_at'),
 });
 
+// One row per request to change an existing draft's title or inline images. The
+// unique request key makes a retried request return the recorded outcome instead
+// of operating the account again; an uncertain row blocks further revisions of
+// that draft until a person records what the account actually holds.
+export const wechatDraftRevisions = sqliteTable('wechat_draft_revisions', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  publicationId: text('publication_id').notNull().references(() => wechatPublications.id, { onDelete: 'cascade' }),
+  runId: text('run_id').notNull(),
+  draftId: text('draft_id').notNull(),
+  requestKey: text('request_key').notNull().unique(),
+  title: text('title'),
+  previousTitle: text('previous_title').notNull(),
+  imageReplacements: text('image_replacements', { mode: 'json' }).$type<Record<string, string>>().notNull().default({}),
+  status: text('status').$type<'applying' | 'saved' | 'failed' | 'uncertain'>().notNull().default('applying'),
+  lastError: text('last_error'),
+  detail: text('detail', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (table) => [index('wechat_draft_revisions_publication_status_idx').on(table.publicationId, table.status)]);
+
 export const workflowRunEvents = sqliteTable('workflow_run_events', {
   runId: text('run_id').notNull().references(() => workflowRuns.id, { onDelete: 'cascade' }), sequence: integer('sequence').notNull(), type: text('type').$type<'run.status' | 'node.started' | 'node.delta' | 'node.waiting' | 'node.completed' | 'node.failed' | 'node.activity' | 'pending_action.updated' | 'artifact.created'>().notNull(), payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(), createdAt: timestamp('created_at'),
 }, (table) => [primaryKey({ columns: [table.runId, table.sequence] })]);
