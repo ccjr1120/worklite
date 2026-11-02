@@ -1,6 +1,9 @@
 {
   "name": "worklite",
   "private": true,
+  "bin": {
+    "worklite": "./scripts/worklite.mjs"
+  },
   "packageManager": "pnpm@10.19.0",
   "engines": {
     "node": ">=22"
@@ -10,7 +13,7 @@
     "dev:web": "pnpm --filter @worklite/web dev",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "deploy:local": "node ./scripts/bump-deployment-version.mjs && node ./scripts/upgrade-runner.mjs deploy deployment",
+    "deploy:local": "node ./scripts/bump-deployment-version.mjs && node ./scripts/upgrade-runner.mjs deploy deployment && node ./scripts/install-command.mjs",
     "diagnose:responses": "node ./scripts/check-responses-stream.mjs",
     "diagnose:codex": "node ./scripts/test-codex-proxy.mjs",
     "typecheck": "turbo typecheck",

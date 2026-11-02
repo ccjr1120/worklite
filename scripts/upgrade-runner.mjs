@@ -753,6 +753,60 @@ async function deploy(profile) {
   process.stdout.write(`Managed WorkLite deployment completed on port ${runtime.ports[0]} at version ${runtime.version}.\n`);
 }
 
+async function startDeployment(restart = false) {
+  const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const dataDirectory = join(projectRoot, '.data', 'deployment');
+  const stateDirectory = join(dataDirectory, 'runtime');
+  const currentPath = join(stateDirectory, 'current.json');
+  const ports = [23390, 23391, 23392];
+  const current = readCurrentRuntime(currentPath, projectRoot, dataDirectory, stateDirectory, ports);
+  if (!current) throw new Error('No deployment found. Run pnpm deploy:local in the project first.');
+  assertNoActiveUpgrade(stateDirectory);
+
+  const occupied = ports.map((port) => listeners(port));
+  if (occupied.some((owners) => owners.length)) {
+    assertCurrentOwnership(current);
+    if (!restart && occupied.every((owners) => owners.length) && alive(current.pid) && current.gateway && alive(current.gateway.pid)) {
+      process.stdout.write(`WorkLite is already running at http://127.0.0.1:${ports[0]}/.\n`);
+      return;
+    }
+    if (current.gateway) await stopGateway(current.gateway);
+    if (alive(current.pid)) await stopImmediately(current);
+    else await stopOrphanGroups(current, verifiedOrphanGroups(current), null);
+  }
+  // After a reboot the saved PIDs may have been reused by unrelated processes.
+  // When the ports are free, do not inspect or signal those stale PIDs.
+  await portsFree(ports);
+  const runtime = { ...current };
+  delete runtime.pid;
+  delete runtime.gateway;
+  const logDirectory = join(stateDirectory, 'deployments');
+  mkdirSync(logDirectory, { recursive: true });
+  const logPath = join(logDirectory, `${randomUUID()}.log`);
+  const log = openSync(logPath, 'a', 0o600);
+  try {
+    runtime.gateway = launchGateway(runtime, dataDirectory, ports[2], false, log);
+    await gatewayReady(runtime.gateway);
+    runtime.pid = launch(runtime, dataDirectory, ports, false, log);
+    await ready(runtime.pid, ports, runtime.releaseHash ?? runtime.version, runtime.gateway);
+    write(currentPath, runtime);
+  } catch (error) {
+    const cleanupErrors = [];
+    if (runtime.pid) {
+      try {
+        if (alive(runtime.pid)) await stopImmediately(runtime);
+        else await stopOrphanGroups(runtime, verifiedOrphanGroups(runtime), null);
+      } catch (cleanupError) { cleanupErrors.push(describeError(cleanupError)); }
+    }
+    if (runtime.gateway) {
+      try { await stopGateway(runtime.gateway); }
+      catch (cleanupError) { cleanupErrors.push(describeError(cleanupError)); }
+    }
+    throw new Error(`${describeError(error)} See ${logPath}.${cleanupErrors.length ? ` Cleanup failed: ${cleanupErrors.join('; ')}.` : ''}`, { cause: error });
+  } finally { closeSync(log); }
+  process.stdout.write(`WorkLite started at http://127.0.0.1:${ports[0]}/ (version ${runtime.version}).\n`);
+}
+
 async function run(state, id) {
   const jobPath = join(state, 'upgrades', `${id}.json`);
   let job = read(jobPath);
@@ -950,5 +1004,7 @@ async function run(state, id) {
 if (command === 'prepare') process.stdout.write(JSON.stringify(prepare(...args)));
 else if (command === 'install') await install(args[0]);
 else if (command === 'deploy') await deploy(args[0]);
+else if (command === 'start') await startDeployment(false);
+else if (command === 'restart') await startDeployment(true);
 else if (command === 'run') await run(...args);
 else throw new Error('Usage: upgrade-runner.mjs deploy <deployment> | install <deployment> | run <state-directory> <job-id>');
