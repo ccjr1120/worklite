@@ -1,31 +1,31 @@
 import { Link } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
-import type { AgentTeamRunStatus, AgentTeamView } from '@worklite/contracts';
-import { useAgentTeamRecordsQuery, useCodersQuery } from '@/api/queries';
+import { CODER_ACTIVE_RUN_STATUSES, type AgentTeamRunStatus, type AgentTeamRunStatusCount, type AgentTeamView } from '@worklite/contracts';
+import { useCoderRunStatusCountsQuery, useCodersQuery } from '@/api/queries';
 import { focusRing } from '@/components/ui/interaction';
 import { TruncatedText } from '@/components/ui/truncated-text';
 import { cn } from '@/lib/utils';
-
-const ACTIVE_RUN_STATUSES: AgentTeamRunStatus[] = ['running', 'waiting_for_input', 'paused'];
 
 /** Executor cards for the configuration view; each links to the same configuration page of that executor. */
 export function CoderSwitcher({ coderId }: { coderId: string }) {
   const { t } = useTranslation('coders');
   const query = useCodersQuery();
+  // One grouped request serves every card.
+  const counts = useCoderRunStatusCountsQuery();
   if (!query.data?.length) return null;
 
   return (
     <nav aria-label={t('switcher.label')} className="grid gap-3 md:grid-cols-2">
-      {query.data.map((team) => <TeamCard key={team.id} team={team} selected={team.id === coderId} />)}
+      {query.data.map((team) => <TeamCard key={team.id} team={team} selected={team.id === coderId} counts={counts.data} />)}
     </nav>
   );
 }
 
-function TeamCard({ team, selected }: { team: AgentTeamView; selected: boolean }) {
+function TeamCard({ team, selected, counts }: { team: AgentTeamView; selected: boolean; counts: AgentTeamRunStatusCount[] | undefined }) {
   const { t } = useTranslation('coders');
-  // Each card reuses the per-executor Run-summary query, so the selected executor's counts share the records request.
-  const runs = useAgentTeamRecordsQuery(team.id);
-  const count = (statuses: AgentTeamRunStatus[]) => runs.data ? runs.data.filter((run) => statuses.includes(run.status)).length : '–';
+  const count = (statuses: readonly AgentTeamRunStatus[]) => counts
+    ? counts.filter((row) => row.coderId === team.id && statuses.includes(row.status)).reduce((total, row) => total + row.count, 0)
+    : '–';
   const focus = t(`focus.${team.id}` as never, { defaultValue: '' });
 
   return (
@@ -47,7 +47,7 @@ function TeamCard({ team, selected }: { team: AgentTeamView; selected: boolean }
       {team.description ? <TruncatedText as="p" text={team.description} className="mt-1.5 text-[13px] text-muted-foreground" /> : null}
       <dl className="mt-3 flex gap-x-4 overflow-hidden whitespace-nowrap text-xs text-muted-foreground">
         <div className="flex gap-1"><dt>{t('switcher.maxConcurrentRuns')}</dt><dd className="tabular-nums text-foreground">{team.maxConcurrentRuns}</dd></div>
-        <div className="flex gap-1"><dt>{t('switcher.activeRuns')}</dt><dd className="tabular-nums text-foreground">{count(ACTIVE_RUN_STATUSES)}</dd></div>
+        <div className="flex gap-1"><dt>{t('switcher.activeRuns')}</dt><dd className="tabular-nums text-foreground">{count(CODER_ACTIVE_RUN_STATUSES)}</dd></div>
         <div className="flex gap-1"><dt>{t('switcher.queuedRuns')}</dt><dd className="tabular-nums text-foreground">{count(['queued'])}</dd></div>
       </dl>
     </Link>

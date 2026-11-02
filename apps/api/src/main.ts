@@ -5,6 +5,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { runtimeAdmissionClosed, runtimeWritesFrozen } from './infrastructure/runtime-upgrade-state';
 import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
+import { ApiRequestLogsService } from './modules/api-request-logs/api-request-logs.service';
 
 async function bootstrap() {
   const port = Number(process.env.API_PORT ?? 23391);
@@ -15,6 +16,8 @@ async function bootstrap() {
   app.useBodyParser('json', { limit: Infinity });
   app.useBodyParser('urlencoded', { extended: true, limit: Infinity });
   app.enableShutdownHooks();
+  // Registered before the upgrade gate so its 503 responses are timed too.
+  app.use(app.get(ApiRequestLogsService).middleware());
   app.use((request: Request, response: Response, next: NextFunction) => {
     const runner = /^\/api\/upgrades\/upgrade_[a-f0-9-]+\/(handoff|freeze|resume)$/.test(request.path);
     if (runtimeWritesFrozen() && !runner && request.path !== '/api/health' && request.path !== '/api/upgrades/runtime') {

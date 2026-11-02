@@ -2,6 +2,7 @@
   "title": "运行记录",
   "loading": "正在加载运行记录...",
   "loadFailed": "无法加载运行记录。",
+  "loadMore": "加载更多",
   "empty": {
     "description": "该工作流还没有运行记录。"
   },

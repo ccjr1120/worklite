@@ -15,7 +15,7 @@ describe('Coder run progress', () => {
   });
 
   it.each([
-    ['group_1_executor', 'development'],
+    ['group_1_implementer', 'development'],
     ['group_2_test_runner', 'test_execution'],
     ['group_3_reviewer', 'review'],
     ['group_4_custom_role', 'working'],

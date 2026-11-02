@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { Request } from 'express';
+import type { Database } from '@worklite/db';
 import { CodersService } from './coders.service';
+import type { AgentTeamRuntimeService } from './coder-runtime.service';
+import type { AgentTeamConfigurationService } from './coder-configuration.service';
+import type { WorkspaceService } from '../teams/teams.service';
 
 describe('CodersService.listRuns', () => {
   let service: CodersService;
@@ -10,9 +14,12 @@ describe('CodersService.listRuns', () => {
   let mockRuntime: Record<string, unknown>;
   let mockRequest: Request;
 
+  let selectMock: ReturnType<typeof vi.fn>;
+
   beforeEach(() => {
+    selectMock = vi.fn();
     mockDb = {
-      select: vi.fn(),
+      select: selectMock,
     };
     mockWorkspaces = {
       getWorkspace: vi.fn().mockResolvedValue({ id: 'ws-123' }),
@@ -21,7 +28,12 @@ describe('CodersService.listRuns', () => {
     mockRuntime = {};
     mockRequest = {} as Request;
 
-    service = new CodersService(mockDb as any, mockWorkspaces as any, mockRuntime as any, mockConfig as any);
+    service = new CodersService(
+      mockDb as unknown as Database,
+      mockWorkspaces as unknown as WorkspaceService,
+      mockRuntime as unknown as AgentTeamRuntimeService,
+      mockConfig as unknown as AgentTeamConfigurationService,
+    );
   });
 
   it('should fetch paginated runs with cursor pagination', async () => {
@@ -35,7 +47,7 @@ describe('CodersService.listRuns', () => {
         modeDecidedAt: null,
         status: 'succeeded',
         createdAt: new Date('2024-01-02'),
-        finishedAt: new Date('2024-01-02T01:00:00'),
+        finishedAt: new Date('2024-01-02T01:00:00Z'),
         coderId: 'team-1',
         currentCoderName: 'Renamed Executor',
         snapshot: { orchestrationVersion: 11, coderName: 'Executor A' },
@@ -71,7 +83,7 @@ describe('CodersService.listRuns', () => {
       orderBy: vi.fn().mockResolvedValue([]),
     };
 
-    (mockDb.select as any).mockReturnValueOnce(mockQuery).mockReturnValue(emptyQuery);
+    selectMock.mockReturnValueOnce(mockQuery).mockReturnValue(emptyQuery);
 
     const result = await service.listRuns(mockRequest, 'personal', ['team-1'], undefined, 50);
 
@@ -125,7 +137,7 @@ describe('CodersService.listRuns', () => {
       limit: vi.fn().mockResolvedValue(mockRuns),
     };
 
-    (mockDb.select as any).mockReturnValue(mockQuery);
+    selectMock.mockReturnValue(mockQuery);
 
     await service.listRuns(mockRequest, 'personal', ['team-1', 'team-2'], undefined, 50);
 
@@ -143,7 +155,7 @@ describe('CodersService.listRuns', () => {
       limit: vi.fn().mockResolvedValue([]),
     };
 
-    (mockDb.select as any).mockReturnValue(mockQuery);
+    selectMock.mockReturnValue(mockQuery);
 
     // Test max limit
     await service.listRuns(mockRequest, 'personal', [], undefined, 500);

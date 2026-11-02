@@ -39,7 +39,6 @@ import {
   coderGroupEvents,
   coderGroupMessages,
   coderGroups,
-  coderMemories,
   coderGroupRepositories,
   coderOperations,
   coderPendingInputs,
@@ -274,7 +273,6 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (team.deletedAt) throw new BadRequestException('This Coder has been deleted and is no longer available for dispatch.');
 
     const snapshot = await this.createVersionSnapshot(team.roles, team.workingPractice, 5, '', team.name);
-    const now = new Date();
     await this.transaction((transaction) => {
       const [latest] = transaction.select({ version: coderVersions.version })
         .from(coderVersions)
@@ -1107,7 +1105,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           instructions: DIRECT_PLANNER_INSTRUCTIONS,
         },
         {
-          ...defaultRoleConfiguration('executor'),
+          ...defaultRoleConfiguration('implementer'),
           displayName: DIRECT_IMPLEMENTER_DISPLAY_NAME,
           entryPoints: [],
           // Its Implementer runs on an execution engine (see produceOutput), not as a chat-completed role.
@@ -3316,7 +3314,7 @@ export function rolePromptAddition(
   return undefined;
 }
 
-function projectStrategyPlannerPromptAddition(request: AgentTeamTaskRequest): string {
+function projectStrategyPlannerPromptAddition(_request: AgentTeamTaskRequest): string {
   return [
     'For orchestration v5, this is an advisory strategy-planning task. It supersedes any older task-goal or role instruction that describes WorkLite-created worktrees or teardown. The supplied projectDirectory is a workspace root that may contain multiple projects and repositories; inspect the workspace and the Planner assignments without assuming the root itself is a Git repository.',
     'Return a document with key "project_workspace_strategy" and title "Project workspace strategy". In its content, list each affected project directory and recommend one of: work in the current branch, switch to or create a feature branch, or use a worktree for that project. Explain the choice briefly in light of the assigned work and parallel Developers.',
@@ -3422,7 +3420,7 @@ function taskContext(request: AgentTeamTaskRequest, executor: boolean, correctio
     intent: request.intent,
     projectDirectory: request.projectDirectory,
     outputDirectory: request.outputDirectory,
-    authorization: modeAuthorization(request.mode),
+    authorization: modeAuthorization(request.mode, request.taskDefinition.role),
     projectInstructions: request.projectInstructions,
     upstreamDocuments: request.upstream,
     ...(request.assignment ? { assignment: request.assignment } : {}),
@@ -3556,9 +3554,11 @@ function teamMemoryProjection(memories: Array<{ role: string | null; content: st
   return lines.join('\n');
 }
 
-function modeAuthorization(mode: AgentTeamMode): string {
+function modeAuthorization(mode: AgentTeamMode, role: AgentTeamRoleId): string {
   if (mode === 'plan_only') return 'Read the declared project. Do not modify project files or execute commands.';
   if (mode === 'validate_existing') return 'Read the declared project and run the checks this task and the project instructions call for. Do not modify project files or author new tests.';
+  // The Implementer only carries out the Planner's plan; it does not run tests or validate its own work.
+  if (role === 'implementer') return 'Read and modify the declared project only within the confirmed implementation scope. Do not run tests or validate the result.';
   return 'Read and modify the declared project only within the confirmed implementation scope, and run the checks this task and the project instructions call for.';
 }
 
@@ -4051,7 +4051,7 @@ export function deriveRunProgress(
     const groupRole = /^group_\d+_(.+)$/.exec(taskKey)?.[1];
     if (groupRole) {
       const phases: Record<string, AgentTeamRunProgress['phase']> = {
-        planner: 'planning', test_designer: 'test_design', developer: 'development', executor: 'development',
+        planner: 'planning', test_designer: 'test_design', developer: 'development', implementer: 'development',
         test_author: 'test_authoring', test_runner: 'test_execution', reviewer: 'review',
       };
       return phases[groupRole] ?? 'working';

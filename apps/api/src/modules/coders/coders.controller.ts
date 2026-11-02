@@ -164,6 +164,12 @@ export class CoderRunsController {
     return this.teams.listRuns(request, 'personal', coderIdArray, cursor, limit);
   }
 
+  // Queued and active Run counts per Coder in one read; declared before :runId.
+  @Get('status-counts')
+  statusCounts(@Req() request: Request) {
+    return this.teams.statusCounts(request, 'personal');
+  }
+
   // Read-only node trees for several Runs at once (comma-separated runIds, at most 50).
   // Declared before :runId so "nodes" is not read as a Run id.
   @Get('nodes')

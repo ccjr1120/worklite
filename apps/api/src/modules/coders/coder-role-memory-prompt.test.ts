@@ -59,17 +59,17 @@ describe('planner investigation guidance', () => {
 
     expect(addition).toContain('Stop investigating each question when its requested scope is supported by sufficient evidence');
     expect(addition).toContain('Satisfy every explicit requirement');
-    expect(addition).toContain('For a request that only asks for read-only investigation or an answer, report the findings directly');
+    expect(addition).toContain('For a request that only asks for read-only investigation or an answer, report the findings in the required Planner document');
     expect(rolePromptAddition('reviewer', snapshot(11))).not.toContain('Scale investigation to the actual request');
   });
 
   it('asks the Planner for an executable plan document and the Implementer to follow it without re-investigating', () => {
     const withImplementer = {
       ...snapshot(11),
-      roles: [{ role: 'planner' }, { role: 'executor', executor: 'claude' }],
+      roles: [{ role: 'planner' }, { role: 'implementer', executor: 'claude' }],
     } as unknown as StoredAgentTeamVersionSnapshot;
     const planner = rolePromptAddition('planner', withImplementer, request('group_0_planner', 'planner', []));
-    const implementer = rolePromptAddition('executor', withImplementer, request('group_1_executor', 'executor', []));
+    const implementer = rolePromptAddition('implementer', withImplementer, request('group_1_implementer', 'implementer', []));
 
     expect(planner).toContain('Issue independent tool calls together in the same round');
     expect(planner).toContain('do not re-investigate them');
@@ -171,11 +171,11 @@ describe('handoff role ids', () => {
       ...snapshot(11),
       roles: [
         { role: 'planner' },
-        { role: 'executor', displayName: 'Implementer', executor: 'codex_app_server' },
+        { role: 'implementer', displayName: 'Implementer', executor: 'codex_app_server' },
       ],
     } as unknown as StoredAgentTeamVersionSnapshot;
     const addition = rolePromptAddition('planner', value, request('group_0_planner', 'planner', []));
 
-    expect(addition).toContain('Captured role ids (use the id exactly in handoff.role, not the display name): planner; executor (display name "Implementer", implementation role).');
+    expect(addition).toContain('Captured role ids (use the id exactly in handoff.role, not the display name): planner; implementer (display name "Implementer", implementation role).');
   });
 });

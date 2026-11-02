@@ -30,9 +30,9 @@ describe('Coder task output', () => {
       invocations: { execute: repair },
       finishCoderOutput: vi.fn(async (_request, _workspace, _attempt, taskKey, output) => parseTaskOutput(output, taskKey)),
     });
-    const role = { role: 'executor', executor: 'claude', publicModelId: 'provider/model', instructions: '', skills: [], mcpServers: [] };
-    const version = { snapshot: { orchestrationVersion: 7, roles: [role], projectExecutorLaunches: { executor: { executor: 'claude' } } } };
-    const request = { runId: 'run', projectDirectory: '/project', outputDirectory: '/output', intent: 'Fix', mode: 'implement_and_validate', scopeRevision: 1, projectInstructions: [], upstream: [], taskDefinition: { role: 'executor', taskKey: 'task' } };
+    const role = { role: 'implementer', executor: 'claude', publicModelId: 'provider/model', instructions: '', skills: [], mcpServers: [] };
+    const version = { snapshot: { orchestrationVersion: 7, roles: [role], projectExecutorLaunches: { implementer: { executor: 'claude' } } } };
+    const request = { runId: 'run', projectDirectory: '/project', outputDirectory: '/output', intent: 'Fix', mode: 'implement_and_validate', scopeRevision: 1, projectInstructions: [], upstream: [], taskDefinition: { role: 'implementer', taskKey: 'task' } };
     const execute = Reflect.get(AgentTeamRuntimeService.prototype, 'executeTask');
     await expect(execute.call(runtime, 'workspace', version, request)).resolves.toMatchObject(completed);
     expect(executor).toHaveBeenCalledTimes(1);

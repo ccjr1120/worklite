@@ -15,7 +15,7 @@ export const DEFAULT_DIRECT_GIT_POLICY = DEFAULT_PROJECT_GIT_POLICY;
 
 // Mirrors CompanyCoder's Planner requirement that the plan itself commit to branch and
 // worktree orchestration, so the Implementer follows a decision instead of improvising one.
-// Display name of QuickCoder's implementation role; its role id stays `executor`.
+// Display name of QuickCoder's implementation role; its role id is `implementer`.
 export const DIRECT_IMPLEMENTER_DISPLAY_NAME = 'Implementer';
 
 export const DEFAULT_PLANNER_EVIDENCE_INSTRUCTIONS = [
@@ -24,7 +24,7 @@ export const DEFAULT_PLANNER_EVIDENCE_INSTRUCTIONS = [
   'Do not invent evidence. If a material decision remains blocked after reasonable read-only investigation, explain what is missing, what you tried and its impact; ask a focused question only if the answer is needed. Preserve already granted approvals and continue independent work.',
 ].join('\n');
 
-export const DIRECT_PLANNER_INSTRUCTIONS = 'Understand the requested goal and preserve user intent. Clarify only material missing information. Inspect the authorized project read-only without editing code, then produce a concrete execution plan for the Implementer. You may ask for plan confirmation using the existing waiting_for_input question mechanism before handing off. Hand off to role executor (the Implementer) with a specific, actionable goal describing the plan to implement.'
+export const DIRECT_PLANNER_INSTRUCTIONS = 'Understand the requested goal and preserve user intent. Clarify only material missing information. Inspect the authorized project read-only without editing code, then produce a concrete execution plan for the Implementer. You may ask for plan confirmation using the existing waiting_for_input question mechanism before handing off. Hand off to role implementer (the Implementer) with a specific, actionable goal describing the plan to implement.'
   + '\n\nWhen Git orchestration is needed, plan it in accordance with the user\'s instructions, repository rules and actual state. Do not assume a base branch, worktree path, commit or merge is required. Include the necessary decisions in the handoff.'
   + '\n\nWhen the implementation can split safely into independent, non-overlapping pieces of work, decide the split yourself instead of leaving it to the Implementer: return up to four developmentAssignments in the handoff, each with a title, scopeSummary, non-overlapping ownedPaths and optional repositoryIds; include branch and worktree decisions only when needed and authorized. WorkLite runs each assignment as its own Implementer process in parallel using this same captured Implementer configuration. Only split when the pieces are truly independent; a single assignment (or none) is correct for most Direct work.'
   + `\n\n${DEFAULT_PLANNER_EVIDENCE_INSTRUCTIONS}`;
@@ -66,7 +66,7 @@ export const CODER_ROLE_TOOL_NAMES: Partial<Record<string, readonly string[]>> =
   // The v5-v9 Worktree Manager plans and reports; Coders choose Git operations.
   'worktree-manager': ['read', 'glob', 'grep', 'process_reference'],
   // QuickCoder's Implementer mirrors the Developer's tool access.
-  executor: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference'],
+  implementer: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference'],
 };
 
 export const CODER_ROLE_INSTRUCTIONS: Partial<Record<string, string>> = {
@@ -79,7 +79,8 @@ export const CODER_ROLE_INSTRUCTIONS: Partial<Record<string, string>> = {
   reviewer: 'Independently assess the implementation and test evidence against the original intent. Request scoped repair only when concrete evidence shows a defect.',
   'worktree-manager': 'For v4 Runs, follow the captured worktree setup and teardown instructions. For v5–v9 work, provide advisory per-project Git strategy recommendations only; Coders inspect the actual repository state and choose their own Git operations.',
   // QuickCoder only: the engine-backed Implementer carries out the Planner's handed-off plan.
-  executor: 'Implement the Planner\'s handed-off plan in the authorized project. Follow the project\'s own repository instructions and the Coder Git policy. Report the changes you made and any gaps between the plan and what you could complete.',
+  // It implements only; it does not run tests or validate its own work.
+  implementer: 'Implement the Planner\'s handed-off plan in the authorized project. Follow the project\'s own repository instructions and the Coder Git policy. Do not run tests or validate the result; implementing the plan is your only responsibility. Report the changes you made and any gaps between the plan and what you could complete.',
 };
 
 // Determine a Coder's entry role based on its configured roles. The Dispatcher is the default

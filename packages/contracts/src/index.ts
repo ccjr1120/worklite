@@ -205,7 +205,10 @@ export type ChatConversationRecords = {
   conversation: ChatConversationSummary;
   execution: AgentExecutionView | null;
   events: AgentExecutionEvent[];
+  /** The newest 500 channel events of the bound chat, oldest first. */
   receipts: Array<{ id: string; payload: Record<string, unknown>; status: 'queued' | 'done' | 'failed'; error: string | null; createdAt: string }>;
+  /** All channel events of the bound chat; larger than receipts.length when older ones were omitted. */
+  receiptsTotal: number;
   submissions: ChatSubmissionView[];
   deliveries: Array<{ id: string; messageId: string | null }>;
 };
@@ -1065,6 +1068,12 @@ export type RunView = {
   pendingAction?: WorkflowPendingActionView | null;
 };
 
+/** One page of Runs, returned by GET /api/runs when `paged=1` or a cursor is given. */
+export type RunListPage = {
+  items: RunView[];
+  nextCursor: string | null;
+};
+
 export type CreateRunRequest = {
   input: unknown;
 };
@@ -1410,6 +1419,55 @@ export type GatewayRequestLogList = {
   from: string;
   to: string;
   retainedFrom: string;
+};
+
+/** Local API request timing, recorded by the WorkLite API for every request it serves. */
+export type ApiRequestLogStatusClass = 'success' | 'client_error' | 'server_error';
+
+export type ApiRequestLogQuery = GatewayTimeRange & {
+  method?: string;
+  route?: string;
+  minDurationMs?: number;
+  statusClass?: ApiRequestLogStatusClass;
+  limit?: number;
+  cursor?: string;
+};
+
+export type ApiRequestLogItem = {
+  id: string;
+  method: string;
+  /** Route template such as /api/runs/:runId; the concrete path is kept in `path`. */
+  route: string;
+  path: string;
+  status: number;
+  durationMs: number;
+  responseBytes: number | null;
+  /** Event streams stay open for minutes, so they are listed but never ranked. */
+  streaming: boolean;
+  occurredAt: string;
+};
+
+export type ApiRequestLogList = {
+  items: ApiRequestLogItem[];
+  nextCursor: string | null;
+  retentionDays: number;
+};
+
+export type ApiRequestRouteStat = {
+  method: string;
+  route: string;
+  count: number;
+  avgMs: number;
+  p95Ms: number;
+  maxMs: number;
+  errorCount: number;
+  avgBytes: number | null;
+};
+
+export type ApiRequestLogStats = {
+  /** Non-streaming routes ordered by p95 duration, slowest first. */
+  routes: ApiRequestRouteStat[];
+  retentionDays: number;
 };
 
 export type ArtifactFormat = 'json' | 'text' | 'markdown' | 'image' | 'unsupported';
@@ -1863,6 +1921,15 @@ export type AgentTeamRunOutcome = {
   summary: string;
   unresolvedIssues: string[];
   criterionAssessments: AgentTeamCriterionAssessment[];
+};
+
+/** Run counts per Coder and status for queued and active Runs (GET /api/coder-runs/status-counts). */
+export const CODER_ACTIVE_RUN_STATUSES = ['running', 'waiting_for_input', 'paused'] as const satisfies readonly AgentTeamRunStatus[];
+
+export type AgentTeamRunStatusCount = {
+  coderId: string;
+  status: AgentTeamRunStatus;
+  count: number;
 };
 
 export type AgentTeamRunSummary = {

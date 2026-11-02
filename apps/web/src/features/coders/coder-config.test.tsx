@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n/config';
 import type { AgentTeamMemoryView, AgentTeamView, McpServerView, SkillView } from '@worklite/contracts';
-import { useAgentTeamMemoriesQuery, useAgentTeamQuery, useAgentTeamRecordsQuery, useCodersQuery, useMcpServersQuery, useSkillsQuery } from '@/api/queries';
+import { useAgentTeamMemoriesQuery, useAgentTeamQuery, useCodersQuery, useCoderRunStatusCountsQuery, useMcpServersQuery, useSkillsQuery } from '@/api/queries';
 import { Route as AgentTeamConfigRoute } from '@/routes/coding/$coderId.config';
 import { CoderConfig } from './coder-config';
 
@@ -13,7 +13,7 @@ vi.mock('@/api/queries', () => ({
   useMcpServersQuery: vi.fn(),
   useSkillsQuery: vi.fn(),
   useCodersQuery: vi.fn(),
-  useAgentTeamRecordsQuery: vi.fn(),
+  useCoderRunStatusCountsQuery: vi.fn(),
 }));
 
 vi.mock('@/components/locale-provider', () => ({
@@ -113,7 +113,7 @@ function mockQueries(options: { team?: AgentTeamView; memories?: AgentTeamMemory
     data: options.skills ?? [],
   } as unknown as ReturnType<typeof useSkillsQuery>);
   vi.mocked(useCodersQuery).mockReturnValue({ data: [options.team ?? team, otherTeam] } as unknown as ReturnType<typeof useCodersQuery>);
-  vi.mocked(useAgentTeamRecordsQuery).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useAgentTeamRecordsQuery>);
+  vi.mocked(useCoderRunStatusCountsQuery).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useCoderRunStatusCountsQuery>);
 }
 
 describe('CoderConfig', () => {
@@ -144,7 +144,7 @@ describe('CoderConfig', () => {
 
     const checkbox = screen.getByRole('checkbox', { name: 'dino-account' });
     expect(checkbox).not.toBeChecked();
-    expect(screen.getByText('本地目录')).toBeInTheDocument();
+    expect(screen.getByText('~/.worklite/skills')).toBeInTheDocument();
 
     fireEvent.click(checkbox);
     expect(checkbox).toBeChecked();

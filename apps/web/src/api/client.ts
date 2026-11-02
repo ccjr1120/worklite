@@ -3,8 +3,12 @@ import type {
   AgentTeamDocumentView,
   AgentTeamMemoryView,
   AgentTeamRunView,
-  AgentTeamRunSummary,
   AgentTeamRunListPage,
+  AgentTeamRunStatusCount,
+  ApiRequestLogList,
+  ApiRequestLogQuery,
+  ApiRequestLogStats,
+  RunListPage,
   AgentTeamRunNodeTree,
   AgentTeamRunEvent,
   AgentTeamView,
@@ -146,6 +150,19 @@ function appendGatewayAttribution(search: URLSearchParams, filters: GatewayAttri
     const trimmed = value?.trim();
     if (trimmed) search.set(name, trimmed);
   }
+}
+
+function apiRequestLogSearch(query: ApiRequestLogQuery): string {
+  const search = new URLSearchParams();
+  if (query.from?.trim()) search.set('from', query.from.trim());
+  if (query.to?.trim()) search.set('to', query.to.trim());
+  if (query.method?.trim()) search.set('method', query.method.trim());
+  if (query.route?.trim()) search.set('route', query.route.trim());
+  if (query.minDurationMs !== undefined) search.set('minDurationMs', String(query.minDurationMs));
+  if (query.statusClass) search.set('statusClass', query.statusClass);
+  if (query.limit) search.set('limit', String(query.limit));
+  if (query.cursor?.trim()) search.set('cursor', query.cursor.trim());
+  return search.size > 0 ? `?${search.toString()}` : '';
 }
 
 function apiGet<T>(path: string): Promise<T> {
@@ -300,9 +317,10 @@ export const api = {
     const suffix = search.size > 0 ? `?${search.toString()}` : '';
     return apiGet<GatewayRequestLogList>(`/api/portkey-gateway/request-logs${suffix}`);
   },
+  apiRequestLogs: (query: ApiRequestLogQuery = {}) => apiGet<ApiRequestLogList>(`/api/api-request-logs${apiRequestLogSearch(query)}`),
+  apiRequestLogStats: (query: ApiRequestLogQuery = {}) => apiGet<ApiRequestLogStats>(`/api/api-request-logs/stats${apiRequestLogSearch(query)}`),
   gatewayRequestLog: (requestLogId: string) => apiGet<GatewayRequestLogDetail>(`/api/portkey-gateway/request-logs/${encodeURIComponent(requestLogId)}`),
   executors: () => apiGet<AgentTeamView[]>('/api/coders'),
-  coderRecords: (coderId: string) => apiGet<AgentTeamRunSummary[]>(`/api/coders/${encodeURIComponent(coderId)}/runs`),
   agentTeamRunList: (query: { coderIds?: string[]; cursor?: string; limit?: number }) => {
     const search = new URLSearchParams();
     if (query.coderIds?.length) {
@@ -313,6 +331,7 @@ export const api = {
     const suffix = search.size > 0 ? `?${search.toString()}` : '';
     return apiGet<AgentTeamRunListPage>(`/api/coder-runs${suffix}`);
   },
+  coderRunStatusCounts: () => apiGet<AgentTeamRunStatusCount[]>('/api/coder-runs/status-counts'),
   agentTeamRunNodes: (runIds: string[]) => apiGet<AgentTeamRunNodeTree>(`/api/coder-runs/nodes?runIds=${encodeURIComponent(runIds.join(','))}`),
   executor: (coderId: string) => apiGet<AgentTeamView>(`/api/coders/${encodeURIComponent(coderId)}`),
   updateCoder: (coderId: string, input: UpdateAgentTeamRequest) => apiPatch<AgentTeamView>(`/api/coders/${encodeURIComponent(coderId)}`, input),
@@ -340,7 +359,13 @@ export const api = {
   resumeAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/coder-runs/${encodeURIComponent(runId)}/resume`),
   cancelAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/coder-runs/${encodeURIComponent(runId)}/cancel`),
   retryAgentTeamTask: (runId: string, taskKey: string) => apiPost<AgentTeamRunActionResponse>(`/api/coder-runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskKey)}/retry`),
-  runs: (_workspace?: string) => apiGet<RunView[]>('/api/runs'),
+  latestSucceededRuns: (_workspace?: string) => apiGet<RunView[]>('/api/runs?latestSucceededPerWorkflow=1'),
+  workflowRunsPage: (query: { workflowId: string; cursor?: string; limit?: number }) => {
+    const search = new URLSearchParams({ paged: '1', workflowId: query.workflowId });
+    if (query.cursor) search.set('cursor', query.cursor);
+    if (query.limit) search.set('limit', String(query.limit));
+    return apiGet<RunListPage>(`/api/runs?${search.toString()}`);
+  },
   run: (_workspace: string | undefined, runId: string) => apiGet<RunView>(`/api/runs/${encodeURIComponent(runId)}`),
   runEventsUrl: (runId: string) => `/api/runs/${encodeURIComponent(runId)}/events`,
   createRun: (workflowVersionId: string, input: CreateRunRequest) => apiPost<{ runId: string }>(`/api/workflow-versions/${encodeURIComponent(workflowVersionId)}/runs`, input),

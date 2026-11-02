@@ -3,7 +3,8 @@
   "views": {
     "statistics": "统计",
     "requests": "请求日志",
-    "usage": "按功能用量"
+    "usage": "按功能用量",
+    "api": "本地接口"
   },
   "range": {
     "label": "时间范围",
@@ -143,5 +144,37 @@
     "withUsage": "含用量数据",
     "emptyTitle": "该时间范围内没有可归因的用量",
     "emptyDescription": "切换分组维度或扩大时间范围；按对话、执行引擎、Coder、Workflow 分组只统计带有对应标识的请求。"
+  },
+  "api": {
+    "retention": "本地 API 每个请求的耗时保留 {{days}} 天。",
+    "streaming": "事件流（长连接）",
+    "emptyTitle": "该时间范围内没有记录到本地接口请求",
+    "emptyDescription": "WorkLite 本地 API 处理的请求会按耗时记录在这里。",
+    "stats": {
+      "title": "慢接口排行",
+      "streamingExcluded": "事件流请求会持续数分钟，不计入排行。点击路由可筛选下方的请求明细。",
+      "error": "无法加载本地接口统计。",
+      "filterRoute": "筛选 {{method}} {{route}} 的请求"
+    },
+    "list": {
+      "title": "请求明细",
+      "error": "无法加载本地接口请求。"
+    },
+    "filters": {
+      "method": "所有方法",
+      "route": "路由",
+      "minDuration": "最小耗时（ms）"
+    },
+    "columns": {
+      "method": "方法",
+      "route": "路由",
+      "count": "次数",
+      "avgMs": "平均",
+      "p95Ms": "P95",
+      "maxMs": "最大",
+      "errorCount": "错误数",
+      "avgBytes": "平均大小",
+      "size": "大小"
+    }
   }
 }

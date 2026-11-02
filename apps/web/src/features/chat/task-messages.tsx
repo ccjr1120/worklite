@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { useContext, useEffect, useState, type FormEvent } from 'react';
 import { LoaderCircle, Pause, Play, RefreshCw, RotateCcw, Square, Users } from 'lucide-react';
 import type { AgentTeamPendingInputView, AgentTeamRunView, ChatSubmissionView } from '@worklite/contracts';
-import { agentTeamGroupQueryKey, agentTeamRunQueryKey, useAgentTeamRunQuery, useRunQuery, useWorkliteUpgradeQuery } from '@/api/queries';
+import { agentTeamGroupQueryKey, agentTeamRunQueryKey, coderRunStatusCountsQueryKey, useAgentTeamRunQuery, useRunQuery, useWorkliteUpgradeQuery } from '@/api/queries';
 import { TaskLink } from './records';
 import { PinTrackingContext } from './pinned-executions';
 import { MessageResponse } from '@/components/ai-elements/message';
@@ -96,7 +96,7 @@ function TeamRunActions({ run, groupId, onRunUpdate }: { run: AgentTeamRunView; 
       const createdRun = [...group.runs].filter((item) => item.id !== run.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
       if (createdRun) setReexecutedRunId(createdRun.id);
       queryClient.setQueryData(agentTeamGroupQueryKey(groupId), group);
-      void queryClient.invalidateQueries({ queryKey: ['agent-team-records', run.coderId] });
+      void queryClient.invalidateQueries({ queryKey: coderRunStatusCountsQueryKey() });
     } catch (cause) { setError(cause instanceof Error ? cause.message : t('controls.failed')); }
     finally { setBusy(''); }
   }
@@ -157,7 +157,7 @@ function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissio
   }, [live, runId]);
   function onRunUpdate(updated: AgentTeamRunView) {
     queryClient.setQueryData(agentTeamRunQueryKey(updated.id), updated);
-    void queryClient.invalidateQueries({ queryKey: ['agent-team-records', updated.coderId] });
+    void queryClient.invalidateQueries({ queryKey: coderRunStatusCountsQueryKey() });
   }
   const failure = run?.status === 'failed' ? [...run.tasks].reverse().find((task) => task.status === 'failed')?.error : null;
   const questions = run?.pendingInputs.filter((input) => input.status === 'pending' && input.kind === 'question') ?? [];

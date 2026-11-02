@@ -1,7 +1,7 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { api } from './client';
-import type { ArtifactListQuery, AssignHomeBoardRequest, CreateHomeBoardCategoryRequest, GatewayRequestLogQuery, PortkeyGatewayStatsQuery, UpdateChatMemoryRequest, UpdateHomeBoardCategoryRequest } from '@worklite/contracts';
+import type { ApiRequestLogQuery, ArtifactListQuery, AssignHomeBoardRequest, CreateHomeBoardCategoryRequest, GatewayRequestLogQuery, PortkeyGatewayStatsQuery, UpdateChatMemoryRequest, UpdateHomeBoardCategoryRequest } from '@worklite/contracts';
 
 export const workflowScheduleQueryKey = (workflowId: string) => ['workflow-schedule', workflowId] as const;
 export const pluginsQueryKey = () => ['plugins'] as const;
@@ -44,7 +44,18 @@ export function useChatConversationsQuery() {
 }
 
 export function useChatConversationRecordsQuery(id: string | null) {
-  return useQuery({ queryKey: ['chat-conversation-records', id], queryFn: () => api.chatConversationRecords(id!), enabled: Boolean(id), refetchInterval: 5_000 });
+  return useQuery({
+    queryKey: ['chat-conversation-records', id],
+    queryFn: () => api.chatConversationRecords(id!),
+    enabled: Boolean(id),
+    // A settled conversation's records no longer change, so only a live one is polled.
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return 5_000;
+      const live = (status: string | undefined) => status === 'running' || status === 'waiting_for_input';
+      return live(data.conversation.status) || live(data.execution?.status) ? 5_000 : false;
+    },
+  });
 }
 
 export function useChatProjectOperationQuery(taskId: string, operationKey: string, enabled: boolean) {
@@ -67,9 +78,12 @@ export function useWorkliteUpgradeQuery(id: string) {
 }
 export const workflowsQueryKey = () => ['workflows'] as const;
 export const runsQueryKey = () => ['runs'] as const;
+// Nested under ['runs'] so every invalidation of runsQueryKey() also refreshes these.
+export const latestSucceededRunsQueryKey = () => ['runs', 'latest-succeeded'] as const;
+export const workflowRunsPageQueryKey = (workflowId: string) => ['runs', 'workflow-pages', workflowId] as const;
 export const mcpServersQueryKey = () => ['mcp-servers'] as const;
 export const artifactsQueryKey = () => ['artifacts'] as const;
-export const agentTeamRecordsQueryKey = (coderId: string) => ['agent-team-records', coderId] as const;
+export const coderRunStatusCountsQueryKey = () => ['coder-run-status-counts'] as const;
 export const agentTeamGroupQueryKey = (groupId: string) => ['agent-team-group', groupId] as const;
 export const agentTeamRunQueryKey = (runId: string) => ['agent-team-run', runId] as const;
 const agentTeamDocumentQueryKey = (documentId: string) => ['agent-team-document', documentId] as const;
@@ -145,8 +159,21 @@ export function useWorkflowVersionsQuery(workspace: string | undefined, workflow
   return useQuery({ queryKey: ['workflow-versions', workflowId] as const, queryFn: () => api.workflowVersions(workspace, workflowId), enabled: Boolean(workflowId && workflowId !== 'new') });
 }
 
-export function useRunsQuery(workspace?: string) {
-  return useQuery({ queryKey: runsQueryKey(), queryFn: () => api.runs(workspace), refetchInterval: 5_000 });
+/** Per Workflow, the newest succeeded Run on its latest published version: what a Home board renders. */
+export function useLatestSucceededRunsQuery(workspace?: string) {
+  return useQuery({ queryKey: latestSucceededRunsQueryKey(), queryFn: () => api.latestSucceededRuns(workspace), refetchInterval: 5_000 });
+}
+
+/** One Workflow's Runs, newest first, 50 per page. */
+export function useWorkflowRunsQuery(workflowId: string) {
+  return useInfiniteQuery({
+    queryKey: workflowRunsPageQueryKey(workflowId),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => api.workflowRunsPage({ workflowId, cursor: pageParam, limit: 50 }),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+    enabled: Boolean(workflowId),
+    refetchInterval: 5_000,
+  });
 }
 
 export function useRunQuery(workspace: string | undefined, runId: string, enabled = true) {
@@ -167,8 +194,9 @@ export function useCodersQuery() {
   return useQuery({ queryKey: ['coders'] as const, queryFn: () => api.executors() });
 }
 
-export function useAgentTeamRecordsQuery(coderId: string) {
-  return useQuery({ queryKey: agentTeamRecordsQueryKey(coderId), queryFn: () => api.coderRecords(coderId), enabled: Boolean(coderId), refetchInterval: 5_000 });
+/** Queued and active Run counts for every Coder; one shared request however many cards render. */
+export function useCoderRunStatusCountsQuery() {
+  return useQuery({ queryKey: coderRunStatusCountsQueryKey(), queryFn: api.coderRunStatusCounts, refetchInterval: 5_000 });
 }
 
 export function useAgentTeamQuery(coderId: string) {
@@ -311,6 +339,22 @@ export function useGatewayRequestLogsQuery(query: GatewayRequestLogQuery) {
   return useQuery({
     queryKey: ['gateway-request-logs', query.from ?? '', query.to ?? '', query.provider ?? '', query.model ?? '', query.statusClass ?? '', ...attributionKey(query)] as const,
     queryFn: () => api.gatewayRequestLogs(query),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useApiRequestLogStatsQuery(query: ApiRequestLogQuery) {
+  return useQuery({
+    queryKey: ['api-request-log-stats', query.from ?? '', query.to ?? '', query.method ?? ''] as const,
+    queryFn: () => api.apiRequestLogStats(query),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useApiRequestLogsQuery(query: ApiRequestLogQuery) {
+  return useQuery({
+    queryKey: ['api-request-logs', query.from ?? '', query.to ?? '', query.method ?? '', query.route ?? '', query.minDurationMs ?? '', query.statusClass ?? ''] as const,
+    queryFn: () => api.apiRequestLogs(query),
     refetchInterval: 30_000,
   });
 }

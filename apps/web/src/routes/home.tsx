@@ -22,7 +22,7 @@ import {
   useModelProvidersQuery,
   useRenameHomeBoardCategoryMutation,
   useRunQuery,
-  useRunsQuery,
+  useLatestSucceededRunsQuery,
   useWorkflowsQuery,
 } from '@/api/queries';
 import { useLocale } from '@/components/locale-provider';
@@ -58,7 +58,8 @@ function HomePage() {
   const modelProvidersQuery = useModelProvidersQuery(workspaceKey);
   const chatQuery = useAgentQuery(workspaceKey, CHAT_AGENT_ID);
   const workflowsQuery = useWorkflowsQuery(workspaceKey);
-  const runsQuery = useRunsQuery(workspaceKey);
+  // Only each Workflow's newest succeeded Run on its latest version is fetched, not every Run.
+  const runsQuery = useLatestSucceededRunsQuery(workspaceKey);
   const categoriesQuery = useHomeBoardPreferencesQuery(workspaceKey);
   const createCategoryMutation = useCreateHomeBoardCategoryMutation(workspaceKey);
   const renameCategoryMutation = useRenameHomeBoardCategoryMutation(workspaceKey);

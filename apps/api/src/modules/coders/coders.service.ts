@@ -1,8 +1,10 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, isNull, lt, notInArray, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
+import { CODER_ACTIVE_RUN_STATUSES } from '@worklite/contracts';
 import type {
   AgentTeamRunListPage,
+  AgentTeamRunStatusCount,
   AgentTeamRunNodeTree,
   AgentTeamRunOverview,
   AgentTeamRunStatus,
@@ -28,6 +30,7 @@ import {
   coderVersions,
   type AgentTeam,
   type Database,
+  type StoredAgentTeamVersionSnapshot,
 } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
@@ -41,6 +44,16 @@ import { activitiesByAttempt, buildRunNodes, currentRunNode, durationBetween, is
 const RUN_NODE_BATCH_LIMIT = 50;
 const RUN_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const REQUEST_LOG_RETENTION_HOURS = 12;
+
+/**
+ * A Run's captured snapshot without its process files. The files are the bulk of every
+ * snapshot (megabytes each) and list and node views never read them, so they are dropped
+ * in SQLite instead of being transferred and parsed for each Run on every poll.
+ */
+function runListSnapshot() {
+  return sql<StoredAgentTeamVersionSnapshot>`json_remove(${coderVersions.snapshot}, '$.processFiles')`
+    .mapWith((value: string) => ({ ...JSON.parse(value), processFiles: [] }) as StoredAgentTeamVersionSnapshot);
+}
 
 @Injectable()
 export class CodersService {
@@ -109,18 +122,30 @@ export class CodersService {
     await this.configuration.getTeam(workspace.id, coderId);
     const rows = await this.db.select({ id: coderRuns.id, intent: coderRuns.intent,
       projectDirectory: coderRuns.projectDirectory, mode: coderRuns.mode,
-      modeRationale: coderRuns.modeRationale, modeDecidedAt: coderRuns.modeDecidedAt, snapshot: coderVersions.snapshot,
+      modeRationale: coderRuns.modeRationale, modeDecidedAt: coderRuns.modeDecidedAt,
+      // Only the orchestration version is read; the multi-megabyte snapshot stays in SQLite.
+      orchestrationVersion: sql<number | null>`json_extract(${coderVersions.snapshot}, '$.orchestrationVersion')`,
       status: coderRuns.status, createdAt: coderRuns.createdAt, finishedAt: coderRuns.finishedAt,
     }).from(coderRuns).innerJoin(coderVersions, eq(coderVersions.id, coderRuns.coderVersionId))
       .where(and(eq(coderRuns.coderId, coderId), eq(coderRuns.workspaceId, workspace.id)))
       .orderBy(desc(coderRuns.createdAt));
-    return rows.map(({ snapshot, ...row }) => ({
+    return rows.map(({ orchestrationVersion, ...row }) => ({
       ...row,
       modeDecidedAt: row.modeDecidedAt?.toISOString() ?? null,
-      orchestrationVersion: snapshot.orchestrationVersion ?? 1,
+      orchestrationVersion: orchestrationVersion ?? 1,
       createdAt: row.createdAt.toISOString(),
       finishedAt: row.finishedAt?.toISOString() ?? null,
     }));
+  }
+
+  /** Queued and active Run counts for every Coder in one grouped read. */
+  async statusCounts(request: Request, workspaceSlug: string): Promise<AgentTeamRunStatusCount[]> {
+    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const rows = await this.db.select({ coderId: coderRuns.coderId, status: coderRuns.status, count: sql<number>`count(*)` })
+      .from(coderRuns)
+      .where(and(eq(coderRuns.workspaceId, workspace.id), inArray(coderRuns.status, ['queued', ...CODER_ACTIVE_RUN_STATUSES])))
+      .groupBy(coderRuns.coderId, coderRuns.status);
+    return rows.map((row) => ({ coderId: row.coderId, status: row.status, count: Number(row.count) }));
   }
 
   async listRuns(
@@ -160,7 +185,7 @@ export class CodersService {
       finishedAt: coderRuns.finishedAt,
       coderId: coderRuns.coderId,
       currentCoderName: coders.name,
-      snapshot: coderVersions.snapshot,
+      snapshot: runListSnapshot(),
       total: sql<number>`count(*) over()`,
     }).from(coderRuns)
       .innerJoin(coders, eq(coders.id, coderRuns.coderId))
@@ -265,7 +290,7 @@ export class CodersService {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const conditions = [eq(coderRuns.workspaceId, workspace.id), inArray(coderRuns.id, ids)];
     if (coderIds.length) conditions.push(inArray(coderRuns.coderId, coderIds));
-    const runs = await this.db.select({ id: coderRuns.id, createdAt: coderRuns.createdAt, snapshot: coderVersions.snapshot })
+    const runs = await this.db.select({ id: coderRuns.id, createdAt: coderRuns.createdAt, snapshot: runListSnapshot() })
       .from(coderRuns)
       .innerJoin(coderVersions, eq(coderVersions.id, coderRuns.coderVersionId))
       .where(and(...conditions));

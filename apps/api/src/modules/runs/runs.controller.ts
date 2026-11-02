@@ -8,15 +8,24 @@ export class RunsController {
   constructor(private readonly runs: RunsService) {}
 
   @Get('runs')
-  list(@Req() request: Request, @Query('workflowId') workflowId?: string, @Query('limit') limit?: string) {
+  list(
+    @Req() request: Request,
+    @Query('workflowId') workflowId?: string,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+    @Query('paged') paged?: string,
+    @Query('latestSucceededPerWorkflow') latestSucceededPerWorkflow?: string,
+  ) {
     // Read-only filters keep a Workflow inspection bounded instead of loading every workspace Run.
     const parsedLimit = limit === undefined ? undefined : Number(limit);
-    return this.runs.list(request, 'personal', {
-      workflowId: workflowId?.trim() || undefined,
-      limit: typeof parsedLimit === 'number' && Number.isInteger(parsedLimit) && parsedLimit > 0
-        ? Math.min(parsedLimit, 200)
-        : undefined,
-    });
+    const boundedLimit = typeof parsedLimit === 'number' && Number.isInteger(parsedLimit) && parsedLimit > 0
+      ? Math.min(parsedLimit, 200)
+      : undefined;
+    const filter = workflowId?.trim() || undefined;
+    if (latestSucceededPerWorkflow === '1' || latestSucceededPerWorkflow === 'true') return this.runs.latestSucceededPerWorkflow(request, 'personal');
+    // A cursor or paged=1 opts into { items, nextCursor }; without them the response stays an array.
+    if (cursor?.trim() || paged === '1' || paged === 'true') return this.runs.listPage(request, 'personal', { workflowId: filter, limit: boundedLimit, cursor: cursor?.trim() || undefined });
+    return this.runs.list(request, 'personal', { workflowId: filter, limit: boundedLimit });
   }
 
   @Get('runs/:runId')

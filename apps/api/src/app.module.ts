@@ -20,6 +20,7 @@ import { PluginsModule } from './modules/plugins/plugins.module';
 import { UpgradesModule } from './modules/upgrades/upgrades.module';
 import { CodersModule } from './modules/coders/coders.module';
 import { LocalProjectsModule } from './modules/local-projects/local-projects.module';
+import { ApiRequestLogsModule } from './modules/api-request-logs/api-request-logs.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { LocalProjectsModule } from './modules/local-projects/local-projects.mod
     // avoiding dotenv file discovery keeps API cutover startup independent of local files.
     ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: process.env.WORKLITE_MANAGED_GATEWAY === '1' }),
     DatabaseModule,
+    ApiRequestLogsModule,
     UpgradesModule,
     CommandsModule,
     PluginsModule,

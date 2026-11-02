@@ -71,7 +71,7 @@ export class AgentTeamConfigurationService {
     await this.assertCoderNameAvailable(workspaceId, id, name);
     const roles = template?.roles ?? [
       { role: 'planner', publicModelId: '', instructions: DIRECT_PLANNER_INSTRUCTIONS, entryPoints: [], skills: [], mcpServers: [], toolNames: [...CODER_ROLE_TOOL_NAMES.planner!] },
-      { role: 'executor', displayName: 'Implementer', publicModelId: '', instructions: CODER_ROLE_INSTRUCTIONS.executor!, entryPoints: [], skills: [], mcpServers: [], toolNames: [...CODER_ROLE_TOOL_NAMES.executor!], executor: 'claude' as const },
+      { role: 'implementer', displayName: 'Implementer', publicModelId: '', instructions: CODER_ROLE_INSTRUCTIONS.implementer!, entryPoints: [], skills: [], mcpServers: [], toolNames: [...CODER_ROLE_TOOL_NAMES.implementer!], executor: 'claude' as const },
     ];
     try {
       const [created] = await this.db.insert(coders).values({ id, workspaceId, name, description: input.description?.trim() ?? template?.description ?? '', processId: template?.processId ?? CODER_PROCESS_ID, processVersion: template?.processVersion ?? CODER_PROCESS_VERSION, roles, workingPractice: template?.workingPractice ?? '', projectGitPolicy: template?.projectGitPolicy ?? DEFAULT_DIRECT_GIT_POLICY, maxConcurrentRuns: template?.maxConcurrentRuns ?? 3 }).returning();

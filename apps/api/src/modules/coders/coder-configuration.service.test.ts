@@ -87,7 +87,7 @@ describe('Coder lifecycle', () => {
   it('persists created configuration, copies a template and soft deletes independently', async () => {
     const configuration = await setup();
     const created = await configuration.create('workspace_personal', { name: 'Research', description: 'Investigate projects' });
-    expect(created.roles.map((role) => role.role)).toEqual(['planner', 'executor']);
+    expect(created.roles.map((role) => role.role)).toEqual(['planner', 'implementer']);
     const changed = await configuration.updateRole('workspace_personal', created.id, 'planner', { instructions: 'Investigate carefully.' });
     await configuration.update('workspace_personal', created.id, { description: 'Updated purpose' });
     const copy = await configuration.create('workspace_personal', { name: 'Research copy', templateCoderId: created.id });

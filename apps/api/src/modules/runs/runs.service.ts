@@ -2,9 +2,9 @@ import { assertRuntimeAdmission } from '../../infrastructure/runtime-upgrade-sta
 import { Lexer } from 'marked';
 import { BadRequestException, forwardRef, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, lt, or, sql, type SQL } from 'drizzle-orm';
 import type { Request } from 'express';
-import type { ArtifactView, CreateRunRequest, RunProgressEvent, RunView, WorkflowNodeActivityDetail, WorkflowNodeActivityEventPayload, WorkflowNodeActivityView, WorkflowNodeRunView, WorkflowPendingActionView } from '@worklite/contracts';
+import type { ArtifactView, CreateRunRequest, RunListPage, RunProgressEvent, RunView, WorkflowNodeActivityDetail, WorkflowNodeActivityEventPayload, WorkflowNodeActivityView, WorkflowNodeRunView, WorkflowPendingActionView } from '@worklite/contracts';
 import {
   artifacts,
   workflowNodeRuns,
@@ -432,14 +432,72 @@ export class RunsService {
     // The filters are read-only projections for bounded inspection; an omitted option keeps the full list.
     const conditions = [eq(workflowRuns.workspaceId, team.id)];
     if (options.workflowId) conditions.push(eq(workflowRuns.workflowId, options.workflowId));
-    const statement = this.db.select({ run: workflowRuns, workflow: workflows, version: workflowVersions })
+    const statement = this.listStatement(and(...conditions)).orderBy(desc(workflowRuns.createdAt));
+    const rows = options.limit === undefined ? await statement : await statement.limit(options.limit);
+    return rows.map((row) => toRunListView(row, workspaceSlug));
+  }
+
+  /** One keyset page of Runs, newest first, optionally for one Workflow. */
+  async listPage(request: Request, workspaceSlug: string, options: { workflowId?: string; limit?: number; cursor?: string } = {}): Promise<RunListPage> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const limit = Math.min(Math.max(options.limit ?? 50, 1), 200);
+    const conditions = [eq(workflowRuns.workspaceId, team.id)];
+    if (options.workflowId) conditions.push(eq(workflowRuns.workflowId, options.workflowId));
+    if (options.cursor) {
+      const boundary = parseRunCursor(options.cursor);
+      conditions.push(or(lt(workflowRuns.createdAt, boundary.createdAt), and(eq(workflowRuns.createdAt, boundary.createdAt), lt(workflowRuns.id, boundary.id)))!);
+    }
+    const rows = await this.listStatement(and(...conditions)).orderBy(desc(workflowRuns.createdAt), desc(workflowRuns.id)).limit(limit + 1);
+    const page = rows.slice(0, limit);
+    const last = page.at(-1);
+    return {
+      items: page.map((row) => toRunListView(row, workspaceSlug)),
+      nextCursor: rows.length > limit && last ? Buffer.from(JSON.stringify({ createdAt: last.createdAt.getTime(), id: last.id })).toString('base64url') : null,
+    };
+  }
+
+  /**
+   * For each Workflow, its most recent succeeded Run on the Workflow's latest published
+   * version number: the Run a Home board renders. At most one row per Workflow.
+   */
+  async latestSucceededPerWorkflow(request: Request, workspaceSlug: string): Promise<RunView[]> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const latest = this.db.$client.prepare(`
+      SELECT id FROM (
+        SELECT r.id AS id, row_number() OVER (PARTITION BY r.workflow_id ORDER BY r.created_at DESC, r.id DESC) AS rank
+        FROM workflow_runs r JOIN workflow_versions v ON v.id = r.workflow_version_id
+        WHERE r.workspace_id = ? AND r.status = 'succeeded'
+          AND v.version = (SELECT max(lv.version) FROM workflow_versions lv WHERE lv.workflow_id = r.workflow_id AND lv.published = 1)
+      ) WHERE rank = 1`).all(team.id) as Array<{ id: string }>;
+    if (!latest.length) return [];
+    const rows = await this.listStatement(and(eq(workflowRuns.workspaceId, team.id), inArray(workflowRuns.id, latest.map((row) => row.id))))
+      .orderBy(desc(workflowRuns.createdAt));
+    return rows.map((row) => toRunListView(row, workspaceSlug));
+  }
+
+  /**
+   * List rows carry only what a list item shows. The execution state (megabytes per
+   * Run) and the version definition are reduced in SQL to the two flags derived from them.
+   */
+  private listStatement(where: SQL | undefined) {
+    return this.db.select({
+      id: workflowRuns.id,
+      workflowId: workflowRuns.workflowId,
+      workflowName: workflows.name,
+      version: workflowVersions.version,
+      status: workflowRuns.status,
+      currentNodeId: workflowRuns.currentNodeId,
+      createdAt: workflowRuns.createdAt,
+      finishedAt: workflowRuns.finishedAt,
+      input: workflowRuns.input,
+      result: workflowRuns.result,
+      hasExecutionState: sql<number>`(${workflowRuns.executionState} IS NOT NULL AND ${workflowRuns.executionState} <> 'null')`,
+      hasArtifactNode: sql<number>`EXISTS (SELECT 1 FROM json_each(${workflowVersions.definition}, '$.nodes') AS node WHERE json_extract(node.value, '$.type') = 'worklite/artifact')`,
+    })
       .from(workflowRuns)
       .innerJoin(workflows, eq(workflowRuns.workflowId, workflows.id))
       .innerJoin(workflowVersions, eq(workflowRuns.workflowVersionId, workflowVersions.id))
-      .where(and(...conditions))
-      .orderBy(desc(workflowRuns.createdAt));
-    const rows = options.limit === undefined ? await statement : await statement.limit(options.limit);
-    return Promise.all(rows.map(({ run, workflow, version }) => this.toView(run, workflow, version, workspaceSlug, 'You', false)));
+      .where(where);
   }
 
   async get(request: Request, workspaceSlug: string, runId: string): Promise<RunView> {
@@ -1322,6 +1380,44 @@ function retryableNodeRunIdOf(run: typeof workflowRuns.$inferSelect): string | n
 
 function runResumable(run: typeof workflowRuns.$inferSelect): boolean {
   return run.status === 'paused' || (run.status === 'cancelled' && run.executionState !== null);
+}
+
+type RunListRow = {
+  id: string;
+  workflowId: string;
+  workflowName: string;
+  version: number;
+  status: RunView['status'];
+  currentNodeId: string | null;
+  createdAt: Date;
+  finishedAt: Date | null;
+  input: unknown;
+  result: unknown;
+  hasExecutionState: number;
+  hasArtifactNode: number;
+};
+
+/** The list form of RunView; it matches toView(..., details = false) field for field. */
+function toRunListView(row: RunListRow, workspaceSlug: string): RunView {
+  const end = row.finishedAt?.getTime() ?? (row.status === 'queued' ? null : Date.now());
+  return {
+    id: row.id, workspaceSlug, workflowId: row.workflowId, workflowName: row.workflowName, version: `v${row.version}`,
+    status: row.status, currentStep: row.currentNodeId, startedAt: row.createdAt.toISOString(),
+    durationSeconds: end === null ? null : Math.max(0, Math.round((end - row.createdAt.getTime()) / 1000)),
+    initiator: 'You', input: sanitizeWorkflowImages(row.input), result: sanitizeWorkflowImages(row.result),
+    hasArtifactNode: Boolean(row.hasArtifactNode),
+    resumable: row.status === 'paused' || (row.status === 'cancelled' && Boolean(row.hasExecutionState)),
+  };
+}
+
+function parseRunCursor(cursor: string): { createdAt: Date; id: string } {
+  try {
+    const value = JSON.parse(Buffer.from(cursor, 'base64url').toString()) as { createdAt?: unknown; id?: unknown };
+    if (typeof value.createdAt === 'number' && Number.isFinite(value.createdAt) && typeof value.id === 'string') return { createdAt: new Date(value.createdAt), id: value.id };
+  } catch {
+    // Falls through to the error below.
+  }
+  throw new BadRequestException('Invalid run cursor.');
 }
 
 function toArtifactView(row: typeof artifacts.$inferSelect, workspaceSlug: string, workflowName: string): ArtifactView {

@@ -27,7 +27,7 @@ export type AgentTeamGroupGraphInitial = {
   // Optional for historical callers/tests; v10 enables Dispatcher routing.
   orchestrationVersion?: 6 | 7 | 8 | 9 | 10 | 11;
   // The captured role id that actually executes code (role.executor is set), e.g.
-  // 'developer' for Company Project or 'executor' for Direct. Parallel development
+  // 'developer' for Company Project or 'implementer' for Direct. Parallel development
   // assignments fan out to this role regardless of its literal name.
   implementationRoleId?: AgentTeamRoleId;
 };

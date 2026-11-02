@@ -74,14 +74,14 @@ async function run(start: AgentTeamGroupGraphInitial, replies: Record<string, Ro
 
 describe('Planner development assignments without a handoff', () => {
   function plannerStart(): AgentTeamGroupGraphInitial {
-    return { ...initial('planner', 'implement_and_validate', 10), implementationRoleId: 'executor' };
+    return { ...initial('planner', 'implement_and_validate', 10), implementationRoleId: 'implementer' };
   }
 
   it('runs the implementation role when the Planner assigns work but omits the handoff', async () => {
     const { roles, state } = await run(plannerStart(), {
       planner: { message: 'Plan ready.', developmentAssignments: [{ title: 'Render PNGs', scopeSummary: 'Render the mascot PNGs.', ownedPaths: ['render.mjs'] }] },
     });
-    expect(roles).toEqual(['planner', 'executor']);
+    expect(roles).toEqual(['planner', 'implementer']);
     expect((state as { finished?: boolean }).finished).toBe(true);
   });
 

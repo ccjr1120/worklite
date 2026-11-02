@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useLocale } from '@/components/locale-provider';
 import { durationParts, formatDateTime } from '@/i18n/format';
 import type { AppLocale } from '@/i18n/locale';
-import { useRunQuery, useRunsQuery } from '@/api/queries';
+import { useRunQuery, useWorkflowRunsQuery } from '@/api/queries';
 import { api } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { queryClient } from '@/lib/query-client';
@@ -28,8 +28,9 @@ type WorkflowRunHistoryDialogProps = {
 function WorkflowRunHistoryDialog({ open, workflowId, workflowName, initialStatus, onOpenChange }: WorkflowRunHistoryDialogProps) {
   const { t } = useTranslation(['runs', 'workflows', 'common']);
   const { locale } = useLocale();
-  const { data: allRuns = [], isLoading, isError } = useRunsQuery('personal');
-  const runs = useMemo(() => allRuns.filter((run) => run.workflowId === workflowId), [allRuns, workflowId]);
+  const runsQuery = useWorkflowRunsQuery(workflowId);
+  const { isLoading, isError } = runsQuery;
+  const runs = useMemo(() => runsQuery.data?.pages.flatMap((page) => page.items) ?? [], [runsQuery.data]);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [focusedInitialRun, setFocusedInitialRun] = useState(false);
 
@@ -73,6 +74,14 @@ function WorkflowRunHistoryDialog({ open, workflowId, workflowName, initialStatu
                 ))}
               </ul>
             )}
+            {runsQuery.hasNextPage ? (
+              <div className="mt-3">
+                <Button type="button" variant="secondary" size="compact" onClick={() => void runsQuery.fetchNextPage()} disabled={runsQuery.isFetchingNextPage}>
+                  {runsQuery.isFetchingNextPage ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : null}
+                  {t('runs:loadMore')}
+                </Button>
+              </div>
+            ) : null}
           </div>
         </div>
       </DialogContent>
@@ -103,7 +112,7 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
   const [browserOpening, setBrowserOpening] = useState(false);
   const [browserOpenError, setBrowserOpenError] = useState<string | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
-  const [, setExpiryTick] = useState(0);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const qrRefreshingRef = useRef(false);
   const browserOpeningRef = useRef(false);
   const qrRefreshedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -132,7 +141,7 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
   const pendingStatus = pendingAction?.status ?? null;
   const pendingExpiresAt = pendingAction?.expiresAt ?? null;
   const expiryTime = pendingExpiresAt ? Date.parse(pendingExpiresAt) : null;
-  const qrExpired = pendingStatus === 'expired' || Boolean(expiryTime !== null && (!Number.isFinite(expiryTime) || expiryTime <= Date.now()));
+  const qrExpired = pendingStatus === 'expired' || Boolean(expiryTime !== null && (!Number.isFinite(expiryTime) || expiryTime <= nowMs));
   const currentQrCode = pendingAction?.qrCode ?? null;
   const showQr = qrVisible && Boolean(currentQrCode) && !qrExpired;
 
@@ -194,12 +203,10 @@ function RunHistoryRow({ run, locale, expanded, onToggle }: RunHistoryRowProps) 
 
   useEffect(() => {
     if (!expanded || pendingExpiresAt === null) return;
+    setNowMs(Date.now());
     const remaining = Date.parse(pendingExpiresAt) - Date.now();
-    if (remaining <= 0) {
-      setExpiryTick((value) => value + 1);
-      return;
-    }
-    const timer = setTimeout(() => setExpiryTick((value) => value + 1), remaining + 250);
+    if (remaining <= 0) return;
+    const timer = setTimeout(() => setNowMs(Date.now()), remaining + 250);
     return () => clearTimeout(timer);
   }, [expanded, pendingExpiresAt]);
 

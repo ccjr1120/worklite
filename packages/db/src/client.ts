@@ -312,7 +312,7 @@ const WORKLITE_PLATFORM_TOOL_SPECS: Array<[path: string, description: string, in
     versions: { type: 'string', enum: ['latest', 'all', 'none'], description: 'Full immutable definitions to include: latest (default) only the newest published version, all every published version, none metadata only.' },
     runLimit: { type: 'integer', minimum: 0, maximum: 20, description: 'Recent Run summaries to return; defaults to 5.' },
   })],
-  ['scripts/query-platform.mjs', 'Query the internal WorkLite platform API for platform facts when no dedicated typed tool covers the route. Supported read-only GET prefixes: /workflows, /workflow-versions, /runs, /artifacts, /home/board-categories, /skills, /mcp-servers, /portkey-gateway, /coders (Coder list, detail, roles, /coders/:coderId/runs and /coders/:coderId/memories), /coder-groups, /coder-runs, /coder-documents, /chat/conversations, /chat/project-tasks, /chat/memories, /chat/channels, /usage, /audit-logs, /platform/snapshot, /settings and /local-projects. Event streams are not supported. Large responses include a truncation marker with a bounded preview.', toolInput({
+  ['scripts/query-platform.mjs', 'Query the internal WorkLite platform API for platform facts when no dedicated typed tool covers the route. Supported read-only GET prefixes: /workflows, /workflow-versions, /runs (an array of every Run by default; paged=1 or cursor with workflowId and limit returns { items, nextCursor } pages; latestSucceededPerWorkflow=1 returns the newest succeeded Run of each Workflow on its latest published version), /artifacts, /home/board-categories, /skills, /mcp-servers, /portkey-gateway, /coders (Coder list, detail, roles, /coders/:coderId/runs and /coders/:coderId/memories), /coder-groups, /coder-runs (including /coder-runs/status-counts: queued and active Run counts per Coder), /coder-documents, /chat/conversations, /chat/project-tasks, /chat/memories, /chat/channels, /usage, /audit-logs, /api-request-logs (local WorkLite API request timings kept for 3 days by default: the list filters by from, to, method, route, minDurationMs and statusClass and pages with nextCursor; /api-request-logs/stats ranks non-streaming routes by p95 duration), /platform/snapshot, /settings and /local-projects. Event streams are not supported. Large responses include a truncation marker with a bounded preview.', toolInput({
     method: { type: 'string', enum: ['GET'], description: 'Only GET is allowed; omit it for GET.' },
     path: toolString('Site-relative path beginning with /, such as /workflows or /workflow-versions/:versionId. Pass query parameters through query.'),
     query: { type: 'object', additionalProperties: { type: ['string', 'number', 'boolean'] }, description: 'Optional flat scalar query parameters, such as limit or workflowId.' },
@@ -353,7 +353,7 @@ const WORKLITE_PLATFORM_TOOL_SPECS: Array<[path: string, description: string, in
     search: toolString('Text to match in conversation content.'),
     channel: toolString('Channel id, such as web or feishu.'),
   })],
-  ['scripts/inspect-chat-conversation.mjs', 'Read one Chat conversation. records: true adds status events and channel receipt diagnostics; successful snapshot outputs are replaced by references, and toolCallId returns one full retained tool call. fullRecordsRoute names the complete raw records.', toolInput({
+  ['scripts/inspect-chat-conversation.mjs', 'Read one Chat conversation. records: true adds status events and channel receipt diagnostics (the newest 500 channel events, with receiptsTotal counting all of them); successful snapshot outputs are replaced by references, and toolCallId returns one full retained tool call. fullRecordsRoute names the complete raw records.', toolInput({
     conversationId: toolString('Conversation (execution) id.'),
     records: { type: 'boolean', description: 'Include diagnostic status and receipt records.' },
     toolCallId: toolString('Return only this tool call with its full output.'),
@@ -881,6 +881,7 @@ if (raw.toolCallId !== undefined) {
     ...(raw.records === true ? {
       events: records.events.filter((item) => item.data.kind === 'status'),
       receipts: records.receipts.map(({ payload, ...item }) => ({ ...item, text: payload.text, action: payload.action, direction: payload.direction })),
+      receiptsTotal: records.receiptsTotal,
       deliveries: records.deliveries,
     } : {}),
     recordSelection: { events: 'status only; current messages and tool calls are above', submissions: 'without rendered cards', receipts: 'metadata, text and action only', snapshotToolOutputs: 'references; select toolCallId for full output', fullRecordsRoute: route + '/records' },
@@ -1195,7 +1196,7 @@ import { call, exactKeys, input, print, requiredString } from './lib.mjs';
 const MAX_OUTPUT_CHARS = 50000;
 const RESERVE_CHARS = 3000;
 const BACKSLASH = String.fromCharCode(92);
-const READ_PREFIXES = ['/workflows', '/workflow-versions', '/runs', '/artifacts', '/home/board-categories', '/skills', '/mcp-servers', '/portkey-gateway', '/coders', '/coder-groups', '/coder-runs', '/coder-documents', '/chat/conversations', '/chat/project-tasks', '/chat/memories', '/chat/channels', '/usage', '/audit-logs', '/platform/snapshot', '/settings', '/local-projects'];
+const READ_PREFIXES = ['/workflows', '/workflow-versions', '/runs', '/artifacts', '/home/board-categories', '/skills', '/mcp-servers', '/portkey-gateway', '/coders', '/coder-groups', '/coder-runs', '/coder-documents', '/chat/conversations', '/chat/project-tasks', '/chat/memories', '/chat/channels', '/usage', '/audit-logs', '/api-request-logs', '/platform/snapshot', '/settings', '/local-projects'];
 const SENSITIVE_KEYS = new Set(['apikey', 'token', 'accesstoken', 'refreshtoken', 'idtoken', 'secret', 'clientsecret', 'password', 'passwd', 'credential', 'credentials', 'authorization', 'privatekey', 'accesskey', 'sessionkey', 'bearer', 'cookie', 'encryptedstorage', 'storagestate', 'encryptedkey', 'encryptionkey']);
 
 const raw = input();

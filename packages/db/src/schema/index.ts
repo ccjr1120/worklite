@@ -105,7 +105,7 @@ export const feishuEvents = sqliteTable('feishu_events', {
   status: text('status').$type<'queued' | 'done' | 'failed'>().notNull().default('queued'),
   error: text('error'),
   createdAt: timestamp('created_at'),
-}, (table) => [index('feishu_events_chat_idx').on(table.chatId)]);
+}, (table) => [index('feishu_events_chat_idx').on(table.chatId), index('feishu_events_chat_created_idx').on(table.chatId, table.createdAt), index('feishu_events_chat_event_idx').on(table.chatId, table.id)]);
 
 export const feishuDeliveries = sqliteTable('feishu_deliveries', {
   id: text('id').primaryKey(),
@@ -120,7 +120,7 @@ export const wechatEvents = sqliteTable('wechat_events', {
   status: text('status').$type<'queued' | 'done' | 'failed'>().notNull().default('queued'),
   error: text('error'),
   createdAt: timestamp('created_at'),
-}, (table) => [index('wechat_events_chat_idx').on(table.chatId)]);
+}, (table) => [index('wechat_events_chat_idx').on(table.chatId), index('wechat_events_chat_created_idx').on(table.chatId, table.createdAt), index('wechat_events_chat_event_idx').on(table.chatId, table.id)]);
 
 export const agents = sqliteTable('agents', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), kind: text('kind').$type<'system' | 'custom'>().notNull().default('custom'), name: text('name').notNull(), responsibility: text('responsibility').notNull(), model: text('model').notNull(), providerId: text('provider_id'),
@@ -1051,6 +1051,25 @@ export const artifacts = sqliteTable('artifacts', {
 export const auditLogs = sqliteTable('audit_logs', {
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), actorId: text('actor_id'), action: text('action').notNull(), resource: text('resource').notNull(), metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}), createdAt: timestamp('created_at'),
 }, (table) => [index('audit_logs_workspace_created_idx').on(table.workspaceId, table.createdAt), index('audit_logs_action_resource_idx').on(table.action, table.resource)]);
+
+// One row per request the local API served, written in batches by ApiRequestLogsService
+// and pruned by its own retention window. `route` is the matched route template, so
+// requests for different ids of one endpoint aggregate together.
+export const apiRequestLogs = sqliteTable('api_request_logs', {
+  id: text('id').primaryKey(),
+  method: text('method').notNull(),
+  route: text('route').notNull(),
+  path: text('path').notNull(),
+  status: integer('status').notNull(),
+  durationMs: integer('duration_ms').notNull(),
+  responseBytes: integer('response_bytes'),
+  streaming: integer('streaming', { mode: 'boolean' }).notNull().default(false),
+  createdAt: timestamp('created_at'),
+}, (table) => [
+  index('api_request_logs_created_idx').on(table.createdAt),
+  index('api_request_logs_route_created_idx').on(table.route, table.createdAt),
+  index('api_request_logs_duration_idx').on(table.durationMs),
+]);
 
 export type Workspace = typeof workspaces.$inferSelect;
 export type Plugin = typeof plugins.$inferSelect;

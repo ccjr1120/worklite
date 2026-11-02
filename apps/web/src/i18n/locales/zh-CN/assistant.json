@@ -252,6 +252,7 @@
     "channelConversationId": "渠道会话 ID",
     "submissions": "请求与任务绑定",
     "channelEvents": "渠道收发事件",
+    "channelEventsTruncated": "仅显示最近 {{shown}} 条，共 {{total}} 条。",
     "agentEvents": "Agent 执行事件",
     "deliveries": "文件与图片投递标识",
     "inbound": "接收",

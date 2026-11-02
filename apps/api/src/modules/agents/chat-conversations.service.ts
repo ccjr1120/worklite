@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { and, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import type { Request } from 'express';
 import { CHAT_AGENT_ID, type AgentExecutionEventData, type AgentExecutionView, type ChatChannelView, type ChatConversationList, type ChatConversationRecords, type ChatConversationSummary, type ChatConversationView, type ChatSubmissionView } from '@worklite/contracts';
 import { agentExecutionEvents, agentExecutions, coderRuns, agentToolCalls, agents, chatConfigurations, chatProjectTasks, chatSubmissions, externalChats, feishuDeliveries, feishuEvents, plugins, wechatEvents, workflowRuns, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
@@ -32,17 +33,45 @@ export class ChatConversationsService {
     ];
   }
 
+  /**
+   * One page of the conversation list, newest first. Each source (Chat executions,
+   * standalone tasks, external chats still waiting for their first turn) reads at most one
+   * page plus one row past the cursor in SQL, so the work per request does not grow with
+   * the total number of conversations. Only a search request, which is never polled, reads
+   * the standalone-task and waiting-chat sources whole, because its text match runs in JS.
+   */
   async list(request: Request, query: { cursor?: string; search?: string; channel?: string }): Promise<ChatConversationList> {
     const workspace = await this.workspaces.getWorkspace(request, 'personal');
-    const rows = await this.db.select({
-      id: agentExecutions.id,
-      status: agentExecutions.status,
-      title: sql<string>`coalesce(json_extract(${agentExecutions.displayMessages}, '$[0].content'), '')`,
-      createdAt: agentExecutions.createdAt,
-      updatedAt: agentExecutions.updatedAt,
-      chatId: sql<string | null>`(select chat_id from chat_submissions where execution_id = ${agentExecutions.id} and chat_id is not null order by created_at desc limit 1)`,
-    }).from(agentExecutions).where(and(eq(agentExecutions.workspaceId, workspace.id), eq(agentExecutions.agentId, CHAT_AGENT_ID),
-      query.search?.trim() ? sql`${agentExecutions.displayMessages} like ${`%${query.search.trim()}%`}` : undefined));
+    const search = query.search?.trim() || undefined;
+    const channel = query.channel || undefined;
+    let boundary: { updatedAt: string; id: string } | null = null;
+    if (query.cursor) {
+      try { boundary = JSON.parse(Buffer.from(query.cursor, 'base64url').toString()) as { updatedAt: string; id: string }; }
+      catch { throw new BadRequestException('Invalid conversation cursor.'); }
+      if (!boundary || typeof boundary.updatedAt !== 'string' || typeof boundary.id !== 'string') throw new BadRequestException('Invalid conversation cursor.');
+    }
+    const boundaryMs = boundary ? Date.parse(boundary.updatedAt) : null;
+    if (boundaryMs !== null && !Number.isFinite(boundaryMs)) throw new BadRequestException('Invalid conversation cursor.');
+    const window = boundary && boundaryMs !== null ? { ms: boundaryMs, id: boundary.id } : null;
+
+    // The outer column is qualified by hand: inside a select list Drizzle renders a column
+    // unqualified, and a bare "id" here would resolve to chat_submissions.id.
+    const chatIdOf = sql<string | null>`(select chat_id from chat_submissions where chat_submissions.execution_id = "agent_executions"."id" and chat_id is not null order by created_at desc limit 1)`;
+    // Same derivation as the item's channel below: unbound is web, an unknown bound chat reads as feishu.
+    const channelOf = sql<string>`(case when ${chatIdOf} is null then 'web' else coalesce((select channel from external_chats where external_chats.id = ${chatIdOf}), 'feishu') end)`;
+    const rows = await pageWindow(window, agentExecutions.updatedAt, true, (bound, limit) => {
+      const statement = this.db.select({
+        id: agentExecutions.id,
+        status: agentExecutions.status,
+        title: sql<string>`coalesce(json_extract(${agentExecutions.displayMessages}, '$[0].content'), '')`,
+        createdAt: agentExecutions.createdAt,
+        updatedAt: agentExecutions.updatedAt,
+        chatId: chatIdOf,
+      }).from(agentExecutions).where(and(eq(agentExecutions.workspaceId, workspace.id), eq(agentExecutions.agentId, CHAT_AGENT_ID),
+        search ? sql`${agentExecutions.displayMessages} like ${`%${search}%`}` : undefined,
+        channel ? sql`${channelOf} = ${channel}` : undefined, bound)).orderBy(desc(agentExecutions.updatedAt), desc(agentExecutions.id));
+      return limit === undefined ? statement : statement.limit(limit);
+    });
     const boundChatIds = [...new Set(rows.map((row) => row.chatId).filter((id): id is string => Boolean(id)))];
     const boundChats = boundChatIds.length ? await this.db.select({ id: externalChats.id, channel: externalChats.channel }).from(externalChats).where(inArray(externalChats.id, boundChatIds)) : [];
     const channelByChat = new Map(boundChats.map((chat) => [chat.id, chat.channel]));
@@ -57,28 +86,32 @@ export class ChatConversationsService {
     for (const item of items) {
       if (item.executionId && activeBackground.has(item.executionId) && item.status !== 'running' && item.status !== 'waiting_for_input') item.status = 'running';
     }
-    const tasks = await this.db.select().from(chatSubmissions).where(and(eq(chatSubmissions.workspaceId, workspace.id), isNull(chatSubmissions.executionId), isNull(chatSubmissions.chatId), sql`${chatSubmissions.reference} is not null`));
+    // Standalone tasks are always web conversations.
+    const tasks = !channel || channel === 'web' ? await pageWindow(window, chatSubmissions.updatedAt, !search, (bound, limit) => {
+      const statement = this.db.select().from(chatSubmissions).where(and(eq(chatSubmissions.workspaceId, workspace.id), isNull(chatSubmissions.executionId), isNull(chatSubmissions.chatId), sql`${chatSubmissions.reference} is not null`, bound))
+        .orderBy(desc(chatSubmissions.updatedAt), desc(chatSubmissions.id));
+      return limit === undefined ? statement : statement.limit(limit);
+    }) : [];
     for (const task of tasks) {
-      if (query.search?.trim() && !task.message.toLowerCase().includes(query.search.trim().toLowerCase())) continue;
+      if (search && !task.message.toLowerCase().includes(search.toLowerCase())) continue;
       items.push({ id: task.id, executionId: null, title: task.message, channel: 'web', channelConversationId: null,
         status: task.error ? 'failed' : 'task', createdAt: task.createdAt.toISOString(), updatedAt: task.updatedAt.toISOString() });
     }
-    const waiting = await this.db.select().from(externalChats).where(and(eq(externalChats.workspaceId, workspace.id), isNull(externalChats.executionId)));
+    const waiting = !channel || channel !== 'web' ? await pageWindow(window, externalChats.updatedAt, !search, (bound, limit) => {
+      const statement = this.db.select().from(externalChats).where(and(eq(externalChats.workspaceId, workspace.id), isNull(externalChats.executionId),
+        channel ? eq(externalChats.channel, channel as 'feishu' | 'wechat') : undefined, bound)).orderBy(desc(externalChats.updatedAt), desc(externalChats.id));
+      return limit === undefined ? statement : statement.limit(limit);
+    }) : [];
     for (const chat of waiting) {
       const events = channelEvents(chat.channel);
-      const [receipt] = await this.db.select().from(events).where(and(eq(events.chatId, chat.id), sql`json_extract(${events.payload}, '$.direction') is null`)).orderBy(desc(events.createdAt)).limit(1);
+      const [receipt] = await this.db.select().from(events).where(and(eq(events.chatId, chat.id), notOutboundEvent(events), sql`json_extract(${events.payload}, '$.direction') is null`)).orderBy(desc(events.createdAt)).limit(1);
       const title = typeof receipt?.payload.text === 'string' ? receipt.payload.text : '';
-      if (query.search?.trim() && !title.toLowerCase().includes(query.search.trim().toLowerCase())) continue;
+      if (search && !title.toLowerCase().includes(search.toLowerCase())) continue;
       items.push({ id: chat.id, executionId: null, title, channel: chat.channel, channelConversationId: chat.id,
         status: receipt?.status === 'failed' ? 'failed' : 'queued', createdAt: (receipt?.createdAt ?? chat.updatedAt).toISOString(), updatedAt: chat.updatedAt.toISOString() });
     }
-    let boundary: { updatedAt: string; id: string } | null = null;
-    if (query.cursor) {
-      try { boundary = JSON.parse(Buffer.from(query.cursor, 'base64url').toString()) as { updatedAt: string; id: string }; }
-      catch { throw new BadRequestException('Invalid conversation cursor.'); }
-      if (!boundary || typeof boundary.updatedAt !== 'string' || typeof boundary.id !== 'string') throw new BadRequestException('Invalid conversation cursor.');
-    }
-    const filtered = items.filter((item) => (!query.channel || item.channel === query.channel) && (!boundary ||
+    // The SQL windows only narrow the candidates; this filter and sort decide the page exactly as before.
+    const filtered = items.filter((item) => (!channel || item.channel === channel) && (!boundary ||
       item.updatedAt < boundary.updatedAt || item.updatedAt === boundary.updatedAt && item.id.localeCompare(boundary.id) < 0))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id));
     const page = filtered.slice(0, 50);
@@ -121,7 +154,14 @@ export class ChatConversationsService {
       execution.messages = [...execution.messages, ...partial.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
     }
     const events = chat ? channelEvents(chat.channel) : null;
-    const receipts = chat && events ? await this.db.select().from(events).where(and(eq(events.chatId, chat.id), or(eq(events.status, 'queued'), eq(events.status, 'failed')))).orderBy(events.createdAt) : [];
+    // Feishu outbound delivery rows never carry a top-level text (card and file deliveries
+    // record operation, card and platform fields), so they can never become pending
+    // receipts; skipping them by id keeps this read off the delivery history, which can
+    // hold hundreds of thousands of rows for one chat. WeChat outbound rows do carry text
+    // and stay included as before.
+    const receipts = chat && events ? await this.db.select().from(events).where(and(eq(events.chatId, chat.id),
+      chat.channel === 'feishu' ? notOutboundEvent(events) : undefined,
+      or(eq(events.status, 'queued'), eq(events.status, 'failed')))).orderBy(events.createdAt) : [];
     const pendingReceipts = receipts.filter((receipt) => typeof receipt.payload.text === 'string' && !receipt.payload.action)
       .map((receipt) => ({ id: receipt.id, text: receipt.payload.text as string, status: receipt.status as 'queued' | 'failed', error: receipt.error, createdAt: receipt.createdAt.toISOString() }));
     const conversation: ChatConversationSummary = {
@@ -136,7 +176,7 @@ export class ChatConversationsService {
     const submissions = await this.db.select().from(chatSubmissions).where(and(eq(chatSubmissions.workspaceId, workspace.id),
       standalone ? eq(chatSubmissions.id, standalone.id) : or(execution ? eq(chatSubmissions.executionId, execution.id) : undefined, chat ? eq(chatSubmissions.chatId, chat.id) : undefined),
     )).orderBy(chatSubmissions.createdAt);
-    const ingressIds = new Set(chat && events ? (await this.db.select({ id: events.id }).from(events).where(and(eq(events.chatId, chat.id), sql`json_extract(${events.payload}, '$.direction') is null`))).map((event) => event.id) : []);
+    const ingressIds = new Set(chat && events ? (await this.db.select({ id: events.id }).from(events).where(and(eq(events.chatId, chat.id), notOutboundEvent(events), sql`json_extract(${events.payload}, '$.direction') is null`))).map((event) => event.id) : []);
     let channelDelivery: ChatConversationView['channelDelivery'] = 'web';
     if (chat?.channel === 'feishu') {
       const [binding] = await this.db.select({ userId: plugins.feishuAllowedUserId, enabled: plugins.feishuEnabled, status: plugins.feishuStatus }).from(plugins).where(and(eq(plugins.workspaceId, workspace.id), eq(plugins.id, 'feishu-bot'))).limit(1);
@@ -154,13 +194,20 @@ export class ChatConversationsService {
     const { conversation, execution, submissions } = await this.get(request, id);
     const chatId = conversation.channelConversationId;
     const events = chatId && conversation.channel !== 'web' ? channelEvents(conversation.channel) : null;
-    const receipts = chatId && events ? await this.db.select().from(events).where(eq(events.chatId, chatId)).orderBy(events.createdAt) : [];
+    // A channel chat accumulates one row per delivery attempt, so the records keep the
+    // newest RECORD_RECEIPT_LIMIT rows (oldest first) and report the full count.
+    const latestReceipts = chatId && events ? await this.db.select().from(events).where(eq(events.chatId, chatId)).orderBy(desc(events.createdAt), desc(events.id)).limit(RECORD_RECEIPT_LIMIT) : [];
+    const receipts = latestReceipts.reverse();
+    const receiptsTotal = chatId && events && receipts.length >= RECORD_RECEIPT_LIMIT
+      ? Number((await this.db.select({ count: sql<number>`count(*)` }).from(events).where(eq(events.chatId, chatId)))[0]?.count ?? receipts.length)
+      : receipts.length;
     const deliveries = chatId && conversation.channel === 'feishu' ? await this.db.select().from(feishuDeliveries).where(eq(feishuDeliveries.chatId, chatId)) : [];
     return {
       conversation,
       execution,
       events: conversation.executionId ? await this.executions.recordsEvents(request, 'personal', CHAT_AGENT_ID, conversation.executionId) : [],
       receipts: receipts.map(({ id, payload, status, error, createdAt }) => ({ id, payload, status, error, createdAt: createdAt.toISOString() })),
+      receiptsTotal,
       submissions,
       deliveries: deliveries.map(({ id, messageId }) => ({ id, messageId })),
     };
@@ -237,4 +284,43 @@ function toSubmission({ id, executionId, message, reference, outputMessageId, re
 // on the external chat selects which one a read model queries.
 function channelEvents(channel: string) {
   return (channel === 'wechat' ? wechatEvents : feishuEvents) as typeof feishuEvents;
+}
+
+/**
+ * Excludes outbound delivery rows by their id prefix. recordDelivery is the only writer of
+ * `outbound:` ids and always stores direction 'outbound', so this never removes a row that a
+ * `direction is null` filter would keep; it lets SQLite skip those rows through the
+ * (chat_id, id) index instead of parsing every delivery payload.
+ */
+function notOutboundEvent(events: typeof feishuEvents): SQL {
+  return or(lt(events.id, 'outbound:'), gte(events.id, 'outbound;'))!;
+}
+
+const CONVERSATION_PAGE_SIZE = 50;
+const RECORD_RECEIPT_LIMIT = 500;
+
+/**
+ * Reads the rows of one conversation-list source that can appear on the requested page.
+ *
+ * The page order compares updatedAt first and then ids with localeCompare, which SQL
+ * cannot reproduce, so ids are never compared in SQL. With a cursor, every row sharing the
+ * cursor's updatedAt is read and the caller's filter decides among them; below it, one
+ * page plus one row is read, and when that cut falls inside a group of equal updatedAt
+ * values the whole group is read as well. `bounded` false reads every row at or below the
+ * cursor, for sources whose remaining filter runs in JS.
+ */
+async function pageWindow<T extends { id: string; updatedAt: Date }>(
+  window: { ms: number; id: string } | null,
+  column: SQLiteColumn,
+  bounded: boolean,
+  read: (bound: SQL | undefined, limit: number | undefined) => PromiseLike<T[]>,
+): Promise<T[]> {
+  const at = window ? new Date(window.ms) : null;
+  if (!bounded) return read(at ? lte(column, at) : undefined, undefined);
+  const rows = [...(at ? await read(eq(column, at), undefined) : [])];
+  const below = await read(at ? lt(column, at) : undefined, CONVERSATION_PAGE_SIZE + 1);
+  rows.push(...below);
+  if (below.length > CONVERSATION_PAGE_SIZE) rows.push(...await read(eq(column, below.at(-1)!.updatedAt), undefined));
+  const seen = new Set<string>();
+  return rows.filter((row) => !seen.has(row.id) && Boolean(seen.add(row.id)));
 }

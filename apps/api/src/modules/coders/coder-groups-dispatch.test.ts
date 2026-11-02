@@ -151,12 +151,62 @@ describe('CodersService.records', () => {
       { ...base, id: 'atrun_v10', coderVersionId: 'atver_10', mode: 'validate_existing', modeRationale: 'The user asked to assess current behavior.', modeDecidedAt: now, langGraphThreadId: 'atthread_v10' },
     ]);
     const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal' }) } as unknown as WorkspaceService;
-    const teams = new CodersService(db!, workspaces, {} as AgentTeamRuntimeService, {} as AgentTeamConfigurationService);
+    const teams = new CodersService(db!, workspaces, {} as AgentTeamRuntimeService, { getTeam: async () => ({}) } as unknown as AgentTeamConfigurationService);
 
     const records = await teams.records(request, 'personal', 'agent_team_test');
     const v9 = records.find((record) => record.id === 'atrun_v9')!;
     const v10 = records.find((record) => record.id === 'atrun_v10')!;
     expect(v9).toMatchObject({ mode: 'implement_and_validate', modeRationale: null, modeDecidedAt: null, orchestrationVersion: 9 });
     expect(v10).toMatchObject({ mode: 'validate_existing', modeRationale: 'The user asked to assess current behavior.', modeDecidedAt: now.toISOString(), orchestrationVersion: 10 });
+  });
+});
+
+describe('CodersService.statusCounts', () => {
+  it('counts queued and active Runs per Coder in one grouped read, matching per-Coder filtering', async () => {
+    await setup();
+    const now = new Date();
+    await db!.insert(coders).values({ id: 'agent_team_other', workspaceId: 'workspace_personal', name: 'Other Coder', description: 'test', processId: 'bmad-tea', processVersion: '1', roles: [], createdAt: now, updatedAt: now });
+    await db!.insert(coderVersions).values({ id: 'atver_other', workspaceId: 'workspace_personal', coderId: 'agent_team_other', version: 1, snapshot: { processId: 'bmad-tea', processVersion: '1', manifestHash: '', developerExecution: { kind: 'codex_app_server' }, orchestrationVersion: 11, roles: [] } as never, createdAt: now });
+    const statuses = [
+      ['agent_team_test', 'running'], ['agent_team_test', 'running'], ['agent_team_test', 'paused'], ['agent_team_test', 'queued'],
+      ['agent_team_test', 'succeeded'], ['agent_team_test', 'failed'],
+      ['agent_team_other', 'waiting_for_input'], ['agent_team_other', 'queued'], ['agent_team_other', 'queued'], ['agent_team_other', 'cancelled'],
+    ] as const;
+    await db!.insert(coderRuns).values(statuses.map(([coderId, status], index) => ({
+      id: `atrun_count_${index}`, workspaceId: 'workspace_personal', coderId, coderVersionId: coderId === 'agent_team_test' ? 'atver_mock' : 'atver_other',
+      intent: 'goal', projectDirectory: '/repo', mode: 'plan_only' as const, langGraphThreadId: `atthread_count_${index}`, status, createdAt: now, updatedAt: now,
+    })));
+    const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal' }) } as unknown as WorkspaceService;
+    const teams = new CodersService(db!, workspaces, {} as AgentTeamRuntimeService, {} as AgentTeamConfigurationService);
+
+    const counts = await teams.statusCounts(request, 'personal');
+    const count = (coderId: string, wanted: string[]) => counts.filter((row) => row.coderId === coderId && wanted.includes(row.status)).reduce((total, row) => total + row.count, 0);
+    const active = ['running', 'waiting_for_input', 'paused'];
+    // The cards used to filter each Coder's full Run list; the grouped counts must agree.
+    for (const coderId of ['agent_team_test', 'agent_team_other']) {
+      const runs = statuses.filter(([id]) => id === coderId).map(([, status]) => ({ status: status as string }));
+      expect(count(coderId, active)).toBe(runs.filter((run) => active.includes(run.status)).length);
+      expect(count(coderId, ['queued'])).toBe(runs.filter((run) => run.status === 'queued').length);
+    }
+    expect(count('agent_team_test', active)).toBe(3);
+    expect(count('agent_team_other', ['queued'])).toBe(2);
+    expect(counts.some((row) => row.status === 'succeeded' || row.status === 'failed' || row.status === 'cancelled')).toBe(false);
+  });
+});
+
+describe('CodersService Run lists', () => {
+  it('reads the captured name and orchestration version without the snapshot process files', async () => {
+    await setup();
+    const now = new Date();
+    await db!.insert(coderVersions).values({ id: 'atver_files', workspaceId: 'workspace_personal', coderId: 'agent_team_test', version: 3, createdAt: now,
+      snapshot: { processId: 'bmad-tea', processVersion: '1', manifestHash: '', developerExecution: { kind: 'codex_app_server' }, orchestrationVersion: 12, coderName: 'Captured', roles: [{ role: 'planner', displayName: 'Planner' }], processFiles: [{ path: 'big.md', content: 'x'.repeat(10_000) }] } as never });
+    await db!.insert(coderRuns).values({ id: 'atrun_files', workspaceId: 'workspace_personal', coderId: 'agent_team_test', coderVersionId: 'atver_files', intent: 'goal', projectDirectory: '/repo', mode: 'plan_only', langGraphThreadId: 'atthread_files', status: 'succeeded', createdAt: now, updatedAt: now });
+    const workspaces = { getWorkspace: async () => ({ id: 'workspace_personal' }) } as unknown as WorkspaceService;
+    const teams = new CodersService(db!, workspaces, {} as AgentTeamRuntimeService, { getTeam: async () => ({}) } as unknown as AgentTeamConfigurationService);
+
+    const page = await teams.listRuns(request, 'personal', ['agent_team_test'], undefined, 10);
+    expect(page.items[0]).toMatchObject({ id: 'atrun_files', coderName: 'Captured', orchestrationVersion: 12 });
+    const [record] = await teams.records(request, 'personal', 'agent_team_test');
+    expect(record).toMatchObject({ id: 'atrun_files', orchestrationVersion: 12 });
   });
 });

@@ -19,14 +19,14 @@ describe('Coder lifecycle platform integration', () => {
       await initializeDatabase(db);
       db.insert(coders).values({ id: 'migration-test', workspaceId: 'workspace_personal', name: 'Migration', description: '', processId: 'bmad-tea', processVersion: '1', roles: [
         { role: 'planner', instructions: 'Keep this instruction.', publicModelId: '', entryPoints: [], skills: [], mcpServers: [], toolNames: [] },
-        { role: 'executor', instructions: 'Keep executor unchanged.', publicModelId: '', entryPoints: [], skills: [], mcpServers: [], toolNames: [] },
+        { role: 'implementer', instructions: 'Keep implementer unchanged.', publicModelId: '', entryPoints: [], skills: [], mcpServers: [], toolNames: [] },
       ] }).run();
       // 0061 predates the Coder rename (0063) and targets the old table name.
       db.$client.exec(readFileSync(resolve('packages/db/drizzle/0061_planner_evidence_policy.sql'), 'utf8').replaceAll('executor_categories', 'coders'));
       const [migrated] = await db.select().from(coders).where(eq(coders.id, 'migration-test'));
       expect(migrated!.roles[0]!.instructions).toContain('Keep this instruction.');
       expect(migrated!.roles[0]!.instructions).toContain('Return waiting_for_input');
-      expect(migrated!.roles[1]!.instructions).toBe('Keep executor unchanged.');
+      expect(migrated!.roles[1]!.instructions).toBe('Keep implementer unchanged.');
       db.update(coders).set({ roles: [{ ...migrated!.roles[0]!, instructions: 'User-edited policy.' }, migrated!.roles[1]!] }).where(eq(coders.id, 'migration-test')).run();
       await initializeDatabase(db);
       const [afterRestart] = await db.select().from(coders).where(eq(coders.id, 'migration-test'));

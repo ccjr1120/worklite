@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { BarChart3, PieChart, ScrollText } from 'lucide-react';
+import { BarChart3, PieChart, ScrollText, Timer } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { GATEWAY_STATS_GROUP_BYS, GATEWAY_SURFACES, type GatewayRequestLogStatusClass, type GatewayStatsGroupBy, type GatewaySurface } from '@worklite/contracts';
 import { PageHeading } from '@/components/page-heading';
@@ -9,9 +9,10 @@ import { useModelProvidersQuery } from '@/api/queries';
 import { GatewayRequestLogs, type RequestLogFilters } from '@/features/logs/request-logs';
 import { GatewayStatistics } from '@/features/logs/gateway-statistics';
 import { GatewayUsage } from '@/features/logs/gateway-usage';
+import { ApiRequestLogs, type ApiRequestLogFilters } from '@/features/logs/api-request-logs';
 import { TimeRangeControl, isRangePreset, resolveTimeRange, type LogsTimeRange, type RangePreset } from '@/features/logs/time-range';
 
-const LOGS_TABS = ['statistics', 'usage', 'requests'] as const;
+const LOGS_TABS = ['statistics', 'usage', 'requests', 'api'] as const;
 type LogsTab = (typeof LOGS_TABS)[number];
 
 const REQUEST_LOG_STATUS_CLASSES = ['success', 'client_error', 'server_error'] as const;
@@ -35,6 +36,10 @@ type LogsSearch = {
   workflowRunId?: string;
   nodeRunId?: string;
   requestLogId?: string;
+  apiMethod?: string;
+  apiRoute?: string;
+  apiMinDurationMs?: number;
+  apiStatusClass?: GatewayRequestLogStatusClass;
 };
 
 function isLogsTab(value: unknown): value is LogsTab {
@@ -43,6 +48,11 @@ function isLogsTab(value: unknown): value is LogsTab {
 
 function optionalSearchText(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function optionalDuration(value: unknown): number | undefined {
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function optionalInstant(value: unknown): string | undefined {
@@ -80,6 +90,11 @@ export const Route = createFileRoute('/logs')({
       workflowRunId: tab === 'requests' ? optionalSearchText(search.workflowRunId) : undefined,
       nodeRunId: tab === 'requests' ? optionalSearchText(search.nodeRunId) : undefined,
       requestLogId: tab === 'requests' ? optionalSearchText(search.requestLogId) : undefined,
+      // Local API filters live under their own names and only on the local API tab.
+      apiMethod: tab === 'api' ? optionalSearchText(search.apiMethod)?.toUpperCase() : undefined,
+      apiRoute: tab === 'api' ? optionalSearchText(search.apiRoute) : undefined,
+      apiMinDurationMs: tab === 'api' ? optionalDuration(search.apiMinDurationMs) : undefined,
+      apiStatusClass: tab === 'api' && REQUEST_LOG_STATUS_CLASSES.includes(search.apiStatusClass as GatewayRequestLogStatusClass) ? search.apiStatusClass as GatewayRequestLogStatusClass : undefined,
     };
   },
   component: LogsPage,
@@ -143,6 +158,10 @@ function LogsPage() {
     });
   }
 
+  function changeApiFilters(next: ApiRequestLogFilters) {
+    void navigate({ to: '/logs', search: { ...search, apiMethod: next.method, apiRoute: next.route, apiMinDurationMs: next.minDurationMs, apiStatusClass: next.statusClass } });
+  }
+
   function changeStatisticsFilters(next: { provider?: string; model?: string }) {
     void navigate({ to: '/logs', search: { ...search, ...next, provider: next.provider, model: next.model, requestLogId: undefined } });
   }
@@ -163,6 +182,7 @@ function LogsPage() {
           <TabsTrigger value="statistics"><BarChart3 className="size-4" aria-hidden="true" />{t('logs:views.statistics')}</TabsTrigger>
           <TabsTrigger value="usage"><PieChart className="size-4" aria-hidden="true" />{t('logs:views.usage')}</TabsTrigger>
           <TabsTrigger value="requests"><ScrollText className="size-4" aria-hidden="true" />{t('logs:views.requests')}</TabsTrigger>
+          <TabsTrigger value="api"><Timer className="size-4" aria-hidden="true" />{t('logs:views.api')}</TabsTrigger>
         </TabsList>
         <TabsContent value="statistics">
           <GatewayStatistics
@@ -205,6 +225,14 @@ function LogsPage() {
             focusedRequestId={search.requestLogId}
             onFocusedRequestClear={() => void navigate({ to: '/logs', search: { ...search, requestLogId: undefined } })}
             onOpenProvider={(provider) => void navigate({ to: '/model-providers', search: { provider } })}
+          />
+        </TabsContent>
+        <TabsContent value="api">
+          <ApiRequestLogs
+            from={resolved.from}
+            to={resolved.to}
+            filters={{ method: search.apiMethod, route: search.apiRoute, minDurationMs: search.apiMinDurationMs, statusClass: search.apiStatusClass }}
+            onFiltersChange={changeApiFilters}
           />
         </TabsContent>
       </Tabs>
