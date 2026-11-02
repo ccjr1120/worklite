@@ -84,6 +84,7 @@ import {
   type AgentInvocationOperationJournal,
 } from '../agents/isolated-agent-invocation.service';
 import { ProjectExecutorService } from '../agents/project-executor.service';
+import { isGatewayPublicModel } from '../agents/project-executor.types';
 import { enqueueTaskMerge, ensureTaskWorktree, ensureWorktreeAt, inspectGitRepository, mergeTaskWorktree, type PreparedTaskWorktree } from '../agents/git-worktree';
 import { AgentTeamOperationJournalService } from './coder-operation-journal.service';
 import { AgentTeamConfigurationService } from './coder-configuration.service';
@@ -1791,9 +1792,10 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       });
     };
 
-    // A role output that fails validation earns exactly one corrective
-    // re-invocation carrying the parse error before the attempt fails.
-    let correction: string | undefined;
+    // Repair malformed output using a tool-free model call, never by restarting the
+    // project executor with permission to repeat the original work.
+    let correctionOutput: string | undefined;
+    let previousOutput = '';
     for (let parseAttempt = 0; ; parseAttempt += 1) {
       try {
         let output: string;
@@ -1801,7 +1803,24 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
           output = await retryTransientProviderFailure({
             invoke: () => {
               modelRoundsCompleted = 0;
-              return produceOutput(correction);
+              if (correctionOutput === undefined) return produceOutput();
+              const model = normalizePublicModelList(role.publicModelId)[0];
+              if (!isGatewayPublicModel(model)) {
+                throw new Error('Cannot repair the Coder result without a configured Gateway model; the original task was not rerun.');
+              }
+              return this.invocations.execute({
+                workspaceId,
+                publicModelId: model,
+                systemPrompt: 'Repair the provided Coder result into one valid JSON object. Preserve all facts, fields and values; do not invent work or evidence. Return only the JSON object.',
+                context: { validationError: correctionOutput, previousReply: previousOutput },
+                skills: [],
+                mcpRuntimes: [],
+                builtinToolNames: [],
+                signal,
+                jsonOutput: true,
+                correlation: { surface: 'coder', coderId: run.coderId, teamRunId: request.runId, teamRole: taskRole, teamTaskAttemptId: attempt.id, nodeRunId: attempt.id },
+                onModelRound: () => { modelRoundsCompleted += 1; },
+              });
             },
             nothingRan: () => modelRoundsCompleted === 0,
             signal,
@@ -1822,11 +1841,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         return await this.finishCoderOutput(request, workspaceId, attempt.id, taskKey, output, commandIds, laneWorktree, laneMergeTarget, orchestrationVersion, version.snapshot.roles.map((item) => item.role));
       } catch (error) {
         if (!(error instanceof TaskOutputValidationError) || parseAttempt >= 1) throw error;
-        correction = [
-          `Your previous reply could not be accepted: ${error.message}`,
-          `Previous reply excerpt: ${error.outputExcerpt}`,
-          'Return exactly one JSON object whose "status" is exactly one of: "waiting_for_input", "completed".',
-        ].join('\n');
+        if (error.output.length > 100_000) throw error;
+        correctionOutput = error.message;
+        previousOutput = error.output;
       }
     }
   }
@@ -3338,6 +3355,8 @@ You are executing one WorkLite Coder task. Use tools only when the captured role
 
 Follow the captured project instructions supplied in the task context, and discover additional applicable AGENTS.md or AGENTS_WORKFLOW.md files before changing or assessing project files. If a project rule or missing user decision requires explicit authorization for an action, return the waiting_for_input response instead of taking that action. ${executor ? 'You run as a project executor in the project directory with your own native tools. WorkLite requires neither proposal confirmation nor exact-command grants. A previous attempt may have changed the project; inspect its actual state rather than assuming earlier work is absent or complete. Read pinned process references from the files listed in the system prompt.' : 'Run whatever shell commands the task needs with bash directly; WorkLite requires no command grant and records every execution as Command evidence. Use process_reference only with one of the exact pinned paths listed in the system prompt.'} Map the process package's project root to projectDirectory and its process output location to outputDirectory. The output directory is managed by WorkLite: return documents in JSON rather than writing planning output there directly.
 
+Scale investigation and verification to the task. Use supplied handoff evidence to target the necessary checks; expand investigation only when evidence is missing or conflicts with the current code. Avoid repeating equivalent searches or checks without a new reason. Report unrelated baseline failures rather than repeatedly rerunning them or changing unrelated code.
+
 When more user input is required, return:
 {"status":"waiting_for_input","pendingInput":{"question":"One specific question"}}
 
@@ -3548,12 +3567,9 @@ function directRoleModeRationale(role: AgentTeamRoleId): string {
 }
 
 class TaskOutputValidationError extends Error {
-  readonly outputExcerpt: string;
-
-  constructor(message: string, output: string) {
+  constructor(message: string, readonly output: string) {
     super(message);
     this.name = 'TaskOutputValidationError';
-    this.outputExcerpt = output.slice(0, 500);
   }
 }
 
@@ -3600,7 +3616,7 @@ function expectedRunWorktreeLayout(
   };
 }
 
-function parseTaskOutput(output: string, taskKey: string, supportedRoleIds: readonly string[] = []): ParsedTaskResult {
+export function parseTaskOutput(output: string, taskKey: string, supportedRoleIds: readonly string[] = []): ParsedTaskResult {
   try {
     return parseTaskOutputUnsafe(output, taskKey, supportedRoleIds);
   } catch (error) {
@@ -3615,7 +3631,9 @@ function parseTaskOutput(output: string, taskKey: string, supportedRoleIds: read
 function parseTaskOutputUnsafe(output: string, taskKey: string, supportedRoleIds: readonly string[]): ParsedTaskResult {
   let value: RawTaskOutput;
   try {
-    value = JSON.parse(output) as RawTaskOutput;
+    const trimmed = output.trim();
+    const fenced = /^```(?:json)?[\t ]*\r?\n([\s\S]*?)\r?\n```[\t ]*$/i.exec(trimmed);
+    value = JSON.parse(fenced ? fenced[1] : trimmed) as RawTaskOutput;
   } catch {
     throw new Error('The Coder role returned invalid JSON.');
   }
