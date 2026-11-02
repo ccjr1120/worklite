@@ -464,6 +464,7 @@
     "parallelNodes": "并行节点",
     "defaultModel": "默认模型",
     "tasks": "角色任务",
+    "roleElapsed": "已耗时 {{duration}}",
     "openRun": "打开任务详情"
   },
   "usage": {

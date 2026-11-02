@@ -703,8 +703,21 @@ export class AgentExecutionsService implements OnModuleInit {
       }
     } catch (error) {
       const failure = executionFailure(error);
-      this.logger.warn(`Agent execution ${executionId} failed: phase=${failure.phase} code=${failure.code} source=${executionFailureSource(error)}.`);
-      await this.markExecutionFailed(workspace.id, executionId, failure);
+      if (progressReport && error instanceof ServiceUnavailableException && error.message === 'Portkey Gateway is unavailable.') {
+        this.logger.warn(`Agent execution ${executionId}: Gateway unavailable; using the recorded progress report.`);
+        // A progress notification can be rendered from the authoritative report without a model.
+        // Keep the conversation usable when the Gateway is temporarily unavailable.
+        const content = progressReport.items.map((item) => `${item.title}：${item.status}`).join('\n');
+        const message = { id: `msg_${randomUUID()}`, role: 'assistant' as const, content, createdAt: new Date().toISOString(), progressReport };
+        const updated = await this.db.update(agentExecutions).set({ status: 'completed', phase: 'model', errorCode: null, error: null, displayMessages: [...execution.displayMessages, message], modelMessages: [...execution.modelMessages, { role: 'assistant' as const, content: [{ type: 'text' as const, text: content }] }], updatedAt: new Date() }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'running'))).returning({ id: agentExecutions.id });
+        if (updated.length) {
+          await this.persistEvent(executionId, { kind: 'message_delta', messageId: message.id, delta: content, progressReport });
+          await this.publishSnapshotForExecution(workspace.id, executionId);
+        }
+      } else {
+        this.logger.warn(`Agent execution ${executionId} failed: phase=${failure.phase} code=${failure.code} source=${executionFailureSource(error)}.`);
+        await this.markExecutionFailed(workspace.id, executionId, failure);
+      }
     } finally {
       if (this.activeModelRequests.get(executionId) === abortController) this.activeModelRequests.delete(executionId);
     }

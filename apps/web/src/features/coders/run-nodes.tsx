@@ -65,11 +65,12 @@ function RunNodeSteps({ node }: { node: AgentTeamRunNode }) {
 }
 
 /** One row per node (role task attempt) of a Run; a node expands into its steps. */
-export function RunNodeTable({ nodes, loading, retentionHours = 12 }: { nodes: AgentTeamRunNode[] | undefined; loading?: boolean; retentionHours?: number }) {
+export function RunNodeTable({ nodes, loading, retentionHours = 12, compact = false }: { nodes: AgentTeamRunNode[] | undefined; loading?: boolean; retentionHours?: number; compact?: boolean }) {
   const { t } = useTranslation('coders');
   const [openNodes, setOpenNodes] = useState<Record<string, boolean>>({});
   if (loading && !nodes) return <div className="space-y-2 p-3" role="status" aria-busy="true"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-2/3" /></div>;
   if (!nodes?.length) return <p className="px-3 py-3 text-xs text-muted-foreground">{t('nodes.empty')}</p>;
+  if (compact) return <section aria-label={t('nodes.title')} className="divide-y divide-border text-xs">{nodes.map((node) => <div key={node.nodeRunId} className="grid grid-cols-[minmax(0,1fr)_7rem_5rem_6rem] items-center gap-2 px-3 py-2"><span className="truncate">{teamRoleLabel(t, node)}</span><span><StatusDot status={toStatusKey(node.status)} /> {t(`run.status.${node.status}` as never)}</span><span className="text-right">{durationText(node.durationMs)}</span><span className="text-right"><TokenFigure value={node.tokens} retentionHours={retentionHours} /></span></div>)}</section>;
   const isOpen = (node: AgentTeamRunNode) => openNodes[node.nodeRunId] ?? ['running', 'waiting_for_input', 'waiting_for_recovery'].includes(node.status);
   const toggle = (node: AgentTeamRunNode) => setOpenNodes((current) => ({ ...current, [node.nodeRunId]: !isOpen(node) }));
   return (

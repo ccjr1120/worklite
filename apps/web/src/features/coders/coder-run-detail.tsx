@@ -66,7 +66,7 @@ function OperationEvidence({ operation }: { operation: AgentTeamOperationView })
   return <article className="rounded-xl border border-border bg-surface p-4 shadow-xs"><div className="flex flex-wrap items-center gap-2"><StatusBadge status={toStatusKey(operation.status)} label={t(`run.status.${operation.status}`)} /><span className="font-mono text-xs break-all">{operation.operationKey}</span><span className="font-mono text-xs text-muted-foreground">{operation.toolName}</span></div><dl className="mt-3 grid gap-3 text-[13px] sm:grid-cols-2"><div><dt className="text-muted-foreground">{t('metadata.taskKey')}</dt><dd className="mt-1 font-mono break-all">{operation.taskKey}</dd></div><div><dt className="text-muted-foreground">{t('operations.command')}</dt><dd className="mt-1 font-mono break-all">{operation.commandId ?? t('operations.noCommand')}</dd></div></dl>{operation.failureReason ? <p className="mt-2 text-[13px] text-danger" role="alert">{operation.failureReason}</p> : null}{operation.commandId ? <CommandEvidence commandId={operation.commandId} /> : null}</article>;
 }
 
-function TeamRunDetail({ runId }: { runId: string }) {
+export function TeamRunDetail({ runId }: { runId: string }) {
   const { t } = useTranslation('coders');
   const { locale } = useLocale();
   const queryClient = useQueryClient();

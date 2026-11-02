@@ -1,3 +1,4 @@
+import { ServiceUnavailableException } from '@nestjs/common';
 import type { AgentExecutionErrorCode, AgentExecutionPhase } from '@worklite/contracts';
 import { ModelGatewayError } from '@worklite/model-gateway';
 
@@ -11,6 +12,7 @@ export function executionFailure(error: unknown): ExecutionFailure {
     if (error.code === 'PROVIDER_REQUEST_FAILED') return { message: error.message, code: 'provider_request', phase: 'model' };
     if (error.code === 'INVALID_REQUEST') return { message: error.message, code: 'invalid_request', phase: 'model' };
   }
+  if (error instanceof ServiceUnavailableException && error.message === 'Portkey Gateway is unavailable.') return { message: 'Portkey Gateway is unavailable. Retry after it recovers.', code: 'provider_request', phase: 'model' };
   if (error instanceof Error && error.name === 'AI_MissingToolResultsError') return { message: 'The Agent conversation was missing a tool result. Retry repairs the recorded tool exchange before contacting the model.', code: 'missing_tool_results', phase: 'model' };
   if (error instanceof Error && error.message === 'Skill execution failed') return { message: 'The Agent Skill script could not be completed.', code: 'skill', phase: 'skill' };
   return { message: 'The Agent could not complete this turn because an internal execution error occurred. Retry the request.', code: 'internal', phase: 'model' };

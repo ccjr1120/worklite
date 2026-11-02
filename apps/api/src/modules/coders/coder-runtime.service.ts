@@ -1723,7 +1723,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         publicModelId: role.publicModelId,
         systemPrompt: taskRole === 'executor-manager'
           ? teamManagerSystemPrompt(groupRolePromptAddition(version.snapshot, request))
-          : taskSystemPrompt(role.instructions, false, [rolePromptAddition(taskRole, version.snapshot, request), groupRolePromptAddition(version.snapshot, request)].filter(Boolean).join('\n\n') || undefined),
+          : taskSystemPrompt(role.instructions, false, [taskRole === 'planner' ? 'Every completed Planner response must include a non-empty plan document in documents, with the goal, decisions, steps and validation or findings appropriate to the request. Do not invent implementation work for read-only requests.' : undefined, rolePromptAddition(taskRole, version.snapshot, request), groupRolePromptAddition(version.snapshot, request)].filter(Boolean).join('\n\n') || undefined),
         context: taskContext(request, false, correction),
         skills: taskRole === 'executor-manager' ? [] : role.skills,
         mcpRuntimes: taskRole === 'executor-manager' ? [] : (await this.resources.workflowMcpRuntimes(workspaceId, role.mcpServers.map((server) => server.id)))
@@ -1891,6 +1891,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     }
     if (orchestrationVersion >= 10 && request.taskDefinition.role === CODER_DISPATCHER_ROLE && !parsed.dispatchDecision) {
       throw new TaskOutputValidationError('The v10 Dispatcher completed without the required dispatchDecision object.', output);
+    }
+    if (request.taskDefinition.role === 'planner' && !parsed.documents.some((document) => document.content.trim())) {
+      throw new TaskOutputValidationError('Planner must return a non-empty plan document in documents.', output);
     }
     validateUpstreamDocuments(parsed.documents, request.upstream);
     if (laneWorktree) await this.mergeDeveloperLane(request.runId, attemptId, taskKey, laneWorktree, laneMergeTarget);
@@ -3220,7 +3223,7 @@ export function rolePromptAddition(
         'Scale investigation to the actual request. Identify its distinct questions and evidence needed for each; answer a capability question from its defining implementation and relevant entry points before exploring downstream effects. Investigate migration, historical references, or exhaustive impact only to the extent requested or necessary to answer.',
         'Use targeted searches and bounded file excerpts. Combine independent patterns for the same path in one grep using regex alternation; use read startLine/endLine for focused excerpts. Start with likely definitions and callers; narrow by path and symbol before expanding. Avoid repeatedly scanning or reading the same large file when existing evidence already answers the question. If output is truncated, narrow the query rather than assuming absence.',
         'Stop investigating each question when its requested scope is supported by sufficient evidence. Satisfy every explicit requirement, including an explicitly requested exhaustive impact analysis; do not silently narrow the request or claim completeness without evidence. State any remaining uncertainty and its effect.',
-        'For a request that only asks for read-only investigation or an answer, report the findings directly and omit implementation handoff, implementation plans, and Git or worktree decisions unless the user requested them. Do not perform changes or validation commands prohibited by the user.',
+        'For a request that only asks for read-only investigation or an answer, report the findings in the required Planner document and omit implementation handoff, proposed code changes, and Git or worktree decisions unless the user requested them. Do not perform changes or validation commands prohibited by the user.',
         'Issue independent tool calls together in the same round instead of one call per round. Each round resends the whole conversation, so the number of rounds drives cost.',
         'When the request already states the root cause, the plan, or the exact edits, do not re-investigate them. Confirm at most that the named files and symbols exist, then write the deliverable and hand off.',
         ...(snapshot.roles.some((item) => item.executor) ? [

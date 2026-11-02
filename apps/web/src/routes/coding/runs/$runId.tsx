@@ -1,5 +1,8 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { LegacyCoderRunDialog } from '@/features/coders/coder-run-detail';
+import { createFileRoute, Link } from '@tanstack/react-router';
+import { PageContainer, PageHeading } from '@/components/page-heading';
+import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
+import { useTranslation } from 'react-i18next';
+import { TeamRunDetail } from '@/features/coders/coder-run-detail';
 
 export const Route = createFileRoute('/coding/runs/$runId')({
   component: CoderRunDetailRoute,
@@ -7,6 +10,6 @@ export const Route = createFileRoute('/coding/runs/$runId')({
 
 function CoderRunDetailRoute() {
   const { runId } = Route.useParams();
-  const navigate = useNavigate();
-  return <LegacyCoderRunDialog runId={runId} onClose={() => void navigate({ to: '/coding' })} />;
+  const { t } = useTranslation('coders');
+  return <PageContainer width="detail"><WorkspaceChrome crumbs={[{ label: 'Coding' }, { label: t('run.detail.title') }]} /><PageHeading title={t('run.detail.title')} actions={<Link to="/coding" className="text-sm underline">Coding</Link>} /><TeamRunDetail runId={runId} /></PageContainer>;
 }

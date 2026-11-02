@@ -1,7 +1,9 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
 import { Link, useSearch } from '@tanstack/react-router';
-import { Search, Settings, ChevronDown, ChevronRight } from 'lucide-react';
+import { Search, Settings, ChevronDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useQueryClient } from '@tanstack/react-query';
+import { api } from '@/api/client';
 import type { AgentTeamRunListItem, AgentTeamRunStatus } from '@worklite/contracts';
 import { useAgentTeamRunListQuery, useAgentTeamRunNodesQuery, useCodersQuery } from '@/api/queries';
 import { ErrorState } from '@/components/error-state';
@@ -23,8 +25,6 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { RunNodeTable, TokenFigure } from './run-nodes';
-import { teamRoleLabel } from './coder-run-summary';
-import { CoderRunDialog } from './coder-run-detail';
 
 const SKELETON_ROWS = 8;
 const SETTLED_STATUSES: ReadonlySet<AgentTeamRunStatus> = new Set(['succeeded', 'failed', 'cancelled']);
@@ -127,10 +127,8 @@ function TeamFilterPopover({ selectedTeamIds, onTeamsChange, disabled }: TeamFil
   );
 }
 
-function RunRow({ run, expanded, onToggle, nodes, nodesLoading, retentionHours, locale }: {
+function RunRow({ run, nodes, nodesLoading, retentionHours, locale }: {
   run: AgentTeamRunListItem;
-  expanded: boolean;
-  onToggle: () => void;
   nodes: Parameters<typeof RunNodeTable>[0]['nodes'];
   nodesLoading: boolean;
   retentionHours: number;
@@ -138,24 +136,21 @@ function RunRow({ run, expanded, onToggle, nodes, nodesLoading, retentionHours, 
 }) {
   const { t } = useTranslation('coders');
   const label = t(`run.status.${run.status}`);
-  const current = run.overview?.currentNode;
-  const currentText = current ? `${current.name === teamRoleLabel(t, current) ? current.name : `${teamRoleLabel(t, current)} · ${current.name}`}${current.action ? `：${current.action}` : ''}` : null;
-  const detailsId = `run-nodes-${run.id}`;
+  const queryClient = useQueryClient();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const control = async (action: 'pause' | 'resume' | 'cancel') => {
+    setPending(true); setError('');
+    try {
+      await (action === 'pause' ? api.pauseAgentTeamRun(run.id) : action === 'resume' ? api.resumeAgentTeamRun(run.id) : api.cancelAgentTeamRun(run.id));
+      await queryClient.invalidateQueries({ queryKey: ['agent-team-run-list'] });
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setPending(false); }
+  };
   return (
     <li>
       <div className="flex items-center rounded-lg hover:bg-muted">
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={expanded}
-          aria-controls={detailsId}
-          aria-label={t(expanded ? 'records.collapseNodes' : 'records.expandNodes')}
-          className={`ml-2 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground ${focusRing}`}
-        >
-          <ChevronRight className={`size-4 transition-transform ${expanded ? 'rotate-90' : ''}`} aria-hidden="true" />
-        </button>
-        <CoderRunDialog runId={run.id}>
-        <button type="button" className={`${rowGrid} pl-1 rounded-lg text-left ${focusRing}`}>
+        <Link to="/coding/runs/$runId" params={{ runId: run.id }} className={`${rowGrid} pl-4 rounded-lg text-left ${focusRing}`}>
           {/* Executor name captured when the Run was dispatched */}
           <span className="hidden sm:flex text-xs font-medium text-foreground truncate">
             {run.coderName}
@@ -165,7 +160,6 @@ function RunRow({ run, expanded, onToggle, nodes, nodesLoading, retentionHours, 
             <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
               <StatusDot status={toStatusKey(run.status)} />
               <span className="shrink-0">{label}</span>
-              {currentText ? <TruncatedText text={`· ${currentText}`} title={currentText} className="min-w-0" /> : null}
             </span>
             <TruncatedText
               text={toSingleLine(run.intent) || run.id}
@@ -203,14 +197,16 @@ function RunRow({ run, expanded, onToggle, nodes, nodesLoading, retentionHours, 
           <div className="text-right text-xs" title={t('records.columns.tokens')}>
             {run.overview ? <TokenFigure value={run.overview.totalTokens} retentionHours={retentionHours} /> : '—'}
           </div>
-        </button>
-        </CoderRunDialog>
+        </Link>
+        {!SETTLED_STATUSES.has(run.status) ? <div className="flex shrink-0 gap-1 pr-3">
+          <Button variant="secondary" disabled={pending} onClick={() => void control(run.status === 'paused' ? 'resume' : 'pause')}>{t(run.status === 'paused' ? 'controls.resume' : 'controls.pause')}</Button>
+          <Button variant="secondary" disabled={pending} onClick={() => void control('cancel')}>{t('controls.cancel')}</Button>
+        </div> : null}
       </div>
-      {expanded ? (
-        <div id={detailsId} className="mx-4 mb-3 rounded-lg border border-border bg-surface">
-          <RunNodeTable nodes={nodes} loading={nodesLoading} retentionHours={retentionHours} />
-        </div>
-      ) : null}
+      {error ? <p role="alert" className="px-4 text-xs text-danger">{error}</p> : null}
+      <div className="mx-4 mb-3 rounded-lg border border-border bg-surface">
+        <RunNodeTable nodes={nodes} loading={nodesLoading} retentionHours={retentionHours} compact />
+      </div>
     </li>
   );
 }
@@ -263,12 +259,7 @@ export function CoderRecords({ coderId }: { coderId: string }) {
     ) ?? [];
   }, [query.data?.pages, keyword]);
 
-  // In-progress Runs open by default so their current node is visible; a click overrides it.
-  const [expandedOverrides, setExpandedOverrides] = useState<Record<string, boolean>>({});
-  const isExpanded = useCallback((run: AgentTeamRunListItem) => expandedOverrides[run.id] ?? !SETTLED_STATUSES.has(run.status), [expandedOverrides]);
-  const toggleRun = (run: AgentTeamRunListItem) => setExpandedOverrides((current) => ({ ...current, [run.id]: !isExpanded(run) }));
-  const expandedRuns = filteredRuns.filter(isExpanded);
-  const nodes = useAgentTeamRunNodesQuery(expandedRuns.map((run) => run.id), expandedRuns.some((run) => !SETTLED_STATUSES.has(run.status)));
+  const nodes = useAgentTeamRunNodesQuery(filteredRuns.map((run) => run.id), filteredRuns.some((run) => !SETTLED_STATUSES.has(run.status)));
 
   const total = query.data?.pages[0]?.total ?? 0;
   const isEmpty = !loading && filteredRuns.length === 0;
@@ -323,8 +314,6 @@ export function CoderRecords({ coderId }: { coderId: string }) {
                 <RunRow
                   key={run.id}
                   run={run}
-                  expanded={isExpanded(run)}
-                  onToggle={() => toggleRun(run)}
                   nodes={nodes.nodesByRun.get(run.id)}
                   nodesLoading={nodes.loading}
                   retentionHours={nodes.retentionHours}
