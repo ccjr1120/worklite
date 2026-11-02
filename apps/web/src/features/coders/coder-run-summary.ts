@@ -26,7 +26,12 @@ export function isSettledTeamRun(run: Pick<AgentTeamRunView, 'status'>): boolean
 export function formatElapsed(t: TFunction<'assistant'>, fromIso: string | null, toMs: number): string | null {
   const from = fromIso ? Date.parse(fromIso) : Number.NaN;
   if (!Number.isFinite(from) || !Number.isFinite(toMs)) return null;
-  const minutes = Math.max(0, Math.floor((toMs - from) / 60_000));
+  return formatElapsedMs(t, toMs - from);
+}
+
+export function formatElapsedMs(t: TFunction<'assistant'>, durationMs: number | null): string | null {
+  if (durationMs === null || !Number.isFinite(durationMs)) return null;
+  const minutes = Math.max(0, Math.floor(durationMs / 60_000));
   if (minutes < 1) return t('codex.elapsedLessThanMinute');
   if (minutes < 60) return t('codex.elapsedMinutes', { count: minutes });
   if (minutes < 24 * 60) return t('codex.elapsedHours', { count: Math.floor(minutes / 60), remainder: minutes % 60 });

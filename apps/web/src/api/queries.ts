@@ -1,4 +1,5 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 import { api } from './client';
 import type { ArtifactListQuery, AssignHomeBoardRequest, CreateHomeBoardCategoryRequest, GatewayRequestLogQuery, PortkeyGatewayStatsQuery, UpdateChatMemoryRequest, UpdateHomeBoardCategoryRequest } from '@worklite/contracts';
 
@@ -235,10 +236,36 @@ export function useAgentTeamRunNodesQuery(runIds: string[], refresh: boolean) {
     })),
     combine: (results) => ({
       nodesByRun: new Map(results.flatMap((result) => result.data?.runs.map((run) => [run.runId, run.nodes] as const) ?? [])),
+      // Older servers omit the Run total; callers treat a missing entry as not reported.
+      totalTokensByRun: new Map(results.flatMap((result) => result.data?.runs.flatMap((run) => run.totalTokens ? [[run.runId, run.totalTokens] as const] : []) ?? [])),
       retentionHours: results.find((result) => result.data)?.data?.requestLogRetentionHours ?? 12,
       // Placeholder data is the previous batch, which lacks a newly expanded Run.
       loading: results.some((result) => result.isPending || result.isPlaceholderData),
+      isError: results.some((result) => result.isError && !result.data),
     }),
+  });
+}
+
+// One Run's node tree for its Chat card. It shares the node-tree cache key of a one-Run batch,
+// refreshes every 5 seconds while the Run is live, and is read once more when the Run settles,
+// after which it is not refetched.
+export function useAgentTeamRunUsageQuery(runId: string, live: boolean) {
+  const client = useQueryClient();
+  const wasLive = useRef(live);
+  useEffect(() => {
+    if (wasLive.current && !live) void client.invalidateQueries({ queryKey: ['agent-team-run-nodes', runId], exact: true });
+    wasLive.current = live;
+  }, [client, live, runId]);
+  return useQuery({
+    queryKey: ['agent-team-run-nodes', runId] as const,
+    queryFn: () => api.agentTeamRunNodes([runId]),
+    enabled: Boolean(runId),
+    refetchInterval: live ? 5_000 : false,
+    staleTime: live ? 0 : Number.POSITIVE_INFINITY,
+    select: (tree) => {
+      const run = tree.runs.find((item) => item.runId === runId);
+      return { nodes: run?.nodes ?? [], totalTokens: run?.totalTokens ?? null, retentionHours: tree.requestLogRetentionHours };
+    },
   });
 }
 
