@@ -109,6 +109,9 @@ function ActivityEntry({ activity, locale }: { activity: WorkflowNodeActivityVie
       {detail.phase === 'skill.script' ? (
         <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">{t('nodeLog.commandExecution', { id: detail.commandExecutionId })}</p>
       ) : null}
+      {detail.phase === 'skill.script' && detail.status === 'failed' && detail.failureReason ? (
+        <p className="mt-0.5 break-words text-[11px] text-danger">{t('nodeLog.skillScriptFailure', { reason: detail.failureReason })}</p>
+      ) : null}
       {detail.phase === 'model.round' && detail.contextDropped > 0 ? (
         <p className="mt-0.5 text-[11px] text-muted-foreground">{t('nodeLog.contextDropped', { count: detail.contextDropped })}</p>
       ) : null}

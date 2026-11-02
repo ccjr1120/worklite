@@ -20,7 +20,7 @@ import {
   type StoredWorkflowNode,
 } from '@worklite/db';
 import { commitWorkflowInvocation, composeWorkflowArticle, createWorkflowSchedulerState, executeWorkflowMap, NodeTypeRegistry, readWorkflowOutputPath, resolveWorkflowNodeCapability, takeNextWorkflowInvocation, workflowRunResult, type NodeExecutionContext, type NodeExecutionRequest, type PendingNodeExecutionResult, type WorkflowSchedulerState } from '@worklite/workflow-engine';
-import type { GatewayCorrelation } from '@worklite/model-gateway';
+import { AgentJsonOutputError, type GatewayCorrelation } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from '../agents/agent-executions.service';
@@ -150,25 +150,42 @@ export class RunsService {
           ? await this.agentExecutions.resolveWorkflowSkillIds(request.context.workspaceId, config.requiredSkillIds as string[])
           : [];
         const skillScriptCalls: SkillScriptCallRecord[] = [];
-        const response = await this.agentExecutions.executeWorkflowAgent(
-          request.context.workspaceId,
-          configModel,
-          context,
-          config.systemPrompt,
-          config.skillIds as string[],
-          config.mcpServerIds as string[],
-          request.signal,
-          (delta) => { void this.publish(request.context.workflowRunId, 'node.delta', { nodeId: request.context.nodeId, nodeRunId: request.context.nodeRunId, delta }); },
-          config.outputFormat === 'json',
-          (detail) => {
-            if (detail.phase === 'skill.script') skillScriptCalls.push({ skillId: detail.skillId, skillName: detail.skillName, exitCode: detail.exitCode, status: detail.status });
-            return this.publishActivity(request.context.workflowRunId, request.context.nodeId, request.context.nodeRunId, detail);
-          },
-          { workflowId: request.context.workflowId, workflowRunId: request.context.workflowRunId, nodeRunId: request.context.nodeRunId },
-          { maxToolCalls: config.maxToolCalls as number | undefined, maxToolRounds: config.maxToolRounds as number | undefined, maxToolResultChars: config.maxToolResultChars as number | undefined, maxOutputTokens: config.maxOutputTokens as number | undefined },
-        );
+        let response: string;
+        try {
+          response = await this.agentExecutions.executeWorkflowAgent(
+            request.context.workspaceId,
+            configModel,
+            context,
+            config.systemPrompt,
+            config.skillIds as string[],
+            config.mcpServerIds as string[],
+            request.signal,
+            (delta) => { void this.publish(request.context.workflowRunId, 'node.delta', { nodeId: request.context.nodeId, nodeRunId: request.context.nodeRunId, delta }); },
+            config.outputFormat === 'json',
+            (detail) => {
+              if (detail.phase === 'skill.script') {
+                skillScriptCalls.push({
+                  skillId: detail.skillId,
+                  skillName: detail.skillName,
+                  exitCode: detail.exitCode,
+                  status: detail.status,
+                  ...(detail.failureReason ? { failureReason: detail.failureReason } : {}),
+                });
+              }
+              return this.publishActivity(request.context.workflowRunId, request.context.nodeId, request.context.nodeRunId, detail);
+            },
+            { workflowId: request.context.workflowId, workflowRunId: request.context.workflowRunId, nodeRunId: request.context.nodeRunId },
+            { maxToolCalls: config.maxToolCalls as number | undefined, maxToolRounds: config.maxToolRounds as number | undefined, maxToolResultChars: config.maxToolResultChars as number | undefined, maxOutputTokens: config.maxOutputTokens as number | undefined },
+          );
+        } catch (error) {
+          // A failed required channel is the cause; a model that then stops with
+          // prose instead of JSON is only its consequence, so report the cause.
+          if (request.signal.aborted) throw error;
+          assertRequiredSkillScriptCalls(requiredSkillIds, skillScriptCalls);
+          throw workflowAgentFailure(error);
+        }
         // The model's own report is not evidence: every required Skill must have at
-        // least one script call that actually exited 0 during this node attempt.
+        // least one script call that actually succeeded during this node attempt.
         assertRequiredSkillScriptCalls(requiredSkillIds, skillScriptCalls);
         if (config.outputFormat !== 'json') return { output: response };
         const output = parseWorkflowAgentJson(response);
@@ -1083,13 +1100,31 @@ function parseWorkflowAgentJson(value: string): unknown {
   }
 }
 
-export type SkillScriptCallRecord = { skillId: string; skillName: string; exitCode: number | null; status: 'succeeded' | 'failed' };
+export type SkillScriptCallRecord = { skillId: string; skillName: string; exitCode: number | null; status: 'succeeded' | 'failed'; failureReason?: string };
+
+const MODEL_REPLY_EXCERPT_MAX_CHARS = 500;
+
+/**
+ * Keeps a JSON-output failure actionable: the node error carries a bounded,
+ * whitespace-collapsed excerpt of what the model actually said. Other errors
+ * pass through unchanged.
+ */
+export function workflowAgentFailure(error: unknown): unknown {
+  const isJsonOutputError = error instanceof AgentJsonOutputError
+    || (error instanceof Error && error.name === 'AgentJsonOutputError' && typeof (error as { output?: unknown }).output === 'string');
+  if (!isJsonOutputError) return error;
+  const reply = (error as AgentJsonOutputError).output.replace(/\s+/g, ' ').trim();
+  if (!reply) return error;
+  const excerpt = reply.length > MODEL_REPLY_EXCERPT_MAX_CHARS ? `${reply.slice(0, MODEL_REPLY_EXCERPT_MAX_CHARS)}…` : reply;
+  return new Error(`${(error as Error).message} Model reply: ${excerpt}`, { cause: error });
+}
 
 /**
  * Fails an Agent node unless every required Skill has at least one script call
- * whose process succeeded (exit code 0). A failed call followed by a successful
- * retry passes; a successful call that found no relevant results also passes,
- * because the script itself decides that outcome through its exit code.
+ * that succeeded: the process exited 0 and its output did not report `ok: false`.
+ * A failed call followed by a successful retry passes; a successful call that
+ * found no relevant results also passes, because the script itself decides that
+ * outcome.
  */
 export function assertRequiredSkillScriptCalls(requiredSkillIds: readonly string[], calls: readonly SkillScriptCallRecord[]): void {
   const missing = requiredSkillIds.filter((skillId) => !calls.some((call) => call.skillId === skillId && call.status === 'succeeded'));
@@ -1099,7 +1134,7 @@ export function assertRequiredSkillScriptCalls(requiredSkillIds: readonly string
     const last = attempts.at(-1);
     const label = last?.skillName || skillId;
     return last
-      ? `Required research Skill ${label} has no successful script call (last exit code ${last.exitCode ?? 'unknown'}).`
+      ? `Required research Skill ${label} has no successful script call (last exit code ${last.exitCode ?? 'unknown'}${last.failureReason ? `: ${last.failureReason}` : ''}).`
       : `Required research Skill ${label} has no successful script call.`;
   });
   throw new Error(reasons.join(' '));

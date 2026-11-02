@@ -1157,7 +1157,7 @@ export type WorkflowNodeActivityDetail =
   | { phase: 'node.setup'; type: string; typeVersion: string; errorPolicy: 'stop' | 'retry'; config: unknown; inputPorts: string[] }
   | { phase: 'node.attempt'; attempt: number; attempts: number; automaticRetry: boolean }
   | { phase: 'model.round'; round: number; model: string; finishReason: string | null; toolCalls: number; contextDropped: number }
-  | { phase: 'skill.script'; skillId: string; skillName: string; scriptPath: string; arguments: string[]; commandExecutionId: string; exitCode: number | null; status: 'succeeded' | 'failed' }
+  | { phase: 'skill.script'; skillId: string; skillName: string; scriptPath: string; arguments: string[]; commandExecutionId: string; exitCode: number | null; status: 'succeeded' | 'failed'; failureReason?: string }
   | { phase: 'mcp.call'; serverId: string; toolName: string; input: unknown; result: string; status: 'succeeded' | 'failed' }
   | { phase: 'map.element'; index: number; total: number; status: 'succeeded' | 'failed' | 'skipped'; message?: string }
   | { phase: 'edge.decision'; decisions: WorkflowNodeActivityEdgeDecision[]; terminal: boolean };
@@ -1963,7 +1963,12 @@ export type AgentTeamRunNode = {
 };
 
 export type AgentTeamRunNodeTree = {
-  runs: Array<{ runId: string; nodes: AgentTeamRunNode[] }>;
+  runs: Array<{
+    runId: string;
+    nodes: AgentTeamRunNode[];
+    /** Sum of all Gateway traffic of the Run, including traffic not attributed to any node. */
+    totalTokens: TokenAttribution;
+  }>;
   /** Request-log retention that bounds step-level estimates. */
   requestLogRetentionHours: number;
 };

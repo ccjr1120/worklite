@@ -56,6 +56,20 @@ export function runTotalTokens(group: GatewayAttributionGroup | undefined): Toke
   return { tokens: group.totalTokens, source: 'exact' };
 }
 
+/**
+ * A Run's total from the node_run grouped statistics: the sum over every group of the Run,
+ * including groups without a node, so it matches the team_run total without another read.
+ * Null group totals are skipped like SQL SUM does.
+ */
+export function runTotalFromNodeStats(groups: readonly GatewayAttributionGroup[] | null, runId: string): TokenAttribution {
+  if (!groups) return unavailableTokens('gateway_unavailable');
+  const runGroups = groups.filter((group) => group.teamRunId === runId);
+  if (!runGroups.length) return unavailableTokens('no_gateway_traffic');
+  const reported = runGroups.filter((group) => group.totalTokens !== null);
+  if (!reported.length) return unavailableTokens('usage_not_reported');
+  return { tokens: reported.reduce((sum, group) => sum + group.totalTokens!, 0), source: 'exact' };
+}
+
 type ActivityPayload = {
   taskAttemptId?: unknown;
   phase?: unknown;

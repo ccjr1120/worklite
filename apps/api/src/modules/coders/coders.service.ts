@@ -36,7 +36,7 @@ import { AgentTeamConfigurationService, coderRevision } from './coder-configurat
 import { capturedCoderName } from './coder-run-summary';
 import { RETIRED_AGENT_TEAM_IDS } from './coder-configuration';
 import { PortkeyGatewayService } from '../model-providers/portkey-gateway.service';
-import { activitiesByAttempt, buildRunNodes, currentRunNode, durationBetween, isRunInProgress, operationActivities, runTotalTokens, timelineByNode, unavailableTokens, type ActivityRow, type AttemptRow } from './coder-run-nodes';
+import { activitiesByAttempt, buildRunNodes, currentRunNode, durationBetween, isRunInProgress, operationActivities, runTotalFromNodeStats, runTotalTokens, timelineByNode, unavailableTokens, type ActivityRow, type AttemptRow } from './coder-run-nodes';
 
 const RUN_NODE_BATCH_LIMIT = 50;
 const RUN_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -295,6 +295,7 @@ export class CodersService {
       runs: [...runs].sort((a, b) => order.get(a.id)! - order.get(b.id)!).map((run) => ({
         runId: run.id,
         nodes: buildRunNodes(run.id, run.snapshot, attempts.filter((attempt) => attempt.runId === run.id), activities, { statsByNode, runsWithUnattributedTraffic, timeline, requestsByNode }, nowMs),
+        totalTokens: runTotalFromNodeStats(stats, run.id),
       })),
       requestLogRetentionHours: timeline?.retentionHours ?? REQUEST_LOG_RETENTION_HOURS,
     };

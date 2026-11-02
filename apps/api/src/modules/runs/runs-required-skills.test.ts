@@ -7,17 +7,30 @@ import type { AgentExecutionsService } from '../agents/agent-executions.service'
 import type { WechatOfficialAccountService } from '../plugins/wechat-official-account.service';
 import type { PortkeyGatewayService } from '../model-providers/portkey-gateway.service';
 import type { ArtifactStorageService } from '../artifacts/artifact-storage.service';
-import { assertRequiredSkillScriptCalls, RunsService } from './runs.service';
+import { AgentJsonOutputError } from '@worklite/model-gateway';
+import { assertRequiredSkillScriptCalls, RunsService, workflowAgentFailure } from './runs.service';
 
-type ScriptCall = { skillId: string; skillName: string; exitCode: number | null };
+type ScriptCall = { skillId: string; skillName: string; exitCode: number | null; failureReason?: string };
 type Reporter = (detail: WorkflowNodeActivityDetail) => void | Promise<void>;
 
-function harness(calls: ScriptCall[], response = '{"plan":"ok"}') {
+function harness(calls: ScriptCall[], response: string | Error = '{"plan":"ok"}') {
   const executeWorkflowAgent = vi.fn(async (...args: unknown[]) => {
     const activity = args[9] as Reporter;
     for (const call of calls) {
-      await activity({ phase: 'skill.script', skillId: call.skillId, skillName: call.skillName, scriptPath: 'scripts/search.mjs', arguments: [], commandExecutionId: `cmd_${call.skillId}`, exitCode: call.exitCode, status: call.exitCode === 0 ? 'succeeded' : 'failed' });
+      const succeeded = call.exitCode === 0 && !call.failureReason;
+      await activity({
+        phase: 'skill.script',
+        skillId: call.skillId,
+        skillName: call.skillName,
+        scriptPath: 'scripts/search.mjs',
+        arguments: [],
+        commandExecutionId: `cmd_${call.skillId}`,
+        exitCode: call.exitCode,
+        status: succeeded ? 'succeeded' : 'failed',
+        ...(call.failureReason ? { failureReason: call.failureReason } : {}),
+      });
     }
+    if (response instanceof Error) throw response;
     return response;
   });
   // Retired aliases resolve to the canonical id reported by script activity.
@@ -78,5 +91,36 @@ describe('Workflow Agent requiredSkillIds', () => {
   it('checks the requirement directly from script call records', () => {
     expect(() => assertRequiredSkillScriptCalls([], [])).not.toThrow();
     expect(() => assertRequiredSkillScriptCalls(['a'], [{ skillId: 'a', skillName: 'A', exitCode: null, status: 'failed' }])).toThrow('Required research Skill A has no successful script call (last exit code unknown).');
+    expect(() => assertRequiredSkillScriptCalls(['a'], [{ skillId: 'a', skillName: 'A', exitCode: 0, status: 'failed', failureReason: 'excessive requests' }])).toThrow('Required research Skill A has no successful script call (last exit code 0: excessive requests).');
+  });
+
+  it('reports the failed required channel instead of the JSON error when the model then stops with prose', async () => {
+    const { execute } = harness([
+      { skillId: 'sk_tavily', skillName: 'tavily-web-research', exitCode: 0, failureReason: 'excessive requests' },
+      { skillId: 'sk_github', skillName: 'github-research', exitCode: 0 },
+      { skillId: 'sk_zhihu', skillName: 'zhihu-research', exitCode: 0 },
+    ], new AgentJsonOutputError('tavily-web-research 被限流（excessive requests），按三渠道必须成功的规则停止。'));
+    const error = await execute(required).then(() => null, (reason: unknown) => reason as Error);
+    expect(error?.message).toBe('Required research Skill tavily-web-research has no successful script call (last exit code 0: excessive requests).');
+  });
+
+  it('adds a bounded excerpt of the model reply to a JSON error when every required channel succeeded', async () => {
+    const prose = `我已经完成调研。\n\n   ${'细节'.repeat(400)}`;
+    const { execute } = harness([
+      { skillId: 'sk_tavily', skillName: 'tavily-web-research', exitCode: 0 },
+      { skillId: 'sk_github', skillName: 'github-research', exitCode: 0 },
+      { skillId: 'sk_zhihu', skillName: 'zhihu-research', exitCode: 0 },
+    ], new AgentJsonOutputError(prose));
+    const error = await execute(required).then(() => null, (reason: unknown) => reason as Error);
+    expect(error?.message).toContain('Agent JSON output requires valid JSON.');
+    expect(error?.message).toContain('Model reply: 我已经完成调研。 细节细节');
+    expect(error!.message.length).toBeLessThan(600);
+  });
+
+  it('passes other model errors through unchanged', async () => {
+    const failure = new Error('Gateway unavailable.');
+    const { execute } = harness([], failure);
+    await expect(execute({})).rejects.toBe(failure);
+    expect(workflowAgentFailure(failure)).toBe(failure);
   });
 });

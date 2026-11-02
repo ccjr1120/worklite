@@ -72,6 +72,7 @@
     "automaticRetry": "自动重试，第 {{attempt}} 次尝试，共 {{attempts}} 次",
     "modelRound": "第 {{round}} 轮，模型 {{model}}，结束原因 {{finishReason}}",
     "skillScript": "技能 {{skill}} 执行了 {{path}}，退出码 {{exitCode}}",
+    "skillScriptFailure": "查询失败：{{reason}}",
     "mcpCall": "MCP 工具 {{tool}} {{status}}",
   "mapElement": "数组第 {{index}}/{{total}} 个元素{{status}}{{message}}",
   "mapElementStatus": {

@@ -33,6 +33,7 @@ type AgentInvocationSkillActivity = {
   commandExecutionId: string;
   exitCode: number | null;
   status: 'succeeded' | 'failed';
+  failureReason?: string;
 };
 
 type AgentInvocationMcpActivity = {
@@ -460,7 +461,10 @@ export class IsolatedAgentInvocationService {
       try {
         const completed = await this.skillScripts.wait(started.id);
         request.signal.throwIfAborted();
-        const succeeded = completed.execution.status === 'succeeded';
+        // Skills report failures as `{"ok": false, "error": ...}`; a zero exit code
+        // alone does not prove the script succeeded.
+        const failureReason = structuredSkillFailure(completed.output ?? '');
+        const succeeded = completed.execution.status === 'succeeded' && failureReason === null;
         const fullValue = completed.output || (succeeded ? 'Skill script completed without output.' : `Skill script failed with exit code ${completed.execution.exitCode ?? 'unknown'}.`);
         const value = boundedToolResult(fullValue, request.limits?.maxToolResultChars);
         await request.onSkillScript?.({
@@ -471,6 +475,7 @@ export class IsolatedAgentInvocationService {
           commandExecutionId: started.id,
           exitCode: completed.execution.exitCode ?? null,
           status: succeeded ? 'succeeded' : 'failed',
+          ...(failureReason ? { failureReason } : {}),
         });
         return {
           output: { type: succeeded ? 'text' : 'error-text', value },
@@ -579,6 +584,39 @@ function requiredString(value: unknown, field: string): string {
 
 function isBuiltinTool(name: string): boolean {
   return name === 'bash' || name === 'read' || name === 'write' || name === 'glob' || name === 'grep';
+}
+
+const SKILL_FAILURE_REASON_MAX_CHARS = 300;
+
+/**
+ * Returns the failure reason when a Skill script's whole output is a JSON object
+ * with `ok: false`; returns null for any other output.
+ */
+export function structuredSkillFailure(output: string): string | null {
+  const trimmed = output.trim();
+  if (!trimmed.startsWith('{')) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const record = parsed as Record<string, unknown>;
+  if (record.ok !== false) return null;
+  const text = (value: unknown): string => {
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'string') return value.trim();
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  };
+  const error = text(record.error);
+  const detail = text(record.message) || text(record.hint);
+  const reason = error && detail && detail !== error ? `${error}: ${detail}` : error || detail || 'Skill script reported ok: false.';
+  return reason.length > SKILL_FAILURE_REASON_MAX_CHARS ? `${reason.slice(0, SKILL_FAILURE_REASON_MAX_CHARS)}…` : reason;
 }
 
 function boundedToolResult(value: string, maxChars: number | undefined): string {
