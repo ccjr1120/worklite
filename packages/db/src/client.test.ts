@@ -20,6 +20,16 @@ afterEach(() => {
 });
 
 describe('initializeDatabase restart recovery', () => {
+  it('offers an optional model only on Coder retry through the platform tool', () => {
+    const tools = JSON.parse(platformFile('scripts/tools.json').content) as Record<string, { inputSchema: { properties: Record<string, unknown>; required: string[] } }>;
+    const control = tools['scripts/control-coder-run.mjs'];
+    expect(control.inputSchema.properties.model).toBeDefined();
+    expect(control.inputSchema.required).not.toContain('model');
+    const script = platformFile('scripts/control-coder-run.mjs').content;
+    expect(script).toContain("raw.model !== undefined && action !== 'retry'");
+    expect(script).toContain("model: requiredString(raw.model, 'model', 240)");
+  });
+
   it('closes a non-recoverable running tool call and persists its failure result', async () => {
     db = createDb(':memory:');
     await initializeDatabase(db);

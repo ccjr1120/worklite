@@ -268,8 +268,8 @@ export class CoderRunsController {
   }
 
   @Post(':runId/tasks/:taskKey/retry')
-  retry(@Req() request: Request, @Param('runId') runId: string, @Param('taskKey') taskKey: string) {
-    return this.teams.retry(request, 'personal', runId, taskKey).then((run) => ({ run }));
+  retry(@Req() request: Request, @Param('runId') runId: string, @Param('taskKey') taskKey: string, @Body() body?: { model?: string }) {
+    return this.teams.retry(request, 'personal', runId, taskKey, body?.model).then((run) => ({ run }));
   }
 }
 

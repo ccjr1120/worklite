@@ -402,10 +402,11 @@ export class CodersService {
     workspaceSlug: string,
     runId: string,
     taskKey: string,
+    model?: string,
   ): Promise<AgentTeamRunView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     await this.runtime.getRunView(runId, workspace.id);
-    return this.runtime.retry(runId, taskKey);
+    return this.runtime.retry(runId, taskKey, model);
   }
 
   async delete(request: Request, workspaceSlug: string, coderId: string, confirmTeamId: string): Promise<{ coderId: string; deletedAt: string }> {

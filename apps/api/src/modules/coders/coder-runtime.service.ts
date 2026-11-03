@@ -626,8 +626,16 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         .orderBy(asc(coderRunEvents.sequence)),
     ]);
     const progressTextByAttemptId = new Map<string, string>();
+    const retryModelByAttemptId = new Map<string, string>();
+    const savedClaudeSessions = new Set<string>();
     for (const row of [...activityRows].reverse()) {
-      const payload = row.payload as { taskAttemptId?: unknown; text?: unknown } | null;
+      const payload = row.payload as { taskAttemptId?: unknown; text?: unknown; phase?: unknown; nextAttemptFor?: unknown; model?: unknown; sessionId?: unknown; sessionPersisted?: unknown } | null;
+      if (payload?.phase === 'claude.session_started' && payload.sessionPersisted === true && typeof payload.taskAttemptId === 'string' && typeof payload.sessionId === 'string' && payload.sessionId) {
+        savedClaudeSessions.add(payload.taskAttemptId);
+      }
+      if (payload?.phase === 'claude.retry_requested' && typeof payload.nextAttemptFor === 'string' && typeof payload.model === 'string' && !retryModelByAttemptId.has(payload.nextAttemptFor)) {
+        retryModelByAttemptId.set(payload.nextAttemptFor, payload.model);
+      }
       if (typeof payload?.taskAttemptId !== 'string' || progressTextByAttemptId.has(payload.taskAttemptId)) continue;
       if (typeof payload.text === 'string' && payload.text.trim()) {
         progressTextByAttemptId.set(payload.taskAttemptId, payload.text);
@@ -635,10 +643,14 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     }
     const worktree = runWorktreeColumns(run);
     const teamDefaultModel = this.config.get<string>('CODER_DEFAULT_PUBLIC_MODEL_ID') ?? '';
-    const tasks = taskRows.map((row) => toTaskAttemptView(row, progressTextByAttemptId.get(row.id) ?? '', {
-      roleName: taskRoleName(version.snapshot, row.role),
-      model: effectiveTaskModel(version.snapshot, row, teamDefaultModel),
-    }));
+    const tasks = taskRows.map((row) => {
+      const task = toTaskAttemptView(row, progressTextByAttemptId.get(row.id) ?? '', {
+        roleName: taskRoleName(version.snapshot, row.role),
+        model: retryModelByAttemptId.get(row.id) ?? effectiveTaskModel(version.snapshot, row, teamDefaultModel),
+      });
+      if (version.snapshot.roles.find((role) => role.role === row.role)?.executor === 'claude' && !savedClaudeSessions.has(row.id)) task.retryable = false;
+      return task;
+    });
     const [executor] = version.snapshot.coderName?.trim() ? [] : await this.db.select({ name: coders.name })
       .from(coders).where(eq(coders.id, run.coderId)).limit(1);
     return {
@@ -1068,7 +1080,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     return this.getRunView(runId);
   }
 
-  async retry(runId: string, taskKey: string): Promise<AgentTeamRunView> {
+  async retry(runId: string, taskKey: string, model?: string): Promise<AgentTeamRunView> {
     const run = await this.getRun(runId);
     if (run.status !== 'failed') throw new BadRequestException('Only a failed Coder run can be retried.');
     const [failed] = await this.db.select().from(coderTaskAttempts)
@@ -1081,6 +1093,21 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       .orderBy(desc(coderTaskAttempts.attemptIndex))
       .limit(1);
     if (!failed) throw new BadRequestException('The failed active Coder task was not found.');
+    const version = await this.getVersion(run);
+    const role = version.snapshot.roles.find((item) => item.role === failed.role);
+    if (model !== undefined) {
+      if (typeof model !== 'string' || !model.trim()) throw new BadRequestException('A retry model must be a non-empty Gateway model id.');
+      if (role?.executor !== 'claude') throw new BadRequestException('A retry model is supported only for Claude Code tasks.');
+      await this.executors.requireModel(run.workspaceId, 'claude', model.trim());
+    }
+    const activity = await this.db.select().from(coderRunEvents)
+      .where(and(eq(coderRunEvents.runId, runId), eq(coderRunEvents.type, 'task.activity')))
+      .orderBy(desc(coderRunEvents.sequence));
+    const hasSavedSession = activity.some((event) => {
+      const payload = event.payload as { taskAttemptId?: string; phase?: string; sessionId?: string; sessionPersisted?: boolean };
+      return payload.taskAttemptId === failed.id && payload.phase === 'claude.session_started' && payload.sessionPersisted === true && !!payload.sessionId;
+    });
+    if (role?.executor === 'claude' && !hasSavedSession) throw new BadRequestException('This task has no saved Claude session to resume; inspect the project state before starting a new task.');
 
     // A failed Developer lane retries its whole fan-out: successful sibling lanes keep their
     // results, and the dispatcher re-dispatches every lane that has none.
@@ -1093,7 +1120,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
     const now = new Date();
     await this.transaction((transaction) => {
-      const failedRows = transaction.select({ id: coderTaskAttempts.id, taskKey: coderTaskAttempts.taskKey })
+      const failedRows = transaction.select({ id: coderTaskAttempts.id, taskKey: coderTaskAttempts.taskKey, role: coderTaskAttempts.role })
         .from(coderTaskAttempts)
         .where(and(
           eq(coderTaskAttempts.runId, runId),
@@ -1102,6 +1129,18 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         )).all();
       for (const row of failedRows) {
         if (fanOutPattern ? !fanOutPattern.test(row.taskKey) : row.taskKey !== taskKey) continue;
+        const session = activity.map((event) => event.payload as { taskAttemptId?: string; phase?: string; sessionId?: string; sessionPersisted?: boolean })
+          .find((event) => event.taskAttemptId === row.id && event.phase === 'claude.session_started' && event.sessionPersisted === true && event.sessionId);
+        const failedRole = version.snapshot.roles.find((item) => item.role === row.role);
+        if (failedRole?.executor === 'claude' && !session?.sessionId) {
+          throw new BadRequestException(`Task ${row.taskKey} has no saved Claude session to resume; inspect the project state before starting a new task.`);
+        }
+        const previousRetry = activity.map((event) => event.payload as { phase?: string; nextAttemptFor?: string; model?: string })
+          .find((event) => event.phase === 'claude.retry_requested' && event.nextAttemptFor === row.id);
+        if (session?.sessionId) this.appendEvent(transaction, runId, 'task.activity', {
+          phase: 'claude.retry_requested', taskKey: row.taskKey, previousAttemptId: row.id,
+          sessionId: session.sessionId, ...(row.id === failed.id && model ? { model: model.trim() } : previousRetry?.model ? { model: previousRetry.model } : {}),
+        });
         transaction.update(coderTaskAttempts).set({ active: false })
           .where(eq(coderTaskAttempts.id, row.id)).run();
       }
@@ -1619,6 +1658,17 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (attempt.status === 'completed' || attempt.status === 'waiting_for_input') {
       return attempt.result as AgentTeamTaskResult;
     }
+    const retryEvents = await this.db.select().from(coderRunEvents)
+      .where(and(eq(coderRunEvents.runId, run.id), eq(coderRunEvents.type, 'task.activity')))
+      .orderBy(desc(coderRunEvents.sequence));
+    const previousAttempts = await this.db.select().from(coderTaskAttempts)
+      .where(and(eq(coderTaskAttempts.runId, run.id), eq(coderTaskAttempts.taskKey, taskKey), eq(coderTaskAttempts.status, 'failed')))
+      .orderBy(desc(coderTaskAttempts.attemptIndex)).limit(1);
+    const retrySession = retryEvents.map((event) => event.payload as { phase?: string; previousAttemptId?: string; sessionId?: string; model?: string })
+      .find((event) => event.phase === 'claude.retry_requested' && event.previousAttemptId === previousAttempts[0]?.id);
+    if (retrySession) this.appendEvent(this.db, run.id, 'task.activity', {
+      phase: 'claude.retry_requested', nextAttemptFor: attempt.id, ...(retrySession.model ? { model: retrySession.model } : {}),
+    });
     const orchestrationVersion: number = version.snapshot.orchestrationVersion ?? 1;
     // A v6-v9 project-executor task cannot launch without a real directory. On an
     // empty-scope Run the runtime raises the directory question itself; an answer that
@@ -1672,7 +1722,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
         const developerRole = instance ?? role;
         // A project executor launches one native process; it has no Gateway-level fallback loop, so a
         // declared fallback list here only ever uses its first (primary) candidate.
-        const model = normalizePublicModelList(developerRole.publicModelId)[0] ?? (execution.executor === 'codex' ? execution.model : null);
+        const model = (execution.executor === 'claude' ? retrySession?.model : undefined) ?? normalizePublicModelList(developerRole.publicModelId)[0] ?? (execution.executor === 'codex' ? execution.model : null);
         if (model) await this.executors.requireModel(workspaceId, execution.executor, model);
         if (!laneWorktree && orchestrationVersion !== 5 && orchestrationVersion !== 6 && orchestrationVersion !== 7 && orchestrationVersion !== 8 && orchestrationVersion !== 9 && orchestrationVersion !== 10 && orchestrationVersion !== 11) {
           if (requestLane) {
@@ -1714,6 +1764,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
             workspaceId,
             launch: execution,
             model,
+            ...(execution.executor === 'claude' && retrySession?.sessionId ? { resumeSessionId: retrySession.sessionId } : {}),
             systemPrompt: taskSystemPrompt(developerRole.instructions, true, promptAddition),
             input: JSON.stringify(taskContext(request, true, correction)),
             projectDirectory: laneWorktree?.worktreePath ?? request.projectDirectory,
@@ -1733,6 +1784,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
                 taskKey,
                 ...taskAttribution(request),
                 ...activity,
+                ...(execution.executor === 'claude' && activity.phase === 'claude.session_started' ? { sessionPersisted: true } : {}),
               });
             },
             onTextDelta: (delta) => this.appendEvent(this.db, request.runId, 'task.delta', {
@@ -1876,7 +1928,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
                 onModelRound: () => { modelRoundsCompleted += 1; },
               });
             },
-            nothingRan: () => modelRoundsCompleted === 0,
+            nothingRan: () => correctionOutput !== undefined || (!role.executor && taskRole !== 'developer' && modelRoundsCompleted === 0),
             signal,
             onRetry: ({ retry, delayMs, reason }) => this.appendEvent(this.db, request.runId, 'task.activity', {
               taskAttemptId: attempt.id,

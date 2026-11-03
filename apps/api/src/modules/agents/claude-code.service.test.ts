@@ -10,7 +10,7 @@ import type { PreparedProjectExecution, ProjectExecutorRequest } from './project
 // the same SDKMessage shapes the real SDK emits (confirmed against @anthropic-ai/claude-agent-sdk
 // 0.3.316 with a real Gateway session; see docs/claude-agent-sdk-implementation.md) and assert on
 // canUseTool behavior, activity ordering, and the mapped options, without a live SDK or network call.
-const captured = vi.hoisted(() => ({ lastOptions: undefined as Options | undefined, lastCanUseTool: undefined as CanUseTool | undefined }));
+const captured = vi.hoisted(() => ({ lastOptions: undefined as Options | undefined, lastCanUseTool: undefined as CanUseTool | undefined, lastPrompt: undefined as AsyncIterable<unknown> | undefined }));
 const fakeQuery = vi.hoisted(() => ({ impl: undefined as ((options: Options) => FakeQuery) | undefined }));
 
 // A queue-based fake. By default it ends naturally once its initial message list is drained,
@@ -65,9 +65,10 @@ function withHome<T>(run: (home: string) => Promise<T>): Promise<T> {
 const queryStarted = () => vi.waitFor(() => { if (!captured.lastCanUseTool) throw new Error('query() not called yet'); });
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  query: (params: { options: Options }) => {
+  query: (params: { options: Options; prompt: AsyncIterable<unknown> }) => {
     captured.lastOptions = params.options;
     captured.lastCanUseTool = params.options.canUseTool;
+    captured.lastPrompt = params.prompt;
     return fakeQuery.impl!(params.options);
   },
 }));
@@ -75,6 +76,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 afterEach(() => {
   captured.lastOptions = undefined;
   captured.lastCanUseTool = undefined;
+  captured.lastPrompt = undefined;
   fakeQuery.impl = undefined;
   vi.clearAllMocks();
 });
@@ -126,6 +128,23 @@ function service(): ClaudeCodeService {
 }
 
 describe('ClaudeCodeService', () => {
+  it('persists Coder sessions and resumes them with the requested model', async () => {
+    fakeQuery.impl = () => new FakeQuery([systemInit('saved-session'), resultSuccess('done')]);
+    const { request, prepared } = buildRequest({ owner: 'coder', resumeSessionId: 'saved-session', model: 'provider/replacement' });
+    await service().execute(request, prepared);
+    expect(captured.lastOptions).toMatchObject({ persistSession: true, resume: 'saved-session', model: 'provider/replacement' });
+    const firstMessage = await captured.lastPrompt![Symbol.asyncIterator]().next();
+    expect(firstMessage.value).toMatchObject({ message: { content: expect.stringContaining('Continue the original task') } });
+  });
+
+  it('records the session activity even when the SDK turn fails immediately', async () => {
+    fakeQuery.impl = () => new FakeQuery([systemInit('failed-session'), resultError('error_during_execution', ['HTTP 500'])]);
+    const events: Array<{ phase: string; sessionId?: string }> = [];
+    const { request, prepared } = buildRequest({ owner: 'coder', onEvent: async (activity) => { await Promise.resolve(); events.push(activity); } });
+    await expect(service().execute(request, prepared)).rejects.toThrow('HTTP 500');
+    expect(events).toContainEqual(expect.objectContaining({ phase: 'claude.session_started', sessionId: 'failed-session' }));
+  });
+
   it('maps the message stream to activities in order and returns the final text', async () => {
     fakeQuery.impl = () => new FakeQuery([
       systemInit('session_123'),
